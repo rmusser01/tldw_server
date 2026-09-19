@@ -38808,13 +38808,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     user_selection_value = self._ensure_json_string_from_mixed(user_selection_json)
 
                 if refreshed_from_snapshot_id is not None:
+                    owner_clause, owner_params = self._selected_owner_filter(self.client_id)
                     parent_row = conn.execute(
                         """
                         SELECT service, activity_type, anchor_type, anchor_id, suggestion_type, user_selection_json
                           FROM suggestion_snapshots
                          WHERE id = ? AND deleted = 0
-                        """,
-                        (refreshed_from_snapshot_id,),
+                        """ + owner_clause,  # nosec B608 -- Fixed owner clause; values are bound.
+                        (refreshed_from_snapshot_id, *owner_params),
                     ).fetchone()
                     if not parent_row:
                         raise ConflictError(
@@ -38872,6 +38873,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def get_suggestion_snapshot(self, snapshot_id: int) -> dict[str, Any] | None:
         """Fetch a single active suggestion snapshot by id."""
+        owner_clause, owner_params = self._selected_owner_filter(self.client_id)
         query = """
             SELECT id, service, activity_type, anchor_type, anchor_id, suggestion_type, status,
                    payload_json, user_selection_json, refreshed_from_snapshot_id,
@@ -38879,7 +38881,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
               FROM suggestion_snapshots
              WHERE id = ? AND deleted = 0
         """
-        cursor = self.execute_query(query, (snapshot_id,))
+        cursor = self.execute_query(query + owner_clause, (snapshot_id, *owner_params))
         row = cursor.fetchone()
         return self._deserialize_row_fields(row, self._SUGGESTION_SNAPSHOT_JSON_FIELDS)
 
@@ -38891,21 +38893,45 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         include_deleted: bool = False,
     ) -> list[dict[str, Any]]:
         """List snapshots for a concrete anchor in newest-first order."""
+        owner_clause, owner_params = self._selected_owner_filter(self.client_id)
         deleted_clause = "1=1" if include_deleted else "deleted = 0"
         query = f"""
             SELECT id, service, activity_type, anchor_type, anchor_id, suggestion_type, status,
                    payload_json, user_selection_json, refreshed_from_snapshot_id,
                    created_at, last_modified, deleted, client_id, version
               FROM suggestion_snapshots
-             WHERE anchor_type = ? AND anchor_id = ? AND {deleted_clause}
+             WHERE anchor_type = ? AND anchor_id = ? AND {deleted_clause}{owner_clause}
              ORDER BY id DESC
         """  # nosec B608
-        cursor = self.execute_query(query, (anchor_type, anchor_id))
+        cursor = self.execute_query(query, (anchor_type, anchor_id, *owner_params))
         return [
             self._deserialize_row_fields(row, self._SUGGESTION_SNAPSHOT_JSON_FIELDS)
             for row in cursor.fetchall()
             if row
         ]
+
+    def _suggestion_link_owner_filter(self) -> tuple[str, tuple[str, ...]]:
+        """Require both the PostgreSQL link and its live snapshot to belong to the caller."""
+        if self.backend_type != BackendType.POSTGRESQL:
+            return "", ()
+        return (
+            " AND client_id = ? AND EXISTS ("
+            "SELECT 1 FROM suggestion_snapshots snapshot "
+            "WHERE snapshot.id = suggestion_generation_links.snapshot_id "
+            "AND snapshot.deleted = FALSE AND snapshot.client_id = ?)",
+            (self.client_id, self.client_id),
+        )
+
+    def _validate_suggestion_snapshot_locked(self, conn: Any, snapshot_id: int) -> None:
+        """Require an owned live PostgreSQL snapshot before creating action links."""
+        if self.backend_type != BackendType.POSTGRESQL:
+            return
+        row = conn.execute(
+            "SELECT id FROM suggestion_snapshots WHERE id = ? AND client_id = ? AND deleted = FALSE FOR SHARE",
+            (snapshot_id, self.client_id),
+        ).fetchone()
+        if row is None:
+            raise InputError("Suggestion snapshot not found")  # noqa: TRY003
 
     def create_suggestion_generation_link(
         self,
@@ -38920,6 +38946,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         now = self._get_current_utc_timestamp_iso()
         try:
             with self.transaction() as conn:
+                self._validate_suggestion_snapshot_locked(conn, snapshot_id)
                 insert_sql = (
                     "INSERT INTO suggestion_generation_links("
                     "snapshot_id, target_service, target_type, target_id, selection_fingerprint, "
@@ -38977,7 +39004,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         selection_fingerprint: str,
     ) -> dict[str, Any] | None:
         """Find the durable link row for a concrete snapshot/action result."""
-        query = """
+        owner_clause, owner_params = self._suggestion_link_owner_filter()
+        query = f"""
             SELECT id, snapshot_id, target_service, target_type, target_id, selection_fingerprint,
                    created_at, last_modified, deleted, client_id, version
               FROM suggestion_generation_links
@@ -38986,13 +39014,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                AND target_type = ?
                AND target_id = ?
                AND selection_fingerprint = ?
-               AND deleted = 0
+               AND deleted = 0{owner_clause}
              ORDER BY id DESC
              LIMIT 1
-        """
+        """  # nosec B608 -- Fixed owner clause; values are bound.
         cursor = self.execute_query(
             query,
-            (snapshot_id, target_service, target_type, target_id, selection_fingerprint),
+            (snapshot_id, target_service, target_type, target_id, selection_fingerprint, *owner_params),
         )
         row = cursor.fetchone()
         return dict(row) if row else None
@@ -39007,25 +39035,28 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         selection_fingerprint: str,
     ) -> int:
         """Upsert a direct generation link without accumulating multiple active rows."""
+        owner_clause, owner_params = self._suggestion_link_owner_filter()
         now = self._get_current_utc_timestamp_iso()
         try:
             with self.transaction() as conn:
+                self._validate_suggestion_snapshot_locked(conn, snapshot_id)
                 rows = conn.execute(
-                    """
+                    f"""
                     SELECT id
                       FROM suggestion_generation_links
                      WHERE snapshot_id = ?
                        AND target_service = ?
                        AND target_type = ?
                        AND selection_fingerprint = ?
-                       AND deleted = 0
+                       AND deleted = 0{owner_clause}
                      ORDER BY id DESC
-                    """,
+                    """,  # nosec B608 -- Fixed owner clause; values are bound.
                     (
                         int(snapshot_id),
                         target_service,
                         target_type,
                         selection_fingerprint,
+                        *owner_params,
                     ),
                 ).fetchall()
                 if rows:
@@ -39035,12 +39066,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         UPDATE suggestion_generation_links
                            SET target_id = ?, last_modified = ?, version = version + 1, client_id = ?
                          WHERE id = ? AND deleted = 0
-                        """,
+                        """ + owner_clause,  # nosec B608 -- Fixed owner clause; values are bound.
                         (
                             str(target_id),
                             now,
                             self.client_id,
                             keeper_id,
+                            *owner_params,
                         ),
                     ).rowcount
                     stale_ids = [int(row["id"]) for row in rows[1:]]
@@ -39050,8 +39082,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                             UPDATE suggestion_generation_links
                                SET deleted = ?, last_modified = ?, version = version + 1, client_id = ?
                              WHERE id = ? AND deleted = 0
-                            """,
-                            (True, now, self.client_id, stale_id),
+                            """ + owner_clause,  # nosec B608 -- Fixed owner clause; values are bound.
+                            (True, now, self.client_id, stale_id, *owner_params),
                         )
                     if updated <= 0:
                         raise CharactersRAGDBError("Failed to update existing suggestion generation link")  # noqa: TRY003
@@ -39113,7 +39145,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         selection_fingerprint: str,
     ) -> dict[str, Any] | None:
         """Find an existing generation link by fingerprint without requiring the target id."""
-        query = """
+        owner_clause, owner_params = self._suggestion_link_owner_filter()
+        query = f"""
             SELECT id, snapshot_id, target_service, target_type, target_id, selection_fingerprint,
                    created_at, last_modified, deleted, client_id, version
               FROM suggestion_generation_links
@@ -39121,13 +39154,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                AND target_service = ?
                AND target_type = ?
                AND selection_fingerprint = ?
-               AND deleted = 0
+               AND deleted = 0{owner_clause}
              ORDER BY id DESC
              LIMIT 1
-        """
+        """  # nosec B608 -- Fixed owner clause; values are bound.
         cursor = self.execute_query(
             query,
-            (int(snapshot_id), target_service, target_type, selection_fingerprint),
+            (int(snapshot_id), target_service, target_type, selection_fingerprint, *owner_params),
         )
         row = cursor.fetchone()
         return dict(row) if row else None
@@ -39145,6 +39178,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         Returns the number of rows updated (0 means the reservation was not found).
         """
+        owner_clause, owner_params = self._suggestion_link_owner_filter()
         now = self._get_current_utc_timestamp_iso()
         pending_target_id = f"pending:{selection_fingerprint}"
         try:
@@ -39159,7 +39193,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                        AND target_id = ?
                        AND selection_fingerprint = ?
                        AND deleted = 0
-                    """,
+                    """ + owner_clause,  # nosec B608 -- Fixed owner clause; values are bound.
                     (
                         str(final_target_id),
                         now,
@@ -39169,6 +39203,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         target_type,
                         pending_target_id,
                         selection_fingerprint,
+                        *owner_params,
                     ),
                 ).rowcount
             return int(updated)
@@ -39186,6 +39221,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         selection_fingerprint: str,
     ) -> int:
         """Soft-delete active generation links matching a snapshot fingerprint."""
+        owner_clause, owner_params = self._suggestion_link_owner_filter()
         now = self._get_current_utc_timestamp_iso()
         try:
             with self.transaction() as conn:
@@ -39198,7 +39234,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                        AND target_type = ?
                        AND selection_fingerprint = ?
                        AND deleted = 0
-                    """,
+                    """ + owner_clause,  # nosec B608 -- Fixed owner clause; values are bound.
                     (
                         True,
                         now,
@@ -39207,6 +39243,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         target_service,
                         target_type,
                         selection_fingerprint,
+                        *owner_params,
                     ),
                 ).rowcount
             return int(updated)
@@ -39224,6 +39261,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         selection_fingerprint: str,
     ) -> None:
         """Soft-delete an in-progress reservation after generation failure."""
+        owner_clause, owner_params = self._suggestion_link_owner_filter()
         now = self._get_current_utc_timestamp_iso()
         pending_target_id = f"pending:{selection_fingerprint}"
         try:
@@ -39238,7 +39276,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                        AND target_id = ?
                        AND selection_fingerprint = ?
                        AND deleted = 0
-                    """,
+                    """ + owner_clause,  # nosec B608 -- Fixed owner clause; values are bound.
                     (
                         True,
                         now,
@@ -39248,6 +39286,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         target_type,
                         pending_target_id,
                         selection_fingerprint,
+                        *owner_params,
                     ),
                 )
         except sqlite3.Error as exc:

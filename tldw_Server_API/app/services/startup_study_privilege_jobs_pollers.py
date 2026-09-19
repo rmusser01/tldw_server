@@ -60,10 +60,7 @@ def provide_study_privilege_jobs_worker_specs(
             worker_service=_run_study_suggestions_jobs_worker_service,
             category="jobs",
             phase=ShutdownPhase.JOB_POLLER_QUIESCE,
-            enabled=route_enabled_predicate(
-                "STUDY_SUGGESTIONS_JOBS_WORKER_ENABLED",
-                "study-suggestions",
-            ),
+            enabled=_study_suggestions_worker_enabled,
         ),
         stop_event_worker_spec(
             name="notes_graph_suggestions_jobs_task",
@@ -105,6 +102,19 @@ def _study_pack_worker_enabled(context: WorkerLifecycleContext) -> bool:
     return should_start_inprocess_worker(
         "STUDY_PACK_JOBS_WORKER_ENABLED",
         "flashcards",
+        sidecar_mode=context.sidecar_mode,
+        test_mode=context.test_mode,
+        route_enabled=context.route_enabled,
+    )
+
+
+def _study_suggestions_worker_enabled(context: WorkerLifecycleContext) -> bool:
+    """Process suggestions by default when their route and worker policy allow it."""
+    if not context.route_enabled("study-suggestions"):
+        return False
+    return should_start_inprocess_worker(
+        "STUDY_SUGGESTIONS_JOBS_WORKER_ENABLED",
+        "study-suggestions",
         sidecar_mode=context.sidecar_mode,
         test_mode=context.test_mode,
         route_enabled=context.route_enabled,
