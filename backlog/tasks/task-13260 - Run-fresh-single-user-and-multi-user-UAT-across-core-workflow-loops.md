@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-19 01:21'
+updated_date: '2026-09-19 02:12'
 labels:
   - uat
   - testing
@@ -227,6 +227,12 @@ PGmulti continued on frozen3cff: natural expiry passed after1843s idle vs1800s t
 Post-merge frozen3cff PGmulti advanced through real ordinary/character failure and Retry, Pirate/reload, analysis failure preservation, Bob-owned fixtures, 40 reciprocal API controls, and admin filtered-item delete/empty/dated Trash/exact restore. UAT290 cross-tab Chat reload switches conversation; canonical ordinary data survives native reselection. UAT291 scoped PG FTS binding order causes actual DB failure falsely presented as No results; confidential negative blocked. UAT292 billing usage reads mismatch canonical usage_daily schema. Native logout/account-switch controls remain active; SQLite cells pending. Generated evidence stays ignored locally; no production mutation during matrix.
 
 PGmulti frozen-cell execution and log audit checkpoint: 40 reciprocal API checks; native real retries, analysis preservation, filtered admin restore, natural expiry and actual outage/Retry. Browser cross-account Back/reload fails293/294; scoped confidential QA blocked291; actual first Bob500 and background failures295-298 retained. Tracker now298 findings/281verified/17open. Complete source manifest24899 entries matches3cff. PGmulti browser closed; later process check finds app and fixture-holder PIDs gone, database retention not claimed. SQLite single fresh preflight/preparation passed and normal initialization started. No production edits, no full UAT acceptance. Generated captures remain excluded. This is documentation-only; Bandit is not applicable.
+
+SQLite single continuation: setup complete; ordinary two-turn canonical reload5 passes. Actual PNG reproduces UAT286 despite llama.cpp vision=true; UAT283 label recurs. Rowan ingest52s completes with honest analysis-truncation warning. Bio227-character Note handoff exact, five grounded cards generated. Matrix/tracker updated; production source remains frozen3cff.
+
+SQLite single evidence through102: real cited QA Media answer and source handoff pass, new UAT299 task13260.236 logs failed Character/Chat SQLite FTS punctuation with false ready display. Five-card and mixed Study13 events/sessions5,2,5,1 verified, practice zero writes. Pirate ARRR and TestBot exact BEEP BOOP. persist. Analysis versions/source hash and delete/restore pass. Controlled unavailable provider produced analysis502x2 plus ordinary502/character stream error; config restored byte-exact to SHA7adcddb9203a62b0fb34560bf04aa512bfa91abccb25c47bbd665ec20942d80a. Browser offline while owned API restarts. Same-turn retry and auth disconnect/reconnect remain pending; no production source changes.
+
+SQLite single frozen execution complete with failures/limits retained: UAT283/286/288/290 recurrences and new299. Auth Disconnect/reconnect/81s offline/API-outage Retry verified. Final evidence122 has6642 observed events, zero pageerrors, three controlled502; backend22 errors categorized in matrix. Frozen source manifest24899 entries zero mismatches; provider config restored exactly. PostgreSQL single+multi and SQLite single complete, SQLite multi pending. No full acceptance, no new PR/push; no production changes. Bandit not applicable to this docs/task-only checkpoint.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
