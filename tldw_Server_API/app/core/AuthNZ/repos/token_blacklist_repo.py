@@ -76,6 +76,13 @@ class AuthnzTokenBlacklistRepo:
         try:
             async with self.db_pool.transaction() as conn:
                 if self._is_postgres_backend():
+                    # IF NOT EXISTS does not serialize concurrent catalog writes.
+                    # The transaction releases this lock on commit or rollback.
+                    await conn.execute(
+                        "SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))",
+                        "authnz_schema",
+                        "token_blacklist",
+                    )
                     for sql in ddl_postgres:
                         await conn.execute(sql)
                 else:
