@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-19 02:12'
+updated_date: '2026-09-19 03:26'
 labels:
   - uat
   - testing
@@ -233,6 +233,20 @@ SQLite single continuation: setup complete; ordinary two-turn canonical reload5 
 SQLite single evidence through102: real cited QA Media answer and source handoff pass, new UAT299 task13260.236 logs failed Character/Chat SQLite FTS punctuation with false ready display. Five-card and mixed Study13 events/sessions5,2,5,1 verified, practice zero writes. Pirate ARRR and TestBot exact BEEP BOOP. persist. Analysis versions/source hash and delete/restore pass. Controlled unavailable provider produced analysis502x2 plus ordinary502/character stream error; config restored byte-exact to SHA7adcddb9203a62b0fb34560bf04aa512bfa91abccb25c47bbd665ec20942d80a. Browser offline while owned API restarts. Same-turn retry and auth disconnect/reconnect remain pending; no production source changes.
 
 SQLite single frozen execution complete with failures/limits retained: UAT283/286/288/290 recurrences and new299. Auth Disconnect/reconnect/81s offline/API-outage Retry verified. Final evidence122 has6642 observed events, zero pageerrors, three controlled502; backend22 errors categorized in matrix. Frozen source manifest24899 entries zero mismatches; provider config restored exactly. PostgreSQL single+multi and SQLite single complete, SQLite multi pending. No full acceptance, no new PR/push; no production changes. Bandit not applicable to this docs/task-only checkpoint.
+
+SQLite multi fresh run active on frozen merged3cff: admin login and native ordinary Alice2/Bob3 creation pass; independent Alice expiry context issued02:23:30UTC, expires_in1800, parked without pages/workers. Runtime18801/18881. No production source edits.
+
+SQLite multi through02:45UTC: real two-turn Chat/reload, Rowan ingest/search/cited Media QA, exact5 Biology cards/reviews/reload, Chat Note/card/backlink, pirate request/reply/reload pass with qualified QA failure299 and timed progress288. Image guard286 and exact Wikipedia access block retained. Bob independent private Note/card/deck save/reload positive. Full matrix continues; TestBot, mixed Study, analysis/recovery, expiry and reciprocal browser/API isolation outstanding. All evidence ignored; source remains frozen.
+
+SQLite multi expiry, admin sole-item trash/restore, confidential exclusion and Bob cited QA passed. Independent normal API logins completed39 recorded isolation/write-restoration checks; exact owner Media content hashes matched. Browser account-switch privacy and provider/API outage controls remain pending; frozen3cff unchanged. Evidence101–121 plus isolation reports; matrix updated.
+
+SQLite multi native same-browser switch reproduces293 transcript/draft and294 Study Pack source metadata leaks despite foreign404. Reload clears transcript but retains draft/metadata; Bob own Notes isolated. Normal logout gates and stops3-tab polling31.944s. Tracker updated, evidence123–129. Reciprocal switch and outage controls continuing.
+
+All4 frozen3cff cells now have12-row outcomes. SQLite multi completed native API outage/Retry recovering original3 Notes; source parity24899 zero mismatches. Failures261/286/288/290/293/294/299 plus Wikipedia and hidden-tab limits retained. Ordinary retry identity/canonical3 pass; character same-turn retry preserves one user but returns reasoning-only/no final, remaining261. Full acceptance failed; repair work remains. Event audit13322/5pages zero pageerrors, qualified error inventory in matrix. Teardown and tracking commit next.
+
+SQLite multi teardown03:25:35: closed independent Bob/admin/expiry contexts and main browser; original provider config SHA0e65ae1f restored; signaled owned API32673/frontend11535. All4 cell outcomes consolidated in matrix. Preparing tracking-only checkpoint, then priority repairs293/294 followed by remaining open findings.
+
+Teardown confirmed: API32673/frontend11535/child11536 gone; ports18801/18881 unbound. Four-file tracking diff whitespace and actual-credential/JWT scans pass. Bandit/production tests N/A for documentation/task-only checkpoint. Next work remains repairs, not another full matrix.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
