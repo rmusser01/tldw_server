@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-19 07:00'
+updated_date: '2026-09-19 07:36'
 labels:
   - uat
   - testing
@@ -259,6 +259,8 @@ UAT293 verified/Done in30d15d951d: reciprocal native SQLite and fresh PostgreSQL
 2026-09-19 06:36UTC: UAT291 and301 verified in569579137e with220 real SQLite/official PostgreSQL focused tests/0 skips, Ruff/Bandit, independent review, and fresh native PostgreSQL scoped public/confidential QA, both title directions, truthful controlled errors/recovery and Bob isolation. All24925 source entries unchanged; app/browser cleanup and official holder exit0 verified. Current301 findings/285 verified/16 open (261,283-290,292,295-300). Recurrences288/292/298 retained. Full matrix remains failed at frozen3cff; continue repairs before another full matrix.
 
 UAT298 verified on b0e6738c13:45 focused tests pass/0skips, Ruff/Bandit clear, independent review clear, fresh restricted PostgreSQL first-login concurrency and native logout/access+refresh revocation pass. Source24925 entries unchanged; apps closed and official fixture holder exits0. Totals301 findings/286 verified/15 open:261,283-290,292,295-297,299-300. Continue bounded fixes before another full matrix. Evidence .tmp/uat298-repair; captures ignored.
+
+UAT296 targeted acceptance completed 2026-09-19 07:35UTC on 7e292d4d13. Fresh official restricted PostgreSQL native Rowan ingestion succeeds; normal source Chat and selected-character Chat return the correct director/code answer and restore their canonical messages after reload. Supplemental authenticated exemplar-search endpoint returns200 for full2090-character prose, 18:00, operator-like text and punctuation-only input; subsequent character read200. Positive matching semantics and failed-read rollback are established by the123 unique SQLite/real PostgreSQL controls, not by empty live exemplars. Selected-character complete-v2 is a separate path and does not itself establish automatic exemplar retrieval. Cluster audit:0 malformed tsquery/0 aborted transactions; existing292 schema errors and optional llm_usage_v2 absence retained. Backend has only optional evaluations-config absence. New302 password-policy UX and303 one-item wording recorded separately. Initial password generator, premature login navigation, collapsed composer and early reload/observer endpoint assumptions are retained as harness limitations.24925 source entries match, owned browser/apps stopped, ports free; API terminated by SIGTERM (launcher reports1), frontend and official holder exit0. Evidence .tmp/uat296-repair stays local/ignored. Current303 findings/287 verified/16 open (261,283-290,292,295,297,299-300,302-303). Frozen full-matrix result remains failed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
