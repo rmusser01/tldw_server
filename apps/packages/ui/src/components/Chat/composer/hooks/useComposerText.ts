@@ -3,6 +3,7 @@ import {
   useDraftPersistence
 } from "@/hooks/useDraftPersistence"
 import { useSimpleForm } from "@/hooks/useSimpleForm"
+import { useChatDraftOwner } from "@/hooks/useChatDraftOwner"
 import React from "react"
 
 /**
@@ -162,13 +163,22 @@ export function useComposerText(
     [form, restoreWithMetadata]
   )
 
+  const { ownerKey, isCurrent } = useChatDraftOwner(() => {
+    pendingPromptAssistResetRef.current = null
+    setPromptAssistSavedAttemptId(null)
+    form.reset()
+    restoreWithMetadata?.("", undefined)
+  })
+
   const { draftSaved, clearDraft } = useDraftPersistence({
-    storageKey: draftKey,
+    storageKey: `${draftKey}:owner:${ownerKey ?? "unresolved"}`,
+    legacyStorageKey: draftKey,
+    isCurrent,
     getValue: () => form.values.message,
     getMetadata: getDraftMetadata,
     setValue: (value) => setMessageValue(value),
     setValueWithMetadata: restoreMessage,
-    enabled: draftEnabled
+    enabled: draftEnabled && ownerKey !== null
   })
 
   const textareaMaxHeight =

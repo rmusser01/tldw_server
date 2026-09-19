@@ -61,6 +61,11 @@ export function usePlaygroundSessionPersistence() {
   const isSessionValid = usePlaygroundSessionStore((s) => s.isSessionValid)
   const [currentScopeKey, setCurrentScopeKey] = useState<string | null>(null)
   const [sessionScopeReady, setSessionScopeReady] = useState(false)
+  const persistenceRevision = sessionStore.restoreRevision
+  const isCurrentPersistence = useCallback(
+    () => usePlaygroundSessionStore.getState().restoreRevision === persistenceRevision,
+    [persistenceRevision]
+  )
 
   // Main message option store
   const {
@@ -186,6 +191,7 @@ export function usePlaygroundSessionPersistence() {
   }, [lastConfigUpdatedAt, resolveCurrentScopeKey, serverUrl])
 
   const buildPersistableSessionSnapshot = useCallback(() => {
+    if (!isCurrentPersistence()) return null
     // Don't save while a restore is replaying into the stores.
     if (isRestoringRef.current) return null
 
@@ -276,6 +282,7 @@ export function usePlaygroundSessionPersistence() {
       queuedMessages
     }
   }, [
+    isCurrentPersistence,
     historyId,
     serverChatId,
     serverChatAssistantKind,
@@ -456,6 +463,7 @@ export function usePlaygroundSessionPersistence() {
     lastImmediateSaveKeyRef.current = immediateSaveKey
 
     void enrichTrackedAssistantSnapshot(snapshot).then((enrichedSnapshot) => {
+      if (!isCurrentPersistence()) return
       saveSession({
         ...enrichedSnapshot,
         scopeKey: currentScopeKey
@@ -464,6 +472,7 @@ export function usePlaygroundSessionPersistence() {
   }, [
     buildPersistableSessionSnapshot,
     currentScopeKey,
+    isCurrentPersistence,
     enrichTrackedAssistantSnapshot,
     saveSession,
     sessionScopeReady
@@ -485,6 +494,7 @@ export function usePlaygroundSessionPersistence() {
         resolveCurrentScopeKey(),
         enrichTrackedAssistantSnapshot(snapshot)
       ]).then(([scopeKey, enrichedSnapshot]) => {
+        if (!isCurrentPersistence() || (currentScopeKey && scopeKey !== currentScopeKey)) return
         saveSession({
           ...enrichedSnapshot,
           scopeKey
@@ -494,6 +504,8 @@ export function usePlaygroundSessionPersistence() {
   }, [
     buildPersistableSessionSnapshot,
     enrichTrackedAssistantSnapshot,
+    currentScopeKey,
+    isCurrentPersistence,
     resolveCurrentScopeKey,
     saveSession
   ])
@@ -503,6 +515,7 @@ export function usePlaygroundSessionPersistence() {
       clearTimeout(saveTimerRef.current)
       saveTimerRef.current = null
     }
+    if (!isCurrentPersistence()) return
     // Prefer a fresh snapshot over the ref to avoid saving stale state on unmount.
     const snapshot = buildPersistableSessionSnapshot() ?? latestSessionSnapshotRef.current
     if (!snapshot) return
@@ -510,6 +523,7 @@ export function usePlaygroundSessionPersistence() {
       resolveCurrentScopeKey(),
       enrichTrackedAssistantSnapshot(snapshot)
     ]).then(([scopeKey, enrichedSnapshot]) => {
+      if (!isCurrentPersistence() || (currentScopeKey && scopeKey !== currentScopeKey)) return
       saveSession({
         ...enrichedSnapshot,
         scopeKey
@@ -518,6 +532,8 @@ export function usePlaygroundSessionPersistence() {
   }, [
     buildPersistableSessionSnapshot,
     enrichTrackedAssistantSnapshot,
+    currentScopeKey,
+    isCurrentPersistence,
     resolveCurrentScopeKey,
     saveSession
   ])

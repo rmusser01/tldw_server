@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-19 04:09'
+updated_date: '2026-09-19 05:27'
 labels:
   - uat
   - testing
@@ -249,6 +249,8 @@ SQLite multi teardown03:25:35: closed independent Bob/admin/expiry contexts and 
 Teardown confirmed: API32673/frontend11535/child11536 gone; ports18801/18881 unbound. Four-file tracking diff whitespace and actual-credential/JWT scans pass. Bandit/production tests N/A for documentation/task-only checkpoint. Next work remains repairs, not another full matrix.
 
 UAT294 repaired and verified in e840341be1: 124 focused tests, independent review and native reciprocal SQLite plus real PostgreSQL account-switch/legacy-link/Back/reload pass. Current count299 findings:282 verified,17 open (261,283-293,295-299). Frozen four-cell3cff matrix remains failed; no new full run started. PostgreSQL token-blacklist initialization failure recurred and is logged under existing298. Generated evidence remains ignored; UAT293 read-only diagnosis identifies unscoped draft registry and retained live option/session state. Continue fixes before another full matrix.
+
+Targeted UAT293 repair found UAT300: navigation can precede login workspace initialization, leaving an owned draft in org-null while later login selects org2. New child TASK13260.237 records evidence and required causal investigation. Current totals: 300 findings, 282 verified, 18 open (261, 283-293, 295-300). UAT293 unit/regression controls pass and reciprocal SQLite privacy checks pass; steady-workspace recovery control and real PostgreSQL acceptance remain in progress.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

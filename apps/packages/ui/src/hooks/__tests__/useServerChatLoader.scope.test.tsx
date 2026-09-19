@@ -146,6 +146,15 @@ describe("useServerChatLoader scoped local history", () => {
     vi.useRealTimers()
   })
 
+  it.each([401, 403, 404])("removes cached private messages and title when the canonical read returns %s", async status => {
+    mocks.listChatMessages.mockRejectedValue(Object.assign(new Error(`HTTP ${status}`), { status }))
+    renderHook(() => useServerChatLoader({ ensureServerChatHistoryId: vi.fn(), notification: { error: vi.fn() }, t: ((_key: string) => "Error") as TFunction }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(200) })
+    expect(mocks.setMessages).toHaveBeenCalledWith([])
+    expect(mocks.setHistory).toHaveBeenCalledWith([])
+    expect(mocks.store.setServerChatTitle).toHaveBeenCalledWith(null)
+  })
+
   it.each(["normal", "persona", "character"] as const)("keeps canonical raw reads limited to %s presentation", async kind => {
     mocks.store.serverChatAssistantKind = kind === "normal" ? null : kind
     mocks.store.serverChatCharacterId = kind === "character" ? 4 : null
