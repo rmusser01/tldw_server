@@ -1195,6 +1195,7 @@ class _BackendPromptStudioDatabase(BackendPromptStudioDatabaseBase):
                     """
                     INSERT INTO sync_log (entity, entity_uuid, operation, client_id, version, payload, timestamp)
                     VALUES (?, ?, ?, ?, 1, ?, CURRENT_TIMESTAMP)
+                    RETURNING change_id
                     """,
                     (
                         entity,
