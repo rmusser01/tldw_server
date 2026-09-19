@@ -1,12 +1,14 @@
 """Prompt Studio mutations retain sync events on the real content backends."""
 
 import json
+from uuid import uuid4
 
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import PromptStudioDatabase
+from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
 
 pytestmark = pytest.mark.integration
 
@@ -81,3 +83,60 @@ def test_prompt_create_and_new_version_persist_sync_events(studio_db):
         "version_operation": "create",
     }
     assert studio_db.get_prompt(updated["id"])["system_prompt"] == "Reply briefly as a pirate."
+
+
+@pytest.mark.parametrize("studio_db", ["postgres"], indirect=True)
+def test_restricted_sync_ownership_is_separate_from_audit_client(studio_db, tmp_path, monkeypatch):
+    """The web audit ID must neither prevent writes nor expose another tenant's events."""
+    monkeypatch.setenv("TLDW_CONTENT_PG_ROLE_SWITCH", "1")
+    backend = studio_db.backend
+    studio_db.close_connection()
+    owners = {
+        tenant: PromptStudioDatabase(
+            tmp_path / f"studio-{tenant}.db", client_id="web", tenant_user_id=tenant, backend=backend
+        )
+        for tenant in ("2", "3")
+    }
+    role_name = f"uat304_sync_{uuid4().hex[:12]}"
+    role = backend.escape_identifier(role_name)
+    created = False
+    try:
+        with backend.transaction() as conn:
+            backend.execute(f"CREATE ROLE {role} NOLOGIN NOSUPERUSER NOBYPASSRLS", connection=conn)
+            backend.execute(f"GRANT USAGE ON SCHEMA public TO {role}", connection=conn)
+            backend.execute(
+                f"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {role}",
+                connection=conn,
+            )
+            backend.execute(f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {role}", connection=conn)
+            backend.execute(f"GRANT {role} TO CURRENT_USER", connection=conn)
+        created = True
+        prompts = {}
+        for tenant, db in owners.items():
+            with scoped_context(user_id=int(tenant), org_ids=[], team_ids=[], is_admin=False, session_role=role_name):
+                flags = db.get_connection().execute(
+                    "SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname=current_user"
+                ).fetchone()
+                assert not flags["rolsuper"] and not flags["rolbypassrls"]
+                project = db.create_project(f"Owner {tenant}", user_id=tenant)
+                prompt = db.create_prompt(project_id=project["id"], name="Pirate", system_prompt="Speak as a pirate.")
+                project_events = _persisted_events(db, "prompt_studio_project", project["uuid"])
+                events = _persisted_events(db, "prompt_studio_prompt", prompt["uuid"])
+                assert [event[1:3] for event in project_events] == [("create", tenant)]
+                assert [event[1:3] for event in events] == [("create", tenant)]
+                assert db.get_project(project["id"])["client_id"] == "web"
+                assert db.get_prompt(prompt["id"])["client_id"] == "web"
+                prompts[tenant] = prompt
+                db.close_connection()
+        for tenant, db in owners.items():
+            foreign = prompts["3" if tenant == "2" else "2"]
+            with scoped_context(user_id=int(tenant), org_ids=[], team_ids=[], is_admin=False, session_role=role_name):
+                assert _persisted_events(db, "prompt_studio_prompt", foreign["uuid"]) == []
+                db.close_connection()
+    finally:
+        for db in owners.values():
+            db.close()
+        if created:
+            with backend.transaction() as conn:
+                backend.execute(f"DROP OWNED BY {role}", connection=conn)
+                backend.execute(f"DROP ROLE {role}", connection=conn)

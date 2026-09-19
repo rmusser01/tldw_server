@@ -1201,7 +1201,9 @@ class _BackendPromptStudioDatabase(BackendPromptStudioDatabaseBase):
                         entity,
                         entity_uuid,
                         operation,
-                        self.client_id,
+                        # Shared sync-log RLS uses this column as tenant ownership.
+                        # The project/prompt rows retain the originating audit client.
+                        self.tenant_user_id,
                         json.dumps(payload, separators=(',', ':')) if payload else None,
                     ),
                 )
