@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-19 06:09'
+updated_date: '2026-09-19 06:38'
 labels:
   - uat
   - testing
@@ -255,6 +255,8 @@ Targeted UAT293 repair found UAT300: navigation can precede login workspace init
 UAT293 verified/Done in30d15d951d: reciprocal native SQLite and fresh PostgreSQL account-switch/history/reload privacy, own full conversation/draft recovery, canonical foreign403 controls. Official fixtures released with holder exit0 after app teardown;24,924 source entries match.231 focused tests plus7/7 ownership controls including added org isolation; no new lint/type diagnostics. UAT300 remains separate. Current300 findings,283 verified,17 open (261,283-292,295-300). Stage4 repairs continue before another full matrix.
 
 2026-09-19 06:08UTC: Post-UAT293 repair work found UAT301, Media title-sort SQL failures on SQLite and PostgreSQL, tracked in TASK13260.238. Running totals301 findings/283 verified/18 open (261,283-292,295-301). UAT291 and301 repairs pass220 focused tests using real PostgreSQL, zero skips, plus Ruff/Bandit and independent review; targeted fresh PostgreSQL browser acceptance remains pending before verification. No new full matrix begun.
+
+2026-09-19 06:36UTC: UAT291 and301 verified in569579137e with220 real SQLite/official PostgreSQL focused tests/0 skips, Ruff/Bandit, independent review, and fresh native PostgreSQL scoped public/confidential QA, both title directions, truthful controlled errors/recovery and Bob isolation. All24925 source entries unchanged; app/browser cleanup and official holder exit0 verified. Current301 findings/285 verified/16 open (261,283-290,292,295-300). Recurrences288/292/298 retained. Full matrix remains failed at frozen3cff; continue repairs before another full matrix.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
