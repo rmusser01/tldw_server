@@ -3236,6 +3236,8 @@ Additional observation: PostgreSQL logged missing org_id and request_count colum
 - Native ingests completed; that does not make these failed background reads successful. Safe receipt: ignored PGmulti/291-pg-errors.txt. Application source remains frozen.
 
 
+- Repair implemented under TASK13260.229: read canonical per-user/day requests through AuthnzUsageRepo, using existing billing primary-org attribution (earliest dated membership, lowest org ID tie-break). Legacy undated memberships follow SQLite LLM behavior. Nonexistent-column fallbacks removed; existing failure policy preserved.229unique scoped tests pass including actual PostgreSQL with0skips; Bandit0findings/errors, no new Ruff diagnostics and independent review clear. Five old PostgreSQL fixture failures reproduce on untouched baseline and are repaired using UsersDB without changing assertions. Native immutable-source acceptance remains pending;292 stays open. Evidence stays local/ignored in .tmp/uat292-repair.
+
 ## UAT293 — P1: account switch plus Back restores prior Chat transcript and draft
 
 - Verified in 30d15d951d; TASK13260.230. Original failure: PGmulti Alice has TestBot c685ba5c and unsent ALICE-PRIVATE-DRAFT-ORBIT742. Native Settings logout200 at01:02:05 clears both protected tabs to login, with no subsequent API requests for39.625s. Normal Bob login200/authme3 at01:03:04, then Back at01:03:23 restores Alice title, four-message transcript and private draft.
