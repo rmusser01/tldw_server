@@ -3,19 +3,19 @@ id: TASK-13260
 title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
-created_date: 2026-09-15 01:27
-updated_date: 2026-09-18 23:24
+created_date: '2026-09-15 01:27'
+updated_date: '2026-09-19 01:21'
 labels:
-- uat
-- testing
-- documentation
+  - uat
+  - testing
+  - documentation
 dependencies: []
 documentation:
-- Docs/Reviews/FRESH_INSTALL_SINGLE_MULTI_UAT_TRACKER_2026_09_14.md
-- Docs/Design/2026-09-15-uat-cycle-2-repairs.md
-- IMPLEMENTATION_PLAN_uat_cycle_2.md
-- Docs/Design/2026-09-15-uat-cycle-3-repairs.md
-- IMPLEMENTATION_PLAN_uat_cycle_3.md
+  - Docs/Reviews/FRESH_INSTALL_SINGLE_MULTI_UAT_TRACKER_2026_09_14.md
+  - Docs/Design/2026-09-15-uat-cycle-2-repairs.md
+  - IMPLEMENTATION_PLAN_uat_cycle_2.md
+  - Docs/Design/2026-09-15-uat-cycle-3-repairs.md
+  - IMPLEMENTATION_PLAN_uat_cycle_3.md
 ---
 
 ## Description
@@ -40,6 +40,7 @@ Prepare isolated configurations, SQLite databases, ports, and browser sessions; 
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Checkpoint: 15 product findings recorded in Docs/Reviews/FRESH_INSTALL_SINGLE_MULTI_UAT_TRACKER_2026_09_14.md (five P1, six P2, four P3), with six environment/tooling observations. Fresh isolated single-user and multi-user SQLite state initialized using existing dependencies; no clean dependency/Docker/Postgres certification. Single-user real local chat and reload persistence pass; source ingestion and media search pass. Admin plus Alice/Bob authenticate, and API note/media isolation and ordinary-user admin denial pass. Multi-user onboarding skip fails CSRF; Alice's Notes UI is blocked by /api/v1/health/live requiring system.logs. Knowledge QA fails provider validation after optional RAG setup was deferred. User definitions for A/B/C remain outstanding, so neither loop coverage nor overall UAT is complete. Selected screenshots, snapshots, and API results retained under output/playwright/fresh-install-2026-09-14; private credentials/raw logs excluded. UAT services and synthetic state retained on ports 18000/18080 and 18001/18081 for continuation; original 8000 and model 9099 untouched. Backlog CLI collision replaced original untracked 13259; semantic content restored through MCP from task history, with original timestamp values documented in its recovery note. This UAT uses explicit 13260. No product code modified; Bandit/application tests are not applicable to the documentation/evidence checkpoint.
 Repair pass completed on codex/fresh-install-uat-fixes. All19 recorded product findings have verified repairs/dispositions; children13260.1-.4 Done. Final focused verification488frontend tests/248Python tests; touchedBandit0findings; ESLint0errors; same90baselineTypeScript diagnostics. Live ordinary Notes, unverified-admin diagnostics and UI user creation, cited Cedar QA with honest relevance, and all-security-filtered no-generation control verified. Existing Notes fixture and prompt-loader baseline failures documented. Full fresh-install workflow UAT has not been rerun; authoritative named frontend journeys/shared real-server workflows and fixture/provenance/no-skip gaps are in the tracker. Next full pass needs fresh single/multi profiles and explicit acceptance matrices; no invented A/B/C mapping. All runtime data remains isolated on18000/18001 and18080/18081; original8000/model9099 unchanged.
@@ -219,12 +220,21 @@ Final frozen matrix retention approved: pg-multi-completed-1751 has 186 payloads
 PR2967 is verified merged into dev as3cff7962721a60b768464221c1f7fe2a8b25e4d5 after requested latest-dev rebase, all required checks and14resolvedQodo threads. First resumed original PG single-user TestBot check completed one submission and canonical reload; answer BEEP BOOP lacks the exact criterion final period, so261 remains open. Requester explicitly authorized continuing the full matrix with261open. Release fresh four-cell preparation/execution at frozen merged3cff;12namedjourneys xSQLite/PostgreSQL xsingle/multi, actualimage included. Reused dependencies/models disclosed; all new failures retained. TASK13260.219 covers merge/resumption checkpoint; this parent owns the full matrix.
 Post-merge frozen matrix on 3cff796: PostgreSQL single rows6/7/9 pass (five-card Study, actual Pirate apply/request/ARRR/reload, Note/backlink/card/practice/re-rate/session controls). Fresh TestBot3 returns exactly BEEP BOOP. and reloads in 4a2b69f7-4477-427d-a448-c0164335d07f; UAT261 remains open per requester. Image Retry blocked286 despite mmproj relaunch; row5 exact Wikipedia denied/no storage. Analysis versions2/3 persist; second contains provider-added quotes. Controlled isolated-provider failure test in progress. Other three fresh cells remain pending.
 PostgreSQL single-user native journey execution checkpoint23:19UTC: exact TestBot first turn and real failed-character Retry both return BEEP BOOP. and canonical reload preserves correct identities/counts;261 stays open. Ordinary same-user Retry, source analysis/reanalysis/error preservation, dated Trash restore, Disconnect/reconnect and background ingest minimize/resume pass. Image blocked286; exact Wikipedia denied; actual hidden-tab control unavailable because both tabs report visible. Independent restored UUID lookup unavailable outside HTTP scope; native ID/content/analysis pass. New shutdown observation287 under13260.224. Other three cells pending; no full acceptance. Evidence records1–207 local/ignored. Frozen application3cff unchanged. Next PostgreSQL multi-user.
+Postmerge PGmulti fresh startup passed official PG holders, initializer and supported admin bootstrap. Native admin created Alice2 and Bob3 as role=user (200), normal Alice login200. Separate normal Alice browser context issued 1800s token at 2026-09-18T23:34:29.841Z and parked23:34:32 with zero pages/workers; natural expiry check due after00:04:40Z. Configured actual discovered llama.cpp9099 model via supported operator INI keys, restarted owned API; no source change. Fresh first Chat now submitted. Native evidence .tmp/pr2967-merge-20260918/full-matrix/pg-multi/00–20. Initial admin auth/me401 auto-refreshed200 without user failure; retained for diagnosis, not new confirmed defect. Two helper locator timeouts reflect fresh /login redirect and Settings Login vs Sign in labels, not application failures.
+PGmulti continued on frozen3cff: natural expiry passed after1843s idle vs1800s token lifetime; QA/citation/source handoff and five-card Biology pass. Row9 final reload13 scheduled events, completed session counts5/2/5/1; practice-only five-card loop zero writes. UAT288 QA fabricated progress and UAT289 undisclosed UTC analytics remain open. Exact Wikipedia source denied,0 stored; dependent QA blocked. Pirate Prompt1 synced and actual ARRR response persisted/reloaded. Quick send during route restoration produced no request and cleared draft; retained106–108 for diagnosis. Character loop now executing; account isolation/auth outage/admin Trash still pending. SQLite cells unstarted.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+Post-merge frozen3cff PGmulti advanced through real ordinary/character failure and Retry, Pirate/reload, analysis failure preservation, Bob-owned fixtures, 40 reciprocal API controls, and admin filtered-item delete/empty/dated Trash/exact restore. UAT290 cross-tab Chat reload switches conversation; canonical ordinary data survives native reselection. UAT291 scoped PG FTS binding order causes actual DB failure falsely presented as No results; confidential negative blocked. UAT292 billing usage reads mismatch canonical usage_daily schema. Native logout/account-switch controls remain active; SQLite cells pending. Generated evidence stays ignored locally; no production mutation during matrix.
+
+PGmulti frozen-cell execution and log audit checkpoint: 40 reciprocal API checks; native real retries, analysis preservation, filtered admin restore, natural expiry and actual outage/Retry. Browser cross-account Back/reload fails293/294; scoped confidential QA blocked291; actual first Bob500 and background failures295-298 retained. Tracker now298 findings/281verified/17open. Complete source manifest24899 entries matches3cff. PGmulti browser closed; later process check finds app and fixture-holder PIDs gone, database retention not claimed. SQLite single fresh preflight/preparation passed and normal initialization started. No production edits, no full UAT acceptance. Generated captures remain excluded. This is documentation-only; Bandit is not applicable.
+<!-- SECTION:NOTES:END -->
+
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 In Progress. PR2967 merged after latest-dev rebase, all required checks and14resolvedQodo threads. Fresh matrix is explicitly released at frozen3cff7962721a60b768464221c1f7fe2a8b25e4d5 across SQLite/PostgreSQL x single/multi-user (12 journeys each), with new profiles/browser state and actual image coverage. One original retained-profile TestBot check was performed first and still fails exact punctuation; UAT261 stays open by requester direction. No new full-matrix acceptance is claimed; current outcomes live in Docs/Reviews/FRESH_INSTALL_UAT_MATRIX_2026_09_18.md.
 <!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed
