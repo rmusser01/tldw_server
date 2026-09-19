@@ -137,3 +137,8 @@ Targeted fresh SQLite/official restricted PostgreSQL native password rejection/c
 
 ### Study Suggestions repair checkpoint — 2026-09-19
 Source488fc0f661 fixes310/311/313/314 and verifies312, but fresh native PostgreSQL exposed315 shared sync trigger failure; SQLite ready panel exposed316 layout deprecation. Both failed-run profiles are cleaned and source-identical. Follow-up source adds supported sync-column handling, a one-time v71->72 trigger migration, and TopicBuilder prop updates.293backend/27frontend checks pass with actual PostgreSQL and no backend skips; security/review clear. Fresh native rerun pending. Current316findings/300verified/16open; Stage4 remains In Progress and full matrix remains failed.
+
+
+### Study Suggestions acceptance — 2026-09-19 21:31 UTC
+
+UAT310/311/313–316 verified on immutable b7d384f788 using fresh SQLite and official restricted PostgreSQL multi-user profiles. Both accounts naturally generate, reload and independently recover owned snapshots; native refresh preserves lineage, reciprocal foreign APIs deny, timestamps serialize, and TopicBuilder consoles are clean. Actual schema72 sync events remain tenant-scoped.293backend/27frontend controls cover cold-worker, generation-link and prior71-upgrade paths beyond native warm acceptance; lint/security/review clear. Both24,951-file manifests match; apps/browsers/holder cleaned, ports free, provider settings untouched. Tracker retains expected logout401s, optional subsystem absence, causal failed runs and harness limitations. Completed owner-scope subplan removed. Current316findings/306verified/10open; Stage4 and original failed full-matrix status remain unchanged.
