@@ -96,7 +96,11 @@ import { useDesktop, useMobile } from "@/hooks/useMediaQuery";
 import { useDarkMode } from "@/hooks/useDarkmode";
 import { useLoadLocalConversation } from "@/hooks/useLoadLocalConversation";
 import { tldwClient } from "@/services/tldw/TldwApiClient";
-import { resolvePlaygroundShortcutAction } from "./playground-shortcuts";
+import {
+  isEditableTarget,
+  resolvePlaygroundShortcutAction,
+  shouldOpenShortcutsHelp,
+} from "./playground-shortcuts";
 import {
   EDIT_MESSAGE_EVENT,
   OPEN_HISTORY_EVENT,
@@ -2471,13 +2475,10 @@ export const Playground = () => {
     if (typeof window === "undefined") return;
 
     const handleShortcut = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      const isEditableTarget = Boolean(
-        target &&
-        (target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA" ||
-          target.isContentEditable),
-      );
+      // A bare "?" is ordinary typed input, so the shortcut must never fire
+      // while the caret is in the composer or any other editable target.
+      // Modifier chords (Cmd/Ctrl+F) are unreachable by typing and stay active.
+      const editableTarget = isEditableTarget(event.target);
       if (
         (event.metaKey || event.ctrlKey) &&
         !event.altKey &&
@@ -2492,13 +2493,7 @@ export const Playground = () => {
         });
         return;
       }
-      if (
-        !event.altKey &&
-        !event.ctrlKey &&
-        !event.metaKey &&
-        event.shiftKey &&
-        event.key === "?"
-      ) {
+      if (shouldOpenShortcutsHelp(event)) {
         event.preventDefault();
         setShortcutsHelpOpen(true);
         return;
@@ -2519,7 +2514,7 @@ export const Playground = () => {
 
       const action = resolvePlaygroundShortcutAction(event);
       if (!action) return;
-      if (isEditableTarget) return;
+      if (editableTarget) return;
       event.preventDefault();
 
       if (action === "toggle_artifacts") {
