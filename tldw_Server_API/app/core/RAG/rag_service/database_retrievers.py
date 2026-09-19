@@ -4774,6 +4774,7 @@ class MultiDatabaseRetriever:
 
         documents: list[Document] = []
         tasks: list[Any] = []
+        task_sources: list[DataSource] = []
 
         async def _run_with_config(
             retriever: BaseRetriever,
@@ -4800,6 +4801,7 @@ class MultiDatabaseRetriever:
             retr = self.retrievers.get(src)
             if retr is None:
                 continue
+            task_sources.append(src)
 
             # Prefer hybrid/vector when requested and available for Media DB
             if (
@@ -4884,21 +4886,35 @@ class MultiDatabaseRetriever:
         if tasks:
             try:
                 results = await asyncio.gather(*tasks, return_exceptions=True)
-            except (RuntimeError, TypeError, ValueError):
-                logger.error("Multi-database retrieval failed")
+            except (RuntimeError, TypeError, ValueError) as error:
+                logger.bind(
+                    operation="multi_database_retrieval",
+                    exception_type=type(error).__name__,
+                    source_count=len(task_sources),
+                ).error("Multi-database retrieval failed (error={})", type(error).__name__)
                 had_source_failure = True
                 results = []
         else:
             results = []
 
         # Flatten and filter out failures
-        for res in results:
+        for source, res in zip(task_sources, results):
             if (
                 getattr(self, "credential_runtime", None) is not None
                 and isinstance(res, (ByokResolutionError, ChatAPIError))
             ):
                 raise res
             if isinstance(res, Exception):
+                # Keep diagnostics useful without logging SQL, credentials, or queries
+                # carried in exception messages or traceback locals.
+                logger.bind(
+                    operation="multi_database_retrieval",
+                    source=source.value,
+                    exception_type=type(res).__name__,
+                ).error(
+                    "Database source retrieval failed (source={}, error={})",
+                    source.value, type(res).__name__,
+                )
                 # Skip failed sources (partial success expected)
                 had_source_failure = True
                 continue

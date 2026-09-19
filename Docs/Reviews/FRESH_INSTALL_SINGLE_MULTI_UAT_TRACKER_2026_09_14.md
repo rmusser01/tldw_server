@@ -3399,3 +3399,9 @@ After normal reload, native edit at15:11:40 returns200, creates prompt version2 
 - Cause remains unassigned; investigate create-to-edit and reopened-edit controls. Retained browser discard-dialog errors are separate harness limitations, not evidence of a product dialog bug. No unrelated UI repair is added to the checkpoint. Evidence .tmp/uat297-final/pg-05-edit-prompt.txt, pg-07-edit-audit.txt, pg-14-reloaded.txt, pg-15-edit-after-reload.txt and pg-16-edited-sync.json.
 
 Checkpoint totals:306 findings,290 verified,16 open (261,283–290,292,295,299–300,302–303,306). Stop unrelated repairs/full UAT until the authorized checkpoint is reviewed and merged.
+
+### PR2969 checkpoint CI and review — 2026-09-19
+
+The published checkpoint's first frontend CI run fails the Study Pack handoff test before its drawer title appears. TASK13260.242.1 tracks awaiting the asynchronous React user action without changing assertions/timeouts, plus removal of unsupported role-query options found by scoped TypeScript validation. Qodo's twelve findings are tracked individually in [the PR2969 review ledger](PR2969_CHECKPOINT_REVIEW_2026_09_19.md) under TASK13260.242.2. The confirmed Media hydration transfer bug is fixed; safe retrieval diagnostics, fixture ownership, test contracts and public failure injection are verified. Official PostgreSQL fixture and caller-owned savepoint suggestions have documented technical dispositions.
+
+Targeted validation:54 unique database tests (real PostgreSQL, zero PostgreSQL skips),109 retrieval/streaming tests and36 frontend tests pass. Failed administrative setup attempts are retained; production write guards remain intact. These checkpoint review findings do not replace the sixteen open UAT issues or change the failed full-matrix result. Hosted reruns, final review state and a new requester-owned Change summary remain merge gates.

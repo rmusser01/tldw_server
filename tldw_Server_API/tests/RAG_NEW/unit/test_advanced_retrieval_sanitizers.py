@@ -902,11 +902,13 @@ async def test_multi_database_retriever_keeps_legacy_partial_success_for_typed_f
 
 @pytest.mark.asyncio
 async def test_multi_database_retriever_keeps_ordinary_partial_source_success():
+    from loguru import logger
+
     from tldw_Server_API.app.core.RAG.rag_service.types import DataSource
 
     class _FailingRetriever:
         async def retrieve(self, query):
-            raise RuntimeError("ordinary source failure")
+            raise RuntimeError("private-database-path query-secret")
 
     class _SuccessfulRetriever:
         async def retrieve(self, query):
@@ -918,9 +920,25 @@ async def test_multi_database_retriever_keeps_ordinary_partial_source_success():
         DataSource.NOTES: _SuccessfulRetriever(),
     }
 
-    documents = await retriever.retrieve("alpha")
+    records = []
+    sink = logger.add(lambda message: records.append(message.record))
+    try:
+        documents = await retriever.retrieve("private-query")
+    finally:
+        logger.remove(sink)
 
     assert [document.id for document in documents] == ["note-1"]
+    failures = [record for record in records if record["level"].name == "ERROR"]
+    assert len(failures) == 1
+    assert failures[0]["extra"]["source"] == DataSource.PROMPTS.value
+    assert failures[0]["extra"]["operation"] == "multi_database_retrieval"
+    assert failures[0]["extra"]["exception_type"] == "RuntimeError"
+    assert DataSource.PROMPTS.value in failures[0]["message"]
+    assert "RuntimeError" in failures[0]["message"]
+    assert failures[0]["exception"] is None
+    assert "private-database-path" not in str(failures)
+    assert "query-secret" not in str(failures)
+    assert "private-query" not in str(failures)
 
 
 @pytest.mark.asyncio

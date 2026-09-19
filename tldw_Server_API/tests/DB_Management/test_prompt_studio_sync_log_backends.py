@@ -1,6 +1,9 @@
 """Prompt Studio mutations retain sync events on the real content backends."""
 
 import json
+from collections.abc import Iterator
+from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -14,11 +17,13 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.fixture(params=["sqlite", pytest.param("postgres", marks=pytest.mark.postgres)])
-def studio_db(request, tmp_path):
+def studio_db(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[PromptStudioDatabase]:
     """Bootstrap the production shared content schema on official PostgreSQL."""
     backend = media = db = None
     try:
         if request.param == "postgres":
+            # The shared PostgreSQL plugin owns database provisioning and teardown;
+            # this fixture closes only the content adapters and their connection pool.
             backend = DatabaseBackendFactory.create_backend(
                 request.getfixturevalue("pg_database_config")
             )
@@ -34,7 +39,9 @@ def studio_db(request, tmp_path):
             backend.get_pool().close_all()
 
 
-def _persisted_events(db, entity, entity_uuid):
+def _persisted_events(
+    db: PromptStudioDatabase, entity: str, entity_uuid: str,
+) -> list[tuple[int, str, str, dict[str, Any]]]:
     """Read after releasing the writer, so pending writes cannot satisfy the test."""
     db.close_connection()
     rows = db.get_connection().execute(
@@ -48,7 +55,8 @@ def _persisted_events(db, entity, entity_uuid):
     ]
 
 
-def test_project_create_and_update_persist_sync_events(studio_db):
+def test_project_create_and_update_persist_sync_events(studio_db: PromptStudioDatabase) -> None:
+    """Create/update through the fixture DB and require durable ordered project events."""
     project = studio_db.create_project(name="Rowan source project", user_id="2")
     studio_db.update_project(project["id"], description="Public source prompts")
 
@@ -61,7 +69,8 @@ def test_project_create_and_update_persist_sync_events(studio_db):
     assert studio_db.get_project(project["id"])["description"] == "Public source prompts"
 
 
-def test_prompt_create_and_new_version_persist_sync_events(studio_db):
+def test_prompt_create_and_new_version_persist_sync_events(studio_db: PromptStudioDatabase) -> None:
+    """Create a prompt and revision, then read their exact events after releasing the writer."""
     project = studio_db.create_project(name="Pirate project", user_id="2")
     prompt = studio_db.create_prompt(
         project_id=project["id"], name="Pirate", system_prompt="Speak like a pirate."
@@ -86,7 +95,9 @@ def test_prompt_create_and_new_version_persist_sync_events(studio_db):
 
 
 @pytest.mark.parametrize("studio_db", ["postgres"], indirect=True)
-def test_restricted_sync_ownership_is_separate_from_audit_client(studio_db, tmp_path, monkeypatch):
+def test_restricted_sync_ownership_is_separate_from_audit_client(
+    studio_db: PromptStudioDatabase, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The web audit ID must neither prevent writes nor expose another tenant's events."""
     monkeypatch.setenv("TLDW_CONTENT_PG_ROLE_SWITCH", "1")
     backend = studio_db.backend

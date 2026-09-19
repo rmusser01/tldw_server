@@ -841,6 +841,8 @@ async def test_streaming_generation_marks_partial_output_and_propagates_failure(
 
 @pytest.mark.asyncio
 async def test_stream_rag_events_reports_standard_prefetch_failure_without_generation():
+    from loguru import logger
+
     async def failing_standard_pipeline(**kwargs: Any) -> UnifiedSearchResult:  # noqa: ARG001
         raise RuntimeError("private-database-path query-secret")
 
@@ -850,20 +852,33 @@ async def test_stream_rag_events_reports_standard_prefetch_failure_without_gener
         calls.append(True)
         return await _fake_generate_streaming_response(context, **kwargs)
 
-    events = [
-        event
-        async for event in stream_rag_events(
-            resolved_request=_resolved_request("standard"),
-            retrieval_plan=_retrieval_plan(),
-            standard_pipeline=failing_standard_pipeline,
-            extra_context={"generate_streaming_response": generate},
-        )
-    ]
+    records = []
+    sink = logger.add(lambda message: records.append(message.record))
+    try:
+        events = [
+            event
+            async for event in stream_rag_events(
+                resolved_request=_resolved_request("standard"),
+                retrieval_plan=_retrieval_plan(),
+                standard_pipeline=failing_standard_pipeline,
+                extra_context={"generate_streaming_response": generate},
+            )
+        ]
+    finally:
+        logger.remove(sink)
 
     assert [event["type"] for event in events] == ["error"]
     assert not calls
     assert events[0]["allow_non_stream_fallback"] is False
     assert "private-database-path" not in str(events)
+    failures = [record for record in records if record["level"].name == "ERROR"]
+    assert len(failures) == 1
+    assert failures[0]["extra"]["operation"] == "rag_standard_retrieval"
+    assert failures[0]["extra"]["exception_type"] == "RuntimeError"
+    assert "RuntimeError" in failures[0]["message"]
+    assert failures[0]["exception"] is None
+    assert "private-database-path" not in str(failures)
+    assert "query-secret" not in str(failures)
 
 
 @pytest.mark.asyncio

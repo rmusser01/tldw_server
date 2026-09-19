@@ -776,7 +776,14 @@ async def stream_rag_events(
             except Exception as prefetch_error:  # noqa: BLE001 - preserve retrieval failure as a terminal event
                 if classify_rag_provider_error(prefetch_error) is not None:
                     raise
-                logger.error("RAG streaming standard retrieval failed")
+                # Exception messages can contain private source text or credentials.
+                logger.bind(
+                    operation="rag_standard_retrieval",
+                    exception_type=type(prefetch_error).__name__,
+                ).error(
+                    "RAG streaming standard retrieval failed (error={})",
+                    type(prefetch_error).__name__,
+                )
                 # Retrieval may itself dispatch providers for embeddings or
                 # query rewriting; never certify a safe non-stream replay.
                 yield rag_internal_error_event(

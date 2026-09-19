@@ -8,6 +8,7 @@ from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 from tldw_Server_API.app.core.AuthNZ.repos.datetime_utils import _strip_tzinfo
+from tldw_Server_API.app.core.DB_Management.backends.postgresql_locks import acquire_schema_lock
 
 
 @dataclass
@@ -78,8 +79,8 @@ class AuthnzTokenBlacklistRepo:
                 if self._is_postgres_backend():
                     # IF NOT EXISTS does not serialize concurrent catalog writes.
                     # The transaction releases this lock on commit or rollback.
-                    await conn.execute(
-                        "SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))",
+                    await acquire_schema_lock(
+                        conn.execute,
                         "authnz_schema",
                         "token_blacklist",
                     )

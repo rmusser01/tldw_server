@@ -1,5 +1,7 @@
 """Real exemplar search keeps optional filters typed and search results intact."""
 
+from typing import Any
+
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
@@ -98,17 +100,18 @@ def test_failed_exemplar_read_preserves_connection_and_caller_transaction(
             ("pending caller write", character),
         )
 
-    original = exemplar_db._prepare_backend_statement
+    original = exemplar_db.execute_query
     fail_next_search = True
 
-    def fail_search_once(sql, params):
+    def fail_search_once(*args: Any, **kwargs: Any) -> Any:
+        """Fail one real database operation without depending on generated SQL."""
         nonlocal fail_next_search
-        if fail_next_search and "character_exemplars" in sql:
+        if fail_next_search:
             fail_next_search = False
-            return original("SELECT missing_uat296_lookup_column", ())
-        return original(sql, params)
+            return original("SELECT missing_uat296_lookup_column")
+        return original(*args, **kwargs)
 
-    monkeypatch.setattr(exemplar_db, "_prepare_backend_statement", fail_search_once)
+    monkeypatch.setattr(exemplar_db, "execute_query", fail_search_once)
     with pytest.raises(CharactersRAGDBError):
         exemplar_db.search_character_exemplars(character, query="Citrine")
 
@@ -140,15 +143,14 @@ def test_exemplar_lookup_preserves_owned_outer_rollback(
         with chacha_operation(independent=True), exemplar_db.transaction():
             # A managed transaction may not yet have sent BEGIN to PostgreSQL.
             if failed_lookup:
-                original = exemplar_db._prepare_backend_statement
+                original = exemplar_db.execute_query
 
-                def fail_search(sql, params):
-                    if "character_exemplars" in sql:
-                        return original("SELECT missing_uat296_lookup_column", ())
-                    return original(sql, params)
+                def fail_search(*args: Any, **kwargs: Any) -> Any:
+                    """Cause a real statement failure inside the search savepoint."""
+                    return original("SELECT missing_uat296_lookup_column")
 
                 with monkeypatch.context() as patch:
-                    patch.setattr(exemplar_db, "_prepare_backend_statement", fail_search)
+                    patch.setattr(exemplar_db, "execute_query", fail_search)
                     with pytest.raises(CharactersRAGDBError):
                         exemplar_db.search_character_exemplars(character, query="Citrine")
             else:

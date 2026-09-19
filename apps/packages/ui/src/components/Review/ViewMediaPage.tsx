@@ -1045,7 +1045,9 @@ const MediaPageContent: React.FC = () => {
 
     try {
       await transferStudyPack(() => {
-        if (!isMediaCurrent() || handoffOwnerRef.current !== ownerScope || handoffSelectionRef.current !== selectedMedia) {
+        const currentSelection = handoffSelectionRef.current
+        if (!isMediaCurrent() || handoffOwnerRef.current !== ownerScope ||
+          currentSelection?.kind !== 'media' || String(currentSelection.id) !== String(mediaId)) {
           throw new Error("The source account or selection changed. Reopen this media before transferring.")
         }
         return {
