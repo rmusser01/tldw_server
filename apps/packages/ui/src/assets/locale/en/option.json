@@ -1840,6 +1840,7 @@
     "recentStudySessionsViewingCompleted": "Viewing completed session",
     "recentStudySessionsViewCompleted": "View completed session",
     "reviewedToday": "Reviewed today",
+    "analyticsDayBoundary": "Daily statistics and study streak use UTC days, starting at midnight UTC. Recent sessions show dates in your local time.",
     "retentionRate": "Retention rate",
     "lapseRate": "Lapse rate",
     "averageAnswerTime": "Avg answer time",
