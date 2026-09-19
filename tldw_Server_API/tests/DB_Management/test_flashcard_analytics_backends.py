@@ -128,9 +128,9 @@ def test_analytics_preserves_visibility_and_deleted_filters(analytics_db):
 def test_postgres_streak_uses_utc_days_with_offset_input(pg_analytics, session_timezone):
     db = pg_analytics
     _, card = _saved_card(db)
-    # These instants are Sep16 and Sep15 in UTC, regardless of source/session timezone.
+    # One hour apart across UTC midnight; both are Sep15 in Honolulu local time.
     _seed_review(db, card, "2026-09-16T14:30:00+14:00")
-    _seed_review(db, card, "2026-09-14T14:30:00-10:00")
+    _seed_review(db, card, "2026-09-15T13:30:00-10:00")
     raw = db._get_thread_connection()
     raw.execute("SELECT set_config('TimeZone', %s, false)", (session_timezone,))
     raw.commit()
