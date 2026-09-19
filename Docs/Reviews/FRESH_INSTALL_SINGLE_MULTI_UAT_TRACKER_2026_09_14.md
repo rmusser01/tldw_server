@@ -6,7 +6,7 @@
 
 - **Qodo review:** All 14 review findings have verified fixes or an accepted disposition in the [review disposition ledger](PR2967_QODO_REVIEW_2026_09_18.md), under TASK13260.219.11–13. All 14 review threads are resolved and Qodo reports zero open findings. Final hosted CI passed before the verified merge. This review does not replace the pending fresh UAT matrix.
 
-- **Current repair gate:** 308 UAT findings: 293 verified; 15 open (261, 283–287, 289–290, 299–300, 302–303, 306–308). The frozen post-merge four-cell matrix completed with failures. Checkpoint [PR2969](https://github.com/rmusser01/tldw_server/pull/2969) merged normally into dev at `1dfdd819b6` after all seven required gates passed, all 12 Qodo threads were resolved, and the requester supplied the Change summary. Follow-up branch `codex/uat295-postgres-notes-20260919` starts from that merge. UAT295, UAT292 and UAT288 now pass targeted fresh PostgreSQL acceptance; remaining repairs precede another full matrix. Generated Playwright evidence remains local and excluded. See the [checkpoint review](PR2969_CHECKPOINT_REVIEW_2026_09_19.md) and [post-merge matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_18.md).
+- **Current repair gate:** 308 UAT findings: 296 verified; 12 open (261, 283–287, 289–290, 299–300, 302, 306). The frozen post-merge four-cell matrix completed with failures. Checkpoint [PR2969](https://github.com/rmusser01/tldw_server/pull/2969) merged normally into dev at `1dfdd819b6` after all seven required gates passed, all 12 Qodo threads were resolved, and the requester supplied the Change summary. Follow-up branch `codex/uat295-postgres-notes-20260919` starts from that merge. UAT295, UAT292, UAT288, UAT303, UAT307 and UAT308 now pass targeted fresh PostgreSQL acceptance; remaining repairs precede another full matrix. Generated Playwright evidence remains local and excluded. See the [checkpoint review](PR2969_CHECKPOINT_REVIEW_2026_09_19.md) and [post-merge matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_18.md).
 
 - **Historical frozen-run findings:246 total —230 previously verified,16 new unresolved (231–246).** The frozen48-row execution is complete with product source unchanged;16new findings await repair/disposition. SQLite multi-user natural session expiry passes; new241 loses source content in Media-to-Chat,242 uses plural wording for one Due review, and243 leaves Character setup visible after an ordinary Chat completion. Existing PostgreSQL RLS failure238 and generation timeout234 remain open.
 
@@ -3370,7 +3370,7 @@ The initial browser observer used an unavailable URL global and failed; its atte
 
 ## UAT303 — P3: one-file Quick Ingest uses plural item labels
 
-- Open; TASK13260.240. Fresh native PostgreSQL on7e292d4d13: one queued Rowan document shows “Configure 1 items,” the completed Add step says “Add 1 items,” and Review says “1 items | Custom preset.” The queue correctly says “1 item.”
+- Verified in9e30b3154b; TASK13260.240 (combined native acceptance below). Fresh native PostgreSQL on7e292d4d13: one queued Rowan document shows “Configure 1 items,” the completed Add step says “Add 1 items,” and Review says “1 items | Custom preset.” The queue correctly says “1 item.”
 - Use existing localized count handling for all three labels without changing processing behavior. Evidence .tmp/uat296-repair/pg-16-upload.txt, pg-17-ingest-configure.txt and pg-18-ingest-start.txt. Separate from historical Study plural findings.
 
 
@@ -3431,10 +3431,19 @@ All24,938 archived source entries match. The controlled read rolls back normally
 
 ## UAT307 — P3: QA loading controls overlap long question text
 
-- Open; TASK13260.245. Fresh native PostgreSQL UAT288 on6a30d7ebb7 at1200×953 visibly overlays the end of the question with the expanded Searching button and Clear control. The52-second screenshot `.tmp/uat288-repair/cold-wait.png` confirms it. SearchBar uses fixed input padding and absolute control positions while the submit label grows. No data-loss consequence established.
+- Verified in0b01ac7e00; TASK13260.245 (combined native acceptance below). Fresh native PostgreSQL UAT288 on6a30d7ebb7 at1200×953 visibly overlays the end of the question with the expanded Searching button and Clear control. The52-second screenshot `.tmp/uat288-repair/cold-wait.png` confirms it. SearchBar uses fixed input padding and absolute control positions while the submit label grows. No data-loss consequence established.
 - Preserve keyboard, clear, submit and cancel behavior while giving text and controls separate space at desktop and narrow widths. The later geometry probe missed the loading state and is retained as a harness timeout, not additional layout evidence.
 
 ## UAT308 — P3: user-cancelled QA is presented as failed and still searching
 
-- Open; TASK13260.246. Native Stop after a dispatched QA POST at19:16:05UTC clears the waiting panel but says Search failed / Answer status: Failed search / Search error. Search cancelled, alongside stale Searching your selected sources text. Cancellation itself works; previous cited answer remains in history and a subsequent native query succeeds.
+- Verified in0fce064a55; TASK13260.246 (combined native acceptance below). Native Stop after a dispatched QA POST at19:16:05UTC clears the waiting panel but says Search failed / Answer status: Failed search / Search error. Search cancelled, alongside stale Searching your selected sources text. Cancellation itself works; previous cited answer remains in history and a subsequent native query succeeds.
 - Distinguish explicit cancellation from real retrieval/provider failures. Evidence `.tmp/uat288-repair/native-cancellation.txt` and `recovery-completed.txt`; source frozen at6a30d7ebb7. No claim that backend computation stopped immediately.
+
+
+### UAT303 / UAT307 / UAT308 combined targeted acceptance — 2026-09-19 19:48 UTC
+
+Fresh native PostgreSQL acceptance passes on immutable `0fce064a55` using the official restricted fixture profile. Quick Ingest correctly renders zero/one/two counts on Configure, completed Add and Review; removing the second file restores singular wording. The remaining Rowan document ingests1success/0fail in2seconds. During actual QA loading, input/Clear/Searching rectangles are nonoverlapping at1200/768/390px, controls remain within viewport, and wide/mobile screenshots were inspected. Keyboard Escape dismisses suggestions, Tab reaches Clear, Space clears, and Enter submits. Explicit Stop before any answer produces a visible neutral cancelled status with no failed-search or stale-searching text. A retry returns Dr.MiraVale/ORBIT-742 with2citations. Another Stop retains that cited answer and history; a final ordinary query succeeds. This does not claim immediate backend computation cancellation.
+
+Source checks:303 passes234tests/16suites,307 passes66existing functional/layout tests,308 passes135tests/6suites including real failures, partial results and empty first cancellation. Independent reviews clear. No added ESLint diagnostics;308 retains22existing diagnostics including1error. Frontend typecheck retains93identical errors/0new. Bandit is inapplicable to the TS/JSON-only changes.
+
+All24,940 archived source entries match. PostgreSQL logs contain0errors; one known character-search429 and optional evaluations-config absence recur. Retained harness limitations: obsolete Review Back selector and its dependent upload timeout, ambiguous main snapshot selector after an otherwise completed cancellation, and an initial Tab assumption that ignored the suggestion menu. Corrected native controls pass; these failures are not counted as product defects. Browser/apps closed, portsfree, fixtureholderexit0; API wrapper1 for requestedSIGTERM, frontend0; original isolated config restored. Evidence stays local/ignored in `.tmp/uat303-307-308-repair/`. Current308 findings/296verified/12open. The frozen full-matrix acceptance remains failed pending remaining repairs.
