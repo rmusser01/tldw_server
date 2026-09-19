@@ -8,9 +8,12 @@ import { REFRESH_SESSION_INVALIDATION_PREFIX } from "./single-user-credential"
 import {
   buildFlashcardsGenerateRoute,
   createFlashcardsGenerateHandoff,
+  createStudyPackHandoff,
   removeFlashcardsGenerateHandoff,
   type FlashcardsGenerateIntent
 } from "./flashcards-generate-handoff"
+
+import { buildStudyPackRoute, type StudyPackIntent } from "./study-pack-handoff"
 
 export const flashcardsHandoffAuthority = (snapshot: ServicePromptSnapshot): string => {
   const { config, userId } = snapshot.requestScope
@@ -132,8 +135,12 @@ const reserveTarget = (target: FlashcardsTransferTarget) => {
 }
 
 /** Capture the owner before source acquisition, and retain source state on failure. */
-export const transferFlashcardsSource = async (
-  acquire: (snapshot: ServicePromptSnapshot) => FlashcardsGenerateIntent | Promise<FlashcardsGenerateIntent>,
+type PrivateTransferIntent =
+  | { kind: "generate"; intent: FlashcardsGenerateIntent }
+  | { kind: "study-pack"; intent: StudyPackIntent }
+
+const transferPrivateFlashcardsSource = async (
+  acquire: (snapshot: ServicePromptSnapshot) => Promise<PrivateTransferIntent>,
   target: FlashcardsTransferTarget,
   signal?: AbortSignal
 ): Promise<void> => {
@@ -144,13 +151,13 @@ export const transferFlashcardsSource = async (
   try {
     snapshot = await loadFlashcardsTransferSnapshot(signal)
     snapshot.scopeSignal.throwIfAborted()
-    const intent = await acquire(snapshot)
+    const source = await acquire(snapshot)
     snapshot.scopeSignal.throwIfAborted()
-    token = await createFlashcardsGenerateHandoff(
-      intent, flashcardsHandoffAuthority(snapshot), snapshot.scopeSignal
-    )
+    token = source.kind === "study-pack"
+      ? await createStudyPackHandoff(source.intent, flashcardsHandoffAuthority(snapshot), snapshot.scopeSignal)
+      : await createFlashcardsGenerateHandoff(source.intent, flashcardsHandoffAuthority(snapshot), snapshot.scopeSignal)
     snapshot.scopeSignal.throwIfAborted()
-    await destination.navigate(buildFlashcardsGenerateRoute(token))
+    await destination.navigate(source.kind === "study-pack" ? buildStudyPackRoute(token) : buildFlashcardsGenerateRoute(token))
     // Same-tab navigation unmounts the source and aborts its hook. Delivery has
     // succeeded; the destination now validates and consumes the owned record.
     if ("newTab" in target) snapshot.scopeSignal.throwIfAborted()
@@ -166,3 +173,13 @@ export const transferFlashcardsSource = async (
     snapshot?.release()
   }
 }
+
+export const transferFlashcardsSource = (
+  acquire: (snapshot: ServicePromptSnapshot) => FlashcardsGenerateIntent | Promise<FlashcardsGenerateIntent>,
+  target: FlashcardsTransferTarget, signal?: AbortSignal
+) => transferPrivateFlashcardsSource(async snapshot => ({ kind: "generate", intent: await acquire(snapshot) }), target, signal)
+
+export const transferStudyPackSource = (
+  acquire: (snapshot: ServicePromptSnapshot) => StudyPackIntent | Promise<StudyPackIntent>,
+  target: FlashcardsTransferTarget, signal?: AbortSignal
+) => transferPrivateFlashcardsSource(async snapshot => ({ kind: "study-pack", intent: await acquire(snapshot) }), target, signal)

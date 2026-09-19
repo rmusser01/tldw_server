@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
-import { consumeFlashcardsGenerateHandoff } from "@/services/tldw/flashcards-generate-handoff"
+import { consumeFlashcardsGenerateHandoff, consumeStudyPackHandoff } from "@/services/tldw/flashcards-generate-handoff"
 import { loadServicePromptSnapshot } from "@/services/service-prompts"
 import { flashcardsHandoffAuthority } from "@/services/tldw/flashcards-generate-transfer"
 vi.mock("@plasmohq/storage", async () => import("../../../../../../tldw-frontend/extension/shims/plasmo-storage"))
@@ -118,6 +118,7 @@ vi.mock("@/services/settings/registry", async (importOriginal) => {
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: vi.fn(async () => undefined),
+    getConfig: async () => JSON.parse(window.localStorage.getItem("tldwConfig") || "null"),
     ensureConfigForRequest: async () => JSON.parse(window.localStorage.getItem("tldwConfig") || "null"),
     getChat: vi.fn(async () => null),
     listChatMessages: vi.fn(async () => []),
@@ -132,7 +133,7 @@ vi.mock("@/components/Common/MarkdownPreview", () => ({
 }))
 
 vi.mock("@/components/Notes/NotesListPanel", () => ({
-  default: () => <div data-testid="notes-list-panel" />
+  default: ({ onSelectNote }: { onSelectNote: (id: string) => void }) => <div data-testid="notes-list-panel"><button onClick={() => onSelectNote("11")}>Open saved note</button></div>
 }))
 
 const renderPage = () => {
@@ -174,6 +175,33 @@ describe("NotesManagerPage stage 3 toolbar and metrics", () => {
   })
 
   afterEach(() => vi.unstubAllGlobals())
+
+  it.each(["single-user", "multi-user"])("transfers the selected saved Note into a Study Pack with verified ownership (%s)", async authMode => {
+    if (authMode === "single-user") window.localStorage.setItem("tldwConfig", JSON.stringify({ serverUrl: "https://notes.test", authMode, apiKey: "synthetic-key" }))
+    const note = { id: "11", title: "Private saved note", content: "Private content", metadata: { keywords: [] }, version: 1 }
+    mockBgRequest.mockImplementation(async ({ path }: { path: string }) => {
+      if (path.startsWith("/api/v1/notes/?")) return { items: [note], pagination: { total_items: 1, total_pages: 1 } }
+      if (path === "/api/v1/notes/11") return note
+      return {}
+    })
+    renderPage()
+    await waitFor(() => expect(mockBgRequest.mock.calls.some(([request]) => request.path.startsWith("/api/v1/notes/?"))).toBe(true))
+    fireEvent.click(await screen.findByRole("button", { name: "Open saved note" }))
+    await screen.findByDisplayValue(note.title)
+    const button = screen.getByTestId("notes-create-study-pack-button")
+    await waitFor(() => expect(button).toBeEnabled())
+    fireEvent.click(button)
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledTimes(1))
+    const route = new URL(mockNavigate.mock.calls[0][0], "https://app.test")
+    expect(route.href).not.toContain("Private")
+    const snapshot = await loadServicePromptSnapshot([])
+    try {
+      expect(await consumeStudyPackHandoff(route.searchParams.get("study_pack_handoff")!, flashcardsHandoffAuthority(snapshot))).toEqual({
+        title: note.title, sourceItems: [{ sourceType: "note", sourceId: "11", sourceTitle: note.title }]
+      })
+    } finally { snapshot.release() }
+    expect(screen.getByDisplayValue(note.title)).toBeInTheDocument()
+  })
 
   it("inserts markdown syntax at cursor/selection via toolbar", async () => {
     renderPage()

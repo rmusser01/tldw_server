@@ -5,13 +5,15 @@ import { HashRouter, MemoryRouter, Route, Routes, useLocation, useNavigate } fro
 import { Storage } from "@plasmohq/storage"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { FlashcardsManager } from "../FlashcardsManager"
-import { useFlashcardsGenerateTransfer } from "@/hooks/useFlashcardsGenerateTransfer"
+import { useFlashcardsGenerateTransfer, useStudyPackTransfer } from "@/hooks/useFlashcardsGenerateTransfer"
 import { loadServicePromptSnapshot } from "@/services/service-prompts"
 import { flashcardsHandoffAuthority } from "@/services/tldw/flashcards-generate-transfer"
 import {
   buildFlashcardsGenerateRoute,
-  createFlashcardsGenerateHandoff
+  createFlashcardsGenerateHandoff,
+  createStudyPackHandoff
 } from "@/services/tldw/flashcards-generate-handoff"
+import { buildStudyPackRoute } from "@/services/tldw/study-pack-handoff"
 
 const mocks = vi.hoisted(() => ({ request: vi.fn(), user: 1, resolveUser: vi.fn(), messages: { success: vi.fn(), warning: vi.fn(), error: vi.fn() } }))
 vi.mock("@plasmohq/storage", async () => import("../../../../../../tldw-frontend/extension/shims/plasmo-storage"))
@@ -44,7 +46,6 @@ vi.mock("../tabs", async () => ({
   ImportExportTab: (await import("../tabs/ImportExportTab")).ImportExportTab
 }))
 vi.mock("../components", () => ({ KeyboardShortcutsModal: () => null }))
-vi.mock("../components/StudyPackCreateDrawer", () => ({ StudyPackCreateDrawer: () => null }))
 vi.mock("../tabs/ImportExport/StudyPackPanel", () => ({ StudyPackPanel: () => null }))
 vi.mock("../tabs/ImportExport/ImportPanel", () => ({ ImportPanel: () => null }))
 vi.mock("../tabs/ImportExport/ExportPanel", () => ({ ExportPanel: () => null }))
@@ -71,6 +72,12 @@ const privateIntent = { text: " \nAlice unsaved private note\n\t ", sourceType: 
 const createRoute = async () => {
   const snapshot = await loadServicePromptSnapshot([])
   try { return buildFlashcardsGenerateRoute(await createFlashcardsGenerateHandoff(privateIntent, flashcardsHandoffAuthority(snapshot))) }
+  finally { snapshot.release() }
+}
+const studyIntent = { title: "Alice private study pack", sourceItems: [{ sourceType: "note" as const, sourceId: "alice-note", sourceTitle: "Alice private title" }] }
+const createStudyRoute = async () => {
+  const snapshot = await loadServicePromptSnapshot([])
+  try { return buildStudyPackRoute(await createStudyPackHandoff(studyIntent, flashcardsHandoffAuthority(snapshot))) }
   finally { snapshot.release() }
 }
 const Location = () => {
@@ -107,6 +114,95 @@ describe("actual Flashcards generation private handoff", () => {
     }))
   })
   afterEach(() => vi.unstubAllGlobals())
+
+  it("delivers a Study Pack into the actual drawer after its source unmounts", async () => {
+    const failures = vi.fn()
+    const Source = () => {
+      const transfer = useStudyPackTransfer()
+      const navigate = useNavigate()
+      return <button onClick={() => { void transfer(() => studyIntent, { navigate }).catch(failures) }}>Study this source</button>
+    }
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={client}><MemoryRouter initialEntries={["/source"]}><Location /><Routes>
+      <Route path="/source" element={<Source />} />
+      <Route path="/flashcards" element={<FlashcardsManager />} />
+    </Routes></MemoryRouter></QueryClientProvider>)
+    fireEvent.click(screen.getByRole("button", { name: "Study this source" }))
+    expect(await screen.findByDisplayValue(studyIntent.title)).toBeVisible()
+    expect(screen.getByText("note · alice-note")).toBeVisible()
+    expect(screen.queryByRole("button", { name: "Study this source" })).not.toBeInTheDocument()
+    expect(screen.getByTestId("location")).not.toHaveTextContent(/Alice|alice-note|study_pack_handoff/)
+    expect(failures).not.toHaveBeenCalled()
+  })
+
+  it("consumes a Study Pack once under StrictMode and cannot restore it on reload or replay", async () => {
+    const route = await createStudyRoute()
+    const view = mount(route, true)
+    expect(await screen.findByDisplayValue(studyIntent.title)).toBeVisible()
+    const cleanRoute = screen.getByTestId("location").textContent!
+    expect(cleanRoute).toBe("/flashcards?tab=importExport")
+    view.unmount()
+    const reload = mount(cleanRoute)
+    await act(async () => {})
+    expect(screen.queryByDisplayValue(studyIntent.title)).not.toBeInTheDocument()
+    reload.unmount()
+    mount(route)
+    expect(await screen.findByText(/missing, expired, or already consumed/)).toBeVisible()
+    expect(screen.queryByText("Alice private title")).not.toBeInTheDocument()
+  })
+
+  it.each(["same-tab", "cross-tab", "A-B-A"])("clears an open Study Pack drawer at the account boundary (%s)", async boundary => {
+    mount(await createStudyRoute())
+    expect(await screen.findByDisplayValue(studyIntent.title)).toBeVisible()
+    act(() => {
+      if (boundary === "cross-tab") {
+        const previous = window.localStorage.getItem("tldwConfig")!
+        const next = JSON.stringify({ ...JSON.parse(previous), accessToken: tokenFor(2), refreshToken: "refresh-2" })
+        mocks.user = 2
+        window.localStorage.setItem("tldwConfig", next)
+        window.dispatchEvent(new StorageEvent("storage", { key: "tldwConfig", oldValue: previous, newValue: next }))
+      } else {
+        setUser(2)
+        if (boundary === "A-B-A") setUser(1)
+      }
+    })
+    await waitFor(() => expect(screen.queryByDisplayValue(studyIntent.title)).not.toBeInTheDocument())
+    expect(screen.queryByText("note · alice-note")).not.toBeInTheDocument()
+    expect(screen.getByTestId("location")).not.toHaveTextContent(/Alice|alice-note/)
+  })
+
+  it("rejects another account's Study Pack token without rendering source details", async () => {
+    const route = await createStudyRoute()
+    setUser(2)
+    mount(route)
+    expect(await screen.findByText(/belongs to another account/)).toBeVisible()
+    expect(screen.queryByDisplayValue(studyIntent.title)).not.toBeInTheDocument()
+    expect(screen.queryByText("note · alice-note")).not.toBeInTheDocument()
+  })
+
+  it("scrubs an old Study Pack history entry when Bob goes Back and keeps reload empty", async () => {
+    setUser(2)
+    const legacy = `/flashcards?tab=importExport&study_pack=1&study_pack_title=${encodeURIComponent(studyIntent.title)}&study_pack_payload=${encodeURIComponent(JSON.stringify(studyIntent.sourceItems))}`
+    const view = mount([legacy, "/flashcards?tab=importExport"])
+    await act(async () => {})
+    fireEvent.click(screen.getByRole("button", { name: "Browser Back" }))
+    expect(await screen.findByText(/old link contains unbound/)).toBeVisible()
+    const cleanRoute = screen.getByTestId("location").textContent!
+    expect(cleanRoute).not.toMatch(/Alice|alice-note|study_pack/)
+    expect(screen.queryByDisplayValue(studyIntent.title)).not.toBeInTheDocument()
+    view.unmount()
+    mount(cleanRoute)
+    await act(async () => {})
+    expect(screen.queryByText("note · alice-note")).not.toBeInTheDocument()
+  })
+
+  it("scrubs both legacy transfer types even when account verification fails", async () => {
+    mocks.resolveUser.mockRejectedValue(new Error("Signed out"))
+    mount("/flashcards?tab=importExport&generate_text=AliceGenerateSecret&study_pack=1&study_pack_title=AliceStudySecret&study_pack_payload=private")
+    await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/flashcards?tab=importExport"))
+    expect(screen.queryByDisplayValue("AliceGenerateSecret")).not.toBeInTheDocument()
+    expect(screen.queryByDisplayValue("AliceStudySecret")).not.toBeInTheDocument()
+  })
 
   it("delivers through the actual router after its source unmounts", async () => {
     const failures = vi.fn()

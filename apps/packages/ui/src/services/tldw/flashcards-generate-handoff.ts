@@ -1,5 +1,6 @@
 import { createSafeStorage } from "@/utils/safe-storage"
 import { isExtensionRuntime } from "@/utils/browser-runtime"
+import { normalizeStudyPackIntent, type StudyPackIntent } from "./study-pack-intent"
 
 export type FlashcardsGenerateSourceType = "media" | "note" | "message" | "manual"
 export type FlashcardsGenerateIntent = {
@@ -21,14 +22,19 @@ const PRIVATE_PARAMS = [
   "generate_text", "generate_source_type", "generate_source_id",
   "generate_source_title", "generate_conversation_id", "generate_message_id"
 ]
+const STUDY_PACK_PRIVATE_PARAMS = ["study_pack", "study_pack_title", "study_pack_payload"]
 const SOURCE_TYPES = new Set(["media", "note", "message", "manual"])
+
+export type FlashcardsHandoffKind = "generate" | "study-pack"
+type PrivateIntent = FlashcardsGenerateIntent | StudyPackIntent
 
 type HandoffRecord = {
   version: 1
   id: string
   authority: string
   expiresAt: number
-  intent: FlashcardsGenerateIntent
+  kind?: FlashcardsHandoffKind
+  intent: PrivateIntent
 }
 
 const handoffError = (message: string) => Object.assign(new Error(message), {
@@ -91,8 +97,11 @@ const isRecord = (value: unknown, id: string): value is HandoffRecord => {
   return record.version === 1 && record.id === id &&
     typeof record.authority === "string" && Boolean(record.authority) &&
     typeof record.expiresAt === "number" && Number.isFinite(record.expiresAt) &&
-    typeof record.intent?.text === "string" &&
-    record.intent.text.length <= MAX_GENERATE_PREFILL_CHARS
+    (record.kind === "study-pack"
+      ? normalizeStudyPackIntent(record.intent) !== null
+      : (record.kind == null || record.kind === "generate") &&
+        typeof (record.intent as FlashcardsGenerateIntent)?.text === "string" &&
+        (record.intent as FlashcardsGenerateIntent).text.length <= MAX_GENERATE_PREFILL_CHARS)
 }
 
 const pruneExpired = async (storage: ReturnType<typeof createSafeStorage>) => {
@@ -105,13 +114,17 @@ const pruneExpired = async (storage: ReturnType<typeof createSafeStorage>) => {
 }
 
 /** The authority is the verified request target/principal tuple; never credentials. */
-export const createFlashcardsGenerateHandoff = async (
-  intent: FlashcardsGenerateIntent,
+const createPrivateHandoff = async (
+  intent: PrivateIntent,
   authority: string,
-  signal?: AbortSignal
+  signal: AbortSignal | undefined,
+  kind: FlashcardsHandoffKind
 ): Promise<string> => {
   if (!authority) throw handoffError("Sign in before transferring source content.")
-  const normalized = normalizeIntent(intent)
+  const normalized = kind === "study-pack"
+    ? normalizeStudyPackIntent(intent)
+    : normalizeIntent(intent as FlashcardsGenerateIntent)
+  if (!normalized) throw handoffError("Choose supported sources and a title before creating a study pack.")
   return withHandoffStorage(async (storage, webStorage) => {
     await pruneExpired(storage)
     signal?.throwIfAborted()
@@ -120,7 +133,7 @@ export const createFlashcardsGenerateHandoff = async (
     const record: HandoffRecord = {
       version: 1, id, authority,
       expiresAt: Date.now() + FLASHCARDS_GENERATE_HANDOFF_TTL_MS,
-      intent: normalized
+      kind, intent: normalized
     }
     try {
       await storage.set(key, record)
@@ -140,11 +153,12 @@ export const createFlashcardsGenerateHandoff = async (
   }, signal)
 }
 
-export const consumeFlashcardsGenerateHandoff = async (
+const consumePrivateHandoff = async (
   token: string,
   authority: string,
-  signal?: AbortSignal
-): Promise<FlashcardsGenerateIntent> => {
+  signal: AbortSignal | undefined,
+  kind: FlashcardsHandoffKind
+): Promise<PrivateIntent> => {
   if (!authority) throw handoffError("Sign in to resolve the transfer authority before opening source content.")
   return withHandoffStorage(async (storage) => {
     const key = `${FLASHCARDS_GENERATE_HANDOFF_PREFIX}${token}`
@@ -154,17 +168,36 @@ export const consumeFlashcardsGenerateHandoff = async (
       await storage.remove(key)
       throw handoffError("This transfer is missing, expired, or already consumed. Reopen it from the source.")
     }
+    if ((record.kind ?? "generate") !== kind) {
+      await storage.remove(key)
+      throw handoffError("This transfer is for a different Flashcards action. Reopen it from its source.")
+    }
     if (record.authority !== authority) {
       await storage.remove(key)
       throw handoffError("This transfer belongs to another account or server. Reopen it from the source.")
     }
-    const intent = normalizeIntent(record.intent)
+    const intent = kind === "study-pack"
+      ? normalizeStudyPackIntent(record.intent)
+      : normalizeIntent(record.intent as FlashcardsGenerateIntent)
+    if (!intent) throw handoffError("The transfer source is invalid. Reopen it from its source.")
     signal?.throwIfAborted()
     await storage.remove(key)
     signal?.throwIfAborted()
     return intent
   }, signal)
 }
+
+export const createFlashcardsGenerateHandoff = (intent: FlashcardsGenerateIntent, authority: string, signal?: AbortSignal) =>
+  createPrivateHandoff(intent, authority, signal, "generate")
+
+export const createStudyPackHandoff = (intent: StudyPackIntent, authority: string, signal?: AbortSignal) =>
+  createPrivateHandoff(intent, authority, signal, "study-pack")
+
+export const consumeFlashcardsGenerateHandoff = (token: string, authority: string, signal?: AbortSignal): Promise<FlashcardsGenerateIntent> =>
+  consumePrivateHandoff(token, authority, signal, "generate") as Promise<FlashcardsGenerateIntent>
+
+export const consumeStudyPackHandoff = (token: string, authority: string, signal?: AbortSignal): Promise<StudyPackIntent> =>
+  consumePrivateHandoff(token, authority, signal, "study-pack") as Promise<StudyPackIntent>
 
 export const removeFlashcardsGenerateHandoff = async (token: string): Promise<void> => {
   await withHandoffStorage(storage => storage.remove(`${FLASHCARDS_GENERATE_HANDOFF_PREFIX}${token}`))
@@ -190,16 +223,22 @@ export const parseFlashcardsGenerateIntentFromLocation = (_location: { search?: 
 
 export const readFlashcardsGenerateRoute = (location: {
   pathname?: string; search?: string; hash?: string
-}): { token: string | null; legacy: boolean; cleanRoute: string } => {
+}, kind: FlashcardsHandoffKind = "generate"): { token: string | null; legacy: boolean; cleanRoute: string } => {
+  const privateParams = kind === "study-pack"
+    ? STUDY_PACK_PRIVATE_PARAMS
+    : PRIVATE_PARAMS
+  const tokenParam = kind === "study-pack" ? "study_pack_handoff" : "generate_handoff"
   const search = new URLSearchParams(location.search || "")
   const hash = location.hash || ""
   const hashQueryIndex = hash.indexOf("?")
   const hashPath = hashQueryIndex < 0 ? hash : hash.slice(0, hashQueryIndex)
   const hashSearch = new URLSearchParams(hashQueryIndex < 0 ? "" : hash.slice(hashQueryIndex + 1))
-  const legacy = PRIVATE_PARAMS.some(key => search.has(key) || hashSearch.has(key))
-  const token = search.get("generate_handoff") || hashSearch.get("generate_handoff")
+  const legacy = privateParams.some(key => search.has(key) || hashSearch.has(key))
+  const token = search.get(tokenParam) || hashSearch.get(tokenParam)
   for (const params of [search, hashSearch]) {
-    for (const key of [...PRIVATE_PARAMS, "generate_handoff"]) params.delete(key)
+    // Both consumers can replace the same history entry. Give each the same
+    // private-data-free destination so neither restores the other's fields.
+    for (const key of [...PRIVATE_PARAMS, ...STUDY_PACK_PRIVATE_PARAMS, "generate_handoff", "study_pack_handoff"]) params.delete(key)
   }
   const cleanSearch = search.toString()
   const cleanHashSearch = hashSearch.toString()

@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import SidepanelChat from "../sidepanel-chat"
 import { loadFlashcardsTransferSnapshot, flashcardsHandoffAuthority } from "@/services/tldw/flashcards-generate-transfer"
-import { consumeFlashcardsGenerateHandoff } from "@/services/tldw/flashcards-generate-handoff"
+import { consumeFlashcardsGenerateHandoff, consumeStudyPackHandoff } from "@/services/tldw/flashcards-generate-handoff"
 
 const mocks = vi.hoisted(() => {
   const noop = () => {}
@@ -44,8 +44,8 @@ vi.mock("@/components/Sidepanel/Chat/ConnectionBanner", () => ({ ConnectionBanne
 vi.mock("@/components/Common/CommandPaletteHost", () => ({ CommandPaletteHost: () => null }))
 vi.mock("@/components/Timeline", () => ({ TimelineModal: () => null }))
 vi.mock("@/components/Sidepanel/Notes/NoteQuickSaveModal", () => ({ default: (props: {
-  onGenerateFlashcards: () => void; onCancel: () => void; onContentChange: (value: string) => void; content: string; error?: string
-}) => <section><textarea aria-label="Captured draft" value={props.content} onChange={event => props.onContentChange(event.target.value)} /><button onClick={props.onGenerateFlashcards}>Generate flashcards</button><button onClick={props.onCancel}>Cancel capture</button>{props.error && <p role="alert">{props.error}</p>}</section> }))
+  onGenerateFlashcards: () => void; onCreateStudyPack?: () => void; onCancel: () => void; onContentChange: (value: string) => void; content: string; error?: string
+}) => <section><textarea aria-label="Captured draft" value={props.content} onChange={event => props.onContentChange(event.target.value)} /><button onClick={props.onGenerateFlashcards}>Generate flashcards</button>{props.onCreateStudyPack && <button onClick={props.onCreateStudyPack}>Create study pack</button>}<button onClick={props.onCancel}>Cancel capture</button>{props.error && <p role="alert">{props.error}</p>}</section> }))
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string, fallback?: string) => fallback || key }) }))
 vi.mock("@plasmohq/storage", async () => import("../../../../../tldw-frontend/extension/shims/plasmo-storage"))
 vi.mock("@/services/tldw/deployment-mode", () => ({ isHostedTldwDeployment: () => false }))
@@ -68,6 +68,32 @@ describe("actual sidepanel Chat private Flashcards producer", () => {
     vi.spyOn(window, "open").mockReturnValue({ closed: false, opener: null, close: vi.fn(), location: { replace: mocks.navigate } } as unknown as Window)
   })
   afterEach(() => vi.unstubAllGlobals())
+
+  it("transfers a captured Message into a Study Pack with an opaque URL", async () => {
+    mocks.background = { type: "save-to-notes", text: "Private source", payload: { messageId: "message-23", pageTitle: "Private title" } }
+    render(<SidepanelChat />)
+    fireEvent.click(await screen.findByRole("button", { name: "Create study pack" }))
+    await waitFor(() => expect(mocks.navigate).toHaveBeenCalledTimes(1))
+    const route = new URL(mocks.navigate.mock.calls[0][0])
+    expect(route.href).not.toMatch(/Private|message-23|local-tab|conversation-41/)
+    const snapshot = await loadFlashcardsTransferSnapshot()
+    try {
+      expect(await consumeStudyPackHandoff(route.searchParams.get("study_pack_handoff")!, flashcardsHandoffAuthority(snapshot))).toEqual({
+        title: "Private title", sourceItems: [{ sourceType: "message", sourceId: "message-23", sourceTitle: "Private title" }]
+      })
+    } finally { snapshot.release() }
+    expect(screen.queryByLabelText("Captured draft")).not.toBeInTheDocument()
+  })
+
+  it("retains a Study Pack source when its popup is blocked", async () => {
+    vi.spyOn(window, "open").mockReturnValue(null)
+    mocks.background = { type: "save-to-notes", text: "Private source", payload: { messageId: "message-23", pageTitle: "Private title" } }
+    render(<SidepanelChat />)
+    fireEvent.click(await screen.findByRole("button", { name: "Create study pack" }))
+    expect(await screen.findByRole("alert")).toHaveTextContent(/popup was blocked/)
+    expect(screen.getByLabelText("Captured draft")).toHaveValue("Private source")
+    expect(mocks.navigate).not.toHaveBeenCalled()
+  })
 
   it.each(["message-23", 23, undefined])("stores captured message provenance without the local tab ID (%s)", async messageId => {
     const source = render(<SidepanelChat />)

@@ -14,6 +14,7 @@ import { useNavigate } from 'react-router-dom'
 import { useDemoMode } from '@/context/demo-mode'
 import { useServerCapabilities } from '@/hooks/useServerCapabilities'
 import { tldwClient } from '@/services/tldw/TldwApiClient'
+import { tldwAuth } from '@/services/tldw/TldwAuth'
 import { useAntdMessage } from '@/hooks/useAntdMessage'
 import { useStoreMessageOption, type Message as ChatMessage } from "@/store/option"
 import { decodeChatErrorPayload } from "@/utils/chat-error-message"
@@ -30,7 +31,7 @@ import NotesGraphWorkspace from "@/components/Notes/NotesGraphWorkspace"
 import NotesStudioCreateModal from "@/components/Notes/NotesStudioCreateModal"
 import NotesSidebar from "@/components/Notes/NotesSidebar"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
-import { useNotesGraphAuthorityScope } from "@/components/Notes/hooks/useNotesGraphAuthorityScope"
+import { createNotesGraphAuthorityScope, useNotesGraphAuthorityScope } from "@/components/Notes/hooks/useNotesGraphAuthorityScope"
 import {
   useNotesKeywords,
   useNotesListManagement,
@@ -41,8 +42,7 @@ import {
 } from "@/components/Notes/hooks"
 import type { NoteListItem } from "@/components/Notes/notes-manager-types"
 import { clearSetting, getSetting } from "@/services/settings/registry"
-import { useFlashcardsGenerateTransfer } from "@/hooks/useFlashcardsGenerateTransfer"
-import { buildStudyPackRoute } from "@/services/tldw/study-pack-handoff"
+import { useFlashcardsGenerateTransfer, useStudyPackTransfer } from "@/hooks/useFlashcardsGenerateTransfer"
 import { buildSourcesNewPath } from "@/routes/route-paths"
 import { deriveNoteStudio, getNoteStudioState, regenerateNoteStudio } from "@/services/notes-studio"
 import { useMobile } from "@/hooks/useMediaQuery"
@@ -128,6 +128,7 @@ const hasUnsavedChatWork = (row: ChatMessage): boolean => {
 
 const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNoteId = null }) => {
   const transferFlashcards = useFlashcardsGenerateTransfer()
+  const transferStudyPack = useStudyPackTransfer()
   const { t } = useTranslation(['option', 'common'])
   const isOnline = useServerOnline()
   const isMobileViewport = useMobile()
@@ -963,8 +964,9 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
     startDraftSession
   ])
 
-  const handleCreateStudyPackFromNote = React.useCallback(() => {
-    const selectedNoteId = ed.selectedId
+  const handleCreateStudyPackFromNote = React.useCallback(async () => {
+    const selectedNoteId = authoritySelectedId
+    const evidence = selectedAuthorityEvidenceRef.current
     if (selectedNoteId == null) {
       message.warning(
         t('option:notesSearch.createStudyPackMissingSelection', {
@@ -993,19 +995,23 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
       return
     }
 
-    navigate(
-      buildStudyPackRoute({
-        title: noteTitle,
-        sourceItems: [
-          {
-            sourceType: 'note',
-            sourceId: String(selectedNoteId),
-            sourceTitle: noteTitle
-          }
-        ]
-      })
-    )
-  }, [ed.isDirty, ed.selectedId, ed.title, message, navigate, t])
+    try {
+      await transferStudyPack(async snapshot => {
+        const user = await tldwAuth.getCurrentUser()
+        snapshot.scopeSignal.throwIfAborted()
+        if (!user?.is_active || user.id == null || !evidence || selectedAuthorityEvidenceRef.current !== evidence ||
+            evidence.authorityScope !== createNotesGraphAuthorityScope(snapshot.requestScope.config.serverUrl, user.id)) {
+          throw new Error("The source account changed. Reopen this note before transferring.")
+        }
+        return {
+          title: noteTitle,
+          sourceItems: [{ sourceType: 'note', sourceId: String(selectedNoteId), sourceTitle: noteTitle }]
+        }
+      }, { navigate })
+    } catch (error) {
+      if (!(error instanceof Error && error.name === "AbortError")) message.error(error instanceof Error ? error.message : "The study pack transfer could not be opened. Your source is unchanged.")
+    }
+  }, [authoritySelectedId, ed.isDirty, ed.title, message, navigate, t, transferStudyPack])
 
   const duplicateSelectedNote = React.useCallback(async () => {
     if (editorDisabled) return

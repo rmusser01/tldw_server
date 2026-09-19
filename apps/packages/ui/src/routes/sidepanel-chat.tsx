@@ -66,10 +66,9 @@ import { normalizeConversationState } from "@/utils/conversation-state"
 import { normalizeChatRole } from "@/utils/normalize-chat-role"
 import { normalizeMessageMetadataExtra } from "@/utils/dynamic-ui"
 import { restoreQueuedRequests } from "@/utils/chat-request-queue"
-import { useFlashcardsGenerateTransfer } from "@/hooks/useFlashcardsGenerateTransfer"
+import { useFlashcardsGenerateTransfer, useStudyPackTransfer } from "@/hooks/useFlashcardsGenerateTransfer"
 import { flashcardsHandoffAuthority, loadFlashcardsTransferSnapshot } from "@/services/tldw/flashcards-generate-transfer"
 import type { ServicePromptSnapshot } from "@/services/service-prompts"
-import { buildStudyPackRoute } from "@/services/tldw/study-pack-handoff"
 import {
   buildCapturedNoteContent,
   CAPTURED_NOTE_KEYWORD
@@ -441,6 +440,7 @@ const buildHistorySnapshot = ({
 
 const SidepanelChat = () => {
   const transferFlashcards = useFlashcardsGenerateTransfer()
+  const transferStudyPack = useStudyPackTransfer()
   useServerOnline()
   const drop = React.useRef<HTMLDivElement>(null)
   const [dropedFile, setDropedFile] = React.useState<File | undefined>()
@@ -628,6 +628,7 @@ const SidepanelChat = () => {
   const resetNoteModal = React.useCallback(() => {
     clearNoteCapture()
     transferFlashcards.cancel()
+    transferStudyPack.cancel()
     setNoteModalOpen(false)
     setNoteDraftContent("")
     setNoteDraftTitle("")
@@ -637,7 +638,7 @@ const SidepanelChat = () => {
     setNoteSourceConversationId(null)
     setNoteSaving(false)
     setNoteError(null)
-  }, [clearNoteCapture, transferFlashcards])
+  }, [clearNoteCapture, transferFlashcards, transferStudyPack])
 
   const openOptionsHashRoute = React.useCallback((route: string) => {
     const normalizedRoute = route.startsWith("/") ? route : `/${route}`
@@ -715,7 +716,8 @@ const SidepanelChat = () => {
     t
   ])
 
-  const handleCreateStudyPackFromSelection = React.useCallback(() => {
+  const handleCreateStudyPackFromSelection = React.useCallback(async () => {
+    const capture = noteCaptureRef.current
     const title = (noteDraftTitle || noteSuggestedTitle).trim()
     const messageId = noteSourceMessageId?.trim() || ""
     if (!title || !messageId) {
@@ -728,20 +730,24 @@ const SidepanelChat = () => {
       return
     }
 
-    openOptionsHashRoute(
-      buildStudyPackRoute({
-        title,
-        sourceItems: [
-          {
-            sourceType: "message",
-            sourceId: messageId,
-            sourceTitle: title
-          }
-        ]
-      })
-    )
-    resetNoteModal()
-  }, [noteDraftTitle, noteSuggestedTitle, noteSourceMessageId, openOptionsHashRoute, resetNoteModal, t])
+    try {
+      await transferStudyPack(async current => {
+        if (!capture?.pending) throw new Error("Capture this source again to verify its account. Your selection is unchanged.")
+        const owner = await capture.pending
+        owner.scopeSignal.throwIfAborted()
+        if (noteCaptureRef.current !== capture || flashcardsHandoffAuthority(owner) !== flashcardsHandoffAuthority(current)) {
+          throw new Error("The source account changed. Capture it again before transferring.")
+        }
+        return {
+          title,
+          sourceItems: [{ sourceType: "message", sourceId: messageId, sourceTitle: title }]
+        }
+      }, { newTab: true })
+      if (noteCaptureRef.current === capture) resetNoteModal()
+    } catch (error) {
+      if (noteCaptureRef.current === capture && !(error instanceof Error && error.name === "AbortError")) setNoteError(error instanceof Error ? error.message : "The study pack transfer could not be opened. Your selection is unchanged.")
+    }
+  }, [noteDraftTitle, noteSuggestedTitle, noteSourceMessageId, transferStudyPack, resetNoteModal, t])
 
   const handleNoteSave = React.useCallback(async () => {
     const content = noteDraftContent.trim()
@@ -2020,6 +2026,7 @@ const SidepanelChat = () => {
           : null
       clearNoteCapture()
       transferFlashcards.cancel()
+      transferStudyPack.cancel()
       const capture: NonNullable<typeof noteCaptureRef.current> = { controller: new AbortController() }
       noteCaptureRef.current = capture
       capture.pending = loadFlashcardsTransferSnapshot(capture.controller.signal, () => {
@@ -2240,6 +2247,7 @@ const SidepanelChat = () => {
     clearNoteCapture,
     resetNoteModal,
     transferFlashcards,
+    transferStudyPack,
     serverChatId,
     streaming,
     selectedModel,

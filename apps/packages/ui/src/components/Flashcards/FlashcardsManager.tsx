@@ -15,8 +15,7 @@ import { KeyboardShortcutsModal } from "./components"
 import { useDecksQuery, type UseFlashcardQueriesOptions } from "./hooks"
 import type { Flashcard } from "@/services/flashcards"
 import { Alert } from "@/components/ui/primitives"
-import { useFlashcardsGenerateHandoff } from "./hooks/useFlashcardsGenerateHandoff"
-import { parseStudyPackIntentFromLocation } from "@/services/tldw/study-pack-handoff"
+import { useFlashcardsGenerateHandoff, useStudyPackHandoff } from "./hooks/useFlashcardsGenerateHandoff"
 import {
   buildQuizAssessmentRouteFromFlashcards,
   parseFlashcardsStudyIntentFromLocation
@@ -72,17 +71,16 @@ export const FlashcardsManager: React.FC = () => {
   const generateHandoff = useFlashcardsGenerateHandoff(location, navigate)
   const currentGenerateIntent = generateHandoff.intent
   const hasGenerateHandoff = generateHandoff.hasRoute || Boolean(currentGenerateIntent)
-  const currentStudyPackIntent = React.useMemo(
-    () => parseStudyPackIntentFromLocation(location),
-    [location]
-  )
+  const studyPackHandoff = useStudyPackHandoff(location, navigate)
+  const currentStudyPackIntent = studyPackHandoff.intent
+  const hasStudyPackHandoff = studyPackHandoff.hasRoute || Boolean(currentStudyPackIntent)
   const currentStudyIntent = React.useMemo(
     () => parseFlashcardsStudyIntentFromLocation(location),
     [location]
   )
   const currentTab = React.useMemo(() => parseInitialFlashcardsTab(location), [location])
   const [activeTab, setActiveTab] = React.useState<string>(() =>
-    currentTab ?? (hasGenerateHandoff || currentStudyPackIntent ? "importExport" : "review")
+    currentTab ?? (hasGenerateHandoff || hasStudyPackHandoff ? "importExport" : "review")
   )
   const deckVisibilityOptions = React.useMemo<UseFlashcardQueriesOptions>(() => ({
     includeWorkspaceItems: currentStudyIntent?.forceShowWorkspaceItems ?? false
@@ -187,15 +185,15 @@ export const FlashcardsManager: React.FC = () => {
   }, [])
 
   React.useEffect(() => {
-    if (hasGenerateHandoff || currentStudyPackIntent) {
+    if (hasGenerateHandoff || hasStudyPackHandoff) {
       setSourceReviewGenerateIntent(null)
     }
     const nextTab =
-      currentTab ?? (hasGenerateHandoff || currentStudyPackIntent ? "importExport" : null)
+      currentTab ?? (hasGenerateHandoff || hasStudyPackHandoff ? "importExport" : null)
     if (nextTab) {
       if (
         nextTab === "importExport" &&
-        (currentTab === "importExport" || hasGenerateHandoff || currentStudyPackIntent)
+        (currentTab === "importExport" || hasGenerateHandoff || hasStudyPackHandoff)
       ) {
         setTransferTaskHandoff(null)
       }
@@ -204,7 +202,7 @@ export const FlashcardsManager: React.FC = () => {
       }
       setActiveTab(nextTab)
     }
-  }, [clearSourceReviewGenerateIntent, hasGenerateHandoff, currentStudyPackIntent, currentTab])
+  }, [clearSourceReviewGenerateIntent, hasGenerateHandoff, hasStudyPackHandoff, currentTab])
 
   // A tab-only route update must not replay the original deck handoff over a
   // user's live selection. A genuinely new incoming study intent still applies.
@@ -405,6 +403,7 @@ export const FlashcardsManager: React.FC = () => {
   return (
     <div className="mx-auto max-w-6xl p-4">
       {generateHandoff.error && <Alert variant="warning" title={generateHandoff.error} />}
+      {studyPackHandoff.error && <Alert variant="warning" title={studyPackHandoff.error} />}
       <Tabs
         data-testid="flashcards-tabs"
         className="flashcards-responsive-tabs [&_.ant-tabs-extra-content]:min-w-0 [&_.ant-tabs-extra-content]:max-w-full [&_.ant-tabs-nav-list]:min-w-max [&_.ant-tabs-nav-wrap]:min-w-0 [&_.ant-tabs-nav-wrap]:overflow-x-auto"
@@ -510,7 +509,7 @@ export const FlashcardsManager: React.FC = () => {
             label: t("option:flashcards.importExport", { defaultValue: "Import / Export" }),
             children: (
               <ImportExportTab
-                key={generateHandoff.generationKey}
+                key={`${generateHandoff.generationKey}:${studyPackHandoff.generationKey}`}
                 generateIntent={currentGenerateIntent}
                 generationScope={generateHandoff.scope}
                 sourceReviewIntent={sourceReviewAuthorityRevision.current === generateHandoff.authorityRevision ? sourceReviewGenerateIntent : null}
