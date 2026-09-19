@@ -11,14 +11,18 @@ from tldw_Server_API.app.core.DB_Management import ChaChaNotes_DB as db_module
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
 from tldw_Server_API.app.core.DB_Management.chacha.runtime import ChaChaRuntimeManager
+from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.services import study_suggestions_jobs_worker as worker
 
 pytestmark = pytest.mark.integration
 
 
 @pytest.mark.parametrize("kind", ["postgresql", "sqlite"])
+@pytest.mark.parametrize("media_first", [False, True], ids=["chacha-only", "shared-media-first"])
 @pytest.mark.parametrize("warm", [False, True], ids=["cold-worker-first", "warm-owner-first"])
-def test_suggestions_worker_preserves_owner_and_authenticated_cache_reuse(request, tmp_path, monkeypatch, kind, warm):
+def test_suggestions_worker_preserves_owner_and_authenticated_cache_reuse(
+    request, tmp_path, monkeypatch, kind, warm, media_first
+):
     backend = (
         DatabaseBackendFactory.create_backend(request.getfixturevalue("pg_database_config"))
         if kind == "postgresql"
@@ -42,6 +46,7 @@ def test_suggestions_worker_preserves_owner_and_authenticated_cache_reuse(reques
     monkeypatch.setattr(deps, "_chacha_default_char_futures", set())
     executor = ThreadPoolExecutor(max_workers=2)
     monkeypatch.setattr(deps, "_get_chacha_executor", lambda: executor)
+    media = MediaDatabase(tmp_path / "media.db", client_id="2", backend=backend) if media_first else None
     seed = db_module.CharactersRAGDB(tmp_path / "2" / "ChaChaNotes.db", client_id="2", backend=backend)
     with chacha_operation(independent=True):
         deck = seed.add_deck("Canonical owner's review")
@@ -94,5 +99,7 @@ def test_suggestions_worker_preserves_owner_and_authenticated_cache_reuse(reques
         for db in tuple(cache.values()):
             db.close_all_connections()
         seed.close_all_connections()
+        if media is not None:
+            media.close_connection()
         if backend is not None:
             backend.get_pool().close_all()

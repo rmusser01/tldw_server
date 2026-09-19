@@ -753,7 +753,7 @@ class CharactersRAGDB:
         db_path_str (str): String representation of the database path for SQLite connection.
     """
     _CURRENT_SCHEMA_VERSION = 68  # Schema v68 retains local keyword merge survivors
-    _POSTGRES_SCHEMA_VERSION = 71
+    _POSTGRES_SCHEMA_VERSION = 72
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
     _NOTE_TASK_V60_TABLES = (
@@ -23395,6 +23395,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
             raise SchemaError(f"Failed ensuring PostgreSQL study pack schema: {exc}") from exc  # noqa: TRY003
 
+        self._ensure_study_pack_sync_triggers_postgres(conn)
+
+    def _ensure_study_pack_sync_triggers_postgres(self, conn: Any) -> None:
+        """Install Study Pack and Suggestions triggers for either shared sync schema."""
         try:
             sync_columns = {column.get("name") for column in self.backend.get_table_info("sync_log", connection=conn)}
             if "entity_id" in sync_columns:
@@ -23657,12 +23661,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 connection=conn,
             )
             self.backend.execute(
-                """
+                f"""
                 CREATE OR REPLACE FUNCTION suggestion_snapshots_sync_log_fn()
                 RETURNS trigger AS $$
                 BEGIN
                   IF TG_OP = 'INSERT' THEN
-                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    INSERT INTO sync_log(entity, {sync_entity_column}, operation, timestamp, client_id, version, payload)
                     VALUES(
                       'suggestion_snapshots',
                       CAST(NEW.id AS TEXT),
@@ -23689,7 +23693,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                       )::text
                     );
                   ELSIF OLD.deleted = FALSE AND NEW.deleted = TRUE THEN
-                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    INSERT INTO sync_log(entity, {sync_entity_column}, operation, timestamp, client_id, version, payload)
                     VALUES(
                       'suggestion_snapshots',
                       CAST(NEW.id AS TEXT),
@@ -23719,7 +23723,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     OLD.last_modified IS DISTINCT FROM NEW.last_modified OR
                     OLD.version IS DISTINCT FROM NEW.version
                   ) THEN
-                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    INSERT INTO sync_log(entity, {sync_entity_column}, operation, timestamp, client_id, version, payload)
                     VALUES(
                       'suggestion_snapshots',
                       CAST(NEW.id AS TEXT),
@@ -23749,16 +23753,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                   RETURN NEW;
                 END;
                 $$ LANGUAGE plpgsql
-                """,
+                """,  # nosec B608 -- Identifier is selected from the fixed entity_id/entity_uuid names above.
                 connection=conn,
             )
             self.backend.execute(
-                """
+                f"""
                 CREATE OR REPLACE FUNCTION suggestion_generation_links_sync_log_fn()
                 RETURNS trigger AS $$
                 BEGIN
                   IF TG_OP = 'INSERT' THEN
-                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    INSERT INTO sync_log(entity, {sync_entity_column}, operation, timestamp, client_id, version, payload)
                     VALUES(
                       'suggestion_generation_links',
                       CAST(NEW.id AS TEXT),
@@ -23781,7 +23785,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                       )::text
                     );
                   ELSIF OLD.deleted = FALSE AND NEW.deleted = TRUE THEN
-                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    INSERT INTO sync_log(entity, {sync_entity_column}, operation, timestamp, client_id, version, payload)
                     VALUES(
                       'suggestion_generation_links',
                       CAST(NEW.id AS TEXT),
@@ -23807,7 +23811,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     OLD.last_modified IS DISTINCT FROM NEW.last_modified OR
                     OLD.version IS DISTINCT FROM NEW.version
                   ) THEN
-                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    INSERT INTO sync_log(entity, {sync_entity_column}, operation, timestamp, client_id, version, payload)
                     VALUES(
                       'suggestion_generation_links',
                       CAST(NEW.id AS TEXT),
@@ -23833,7 +23837,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                   RETURN NEW;
                 END;
                 $$ LANGUAGE plpgsql
-                """,
+                """,  # nosec B608 -- Identifier is selected from the fixed entity_id/entity_uuid names above.
                 connection=conn,
             )
             self.backend.execute("DROP TRIGGER IF EXISTS study_packs_sync_log ON study_packs", connection=conn)
@@ -24881,7 +24885,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise SchemaError(f"Failed rebuilding character_cards_fts: {exc}") from exc  # noqa: TRY003
 
     def _postgres_schema_is_current(self, conn: Any) -> bool:
-        """Verify a completed v71+ schema without replaying migration writes.
+        """Verify the current completed schema without replaying migration writes.
 
         This is a database check on every open, including a worker's first open;
         no process-local readiness cache can hide a changed schema. Catalog-only
@@ -24931,6 +24935,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 raise SchemaError(  # noqa: TRY003
                     f"Database schema version ({current_version}) is newer than supported by code ({target_version})."
                 )
+            if current_version == 71 and target_version == 72:
+                # v71 already reconciled the schema. Upgrade only the Study sync
+                # triggers under the shared migration lock and transaction.
+                self._ensure_study_pack_sync_triggers_postgres(conn)
+                self._set_schema_version_postgres(conn, 72)
+                self._postgres_schema_is_current(conn)
+                return
+
             if current_version == 59:
                 self._verify_note_attachment_schema_postgres(conn)
             elif current_version >= 60:
@@ -25336,6 +25348,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._set_schema_version_postgres(conn, 71)
                 self._runtime_schema_version = 71
                 current_version = 71
+
+            if target_version >= 72 and current_version < 72:
+                # Fresh/older schemas installed the updated triggers above.
+                self._set_schema_version_postgres(conn, 72)
+                self._runtime_schema_version = 72
+                current_version = 72
 
             if current_version < target_version:
                 logger.warning(

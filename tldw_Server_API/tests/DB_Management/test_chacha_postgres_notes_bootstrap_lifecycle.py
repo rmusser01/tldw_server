@@ -336,7 +336,7 @@ def test_v70_upgrade_retries_after_late_failure_without_publishing_readiness(
         replacement = CharactersRAGDB(tmp_path / "upgraded.db", client_id="1", backend=backend)
         assert replacement.get_note_by_id(note)["content"] == "Existing v70 content"
         assert backend.execute("SELECT version FROM db_schema_version WHERE schema_name=%s",
-                               (legacy._SCHEMA_NAME,)).scalar == 71
+                               (legacy._SCHEMA_NAME,)).scalar == 72
     finally:
         for db in (legacy, replacement):
             if db is not None:

@@ -1,5 +1,6 @@
 """Study Suggestions do not cross owners in shared PostgreSQL storage."""
 
+import json
 from contextlib import contextmanager
 from uuid import uuid4
 
@@ -14,6 +15,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 
 pytestmark = pytest.mark.integration
 
@@ -25,26 +27,30 @@ def suggestion_owners(request, tmp_path):
         if request.param == "postgresql"
         else None
     )
-    owner = CharactersRAGDB(tmp_path / "2.db", client_id="2", backend=backend)
-    foreign = CharactersRAGDB(tmp_path / "3.db", client_id="3", backend=backend)
-    snapshot_id = owner.create_suggestion_snapshot(
-        service="flashcards",
-        activity_type="flashcard_review_session",
-        anchor_type="flashcard_review_session",
-        anchor_id=101,
-        suggestion_type="study_suggestions",
-        payload_json={"topics": [{"display_label": "Private citrine lesson"}]},
-    )
-    owner.create_suggestion_generation_link(
-        snapshot_id=snapshot_id,
-        target_service="flashcards",
-        target_type="deck",
-        target_id="pending:sel",
-        selection_fingerprint="sel",
-    )
+    owner = foreign = media = None
     role = None
     role_created = False
     try:
+        # Match runtime startup: Media owns the shared PostgreSQL sync schema.
+        if backend is not None:
+            media = MediaDatabase(tmp_path / "media.db", client_id="2", backend=backend)
+        owner = CharactersRAGDB(tmp_path / "2.db", client_id="2", backend=backend)
+        foreign = CharactersRAGDB(tmp_path / "3.db", client_id="3", backend=backend)
+        snapshot_id = owner.create_suggestion_snapshot(
+            service="flashcards",
+            activity_type="flashcard_review_session",
+            anchor_type="flashcard_review_session",
+            anchor_id=101,
+            suggestion_type="study_suggestions",
+            payload_json={"topics": [{"display_label": "Private citrine lesson"}]},
+        )
+        owner.create_suggestion_generation_link(
+            snapshot_id=snapshot_id,
+            target_service="flashcards",
+            target_type="deck",
+            target_id="pending:sel",
+            selection_fingerprint="sel",
+        )
         if backend is not None:
             role = backend.escape_identifier(f"suggestions_scope_{uuid4().hex[:12]}")
             with backend.transaction() as conn:
@@ -72,8 +78,14 @@ def suggestion_owners(request, tmp_path):
 
         yield owner, foreign, snapshot_id, restricted
     finally:
-        owner.close_connection()
-        foreign.close_connection()
+        for db in (owner, foreign):
+            if db is not None:
+                if backend is not None:
+                    db.close_connection()
+                else:
+                    db.close_all_connections()
+        if media is not None:
+            media.close_connection()
         if backend is not None:
             try:
                 if role_created:
@@ -82,9 +94,6 @@ def suggestion_owners(request, tmp_path):
                         backend.execute(f"DROP ROLE {role}", connection=conn)
             finally:
                 backend.get_pool().close_all()
-        else:
-            owner.close_all_connections()
-            foreign.close_all_connections()
 
 
 @pytest.mark.parametrize(
@@ -250,7 +259,9 @@ def test_legacy_links_require_both_owners_and_live_parent(suggestion_owners, mis
         if mismatch == "deleted-parent":
             conn.execute("UPDATE suggestion_snapshots SET deleted = TRUE WHERE id = ?", (snapshot_id,))
         else:
-            conn.execute("UPDATE suggestion_generation_links SET client_id = ? WHERE snapshot_id = ?", ("3", snapshot_id))
+            conn.execute(
+                "UPDATE suggestion_generation_links SET client_id = ? WHERE snapshot_id = ?", ("3", snapshot_id)
+            )
             if mismatch == "foreign-parent":
                 actor = foreign
     with restricted(actor):
@@ -293,3 +304,58 @@ def test_sqlite_snapshot_and_links_survive_device_identity_change(tmp_path):
     finally:
         previous.close_all_connections()
         current.close_all_connections()
+
+
+def test_shared_sync_events_preserve_suggestion_lifecycle_and_tenant(suggestion_owners):
+    """Real restricted writes keep atomic, tenant-scoped snapshot/link events."""
+    owner, foreign, _, restricted = suggestion_owners
+    with restricted(owner):
+        snapshot = owner.create_suggestion_snapshot(
+            service="flashcards",
+            activity_type="flashcard_review_session",
+            anchor_type="flashcard_review_session",
+            anchor_id=202,
+            suggestion_type="study_suggestions",
+            payload_json={"topics": []},
+        )
+        link = {
+            "snapshot_id": snapshot,
+            "target_service": "flashcards",
+            "target_type": "deck",
+            "selection_fingerprint": "lifecycle",
+        }
+        link_id = owner.create_suggestion_generation_link(**link, target_id="pending:lifecycle")
+        assert owner.finalize_suggestion_generation_link(**link, final_target_id="owned-deck") == 1
+        assert owner.soft_delete_suggestion_generation_link(**link) == 1
+        with owner.transaction() as conn:
+            conn.execute(
+                "UPDATE suggestion_snapshots SET status=?, version=version+1 WHERE id=?", ("superseded", snapshot)
+            )
+            conn.execute("UPDATE suggestion_snapshots SET deleted=?, version=version+1 WHERE id=?", (True, snapshot))
+    # Read in a new transaction: writes must be durable, not merely pending.
+    with restricted(owner):
+        rows = [
+            dict(row)
+            for row in owner.execute_query(
+                "SELECT * FROM sync_log WHERE entity IN (?, ?) ORDER BY change_id",
+                ("suggestion_snapshots", "suggestion_generation_links"),
+            ).fetchall()
+        ]
+        for entity, entity_id in (("suggestion_snapshots", snapshot), ("suggestion_generation_links", link_id)):
+            events = [
+                row
+                for row in rows
+                if row["entity"] == entity and row.get("entity_id", row.get("entity_uuid")) == str(entity_id)
+            ]
+            assert [row["operation"] for row in events] == ["create", "update", "delete"]
+            assert [row["version"] for row in events] == [1, 2, 3]
+            assert all(row["client_id"] == json.loads(row["payload"])["client_id"] == "2" for row in events)
+            assert json.loads(events[-1]["payload"])["deleted"]
+    with restricted(foreign):
+        assert (
+            foreign.execute_query(
+                "SELECT count(*) AS n FROM sync_log WHERE entity IN (?, ?)",
+                ("suggestion_snapshots", "suggestion_generation_links"),
+            ).fetchone()["n"]
+            == 0
+        )
