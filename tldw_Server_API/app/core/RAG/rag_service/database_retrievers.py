@@ -33,6 +33,7 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatConfigurationError,
     ChatProviderError,
 )
+from tldw_Server_API.app.core.Chat.knowledge_save import visible_knowledge_text
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.backends.fts_translator import FTSQueryTranslator
 from tldw_Server_API.app.core.DB_Management.Kanban_DB import KanbanDB
@@ -3929,6 +3930,7 @@ class ChatHistoryRetriever(BaseRetriever):
                 m.timestamp,
                 conv.character_id,
                 conv.source AS conversation_source,
+                conv.title AS conversation_title,
                 cc.name AS character_name
             FROM messages m
             JOIN conversations conv ON m.conversation_id = conv.id
@@ -3943,10 +3945,13 @@ class ChatHistoryRetriever(BaseRetriever):
         """  # nosec B608 - fixed owner predicate; every value remains bound.
         rows = await self._execute_query_async(sql, (*owner_params, f"%{query}%", "knowledge_qa", max_results))
         for row in rows:
+            visible = visible_knowledge_text(row.get("content") or "")
+            if not visible:
+                continue
             documents.append(
                 Document(
                     id=f"chat_{row['id']}",
-                    content=f"[{row.get('sender')}]: {row.get('content', '')}",
+                    content=f"[{row.get('sender')}]: {visible}",
                     source=DataSource.CHAT_HISTORY,
                     metadata={
                         "message_id": row.get("id"),
@@ -3956,6 +3961,9 @@ class ChatHistoryRetriever(BaseRetriever):
                         "character_id": row.get("character_id"),
                         "character_name": row.get("character_name"),
                         "conversation_source": row.get("conversation_source"),
+                        "title": row.get("conversation_title") or "Untitled conversation",
+                        "source_type": "chats",
+                        "source_id": str(row["conversation_id"]),
                         "type": "chat_message",
                         "source": "chats",
                     },
@@ -3976,15 +3984,21 @@ class ChatHistoryRetriever(BaseRetriever):
                     conv_id = row.get("conversation_id")
                     if self._is_excluded_conversation_source(conv_id):
                         continue
+                    visible = visible_knowledge_text(row.get("content") or "")
+                    if not visible:
+                        continue
 
                     documents.append(
                         Document(
                             id=f"chat_{row['id']}",
-                            content=f"{row.get('sender')}: {row.get('content', '')}",
+                            content=f"{row.get('sender')}: {visible}",
                             source=DataSource.CHAT_HISTORY,
                             metadata={
                                 "message_id": row.get("id"),
                                 "conversation_id": conv_id,
+                                "title": row.get("conversation_title") or "Untitled conversation",
+                                "source_type": "chats",
+                                "source_id": str(conv_id),
                                 "sender": row.get("sender"),
                                 "timestamp": row.get("timestamp"),
                                 "character_id": row.get("character_id"),
@@ -4275,6 +4289,9 @@ class CharacterCardsRetriever(BaseRetriever):
                         source=DataSource.CHARACTER_CARDS,
                         metadata={
                             "name": name,
+                            "title": name,
+                            "source_type": "characters",
+                            "source_id": str(row["id"]),
                             "creator": row.get("creator"),
                             "version": row.get("version"),
                             "type": "character_card",
@@ -4288,6 +4305,9 @@ class CharacterCardsRetriever(BaseRetriever):
                     limit_msgs = max(1, self.config.max_results // 2)
                     msg_rows = self.chacha_db.search_messages_by_content(query, limit=limit_msgs)
                     for row in msg_rows:
+                        visible = visible_knowledge_text(row.get("content") or "")
+                        if not visible:
+                            continue
                         character_name = None
                         character_id = None
                         conv_id = row.get("conversation_id")
@@ -4302,8 +4322,11 @@ class CharacterCardsRetriever(BaseRetriever):
                                     if card:
                                         character_name = card.get("name")
 
-                        content = f"{row.get('sender')}: {row.get('content', '')}"
+                        content = f"{row.get('sender')}: {visible}"
                         metadata = {
+                            "title": row.get("conversation_title") or "Untitled conversation",
+                            "source_type": "chats",
+                            "source_id": str(conv_id),
                             "sender": row.get("sender"),
                             "timestamp": row.get("timestamp"),
                             "character_id": character_id,
@@ -4373,6 +4396,9 @@ class CharacterCardsRetriever(BaseRetriever):
                 source=DataSource.CHARACTER_CARDS,
                 metadata={
                     "name": row["name"],
+                    "title": row["name"],
+                    "source_type": "characters",
+                    "source_id": str(row["id"]),
                     "creator": row["creator"],
                     "version": row["version"],
                     "type": "character_card",
@@ -4386,10 +4412,12 @@ class CharacterCardsRetriever(BaseRetriever):
             chat_sql = """
                 SELECT
                     m.id,
+                    m.conversation_id,
                     m.content,
                     m.sender,
                     m.timestamp,
                     conv.character_id,
+                    conv.title AS conversation_title,
                     cc.name as character_name
                 FROM messages m
                 JOIN conversations conv ON m.conversation_id = conv.id
@@ -4401,12 +4429,18 @@ class CharacterCardsRetriever(BaseRetriever):
             chat_params = [f"%{query}%", self.config.max_results // 2]
             chat_results = self._execute_query(chat_sql, tuple(chat_params))
             for row in chat_results:
-                content = f"[{row['sender']}]: {row['content']}"
+                visible = visible_knowledge_text(row.get("content") or "")
+                if not visible:
+                    continue
+                content = f"[{row['sender']}]: {visible}"
                 doc = Document(
                     id=f"chat_{row['id']}",
                     content=content,
                     source=DataSource.CHAT_HISTORY,
                     metadata={
+                        "title": row.get("conversation_title") or "Untitled conversation",
+                        "source_type": "chats",
+                        "source_id": str(row["conversation_id"]),
                         "sender": row["sender"],
                         "timestamp": row["timestamp"],
                         "character": row["character_name"],

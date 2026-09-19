@@ -99,7 +99,9 @@ async def test_real_qa_retrievers_find_character_and_chat_evidence_for_prose(sea
 
 
 @pytest.mark.asyncio
-async def test_real_qa_pipeline_default_chunk_filter_keeps_owned_character_and_chat(search_db):
+@pytest.mark.parametrize("query", ["Rowan", "Rowan Observatory,"])
+async def test_real_qa_pipeline_default_chunk_filter_keeps_owned_character_and_chat(search_db, query):
+    from tldw_Server_API.app.core.RAG.rag_service.streaming_executor import _context_events
     from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
 
     character = search_db.add_character_card({"name": "Rowan Observatory guide"})
@@ -107,12 +109,24 @@ async def test_real_qa_pipeline_default_chunk_filter_keeps_owned_character_and_c
     message = search_db.add_message({"conversation_id": conversation, "sender": "user", "content": "Rowan Observatory is on Cedar Hill."})
     search_db.add_character_card({"name": "Unrelated ocean diary"})
     result = await unified_rag_pipeline(
-        query="Rowan Observatory,", sources=["characters", "chats"],
+        query=query, sources=["characters", "chats"],
         character_db_path=search_db.db_path_str, chacha_db=search_db, user_id="1",
         chunk_type_filter=["text", "code", "table", "list"],
         search_mode="fts", enable_cache=False, enable_reranking=False, enable_generation=False,
     )
     assert {doc["id"] for doc in result.documents} == {f"character_{character}", f"chat_{message}"}
+    expected = {
+        f"character_{character}": ("Rowan Observatory guide", "characters", str(character)),
+        f"chat_{message}": ("Tour answers", "chats", conversation),
+    }
+    for doc in result.documents:
+        metadata = doc["metadata"]
+        assert (metadata["title"], metadata["source_type"], metadata["source_id"]) == expected[doc["id"]]
+    contexts = _context_events(docs=result.documents, payload={}, request_defaults={})[0]["contexts"]
+    assert {
+        context["id"]: (context["title"], context["source_type"], context["source_id"])
+        for context in contexts
+    } == expected
 
 
 def test_sqlite_search_keeps_grouped_fts_boolean_meaning(tmp_path):
@@ -219,3 +233,24 @@ async def test_chat_metadata_excludes_foreign_and_deleted_conversations(private_
     assert (await retriever.get_metadata(f"chat_{records['own'][1]}"))["id"] == records["own"][1]
     assert await retriever.get_metadata(f"chat_{records['foreign'][1]}") == {}
     assert await retriever.get_metadata(f"chat_{records['deleted'][1]}") == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("retriever_name", ["ChatHistoryRetriever", "CharacterCardsRetriever"])
+@pytest.mark.parametrize("query", ["Rowan", "Rowan Observatory,"])
+async def test_chat_evidence_projects_visible_text_without_rewriting_messages(search_db, retriever_name, query):
+    from tldw_Server_API.app.core.RAG.rag_service import database_retrievers
+
+    conversation = search_db.add_conversation({"title": "Public tour answer"})
+    raw = "<think>Rowan Observatory internal scratchpad.</think>Rowan Observatory opens Fridays."
+    answer = search_db.add_message({"conversation_id": conversation, "sender": "assistant", "content": raw})
+    question = search_db.add_message({"conversation_id": conversation, "sender": "user", "content": "Rowan Observatory tour hours?"})
+    search_db.add_message({"conversation_id": conversation, "sender": "assistant", "content": "<reasoning>Rowan Observatory unfinished scratchpad"})
+    retriever = getattr(database_retrievers, retriever_name)(search_db.db_path_str, chacha_db=search_db)
+
+    documents = await retriever.retrieve(query)
+
+    assert {doc.id for doc in documents} == {f"chat_{answer}", f"chat_{question}"}
+    assert all("scratchpad" not in doc.content for doc in documents)
+    assert "Rowan Observatory opens Fridays." in next(doc.content for doc in documents if doc.id == f"chat_{answer}")
+    assert search_db.get_message_by_id(answer)["content"] == raw

@@ -34,6 +34,7 @@ import {
   type DefaultCharacterPreferenceQueryResult
 } from "../utils"
 import { useStorage } from "@plasmohq/storage/hook"
+import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts"
 
 export interface UseCharacterDataDeps {
   t: (key: string, opts?: Record<string, any>) => string
@@ -685,6 +686,34 @@ export function useCharacterData(deps: UseCharacterDataDeps) {
     }
     if (status !== "success") return
 
+    // Numeric deep links identify a server record, never a matching name or
+    // slug on the current page. Scoped detail reads bypass the legacy cache.
+    if (/^[1-9]\d*$/.test(focusCharacterId)) {
+      const controller = new AbortController()
+      let snapshot: ServicePromptSnapshot | undefined
+      void (async () => {
+        try {
+          snapshot = await loadServicePromptSnapshot([], { signal: controller.signal })
+          const character = await tldwClient.getCharacter(focusCharacterId, {
+            signal: snapshot.scopeSignal, requestScope: snapshot.requestScope
+          })
+          if (controller.signal.aborted || snapshot.scopeSignal.aborted) return
+          if (!character || String(character.id) !== focusCharacterId) throw new Error("Character unavailable")
+          hasHandledFocusCharacterRef.current = true
+          setPreviewCharacter(character)
+        } catch {
+          if (controller.signal.aborted || snapshot?.scopeSignal.aborted) return
+          hasHandledFocusCharacterRef.current = true
+          notification.error({
+            message: t("settings:manageCharacters.focusUnavailable", { defaultValue: "Character unavailable" })
+          })
+        } finally {
+          snapshot?.release()
+        }
+      })()
+      return () => controller.abort()
+    }
+
     const matchingCharacter = (data || []).find((character: any) => {
       const candidates = [
         character?.id,
@@ -700,7 +729,7 @@ export function useCharacterData(deps: UseCharacterDataDeps) {
     if (matchingCharacter) {
       setPreviewCharacter(matchingCharacter)
     }
-  }, [crossNavigationContext.focusCharacterId, data, setPreviewCharacter, status])
+  }, [crossNavigationContext.focusCharacterId, data, notification, setPreviewCharacter, status, t])
 
   // --- Total and page reset ---
   const totalCharacters = React.useMemo(

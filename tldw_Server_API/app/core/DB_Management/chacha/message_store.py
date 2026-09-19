@@ -1559,7 +1559,7 @@ class MessageStore:
                 return []
 
             base_query = [
-                "SELECT m.*, ts_rank(m.messages_fts_tsv, to_tsquery('english', ?)) AS rank",
+                "SELECT m.*, c.title AS conversation_title, ts_rank(m.messages_fts_tsv, to_tsquery('english', ?)) AS rank",
                 "FROM messages m",
                 "JOIN conversations c ON c.id = m.conversation_id",
                 "WHERE m.deleted = FALSE",
@@ -1588,7 +1588,7 @@ class MessageStore:
         if not safe_search_term.strip():
             return []
         base_query = """
-                     SELECT m.*
+                     SELECT m.*, c.title AS conversation_title
                      FROM messages_fts, messages m
                      JOIN conversations c ON c.id = m.conversation_id
                      WHERE messages_fts.rowid = m.rowid \

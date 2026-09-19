@@ -35,7 +35,8 @@ const {
     destroy: vi.fn()
   },
   tldwClientMock: {
-    initialize: vi.fn(async () => undefined)
+    initialize: vi.fn(async () => undefined),
+    getCharacter: vi.fn()
   }
 }))
 
@@ -137,6 +138,13 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: tldwClientMock
 }))
 
+vi.mock("@/services/service-prompts", () => ({
+  loadServicePromptSnapshot: async (_ids: string[], { signal }: { signal: AbortSignal }) => ({
+    requestScope: { config: { serverUrl: "https://characters.test", authMode: "multi-user" }, userId: 1 },
+    scopeSignal: signal, release: () => undefined
+  })
+}))
+
 vi.mock("@/services/tldw-server", () => ({
   fetchChatModels: vi.fn(async () => [])
 }))
@@ -173,6 +181,7 @@ const makeUseQueryResult = (value: Record<string, unknown>) => ({
 describe("CharactersManager cross-feature integration stage-1", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    tldwClientMock.getCharacter.mockResolvedValue({ id: 7, name: "Captain A", description: "Command strategist" })
     ensureLocalStorageApi().clear()
     window.history.replaceState(
       {},
@@ -212,9 +221,14 @@ describe("CharactersManager cross-feature integration stage-1", () => {
                 slug: "captain-a",
                 name: "Captain A",
                 description: "Command strategist"
+              },
+              {
+                id: 8,
+                name: "29",
+                description: "A different record with a misleading numeric name"
               }
             ],
-            total: 1,
+            total: 2,
             page: 1,
             page_size: 25,
             has_more: false
@@ -241,6 +255,29 @@ describe("CharactersManager cross-feature integration stage-1", () => {
       }
       return makeUseQueryResult({})
     })
+  })
+
+  it("opens an authorized source Character outside the current page", async () => {
+    window.history.replaceState({}, "", "/characters?focusCharacterId=29")
+    tldwClientMock.getCharacter.mockResolvedValue({
+      id: 29, name: "Off-page Rowan guide", description: "Cedar Ridge tour hours"
+    })
+
+    render(<CharactersManager />)
+
+    expect(await screen.findByText("Cedar Ridge tour hours")).toBeInTheDocument()
+  })
+
+  it("reports an unavailable source Character without showing a different record", async () => {
+    window.history.replaceState({}, "", "/characters?focusCharacterId=29")
+    tldwClientMock.getCharacter.mockRejectedValue(new Error("Not found"))
+
+    render(<CharactersManager />)
+
+    await vi.waitFor(() => expect(notificationMock.error).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "Character unavailable" })
+    ))
+    expect(screen.queryByText("Cedar Ridge tour hours")).not.toBeInTheDocument()
   })
 
   it("opens focused character preview from world-books route context with attached world-book links", async () => {
