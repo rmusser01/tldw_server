@@ -5330,7 +5330,11 @@ async def unified_rag_pipeline(
                 before_count = len(result.documents)
                 filtered_docs = []
                 for d in result.documents:
-                    doc_type = _normalize_chunk_type_value((d.metadata or {}).get("chunk_type"))
+                    # Whole text records (notes, chats, cards) have no chunk
+                    # annotation. They remain text, including in the UI default
+                    # filter; an explicitly typed chunk still keeps its type.
+                    raw_type = (d.metadata or {}).get("chunk_type")
+                    doc_type = _normalize_chunk_type_value(raw_type if raw_type is not None else "text")
                     if doc_type and doc_type in allowed:
                         filtered_docs.append(d)
                 result.documents = filtered_docs

@@ -13,7 +13,9 @@ Related regression repairs: TASK13260.255 (UAT317 duplicate Note conflicts) and 
 **Goal**: Use the existing SQLite query normalizer and request-local source diagnostics; reflect actual failures in the existing QA summary.
 **Success Criteria**: Preserve quoted queries, ownership, successful evidence and source-specific failure information without shared mutable request state.
 **Tests**: Causal tests turn green, actual PostgreSQL compatibility, focused suites, lint, Bandit and independent review.
-**Status**: Complete
+**Status**: In Progress
+
+Native 63d4581613 exposed an untested transport boundary: streaming prefetch discards aggregate source_status. Add causal streamed-event coverage (ordinary and progress paths, empty/partial success, safe fields) and forward the existing diagnostic contract. New TASK13260.257/UAT319 covers document-type filtering of otherwise matching Character/Chat results and non-file PostgreSQL readiness; TASK13260.258/UAT320 covers the Balanced post-load stall. Preserve immutable native failures before replacement runs.
 
 ## Stage 3: Native acceptance and closure
 **Goal**: Verify real QA source retrieval and truthful status in isolated native installs.

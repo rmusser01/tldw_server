@@ -60,6 +60,64 @@ def _retrieval_plan() -> RetrievalPlan:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("with_progress", [False, True])
+@pytest.mark.parametrize("retained", [False, True])
+async def test_stream_preserves_source_failures_with_only_public_fields(with_progress, retained):
+    request = _resolved_request()
+    request.payload["enable_research_progress"] = with_progress
+    request.payload["enable_generation"] = False
+    document = Document(id="owned", content="Rowan Observatory", source=DataSource.MEDIA_DB, metadata={})
+    statuses = {
+        "media_db": {"status": "searched" if retained else "empty", "count": int(retained)},
+        "characters": {
+            "status": "error", "count": 0, "reason": "retrieval_failed",
+            "exception": "private credential", "path": "/private/database",
+        },
+        "chats": {"status": "error", "count": 1, "reason": "retrieval_failed", "filtered_artifact_count": 2},
+        "private-source-name": {"status": "error", "count": 0},
+    }
+
+    async def retrieve(**kwargs):
+        return UnifiedSearchResult(
+            query=kwargs["query"], documents=[document] if retained else [],
+            metadata={"source_status": statuses},
+        )
+
+    events = [event async for event in stream_rag_events(
+        resolved_request=request, retrieval_plan=_retrieval_plan(), standard_pipeline=retrieve,
+    )]
+    context = next(event for event in events if event["type"] == "contexts")
+    assert context["source_status"] == {
+        "media_db": statuses["media_db"],
+        "characters": {"status": "error", "count": 0, "reason": "retrieval_failed"},
+        "chats": statuses["chats"],
+    }
+    assert len(context["contexts"]) == int(retained)
+    assert "private" not in str(events)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid", [None, [], {"status": "private-error", "count": 0},
+                                     {"status": "error", "count": -1},
+                                     {"status": "error", "count": True}])
+async def test_stream_omits_invalid_source_status_entries(invalid):
+    request = _resolved_request()
+    request.payload["enable_generation"] = False
+
+    async def retrieve(**kwargs):
+        return UnifiedSearchResult(query=kwargs["query"], documents=[], metadata={"source_status": {
+            "characters": invalid,
+            "notes": {"status": "empty", "count": 0, "reason": "/private/error", "filtered_artifact_count": -1},
+        }})
+
+    events = [event async for event in stream_rag_events(
+        resolved_request=request, retrieval_plan=_retrieval_plan(), standard_pipeline=retrieve,
+    )]
+    context = next(event for event in events if event["type"] == "contexts")
+    assert context["source_status"] == {"notes": {"status": "empty", "count": 0}}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("with_progress", [False, True])
 @pytest.mark.parametrize("retained,excluded", [(0, 1), (1, 1), (0, 0)])
 async def test_stream_preserves_safe_security_filter_outcome(retained, excluded, with_progress):
     request = _resolved_request()

@@ -98,6 +98,23 @@ async def test_real_qa_retrievers_find_character_and_chat_evidence_for_prose(sea
         retriever.close()
 
 
+@pytest.mark.asyncio
+async def test_real_qa_pipeline_default_chunk_filter_keeps_owned_character_and_chat(search_db):
+    from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
+
+    character = search_db.add_character_card({"name": "Rowan Observatory guide"})
+    conversation = search_db.add_conversation({"title": "Tour answers"})
+    message = search_db.add_message({"conversation_id": conversation, "sender": "user", "content": "Rowan Observatory is on Cedar Hill."})
+    search_db.add_character_card({"name": "Unrelated ocean diary"})
+    result = await unified_rag_pipeline(
+        query="Rowan Observatory,", sources=["characters", "chats"],
+        character_db_path=search_db.db_path_str, chacha_db=search_db, user_id="1",
+        chunk_type_filter=["text", "code", "table", "list"],
+        search_mode="fts", enable_cache=False, enable_reranking=False, enable_generation=False,
+    )
+    assert {doc["id"] for doc in result.documents} == {f"character_{character}", f"chat_{message}"}
+
+
 def test_sqlite_search_keeps_grouped_fts_boolean_meaning(tmp_path):
     db = CharactersRAGDB(tmp_path / "grouped.db", client_id="1")
     try:

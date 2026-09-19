@@ -29,6 +29,7 @@ from tldw_Server_API.app.core.RAG.rag_service.retrieval_plan import RetrievalPla
 from tldw_Server_API.app.core.RAG.rag_service.runtime_provider_call import (
     close_provider_stream,
 )
+from tldw_Server_API.app.core.RAG.rag_service.source_health import CANONICAL_KNOWLEDGE_SOURCE_IDS
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import (
     normalize_documents_for_generation,
     unified_rag_pipeline,
@@ -332,6 +333,32 @@ class _PrefetchedEvidence:
     documents: list[Any]
     clarification_answer: str | None = None
     security_filter: dict[str, int] | None = None
+    source_status: dict[str, dict[str, Any]] | None = None
+
+
+def _public_source_status(raw: Any) -> dict[str, dict[str, Any]] | None:
+    """Expose only canonical source names and bounded retrieval diagnostics."""
+    if not isinstance(raw, dict):
+        return None
+    result = {}
+    for source in CANONICAL_KNOWLEDGE_SOURCE_IDS:
+        entry = raw.get(source)
+        if not isinstance(entry, dict):
+            continue
+        status, count = entry.get("status"), entry.get("count")
+        if status not in ("searched", "empty", "unavailable", "error"):
+            continue
+        if type(count) is not int or count < 0:
+            continue
+        safe = {"status": status, "count": count}
+        reason = entry.get("reason")
+        if reason in ("no_retriever_configured", "retrieval_failed", "no_matching_entries"):
+            safe["reason"] = reason
+        filtered_count = entry.get("filtered_artifact_count")
+        if type(filtered_count) is int and filtered_count >= 0:
+            safe["filtered_artifact_count"] = filtered_count
+        result[source] = safe
+    return result or None
 
 
 async def _retrieve_standard_documents(
@@ -397,6 +424,7 @@ async def _retrieve_standard_documents(
         documents=normalize_documents_for_generation(documents),
         clarification_answer=answer,
         security_filter=safe_filter_outcome,
+        source_status=_public_source_status(metadata.get("source_status")) if isinstance(metadata, dict) else None,
     )
 
 
@@ -548,6 +576,7 @@ def _context_events(
     payload: dict[str, Any],
     request_defaults: dict[str, Any],
     security_filter: dict[str, int] | None = None,
+    source_status: dict[str, dict[str, Any]] | None = None,
 ) -> list[RAGStreamEvent]:
     top_k_requested = _value(payload, request_defaults, "top_k", 10)
     top_k_limit = min(10, _to_int(top_k_requested, 10))
@@ -611,6 +640,7 @@ def _context_events(
             "contexts": top_contexts,
             "why": why,
             **({"security_filter": security_filter} if security_filter is not None else {}),
+            **({"source_status": source_status} if source_status is not None else {}),
         },
         {"type": "reasoning", **rationale},
     ]
@@ -729,6 +759,7 @@ async def stream_rag_events(
 
         docs: list[Any] = []
         security_filter = None
+        source_status = None
         if str(resolved_request.strategy).strip().lower() == "agentic":
             try:
                 docs, agentic_events = await _run_agentic_prefetch(
@@ -769,6 +800,7 @@ async def stream_rag_events(
                             return
                         docs = item.documents
                         security_filter = item.security_filter
+                        source_status = item.source_status
                     else:
                         yield item
             except asyncio.CancelledError:
@@ -801,6 +833,7 @@ async def stream_rag_events(
             payload=payload,
             request_defaults=request_defaults,
             security_filter=security_filter,
+            source_status=source_status,
         ):
             yield event
 
