@@ -9,6 +9,46 @@ describe("buildAnswerTrustSummary", () => {
     )
   })
 
+  it("reports failed retrieval sources even when preflight health was ready", () => {
+    const lines = buildAnswerTrustSummary({
+      selectedSources: ["media_db", "characters", "chats"],
+      resultCount: 1,
+      citationCount: 1,
+      webFallbackEnabled: false,
+      webFallbackTriggered: false,
+      generationProvider: null,
+      generationModel: null,
+      sourceHealthCaveatCount: 0,
+      sourceStatus: {
+        media_db: { status: "searched", count: 1 },
+        characters: { status: "error", count: 0, reason: "retrieval_failed" },
+        chats: { status: "error", count: 0, reason: "retrieval_failed" },
+      },
+    })
+
+    expect(lines).toContain("Searched Documents & Media. 1 source returned, 1 cited.")
+    expect(lines).toContain("Could not search Characters and Chats.")
+    expect(lines).not.toContain("Selected sources look ready.")
+  })
+
+  it("keeps successful evidence visible when another search of that source fails", () => {
+    const lines = buildAnswerTrustSummary({
+      selectedSources: ["characters"],
+      resultCount: 1,
+      citationCount: 1,
+      webFallbackEnabled: false,
+      webFallbackTriggered: false,
+      generationProvider: null,
+      generationModel: null,
+      sourceHealthCaveatCount: 0,
+      sourceStatus: { characters: { status: "error", count: 1, reason: "retrieval_failed" } },
+    })
+
+    expect(lines).toContain("Searched Characters. 1 source returned, 1 cited.")
+    expect(lines).toContain("Some searches failed for Characters.")
+    expect(lines).not.toContain("Selected sources look ready.")
+  })
+
   it("summarizes sources, citations, web fallback, and caveats", () => {
     expect(
       buildAnswerTrustSummary({

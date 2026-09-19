@@ -34,6 +34,14 @@ def note_owners(request, tmp_path):
             backend.get_pool().close_all()
 
 
+def test_duplicate_note_id_is_a_conflict_and_preserves_original(note_owners):
+    original = note_owners.alice.get_note_by_id(note_owners.private)
+    with pytest.raises(ConflictError, match="already exists"):
+        note_owners.alice.add_note("Replacement", "Must not be saved", note_id=note_owners.private)
+    assert note_owners.alice.get_note_by_id(note_owners.private) == original
+    assert note_owners.bob.get_note_by_id(note_owners.private) is None
+
+
 @pytest.mark.parametrize("operation", ["list", "count", "detail", "deleted", "batch", "search"])
 def test_note_reads_exclude_foreign_owner(note_owners, operation):
     db = note_owners.bob

@@ -1583,6 +1583,8 @@ class MessageStore:
 
         safe_literal = content_query.replace('"', '""')
         safe_search_term = f'"{safe_literal}"' if '"' in content_query else safe_literal
+        if not safe_search_term.strip():
+            return []
         base_query = """
                      SELECT m.*
                      FROM messages_fts, messages m
@@ -1599,8 +1601,20 @@ class MessageStore:
         params_list.extend([limit, offset])
 
         try:
-            cursor = self._db.execute_query(base_query, tuple(params_list))
-            return [dict(row) for row in cursor.fetchall()]
+            try:
+                # Retain valid FTS syntax; normalize only prose parse failures.
+                rows = self._db.get_connection().execute(base_query, tuple(params_list)).fetchall()
+            except sqlite3.OperationalError as exc:
+                if not any(marker in str(exc).lower() for marker in ("fts5: syntax error", "no such column:")):
+                    raise
+                normalized = FTSQueryTranslator.normalize_query(content_query, "sqlite")
+                if normalized == safe_search_term:
+                    raise
+                params_list[0] = normalized
+                rows = self._db.get_connection().execute(base_query, tuple(params_list)).fetchall()
+            return [dict(row) for row in rows]
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Message search failed: {exc}") from exc  # noqa: TRY003
         except CharactersRAGDBError as e:
             logger.error("Error searching messages for content '{}': {}", safe_search_term, e)
             raise

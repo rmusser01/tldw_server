@@ -280,6 +280,7 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
         generationProvider: settings?.generation_provider,
         generationModel: settings?.generation_model,
         sourceHealthCaveatCount,
+        sourceStatus: searchDetails?.sourceStatus,
         trustState: answerTrustState,
       }),
     [
@@ -293,6 +294,7 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
       settings?.generation_provider,
       settings?.sources,
       sourceHealthCaveatCount,
+      searchDetails?.sourceStatus,
     ]
   )
   const lowConfidenceRecovery = useMemo(() => {

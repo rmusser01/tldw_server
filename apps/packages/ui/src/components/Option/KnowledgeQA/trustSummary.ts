@@ -1,6 +1,6 @@
 import { getRagSourceLabel } from "@/services/rag/sourceMetadata"
 import type { RagSource } from "@/services/rag/unified-rag"
-import type { KnowledgeAnswerTrustState } from "./types"
+import type { KnowledgeAnswerTrustState, KnowledgeSourceStatus } from "./types"
 import { getKnowledgeAnswerTrustLabel } from "./trustState"
 
 export type AnswerTrustLabel = "Strong" | "Partial" | "Weak"
@@ -14,6 +14,7 @@ type BuildAnswerTrustSummaryInput = {
   generationProvider: string | null | undefined
   generationModel: string | null | undefined
   sourceHealthCaveatCount: number
+  sourceStatus?: Record<string, KnowledgeSourceStatus>
   trustState?: KnowledgeAnswerTrustState | null | undefined
   trustLabel?: AnswerTrustLabel | null | undefined
 }
@@ -51,11 +52,21 @@ export function buildAnswerTrustSummary({
   generationProvider,
   generationModel,
   sourceHealthCaveatCount,
+  sourceStatus,
   trustState,
   trustLabel,
 }: BuildAnswerTrustSummaryInput): string[] {
+  const failedSources = selectedSources.filter((source) =>
+    ["error", "unavailable"].includes(sourceStatus?.[source]?.status ?? "")
+  )
+  const unavailableSources = failedSources.filter((source) => !sourceStatus?.[source]?.count)
+  const partialSources = failedSources.filter((source) => Boolean(sourceStatus?.[source]?.count))
+  const searchedSources = selectedSources.filter((source) => !unavailableSources.includes(source))
+  const searchSummary = searchedSources.length > 0
+    ? `Searched ${formatSourceList(searchedSources)}.`
+    : "No selected sources were searched."
   const lines = [
-    `Searched ${formatSourceList(selectedSources)}. ${resultCount} ${pluralize(
+    `${searchSummary} ${resultCount} ${pluralize(
       resultCount,
       "source"
     )} returned, ${citationCount} cited.`,
@@ -68,6 +79,12 @@ export function buildAnswerTrustSummary({
   )
   lines.push(`AI model: ${formatGenerationModel(generationProvider, generationModel)}.`)
 
+  if (unavailableSources.length > 0) {
+    lines.push(`Could not search ${formatSourceList(unavailableSources)}.`)
+  }
+  if (partialSources.length > 0) {
+    lines.push(`Some searches failed for ${formatSourceList(partialSources)}.`)
+  }
   if (sourceHealthCaveatCount > 0) {
     lines.push(
       `${sourceHealthCaveatCount} selected ${pluralize(
@@ -75,7 +92,7 @@ export function buildAnswerTrustSummary({
         "source"
       )} ${sourceHealthCaveatCount === 1 ? "needs" : "need"} attention.`
     )
-  } else {
+  } else if (failedSources.length === 0) {
     lines.push("Selected sources look ready.")
   }
 

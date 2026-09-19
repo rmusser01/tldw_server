@@ -6,6 +6,7 @@ import type {
   EvidenceOrigin,
   KnowledgeAnswerTrustState,
   KnowledgeSourceHealthState,
+  KnowledgeSourceStatus,
   KnowledgeTrustReasonCode,
   RagResult,
 } from "../types"
@@ -136,6 +137,7 @@ const state = {
         verificationRate?: number | null
         verificationReportAvailable?: boolean
         verificationTotalClaims?: number | null
+        sourceStatus?: Record<string, KnowledgeSourceStatus>
       }
     | null,
   query: "What does this source say?",
@@ -362,6 +364,27 @@ describe("AnswerPanel state guardrails", () => {
 
     expect(screen.getByText("Source support: Strong")).toBeInTheDocument()
     expect(screen.getByText("Claim check (3 claims)")).toBeInTheDocument()
+  })
+
+  it("names failed sources in the answer summary after a healthy preflight", () => {
+    state.answer = "Media answer [1]."
+    state.citations = [{ index: 1 }]
+    state.results = [{ id: "r1", metadata: { title: "Rowan media" } }]
+    state.settings.sources = ["media_db", "characters", "chats"]
+    state.searchDetails = {
+      sourceStatus: {
+        media_db: { status: "searched", count: 1 },
+        characters: { status: "error", count: 0, reason: "retrieval_failed" },
+        chats: { status: "error", count: 0, reason: "retrieval_failed" },
+      },
+    }
+
+    render(<AnswerPanel />)
+
+    const summary = screen.getByLabelText("Answer trust summary")
+    expect(summary).toHaveTextContent("Could not search Characters and Chats.")
+    expect(summary).toHaveTextContent("Searched Documents & Media.")
+    expect(summary).not.toHaveTextContent("Selected sources look ready.")
   })
 
   it("renders a compact answer trust summary outside the markdown answer body", () => {

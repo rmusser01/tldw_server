@@ -4732,6 +4732,7 @@ class MultiDatabaseRetriever:
         # Optional per-source restrictions
         allowed_media_ids: Optional[list[int]] = None,
         allowed_note_ids: Optional[list[str]] = None,
+        source_failures: Optional[set[DataSource]] = None,
     ) -> list[Document]:
         """
         Retrieve documents from one or more configured data sources.
@@ -4741,6 +4742,7 @@ class MultiDatabaseRetriever:
             sources: Optional explicit list of `DataSource` to query. Defaults to all configured.
             config: Optional `RetrievalConfig` to apply to each retriever
             index_namespace: Optional namespace for vector stores
+            source_failures: Optional request-owned collector for failed sources.
 
         Returns:
             A list of `Document` objects sorted by score (desc), capped by config.max_results if provided.
@@ -4893,6 +4895,8 @@ class MultiDatabaseRetriever:
                     source_count=len(task_sources),
                 ).error("Multi-database retrieval failed (error={})", type(error).__name__)
                 had_source_failure = True
+                if source_failures is not None:
+                    source_failures.update(task_sources)
                 results = []
         else:
             results = []
@@ -4917,6 +4921,8 @@ class MultiDatabaseRetriever:
                 )
                 # Skip failed sources (partial success expected)
                 had_source_failure = True
+                if source_failures is not None:
+                    source_failures.add(source)
                 continue
             if isinstance(res, list):
                 documents.extend(res)
@@ -4936,6 +4942,8 @@ class MultiDatabaseRetriever:
     async def retrieve_from_plan(
         self,
         plan: RetrievalPlan,
+        *,
+        source_failures: Optional[set[DataSource]] = None,
         **kwargs: Any,
     ) -> list[Document]:
         """Retrieve documents using a normalized retrieval plan."""
@@ -4943,6 +4951,7 @@ class MultiDatabaseRetriever:
         return await self.retrieve(
             plan.query,
             retrieval_plan=plan,
+            source_failures=source_failures,
             **kwargs,
         )
 
