@@ -4,6 +4,7 @@ import asyncio
 import re
 import types
 from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import aclosing
 from dataclasses import dataclass
 from typing import Any, Literal, TypedDict
 
@@ -62,6 +63,7 @@ _RAG_STREAM_SCHEMA_VERSION = 1
 _RAG_REPLAY_CERTIFICATION_CODE = "stream_transport_unavailable"
 _RAG_TERMINAL_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _MAX_TERMINAL_MESSAGE_LENGTH = 240
+_RETRIEVAL_HEARTBEAT_SECONDS = 15.0
 _RAG_PROVIDER_ERROR_MESSAGES = {
     "provider_request_invalid": "The selected provider or model is invalid.",
     "provider_authentication_failed": "The selected provider credentials could not be authenticated.",
@@ -461,7 +463,13 @@ async def _retrieve_with_progress_events(
     pending_error: Exception | None = None
     try:
         while True:
-            queued = await progress_queue.get()
+            try:
+                queued = await asyncio.wait_for(progress_queue.get(), _RETRIEVAL_HEARTBEAT_SECONDS)
+            except asyncio.TimeoutError:
+                # Cold local model loading can exceed a proxy's idle budget.
+                # Keep retrieval connected without certifying evidence or an answer.
+                yield {"type": "heartbeat"}
+                continue
             if queued is done_marker:
                 break
             if isinstance(queued, tuple) and len(queued) == 2 and queued[0] is error_marker:
@@ -484,7 +492,7 @@ async def _retrieve_with_progress_events(
     yield docs
 
 
-async def _prefetch_documents(
+def _prefetch_documents(
     *,
     resolved_request: ResolvedRAGRequest,
     retrieval_plan: RetrievalPlan,
@@ -492,25 +500,13 @@ async def _prefetch_documents(
     pipeline_kwargs: dict[str, Any],
     payload: dict[str, Any],
 ) -> AsyncIterator[RAGStreamEvent | _PrefetchedEvidence]:
-    if bool(payload.get("enable_research_progress", False)):
-        async for item in _retrieve_with_progress_events(
-            resolved_request=resolved_request,
-            retrieval_plan=retrieval_plan,
-            standard_pipeline=standard_pipeline,
-            pipeline_kwargs=pipeline_kwargs,
-            payload=payload,
-        ):
-            yield item
-        return
-
-    docs = await _retrieve_standard_documents(
+    return _retrieve_with_progress_events(
         resolved_request=resolved_request,
         retrieval_plan=retrieval_plan,
         standard_pipeline=standard_pipeline,
         pipeline_kwargs=pipeline_kwargs,
         payload=payload,
     )
-    yield docs
 
 
 async def _run_agentic_prefetch(
@@ -785,24 +781,25 @@ async def stream_rag_events(
                 docs = []
         else:
             try:
-                async for item in _prefetch_documents(
+                async with aclosing(_prefetch_documents(
                     resolved_request=resolved_request,
                     retrieval_plan=retrieval_plan,
                     standard_pipeline=standard_pipeline,
                     pipeline_kwargs=pipeline_kwargs,
                     payload=payload,
-                ):
-                    if isinstance(item, _PrefetchedEvidence):
-                        if item.clarification_answer:
-                            yield {"type": "clarification", "required": True, "stage": "pre_retrieval"}
-                            yield {"type": "delta", "text": item.clarification_answer}
-                            yield rag_complete_event(output_emitted=True)
-                            return
-                        docs = item.documents
-                        security_filter = item.security_filter
-                        source_status = item.source_status
-                    else:
-                        yield item
+                )) as prefetch:
+                    async for item in prefetch:
+                        if isinstance(item, _PrefetchedEvidence):
+                            if item.clarification_answer:
+                                yield {"type": "clarification", "required": True, "stage": "pre_retrieval"}
+                                yield {"type": "delta", "text": item.clarification_answer}
+                                yield rag_complete_event(output_emitted=True)
+                                return
+                            docs = item.documents
+                            security_filter = item.security_filter
+                            source_status = item.source_status
+                        else:
+                            yield item
             except asyncio.CancelledError:
                 raise
             except Exception as prefetch_error:  # noqa: BLE001 - preserve retrieval failure as a terminal event
