@@ -116,8 +116,12 @@ describe("KnowledgeQAProvider search cancellation", () => {
 
     await waitFor(() => {
       expect(latestContext!.isSearching).toBe(false)
-      expect(latestContext!.error).toBe("Search cancelled")
+      expect(latestContext!.error).toBeNull()
+      expect(latestContext!.queryStage).toBe("cancelled")
+      expect(latestContext!.hasSearched).toBe(true)
     })
+    expect(latestContext!.answerTrustState).not.toBe("failed_search")
+    expect(latestContext!.extensionFailureState).not.toBe("search_failed")
 
     expect(messageOpenMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -126,6 +130,34 @@ describe("KnowledgeQAProvider search cancellation", () => {
       })
     )
     expect(trackMetricMock).toHaveBeenCalledWith({ type: "search_cancel" })
+
+    ragSearchMock.mockResolvedValueOnce({
+      results: [{ id: "recovered", content: "Recovered source" }],
+      answer: "Recovered answer",
+    })
+    await act(async () => { await latestContext!.search() })
+    expect(latestContext!.queryStage).toBe("complete")
+    expect(latestContext!.error).toBeNull()
+    expect(latestContext!.answer).toBe("Recovered answer")
+  })
+
+  it("keeps an unexpected transport abort on the failure path", async () => {
+    ragSearchMock.mockRejectedValueOnce(Object.assign(new Error("Transport aborted"), { name: "AbortError" }))
+    render(<KnowledgeQAProvider><ContextProbe /></KnowledgeQAProvider>)
+    await act(async () => { await latestContext!.selectThread("local-abort-failure") })
+    act(() => { latestContext!.setQuery("A query that the transport aborts") })
+    await act(async () => { await latestContext!.search() })
+    expect(latestContext!.queryStage).toBe("error")
+    expect(latestContext!.answerTrustState).toBe("failed_search")
+    expect(latestContext!.error).not.toBe("Search cancelled")
+
+    act(() => { void latestContext!.search() })
+    await waitFor(() => expect(ragSearchMock).toHaveBeenCalledTimes(2))
+    act(() => { latestContext!.cancelSearch() })
+    await waitFor(() => expect(latestContext!.queryStage).toBe("cancelled"))
+    expect(latestContext!.error).toBeNull()
+    expect(latestContext!.answerTrustState).not.toBe("failed_search")
+    expect(latestContext!.extensionFailureState).not.toBe("search_failed")
   })
 
   it("tracks clear-full actions and keeps clear aborts status-neutral", async () => {

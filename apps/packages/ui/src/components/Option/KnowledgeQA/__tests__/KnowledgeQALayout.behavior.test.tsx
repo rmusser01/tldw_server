@@ -261,6 +261,14 @@ describe("KnowledgeQALayout evidence-rail transitions", () => {
     />
   )
   const renderLayout = () => render(renderLayoutElement())
+  it.each([false, true])("keeps the cancelled results area visible without empty-search recovery (hasSearched=%s)", async (hasSearched) => {
+    state.hasSearched = hasSearched
+    state.queryStage = "cancelled"
+    renderLayout()
+    expect(screen.getByTestId("knowledge-results-shell")).toBeInTheDocument()
+    await act(async () => { await vi.dynamicImportSettled() })
+    expect(screen.queryByTestId("knowledge-no-results-recovery")).not.toBeInTheDocument()
+  })
   const applyStateFixture = (name: KnowledgeQaStateFixtureName) => {
     const fixture = createKnowledgeQaStateFixture(name).knowledgeQa
     const fullFixture = createKnowledgeQaStateFixture(name)

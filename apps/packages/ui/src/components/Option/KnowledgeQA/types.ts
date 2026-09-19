@@ -11,6 +11,7 @@ export type QueryStage =
   | "generating"
   | "verifying"
   | "complete"
+  | "cancelled"
   | "error"
 
 export type ScopeSnapshot = {

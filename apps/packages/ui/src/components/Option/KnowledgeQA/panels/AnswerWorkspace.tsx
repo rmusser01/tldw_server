@@ -20,6 +20,7 @@ const STAGE_COPY: Record<QueryStage, string> = {
   generating: "Generating answer",
   verifying: "Checking source citations",
   complete: "Answer complete",
+  cancelled: "Search cancelled",
   error: "Search needs attention",
 }
 
@@ -52,7 +53,7 @@ export function AnswerWorkspace({ queryStage, className }: AnswerWorkspaceProps)
     settings,
   } = useKnowledgeQA()
   const isActiveStage =
-    queryStage !== "idle" && queryStage !== "complete" && queryStage !== "error"
+    queryStage !== "idle" && queryStage !== "complete" && queryStage !== "error" && queryStage !== "cancelled"
   const [politeAnnouncement, setPoliteAnnouncement] = useState("")
   const [assertiveAnnouncement, setAssertiveAnnouncement] = useState("")
   const previousStageRef = useRef<QueryStage | null>(null)
@@ -135,6 +136,10 @@ export function AnswerWorkspace({ queryStage, className }: AnswerWorkspaceProps)
       )
       return
     }
+    if (queryStage === "cancelled") {
+      setPoliteAnnouncement("Search cancelled. You can ask again when ready.")
+      return
+    }
     if (queryStage === "error") {
       setPoliteAnnouncement("")
       return
@@ -151,7 +156,12 @@ export function AnswerWorkspace({ queryStage, className }: AnswerWorkspaceProps)
 
   return (
     <div className={cn("space-y-6", className)}>
-      <div className="sr-only" aria-live="polite" aria-atomic="true">
+      <div
+        className={queryStage === "cancelled" ? "rounded-lg border border-border bg-muted/20 px-3 py-2 text-sm text-text-muted" : "sr-only"}
+        role={queryStage === "cancelled" ? "status" : undefined}
+        aria-live="polite"
+        aria-atomic="true"
+      >
         {politeAnnouncement}
       </div>
       <div className="sr-only" aria-live="assertive" aria-atomic="true">

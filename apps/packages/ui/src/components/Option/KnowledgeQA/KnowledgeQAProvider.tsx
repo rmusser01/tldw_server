@@ -208,6 +208,7 @@ type Action =
     }
   | { type: "SET_SEARCH_DETAILS"; payload: SearchRuntimeDetails | null }
   | { type: "SET_ERROR"; payload: string | null }
+  | { type: "CANCEL_SEARCH" }
   | { type: "CLEAR_RESULTS" }
   | { type: "SET_THREAD_ID"; payload: string | null }
   | { type: "SET_LOCAL_ONLY_THREAD"; payload: boolean }
@@ -327,6 +328,18 @@ function reducer(state: KnowledgeQAState, action: Action): KnowledgeQAState {
         hasSearched: true,
         isSearching: false,
         queryStage: action.payload ? "error" : "idle",
+      }
+    case "CANCEL_SEARCH":
+      return {
+        ...state,
+        error: null,
+        hasSearched: true,
+        isSearching: false,
+        queryStage: "cancelled",
+        answerTrustState:
+          state.answerTrustState === "failed_search" ? "unknown_trust" : state.answerTrustState,
+        extensionFailureState:
+          state.extensionFailureState === "search_failed" ? null : state.extensionFailureState,
       }
     case "CLEAR_RESULTS":
       return {
@@ -2745,9 +2758,10 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
             dispatch({ type: "SET_ERROR", payload: null })
             return
           }
-          dispatch({ type: "SET_ERROR", payload: "Search cancelled" })
-          dispatch({ type: "SET_QUERY_STAGE", payload: "idle" })
-          return
+          if (abortReason === "cancel") {
+            dispatch({ type: "CANCEL_SEARCH" })
+            return
+          }
         }
         console.warn(
           "Search failed:",

@@ -88,6 +88,33 @@ describe("KnowledgeQAProvider streaming search", () => {
     })
   })
 
+  it("keeps received answer and evidence when the user cancels a partial stream", async () => {
+    ragSearchStreamMock.mockImplementation(async function* (_query: string, options: { signal: AbortSignal }) {
+      yield { type: "contexts", contexts: [{ id: "cedar", excerpt: "Cedar opens in January." }] }
+      yield { type: "delta", text: "Cedar opens in January [1]." }
+      await new Promise<void>((_resolve, reject) => {
+        options.signal.addEventListener("abort", () => {
+          reject(Object.assign(new Error("Aborted"), { name: "AbortError" }))
+        }, { once: true })
+      })
+    })
+    render(<KnowledgeQAProvider><ContextProbe /></KnowledgeQAProvider>)
+    await act(async () => { await latestContext!.selectThread("local-partial-cancellation") })
+    act(() => { latestContext!.setQuery("When does Cedar open?") })
+    let pending!: Promise<void>
+    act(() => { pending = latestContext!.search() })
+    await waitFor(() => expect(latestContext!.answer).toBe("Cedar opens in January [1]."))
+    const receivedTrust = latestContext!.answerTrustState
+    act(() => { latestContext!.cancelSearch() })
+    await act(async () => { await pending })
+    expect(latestContext!.queryStage).toBe("cancelled")
+    expect(latestContext!.error).toBeNull()
+    expect(latestContext!.answer).toBe("Cedar opens in January [1].")
+    expect(latestContext!.results.map(result => result.id)).toEqual(["cedar"])
+    expect(latestContext!.answerTrustState).toBe(receivedTrust)
+    expect(ragSearchMock).not.toHaveBeenCalled()
+  })
+
   it("contains timeout feedback without a console overlay and permits recovery", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined)
     const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined)

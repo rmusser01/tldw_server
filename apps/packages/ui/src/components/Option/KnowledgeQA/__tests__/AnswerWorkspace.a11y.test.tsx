@@ -72,6 +72,19 @@ describe("AnswerWorkspace accessibility announcements", () => {
     expect(screen.getByText("Search error. Search timed out")).toBeInTheDocument()
   })
 
+  it("announces cancellation neutrally and replaces the stale active message", () => {
+    const { container, rerender } = render(<AnswerWorkspace queryStage="searching" />)
+    rerender(<AnswerWorkspace queryStage="cancelled" />)
+    expect(screen.getByRole("status")).toHaveTextContent("Search cancelled")
+    expect(container.querySelector('[aria-live="polite"]')).toHaveTextContent("Search cancelled.")
+    expect(container.querySelector('[aria-live="assertive"]')).toBeEmptyDOMElement()
+    expect(screen.queryByText("Searching your selected sources.")).not.toBeInTheDocument()
+    expect(screen.queryByText("Searching selected sources")).not.toBeInTheDocument()
+    rerender(<AnswerWorkspace queryStage="searching" />)
+    expect(screen.queryByRole("status")).not.toBeInTheDocument()
+    expect(container.querySelector('[aria-live="polite"]')).toHaveTextContent("Searching your selected sources.")
+  })
+
   it("clears the assertive timeout when a retry starts and completes", () => {
     state.error = "Search timed out"
     const { rerender } = render(<AnswerWorkspace queryStage="error" />)
