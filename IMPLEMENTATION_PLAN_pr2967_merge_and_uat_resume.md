@@ -40,6 +40,8 @@ At8eca6, all eight frontend unit shards pass; shard2 has31 frontend and563 UI te
 **Tests:** Characters → TestBot → Chat, exact public question and instruction, real completion/canonical reload; then the retained twelve-row protocol across SQLite/PostgreSQL and single/multi-user setups, including actual image attachment.
 **Status:** In Progress.
 
+Checkpoint PR2969 merged normally on2026-09-19T16:15:21Z as1dfdd819b6e7056c2e7721d4763c85d5ad07d85c after all seven enforced gates passed, all12Qodo threads were resolved, and the requester supplied a new verbatim Change summary. The merge tree matches CI-tested46a98a552c. Remaining repair work resumes from this latest-dev merge on codex/uat295-postgres-notes-20260919, starting UAT295; the failed frozen matrix and16open findings remain explicit. Checkpoint details: Docs/Reviews/PR2969_CHECKPOINT_REVIEW_2026_09_19.md.
+
 The first corrected local browser run passes device and legacy persistence but fails session readiness after the unchanged15-second wait, with retries0. Thus the original weak readiness check does not explain the full failure. Retain that failed attempt and trace actual save/storage behavior before another candidate. Local evidence: .tmp/pr2967-merge-20260918/manual-api-key-e2e/. The rebased branch may be reviewed by Qodo while this known gate is diagnosed; it is not merge-ready.
 
 ## Qodo remediation checkpoint, 2026-09-18
