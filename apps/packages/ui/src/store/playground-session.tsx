@@ -2,6 +2,7 @@ import { createWithEqualityFn } from "zustand/traditional"
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware"
 import type { QueuedRequest } from "@/utils/chat-request-queue"
 import type { AssistantSelection } from "@/types/assistant-selection"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 
 const STORAGE_KEY = "tldw-playground-session"
 const STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000 // 24 hours
@@ -171,6 +172,12 @@ export const usePlaygroundSessionStore = createWithEqualityFn<PlaygroundSessionS
     }
   )
 )
+
+const stopWatchingAccount = watchChatAccountChanges((invalidated) => {
+  if (invalidated) usePlaygroundSessionStore.getState().clearSession()
+})
+const hot = (import.meta as { hot?: { dispose: (callback: () => void) => void } }).hot
+hot?.dispose(stopWatchingAccount)
 
 if (typeof window !== "undefined" && process.env.NODE_ENV !== "production") {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

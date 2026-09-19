@@ -470,9 +470,9 @@ describe("Playground coordinator integration", () => {
     try {
       act(() => {
         window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed", { detail: { kind: "logout" } }))
-        usePlaygroundSessionStore.getState().clearSession()
-        useStoreMessageOption.getState().setServerChatId(null)
-        useStoreMessageOption.setState({ messages: [], history: [], historyId: null })
+        expect(useStoreMessageOption.getState().messages).toEqual([])
+        expect(useStoreMessageOption.getState().serverChatId).toBeNull()
+        expect(usePlaygroundSessionStore.getState().serverChatId).toBeNull()
         ordinaryCompletion.owner = "B"
         window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed", { detail: { kind: "login" } }))
       })

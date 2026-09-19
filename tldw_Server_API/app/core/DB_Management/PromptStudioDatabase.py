@@ -1195,12 +1195,15 @@ class _BackendPromptStudioDatabase(BackendPromptStudioDatabaseBase):
                     """
                     INSERT INTO sync_log (entity, entity_uuid, operation, client_id, version, payload, timestamp)
                     VALUES (?, ?, ?, ?, 1, ?, CURRENT_TIMESTAMP)
+                    RETURNING change_id
                     """,
                     (
                         entity,
                         entity_uuid,
                         operation,
-                        self.client_id,
+                        # Shared sync-log RLS uses this column as tenant ownership.
+                        # The project/prompt rows retain the originating audit client.
+                        self.tenant_user_id,
                         json.dumps(payload, separators=(',', ':')) if payload else None,
                     ),
                 )

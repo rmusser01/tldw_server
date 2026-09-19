@@ -2,23 +2,28 @@ import React from "react"
 import type { ServicePromptSnapshot } from "@/services/service-prompts"
 import {
   consumeFlashcardsGenerateHandoff,
+  consumeStudyPackHandoff,
+  type FlashcardsHandoffKind,
   readFlashcardsGenerateRoute,
   removeFlashcardsGenerateHandoff,
   type FlashcardsGenerateIntent
 } from "@/services/tldw/flashcards-generate-handoff"
 import { flashcardsHandoffAuthority, loadFlashcardsTransferSnapshot } from "@/services/tldw/flashcards-generate-transfer"
 
-export const useFlashcardsGenerateHandoff = (
+import type { StudyPackIntent } from "@/services/tldw/study-pack-handoff"
+
+const usePrivateFlashcardsHandoff = (
   location: { pathname?: string; search?: string; hash?: string },
-  navigate: (route: string, options: { replace: boolean }) => void
+  navigate: (route: string, options: { replace: boolean }) => void,
+  kind: FlashcardsHandoffKind
 ) => {
   const { pathname, search, hash } = location
-  const route = React.useMemo(() => readFlashcardsGenerateRoute({ pathname, search, hash }), [pathname, search, hash])
+  const route = React.useMemo(() => readFlashcardsGenerateRoute({ pathname, search, hash }, kind), [pathname, search, hash, kind])
   const latest = React.useRef({ route, navigate })
   latest.current = { route, navigate }
   const [revision, setRevision] = React.useState(0)
   const [scope, setScope] = React.useState<ServicePromptSnapshot | null>(null)
-  const [accepted, setAccepted] = React.useState<{ token: string; intent: FlashcardsGenerateIntent } | null>(null)
+  const [accepted, setAccepted] = React.useState<{ token: string; intent: FlashcardsGenerateIntent | StudyPackIntent } | null>(null)
   const [error, setError] = React.useState<string | null>(null)
 
   React.useEffect(() => {
@@ -76,7 +81,8 @@ export const useFlashcardsGenerateHandoff = (
     const abort = () => controller.abort()
     scope.scopeSignal.addEventListener("abort", abort, { once: true })
     setAccepted(null)
-    void consumeFlashcardsGenerateHandoff(route.token, flashcardsHandoffAuthority(scope), controller.signal).then(intent => {
+    const consume = kind === "study-pack" ? consumeStudyPackHandoff : consumeFlashcardsGenerateHandoff
+    void consume(route.token, flashcardsHandoffAuthority(scope), controller.signal).then(intent => {
       if (controller.signal.aborted || latest.current.route.token !== route.token) return
       setAccepted({ token: route.token!, intent })
       setError(null)
@@ -90,7 +96,7 @@ export const useFlashcardsGenerateHandoff = (
       controller.abort()
       scope.scopeSignal.removeEventListener("abort", abort)
     }
-  }, [route.token, route.legacy, scope])
+  }, [route.token, route.legacy, scope, kind])
 
   return {
     intent: scope?.scopeSignal.aborted ? null : accepted?.intent ?? null,
@@ -100,4 +106,17 @@ export const useFlashcardsGenerateHandoff = (
     hasRoute: Boolean(route.token || route.legacy),
     error
   }
+}
+
+type HandoffLocation = Parameters<typeof usePrivateFlashcardsHandoff>[0]
+type HandoffNavigate = Parameters<typeof usePrivateFlashcardsHandoff>[1]
+
+export const useFlashcardsGenerateHandoff = (location: HandoffLocation, navigate: HandoffNavigate) => {
+  const result = usePrivateFlashcardsHandoff(location, navigate, "generate")
+  return { ...result, intent: result.intent as FlashcardsGenerateIntent | null }
+}
+
+export const useStudyPackHandoff = (location: HandoffLocation, navigate: HandoffNavigate) => {
+  const result = usePrivateFlashcardsHandoff(location, navigate, "study-pack")
+  return { ...result, intent: result.intent as StudyPackIntent | null }
 }

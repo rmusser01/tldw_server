@@ -840,28 +840,71 @@ async def test_streaming_generation_marks_partial_output_and_propagates_failure(
 
 
 @pytest.mark.asyncio
-async def test_stream_rag_events_continues_when_standard_prefetch_fails():
+async def test_stream_rag_events_reports_standard_prefetch_failure_without_generation():
+    from loguru import logger
+
     async def failing_standard_pipeline(**kwargs: Any) -> UnifiedSearchResult:  # noqa: ARG001
-        raise RuntimeError("retrieval backend unavailable")
+        raise RuntimeError("private-database-path query-secret")
 
-    events = [
-        event
-        async for event in stream_rag_events(
-            resolved_request=_resolved_request("standard"),
-            retrieval_plan=_retrieval_plan(),
-            standard_pipeline=failing_standard_pipeline,
-            extra_context={"generate_streaming_response": _fake_generate_streaming_response},
-        )
-    ]
+    calls = []
 
-    assert [event["type"] for event in events] == [  # nosec B101
-        "contexts",
-        "reasoning",
-        "delta",
-        "complete",
-    ]
-    assert events[0]["contexts"] == []  # nosec B101
-    assert events[-2]["text"] == "answer text"  # nosec B101
+    async def generate(context, **kwargs):
+        calls.append(True)
+        return await _fake_generate_streaming_response(context, **kwargs)
+
+    records = []
+    sink = logger.add(lambda message: records.append(message.record))
+    try:
+        events = [
+            event
+            async for event in stream_rag_events(
+                resolved_request=_resolved_request("standard"),
+                retrieval_plan=_retrieval_plan(),
+                standard_pipeline=failing_standard_pipeline,
+                extra_context={"generate_streaming_response": generate},
+            )
+        ]
+    finally:
+        logger.remove(sink)
+
+    assert [event["type"] for event in events] == ["error"]
+    assert not calls
+    assert events[0]["allow_non_stream_fallback"] is False
+    assert "private-database-path" not in str(events)
+    failures = [record for record in records if record["level"].name == "ERROR"]
+    assert len(failures) == 1
+    assert failures[0]["extra"]["operation"] == "rag_standard_retrieval"
+    assert failures[0]["extra"]["exception_type"] == "RuntimeError"
+    assert "RuntimeError" in failures[0]["message"]
+    assert failures[0]["exception"] is None
+    assert "private-database-path" not in str(failures)
+    assert "query-secret" not in str(failures)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("with_progress", [False, True])
+@pytest.mark.parametrize("error_code", ["document_retrieval_failed", "pipeline_failed"])
+async def test_stream_reports_empty_failed_retrieval_result(error_code, with_progress):
+    request = _resolved_request()
+    request.payload["enable_research_progress"] = with_progress
+
+    async def retrieve(**kwargs):
+        return UnifiedSearchResult(documents=[], query=kwargs["query"], errors=[error_code])
+
+    calls = []
+
+    async def generate(context, **kwargs):
+        calls.append(True)
+        return await _fake_generate_streaming_response(context, **kwargs)
+
+    events = [event async for event in stream_rag_events(
+        resolved_request=request, retrieval_plan=_retrieval_plan(),
+        standard_pipeline=retrieve,
+        extra_context={"generate_streaming_response": generate},
+    )]
+    assert [event["type"] for event in events] == ["error"]
+    assert not calls
+    assert events[0]["allow_non_stream_fallback"] is False
 
 
 @pytest.mark.asyncio

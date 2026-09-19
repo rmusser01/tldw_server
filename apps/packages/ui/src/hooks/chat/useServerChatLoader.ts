@@ -278,6 +278,12 @@ const isMissingServerChatReferenceError = (error: unknown): boolean => {
   return message.includes("404") || message.includes("not found")
 }
 
+const isDeniedServerChatError = (error: unknown): boolean => {
+  const candidate = error as { status?: unknown; response?: { status?: unknown } } | null
+  const status = Number(candidate?.status ?? candidate?.response?.status)
+  return status === 401 || status === 403
+}
+
 export const resolveServerChatAssistantIdentity = (
   chat: Record<string, unknown> | null | undefined
 ): {
@@ -813,6 +819,9 @@ export const useServerChatLoader = ({
                 expectedScope: scope || { type: "global" }
               })
               if (!validatedServerChatId) {
+                setMessages([])
+                setHistory([])
+                setServerChatTitle(null)
                 setServerChatId(null)
                 return
               }
@@ -857,10 +866,7 @@ export const useServerChatLoader = ({
               )
               setServerChatMetaLoaded(true)
             } catch (error) {
-              if (isMissingServerChatReferenceError(error) && canCommitCurrentLoad()) {
-                setServerChatId(null)
-                return
-              }
+              if (isMissingServerChatReferenceError(error) || isDeniedServerChatError(error)) throw error
               // ignore metadata failures; still try to load messages
             }
           }
@@ -1133,6 +1139,13 @@ export const useServerChatLoader = ({
             e instanceof Error && e.name === "AbortError"
               ? true
               : message.toLowerCase().includes("abort")
+          if (!isAbort && canCommitCurrentLoad() &&
+            (isMissingServerChatReferenceError(e) || isDeniedServerChatError(e))) {
+            setMessages([])
+            setHistory([])
+            setServerChatTitle(null)
+            updatePageTitle()
+          }
           if (!isAbort && isMissingServerChatReferenceError(e) && canCommitCurrentLoad()) {
             setServerChatId(null)
             return

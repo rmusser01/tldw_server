@@ -1,6 +1,6 @@
 import React from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import ViewMediaPage from '../ViewMediaPage'
 import { MEDIA_REVIEW_SELECTION_SETTING } from '@/services/settings/ui-settings'
@@ -19,7 +19,15 @@ const mocks = vi.hoisted(() => ({
   setChatMode: vi.fn(),
   setSelectedKnowledge: vi.fn(),
   setRagMediaIds: vi.fn(),
-  downloadBlob: vi.fn()
+  downloadBlob: vi.fn(),
+  owner: 'alice',
+  transferStudyPack: vi.fn()
+}))
+
+vi.mock('@/hooks/useHomeMilestoneScope', () => ({ useHomeMilestoneScope: () => mocks.owner }))
+vi.mock('@/hooks/useFlashcardsGenerateTransfer', () => ({
+  useStudyPackTransfer: () => mocks.transferStudyPack,
+  useFlashcardsGenerateTransfer: () => vi.fn()
 }))
 
 vi.mock('react-i18next', () => ({
@@ -288,6 +296,8 @@ describe('ViewMediaPage stage 14 bulk actions baseline', () => {
   })
 
   beforeEach(() => {
+    mocks.owner = 'alice'
+    mocks.transferStudyPack.mockReset()
     mocks.queryData = [
       {
         kind: 'media',
@@ -349,6 +359,43 @@ describe('ViewMediaPage stage 14 bulk actions baseline', () => {
       }
       return {}
     })
+  })
+
+  it.each(['same-media', 'other-media', 'other-owner'])('validates the Study Pack source after detail hydration: %s', async change => {
+    let finishDetails!: (value: unknown) => void
+    const details = new Promise(resolve => { finishDetails = resolve })
+    let finishAuthority!: () => void
+    const authority = new Promise<void>(resolve => { finishAuthority = resolve })
+    const delivered = vi.fn()
+    mocks.transferStudyPack.mockImplementation(async (acquire: () => unknown) => {
+      await authority
+      delivered(acquire())
+    })
+    const originalRequest = mocks.bgRequest.getMockImplementation()!
+    mocks.bgRequest.mockImplementation((request: { path?: string; method?: string }) =>
+      request.method === 'GET' && request.path === '/api/v1/media/2'
+        ? details
+        : originalRequest(request)
+    )
+    const view = renderMediaPage()
+    fireEvent.click(screen.getByTestId('result-2'))
+    await waitFor(() => expect(screen.getByTestId('mock-content-viewer')).toHaveTextContent('2'))
+    fireEvent.click(screen.getByRole('button', { name: 'Create study pack' }))
+    await waitFor(() => expect(mocks.transferStudyPack).toHaveBeenCalledOnce())
+    await act(async () => { finishDetails({ media_id: 2, content: 'Hydrated text', keywords: ['hydrated'] }) })
+    if (change === 'other-media') fireEvent.click(screen.getByTestId('result-1'))
+    if (change === 'other-owner') {
+      mocks.owner = 'bob'
+      view.rerender(<MemoryRouter initialEntries={['/media']}><Routes><Route path='/media' element={<ViewMediaPage />} /></Routes></MemoryRouter>)
+    }
+    await act(async () => { finishAuthority() })
+    if (change === 'same-media') {
+      expect(delivered).toHaveBeenCalledWith({ title: 'Doc 2', sourceItems: [{ sourceType: 'media', sourceId: '2', sourceTitle: 'Doc 2' }] })
+      expect(mocks.messageError).not.toHaveBeenCalled()
+    } else {
+      expect(delivered).not.toHaveBeenCalled()
+      expect(mocks.messageError).toHaveBeenCalledWith(expect.stringContaining('source account or selection changed'))
+    }
   })
 
   it('deletes selected items in bulk mode', async () => {

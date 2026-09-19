@@ -85,6 +85,18 @@ describe("usePlaygroundSessionPersistence", () => {
     usePlaygroundSessionStore.getState().clearSession()
   })
 
+  it("does not stamp a pending private session save with the next account on unmount", async () => {
+    useStoreMessageOption.setState({ serverChatId: "alice-private-chat", serverChatTitle: "Alice title" })
+    const view = renderHook(() => usePlaygroundSessionPersistence())
+    await waitFor(() => expect(view.result.current.sessionScopeReady).toBe(true))
+    let resolveConfig!: (config: null) => void
+    mocks.getConfig.mockImplementation(() => new Promise(resolve => { resolveConfig = resolve }))
+    view.unmount()
+    act(() => window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed", { detail: { kind: "logout" } })))
+    await act(async () => { resolveConfig(null) })
+    expect(usePlaygroundSessionStore.getState().serverChatId).toBeNull()
+  })
+
   it("restores a persisted server-backed character chat even without local Dexie history", async () => {
     useStoreMessageOption.setState({
       historyId: "stale-local-history",

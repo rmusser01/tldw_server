@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { transferFlashcardsSource } from "@/services/tldw/flashcards-generate-transfer"
+import { transferFlashcardsSource, transferStudyPackSource } from "@/services/tldw/flashcards-generate-transfer"
 import { FLASHCARDS_GENERATE_HANDOFF_PREFIX } from "@/services/tldw/flashcards-generate-handoff"
 
 const mocks = vi.hoisted(() => ({
@@ -24,6 +24,7 @@ vi.mock("wxt/browser", () => ({ browser: {
 } }))
 
 const intent = { text: "Private source", sourceType: "note" as const, sourceId: "note-1" }
+const studyIntent = { title: "Private source", sourceItems: [{ sourceType: "note" as const, sourceId: "private-note" }] }
 const deferred = <T,>() => {
   let resolve!: (value: T) => void
   const promise = new Promise<T>(done => { resolve = done })
@@ -52,6 +53,29 @@ describe("private Flashcards producer platform boundary", () => {
     } } }))
   })
   afterEach(() => vi.unstubAllGlobals())
+
+  it("rejects a Study Pack acquired across an account change and preserves the source", async () => {
+    const source = deferred<typeof studyIntent>()
+    const acquire = vi.fn(() => source.promise)
+    const navigate = vi.fn()
+    const pending = transferStudyPackSource(acquire, { navigate })
+    await vi.waitFor(() => expect(acquire).toHaveBeenCalled())
+    window.dispatchEvent(new Event("tldw:auth-credentials-changed"))
+    source.resolve(studyIntent)
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" })
+    expect(navigate).not.toHaveBeenCalled()
+    expect(transferKeys()).toHaveLength(0)
+    expect(studyIntent.sourceItems[0].sourceId).toBe("private-note")
+  })
+
+  it("opens extension Study Packs with only an opaque token", async () => {
+    mocks.extension = true
+    mocks.createTab.mockResolvedValue({ id: 4 })
+    await transferStudyPackSource(() => studyIntent, { newTab: true })
+    expect(mocks.createTab).toHaveBeenCalledWith({ url: expect.stringMatching(/^chrome-extension:\/\/test\/options.html#\/flashcards\?tab=importExport&study_pack_handoff=/) })
+    expect(mocks.createTab.mock.calls[0][0].url).not.toMatch(/Private|private-note/)
+    expect(mocks.removeTab).not.toHaveBeenCalled()
+  })
 
   it("waits for authority and storage before same-tab navigation", async () => {
     const ready = deferred<void>()

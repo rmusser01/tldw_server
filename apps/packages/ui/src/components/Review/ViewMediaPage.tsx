@@ -52,8 +52,7 @@ import {
   buildMediaFilterSearch,
   hasMediaFilterParams
 } from '@/components/Review/mediaFilterParams'
-import { useFlashcardsGenerateTransfer } from "@/hooks/useFlashcardsGenerateTransfer"
-import { buildStudyPackRoute } from "@/services/tldw/study-pack-handoff"
+import { useFlashcardsGenerateTransfer, useStudyPackTransfer } from "@/hooks/useFlashcardsGenerateTransfer"
 import {
   getMediaNavigationResumeEntry,
   resolveMediaNavigationResumeSelection,
@@ -312,6 +311,7 @@ const MediaPageContent: React.FC = () => {
   const handoffOwnerRef = useRef(ownerScope)
   handoffOwnerRef.current = ownerScope
   const transferFlashcards = useFlashcardsGenerateTransfer()
+  const transferStudyPack = useStudyPackTransfer()
   const { t } = useTranslation(['review', 'common'])
   const navigate = useNavigate()
   const location = useLocation()
@@ -1028,7 +1028,8 @@ const MediaPageContent: React.FC = () => {
     [message, navigate, nav.selected, t, transferFlashcards]
   )
 
-  const handleCreateStudyPackFromMedia = useCallback(() => {
+  const handleCreateStudyPackFromMedia = useCallback(async () => {
+    if (!ownerScope || !isMediaCurrent()) return
     const selectedMedia = nav.selected?.kind === "media" ? nav.selected : null
     const mediaTitle = selectedMedia?.title?.trim() || ""
     const mediaId = selectedMedia?.id
@@ -1042,19 +1043,22 @@ const MediaPageContent: React.FC = () => {
       return
     }
 
-    navigate(
-      buildStudyPackRoute({
-        title: mediaTitle,
-        sourceItems: [
-          {
-            sourceType: "media",
-            sourceId: String(mediaId),
-            sourceTitle: mediaTitle
-          }
-        ]
-      })
-    )
-  }, [message, nav.selected, navigate, t])
+    try {
+      await transferStudyPack(() => {
+        const currentSelection = handoffSelectionRef.current
+        if (!isMediaCurrent() || handoffOwnerRef.current !== ownerScope ||
+          currentSelection?.kind !== 'media' || String(currentSelection.id) !== String(mediaId)) {
+          throw new Error("The source account or selection changed. Reopen this media before transferring.")
+        }
+        return {
+          title: mediaTitle,
+          sourceItems: [{ sourceType: "media", sourceId: String(mediaId), sourceTitle: mediaTitle }]
+        }
+      }, { navigate })
+    } catch (error) {
+      if (!(error instanceof Error && error.name === "AbortError")) message.error(error instanceof Error ? error.message : "The study pack transfer could not be opened. Your source is unchanged.")
+    }
+  }, [isMediaCurrent, message, nav.selected, navigate, ownerScope, t, transferStudyPack])
 
   const handleCreateNoteWithContent = useCallback(async (noteContent: string, title: string) => {
     try {

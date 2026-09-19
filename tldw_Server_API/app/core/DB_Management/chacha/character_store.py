@@ -9,10 +9,19 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
+from tldw_Server_API.app.core.DB_Management.backends.base import (
+    DatabaseError as BackendDatabaseError,
+)
+from tldw_Server_API.app.core.DB_Management.backends.fts_translator import (
+    MAX_FTS_QUERY_LENGTH,
+)
+from tldw_Server_API.app.core.DB_Management.chacha import exemplar_normalization
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    _CHACHA_NONCRITICAL_EXCEPTIONS,
     BackendType,
     CharactersRAGDBError,
     ConflictError,
@@ -20,13 +29,8 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     InputError,
     RestoreWindowExpiredError,
     SchemaError,
-    _CHACHA_NONCRITICAL_EXCEPTIONS,
     logger,
 )
-from tldw_Server_API.app.core.DB_Management.backends.base import (
-    DatabaseError as BackendDatabaseError,
-)
-from tldw_Server_API.app.core.DB_Management.chacha import exemplar_normalization
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -2160,7 +2164,7 @@ class CharacterStore:
         limit: int = 20,
         offset: int = 0,
     ) -> tuple[list[dict[str, Any]], int]:
-        """Search exemplars for a character via FTS + structured filters."""
+        """Search literal exemplar text with structured filters and owner scope."""
         emotion_filter = None
         if emotion is not None:
             emotion_filter = self._normalize_exemplar_enum(
@@ -2197,37 +2201,23 @@ class CharacterStore:
         owner_filter, owner_params = self._exemplar_owner_filter(aliased=True)
 
         if normalized_query and self._db.backend_type == BackendType.POSTGRESQL:
-            tsquery = FTSQueryTranslator.normalize_query(normalized_query, 'postgresql')
-            if tsquery:
-                sql = """
-                    SELECT ce.*, ts_rank(ce.character_exemplars_fts_tsv, to_tsquery('english', ?)) AS rank
-                    FROM character_exemplars ce
-                    WHERE ce.character_id = ?
-                      AND ce.is_deleted = ?
-                      AND (CAST(? AS TEXT) IS NULL OR ce.emotion = ?)
-                      AND (CAST(? AS TEXT) IS NULL OR ce.scenario = ?)
-                      AND ce.character_exemplars_fts_tsv @@ to_tsquery('english', ?)
-                """
-                sql += owner_filter
-                sql += """
-                    ORDER BY rank DESC, ce.updated_at DESC
-                """
-                query_params = [tsquery] + filter_params + [tsquery]
-            else:
-                sql = """
-                    SELECT ce.*
-                    FROM character_exemplars ce
-                    WHERE ce.character_id = ?
-                      AND ce.is_deleted = ?
-                      AND (CAST(? AS TEXT) IS NULL OR ce.emotion = ?)
-                      AND (CAST(? AS TEXT) IS NULL OR ce.scenario = ?)
-                      AND ce.text ILIKE ?
-                """
-                sql += owner_filter
-                sql += """
-                    ORDER BY ce.updated_at DESC
-                """
-                query_params = filter_params + [f"%{normalized_query}%"]
+            # Persona selection passes complete user turns and source prose,
+            # not a tsquery expression. Parse punctuation as literal text.
+            plain_query = normalized_query[:MAX_FTS_QUERY_LENGTH]
+            sql = """
+                SELECT ce.*, ts_rank(ce.character_exemplars_fts_tsv, plainto_tsquery('english', ?)) AS rank
+                FROM character_exemplars ce
+                WHERE ce.character_id = ?
+                  AND ce.is_deleted = ?
+                  AND (CAST(? AS TEXT) IS NULL OR ce.emotion = ?)
+                  AND (CAST(? AS TEXT) IS NULL OR ce.scenario = ?)
+                  AND ce.character_exemplars_fts_tsv @@ plainto_tsquery('english', ?)
+            """
+            sql += owner_filter
+            sql += """
+                ORDER BY rank DESC, ce.updated_at DESC
+            """
+            query_params = [plain_query] + filter_params + [plain_query]
         elif normalized_query:
             safe_literal = normalized_query.replace('"', '""')
             safe_fts = f'"{safe_literal}"'
@@ -2262,8 +2252,24 @@ class CharacterStore:
             query_params = filter_params
 
         try:
-            cursor = self._db.execute_query(sql, (*query_params, *owner_params))
-            rows = cursor.fetchall()
+            if self._db.backend_type == BackendType.POSTGRESQL:
+                conn = self._db.get_connection()
+                operation_state = conn._operation_state
+                with operation_state.use() if operation_state is not None else nullcontext():
+                    raw_conn = conn._connection
+                    if raw_conn.info.transaction_status.name == "IDLE" and (
+                        getattr(self._db._connection_state(), "tx_depth", 0)
+                        or conn._backend._tx_depth(raw_conn)
+                    ):
+                        conn.execute("BEGIN")
+                    # A savepoint protects existing caller work; an idle
+                    # connection owns only this read's commit or rollback.
+                    with raw_conn.transaction():
+                        cursor = self._db.execute_query(sql, (*query_params, *owner_params))
+                        rows = cursor.fetchall()
+            else:
+                cursor = self._db.execute_query(sql, (*query_params, *owner_params))
+                rows = cursor.fetchall()
         except CharactersRAGDBError as exc:
             logger.error(
                 "Error searching character exemplars for character_id={} query='{}': {}",
