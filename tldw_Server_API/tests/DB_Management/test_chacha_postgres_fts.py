@@ -1,16 +1,17 @@
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from contextlib import contextmanager
 from types import SimpleNamespace
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, List, Optional
 from unittest.mock import MagicMock, call
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.chacha.character_store import CharacterStore
 from tldw_Server_API.app.core.DB_Management.chacha.keyword_store import KeywordStore
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
 class _CursorStub:
@@ -27,6 +28,7 @@ class _CursorStub:
 def _make_postgres_db() -> CharactersRAGDB:
 
     db = CharactersRAGDB.__new__(CharactersRAGDB)
+    db.client_id = "pg-test"
     db._local = SimpleNamespace(backend_ref=None)
     db._uses_shared_content_backend = False
     db._backend = MagicMock()
@@ -155,7 +157,8 @@ def test_get_flashcards_by_uuids_postgres_uses_boolean_deleted(
     assert result == []
     sql, params = db.execute_query.call_args[0]
     assert "f.deleted = FALSE" in sql
-    assert params == ("uuid-1", "uuid-2")
+    assert "f.client_id = ?" in sql
+    assert params == ("uuid-1", "uuid-2", "pg-test")
 
 
 def test_manage_link_postgres_uses_on_conflict():
@@ -197,8 +200,6 @@ def test_set_flashcard_tags_postgres_uses_on_conflict():
     db = _make_postgres_db()
     db.client_id = "pg-test"
     db._get_current_utc_timestamp_iso = lambda: "2025-01-01T00:00:00Z"  # type: ignore[assignment]
-    db.get_keyword_by_text = lambda _text: None  # type: ignore[assignment]
-    db.add_keyword = lambda _text: 7  # type: ignore[assignment]
 
     class _Cursor:
         def __init__(self, *, rows: Optional[List[Any]] = None, rowcount: int = 0):
@@ -224,6 +225,9 @@ def test_set_flashcard_tags_postgres_uses_on_conflict():
                 return _Cursor(rows=[{"id": 1}])
             if sql_upper.startswith("SELECT KEYWORD_ID FROM FLASHCARD_KEYWORDS"):
                 return _Cursor(rows=[])
+            if sql_upper.startswith("SELECT ID, DELETED FROM CHACHA_KEYWORDS"):
+                assert params == ("pg-test", "Alpha")
+                return _Cursor(rows=[{"id": 7, "deleted": False}])
             if "INSERT INTO FLASHCARD_KEYWORDS" in sql_upper:
                 return _Cursor(rowcount=1)
             if sql_upper.startswith("UPDATE FLASHCARDS SET"):
@@ -257,4 +261,5 @@ def test_search_keywords_postgres_uses_tsquery(monkeypatch: pytest.MonkeyPatch) 
     assert db.execute_query.call_count == 1
     sql, params = db.execute_query.call_args[0]
     assert "keywords_fts_tsv" in sql and "to_tsquery('english', ?)" in sql
-    assert params == ("fruit", "fruit", 5)
+    assert "k.client_id = ?" in sql
+    assert params == ("fruit", "pg-test", "fruit", 5)

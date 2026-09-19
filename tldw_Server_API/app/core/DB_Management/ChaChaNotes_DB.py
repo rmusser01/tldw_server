@@ -753,7 +753,7 @@ class CharactersRAGDB:
         db_path_str (str): String representation of the database path for SQLite connection.
     """
     _CURRENT_SCHEMA_VERSION = 68  # Schema v68 retains local keyword merge survivors
-    _POSTGRES_SCHEMA_VERSION = 70
+    _POSTGRES_SCHEMA_VERSION = 71
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
     _NOTE_TASK_V60_TABLES = (
@@ -16257,12 +16257,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         for statement in statements:
             self.backend.execute(statement, connection=conn)
 
-    def _verify_note_attachment_schema_postgres(self, conn: Any) -> None:
+    def _verify_note_attachment_schema_postgres(self, conn: Any, *, runtime: bool = False) -> None:
         """Fail closed unless the locked v59 registry catalog is canonical."""
 
         backend = self.backend
         backend.execute(
-            "LOCK TABLE notes, note_attachments IN SHARE MODE",
+            ("LOCK TABLE notes, note_attachments IN ACCESS SHARE MODE" if runtime
+             else "LOCK TABLE notes, note_attachments IN SHARE MODE"),
             connection=conn,
         )
         relation_rows = backend.execute(
@@ -16611,7 +16612,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 "Notes attachment v59 PostgreSQL registry RLS policy catalog drifted."
             )
 
-    def _verify_note_task_schema_postgres(self, conn: Any) -> None:
+    def _verify_note_task_schema_postgres(self, conn: Any, *, runtime: bool = False) -> None:
         """Verify the complete PostgreSQL v60 task graph without repairing drift."""
         backend = self.backend
         authority_relations = ("notes", *self._NOTE_TASK_V60_RELATIONS)
@@ -16619,7 +16620,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "LOCK TABLE note_task_scope_authority, notes, note_tasks, "
             "task_note_projections, task_events, "
             "task_event_read_state, note_task_reconciliation_state, task_projection_drifts "
-            "IN SHARE MODE",
+            + ("IN ACCESS SHARE MODE" if runtime else "IN SHARE MODE"),
             connection=conn,
         )
         table_rows = backend.execute(
@@ -20210,6 +20211,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     self._initialize_schema_sqlite()
         elif self.backend_type == BackendType.POSTGRESQL:
             self._initialize_schema_postgres()
+            return
         else:
             raise NotImplementedError(
                 f"Schema initialization not implemented for backend {self.backend_type}"
@@ -24878,14 +24880,47 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             logger.error("Failed rebuilding character_cards_fts: {}", exc)
             raise SchemaError(f"Failed rebuilding character_cards_fts: {exc}") from exc  # noqa: TRY003
 
+    def _postgres_schema_is_current(self, conn: Any) -> bool:
+        """Verify a completed v71+ schema without replaying migration writes.
+
+        This is a database check on every open, including a worker's first open;
+        no process-local readiness cache can hide a changed schema. Catalog-only
+        verifiers allow ordinary DML while retaining locks against RLS changes.
+        """
+        if not self.backend.table_exists('db_schema_version', connection=conn):
+            return False
+        current_version = self._get_schema_version_postgres(conn)
+        if current_version > self._POSTGRES_SCHEMA_VERSION:
+            raise SchemaError(  # noqa: TRY003
+                f"Database schema version ({current_version}) is newer than supported by code "
+                f"({self._POSTGRES_SCHEMA_VERSION})."
+            )
+        if current_version < 71 or current_version != self._POSTGRES_SCHEMA_VERSION:
+            return False
+        self._verify_note_attachment_schema_postgres(conn, runtime=True)
+        self._verify_note_task_schema_postgres(conn, runtime=True)
+        self._verify_notes_moodboard_studio_schema_postgres(conn)
+        for fts_table, source_table, _ in self._FTS_CONFIG:
+            self.backend.register_fts_table(fts_table, self._map_table_for_backend(source_table))
+        self._runtime_schema_version = current_version
+        return True
+
     def _initialize_schema_postgres(self):
         """Bootstrap or migrate the ChaCha schema on PostgreSQL."""
+        from tldw_Server_API.app.core.DB_Management.chacha.schema_bootstrap import postgres_schema_migration
 
         backend = self.backend
         target_version = self._POSTGRES_SCHEMA_VERSION
 
         with backend.transaction() as conn:
             self._configure_notes_moodboard_studio_v61_postgres_transaction(conn)
+            if self._postgres_schema_is_current(conn):
+                return
+
+        with postgres_schema_migration(backend, self._NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT) as conn:
+            self._configure_notes_moodboard_studio_v61_postgres_transaction(conn)
+            if self._postgres_schema_is_current(conn):
+                return
             schema_exists = backend.table_exists('db_schema_version', connection=conn)
 
             if not schema_exists:
@@ -25172,14 +25207,6 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             self._ensure_manuscript_phase2_sync_triggers_postgres(conn)
             self._ensure_chacha_rls_postgres(conn)
 
-            if current_version < target_version:
-                logger.warning(
-                    'ChaChaNotes PostgreSQL schema is at version {} but code expects {}. '
-                    'Some migrations may not yet be available for PostgreSQL.',
-                    current_version,
-                    target_version,
-                )
-
             try:
                 # Namespace migration: if legacy 'keywords' exists, rename to 'chacha_keywords'
                 try:
@@ -25299,6 +25326,25 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             except BackendDatabaseError as exc:
                 raise SchemaError(f"Failed to ensure PostgreSQL FTS structures: {exc}") from exc  # noqa: TRY003
 
+            self._ensure_message_metadata_table(connection=conn)
+            self._ensure_persona_live_voice_session_summaries_table(connection=conn)
+            self._ensure_conversation_settings_table(connection=conn)
+            if target_version >= 71 and current_version < 71:
+                # v71 makes the previously unversioned reconciliation above a
+                # one-time migration. Publish readiness only after all of it
+                # succeeds in this transaction, including the auxiliary tables.
+                self._set_schema_version_postgres(conn, 71)
+                self._runtime_schema_version = 71
+                current_version = 71
+
+            if current_version < target_version:
+                logger.warning(
+                    'ChaChaNotes PostgreSQL schema is at version {} but code expects {}. '
+                    'Some migrations may not yet be available for PostgreSQL.',
+                    current_version,
+                    target_version,
+                )
+
     def _ensure_postgres_fts(self, conn) -> None:
         """Ensure PostgreSQL full-text search structures exist for ChaCha entities."""
 
@@ -25384,7 +25430,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     # ----------------------
     # Message metadata (tool calls)
     # ----------------------
-    def _ensure_message_metadata_table(self) -> None:
+    def _ensure_message_metadata_table(self, *, connection: Any | None = None) -> None:
         """Ensure the message_metadata table exists for the active backend."""
         if self.backend_type == BackendType.SQLITE:
             self.execute_query(
@@ -25410,7 +25456,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                   extra_json TEXT,
                   last_modified TIMESTAMP NOT NULL DEFAULT NOW()
                 )
-                """
+                """,
+                connection=connection,
             )
             return
 

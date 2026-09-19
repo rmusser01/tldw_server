@@ -1329,11 +1329,7 @@ class PostgreSQLBackend(DatabaseBackend):
             """)
 
             # Record the mapping for fts_search when table_name != source_table.
-            with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
-                self._fts_table_map[table_name] = {
-                    "source_table": source_table,
-                    "fts_column": fts_column,
-                }
+            self.register_fts_table(table_name, source_table)
 
             if not external_conn:
                 conn.commit()
@@ -1346,6 +1342,13 @@ class PostgreSQLBackend(DatabaseBackend):
         finally:
             if not external_conn:
                 self.get_pool().return_connection(conn)
+
+    def register_fts_table(self, table_name: str, source_table: str) -> None:
+        """Bind an existing FTS alias on this backend without rebuilding its schema."""
+        self._fts_table_map[table_name] = {
+            "source_table": source_table,
+            "fts_column": f"{table_name}_tsv",
+        }
 
     def fts_search(
         self,
