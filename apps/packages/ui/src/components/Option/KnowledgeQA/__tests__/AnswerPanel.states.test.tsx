@@ -774,22 +774,62 @@ describe("AnswerPanel state guardrails", () => {
     expect(state.scrollToSource).toHaveBeenCalledWith(0)
   })
 
-  it("shows staged loading text with elapsed seconds", () => {
+  it.each(["fast", "balanced", "thorough", "custom"] as const)(
+    "keeps %s waiting neutral while elapsed time passes stage thresholds",
+    (preset) => {
+      vi.useFakeTimers()
+      state.isSearching = true
+      state.preset = preset
+
+      const { container } = render(<AnswerPanel />)
+      for (const [seconds, advance] of [[0, 0], [5, 5], [10, 5], [20, 10], [120, 100]]) {
+        if (seconds > 0) {
+          act(() => { vi.advanceTimersByTime(advance * 1000) })
+          expect(screen.getByText(`(${seconds}s)`)).toBeInTheDocument()
+        }
+        expect(container).not.toHaveTextContent(
+          /Searching documents|Reranking results|Generating answer|Verifying citations/
+        )
+        expect(screen.getByText(/Working on your question/)).toBeInTheDocument()
+        expect(container).not.toHaveTextContent(/completes|up to \d+ seconds/)
+      }
+    }
+  )
+
+  it("clears waiting after cancellation and restarts elapsed time for a new search", () => {
     vi.useFakeTimers()
     state.isSearching = true
-    state.preset = "thorough"
-
-    render(<AnswerPanel />)
-    expect(screen.getByText(/Searching documents/i)).toBeInTheDocument()
-    expect(
-      screen.getByText(/Deep preset may take up to 30 seconds/i)
-    ).toBeInTheDocument()
-
+    const { container, rerender } = render(<AnswerPanel />)
     act(() => {
-      vi.advanceTimersByTime(6000)
+      vi.advanceTimersByTime(120_000)
     })
-    expect(screen.getByText(/Reranking results/i)).toBeInTheDocument()
-    expect(screen.getByText(/\(6s\)/)).toBeInTheDocument()
+    expect(screen.getByText("(120s)")).toBeInTheDocument()
+
+    state.isSearching = false
+    rerender(<AnswerPanel />)
+    expect(container).toBeEmptyDOMElement()
+
+    state.isSearching = true
+    rerender(<AnswerPanel />)
+    expect(screen.getByText(/Working on your question/)).toBeInTheDocument()
+    expect(screen.queryByText("(120s)")).not.toBeInTheDocument()
+    act(() => { vi.advanceTimersByTime(1000) })
+    expect(screen.getByText("(1s)")).toBeInTheDocument()
+  })
+
+  it("replaces waiting with the completed answer after a long search", () => {
+    vi.useFakeTimers()
+    state.isSearching = true
+    const { rerender } = render(<AnswerPanel />)
+    act(() => { vi.advanceTimersByTime(120_000) })
+
+    state.isSearching = false
+    state.answer = "The observatory director is Dr. Mira Vale."
+    rerender(<AnswerPanel />)
+
+    expect(screen.getByText(state.answer)).toBeInTheDocument()
+    expect(screen.queryByText("(120s)")).not.toBeInTheDocument()
+    expect(screen.queryByText(/Working on your question/)).not.toBeInTheDocument()
   })
 
   it("classifies timeout errors with targeted guidance", () => {

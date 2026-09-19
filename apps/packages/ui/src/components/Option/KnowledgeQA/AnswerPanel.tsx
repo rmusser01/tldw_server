@@ -190,7 +190,6 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
     messages = [],
     setSettingsPanelOpen,
     updateSetting,
-    preset,
     settings,
     rerunWithTokenLimit,
     retrySync,
@@ -625,26 +624,6 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
     }
   }
 
-  const loadingStageLabel = useMemo(() => {
-    if (loadingElapsedSeconds < 5) return "Searching documents..."
-    if (loadingElapsedSeconds < 10) return "Reranking results..."
-    if (loadingElapsedSeconds < 20) return "Generating answer..."
-    return "Verifying citations..."
-  }, [loadingElapsedSeconds])
-
-  const presetLatencyHint = useMemo(() => {
-    if (preset === "fast") {
-      return "Fast preset usually completes in a few seconds."
-    }
-    if (preset === "balanced") {
-      return "Balanced preset typically completes within about 10 seconds."
-    }
-    if (preset === "thorough") {
-      return "Deep preset may take up to 30 seconds."
-    }
-    return "Custom preset timing varies with your settings."
-  }, [preset])
-
   // Loading state
   if (isSearching && !normalizedAnswer) {
     return (
@@ -653,13 +632,13 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
           <Loader2 className="w-5 h-5 animate-spin text-primary" />
           <div>
             <p className="font-medium">
-              {loadingStageLabel}{" "}
+              Working on your question...{" "}
               {loadingElapsedSeconds > 0 && (
                 <span className="text-text-muted">({loadingElapsedSeconds}s)</span>
               )}
             </p>
             <p className="text-sm text-text-muted">
-              {presetLatencyHint}
+              Response time depends on your sources and model readiness.
             </p>
           </div>
         </div>
