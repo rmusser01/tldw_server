@@ -298,8 +298,8 @@ vi.mock("@/store/model", () => ({
 }))
 
 vi.mock("@/store/option", () => ({
-  useStoreMessageOption: (selector?: (state: Record<string, unknown>) => unknown) =>
-    selector ? selector(storeState) : storeState
+  useStoreMessageOption: Object.assign((selector?: (state: Record<string, unknown>) => unknown) =>
+    selector ? selector(storeState) : storeState, { getState: () => storeState })
 }))
 
 vi.mock("@plasmohq/storage/hook", () => ({

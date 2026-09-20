@@ -2609,8 +2609,13 @@ export class TldwApiClientBase {
     })
   }
 
-  async getDefaultCharacterPreference(): Promise<string | null> {
-    const profile = await this.getCurrentUserProfile({
+  async getDefaultCharacterPreference(options?: ScopedRequestOptions): Promise<string | null> {
+    const profile = options?.requestScope ? await bgRequest<{ preferences?: Record<string, unknown> }>({
+      path: "/api/v1/users/me/profile?sections=preferences",
+      method: "GET",
+      ...requestScopeFields(options.requestScope),
+      abortSignal: options.signal
+    }) : await this.getCurrentUserProfile({
       sections: "preferences"
     })
     const raw = profile?.preferences?.[DEFAULT_CHARACTER_PROFILE_PREFERENCE_KEY]
@@ -2628,9 +2633,18 @@ export class TldwApiClientBase {
   }
 
   async setDefaultCharacterPreference(
-    characterId: string | null
+    characterId: string | null,
+    options?: ScopedRequestOptions
   ): Promise<UserProfileUpdateResponse> {
     const normalizedCharacterId = normalizeDefaultCharacterPreferenceId(characterId)
+    if (options?.requestScope) {
+      return bgRequest<UserProfileUpdateResponse>({
+        path: "/api/v1/users/me/profile", method: "PATCH",
+        ...requestScopeFields(options.requestScope),
+        abortSignal: options.signal,
+        body: { updates: [{ key: DEFAULT_CHARACTER_PROFILE_PREFERENCE_KEY, value: normalizedCharacterId }] }
+      })
+    }
     return await this.updateCurrentUserProfile({
       updates: [
         {

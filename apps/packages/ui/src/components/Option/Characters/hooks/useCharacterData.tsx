@@ -76,6 +76,7 @@ export interface UseCharacterDataDeps {
   defaultCharacterSelection: any
   setDefaultCharacterSelection: (value: any) => Promise<void> | void
   defaultCharacterId: string | undefined
+  defaultCharacterPreference?: DefaultCharacterPreferenceQueryResult
 }
 
 export function useCharacterData(deps: UseCharacterDataDeps) {
@@ -389,16 +390,7 @@ export function useCharacterData(deps: UseCharacterDataDeps) {
   })
 
   // --- Default character preference ---
-  const { data: defaultCharacterPreference } = useQuery<DefaultCharacterPreferenceQueryResult>({
-    queryKey: ["tldw:defaultCharacterPreference"],
-    queryFn: async () => {
-      await tldwClient.initialize()
-      const defaultCharacterId = await tldwClient.getDefaultCharacterPreference()
-      return { defaultCharacterId }
-    },
-    staleTime: 60 * 1000,
-    throwOnError: false
-  })
+  const defaultCharacterPreference = deps.defaultCharacterPreference
 
   const serverDefaultCharacterId = defaultCharacterPreference?.defaultCharacterId
   const effectiveDefaultCharacterId =

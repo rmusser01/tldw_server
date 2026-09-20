@@ -24,7 +24,11 @@ import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant
 import { useSelectedAssistant } from "@/hooks/useSelectedAssistant";
 import type { AssistantSelection } from "@/types/assistant-selection";
 import type { Character } from "@/types/character";
-import { useSelectedCharacter } from "@/hooks/useSelectedCharacter";
+import {
+  assistantSelectionToCharacter,
+  characterToAssistantSelection,
+  getAssistantSelectionMode,
+} from "@/types/assistant-selection";
 import { useSetting } from "@/hooks/useSetting";
 import { CONTEXT_FILE_SIZE_MB_SETTING } from "@/services/settings/ui-settings";
 import {
@@ -213,9 +217,21 @@ export const useMessageOption = (
   const currentChatModelSettings = useStoreChatModelSettings();
   const { selectedModel, setSelectedModel, selectedModelIsLoading } =
     useSelectedModel();
-  const [selectedCharacter, setSelectedCharacter] =
-    useSelectedCharacter<Character | null>(null);
-  const [selectedAssistant, setSelectedAssistant] = useSelectedAssistant(null);
+  const [selectedAssistant, setSelectedAssistant, assistantSelectionMeta] = useSelectedAssistant(null);
+  const selectedCharacter = React.useMemo(
+    () => assistantSelectionToCharacter<Character>(selectedAssistant),
+    [selectedAssistant],
+  );
+  const selectedCharacterMode = getAssistantSelectionMode(selectedAssistant);
+  const setSelectedCharacter = React.useCallback(async (next: Character | null) => {
+    const selection = characterToAssistantSelection(
+      next as (Character & Record<string, unknown>) | null,
+    );
+    if (selection && selectedCharacterMode && !getAssistantSelectionMode(selection)) {
+      selection.metadata = { ...selection.metadata, selectionMode: selectedCharacterMode };
+    }
+    await setSelectedAssistant(selection);
+  }, [selectedCharacterMode, setSelectedAssistant]);
   const [defaultInternetSearchOn] = useStorage(
     "defaultInternetSearchOn",
     false,
@@ -661,6 +677,7 @@ export const useMessageOption = (
     setCompareMaxModels,
     selectedCharacter,
     setSelectedCharacter,
+    assistantSelectionMeta,
     selectedAssistant: effectiveSelectedAssistant,
     selectedAssistantSource,
     setSelectedAssistant,

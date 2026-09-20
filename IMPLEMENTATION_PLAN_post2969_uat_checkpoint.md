@@ -4,7 +4,7 @@ Backlog: TASK13260.270. Branch: `codex/uat295-postgres-notes-20260919`.
 
 ## Stage 1: Finish targeted acceptance
 **Goal**: Close remaining application findings, retaining UAT261 by user direction.
-**Success Criteria**: UAT290 normal/Character tab, draft, recovery and account controls pass; storage-failure review finding repaired.
+**Success Criteria**: UAT290 normal/Character tab, draft, recovery and account controls pass; UAT332 selected/default Character account leaks (including UAT334) are repaired and verified.
 **Tests**: Causal session-storage regressions, adjacent composer/account tests, immutable native PostgreSQL acceptance.
 **Status**: In Progress
 
@@ -12,7 +12,7 @@ Backlog: TASK13260.270. Branch: `codex/uat295-postgres-notes-20260919`.
 **Goal**: Review and validate the complete change against latest dev.
 **Success Criteria**: Affected frontend/backend tests pass with real PostgreSQL; no new static or Bandit findings; independent review clear.
 **Tests**: Changed and adjacent test suites; ESLint/TypeScript baseline comparison; touched Python Bandit.
-**Status**: Not Started
+**Status**: In Progress
 
 ## Stage 3: Publish and review
 **Goal**: Publish the checkpoint PR and address Qodo/CI feedback.

@@ -1169,6 +1169,7 @@ describe("Home source handoff through the real Chat and RAG send boundary", () =
     sourceFlow.config.serverUrl = "https://handoff.test"
     sourceFlow.config.apiKey = "synthetic-handoff"
     localStorage.clear()
+    sessionStorage.clear()
     useStoreMessageOption.setState(useStoreMessageOption.getInitialState(), true)
     useStoreMessageOption.setState({ selectedModel: "openai:gpt-4o-mini", temporaryChat: false, fileRetrievalEnabled: false })
     usePlaygroundSessionStore.getState().clearSession()
@@ -1231,6 +1232,7 @@ describe("Home source handoff through the real Chat and RAG send boundary", () =
       useStoreMessageOption.setState(useStoreMessageOption.getInitialState(), true)
       useStoreMessageOption.setState({ selectedModel: "openai:gpt-4o-mini", temporaryChat: false })
       usePlaygroundSessionStore.setState(usePlaygroundSessionStore.getInitialState(), true)
+      sessionStorage.clear()
       localStorage.setItem("tldw-playground-session", serialized)
       await usePlaygroundSessionStore.persist.rehydrate()
     })
@@ -1508,6 +1510,7 @@ describe("Home source handoff through the real Chat and RAG send boundary", () =
     const persisted = JSON.parse(localStorage.getItem("tldw-playground-session")!)
     persisted.state.chatMode = "rag"
     persisted.state.ragMediaIds = [7]
+    sessionStorage.clear()
     localStorage.setItem("tldw-playground-session", JSON.stringify(persisted))
     let hydrated = false
     const unsubscribe = usePlaygroundSessionStore.persist.onFinishHydration(() => { hydrated = true })

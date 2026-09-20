@@ -48,6 +48,7 @@ const mocks = vi.hoisted(() => ({
   mirrorHistories: new Map<string, Record<string, unknown>>(),
   withLoader: false,
   selectionRevision: 0,
+  assistantLoading: false,
   serverRows: new Map<
     string,
     Array<{ id?: string; role: string; content: string; metadata_extra?: Record<string, unknown>; images?: string[]; version?: number }>
@@ -163,7 +164,7 @@ vi.mock("@/db/dexie/schema", () => ({ db: {
 } }))
 vi.mock("@/hooks/useSelectedAssistant", () => ({
   getSelectedAssistantOperationRevision: () => mocks.selectionRevision,
-  useSelectedAssistant: () => [null, setLoaderSelection]
+  useSelectedAssistant: () => [null, setLoaderSelection, { isLoading: mocks.assistantLoading }]
 }))
 function setLoaderSelection() { mocks.selectionRevision++ }
 
@@ -795,6 +796,7 @@ describe("saved normal Chat pipeline with autosave", () => {
   })
 
   beforeEach(() => {
+    mocks.assistantLoading = false
     mocks.capability = true
     vi.clearAllMocks()
     mocks.rows.length = 0
@@ -1577,6 +1579,22 @@ describe("saved normal Chat pipeline with autosave", () => {
     })
     expect(result.current.state.history.map(row => row.content)).toEqual(["Question", "<think>Still working</think>"])
     expect(mocks.addChatMessage).not.toHaveBeenCalled()
+  })
+
+  it("waits for the selection account before loading a saved chat", async () => {
+    mocks.withLoader = true
+    mocks.assistantLoading = true
+    mocks.serverRows.set("owned-chat", [{ id: "owned-user", role: "user", content: "Owned question" }])
+    useStoreMessageOption.setState({ serverChatId: "owned-chat" })
+    const view = renderHook(() => useServerChatLoader({
+      ensureServerChatHistoryId: mocks.ensureHistory, notification: loaderNotification, t: loaderTranslate
+    }))
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 250)) })
+    expect(useStoreMessageOption.getState().messages).toEqual([])
+    expect(mocks.getChat).not.toHaveBeenCalled()
+    mocks.assistantLoading = false
+    view.rerender()
+    await waitFor(() => expect(useStoreMessageOption.getState().messages[0]?.message).toBe("Owned question"))
   })
 
   it("acknowledges both saved turns before backlink eligibility and reload without consuming an identical unsent draft", async () => {

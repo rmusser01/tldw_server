@@ -138,7 +138,8 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: tldwClientMock
 }))
 
-vi.mock("@/services/service-prompts", () => ({
+vi.mock("@/services/service-prompts", async importOriginal => ({
+  ...await importOriginal<typeof import("@/services/service-prompts")>(),
   loadServicePromptSnapshot: async (_ids: string[], { signal }: { signal: AbortSignal }) => ({
     requestScope: { config: { serverUrl: "https://characters.test", authMode: "multi-user" }, userId: 1 },
     scopeSignal: signal, release: () => undefined

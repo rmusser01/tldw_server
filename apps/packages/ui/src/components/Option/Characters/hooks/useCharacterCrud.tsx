@@ -92,7 +92,8 @@ export interface UseCharacterCrudDeps {
   data: any[]
   effectiveDefaultCharacterId: string | undefined
   defaultCharacterSelection: any
-  setDefaultCharacterSelection: (value: any) => Promise<void> | void
+  setDefaultCharacterSelection: (value: any, options?: { localOnly?: boolean }) => Promise<void> | void
+  writeDefaultCharacterPreference: (id: string | null) => Promise<unknown>
   activeChatModel: string | null
   availableChatModels: Array<{ model?: unknown; name?: unknown }> | null | undefined
   setChatIntentBlocker: (value: CharacterChatIntentBlocker | null) => void
@@ -131,6 +132,7 @@ export function useCharacterCrud(deps: UseCharacterCrudDeps) {
     data,
     effectiveDefaultCharacterId,
     setDefaultCharacterSelection,
+    writeDefaultCharacterPreference,
     activeChatModel,
     availableChatModels,
     setChatIntentBlocker
@@ -846,12 +848,12 @@ export function useCharacterCrud(deps: UseCharacterCrudDeps) {
 
         let serverWriteError: any = null
         try {
-          await tldwClient.setDefaultCharacterPreference(nextDefaultId)
+          await writeDefaultCharacterPreference(nextDefaultId)
         } catch (serverError) {
           serverWriteError = serverError
         }
 
-        await setDefaultCharacterSelection(nextSelection)
+        await setDefaultCharacterSelection(nextSelection, { localOnly: Boolean(serverWriteError) })
 
         if (serverWriteError) {
           notification.warning({
@@ -896,19 +898,19 @@ export function useCharacterCrud(deps: UseCharacterCrudDeps) {
         })
       }
     },
-    [notification, setDefaultCharacterSelection, t]
+    [notification, setDefaultCharacterSelection, writeDefaultCharacterPreference, t]
   )
 
   const handleClearDefaultCharacter = React.useCallback(async () => {
     try {
       let serverWriteError: any = null
       try {
-        await tldwClient.setDefaultCharacterPreference(null)
+        await writeDefaultCharacterPreference(null)
       } catch (serverError) {
         serverWriteError = serverError
       }
 
-      await setDefaultCharacterSelection(null)
+      await setDefaultCharacterSelection(null, { localOnly: Boolean(serverWriteError) })
 
       if (serverWriteError) {
         notification.warning({
@@ -948,7 +950,7 @@ export function useCharacterCrud(deps: UseCharacterCrudDeps) {
             })
       })
     }
-  }, [notification, setDefaultCharacterSelection, t])
+  }, [notification, setDefaultCharacterSelection, writeDefaultCharacterPreference, t])
 
   // --- Favorites ---
   const isCharacterFavoriteRecord = React.useCallback(
