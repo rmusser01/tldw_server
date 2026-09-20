@@ -1,10 +1,12 @@
 # llm_providers.py
 import asyncio
+import hashlib
 import json
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import partial
+from time import monotonic as _vision_cache_time
 from typing import Any, Optional
 from urllib.parse import urljoin, urlparse
 
@@ -24,8 +26,8 @@ from tldw_Server_API.app.core.config import load_comprehensive_config
 from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_config_option_names,
     custom_openai_provider_name,
-    iter_custom_openai_provider_numbers,
     iter_custom_openai_provider_names,
+    iter_custom_openai_provider_numbers,
 )
 from tldw_Server_API.app.core.exceptions import (
     EgressPolicyError,
@@ -1034,10 +1036,70 @@ LOCAL_MODEL_DISCOVERY_TIMEOUT = 1.5  # seconds
 # is kept short: it is discovery, and a miss degrades to "no models found".
 LOCAL_MODEL_DISCOVERY_TTL = 300  # seconds
 _LOCAL_MODEL_CACHE: dict[str, tuple[float, ModelDiscoveryResult]] = {}
+_LLAMACPP_VISION_CACHE: dict[str, tuple[float, dict[str, bool]]] = {}
 # Upper bound on simultaneous discovery probes for one endpoint.
 _MODEL_DISCOVERY_MAX_PARALLEL_PROBES = 6
 OPENROUTER_MODEL_DISCOVERY_TIMEOUT = 5.0  # seconds
 _TRUE_VALUES = {"1", "true", "yes", "on"}
+
+
+def _discover_llamacpp_vision(
+    endpoint_url: str,
+    api_key: Optional[str],
+    *,
+    configured_endpoint: ConfiguredEndpointScope,
+) -> dict[str, bool]:
+    """Confirm vision only for identities reported by the configured llama.cpp server.
+
+    Keep one short-lived snapshot, including failures, to avoid delaying every
+    catalog request when /props is unavailable. Endpoint or credential changes
+    invalidate it. This optional capability probe does not change readiness.
+    """
+    parsed = urlparse(endpoint_url)
+    path = parsed.path.rstrip("/")
+    for suffix in ("/v1/chat/completions", "/chat/completions", "/completion", "/v1"):
+        if path.endswith(suffix):
+            path = path[:-len(suffix)]
+            break
+    props_url = parsed._replace(path=f"{path}/props", params="", query="", fragment="").geturl()
+    cache_key = hashlib.sha256(json.dumps([props_url, api_key]).encode()).hexdigest()
+    now = _vision_cache_time()
+    cached = _LLAMACPP_VISION_CACHE.get(cache_key)
+    if cached is not None and now - cached[0] < 30:
+        return cached[1]
+
+    confirmed: dict[str, bool] = {}
+    headers = {"Accept": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    try:
+        response = _http_fetch(
+            method="GET",
+            url=props_url,
+            headers=headers,
+            timeout=LOCAL_MODEL_DISCOVERY_TIMEOUT,
+            retry=_RetryPolicy(attempts=1),
+            allow_redirects=False,
+            configured_endpoint=configured_endpoint,
+            sensitive_observability=True,
+        )
+        try:
+            if response.status_code == 200:
+                payload = response.json()
+                modalities = payload.get("modalities") if isinstance(payload, dict) else None
+                vision = modalities.get("vision") if isinstance(modalities, dict) else None
+                if isinstance(vision, bool):
+                    for field in ("model_alias", "model_path"):
+                        identity = payload.get(field)
+                        if isinstance(identity, str) and identity.strip():
+                            confirmed[identity.strip()] = vision
+        finally:
+            response.close()
+    except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
+        logger.debug("External llama.cpp capability discovery unavailable")
+    _LLAMACPP_VISION_CACHE.clear()
+    _LLAMACPP_VISION_CACHE[cache_key] = (now, confirmed)
+    return confirmed
 
 
 def _dedupe_preserve_order(values: list[str]) -> list[str]:
@@ -1920,6 +1982,28 @@ def get_configured_providers(
                     models = models + extras
             # Build models and metadata
             models_info = [get_model_metadata(provider_name, m) for m in models]
+            if (
+                provider_name == "llama"
+                and models_info
+                and endpoint_url
+                and endpoint_scope is not None
+                and endpoint_policy is not None
+                and endpoint_policy.allowed
+                and provider_readiness.get("provider_enabled") is not False
+            ):
+                external_vision = _discover_llamacpp_vision(
+                    endpoint_url, api_key_value, configured_endpoint=endpoint_scope,
+                )
+                for model_info in models_info:
+                    vision = external_vision.get(model_info["name"])
+                    if vision is not None:
+                        model_info["capabilities"] = {**model_info["capabilities"], "vision": vision}
+                        model_info["vision_support"] = vision
+                        inputs = [m for m in model_info["modalities"]["input"] if m != "image"]
+                        model_info["modalities"] = {
+                            **model_info["modalities"],
+                            "input": [*inputs, "image"] if vision else inputs,
+                        }
             if not include_deprecated:
                 # Filter out deprecated models by default
                 filtered = [mi for mi in models_info if not mi.get('deprecated', False)]
