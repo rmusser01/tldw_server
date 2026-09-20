@@ -5,6 +5,7 @@
 import { hasLowMeasuredRelevance } from "./sourceListUtils"
 
 import React, { type ReactNode, useEffect, useMemo, useRef, useState } from "react"
+import { useTranslation } from "react-i18next"
 import { Sparkles, AlertCircle, Loader2, ThumbsUp, ThumbsDown } from "lucide-react"
 import { useKnowledgeQA } from "./KnowledgeQAProvider"
 import { cn } from "@/libs/utils"
@@ -172,6 +173,7 @@ function sourceHealthNeedsAttention(
 }
 
 export function AnswerPanel({ className }: AnswerPanelProps) {
+  const { t } = useTranslation(["knowledge", "sidepanel"])
   const {
     answer,
     answerTrustState = "unknown_trust",
@@ -282,8 +284,9 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
         sourceHealthCaveatCount,
         sourceStatus: searchDetails?.sourceStatus,
         trustState: answerTrustState,
-      }),
+      }, t),
     [
+      t,
       answerTrustState,
       citations.length,
       results.length,
@@ -634,13 +637,15 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
           <Loader2 className="w-5 h-5 animate-spin text-primary" />
           <div>
             <p className="font-medium">
-              Working on your question...{" "}
+              {t("answerPanel.loading", { defaultValue: "Working on your question..." })}{" "}
               {loadingElapsedSeconds > 0 && (
                 <span className="text-text-muted">({loadingElapsedSeconds}s)</span>
               )}
             </p>
             <p className="text-sm text-text-muted">
-              Response time depends on your sources and model readiness.
+              {t("answerPanel.modelReadiness", {
+                defaultValue: "Response time depends on your sources and model readiness.",
+              })}
             </p>
           </div>
         </div>

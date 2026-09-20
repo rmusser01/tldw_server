@@ -6,7 +6,7 @@
 
 - **Qodo review:** All 14 review findings have verified fixes or an accepted disposition in the [review disposition ledger](PR2967_QODO_REVIEW_2026_09_18.md), under TASK13260.219.11–13. All 14 review threads are resolved and Qodo reports zero open findings. Final hosted CI passed before the verified merge. This review does not replace the pending fresh UAT matrix.
 
-- **Current repair gate:** 339 UAT findings: 334 verified; 5 open (261, 334, 336, 338, 339). The frozen post-merge four-cell matrix completed with failures. Checkpoint [PR2969](https://github.com/rmusser01/tldw_server/pull/2969) merged normally into dev at `1dfdd819b6` after all seven required gates passed, all 12 Qodo threads were resolved, and the requester supplied the Change summary. Follow-up branch `codex/uat295-postgres-notes-20260919` starts from that merge. UAT299 and UAT319/321–323 now pass targeted SQLite/PostgreSQL acceptance, including owner/Bob isolation and controlled source-failure disclosure. Remaining repairs precede another full matrix. Generated Playwright evidence remains local and excluded. See the [checkpoint review](PR2969_CHECKPOINT_REVIEW_2026_09_19.md) and [post-merge matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_18.md).
+- **Current repair gate:** 345 UAT findings: 343 verified; 2 open (261, 345). The frozen post-merge four-cell matrix completed with failures. Checkpoint [PR2969](https://github.com/rmusser01/tldw_server/pull/2969) merged normally into dev at `1dfdd819b6` after all seven required gates passed, all 12 Qodo threads were resolved, and the requester supplied the Change summary. Follow-up branch `codex/uat295-postgres-notes-20260919` starts from that merge. UAT299 and UAT319/321–323 now pass targeted SQLite/PostgreSQL acceptance, including owner/Bob isolation and controlled source-failure disclosure. Remaining repairs precede another full matrix. Generated Playwright evidence remains local and excluded. See the [checkpoint review](PR2969_CHECKPOINT_REVIEW_2026_09_19.md) and [post-merge matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_18.md).
 
 - **Historical frozen-run findings:246 total —230 previously verified,16 new unresolved (231–246).** The frozen48-row execution is complete with product source unchanged;16new findings await repair/disposition. SQLite multi-user natural session expiry passes; new241 loses source content in Media-to-Chat,242 uses plural wording for one Due review, and243 leaves Character setup visible after an ordinary Chat completion. Existing PostgreSQL RLS failure238 and generation timeout234 remain open.
 
@@ -3854,7 +3854,7 @@ TASK13260.272 moves the existing fixed-table teardown into the common historical
 
 ## UAT334 — P2: default Character fallback and preference cache cross account boundaries
 
-- Status: open; TASK13260.273. UAT332 review traced global defaultCharacterSelection into both Playground and Sidepanel bootstrap while the server preference is unresolved. Static preference query keys can also retain another account result. Waiting for the selection owner alone does not prevent adoption of that global default.
+- Status: verified; TASK13260.273 Done. UAT332 review traced global defaultCharacterSelection into both Playground and Sidepanel bootstrap while the server preference is unresolved. Static preference query keys can also retain another account result. Waiting for the selection owner alone does not prevent adoption of that global default.
 - Preserve the documented same-owner local fallback when a profile preference write fails, but scope its storage, writes and preference queries to the verified owner. Reject unowned legacy payloads. Focused regressions, independent review and native PostgreSQL account acceptance remain required.
 
 ## UAT335 — verified: baseline failures in expanded frontend checks
@@ -3883,7 +3883,7 @@ Follow-up review confirms self-profile GET/PATCH also lack the expected-user dep
 
 ## UAT336 — P1: PostgreSQL profile preference writes wait on their own schema locks
 
-- Status: open; TASK13260.275.
+- Status: verified; TASK13260.275 Done.
 - Reproduction: authenticated PATCH /api/v1/users/me/profile setting preferences.chat.default_character_id fails after about sixty seconds on each fresh official isolated PostgreSQL database. All four attempted account-scope cases fail in preference setup, not their scope assertions.
 - Cause: ProfileCommandService reads the profile version on its active write transaction; UserProfileOverridesRepo.ensure_tables then opens another transaction and reruns AuthNZ bootstrap DDL, including unconditional ALTER TABLE users operations. That DDL waits for the first transaction, which is awaiting readiness.
 - Repair in progress: reuse the existing read-only PostgreSQL candidate-schema validator for runtime readiness, retaining bootstrap ownership of migrations and sanitized fail-closed errors. Real PostgreSQL set/clear, account guard controls, SQLite compatibility and independent review remain required.
@@ -3911,7 +3911,38 @@ Final checkpoint follow-up verification:99transport tests plus10default privacy 
 
 ## UAT338/339 — PR2970 CI test-boundary and shard coverage failures
 
-- Status: fixes verified locally; hosted recheck pending; TASK13260.270.1.
+- Status: verified locally and on GitHub at a80d28d9f6; TASK13260.270.1 Done. HTTP patch, shard coverage and pre-commit checks pass.
 - UAT338: line-based HTTP patch guard flags two provider-readiness fixtures that construct httpx.Response on the same line as patching the application adapter. The library itself is not patched. Separate response construction from the adapter patch; preserve guard and behavioral assertions. Pre-commit failed for this same guard.
 - UAT339: new Services/test_main_lifespan_cancellation.py was absent from CI shards. Add it beside existing lifecycle tests in all five matching matrices; no ignore or skip.
 - Both exact guard commands now pass (806shards,0newuncovered); affected52tests pass49.43s; Ruff clean; testBandit0nonassertfindings. PR2970 is open against latestdev1dfdd819b6; generatedcaptures remain excluded.
+
+## UAT340–344 — PR2970 Qodo review findings
+
+- Status: verified; parent TASK13260.270.2; review posted 2026-09-20. Independent review clear; PR replies/resolution pending commit.
+- UAT340 (P1): API usage attribution ranks inactive organization memberships. Verify active-membership policy and add SQLite/real PostgreSQL regression before correcting the CTE. Qodo4056423752.
+- UAT341 (P3): Knowledge QA loading and model-readiness notices bypass translations. Qodo4056423745.
+- UAT342 (P3): cancellation label, accessibility announcement and retained-source notice bypass translations. Qodo4056423746.
+- UAT343 (P3): source health/search summary templates bypass translations. Qodo4056423748.
+- UAT344 (P2): changed Chat search/metadata SQL belongs in DB_Management; preserve PostgreSQL owner filtering, bound parameters and existing execution/connection behavior. Qodo4056423750.
+- Three bounded repair domains run independently; regression evidence and review disposition will be recorded here.
+
+## UAT345 — PR2970 API contract fingerprint drift
+
+- Status: open; TASK13260.270.3. Hosted backend-required fails OpenAPI contract drift at a80d28d9f6, with unchanged2097paths/3207schemas. Investigate exact structure before regenerating API contract/types. This is tracked separately from the now-passing HTTP/shard/pre-commit guards.
+
+### UAT334/336 — native PostgreSQL acceptance complete
+
+Frozen55313054f9 native pg-multi run uat334-native-20260920 passes Alice default4 set200/reloadGET200, Bob empty preference and no Alice card/draft, Bob default6 set200/reloadGET200, Alice re-login selecting only default4, Alice clear200/null on reload, and Bob re-login retaining default6. Stored defaults are owner scoped with localOnlyfalse. Current-page console0errors. No application source changed while the apps ran. Both tasks are Done.
+
+Owned browser/API/frontend stopped and ports18833/18913 released; official fixture holder exited0, leaving the shared cluster available. Cleanup initially copied the operator configuration backup to the stopped source archive instead of the runtime configuration. The parity audit caught that mistake; runtime configuration was restored byte-for-byte and the source file restored from frozen55313054f9. Final24990source entries have no mismatches. The failed and corrected audits remain in ignored .tmp/uat334-native; no captures are included in the PR.
+
+### UAT340–344 — reviewed regression closure
+
+- UAT340: normalized active membership filtering precedes ranking. Twelve causal failures across SQLite/real PostgreSQL become45passing billing tests with0skips. Undated membership and deterministic primary-org behavior stay intact.
+- UAT341–343: existing i18next/ICU paths now render loading/readiness, cancellation visual/live text, retained-source notices and parameterized search/failure summaries. Eight causal translated-render failures become82passing tests across5files. Independent reviewer reran77changed-suite tests and checked13locale values against the public mirror. TypeScript remains93existing diagnostics; touched ESLint passes.
+- UAT344: DB_Management owns the two semantic Chat query helpers; existing executor retains adapter/path fallback, owner parameters and connection behavior. Three missing-helper failures become green. Complete affected SQLite/real PostgreSQL run84passed/0skipped, plus3path-fallback/production-gate controls.
+- Production Bandit reports0findings in changed billing/RAG/helper code. Test scans retain ordinary pytest assertions and pre-existing dummy-credential fixtures only. Independent integration review reports no actionable findings.
+
+### UAT345 — exact contract repair verified locally
+
+CI-matched Python3.12 export reproduces hosted hash d98e55a945e8; fresh dev export reproduces checked-in6dcb5357a7a6. The entire structural delta is optional X-TLDW-Expected-User-ID on self-profile GET and PATCH. Regenerated fingerprint and ignored frontend API types pass the exact drift check. Counts remain2097paths/3207schemas. Hosted recheck remains outstanding. The older root Python3.11 export was not used because its installed dependencies generated a different schema count.

@@ -77,9 +77,9 @@ class AuthnzUsageRepo:
         """Sum the UTC daily rollup, assigning each user to one primary org.
 
         The aggregate stores user/day counts, not request-time org or API-key
-        attribution. Follow billing's user-scoped LLM convention: earliest
-        dated current membership, then lowest org ID. Undated legacy memberships
-        are ignored, as in the existing SQLite LLM attribution query.
+        attribution. Use active memberships only and follow billing's user-scoped
+        LLM convention: earliest dated membership, then lowest org ID. Undated
+        legacy memberships are ignored, as in the existing SQLite LLM attribution query.
         Counts reflect rollup freshness.
         Source failures propagate so the caller retains its failure policy.
         """
@@ -93,6 +93,7 @@ class AuthnzUsageRepo:
                        ) AS rank
                 FROM org_members
                 WHERE added_at IS NOT NULL
+                  AND LOWER(TRIM(status)) = 'active'
             )
             SELECT COALESCE(SUM(u.requests), 0)
             FROM usage_daily AS u

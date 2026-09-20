@@ -36,6 +36,10 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
 from tldw_Server_API.app.core.Chat.knowledge_save import visible_knowledge_text
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.backends.fts_translator import FTSQueryTranslator
+from tldw_Server_API.app.core.DB_Management.chacha.chat_history_queries import (
+    get_chat_history_metadata,
+    search_chat_history,
+)
 from tldw_Server_API.app.core.DB_Management.Kanban_DB import KanbanDB
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     create_media_database,
@@ -3917,33 +3921,13 @@ class ChatHistoryRetriever(BaseRetriever):
     async def retrieve(self, query: str, **kwargs: Any) -> list[Document]:
         documents: list[Document] = []
         max_results = int(self.config.max_results)
-        is_postgres = getattr(self._db_adapter, "backend_type", None) == BackendType.POSTGRESQL
-        owner_clause = "AND conv.client_id = ?" if is_postgres else ""
-        owner_params = (str(self._db_adapter.client_id),) if is_postgres else ()
-
-        sql = f"""
-            SELECT
-                m.id,
-                m.conversation_id,
-                m.content,
-                m.sender,
-                m.timestamp,
-                conv.character_id,
-                conv.source AS conversation_source,
-                conv.title AS conversation_title,
-                cc.name AS character_name
-            FROM messages m
-            JOIN conversations conv ON m.conversation_id = conv.id
-            LEFT JOIN character_cards cc ON conv.character_id = cc.id
-            WHERE m.deleted = 0
-              AND conv.deleted = 0
-              {owner_clause}
-              AND m.content LIKE ?
-              AND COALESCE(conv.source, '') != ?
-            ORDER BY m.timestamp DESC
-            LIMIT ?
-        """  # nosec B608 - fixed owner predicate; every value remains bound.
-        rows = await self._execute_query_async(sql, (*owner_params, f"%{query}%", "knowledge_qa", max_results))
+        rows = await asyncio.to_thread(
+            search_chat_history,
+            self._execute_query,
+            query,
+            db_adapter=self._db_adapter,
+            limit=max_results,
+        )
         for row in rows:
             visible = visible_knowledge_text(row.get("content") or "")
             if not visible:
@@ -4024,21 +4008,11 @@ class ChatHistoryRetriever(BaseRetriever):
 
     async def get_metadata(self, doc_id: str) -> dict[str, Any]:
         chat_id = doc_id.replace("chat_", "")
-        is_postgres = getattr(self._db_adapter, "backend_type", None) == BackendType.POSTGRESQL
-        owner_clause = "AND conv.client_id = ?" if is_postgres else ""
-        owner_params = (str(self._db_adapter.client_id),) if is_postgres else ()
-        results = self._execute_query(
-            f"""
-            SELECT m.*, conv.character_id
-            FROM messages m
-            JOIN conversations conv ON m.conversation_id = conv.id
-            WHERE m.id = ?
-              AND m.deleted = 0 AND conv.deleted = 0
-              {owner_clause}
-            """,  # nosec B608 - fixed owner predicate; every value remains bound.
-            (chat_id, *owner_params),
+        return get_chat_history_metadata(
+            self._execute_query,
+            chat_id,
+            db_adapter=self._db_adapter,
         )
-        return dict(results[0]) if results else {}
 
 
 class WorldBooksRetriever(BaseRetriever):

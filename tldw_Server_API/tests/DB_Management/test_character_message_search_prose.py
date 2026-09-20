@@ -235,6 +235,110 @@ async def test_chat_metadata_excludes_foreign_and_deleted_conversations(private_
     assert await retriever.get_metadata(f"chat_{records['deleted'][1]}") == {}
 
 
+def _chat_query_rows(db, sql, params):
+    """Run the query helper against the real backend without owning its connection."""
+    return [dict(row) for row in db.execute_query(sql, params).fetchall()]
+
+
+def test_chat_query_helper_filters_before_limit_and_binds_search(private_chat_evidence):
+    from functools import partial
+
+    from tldw_Server_API.app.core.DB_Management.chacha.chat_history_queries import search_chat_history
+
+    db, records = private_chat_evidence
+    knowledge_qa = db.add_conversation({"title": "QA history", "source": "knowledge_qa"})
+    db.add_message({"conversation_id": knowledge_qa, "sender": "user", "content": "Rowan Observatory"})
+    deleted_message = db.add_message({
+        "conversation_id": records["own"][0], "sender": "user", "content": "Rowan Observatory",
+    })
+    db.soft_delete_message(deleted_message, expected_version=1)
+    execute = partial(_chat_query_rows, db)
+
+    rows = search_chat_history(execute, "Rowan", db_adapter=db, limit=1)
+
+    assert [row["id"] for row in rows] == [records["own"][1]]
+    assert rows[0]["conversation_title"] == "own tour"
+    assert search_chat_history(execute, "' OR 1=1 --", db_adapter=db, limit=10) == []
+
+
+def test_chat_metadata_query_helper_binds_ids_and_enforces_visibility(private_chat_evidence):
+    from functools import partial
+
+    from tldw_Server_API.app.core.DB_Management.chacha.chat_history_queries import get_chat_history_metadata
+
+    db, records = private_chat_evidence
+    execute = partial(_chat_query_rows, db)
+
+    assert get_chat_history_metadata(execute, records["own"][1], db_adapter=db)["id"] == records["own"][1]
+    assert get_chat_history_metadata(execute, records["foreign"][1], db_adapter=db) == {}
+    assert get_chat_history_metadata(execute, records["deleted"][1], db_adapter=db) == {}
+    assert get_chat_history_metadata(execute, "' OR 1=1 --", db_adapter=db) == {}
+
+
+def test_chat_query_helpers_preserve_caller_rollback(search_db):
+    from functools import partial
+
+    from tldw_Server_API.app.core.DB_Management.chacha.chat_history_queries import (
+        get_chat_history_metadata,
+        search_chat_history,
+    )
+
+    class Rollback(Exception):
+        pass
+
+    execute = partial(_chat_query_rows, search_db)
+    with pytest.raises(Rollback), search_db.transaction():
+        conversation = search_db.add_conversation({"title": "Pending tour"})
+        message = search_db.add_message({
+            "conversation_id": conversation, "sender": "user", "content": "Rowan Observatory",
+        })
+        assert search_chat_history(execute, "Rowan", db_adapter=search_db, limit=1)[0]["id"] == message
+        assert get_chat_history_metadata(execute, message, db_adapter=search_db)["id"] == message
+        raise Rollback
+
+    assert search_chat_history(execute, "Rowan", db_adapter=search_db, limit=1) == []
+    assert get_chat_history_metadata(execute, message, db_adapter=search_db) == {}
+
+
+@pytest.mark.asyncio
+async def test_chat_query_helpers_keep_path_only_sqlite_retrieval(tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import ChatHistoryRetriever
+
+    monkeypatch.setenv("tldw_production", "false")
+    db = CharactersRAGDB(tmp_path / "chat-fallback.db", client_id="1")
+    try:
+        conversation = db.add_conversation({"title": "Path-only tour"})
+        message = db.add_message({
+            "conversation_id": conversation, "sender": "user", "content": "Rowan Observatory",
+        })
+        retriever = ChatHistoryRetriever(db.db_path_str)
+
+        documents = await retriever.retrieve("Rowan")
+
+        assert [doc.id for doc in documents] == [f"chat_{message}"]
+        assert documents[0].metadata["title"] == "Path-only tour"
+        assert (await retriever.get_metadata(f"chat_{message}"))["conversation_id"] == conversation
+    finally:
+        db.close_all_connections()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["retrieve", "get_metadata"])
+async def test_chat_query_helpers_keep_production_path_fallback_disabled(tmp_path, monkeypatch, operation):
+    from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import (
+        ChatHistoryRetriever,
+        RawSqlFallbackDisabledError,
+    )
+
+    monkeypatch.setenv("tldw_production", "true")
+    db_path = tmp_path / "must-not-create.db"
+    retriever = ChatHistoryRetriever(str(db_path))
+
+    with pytest.raises(RawSqlFallbackDisabledError):
+        await getattr(retriever, operation)("Rowan")
+    assert not db_path.exists()
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("retriever_name", ["ChatHistoryRetriever", "CharacterCardsRetriever"])
 @pytest.mark.parametrize("query", ["Rowan", "Rowan Observatory,"])

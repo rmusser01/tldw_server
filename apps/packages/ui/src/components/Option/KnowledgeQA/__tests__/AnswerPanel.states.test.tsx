@@ -1,4 +1,8 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render as renderComponent, screen, waitFor } from "@testing-library/react"
+import { createInstance } from "i18next"
+import { I18nextProvider } from "react-i18next"
+import knowledgeEn from "@/assets/locale/en/knowledge.json"
+import ICUWithInterpolation from "@/i18n/icu-format"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { AnswerPanel } from "../AnswerPanel"
 import type { RagSource } from "@/services/rag/unified-rag"
@@ -15,6 +19,11 @@ const submitExplicitFeedbackMock = vi.fn()
 const messageOpenMock = vi.fn()
 const navigateMock = vi.fn()
 const trackMetricMock = vi.fn()
+const testI18n = createInstance().use(ICUWithInterpolation)
+const render: typeof renderComponent = (ui, options) => renderComponent(ui, {
+  ...options,
+  wrapper: ({ children }) => <I18nextProvider i18n={testI18n}>{children}</I18nextProvider>,
+})
 
 type AnswerPanelTestSettings = {
   enable_generation?: boolean
@@ -207,7 +216,12 @@ vi.mock("../KnowledgeQAProvider", () => ({
 }))
 
 describe("AnswerPanel state guardrails", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await testI18n.init({
+      lng: "en", fallbackLng: "en", defaultNS: "knowledge",
+      resources: { en: { knowledge: knowledgeEn } },
+      interpolation: { escapeValue: false },
+    })
     vi.clearAllMocks()
     state.answer = null
     state.answerTrustState = "cited_answer"
@@ -243,6 +257,41 @@ describe("AnswerPanel state guardrails", () => {
   it("renders nothing when there is no answer and no results", () => {
     const { container } = render(<AnswerPanel />)
     expect(container.firstChild).toBeNull()
+  })
+
+  it("renders translated loading and model-readiness guidance", async () => {
+    testI18n.addResourceBundle("fr", "knowledge", { answerPanel: {
+      loading: "Traitement de votre question...",
+      modelReadiness: "Le délai dépend des sources et de la disponibilité du modèle.",
+    } })
+    await testI18n.changeLanguage("fr")
+    state.isSearching = true
+
+    render(<AnswerPanel />)
+
+    expect(screen.getByText("Traitement de votre question...")).toBeInTheDocument()
+    expect(screen.getByText("Le délai dépend des sources et de la disponibilité du modèle.")).toBeInTheDocument()
+    expect(screen.queryByText(/Working on your question/)).not.toBeInTheDocument()
+  })
+
+  it("renders translated source-summary templates with result and citation counts", async () => {
+    testI18n.addResourceBundle("fr", "knowledge", { trustSummary: {
+      searched: "Recherche : {{sources}}. {count, plural, one {# résultat} other {# résultats}}, {{citationCount}} citations.",
+      sourcePair: "{{first}} et {{last}}",
+    } })
+    testI18n.addResourceBundle("fr", "sidepanel", { rag: { sources: {
+      media: "Documents", notes: "Notes personnelles",
+    } } })
+    await testI18n.changeLanguage("fr")
+    state.answer = "Une réponse [1]."
+    state.results = [{ id: "r1" }, { id: "r2" }]
+    state.citations = [{ index: 1 }]
+
+    render(<AnswerPanel />)
+
+    expect(screen.getByLabelText("Answer trust summary")).toHaveTextContent(
+      "Recherche : Documents et Notes personnelles. 2 résultats, 1 citations."
+    )
   })
 
   it("renders no-answer guidance when results exist but answer generation is off", () => {

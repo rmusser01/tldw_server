@@ -133,6 +133,26 @@ async def test_api_usage_primary_org_uses_membership_time_then_id(usage_pool, ea
     assert [await enforcer._get_api_calls_today(org) for org in (lower, higher)] == expected
 
 
+@pytest.mark.parametrize("inactive_status", ["inactive", "suspended", None])
+@pytest.mark.parametrize("active_status", ["active", " Active "])
+async def test_api_usage_only_counts_active_primary_memberships(usage_pool, inactive_status, active_status):
+    """Inactive memberships cannot own usage or hide it from a later active org."""
+    pool = usage_pool
+    former, primary, secondary = [await _org(pool) for _ in range(3)]
+    member, inactive_only = [await _user(pool) for _ in range(2)]
+    await _membership(pool, member, former, 3)
+    await _membership(pool, member, primary, 2)
+    await _membership(pool, member, secondary, 1)
+    await _membership(pool, inactive_only, former, 3)
+    await pool.execute("UPDATE org_members SET status = ? WHERE org_id = ?", inactive_status, former)
+    await pool.execute("UPDATE org_members SET status = ? WHERE org_id = ?", active_status, primary)
+    await _daily(pool, member, 13)
+    await _daily(pool, inactive_only, 17)
+
+    enforcer = BillingEnforcer()
+    assert [await enforcer._get_api_calls_today(org) for org in (former, primary, secondary)] == [0, 13, 0]
+
+
 @pytest.mark.parametrize("failure_mode", ["open", "closed"])
 async def test_unavailable_daily_usage_preserves_failure_policy(usage_pool, monkeypatch, failure_mode):
     """An unavailable source follows the configured policy and never widens the query."""

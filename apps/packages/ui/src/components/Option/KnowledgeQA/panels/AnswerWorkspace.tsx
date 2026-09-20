@@ -1,5 +1,6 @@
 import { hasLowMeasuredRelevance } from "../sourceListUtils"
 import React, { useEffect, useMemo, useRef, useState } from "react"
+import { useTranslation } from "react-i18next"
 import { Loader2 } from "lucide-react"
 import { cn } from "@/libs/utils"
 import { isRagSource } from "@/services/rag/sourceMetadata"
@@ -15,14 +16,13 @@ type AnswerWorkspaceProps = {
   className?: string
 }
 
-const STAGE_COPY: Record<QueryStage, string> = {
+const STAGE_COPY: Record<Exclude<QueryStage, "cancelled">, string> = {
   idle: "Ready to search",
   searching: "Searching selected sources",
   ranking: "Ranking best evidence",
   generating: "Generating answer",
   verifying: "Checking source citations",
   complete: "Answer complete",
-  cancelled: "Search cancelled",
   error: "Search needs attention",
 }
 
@@ -46,6 +46,7 @@ function truncatePreview(value: string, maxLength = 140): string {
 }
 
 export function AnswerWorkspace({ queryStage, className }: AnswerWorkspaceProps) {
+  const { t } = useTranslation(["knowledge", "sidepanel"])
   const {
     answer = null,
     searchDetails = null,
@@ -62,7 +63,8 @@ export function AnswerWorkspace({ queryStage, className }: AnswerWorkspaceProps)
     queryStage === "complete" && results.length > 0 && !answer?.trim()
       ? buildSourceFailureSummary(
           Object.keys(searchDetails?.sourceStatus ?? {}).filter(isRagSource),
-          searchDetails?.sourceStatus
+          searchDetails?.sourceStatus,
+          t
         )
       : []
   const [politeAnnouncement, setPoliteAnnouncement] = useState("")
@@ -137,6 +139,13 @@ export function AnswerWorkspace({ queryStage, className }: AnswerWorkspaceProps)
   }, [queryStage, results, citations, settings?.strip_min_relevance])
 
   useEffect(() => {
+    if (queryStage === "cancelled") {
+      previousStageRef.current = queryStage
+      setPoliteAnnouncement(t("answerWorkspace.cancelledAnnouncement", {
+        defaultValue: "Search cancelled. You can ask again when ready.",
+      }))
+      return
+    }
     if (queryStage === previousStageRef.current) return
     previousStageRef.current = queryStage
 
@@ -147,10 +156,6 @@ export function AnswerWorkspace({ queryStage, className }: AnswerWorkspaceProps)
       )
       return
     }
-    if (queryStage === "cancelled") {
-      setPoliteAnnouncement("Search cancelled. You can ask again when ready.")
-      return
-    }
     if (queryStage === "error") {
       setPoliteAnnouncement("")
       return
@@ -159,7 +164,7 @@ export function AnswerWorkspace({ queryStage, className }: AnswerWorkspaceProps)
     if (stageMessage) {
       setPoliteAnnouncement(stageMessage)
     }
-  }, [queryStage, results.length, queryWarning])
+  }, [queryStage, results.length, queryWarning, t])
 
   useEffect(() => {
     setAssertiveAnnouncement(error ? `Search error. ${error}` : "")
@@ -170,6 +175,9 @@ export function AnswerWorkspace({ queryStage, className }: AnswerWorkspaceProps)
       <div
         className={queryStage === "cancelled" ? "rounded-lg border border-border bg-muted/20 px-3 py-2 text-sm text-text-muted" : "sr-only"}
         role={queryStage === "cancelled" ? "status" : undefined}
+        aria-label={queryStage === "cancelled"
+          ? t("answerWorkspace.cancelled", { defaultValue: "Search cancelled" })
+          : undefined}
         aria-live="polite"
         aria-atomic="true"
       >
@@ -222,7 +230,11 @@ export function AnswerWorkspace({ queryStage, className }: AnswerWorkspaceProps)
       {sourceFailureLines.length > 0 ? (
         <div role="status" className="rounded-lg border border-warn/25 bg-warn/10 px-4 py-3 text-sm">
           {sourceFailureLines.map((line) => <p key={line}>{line}</p>)}
-          <p className="mt-1 text-text-muted">Retrieved sources are still available.</p>
+          <p className="mt-1 text-text-muted">
+            {t("answerWorkspace.retainedSources", {
+              defaultValue: "Retrieved sources are still available.",
+            })}
+          </p>
         </div>
       ) : null}
       <AnswerPanel />

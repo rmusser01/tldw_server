@@ -1,7 +1,17 @@
-import { render, screen } from "@testing-library/react"
+import { act, render as renderComponent, screen } from "@testing-library/react"
+import { createInstance } from "i18next"
+import { I18nextProvider } from "react-i18next"
+import knowledgeEn from "@/assets/locale/en/knowledge.json"
+import ICUWithInterpolation from "@/i18n/icu-format"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { AnswerWorkspace } from "../panels/AnswerWorkspace"
 import type { KnowledgeSourceStatus } from "../types"
+
+const testI18n = createInstance().use(ICUWithInterpolation)
+const render: typeof renderComponent = (ui, options) => renderComponent(ui, {
+  ...options,
+  wrapper: ({ children }) => <I18nextProvider i18n={testI18n}>{children}</I18nextProvider>,
+})
 
 const state = {
   answer: null as string | null,
@@ -48,7 +58,12 @@ vi.mock("../FollowUpInput", () => ({
 }))
 
 describe("AnswerWorkspace accessibility announcements", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await testI18n.init({
+      lng: "en", fallbackLng: "en", defaultNS: "knowledge",
+      resources: { en: { knowledge: knowledgeEn } },
+      interpolation: { escapeValue: false },
+    })
     state.answer = null
     state.searchDetails = null
     state.results = []
@@ -58,6 +73,49 @@ describe("AnswerWorkspace accessibility announcements", () => {
     state.currentThreadId = null
     state.citations = []
     state.settings = { strip_min_relevance: 0.3 }
+  })
+
+  it("translates cancellation status and its live announcement after a locale change", async () => {
+    testI18n.addResourceBundle("fr", "knowledge", { answerWorkspace: {
+      cancelled: "Recherche annulée",
+      cancelledAnnouncement: "Recherche annulée. Posez une nouvelle question quand vous le souhaitez.",
+    } })
+    const { container, rerender } = render(<AnswerWorkspace queryStage="searching" />)
+    rerender(<AnswerWorkspace queryStage="cancelled" />)
+    await act(() => testI18n.changeLanguage("fr"))
+
+    expect(screen.getByRole("status", { name: "Recherche annulée" })).toHaveTextContent(
+      "Recherche annulée. Posez une nouvelle question quand vous le souhaitez."
+    )
+    expect(container.querySelector('[aria-live="polite"]')).toHaveTextContent("Recherche annulée.")
+    expect(screen.queryByText(/Search cancelled/)).not.toBeInTheDocument()
+  })
+
+  it("translates failed source lists and the retained-source notice", async () => {
+    testI18n.addResourceBundle("fr", "knowledge", {
+      answerWorkspace: { retainedSources: "Les sources récupérées restent disponibles." },
+      trustSummary: {
+        unavailable: "Recherche impossible : {{sources}}.",
+        partialFailure: "Échec partiel : {{sources}}.",
+        sourcePair: "{{first}} et {{last}}",
+      },
+    })
+    testI18n.addResourceBundle("fr", "sidepanel", { rag: { sources: {
+      chats: "Discussions", characters: "Personnages", notes: "Notes personnelles",
+    } } })
+    await testI18n.changeLanguage("fr")
+    state.results = [{ id: "retained-note" }]
+    state.searchDetails = { sourceStatus: {
+      chats: { status: "error", count: 0 },
+      characters: { status: "unavailable", count: 0 },
+      notes: { status: "error", count: 1 },
+    } }
+
+    render(<AnswerWorkspace queryStage="complete" />)
+
+    expect(screen.getByRole("status")).toHaveTextContent("Recherche impossible : Discussions et Personnages.")
+    expect(screen.getByRole("status")).toHaveTextContent("Échec partiel : Notes personnelles.")
+    expect(screen.getByRole("status")).toHaveTextContent("Les sources récupérées restent disponibles.")
   })
 
   it.each([true, false])("discloses failed sources without an answer when generation is %s", (generationEnabled) => {
