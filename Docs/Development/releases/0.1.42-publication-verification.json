@@ -1,0 +1,116 @@
+{
+  "version": "0.1.42",
+  "verified_at": "2026-09-20T20:27:27.388769+00:00",
+  "release_url": "https://github.com/rmusser01/tldw_server/releases/tag/v0.1.42",
+  "tag_commit": "25608249ed5f0fe3700f6e87feeedce77c503425",
+  "docker_run": "https://github.com/rmusser01/tldw_server/actions/runs/35533805758",
+  "docker_result": "success",
+  "images": [
+    {
+      "image": "app",
+      "subject": {
+        "name": "ghcr.io/rmusser01/tldw_server",
+        "digest": {
+          "sha256": "61804c193318186d1590b17457c3d0e8bb031110b1c22960ab72767270f891fe"
+        }
+      },
+      "source": {
+        "digest": {
+          "gitCommit": "25608249ed5f0fe3700f6e87feeedce77c503425"
+        },
+        "uri": "git+https://github.com/rmusser01/tldw_server@refs/tags/v0.1.42"
+      },
+      "verified_identity": {
+        "subjectAlternativeName": {
+          "subjectAlternativeName": "",
+          "regexp": "(?i)^https://github.com/rmusser01/tldw_server/"
+        },
+        "issuer": {
+          "issuer": "",
+          "regexp": ".*"
+        }
+      },
+      "workflow": {
+        "path": ".github/workflows/publish-docker.yml",
+        "ref": "refs/tags/v0.1.42",
+        "repository": "https://github.com/rmusser01/tldw_server"
+      },
+      "invocation": "https://github.com/rmusser01/tldw_server/actions/runs/35533805758/attempts/1",
+      "signature_verified": true
+    },
+    {
+      "image": "worker",
+      "subject": {
+        "name": "ghcr.io/rmusser01/tldw_server-worker",
+        "digest": {
+          "sha256": "8ab4441665b0ee46889926a8b0ef6e22c7c4a5efc1ccc71424c1e637ca64252f"
+        }
+      },
+      "source": {
+        "digest": {
+          "gitCommit": "25608249ed5f0fe3700f6e87feeedce77c503425"
+        },
+        "uri": "git+https://github.com/rmusser01/tldw_server@refs/tags/v0.1.42"
+      },
+      "verified_identity": {
+        "subjectAlternativeName": {
+          "subjectAlternativeName": "",
+          "regexp": "(?i)^https://github.com/rmusser01/tldw_server/"
+        },
+        "issuer": {
+          "issuer": "",
+          "regexp": ".*"
+        }
+      },
+      "workflow": {
+        "path": ".github/workflows/publish-docker.yml",
+        "ref": "refs/tags/v0.1.42",
+        "repository": "https://github.com/rmusser01/tldw_server"
+      },
+      "invocation": "https://github.com/rmusser01/tldw_server/actions/runs/35533805758/attempts/1",
+      "signature_verified": true
+    },
+    {
+      "image": "audio-worker",
+      "subject": {
+        "name": "ghcr.io/rmusser01/tldw_server-audio-worker",
+        "digest": {
+          "sha256": "5de5fb0dbcb0f671f3ff65b2234985fc0c2ad3804b9a0498bd495b8402b0956e"
+        }
+      },
+      "source": {
+        "digest": {
+          "gitCommit": "25608249ed5f0fe3700f6e87feeedce77c503425"
+        },
+        "uri": "git+https://github.com/rmusser01/tldw_server@refs/tags/v0.1.42"
+      },
+      "verified_identity": {
+        "subjectAlternativeName": {
+          "subjectAlternativeName": "",
+          "regexp": "(?i)^https://github.com/rmusser01/tldw_server/"
+        },
+        "issuer": {
+          "issuer": "",
+          "regexp": ".*"
+        }
+      },
+      "workflow": {
+        "path": ".github/workflows/publish-docker.yml",
+        "ref": "refs/tags/v0.1.42",
+        "repository": "https://github.com/rmusser01/tldw_server"
+      },
+      "invocation": "https://github.com/rmusser01/tldw_server/actions/runs/35533805758/attempts/1",
+      "signature_verified": true
+    }
+  ],
+  "verification_command": "gh attestation verify oci://<subject.name>@sha256:<subject.digest.sha256> --repo rmusser01/tldw_server --format json",
+  "pypi": {
+    "status": "blocked",
+    "version_endpoint_http_status": 404,
+    "failed_run": "https://github.com/rmusser01/tldw_server/actions/runs/35533776321",
+    "cause": "Duplicate AuthNZ conftest registration during collection",
+    "recovery_pr": "https://github.com/rmusser01/tldw_server/pull/2973"
+  },
+  "sync_pr": "https://github.com/rmusser01/tldw_server/pull/2971",
+  "next_release_pr": "https://github.com/rmusser01/tldw_server/pull/2972"
+}

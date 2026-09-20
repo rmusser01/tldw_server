@@ -4,7 +4,7 @@ title: Prepare the 0.1.43 release with all changes since v0.1.42
 status: In Progress
 assignee: []
 created_date: '2026-09-20 19:56'
-updated_date: '2026-09-20 20:16'
+updated_date: '2026-09-20 20:27'
 labels: []
 dependencies: []
 priority: high
@@ -21,7 +21,7 @@ Prepare a reviewed release candidate based on v0.1.42 and frozen dev d72b1d2850e
 - [x] #1 The candidate includes v0.1.42 and frozen dev as ancestors, with reviewed conflict resolutions.
 - [x] #2 Changelog and release notes cover all post-0.1.42 changes, with an exhaustive commit inventory.
 - [x] #3 Version metadata, documentation and protected-source records are consistent and verified.
-- [ ] #4 A draft PR and release plan record checks, publication state and remaining human decisions.
+- [x] #4 A draft PR and release plan record checks, publication state and remaining human decisions.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -34,6 +34,8 @@ Strict docs build passes. Sync draft PR2971 opened. Existing plugin isolation te
 Typing reassessment: intersection return type left unknown-array filter overloads; Omit on the transport index signature erased variables; compiler inferred normalization already preserves both concrete arrays, so use inferred return type rather than layering annotations. Reviewer identified future-development manifest coupling; ordinary CI checks record consistency, while the release plan explicitly runs TLDW_VERIFY_RELEASE_SOURCE=1 for checkout equality.
 
 Final protected source ef64db48f520971bd593e6caec87e368b0354470,7321files,manifest a54e754a3e9edb29ad91ef74c8000244bda720d50b8f7588ce6f213827111eeb. Full WebUI typecheck passes. Metadata/workflow92pass, explicit release source12pass, strict MkDocs and wheel/sdist/backend-boundary checks pass. Legal dates remain proposed; release PR, CI and human Change summary pending.
+
+Draft release PR2972 contains all616commits/19integrationPRs, consistent metadata and protected-source record. Publication evidence JSON records all three0.1.42signed image attestations against25608249ed. PyPI404 remains; test-only recoveryPR2973 is prepared, CI restarted after automatic approval rejected merge/publication. Requester rejected extra human-summary gate for recovery. Next candidate legal dates and publication remain unapproved; main/dev syncPR2971 remains draft.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
