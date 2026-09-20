@@ -6,7 +6,7 @@
 
 - **Qodo review:** All 14 review findings have verified fixes or an accepted disposition in the [review disposition ledger](PR2967_QODO_REVIEW_2026_09_18.md), under TASK13260.219.11–13. All 14 review threads are resolved and Qodo reports zero open findings. Final hosted CI passed before the verified merge. This review does not replace the pending fresh UAT matrix.
 
-- **Current repair gate:** 345 UAT findings: 343 verified; 2 open (261, 345). The frozen post-merge four-cell matrix completed with failures. Checkpoint [PR2969](https://github.com/rmusser01/tldw_server/pull/2969) merged normally into dev at `1dfdd819b6` after all seven required gates passed, all 12 Qodo threads were resolved, and the requester supplied the Change summary. Follow-up branch `codex/uat295-postgres-notes-20260919` starts from that merge. UAT299 and UAT319/321–323 now pass targeted SQLite/PostgreSQL acceptance, including owner/Bob isolation and controlled source-failure disclosure. Remaining repairs precede another full matrix. Generated Playwright evidence remains local and excluded. See the [checkpoint review](PR2969_CHECKPOINT_REVIEW_2026_09_19.md) and [post-merge matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_18.md).
+- **Current repair gate:** 346 UAT findings: 345 verified; 1 open (261, retained by requester direction). PR2970 hosted checks remain a separate merge gate. The frozen post-merge four-cell matrix completed with failures. Checkpoint [PR2969](https://github.com/rmusser01/tldw_server/pull/2969) merged normally into dev at `1dfdd819b6` after all seven required gates passed, all 12 Qodo threads were resolved, and the requester supplied the Change summary. Follow-up branch `codex/uat295-postgres-notes-20260919` starts from that merge. UAT299 and UAT319/321–323 now pass targeted SQLite/PostgreSQL acceptance, including owner/Bob isolation and controlled source-failure disclosure. Remaining repairs precede another full matrix. Generated Playwright evidence remains local and excluded. See the [checkpoint review](PR2969_CHECKPOINT_REVIEW_2026_09_19.md) and [post-merge matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_18.md).
 
 - **Historical frozen-run findings:246 total —230 previously verified,16 new unresolved (231–246).** The frozen48-row execution is complete with product source unchanged;16new findings await repair/disposition. SQLite multi-user natural session expiry passes; new241 loses source content in Media-to-Chat,242 uses plural wording for one Due review, and243 leaves Character setup visible after an ordinary Chat completion. Existing PostgreSQL RLS failure238 and generation timeout234 remain open.
 
@@ -3918,7 +3918,7 @@ Final checkpoint follow-up verification:99transport tests plus10default privacy 
 
 ## UAT340–344 — PR2970 Qodo review findings
 
-- Status: verified; parent TASK13260.270.2; review posted 2026-09-20. Independent review clear; PR replies/resolution pending commit.
+- Status: verified; parent TASK13260.270.2; review posted 2026-09-20. Independent review clear; fixed in6c529b66e7, all five inline replies posted and threads resolved.
 - UAT340 (P1): API usage attribution ranks inactive organization memberships. Verify active-membership policy and add SQLite/real PostgreSQL regression before correcting the CTE. Qodo4056423752.
 - UAT341 (P3): Knowledge QA loading and model-readiness notices bypass translations. Qodo4056423745.
 - UAT342 (P3): cancellation label, accessibility announcement and retained-source notice bypass translations. Qodo4056423746.
@@ -3928,7 +3928,7 @@ Final checkpoint follow-up verification:99transport tests plus10default privacy 
 
 ## UAT345 — PR2970 API contract fingerprint drift
 
-- Status: open; TASK13260.270.3. Hosted backend-required fails OpenAPI contract drift at a80d28d9f6, with unchanged2097paths/3207schemas. Investigate exact structure before regenerating API contract/types. This is tracked separately from the now-passing HTTP/shard/pre-commit guards.
+- Status: verified locally; TASK13260.270.3 Done. Hosted backend-required fails OpenAPI contract drift at a80d28d9f6, with unchanged2097paths/3207schemas. Investigate exact structure before regenerating API contract/types. This is tracked separately from the now-passing HTTP/shard/pre-commit guards.
 
 ### UAT334/336 — native PostgreSQL acceptance complete
 
@@ -3946,3 +3946,8 @@ Owned browser/API/frontend stopped and ports18833/18913 released; official fixtu
 ### UAT345 — exact contract repair verified locally
 
 CI-matched Python3.12 export reproduces hosted hash d98e55a945e8; fresh dev export reproduces checked-in6dcb5357a7a6. The entire structural delta is optional X-TLDW-Expected-User-ID on self-profile GET and PATCH. Regenerated fingerprint and ignored frontend API types pass the exact drift check. Counts remain2097paths/3207schemas. Hosted recheck remains outstanding. The older root Python3.11 export was not used because its installed dependencies generated a different schema count.
+
+## UAT346 — Backlog CLI task lacks final newline
+
+- Status: verified locally; TASK13260.270.4 Done. The full PR changed-file pre-commit run passes all applicable hooks. Hosted recheck remains a parent merge gate.
+- Hosted pre-commit on6c529b66e7 reports only end-of-file-fixer modifying the billing Backlog child task. Backlog CLI wrote the final implementation-notes marker without a newline. The official formatter adds exactly that newline; no application behavior changes. Local first full hook invocation stashed the unstaged correction and re-exposed the old bytes; stage the correction before rerunning.
