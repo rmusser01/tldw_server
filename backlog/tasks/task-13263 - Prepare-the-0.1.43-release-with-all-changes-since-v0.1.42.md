@@ -4,7 +4,7 @@ title: Prepare the 0.1.43 release with all changes since v0.1.42
 status: In Progress
 assignee: []
 created_date: '2026-09-20 19:56'
-updated_date: '2026-09-20 20:27'
+updated_date: '2026-09-20 21:07'
 labels: []
 dependencies: []
 priority: high
@@ -36,6 +36,8 @@ Typing reassessment: intersection return type left unknown-array filter overload
 Final protected source ef64db48f520971bd593e6caec87e368b0354470,7321files,manifest a54e754a3e9edb29ad91ef74c8000244bda720d50b8f7588ce6f213827111eeb. Full WebUI typecheck passes. Metadata/workflow92pass, explicit release source12pass, strict MkDocs and wheel/sdist/backend-boundary checks pass. Legal dates remain proposed; release PR, CI and human Change summary pending.
 
 Draft release PR2972 contains all616commits/19integrationPRs, consistent metadata and protected-source record. Publication evidence JSON records all three0.1.42signed image attestations against25608249ed. PyPI404 remains; test-only recoveryPR2973 is prepared, CI restarted after automatic approval rejected merge/publication. Requester rejected extra human-summary gate for recovery. Next candidate legal dates and publication remain unapproved; main/dev syncPR2971 remains draft.
+
+Fresh candidate CodeQL review includes alert2693: buffered character-chat SSE fallback returns raw exception text, unlike existing safe lazy-stream handlers. Investigating and repairing under this release task with error-injection regression; five frontend test-fixture alerts require evidence-backed disposition. No release publication performed.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
