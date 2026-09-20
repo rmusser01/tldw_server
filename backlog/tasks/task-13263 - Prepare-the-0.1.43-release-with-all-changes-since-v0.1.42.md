@@ -4,7 +4,7 @@ title: Prepare the 0.1.43 release with all changes since v0.1.42
 status: In Progress
 assignee: []
 created_date: '2026-09-20 19:56'
-updated_date: '2026-09-20 23:09'
+updated_date: '2026-09-20 23:11'
 labels: []
 dependencies: []
 priority: high
@@ -15,8 +15,8 @@ priority: high
 <!-- SECTION:DESCRIPTION:BEGIN -->
 Prepare a reviewed release candidate based on v0.1.42 and frozen dev d72b1d2850ea947b6d12cac19f6b95867b68a580. Preserve 0.1.42 release fixes, reconcile released main into dev, inventory every new commit and merged PR, update release metadata and protected source records, and open a draft release PR. Track outstanding 0.1.42 publication verification in TASK-13013.3.
 
-Protected source: `645e58c6a701bd2f7936e1bb79b362a12bc0b817`.
-Protected manifest SHA-256: `1d3af39b50da7797f8d6ec2aaabbedee22d5a6d7cf7ee6a76a388cc32c283b51`.
+Protected source: `cca220627a8f0f9f3124126b50add2e0e88ee8a7`.
+Protected manifest SHA-256: `bfd14b9e3fb5efa6ecbe54c2e27267cd4958b51881aad9cd3e1b4ab100ecd4e1`.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -53,6 +53,8 @@ Current protected source645e58c6a7 and manifest1d3af39b50da7797f8d6ec2aaabbedee2
 New CI follow-up after Qodo closure: c5453d4385 frontend shards4/8 and8/8 fail in media page tests. Logs identify missing useQueryClient exports in two React Query mocks after authority-cache cleanup and obsolete stale-selection expectation. Reproduce both complete files, repair fixture contract/security-state expectation only if confirmed, then focused media regressions/tsc/lint. Parent owns source commit and protected-manifest refresh.
 
 c545 CI follow-up verified: media page mock regressions reproduce41failed/1pass, then both files plus real-query outage/hydration58pass/4files. Added stable useQueryClient/removeQueries fixture contracts; stale-deletion security test now asserts selection cleared before and after late404, preserving no-warning/no-refetch assertions. Full nonincremental WebUI tsc exits0. ScopedESLint baseline10/current10/new0; diffcheckclean; Bandit N/A TS-only. Two testfiles+this tracking only; no production edits/skip/timeout changes. Evidence /tmp/candidate-c545-frontend-ci-results.md. Parent owns review/sourcecommit/protectedmanifest/push.
+
+Required-CI test-only repaircca220627a verified independently58tests, nonincrementaltsc, no new ESLint. Refreshed7322-file protected manifest and all current source authorities; explicit licensing13pass. Separate0.1.42 PyPI timeout/failure triage now in release plans; publication remains blocked, no gate weakened.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
