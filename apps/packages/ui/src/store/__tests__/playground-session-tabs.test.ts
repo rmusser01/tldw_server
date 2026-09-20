@@ -25,7 +25,10 @@ const character = { historyId: "character-local", serverChatId: "character-serve
 
 describe("tab-owned playground session persistence", () => {
   beforeEach(() => localStorage.clear())
-  afterEach(() => vi.unstubAllGlobals())
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
 
   it("restores each saved normal and character chat after the other tab changes", async () => {
     const first = await openTab()
@@ -62,5 +65,49 @@ describe("tab-owned playground session persistence", () => {
     tab.store.getState().clearSession()
     await tab.store.persist.rehydrate()
     expect(tab.store.getState().isSessionValid("account-a:org-2")).toBe(false)
+  })
+
+  it.each(["getter", "read", "pin"])("recovers the durable session when tab storage fails during %s", async (failure) => {
+    const saved = await openTab()
+    saved.store.getState().saveSession(character)
+    const storage = makeTabStorage()
+    vi.stubGlobal("sessionStorage", storage)
+    if (failure === "getter") {
+      vi.spyOn(window, "sessionStorage", "get").mockImplementation(() => { throw new Error("Blocked") })
+    } else {
+      vi.spyOn(storage, failure === "read" ? "getItem" : "setItem").mockImplementation(() => { throw new Error("Blocked") })
+    }
+    vi.resetModules()
+    const store = (await import("../playground-session")).usePlaygroundSessionStore
+    expect(store.getState()).toMatchObject(character)
+    expect(() => store.getState().saveSession(normal)).not.toThrow()
+    expect(JSON.parse(localStorage.getItem("tldw-playground-session")!).state).toMatchObject(normal)
+  })
+
+  it("recovers the new durable session instead of an old tab pin after a quota failure", async () => {
+    const tab = await openTab()
+    tab.store.getState().saveSession(normal)
+    const write = vi.spyOn(tab.storage, "setItem").mockImplementation(() => { throw new Error("Quota exceeded") })
+    expect(() => tab.store.getState().saveSession(character)).not.toThrow()
+    write.mockRestore()
+    const reloaded = await openTab(tab.storage)
+    expect(reloaded.store.getState()).toMatchObject(character)
+  })
+
+  it("retains tab recovery when durable storage writes fail", async () => {
+    const tab = await openTab()
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("Quota exceeded") })
+    expect(() => tab.store.getState().saveSession(character)).not.toThrow()
+    const reloaded = await openTab(tab.storage)
+    expect(reloaded.store.getState()).toMatchObject(character)
+  })
+
+  it("clears the durable session even when tab storage rejects writes", async () => {
+    const tab = await openTab()
+    tab.store.getState().saveSession(character)
+    vi.spyOn(tab.storage, "setItem").mockImplementation(() => { throw new Error("Quota exceeded") })
+    expect(() => tab.store.getState().clearSession()).not.toThrow()
+    const reloaded = await openTab()
+    expect(reloaded.store.getState().isSessionValid("account-a:org-2")).toBe(false)
   })
 })
