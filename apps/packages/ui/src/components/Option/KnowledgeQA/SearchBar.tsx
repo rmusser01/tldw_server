@@ -291,7 +291,7 @@ export function SearchBar({
       <p id="knowledge-qa-search-description" className="sr-only">
         Ask questions about your documents and get AI-powered answers with citations from your knowledge base.
       </p>
-      <div className="relative group">
+      <div className="relative group flex items-center gap-2 rounded-xl border border-border bg-surface pr-2 shadow-sm transition-shadow hover:shadow-md focus-within:ring-2 focus-within:ring-primary focus-within:shadow-md">
         {/* Search icon */}
         <div className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none">
           {isSearching ? (
@@ -365,12 +365,10 @@ export function SearchBar({
           disabled={isSearching}
           maxLength={MAX_QUERY_LENGTH}
           className={cn(
-            "w-full pl-12 pr-20 py-4 text-lg",
-            "bg-surface border border-border rounded-xl",
-            "focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent",
+            "w-full min-w-0 flex-1 pl-12 py-4 text-lg",
+            "bg-transparent rounded-xl focus:outline-none",
             "placeholder:text-text-subtle",
             "transition-all duration-200",
-            "shadow-sm hover:shadow-md focus:shadow-md",
             isSearching && "opacity-75 cursor-not-allowed"
           )}
           aria-label="Search your knowledge base"
@@ -415,7 +413,7 @@ export function SearchBar({
           <button
             type="button"
             onClick={handleClear}
-            className="absolute right-14 top-1/2 -translate-y-1/2 p-1 text-text-muted hover:text-text transition-colors"
+            className="shrink-0 p-1 text-text-muted hover:text-text transition-colors"
             aria-label="Clear search"
           >
             <X className="w-4 h-4" />
@@ -430,7 +428,7 @@ export function SearchBar({
               : null
           }
         >
-          <span className="absolute right-2 top-1/2 inline-flex -translate-y-1/2">
+          <span className="inline-flex shrink-0">
             <button
               type="submit"
               disabled={!query.trim() || isSearching || noSourcesBlocked}

@@ -91,7 +91,10 @@ describe('hosted-only placeholder pages', () => {
       render(<Component />);
 
       expect(screen.getByRole('heading', { level: 1, name: title })).toBeVisible();
-      expect(screen.getAllByText(path)).toHaveLength(2);
+      expect(screen.getByText(path)).toBeVisible();
+      expect(screen.getByText(/Requested route:/)).toHaveTextContent(path);
+      expect(screen.queryByText(/Planned route:/)).not.toBeInTheDocument();
+      expect(document.title).toBe(`${title} · tldw`);
       expect(screen.getByTestId('route-placeholder-primary')).toHaveAttribute(
         'href',
         '/settings/tldw'
@@ -111,7 +114,9 @@ describe('hosted-only placeholder pages', () => {
 
       render(<Component />);
 
-      expect(screen.getAllByText(path)).toHaveLength(2);
+      expect(screen.getByText(path)).toBeVisible();
+      expect(screen.getByText(/Requested route:/)).toHaveTextContent(path);
+      expect(screen.queryByText(/Planned route:/)).not.toBeInTheDocument();
       expect(screen.getByTestId('route-placeholder-primary')).toHaveAttribute('href', '/login');
       expect(screen.getByTestId('route-placeholder-primary')).toHaveTextContent('Open Login');
       expect(screen.getByTestId('route-placeholder-open-settings')).toHaveAttribute(

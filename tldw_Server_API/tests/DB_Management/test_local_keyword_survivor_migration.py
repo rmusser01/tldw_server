@@ -101,7 +101,7 @@ def test_genuine_prior_schema_upgrade_preserves_rows_and_reopens(historical_keyw
         version = db.execute_query(
             "SELECT version FROM db_schema_version WHERE schema_name = ?", (db._SCHEMA_NAME,), read_only=True
         ).fetchone()["version"]
-        assert version == (70 if f.backend is not None else 68)
+        assert version == (CharactersRAGDB._POSTGRES_SCHEMA_VERSION if f.backend is not None else 68)
         assert f.schema_metadata() == f.metadata_before
 
 

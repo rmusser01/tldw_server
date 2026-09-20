@@ -203,3 +203,34 @@ it.each(["pending", "error"] as const)("does not announce results while %s", asy
 
   expect(screen.getByRole("status")).toBeEmptyDOMElement()
 })
+
+it.each(["UTC", "America/Los_Angeles", "Pacific/Kiritimati"])(
+  "shows the fresh seed API instant as five minutes ago in %s",
+  async browserTimezone => {
+    const originalTimezone = process.env.TZ
+    const now = vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-09-20T00:00:19Z"))
+    process.env.TZ = browserTimezone
+    try {
+      const translate = await createEnglishTranslator()
+      render(<CharacterListContent {...createProps({
+        t: translate,
+        status: "success",
+        error: null,
+        totalCharacters: 1,
+        data: [{
+          id: 1,
+          name: "Default Assistant",
+          created_at: "2026-09-19T23:55:19Z",
+          updated_at: "2026-09-19T23:55:19Z"
+        }]
+      })} />)
+      const row = screen.getByRole("row", { name: /Default Assistant/ })
+      expect(within(row).getByText("5m ago")).toBeInTheDocument()
+      expect(within(row).getByText("Updated 5m ago")).toBeInTheDocument()
+    } finally {
+      now.mockRestore()
+      if (originalTimezone === undefined) delete process.env.TZ
+      else process.env.TZ = originalTimezone
+    }
+  }
+)

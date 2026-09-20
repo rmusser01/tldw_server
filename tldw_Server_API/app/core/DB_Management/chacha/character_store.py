@@ -1554,13 +1554,24 @@ class CharacterStore:
                 LIMIT ?
                 """.format_map(locals())  # nosec B608
         try:
-            cursor = self._db.execute_query(query, (safe_search_term, limit))
-            rows = cursor.fetchall()
+            try:
+                # Preserve valid FTS grouping/operators. Only parse failures
+                # retry as prose, without logging an expected failed parse.
+                rows = self._db.get_connection().execute(query, (safe_search_term, limit)).fetchall()
+            except sqlite3.OperationalError as exc:
+                if not any(marker in str(exc).lower() for marker in ("fts5: syntax error", "no such column:")):
+                    raise
+                normalized = FTSQueryTranslator.normalize_query(search_term, "sqlite")
+                if normalized == safe_search_term:
+                    raise
+                rows = self._db.get_connection().execute(query, (normalized, limit)).fetchall()
             return [
                 self._db._deserialize_row_fields(row, self._db._CHARACTER_CARD_JSON_FIELDS)
                 for row in rows
                 if row
             ]
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Character search failed: {exc}") from exc  # noqa: TRY003
         except CharactersRAGDBError as e:
             logger.error("Error searching character cards for '{}': {}", safe_search_term, e)
             raise

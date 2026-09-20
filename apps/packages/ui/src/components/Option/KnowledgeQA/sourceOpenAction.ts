@@ -1,4 +1,5 @@
 import type { RagResult } from "./types"
+import { buildChatThreadPath } from "@/routes/route-paths"
 import { getResultSourceId } from "./sourceListUtils"
 
 /** Resolve a source action without treating uploaded filenames as web routes. */
@@ -18,6 +19,12 @@ export function getSourceOpenAction(result: RagResult): { href: string; label: s
   const sourceId = getResultSourceId(result)
   if (sourceType === "media_db" && sourceId && /^[1-9]\d*$/.test(sourceId)) {
     return { href: `/media?id=${sourceId}`, label: "Open in Media" }
+  }
+  if (sourceType === "characters" && sourceId && /^[1-9]\d*$/.test(sourceId)) {
+    return { href: `/characters?focusCharacterId=${sourceId}`, label: "Open in Characters" }
+  }
+  if (sourceType === "chats" && sourceId) {
+    return { href: buildChatThreadPath({ serverChatId: sourceId }), label: "Open in Chat" }
   }
   return null
 }

@@ -753,7 +753,7 @@ class CharactersRAGDB:
         db_path_str (str): String representation of the database path for SQLite connection.
     """
     _CURRENT_SCHEMA_VERSION = 68  # Schema v68 retains local keyword merge survivors
-    _POSTGRES_SCHEMA_VERSION = 70
+    _POSTGRES_SCHEMA_VERSION = 72
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
     _NOTE_TASK_V60_TABLES = (
@@ -16257,12 +16257,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         for statement in statements:
             self.backend.execute(statement, connection=conn)
 
-    def _verify_note_attachment_schema_postgres(self, conn: Any) -> None:
+    def _verify_note_attachment_schema_postgres(self, conn: Any, *, runtime: bool = False) -> None:
         """Fail closed unless the locked v59 registry catalog is canonical."""
 
         backend = self.backend
         backend.execute(
-            "LOCK TABLE notes, note_attachments IN SHARE MODE",
+            ("LOCK TABLE notes, note_attachments IN ACCESS SHARE MODE" if runtime
+             else "LOCK TABLE notes, note_attachments IN SHARE MODE"),
             connection=conn,
         )
         relation_rows = backend.execute(
@@ -16611,7 +16612,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 "Notes attachment v59 PostgreSQL registry RLS policy catalog drifted."
             )
 
-    def _verify_note_task_schema_postgres(self, conn: Any) -> None:
+    def _verify_note_task_schema_postgres(self, conn: Any, *, runtime: bool = False) -> None:
         """Verify the complete PostgreSQL v60 task graph without repairing drift."""
         backend = self.backend
         authority_relations = ("notes", *self._NOTE_TASK_V60_RELATIONS)
@@ -16619,7 +16620,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "LOCK TABLE note_task_scope_authority, notes, note_tasks, "
             "task_note_projections, task_events, "
             "task_event_read_state, note_task_reconciliation_state, task_projection_drifts "
-            "IN SHARE MODE",
+            + ("IN ACCESS SHARE MODE" if runtime else "IN SHARE MODE"),
             connection=conn,
         )
         table_rows = backend.execute(
@@ -20210,6 +20211,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     self._initialize_schema_sqlite()
         elif self.backend_type == BackendType.POSTGRESQL:
             self._initialize_schema_postgres()
+            return
         else:
             raise NotImplementedError(
                 f"Schema initialization not implemented for backend {self.backend_type}"
@@ -23393,6 +23395,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
             raise SchemaError(f"Failed ensuring PostgreSQL study pack schema: {exc}") from exc  # noqa: TRY003
 
+        self._ensure_study_pack_sync_triggers_postgres(conn)
+
+    def _ensure_study_pack_sync_triggers_postgres(self, conn: Any) -> None:
+        """Install Study Pack and Suggestions triggers for either shared sync schema."""
         try:
             sync_columns = {column.get("name") for column in self.backend.get_table_info("sync_log", connection=conn)}
             if "entity_id" in sync_columns:
@@ -23655,12 +23661,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 connection=conn,
             )
             self.backend.execute(
-                """
+                f"""
                 CREATE OR REPLACE FUNCTION suggestion_snapshots_sync_log_fn()
                 RETURNS trigger AS $$
                 BEGIN
                   IF TG_OP = 'INSERT' THEN
-                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    INSERT INTO sync_log(entity, {sync_entity_column}, operation, timestamp, client_id, version, payload)
                     VALUES(
                       'suggestion_snapshots',
                       CAST(NEW.id AS TEXT),
@@ -23687,7 +23693,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                       )::text
                     );
                   ELSIF OLD.deleted = FALSE AND NEW.deleted = TRUE THEN
-                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    INSERT INTO sync_log(entity, {sync_entity_column}, operation, timestamp, client_id, version, payload)
                     VALUES(
                       'suggestion_snapshots',
                       CAST(NEW.id AS TEXT),
@@ -23717,7 +23723,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     OLD.last_modified IS DISTINCT FROM NEW.last_modified OR
                     OLD.version IS DISTINCT FROM NEW.version
                   ) THEN
-                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    INSERT INTO sync_log(entity, {sync_entity_column}, operation, timestamp, client_id, version, payload)
                     VALUES(
                       'suggestion_snapshots',
                       CAST(NEW.id AS TEXT),
@@ -23747,16 +23753,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                   RETURN NEW;
                 END;
                 $$ LANGUAGE plpgsql
-                """,
+                """,  # nosec B608 -- Identifier is selected from the fixed entity_id/entity_uuid names above.
                 connection=conn,
             )
             self.backend.execute(
-                """
+                f"""
                 CREATE OR REPLACE FUNCTION suggestion_generation_links_sync_log_fn()
                 RETURNS trigger AS $$
                 BEGIN
                   IF TG_OP = 'INSERT' THEN
-                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    INSERT INTO sync_log(entity, {sync_entity_column}, operation, timestamp, client_id, version, payload)
                     VALUES(
                       'suggestion_generation_links',
                       CAST(NEW.id AS TEXT),
@@ -23779,7 +23785,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                       )::text
                     );
                   ELSIF OLD.deleted = FALSE AND NEW.deleted = TRUE THEN
-                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    INSERT INTO sync_log(entity, {sync_entity_column}, operation, timestamp, client_id, version, payload)
                     VALUES(
                       'suggestion_generation_links',
                       CAST(NEW.id AS TEXT),
@@ -23805,7 +23811,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     OLD.last_modified IS DISTINCT FROM NEW.last_modified OR
                     OLD.version IS DISTINCT FROM NEW.version
                   ) THEN
-                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    INSERT INTO sync_log(entity, {sync_entity_column}, operation, timestamp, client_id, version, payload)
                     VALUES(
                       'suggestion_generation_links',
                       CAST(NEW.id AS TEXT),
@@ -23831,7 +23837,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                   RETURN NEW;
                 END;
                 $$ LANGUAGE plpgsql
-                """,
+                """,  # nosec B608 -- Identifier is selected from the fixed entity_id/entity_uuid names above.
                 connection=conn,
             )
             self.backend.execute("DROP TRIGGER IF EXISTS study_packs_sync_log ON study_packs", connection=conn)
@@ -24878,14 +24884,47 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             logger.error("Failed rebuilding character_cards_fts: {}", exc)
             raise SchemaError(f"Failed rebuilding character_cards_fts: {exc}") from exc  # noqa: TRY003
 
+    def _postgres_schema_is_current(self, conn: Any) -> bool:
+        """Verify the current completed schema without replaying migration writes.
+
+        This is a database check on every open, including a worker's first open;
+        no process-local readiness cache can hide a changed schema. Catalog-only
+        verifiers allow ordinary DML while retaining locks against RLS changes.
+        """
+        if not self.backend.table_exists('db_schema_version', connection=conn):
+            return False
+        current_version = self._get_schema_version_postgres(conn)
+        if current_version > self._POSTGRES_SCHEMA_VERSION:
+            raise SchemaError(  # noqa: TRY003
+                f"Database schema version ({current_version}) is newer than supported by code "
+                f"({self._POSTGRES_SCHEMA_VERSION})."
+            )
+        if current_version < 71 or current_version != self._POSTGRES_SCHEMA_VERSION:
+            return False
+        self._verify_note_attachment_schema_postgres(conn, runtime=True)
+        self._verify_note_task_schema_postgres(conn, runtime=True)
+        self._verify_notes_moodboard_studio_schema_postgres(conn)
+        for fts_table, source_table, _ in self._FTS_CONFIG:
+            self.backend.register_fts_table(fts_table, self._map_table_for_backend(source_table))
+        self._runtime_schema_version = current_version
+        return True
+
     def _initialize_schema_postgres(self):
         """Bootstrap or migrate the ChaCha schema on PostgreSQL."""
+        from tldw_Server_API.app.core.DB_Management.chacha.schema_bootstrap import postgres_schema_migration
 
         backend = self.backend
         target_version = self._POSTGRES_SCHEMA_VERSION
 
         with backend.transaction() as conn:
             self._configure_notes_moodboard_studio_v61_postgres_transaction(conn)
+            if self._postgres_schema_is_current(conn):
+                return
+
+        with postgres_schema_migration(backend, self._NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT) as conn:
+            self._configure_notes_moodboard_studio_v61_postgres_transaction(conn)
+            if self._postgres_schema_is_current(conn):
+                return
             schema_exists = backend.table_exists('db_schema_version', connection=conn)
 
             if not schema_exists:
@@ -24896,6 +24935,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 raise SchemaError(  # noqa: TRY003
                     f"Database schema version ({current_version}) is newer than supported by code ({target_version})."
                 )
+            if current_version == 71 and target_version == 72:
+                # v71 already reconciled the schema. Upgrade only the Study sync
+                # triggers under the shared migration lock and transaction.
+                self._ensure_study_pack_sync_triggers_postgres(conn)
+                self._set_schema_version_postgres(conn, 72)
+                self._postgres_schema_is_current(conn)
+                return
+
             if current_version == 59:
                 self._verify_note_attachment_schema_postgres(conn)
             elif current_version >= 60:
@@ -25172,14 +25219,6 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             self._ensure_manuscript_phase2_sync_triggers_postgres(conn)
             self._ensure_chacha_rls_postgres(conn)
 
-            if current_version < target_version:
-                logger.warning(
-                    'ChaChaNotes PostgreSQL schema is at version {} but code expects {}. '
-                    'Some migrations may not yet be available for PostgreSQL.',
-                    current_version,
-                    target_version,
-                )
-
             try:
                 # Namespace migration: if legacy 'keywords' exists, rename to 'chacha_keywords'
                 try:
@@ -25299,6 +25338,31 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             except BackendDatabaseError as exc:
                 raise SchemaError(f"Failed to ensure PostgreSQL FTS structures: {exc}") from exc  # noqa: TRY003
 
+            self._ensure_message_metadata_table(connection=conn)
+            self._ensure_persona_live_voice_session_summaries_table(connection=conn)
+            self._ensure_conversation_settings_table(connection=conn)
+            if target_version >= 71 and current_version < 71:
+                # v71 makes the previously unversioned reconciliation above a
+                # one-time migration. Publish readiness only after all of it
+                # succeeds in this transaction, including the auxiliary tables.
+                self._set_schema_version_postgres(conn, 71)
+                self._runtime_schema_version = 71
+                current_version = 71
+
+            if target_version >= 72 and current_version < 72:
+                # Fresh/older schemas installed the updated triggers above.
+                self._set_schema_version_postgres(conn, 72)
+                self._runtime_schema_version = 72
+                current_version = 72
+
+            if current_version < target_version:
+                logger.warning(
+                    'ChaChaNotes PostgreSQL schema is at version {} but code expects {}. '
+                    'Some migrations may not yet be available for PostgreSQL.',
+                    current_version,
+                    target_version,
+                )
+
     def _ensure_postgres_fts(self, conn) -> None:
         """Ensure PostgreSQL full-text search structures exist for ChaCha entities."""
 
@@ -25384,7 +25448,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     # ----------------------
     # Message metadata (tool calls)
     # ----------------------
-    def _ensure_message_metadata_table(self) -> None:
+    def _ensure_message_metadata_table(self, *, connection: Any | None = None) -> None:
         """Ensure the message_metadata table exists for the active backend."""
         if self.backend_type == BackendType.SQLITE:
             self.execute_query(
@@ -25410,7 +25474,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                   extra_json TEXT,
                   last_modified TIMESTAMP NOT NULL DEFAULT NOW()
                 )
-                """
+                """,
+                connection=connection,
             )
             return
 
@@ -38761,13 +38826,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     user_selection_value = self._ensure_json_string_from_mixed(user_selection_json)
 
                 if refreshed_from_snapshot_id is not None:
+                    owner_clause, owner_params = self._selected_owner_filter(self.client_id)
                     parent_row = conn.execute(
                         """
                         SELECT service, activity_type, anchor_type, anchor_id, suggestion_type, user_selection_json
                           FROM suggestion_snapshots
                          WHERE id = ? AND deleted = 0
-                        """,
-                        (refreshed_from_snapshot_id,),
+                        """ + owner_clause,  # nosec B608 -- Fixed owner clause; values are bound.
+                        (refreshed_from_snapshot_id, *owner_params),
                     ).fetchone()
                     if not parent_row:
                         raise ConflictError(
@@ -38825,6 +38891,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def get_suggestion_snapshot(self, snapshot_id: int) -> dict[str, Any] | None:
         """Fetch a single active suggestion snapshot by id."""
+        owner_clause, owner_params = self._selected_owner_filter(self.client_id)
         query = """
             SELECT id, service, activity_type, anchor_type, anchor_id, suggestion_type, status,
                    payload_json, user_selection_json, refreshed_from_snapshot_id,
@@ -38832,7 +38899,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
               FROM suggestion_snapshots
              WHERE id = ? AND deleted = 0
         """
-        cursor = self.execute_query(query, (snapshot_id,))
+        cursor = self.execute_query(query + owner_clause, (snapshot_id, *owner_params))
         row = cursor.fetchone()
         return self._deserialize_row_fields(row, self._SUGGESTION_SNAPSHOT_JSON_FIELDS)
 
@@ -38844,21 +38911,45 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         include_deleted: bool = False,
     ) -> list[dict[str, Any]]:
         """List snapshots for a concrete anchor in newest-first order."""
+        owner_clause, owner_params = self._selected_owner_filter(self.client_id)
         deleted_clause = "1=1" if include_deleted else "deleted = 0"
         query = f"""
             SELECT id, service, activity_type, anchor_type, anchor_id, suggestion_type, status,
                    payload_json, user_selection_json, refreshed_from_snapshot_id,
                    created_at, last_modified, deleted, client_id, version
               FROM suggestion_snapshots
-             WHERE anchor_type = ? AND anchor_id = ? AND {deleted_clause}
+             WHERE anchor_type = ? AND anchor_id = ? AND {deleted_clause}{owner_clause}
              ORDER BY id DESC
         """  # nosec B608
-        cursor = self.execute_query(query, (anchor_type, anchor_id))
+        cursor = self.execute_query(query, (anchor_type, anchor_id, *owner_params))
         return [
             self._deserialize_row_fields(row, self._SUGGESTION_SNAPSHOT_JSON_FIELDS)
             for row in cursor.fetchall()
             if row
         ]
+
+    def _suggestion_link_owner_filter(self) -> tuple[str, tuple[str, ...]]:
+        """Require both the PostgreSQL link and its live snapshot to belong to the caller."""
+        if self.backend_type != BackendType.POSTGRESQL:
+            return "", ()
+        return (
+            " AND client_id = ? AND EXISTS ("
+            "SELECT 1 FROM suggestion_snapshots snapshot "
+            "WHERE snapshot.id = suggestion_generation_links.snapshot_id "
+            "AND snapshot.deleted = FALSE AND snapshot.client_id = ?)",
+            (self.client_id, self.client_id),
+        )
+
+    def _validate_suggestion_snapshot_locked(self, conn: Any, snapshot_id: int) -> None:
+        """Require an owned live PostgreSQL snapshot before creating action links."""
+        if self.backend_type != BackendType.POSTGRESQL:
+            return
+        row = conn.execute(
+            "SELECT id FROM suggestion_snapshots WHERE id = ? AND client_id = ? AND deleted = FALSE FOR SHARE",
+            (snapshot_id, self.client_id),
+        ).fetchone()
+        if row is None:
+            raise InputError("Suggestion snapshot not found")  # noqa: TRY003
 
     def create_suggestion_generation_link(
         self,
@@ -38873,6 +38964,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         now = self._get_current_utc_timestamp_iso()
         try:
             with self.transaction() as conn:
+                self._validate_suggestion_snapshot_locked(conn, snapshot_id)
                 insert_sql = (
                     "INSERT INTO suggestion_generation_links("
                     "snapshot_id, target_service, target_type, target_id, selection_fingerprint, "
@@ -38930,7 +39022,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         selection_fingerprint: str,
     ) -> dict[str, Any] | None:
         """Find the durable link row for a concrete snapshot/action result."""
-        query = """
+        owner_clause, owner_params = self._suggestion_link_owner_filter()
+        query = f"""
             SELECT id, snapshot_id, target_service, target_type, target_id, selection_fingerprint,
                    created_at, last_modified, deleted, client_id, version
               FROM suggestion_generation_links
@@ -38939,13 +39032,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                AND target_type = ?
                AND target_id = ?
                AND selection_fingerprint = ?
-               AND deleted = 0
+               AND deleted = 0{owner_clause}
              ORDER BY id DESC
              LIMIT 1
-        """
+        """  # nosec B608 -- Fixed owner clause; values are bound.
         cursor = self.execute_query(
             query,
-            (snapshot_id, target_service, target_type, target_id, selection_fingerprint),
+            (snapshot_id, target_service, target_type, target_id, selection_fingerprint, *owner_params),
         )
         row = cursor.fetchone()
         return dict(row) if row else None
@@ -38960,25 +39053,28 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         selection_fingerprint: str,
     ) -> int:
         """Upsert a direct generation link without accumulating multiple active rows."""
+        owner_clause, owner_params = self._suggestion_link_owner_filter()
         now = self._get_current_utc_timestamp_iso()
         try:
             with self.transaction() as conn:
+                self._validate_suggestion_snapshot_locked(conn, snapshot_id)
                 rows = conn.execute(
-                    """
+                    f"""
                     SELECT id
                       FROM suggestion_generation_links
                      WHERE snapshot_id = ?
                        AND target_service = ?
                        AND target_type = ?
                        AND selection_fingerprint = ?
-                       AND deleted = 0
+                       AND deleted = 0{owner_clause}
                      ORDER BY id DESC
-                    """,
+                    """,  # nosec B608 -- Fixed owner clause; values are bound.
                     (
                         int(snapshot_id),
                         target_service,
                         target_type,
                         selection_fingerprint,
+                        *owner_params,
                     ),
                 ).fetchall()
                 if rows:
@@ -38988,12 +39084,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         UPDATE suggestion_generation_links
                            SET target_id = ?, last_modified = ?, version = version + 1, client_id = ?
                          WHERE id = ? AND deleted = 0
-                        """,
+                        """ + owner_clause,  # nosec B608 -- Fixed owner clause; values are bound.
                         (
                             str(target_id),
                             now,
                             self.client_id,
                             keeper_id,
+                            *owner_params,
                         ),
                     ).rowcount
                     stale_ids = [int(row["id"]) for row in rows[1:]]
@@ -39003,8 +39100,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                             UPDATE suggestion_generation_links
                                SET deleted = ?, last_modified = ?, version = version + 1, client_id = ?
                              WHERE id = ? AND deleted = 0
-                            """,
-                            (True, now, self.client_id, stale_id),
+                            """ + owner_clause,  # nosec B608 -- Fixed owner clause; values are bound.
+                            (True, now, self.client_id, stale_id, *owner_params),
                         )
                     if updated <= 0:
                         raise CharactersRAGDBError("Failed to update existing suggestion generation link")  # noqa: TRY003
@@ -39066,7 +39163,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         selection_fingerprint: str,
     ) -> dict[str, Any] | None:
         """Find an existing generation link by fingerprint without requiring the target id."""
-        query = """
+        owner_clause, owner_params = self._suggestion_link_owner_filter()
+        query = f"""
             SELECT id, snapshot_id, target_service, target_type, target_id, selection_fingerprint,
                    created_at, last_modified, deleted, client_id, version
               FROM suggestion_generation_links
@@ -39074,13 +39172,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                AND target_service = ?
                AND target_type = ?
                AND selection_fingerprint = ?
-               AND deleted = 0
+               AND deleted = 0{owner_clause}
              ORDER BY id DESC
              LIMIT 1
-        """
+        """  # nosec B608 -- Fixed owner clause; values are bound.
         cursor = self.execute_query(
             query,
-            (int(snapshot_id), target_service, target_type, selection_fingerprint),
+            (int(snapshot_id), target_service, target_type, selection_fingerprint, *owner_params),
         )
         row = cursor.fetchone()
         return dict(row) if row else None
@@ -39098,6 +39196,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         Returns the number of rows updated (0 means the reservation was not found).
         """
+        owner_clause, owner_params = self._suggestion_link_owner_filter()
         now = self._get_current_utc_timestamp_iso()
         pending_target_id = f"pending:{selection_fingerprint}"
         try:
@@ -39112,7 +39211,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                        AND target_id = ?
                        AND selection_fingerprint = ?
                        AND deleted = 0
-                    """,
+                    """ + owner_clause,  # nosec B608 -- Fixed owner clause; values are bound.
                     (
                         str(final_target_id),
                         now,
@@ -39122,6 +39221,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         target_type,
                         pending_target_id,
                         selection_fingerprint,
+                        *owner_params,
                     ),
                 ).rowcount
             return int(updated)
@@ -39139,6 +39239,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         selection_fingerprint: str,
     ) -> int:
         """Soft-delete active generation links matching a snapshot fingerprint."""
+        owner_clause, owner_params = self._suggestion_link_owner_filter()
         now = self._get_current_utc_timestamp_iso()
         try:
             with self.transaction() as conn:
@@ -39151,7 +39252,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                        AND target_type = ?
                        AND selection_fingerprint = ?
                        AND deleted = 0
-                    """,
+                    """ + owner_clause,  # nosec B608 -- Fixed owner clause; values are bound.
                     (
                         True,
                         now,
@@ -39160,6 +39261,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         target_service,
                         target_type,
                         selection_fingerprint,
+                        *owner_params,
                     ),
                 ).rowcount
             return int(updated)
@@ -39177,6 +39279,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         selection_fingerprint: str,
     ) -> None:
         """Soft-delete an in-progress reservation after generation failure."""
+        owner_clause, owner_params = self._suggestion_link_owner_filter()
         now = self._get_current_utc_timestamp_iso()
         pending_target_id = f"pending:{selection_fingerprint}"
         try:
@@ -39191,7 +39294,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                        AND target_id = ?
                        AND selection_fingerprint = ?
                        AND deleted = 0
-                    """,
+                    """ + owner_clause,  # nosec B608 -- Fixed owner clause; values are bound.
                     (
                         True,
                         now,
@@ -39201,6 +39304,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         target_type,
                         pending_target_id,
                         selection_fingerprint,
+                        *owner_params,
                     ),
                 )
         except sqlite3.Error as exc:

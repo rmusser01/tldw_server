@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-19 07:36'
+updated_date: '2026-09-20 05:41'
 labels:
   - uat
   - testing
@@ -261,6 +261,8 @@ UAT293 verified/Done in30d15d951d: reciprocal native SQLite and fresh PostgreSQL
 UAT298 verified on b0e6738c13:45 focused tests pass/0skips, Ruff/Bandit clear, independent review clear, fresh restricted PostgreSQL first-login concurrency and native logout/access+refresh revocation pass. Source24925 entries unchanged; apps closed and official fixture holder exits0. Totals301 findings/286 verified/15 open:261,283-290,292,295-297,299-300. Continue bounded fixes before another full matrix. Evidence .tmp/uat298-repair; captures ignored.
 
 UAT296 targeted acceptance completed 2026-09-19 07:35UTC on 7e292d4d13. Fresh official restricted PostgreSQL native Rowan ingestion succeeds; normal source Chat and selected-character Chat return the correct director/code answer and restore their canonical messages after reload. Supplemental authenticated exemplar-search endpoint returns200 for full2090-character prose, 18:00, operator-like text and punctuation-only input; subsequent character read200. Positive matching semantics and failed-read rollback are established by the123 unique SQLite/real PostgreSQL controls, not by empty live exemplars. Selected-character complete-v2 is a separate path and does not itself establish automatic exemplar retrieval. Cluster audit:0 malformed tsquery/0 aborted transactions; existing292 schema errors and optional llm_usage_v2 absence retained. Backend has only optional evaluations-config absence. New302 password-policy UX and303 one-item wording recorded separately. Initial password generator, premature login navigation, collapsed composer and early reload/observer endpoint assumptions are retained as harness limitations.24925 source entries match, owned browser/apps stopped, ports free; API terminated by SIGTERM (launcher reports1), frontend and official holder exit0. Evidence .tmp/uat296-repair stays local/ignored. Current303 findings/287 verified/16 open (261,283-290,292,295,297,299-300,302-303). Frozen full-matrix result remains failed.
+
+Post-PR2969 checkpoint in progress on codex/uat295-postgres-notes-20260919, based on latest fetched dev1dfdd819b6. Current332findings/329verified/open261,290,332.300and306 now natively verified.290 healthy-storage native controls pass; new storage-failure guard reviewed and tested, final committed native recheck pending.332 is private Character selection carryover across accounts (no transcript/draft leakage observed), now repair task13260.271. Checkpoint13260.270 owns combined validation/PR/Qodo/merge gate. No full new48-row matrix started.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

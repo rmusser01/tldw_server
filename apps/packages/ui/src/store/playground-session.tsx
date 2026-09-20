@@ -6,12 +6,61 @@ import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 
 const STORAGE_KEY = "tldw-playground-session"
 const STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000 // 24 hours
+type SyncStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">
 
-const createMemoryStorage = (): StateStorage => ({
+const createMemoryStorage = (): SyncStorage => ({
   getItem: () => null,
   setItem: () => {},
   removeItem: () => {}
 })
+
+const bestEffortStorage = (getStorage: () => Storage): SyncStorage => {
+  let storage: Storage
+  try {
+    storage = getStorage()
+  } catch {
+    return createMemoryStorage()
+  }
+  return {
+    getItem: (key) => {
+      try { return storage.getItem(key) } catch { return null }
+    },
+    setItem: (key, value) => {
+      try {
+        storage.setItem(key, value)
+      } catch {
+        // A rejected replacement must not leave an older restore target pinned.
+        try { storage.removeItem(key) } catch { /* Storage may be blocked entirely. */ }
+      }
+    },
+    removeItem: (key) => {
+      try { storage.removeItem(key) } catch { /* Preserve the other backing store. */ }
+    }
+  }
+}
+
+const createBrowserStorage = (): StateStorage => {
+  const tabStorage = bestEffortStorage(() => sessionStorage)
+  const durableStorage = bestEffortStorage(() => localStorage)
+  return {
+    getItem: (key) => {
+      const current = tabStorage.getItem(key)
+      if (current !== null) return current
+      // New tabs keep last-session recovery, then own their restore target.
+      const previous = durableStorage.getItem(key)
+      if (previous !== null) tabStorage.setItem(key, previous)
+      return previous
+    },
+    setItem: (key, value) => {
+      tabStorage.setItem(key, value)
+      durableStorage.setItem(key, value)
+    },
+    removeItem: (key) => {
+      tabStorage.removeItem(key)
+      durableStorage.removeItem(key)
+    }
+  }
+}
 
 export interface PlaygroundSessionData {
   // Core identifier (used to restore messages from Dexie)
@@ -143,7 +192,7 @@ export const usePlaygroundSessionStore = createWithEqualityFn<PlaygroundSessionS
       version: 1,
       migrate: (persisted) => persisted as any,
       storage: createJSONStorage(() =>
-        typeof window !== "undefined" ? localStorage : createMemoryStorage()
+        typeof window !== "undefined" ? createBrowserStorage() : createMemoryStorage()
       ),
       partialize: (state) => ({
         historyId: state.historyId,

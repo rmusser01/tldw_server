@@ -52,7 +52,7 @@ class ConversationStore:
             raise CharactersRAGDBError("Database result row did not expose column names.")
         return dict(zip(keys, row, strict=False))
 
-    def _ensure_conversation_settings_table(self) -> None:
+    def _ensure_conversation_settings_table(self, *, connection: Any | None = None) -> None:
         """Ensure the conversation_settings table exists for the active backend."""
         if self._db.backend_type == BackendType.SQLITE:
             self._db.execute_query(
@@ -78,7 +78,8 @@ class ConversationStore:
                   settings_version INTEGER NOT NULL DEFAULT 1 CHECK(settings_version >= 1),
                   last_modified TIMESTAMP NOT NULL DEFAULT NOW()
                 )
-                """
+                """,
+                connection=connection,
             )
             return
 

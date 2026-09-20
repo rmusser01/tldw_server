@@ -1166,7 +1166,12 @@ export const ServerAdminPage: React.FC = () => {
           <Form.Item name="email" label={t("settings:admin.users.email", "Email")} rules={[{ required: true, type: "email" }]}>
             <Input autoComplete="off" />
           </Form.Item>
-          <Form.Item name="password" label={t("settings:admin.users.password", "Password")} rules={[{ required: true, min: 10, max: 128 }]}>
+          <Form.Item
+            name="password"
+            label={t("settings:admin.users.password", "Password")}
+            extra={t("settings:admin.users.passwordGuidance", "Use a long, unique password with uppercase and lowercase letters, a number, and a symbol. Avoid your username and sequences or repeats of three characters.")}
+            rules={[{ required: true, min: 10, max: 128 }]}
+          >
             <Input.Password autoComplete="new-password" />
           </Form.Item>
           <Form.Item name="role" label={t("settings:admin.users.role", "Role")} rules={[{ required: true }]}>

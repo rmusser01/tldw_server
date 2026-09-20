@@ -13,6 +13,7 @@ import { CharactersManager, withCharacterNameInLabel } from "../Manager"
 import { DEFAULT_CHARACTER_STORAGE_KEY } from "@/utils/default-character-preference"
 import { ensureLocalStorageApi } from "./testUtils"
 
+const OWNED_DEFAULT_KEY = `${DEFAULT_CHARACTER_STORAGE_KEY}:owner:account-a`
 const TEMPLATE_CHOOSER_SEEN_KEY = "characters-template-chooser-seen"
 
 const {
@@ -180,6 +181,14 @@ const {
       tags: ["education"]
     }
   ]
+}))
+
+vi.mock("@/hooks/useChatDraftOwner", () => ({
+  useChatDraftOwner: () => ({ ownerKey: "account-a", isCurrent: () => true })
+}))
+vi.mock("@/services/service-prompts", async importOriginal => ({
+  ...await importOriginal<typeof import("@/services/service-prompts")>(),
+  resolveServicePromptScope: async () => ({ config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "account-a" })
 }))
 
 vi.mock("@tanstack/react-query", () => ({
@@ -373,7 +382,8 @@ describe("CharactersManager first-use onboarding", () => {
 
     useQueryClientMock.mockReturnValue({
       invalidateQueries: vi.fn(),
-      setQueryData: vi.fn()
+      setQueryData: vi.fn(),
+      cancelQueries: vi.fn(async () => undefined)
     })
 
     useMutationMock.mockReturnValue({
@@ -3768,8 +3778,8 @@ describe("CharactersManager first-use onboarding", () => {
     const setDefaultCharacterMock = vi.fn(async () => undefined)
 
     useStorageMock.mockImplementation((key: unknown, defaultValue: unknown) => {
-      if (resolveStorageKey(key) === DEFAULT_CHARACTER_STORAGE_KEY) {
-        return [null, setDefaultCharacterMock, { isLoading: false }]
+      if (resolveStorageKey(key) === OWNED_DEFAULT_KEY) {
+        return [{ ownerKey: "account-a", selection: null }, setDefaultCharacterMock, { isLoading: false }]
       }
       return [defaultValue ?? null, vi.fn(), { isLoading: false }]
     })
@@ -3798,16 +3808,16 @@ describe("CharactersManager first-use onboarding", () => {
 
     await waitFor(() => {
       expect(setDefaultCharacterMock).toHaveBeenCalledWith(
-        expect.objectContaining({
+        { ownerKey: "account-a", localOnly: false, selection: expect.objectContaining({
           id: "char-default",
           name: "Default Candidate",
           system_prompt: "Default system prompt",
           greeting: "Default greeting"
-        })
+        }) }
       )
     })
     expect(tldwClientMock.setDefaultCharacterPreference).toHaveBeenCalledWith(
-      "char-default"
+      "char-default", { requestScope: { config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "account-a" } }
     )
   }, 30000)
 
@@ -3823,14 +3833,14 @@ describe("CharactersManager first-use onboarding", () => {
     const setDefaultCharacterMock = vi.fn(async () => undefined)
 
     useStorageMock.mockImplementation((key: unknown, defaultValue: unknown) => {
-      if (resolveStorageKey(key) === DEFAULT_CHARACTER_STORAGE_KEY) {
+      if (resolveStorageKey(key) === OWNED_DEFAULT_KEY) {
         return [
-          {
+          { ownerKey: "account-a", selection: {
             id: "char-default-clear",
             name: "Default Clear Candidate",
             system_prompt: "Default system prompt",
             greeting: "Default greeting"
-          },
+          } },
           setDefaultCharacterMock,
           { isLoading: false }
         ]
@@ -3861,10 +3871,10 @@ describe("CharactersManager first-use onboarding", () => {
     await user.click(await screen.findByRole("menuitem", { name: "Clear default" }))
 
     await waitFor(() => {
-      expect(setDefaultCharacterMock).toHaveBeenCalledWith(null)
+      expect(setDefaultCharacterMock).toHaveBeenCalledWith({ ownerKey: "account-a", localOnly: false, selection: null })
     })
     expect(tldwClientMock.setDefaultCharacterPreference).toHaveBeenCalledWith(
-      null
+      null, { requestScope: { config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "account-a" } }
     )
   }, 30000)
 

@@ -306,7 +306,7 @@ async def test_user_profile_override_writes_use_transaction_connection(
         def __init__(self, db_pool) -> None:
             self.db_pool = db_pool
 
-        async def ensure_tables(self) -> None:
+        async def ensure_tables(self, *, db_conn=None) -> None:
             return None
 
         async def upsert_override(

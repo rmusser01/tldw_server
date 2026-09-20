@@ -88,12 +88,6 @@ import {
   toMessageSteeringPromptPayload
 } from "@/utils/message-steering"
 import {
-  SELECTED_CHARACTER_STORAGE_KEY,
-  selectedCharacterStorage,
-  selectedCharacterSyncStorage,
-  parseSelectedCharacterValue
-} from "@/utils/selected-character-storage"
-import {
   tldwClient,
   type ChatResearchContext,
   type ConversationState,
@@ -791,41 +785,6 @@ export const useChatActions = ({
   React.useEffect(() => {
     messagesRef.current = messages
   }, [messages])
-
-  const resolveSelectedCharacter = React.useCallback(async () => {
-    try {
-      const storedRaw = await selectedCharacterStorage.get(
-        SELECTED_CHARACTER_STORAGE_KEY
-      )
-      const stored = parseSelectedCharacterValue<Character>(storedRaw)
-      if (stored?.id) {
-        if (
-          !selectedCharacter?.id ||
-          String(stored.id) !== String(selectedCharacter.id)
-        ) {
-          return stored
-        }
-      }
-      const storedSyncRaw = await selectedCharacterSyncStorage.get(
-        SELECTED_CHARACTER_STORAGE_KEY
-      )
-      const storedSync = parseSelectedCharacterValue<Character>(storedSyncRaw)
-      if (storedSync?.id) {
-        await selectedCharacterStorage
-          .set(SELECTED_CHARACTER_STORAGE_KEY, storedSync)
-          .catch(() => {})
-        if (
-          !selectedCharacter?.id ||
-          String(storedSync.id) !== String(selectedCharacter.id)
-        ) {
-          return storedSync
-        }
-      }
-    } catch {
-      // best-effort only
-    }
-    return selectedCharacter
-  }, [selectedCharacter])
 
   const resolveTrackedCharacterForCurrentChat = React.useCallback((): Character | null => {
     if (serverChatAssistantKind !== "character") return null

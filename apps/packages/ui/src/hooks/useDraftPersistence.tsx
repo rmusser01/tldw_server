@@ -27,7 +27,7 @@ type DraftPayload = {
 
 type DraftValue = string | DraftPayload
 
-const draftBucket = createLocalRegistryBucket<DraftValue>({
+const durableDraftBucket = createLocalRegistryBucket<DraftValue>({
   prefix: DRAFT_BUCKET_PREFIX,
   ttlMs: DRAFT_TTL_MS
 })
@@ -109,6 +109,7 @@ const clearLegacyDraft = (storageKey: string) => {
 
 interface DraftPersistenceOptions {
   storageKey: string
+  tabScoped?: boolean
   /** Discard this older, unowned key instead of migrating its private content. */
   legacyStorageKey?: string
   /** Captures the owner of this render, including synchronous logout invalidation. */
@@ -135,6 +136,7 @@ interface DraftPersistenceResult {
  */
 export const useDraftPersistence = ({
   storageKey,
+  tabScoped = false,
   legacyStorageKey,
   isCurrent,
   getValue,
@@ -143,6 +145,9 @@ export const useDraftPersistence = ({
   setValueWithMetadata,
   enabled = true
 }: DraftPersistenceOptions): DraftPersistenceResult => {
+  const draftBucket = React.useMemo(() => tabScoped
+    ? createLocalRegistryBucket<DraftValue>({ prefix: DRAFT_BUCKET_PREFIX, ttlMs: DRAFT_TTL_MS, tabScoped: true })
+    : durableDraftBucket, [tabScoped])
   const [draftSaved, setDraftSaved] = React.useState(false)
   const identity = React.useMemo(() => ({ storageKey, enabled, isCurrent }), [storageKey, enabled, isCurrent])
   const [hydrated, setHydrated] = React.useState<object | null>(null)
@@ -176,7 +181,7 @@ export const useDraftPersistence = ({
     const restoreDraft = async () => {
       if (legacyStorageKey) {
         clearLegacyDraft(legacyStorageKey)
-        await draftBucket.remove(legacyStorageKey)
+        await durableDraftBucket.remove(legacyStorageKey)
         if (!current()) return
       }
       const record = await draftBucket.get(storageKey)
@@ -229,12 +234,12 @@ export const useDraftPersistence = ({
     return () => {
       cancelled = true
     }
-  }, [storageKey, legacyStorageKey, enabled, identity, isCurrent])
+  }, [storageKey, legacyStorageKey, enabled, identity, isCurrent, draftBucket])
 
   React.useEffect(() => {
     if (!enabled) return
     void draftBucket.cleanup()
-  }, [enabled])
+  }, [enabled, draftBucket])
 
   // Get current value for effect dependency
   const currentValue = getValue()
@@ -307,7 +312,7 @@ export const useDraftPersistence = ({
         draftSavedTimeoutRef.current = null
       }
     }
-  }, [currentValue, storageKey, enabled, hydrated, identity, isCurrent])
+  }, [currentValue, storageKey, enabled, hydrated, identity, isCurrent, draftBucket])
 
   // Cleanup timeout on unmount
   React.useEffect(() => {
@@ -331,7 +336,7 @@ export const useDraftPersistence = ({
     clearLegacyDraft(storageKey)
     lastPersistedSignatureRef.current = null
     setDraftSaved(false)
-  }, [storageKey, isCurrent])
+  }, [storageKey, isCurrent, draftBucket])
 
   return {
     draftSaved,

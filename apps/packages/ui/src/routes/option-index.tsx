@@ -6,7 +6,6 @@ import {
   type FirstSourceKind
 } from "@/components/Option/Onboarding/FirstSourceMilestonePrompt"
 import { PostSetupApiRecovery } from "@/components/Option/Onboarding/PostSetupApiRecovery"
-import { UnifiedSetupWizard } from "@/components/Option/Onboarding/UnifiedSetupWizard"
 import {
   useConnectionActions,
   useConnectionState
@@ -29,6 +28,12 @@ import { useNavigate } from "react-router-dom"
 import { useMilestoneStore } from "@/store/milestones"
 import { setSetting } from "@/services/settings/registry"
 import { DISCUSS_MEDIA_PROMPT_SETTING } from "@/services/settings/ui-settings"
+
+const LazyUnifiedSetupWizard = React.lazy(() =>
+  import("@/components/Option/Onboarding/UnifiedSetupWizard").then((module) => ({
+    default: module.UnifiedSetupWizard
+  }))
+)
 
 const LazyCompanionHomeShell = React.lazy(() =>
   import("@/components/Option/CompanionHome").then((module) => ({
@@ -263,11 +268,13 @@ const OptionIndex = () => {
   if (wizardRequired && !connectionReady) {
     return (
       <OptionLayout hideHeader hideSidebar>
-        <UnifiedSetupWizard
-          initialState={firstRunState}
-          initialMetadata={firstRunMetadata}
-          onStateChange={adoptFirstRunState}
-        />
+        <React.Suspense fallback={<PageAssistLoader />}>
+          <LazyUnifiedSetupWizard
+            initialState={firstRunState}
+            initialMetadata={firstRunMetadata}
+            onStateChange={adoptFirstRunState}
+          />
+        </React.Suspense>
       </OptionLayout>
     )
   }

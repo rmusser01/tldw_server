@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
+from tldw_Server_API.app.core.DB_Management.backends.base import UniqueConstraintError
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     _CHACHA_NONCRITICAL_EXCEPTIONS,
     _SUPPORTED_NOTE_STUDIO_HANDWRITING_MODES,
@@ -134,14 +135,14 @@ class NoteStore:
             msg = str(e).lower()
             if "foreign key constraint failed" in msg:
                 raise ConflictError("Conversation or message not found.", entity="notes", entity_id=final_note_id) from e  # noqa: TRY003
-            if "unique constraint failed: notes.id" in msg:
+            if "unique constraint failed: notes.id" in msg or "unique constraint failed: notes.client_id, notes.id" in msg:
                 raise ConflictError(f"Note with ID '{final_note_id}' already exists.", entity="notes", entity_id=final_note_id) from e  # noqa: TRY003
             raise CharactersRAGDBError(f"Database integrity error adding note: {e}") from e  # noqa: TRY003
         except BackendDatabaseError as e:
             msg = str(e).lower()
             if "foreign key" in msg:
                 raise ConflictError("Conversation or message not found.", entity="notes", entity_id=final_note_id) from e  # noqa: TRY003
-            if "duplicate key" in msg or "unique constraint" in msg:
+            if isinstance(e, UniqueConstraintError) or "duplicate key" in msg or "unique constraint" in msg:
                 raise ConflictError(f"Note with ID '{final_note_id}' already exists.", entity="notes", entity_id=final_note_id) from e  # noqa: TRY003
             raise CharactersRAGDBError(f"Backend error adding note: {e}") from e  # noqa: TRY003
         except CharactersRAGDBError as e:

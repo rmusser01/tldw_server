@@ -4006,6 +4006,58 @@ def _saved_image_text(row: dict[str, Any], extra: Any) -> str:
     return text
 
 
+def _saved_user_content_parts(row: dict[str, Any], extra: Any) -> list[dict[str, Any]]:
+    """Reconstruct the literal saved user text and every attachment for reuse."""
+    text = _saved_image_text(row, extra)
+    parts = [{"type": "text", "text": text}] if text else []
+    images = row.get("images") or ([row] if row.get("image_data") else [])
+    for image in images:
+        data = image.get("image_data")
+        if not data:
+            raise HTTPException(status_code=409, detail="A saved chat attachment is incomplete.")
+        mime = image.get("image_mime_type") or "image/png"
+        parts.append({"type": "image_url", "image_url": {
+            "url": f"data:{mime};base64,{base64.b64encode(data).decode('utf-8')}"
+        }})
+    return parts
+
+
+async def _resolve_saved_regeneration(
+    chat_db: Any, conversation_id: str, reply_id: str, requested_user: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Validate the current answered turn, returning its user and legacy reply."""
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError
+
+    tail = await asyncio.to_thread(partial(
+        chat_db.get_messages_for_conversation, conversation_id, 2, 0, "DESC", strict_images=True,
+    ))
+    reply = await asyncio.to_thread(chat_db.get_message_by_id, reply_id)
+    if not reply or str(reply.get("conversation_id")) != conversation_id:
+        raise HTTPException(status_code=404, detail="The reply to regenerate was not found in this conversation.")
+    if (requested_user.get("role") != "user" or not tail
+            or str(reply.get("sender", "")).lower() != "assistant"
+            or str(tail[0].get("sender", "")).lower() != "assistant"
+            or _is_saved_chat_error_envelope({"role": "assistant", "content": tail[0].get("content", "")})):
+        raise HTTPException(status_code=409, detail="The answered turn changed. Reload before regenerating.")
+    user_id = tail[0].get("parent_message_id")
+    if not user_id and len(tail) > 1 and str(tail[1].get("sender", "")).lower() == "user":
+        user_id = tail[1]["id"]
+    legacy_reply = reply if not reply.get("parent_message_id") and reply["id"] == tail[0]["id"] else None
+    if not user_id or (reply.get("parent_message_id") != user_id and legacy_reply is None):
+        raise HTTPException(status_code=409, detail="The reply no longer belongs to the current turn. Reload before regenerating.")
+    try:
+        user = await asyncio.to_thread(partial(chat_db.get_message_by_id, user_id, strict_images=True))
+    except CharactersRAGDBError as exc:
+        raise HTTPException(status_code=409, detail="The saved chat attachments could not be read completely.") from exc
+    if not user or user.get("conversation_id") != conversation_id or str(user.get("sender", "")).lower() != "user":
+        raise HTTPException(status_code=409, detail="The saved user turn is unavailable. Reload before regenerating.")
+    metadata = await asyncio.to_thread(chat_db.get_message_metadata, user_id)
+    parts = _saved_user_content_parts(user, (metadata or {}).get("extra"))
+    if _retry_content_components(requested_user.get("content")) != _retry_content_components(parts):
+        raise HTTPException(status_code=409, detail="The saved user text or attachments changed. Reload before regenerating.")
+    return user, legacy_reply
+
+
 async def build_context_and_messages(
     chat_db: Any,
     request_data: Any,
@@ -4020,6 +4072,17 @@ async def build_context_and_messages(
 
     Returns (character_card, character_db_id, final_conversation_id, conversation_created, llm_payload_messages, should_persist)
     """
+    request_metadata = getattr(request_data, "metadata", None)
+    explicit_failed_retry = isinstance(request_metadata, dict) and request_metadata.get("tldw_retry_failed_turn") is True
+    regenerate_reply_id = request_metadata.get("tldw_regenerate_from_message_id") if isinstance(request_metadata, dict) else None
+    if regenerate_reply_id is not None:
+        if not isinstance(regenerate_reply_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", regenerate_reply_id):
+            raise HTTPException(status_code=422, detail="A valid saved reply ID is required for regeneration.")
+        if (not final_conversation_id or explicit_failed_retry
+                or getattr(request_data, "tldw_continuation", None) is not None):
+            raise HTTPException(status_code=409, detail="Regeneration requires an existing saved answered turn.")
+    reuse_saved_turn = explicit_failed_retry or regenerate_reply_id is not None
+
     # Assistant context
     (
         character_card,
@@ -4099,7 +4162,14 @@ async def build_context_and_messages(
         )
         should_persist = False
 
-    if should_persist:
+    if regenerate_reply_id:
+        if (not should_persist or not existing_conversation
+                or existing_conversation.get("client_id") != client_id_from_db
+                or not (is_existing_persona_conversation or is_accepted_buddy_conversation or is_owned_neutral_conversation
+                        or existing_conversation.get("character_id") == character_db_id)):
+            raise HTTPException(status_code=409, detail="Regeneration requires the existing saved assistant and conversation.")
+        # This operation can only reuse its existing target; it must never fork.
+    elif should_persist:
         if (is_existing_persona_conversation or is_accepted_buddy_conversation or is_owned_neutral_conversation) and conv_id:
             conversation_created = False
         else:
@@ -4134,9 +4204,6 @@ async def build_context_and_messages(
                 detail="conversation_id is required for continuation and must reference an existing conversation.",
             )
 
-    request_metadata = getattr(request_data, "metadata", None)
-    explicit_failed_retry = isinstance(request_metadata, dict) and request_metadata.get("tldw_retry_failed_turn") is True
-
     # History loading (configurable limit/order; filter missing roles, normalize assistant names)
     requested_history_limit = getattr(request_data, "history_message_limit", None)
     if requested_history_limit is None:
@@ -4160,8 +4227,8 @@ async def build_context_and_messages(
     historical_msgs: list[dict[str, Any]] = []
     historical_ids: list[str | None] = []
     retry_history_content: dict[int, Any] = {}
+    raw_hist: list[dict[str, Any]] = []
     if conv_id and (not conversation_created):
-        raw_hist: list[dict[str, Any]] = []
         if continuation_spec:
             from_message_id, mode, assistant_prefill = continuation_spec
             resolved_hist, continuation_metadata = await _resolve_tldw_continuation_history(
@@ -4179,7 +4246,7 @@ async def build_context_and_messages(
         elif history_limit > 0:
             raw_hist = await asyncio.to_thread(partial(chat_db.get_messages_for_conversation,
                     conv_id, history_limit, 0, db_order,
-                    **({"strict_images": True} if explicit_failed_retry else {})),
+                    **({"strict_images": True} if reuse_saved_turn else {})),
             )
         for db_msg in raw_hist:
             sender_val = str(db_msg.get("sender", "") or "")
@@ -4213,7 +4280,7 @@ async def build_context_and_messages(
             text_content = _saved_image_text(db_msg, metadata.get("extra") if isinstance(metadata, dict) else None)
             raw_user_text = text_content
             # Normal/persona Retry compares and sends the literal saved user input.
-            preserve_literal_retry = explicit_failed_retry and role == "user" and (is_owned_neutral_conversation or is_existing_persona_conversation)
+            preserve_literal_retry = reuse_saved_turn and role == "user" and (is_owned_neutral_conversation or is_existing_persona_conversation)
             if text_content and role != "tool" and not preserve_literal_retry:
                 text_content = replace_placeholders(text_content, char_name_hist, "User")
             msg_parts = []
@@ -4233,7 +4300,7 @@ async def build_context_and_messages(
                     if isinstance(img_bytes, memoryview):
                         img_bytes = img_bytes.tobytes()
                     if not img_bytes:
-                        if explicit_failed_retry:
+                        if reuse_saved_turn:
                             raise HTTPException(status_code=409, detail="A saved chat attachment is incomplete. Reload after repairing the source message.")
                         continue
                     img_mime = image_entry.get("image_mime_type") or db_msg.get("image_mime_type") or "image/png"
@@ -4242,11 +4309,11 @@ async def build_context_and_messages(
                         "type": "image_url",
                         "image_url": {"url": f"data:{img_mime};base64,{b64_img.decode('utf-8')}"}
                     }
-                    if explicit_failed_retry:
+                    if reuse_saved_turn:
                         _retry_content_components([image_part])
                     msg_parts.append(image_part)
                 except _CHAT_NONCRITICAL_EXCEPTIONS as e:
-                    if explicit_failed_retry:
+                    if reuse_saved_turn:
                         raise HTTPException(status_code=409, detail="A saved chat attachment could not be read completely.") from e
                     logger.warning(
                         "Error encoding DB image for history msg_id={} error={}",
@@ -4280,7 +4347,7 @@ async def build_context_and_messages(
                         db_msg.get("id"),
                     )
                     continue
-                if explicit_failed_retry and role == "user":
+                if reuse_saved_turn and role == "user":
                     retry_history_content[id(hist_entry)] = ([{"type": "text", "text": raw_user_text}] if raw_user_text else []) + [part for part in msg_parts if part.get("type") == "image_url"]
                 historical_msgs.append(hist_entry)
                 historical_ids.append(db_msg.get("id"))
@@ -4319,6 +4386,28 @@ async def build_context_and_messages(
         client_message_id = None
     explicit_failed_retry = isinstance(metadata, dict) and metadata.get("tldw_retry_failed_turn") is True
     retry_user_message_id: str | None = None
+    legacy_regenerated_reply: dict[str, Any] | None = None
+    if regenerate_reply_id:
+        if not request_messages:
+            raise HTTPException(status_code=409, detail="Regeneration requires the saved user turn.")
+        if any(message.get("role") != "system" for message in request_messages[:-1]):
+            raise HTTPException(status_code=409, detail="Regeneration uses saved history. Send only the original user turn and current system instructions.")
+        # System instructions still participate in prompt construction through
+        # request_data. Neither they nor a supplied history prefix are new turns.
+        request_messages = request_messages[-1:]
+        regenerated_user, legacy_regenerated_reply = await _resolve_saved_regeneration(
+            chat_db, conv_id, regenerate_reply_id, request_messages[-1],
+        )
+        retry_user_message_id = str(regenerated_user["id"])
+        # Prior variants are alternatives to the answer being generated, not
+        # preceding conversation context. Retain earlier turns unchanged.
+        variant_ids = {row["id"] for row in raw_hist if
+                       row.get("parent_message_id") == retry_user_message_id
+                       or row["id"] == regenerate_reply_id}
+        retained = [(message, message_id) for message, message_id in zip(historical_msgs, historical_ids)
+                    if message_id not in variant_ids]
+        historical_msgs = [message for message, _ in retained]
+        historical_ids = [message_id for _, message_id in retained]
     if explicit_failed_retry and should_persist and not conversation_created and request_messages:
         # Read the actual tail independently of the requested context window.
         # Retry is an explicit operation; equal text on an ordinary send is new.
@@ -4332,19 +4421,7 @@ async def build_context_and_messages(
             if str(row.get("sender", "")).lower() != "user":
                 return False
             stored_metadata = tail_metadata.get(row["id"]) or {}
-            text = _saved_image_text(row, stored_metadata.get("extra"))
-            parts = [{"type": "text", "text": text}] if text else []
-            images = row.get("images") or []
-            if not images and row.get("image_data"):
-                images = [row]
-            for image in images:
-                data = image.get("image_data")
-                if not data:
-                    raise HTTPException(status_code=409, detail="A saved chat attachment is incomplete.")
-                mime = image.get("image_mime_type") or "image/png"
-                parts.append({"type": "image_url", "image_url": {
-                    "url": f"data:{mime};base64,{base64.b64encode(data).decode('utf-8')}"
-                }})
+            parts = _saved_user_content_parts(row, stored_metadata.get("extra"))
             return _retry_content_components(requested_user.get("content")) == _retry_content_components(parts)
 
         if tail_rows:
@@ -4383,7 +4460,7 @@ async def build_context_and_messages(
         def _msg_sig(msg: dict[str, Any]) -> str:
             payload = {
                 "role": msg.get("role"),
-                "content": (_retry_content_components(retry_history_content.get(id(msg), msg.get("content"))) if explicit_failed_retry and msg.get("role") == "user" else _normalize_content(msg.get("content"))),
+                "content": (_retry_content_components(retry_history_content.get(id(msg), msg.get("content"))) if reuse_saved_turn and msg.get("role") == "user" else _normalize_content(msg.get("content"))),
                 "tool_calls": msg.get("tool_calls"),
                 "function_call": msg.get("function_call"),
                 "tool_call_id": msg.get("tool_call_id"),
@@ -4457,6 +4534,17 @@ async def build_context_and_messages(
         if saved_client_id and saved_client_id != client_message_id:
             raise HTTPException(status_code=409, detail="The failed turn identity changed. Reload the conversation before retrying.")
 
+    if legacy_regenerated_reply is not None:
+        from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError
+
+        try:
+            await asyncio.to_thread(
+                chat_db.update_message, legacy_regenerated_reply["id"],
+                {"parent_message_id": retry_user_message_id}, legacy_regenerated_reply["version"],
+            )
+        except ConflictError as exc:
+            raise HTTPException(status_code=409, detail="The saved reply changed. Reload before regenerating.") from exc
+
     persisted_user_message_id: str | None = retry_user_message_id
     current_turn: list[dict[str, Any]] = []
     for index, msg_dict in enumerate(request_messages[overlap_cut:], start=overlap_cut):
@@ -4502,6 +4590,8 @@ async def build_context_and_messages(
 
     if runtime_state is not None:
         runtime_state["user_message_id"] = persisted_user_message_id
+        if persisted_user_message_id:
+            runtime_state["assistant_parent_message_id"] = persisted_user_message_id
         runtime_state["assistant_context"] = dict(assistant_context)
         if continuation_spec and continuation_metadata is not None:
             runtime_state["tldw_continuation"] = continuation_metadata

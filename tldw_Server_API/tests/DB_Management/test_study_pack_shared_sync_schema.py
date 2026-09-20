@@ -6,9 +6,10 @@ from types import SimpleNamespace
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.core.StudyPacks import generation_service
 from tldw_Server_API.app.services import study_pack_jobs_worker as worker
@@ -161,6 +162,27 @@ def _create_graph(db):
     return pack, card
 
 
+def _create_suggestions(db):
+    """Persist a snapshot and action reservation through the real database API."""
+    snapshot = db.create_suggestion_snapshot(
+        service="flashcards",
+        activity_type="flashcard_review_session",
+        anchor_type="flashcard_review_session",
+        anchor_id=1,
+        suggestion_type="study_suggestions",
+        payload_json={"topics": []},
+    )
+    link = {
+        "snapshot_id": snapshot,
+        "target_service": "flashcards",
+        "target_type": "deck",
+        "selection_fingerprint": "shared",
+    }
+    db.create_suggestion_generation_link(**link, target_id="pending:shared")
+    assert db.get_suggestion_snapshot(snapshot)["client_id"] == "2"
+    assert db.find_suggestion_generation_link_by_fingerprint(**link)["target_id"] == "pending:shared"
+
+
 def test_shared_sync_writes_remain_in_caller_rollback(shared_store):
     db = shared_store
     with chacha_operation(independent=True):
@@ -168,6 +190,7 @@ def test_shared_sync_writes_remain_in_caller_rollback(shared_store):
         with pytest.raises(RuntimeError, match="caller rollback"):
             with db.transaction():
                 _create_graph(db)
+                _create_suggestions(db)
                 raise RuntimeError("caller rollback")
         counts = db.execute_query(
             """SELECT
@@ -176,12 +199,17 @@ def test_shared_sync_writes_remain_in_caller_rollback(shared_store):
             (SELECT COUNT(*) FROM study_packs) AS packs,
             (SELECT COUNT(*) FROM study_pack_cards) AS memberships,
             (SELECT COUNT(*) FROM flashcard_citations) AS citations,
+            (SELECT COUNT(*) FROM suggestion_snapshots) AS snapshots,
+            (SELECT COUNT(*) FROM suggestion_generation_links) AS links,
             (SELECT COUNT(*) FROM sync_log WHERE entity IN
-                ('study_packs', 'study_pack_cards', 'flashcard_citations')) AS sync_rows
+                ('study_packs', 'study_pack_cards', 'flashcard_citations',
+                 'suggestion_snapshots', 'suggestion_generation_links')) AS sync_rows
         """,
             read_only=True,
         ).fetchone()
-        assert dict(counts) == dict.fromkeys(("decks", "cards", "packs", "memberships", "citations", "sync_rows"), 0)
+        assert dict(counts) == dict.fromkeys(
+            ("decks", "cards", "packs", "memberships", "citations", "snapshots", "links", "sync_rows"), 0
+        )
         assert db.get_note_by_id(note)["content"] == "Keep this committed source"
 
 
@@ -227,7 +255,8 @@ def test_all_three_triggers_preserve_update_delete_payloads(shared_store):
             assert bool(json.loads(own_rows[-1]["payload"])["deleted"])
 
 
-def test_reopen_replaces_existing_runtime_trigger_bodies(pg_database_config, tmp_path):
+@pytest.mark.parametrize("fail_once", [False, True], ids=["upgrade", "rollback-and-retry"])
+def test_upgrade_replaces_existing_v71_trigger_bodies(pg_database_config, tmp_path, monkeypatch, fail_once):
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
     media = MediaDatabase(str(tmp_path / "media.db"), client_id="2", backend=backend)
     db = CharactersRAGDB(tmp_path / "notes.db", client_id="2", backend=backend)
@@ -235,7 +264,13 @@ def test_reopen_replaces_existing_runtime_trigger_bodies(pg_database_config, tmp
         columns = {column["name"] for column in backend.get_table_info("sync_log")}
         assert "entity_uuid" in columns and "entity_id" not in columns
         with backend.transaction() as conn:
-            for name in ("study_packs_sync_log_fn", "study_pack_cards_sync_log_fn", "flashcard_citations_sync_log_fn"):
+            for name in (
+                "study_packs_sync_log_fn",
+                "study_pack_cards_sync_log_fn",
+                "flashcard_citations_sync_log_fn",
+                "suggestion_snapshots_sync_log_fn",
+                "suggestion_generation_links_sync_log_fn",
+            ):
                 definition = backend.execute(
                     "SELECT pg_get_functiondef(oid) AS definition FROM pg_proc "
                     "WHERE proname=%s AND pronamespace='public'::regnamespace",
@@ -247,19 +282,38 @@ def test_reopen_replaces_existing_runtime_trigger_bodies(pg_database_config, tmp
                     definition.replace("sync_log(entity, entity_uuid,", "sync_log(entity, entity_id,"),
                     connection=conn,
                 )
-        before = backend.execute(
-            "SELECT version FROM db_schema_version WHERE schema_name=%s", (db._SCHEMA_NAME,)
-        ).scalar
+            backend.execute(
+                "UPDATE db_schema_version SET version=71 WHERE schema_name=%s",
+                (db._SCHEMA_NAME,),
+                connection=conn,
+            )
         db.close_connection()
+        if fail_once:
+            original_execute = backend.execute
+
+            def fail_final_trigger(query, *args, **kwargs):
+                if "CREATE TRIGGER suggestion_generation_links_sync_log" in query:
+                    raise DatabaseError("planned trigger upgrade failure")
+                return original_execute(query, *args, **kwargs)
+
+            with monkeypatch.context() as patch:
+                patch.setattr(backend, "execute", fail_final_trigger)
+                with pytest.raises(CharactersRAGDBError, match="planned trigger upgrade failure"):
+                    CharactersRAGDB(tmp_path / "failed.db", client_id="2", backend=backend)
+            assert (
+                backend.execute("SELECT version FROM db_schema_version WHERE schema_name=%s", (db._SCHEMA_NAME,)).scalar
+                == 71
+            )
         db = CharactersRAGDB(tmp_path / "notes.db", client_id="2", backend=backend)
         assert (
             backend.execute("SELECT version FROM db_schema_version WHERE schema_name=%s", (db._SCHEMA_NAME,)).scalar
-            == before
+            == 72
         )
         with chacha_operation(independent=True):
             pack, card = _create_graph(db)
             assert db.get_study_pack(pack)["client_id"] == "2"
             assert db.list_flashcard_citations(card)[0]["client_id"] == "2"
+            _create_suggestions(db)
     finally:
         db.close_all_connections()
         media.close_connection()

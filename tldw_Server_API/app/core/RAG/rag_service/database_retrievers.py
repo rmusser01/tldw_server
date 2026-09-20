@@ -33,8 +33,13 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatConfigurationError,
     ChatProviderError,
 )
+from tldw_Server_API.app.core.Chat.knowledge_save import visible_knowledge_text
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.backends.fts_translator import FTSQueryTranslator
+from tldw_Server_API.app.core.DB_Management.chacha.chat_history_queries import (
+    get_chat_history_metadata,
+    search_chat_history,
+)
 from tldw_Server_API.app.core.DB_Management.Kanban_DB import KanbanDB
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     create_media_database,
@@ -3916,32 +3921,21 @@ class ChatHistoryRetriever(BaseRetriever):
     async def retrieve(self, query: str, **kwargs: Any) -> list[Document]:
         documents: list[Document] = []
         max_results = int(self.config.max_results)
-
-        sql = """
-            SELECT
-                m.id,
-                m.conversation_id,
-                m.content,
-                m.sender,
-                m.timestamp,
-                conv.character_id,
-                conv.source AS conversation_source,
-                cc.name AS character_name
-            FROM messages m
-            JOIN conversations conv ON m.conversation_id = conv.id
-            LEFT JOIN character_cards cc ON conv.character_id = cc.id
-            WHERE m.deleted = 0
-              AND m.content LIKE ?
-              AND COALESCE(conv.source, '') != ?
-            ORDER BY m.timestamp DESC
-            LIMIT ?
-        """
-        rows = await self._execute_query_async(sql, (f"%{query}%", "knowledge_qa", max_results))
+        rows = await asyncio.to_thread(
+            search_chat_history,
+            self._execute_query,
+            query,
+            db_adapter=self._db_adapter,
+            limit=max_results,
+        )
         for row in rows:
+            visible = visible_knowledge_text(row.get("content") or "")
+            if not visible:
+                continue
             documents.append(
                 Document(
                     id=f"chat_{row['id']}",
-                    content=f"[{row.get('sender')}]: {row.get('content', '')}",
+                    content=f"[{row.get('sender')}]: {visible}",
                     source=DataSource.CHAT_HISTORY,
                     metadata={
                         "message_id": row.get("id"),
@@ -3951,6 +3945,9 @@ class ChatHistoryRetriever(BaseRetriever):
                         "character_id": row.get("character_id"),
                         "character_name": row.get("character_name"),
                         "conversation_source": row.get("conversation_source"),
+                        "title": row.get("conversation_title") or "Untitled conversation",
+                        "source_type": "chats",
+                        "source_id": str(row["conversation_id"]),
                         "type": "chat_message",
                         "source": "chats",
                     },
@@ -3971,15 +3968,21 @@ class ChatHistoryRetriever(BaseRetriever):
                     conv_id = row.get("conversation_id")
                     if self._is_excluded_conversation_source(conv_id):
                         continue
+                    visible = visible_knowledge_text(row.get("content") or "")
+                    if not visible:
+                        continue
 
                     documents.append(
                         Document(
                             id=f"chat_{row['id']}",
-                            content=f"{row.get('sender')}: {row.get('content', '')}",
+                            content=f"{row.get('sender')}: {visible}",
                             source=DataSource.CHAT_HISTORY,
                             metadata={
                                 "message_id": row.get("id"),
                                 "conversation_id": conv_id,
+                                "title": row.get("conversation_title") or "Untitled conversation",
+                                "source_type": "chats",
+                                "source_id": str(conv_id),
                                 "sender": row.get("sender"),
                                 "timestamp": row.get("timestamp"),
                                 "character_id": row.get("character_id"),
@@ -4005,16 +4008,11 @@ class ChatHistoryRetriever(BaseRetriever):
 
     async def get_metadata(self, doc_id: str) -> dict[str, Any]:
         chat_id = doc_id.replace("chat_", "")
-        results = self._execute_query(
-            """
-            SELECT m.*, conv.character_id
-            FROM messages m
-            JOIN conversations conv ON m.conversation_id = conv.id
-            WHERE m.id = ?
-            """,
-            (chat_id,),
+        return get_chat_history_metadata(
+            self._execute_query,
+            chat_id,
+            db_adapter=self._db_adapter,
         )
-        return dict(results[0]) if results else {}
 
 
 class WorldBooksRetriever(BaseRetriever):
@@ -4191,6 +4189,21 @@ class ChatDictionariesRetriever(BaseRetriever):
         return dict(rows[0]) if rows else {}
 
 
+def _format_character_evidence(row: dict[str, Any]) -> str:
+    """Keep Character evidence readable in the plain-text source preview."""
+    sections = [row.get("name") or "(Unnamed)"]
+    for field, label in (
+        ("description", "Description"),
+        ("personality", "Personality"),
+        ("scenario", "Scenario"),
+        ("first_message", "First Message"),
+    ):
+        value = row.get(field)
+        if value and value.strip():
+            sections.append(f"{label}: {value}")
+    return "\n\n".join(sections)
+
+
 class CharacterCardsRetriever(BaseRetriever):
     """Retriever for character cards and chats."""
 
@@ -4244,27 +4257,20 @@ class CharacterCardsRetriever(BaseRetriever):
                 min_score = float(self.config.min_score or 0.0)
                 for idx, row in enumerate(card_rows):
                     name = row.get("name") or "(Unnamed)"
-                    description = row.get("description") or ""
-                    personality = row.get("personality") or ""
-                    scenario = row.get("scenario") or ""
-                    first_message = row.get("first_message") or ""
                     score_val = norm_map.get(idx, 0.75)
                     if score_val < min_score:
                         continue
 
-                    content = (
-                        f"# {name}\n\n"
-                        f"**Description:** {description}\n\n"
-                        f"**Personality:** {personality}\n\n"
-                        f"**Scenario:** {scenario}\n\n"
-                        f"**First Message:** {first_message}"
-                    )
+                    content = _format_character_evidence(row)
                     doc = Document(
                         id=f"character_{row['id']}",
                         content=content,
                         source=DataSource.CHARACTER_CARDS,
                         metadata={
                             "name": name,
+                            "title": name,
+                            "source_type": "characters",
+                            "source_id": str(row["id"]),
                             "creator": row.get("creator"),
                             "version": row.get("version"),
                             "type": "character_card",
@@ -4278,6 +4284,9 @@ class CharacterCardsRetriever(BaseRetriever):
                     limit_msgs = max(1, self.config.max_results // 2)
                     msg_rows = self.chacha_db.search_messages_by_content(query, limit=limit_msgs)
                     for row in msg_rows:
+                        visible = visible_knowledge_text(row.get("content") or "")
+                        if not visible:
+                            continue
                         character_name = None
                         character_id = None
                         conv_id = row.get("conversation_id")
@@ -4292,8 +4301,11 @@ class CharacterCardsRetriever(BaseRetriever):
                                     if card:
                                         character_name = card.get("name")
 
-                        content = f"{row.get('sender')}: {row.get('content', '')}"
+                        content = f"{row.get('sender')}: {visible}"
                         metadata = {
+                            "title": row.get("conversation_title") or "Untitled conversation",
+                            "source_type": "chats",
+                            "source_id": str(conv_id),
                             "sender": row.get("sender"),
                             "timestamp": row.get("timestamp"),
                             "character_id": character_id,
@@ -4349,7 +4361,7 @@ class CharacterCardsRetriever(BaseRetriever):
         params = [f"%{query}%"] * 5 + [self.config.max_results // 2]
         card_results = self._execute_query(card_sql, tuple(params))
         for row in card_results:
-            content = f"""# {row['name']}\n\n**Description:** {row['description']}\n\n**Personality:** {row['personality']}\n\n**Scenario:** {row['scenario']}\n\n**First Message:** {row['first_message']}"""
+            content = _format_character_evidence(row)
             matches = sum(
                 [
                     query.lower() in (row[field] or "").lower()
@@ -4363,6 +4375,9 @@ class CharacterCardsRetriever(BaseRetriever):
                 source=DataSource.CHARACTER_CARDS,
                 metadata={
                     "name": row["name"],
+                    "title": row["name"],
+                    "source_type": "characters",
+                    "source_id": str(row["id"]),
                     "creator": row["creator"],
                     "version": row["version"],
                     "type": "character_card",
@@ -4376,10 +4391,12 @@ class CharacterCardsRetriever(BaseRetriever):
             chat_sql = """
                 SELECT
                     m.id,
+                    m.conversation_id,
                     m.content,
                     m.sender,
                     m.timestamp,
                     conv.character_id,
+                    conv.title AS conversation_title,
                     cc.name as character_name
                 FROM messages m
                 JOIN conversations conv ON m.conversation_id = conv.id
@@ -4391,12 +4408,18 @@ class CharacterCardsRetriever(BaseRetriever):
             chat_params = [f"%{query}%", self.config.max_results // 2]
             chat_results = self._execute_query(chat_sql, tuple(chat_params))
             for row in chat_results:
-                content = f"[{row['sender']}]: {row['content']}"
+                visible = visible_knowledge_text(row.get("content") or "")
+                if not visible:
+                    continue
+                content = f"[{row['sender']}]: {visible}"
                 doc = Document(
                     id=f"chat_{row['id']}",
                     content=content,
                     source=DataSource.CHAT_HISTORY,
                     metadata={
+                        "title": row.get("conversation_title") or "Untitled conversation",
+                        "source_type": "chats",
+                        "source_id": str(row["conversation_id"]),
                         "sender": row["sender"],
                         "timestamp": row["timestamp"],
                         "character": row["character_name"],
@@ -4732,6 +4755,7 @@ class MultiDatabaseRetriever:
         # Optional per-source restrictions
         allowed_media_ids: Optional[list[int]] = None,
         allowed_note_ids: Optional[list[str]] = None,
+        source_failures: Optional[set[DataSource]] = None,
     ) -> list[Document]:
         """
         Retrieve documents from one or more configured data sources.
@@ -4741,6 +4765,7 @@ class MultiDatabaseRetriever:
             sources: Optional explicit list of `DataSource` to query. Defaults to all configured.
             config: Optional `RetrievalConfig` to apply to each retriever
             index_namespace: Optional namespace for vector stores
+            source_failures: Optional request-owned collector for failed sources.
 
         Returns:
             A list of `Document` objects sorted by score (desc), capped by config.max_results if provided.
@@ -4893,6 +4918,8 @@ class MultiDatabaseRetriever:
                     source_count=len(task_sources),
                 ).error("Multi-database retrieval failed (error={})", type(error).__name__)
                 had_source_failure = True
+                if source_failures is not None:
+                    source_failures.update(task_sources)
                 results = []
         else:
             results = []
@@ -4917,6 +4944,8 @@ class MultiDatabaseRetriever:
                 )
                 # Skip failed sources (partial success expected)
                 had_source_failure = True
+                if source_failures is not None:
+                    source_failures.add(source)
                 continue
             if isinstance(res, list):
                 documents.extend(res)
@@ -4936,6 +4965,8 @@ class MultiDatabaseRetriever:
     async def retrieve_from_plan(
         self,
         plan: RetrievalPlan,
+        *,
+        source_failures: Optional[set[DataSource]] = None,
         **kwargs: Any,
     ) -> list[Document]:
         """Retrieve documents using a normalized retrieval plan."""
@@ -4943,6 +4974,7 @@ class MultiDatabaseRetriever:
         return await self.retrieve(
             plan.query,
             retrieval_plan=plan,
+            source_failures=source_failures,
             **kwargs,
         )
 

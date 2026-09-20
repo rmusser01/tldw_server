@@ -16,6 +16,7 @@ const audiobookStudioPagePath = path.resolve(
   testDir,
   "../e2e/utils/page-objects/AudiobookStudioPage.ts"
 )
+const audioStudioPagePath = path.resolve(testDir, "../e2e/utils/page-objects/AudioStudioPage.ts")
 const knowledgeQaPagePath = path.resolve(
   testDir,
   "../e2e/utils/page-objects/KnowledgeQAPage.ts"
@@ -97,7 +98,7 @@ describe("e2e page object contracts", () => {
   it("keeps key page objects off direct networkidle readiness checks", () => {
     const sources = [
       readFileSync(writingPlaygroundPagePath, "utf8"),
-      readFileSync(audiobookStudioPagePath, "utf8"),
+      readFileSync(audioStudioPagePath, "utf8"),
       readFileSync(knowledgeQaPagePath, "utf8"),
       readFileSync(worldBooksPagePath, "utf8"),
       readFileSync(agentRegistryPagePath, "utf8"),
@@ -108,6 +109,14 @@ describe("e2e page object contracts", () => {
       expect(source).not.toContain('waitForLoadState("networkidle"')
       expect(source).toContain("waitForAppShell")
     }
+
+    // The legacy route inherits readiness from the canonical Audio Studio page.
+    const compatibilitySource = readFileSync(audiobookStudioPagePath, "utf8")
+    expect(compatibilitySource).toContain('import { AudioStudioPage } from "./AudioStudioPage"')
+    expect(compatibilitySource).toContain("extends AudioStudioPage")
+    expect(compatibilitySource).toContain("await this.gotoCompatibilityRoute()")
+    expect(compatibilitySource).not.toContain("async assertPageReady(")
+    expect(compatibilitySource).not.toContain('waitForLoadState("networkidle"')
   })
 
   it("grants clipboard permissions for workflow tests", () => {
@@ -124,7 +133,9 @@ describe("e2e page object contracts", () => {
     expect(source).not.toContain("Watchlist page not available (404)")
     expect(source).not.toContain("Watchlist create button not found")
     expect(source).toMatch(/watchlists\\\/jobs\\\/300\\\/run/)
-    expect(source).toContain('getByRole("button", { name: "Open Monitors" })')
+    expect(source).toContain('getByTestId("watchlists-open-command-palette").click()')
+    expect(source).toContain('getByTestId("watchlists-command-nav-monitors").click()')
+    expect(source).toContain('expect(page.getByLabel(/Monitors table/i)).toBeVisible()')
     expect(source).toContain('getByRole("button", { name: "Open Activity" })')
     expect(source).toContain("watchlists-secondary-activity")
     expect(source).toContain("watchlists-item-row-9001")

@@ -1,14 +1,18 @@
 """The complete Notes page bootstrap must release reads before replacement DDL."""
 
 import asyncio
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
 from tldw_Server_API.app.api.v1.endpoints import notes
+from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig, DatabaseError, FTSQuery
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
 
@@ -158,6 +162,211 @@ def test_notes_without_bootstrap_predecessors_remains_a_control(pg_bootstrap, tm
     asyncio.run(_handler(f, "notes"))
     _replacement(f, config, tmp_path)
     assert _state(f.db, f.db._get_thread_connection()) == {"transaction": "IDLE", "relations": []}
+
+
+@pytest.mark.parametrize("reuse_backend", [True, False], ids=["warm-worker", "cold-worker"])
+@pytest.mark.parametrize("pending_write", [False, True], ids=["read", "write"])
+def test_second_user_bootstrap_preserves_an_active_first_user_read(
+    pg_bootstrap: tuple[SimpleNamespace, DatabaseConfig], tmp_path: Path,
+    reuse_backend: bool, pending_write: bool,
+) -> None:
+    """Any worker can open the current schema during another user's transaction."""
+    f, config = pg_bootstrap
+    backend = f.db.backend
+    second_backend = backend if reuse_backend else DatabaseBackendFactory.create_backend(config)
+    second_user = None
+    try:
+        with backend.transaction() as first_request:
+            backend.execute("SELECT id FROM conversations LIMIT 1", connection=first_request)
+            if pending_write:
+                backend.execute("UPDATE notes SET title='Pending title' WHERE id=%s",
+                                (f.note,), connection=first_request)
+            second_user = CharactersRAGDB(tmp_path / "second-user.db", client_id="2", backend=second_backend)
+            assert second_user.get_note_by_id(f.note) is None
+            # Initialization must not commit or roll back the other caller's work.
+            assert first_request.info.transaction_status.name == "INTRANS"
+            assert f.db.get_note_by_id(f.note)["title"] == "Committed title"
+        expected = "Pending title" if pending_write else "Committed title"
+        assert f.db.get_note_by_id(f.note)["title"] == expected
+    finally:
+        if second_user is not None:
+            second_user.close_connection()
+        if not reuse_backend:
+            second_backend.get_pool().close_all()
+
+
+@pytest.mark.parametrize("damage", [
+    "ALTER TABLE note_attachments DISABLE ROW LEVEL SECURITY",
+    "DROP INDEX idx_note_attachments_owner_dataset_blob",
+], ids=["rls-disabled", "index-missing"])
+def test_later_user_rejects_schema_drift_after_completed_bootstrap(
+    pg_bootstrap: tuple[SimpleNamespace, DatabaseConfig], tmp_path: Path, damage: str,
+) -> None:
+    """Successful setup must never cache away the existing fail-closed checks."""
+    f, _ = pg_bootstrap
+    with f.db.backend.transaction() as connection:
+        f.db.backend.execute(damage, connection=connection)
+    with pytest.raises(CharactersRAGDBError, match="catalog drifted"):
+        CharactersRAGDB(tmp_path / "drift.db", client_id="2", backend=f.db.backend)
+
+
+def test_recreated_schema_does_not_inherit_bootstrap_readiness(
+    pg_bootstrap: tuple[SimpleNamespace, DatabaseConfig], tmp_path: Path,
+) -> None:
+    """Recreate only the official fixture's schema and require a usable new store."""
+    f, _ = pg_bootstrap
+    backend = f.db.backend
+    f.db.close_connection()
+    with backend.transaction() as connection:
+        backend.execute("DROP SCHEMA public CASCADE", connection=connection)
+        backend.execute("CREATE SCHEMA public", connection=connection)
+    replacement = CharactersRAGDB(tmp_path / "recreated.db", client_id="2", backend=backend)
+    try:
+        assert replacement.get_note_by_id(f.note) is None
+        created = replacement.add_note(title="Recreated", content="Fresh schema")
+        assert replacement.get_note_by_id(created)["content"] == "Fresh schema"
+    finally:
+        replacement.close_connection()
+
+
+def test_newer_schema_version_is_not_hidden_by_completed_bootstrap(
+    pg_bootstrap: tuple[SimpleNamespace, DatabaseConfig], tmp_path: Path,
+) -> None:
+    """A later schema version must still reject an incompatible reader."""
+    f, _ = pg_bootstrap
+    backend = f.db.backend
+    with backend.transaction() as connection:
+        backend.execute("UPDATE db_schema_version SET version=version+1 WHERE schema_name=%s",
+                        (f.db._SCHEMA_NAME,), connection=connection)
+    with pytest.raises(CharactersRAGDBError, match="newer than supported"):
+        CharactersRAGDB(tmp_path / "newer.db", client_id="2", backend=backend)
+
+
+def test_failed_bootstrap_can_retry_on_the_same_backend(
+    pg_database_config: DatabaseConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed first initialization cannot mark this backend as ready."""
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    replacement = None
+
+    def fail_setup(*args: object, **kwargs: object) -> None:
+        """Simulate a database outage at the public execution boundary."""
+        raise DatabaseError("planned bootstrap outage")
+
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(backend, "execute", fail_setup)
+            with pytest.raises(CharactersRAGDBError, match="planned bootstrap outage"):
+                CharactersRAGDB(tmp_path / "failed.db", client_id="1", backend=backend)
+        replacement = CharactersRAGDB(tmp_path / "retry.db", client_id="2", backend=backend)
+        note = replacement.add_note(title="Recovered", content="Retry works")
+        assert replacement.get_note_by_id(note)["content"] == "Retry works"
+    finally:
+        if replacement is not None:
+            replacement.close_connection()
+        backend.get_pool().close_all()
+
+
+@pytest.mark.parametrize("reuse_backend", [True, False], ids=["one-worker", "separate-workers"])
+def test_simultaneous_first_users_share_successful_bootstrap(
+    pg_database_config: DatabaseConfig, tmp_path: Path, reuse_backend: bool,
+) -> None:
+    """Concurrent tenant wrappers must all reach usable, isolated Notes stores."""
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    backends = [backend] * 3 if reuse_backend else [
+        backend, *(DatabaseBackendFactory.create_backend(pg_database_config) for _ in range(2)),
+    ]
+    ready = threading.Barrier(3)
+
+    def create_owner_note(owner: int) -> str:
+        """Open one tenant after the barrier and persist a tenant-owned note."""
+        ready.wait(timeout=10)
+        db = CharactersRAGDB(tmp_path / f"owner-{owner}.db", client_id=str(owner), backend=backends[owner - 1])
+        try:
+            note = db.add_note(title=f"Owner {owner}", content="Isolated content")
+            assert db.get_note_by_id(note)["title"] == f"Owner {owner}"
+            return note
+        finally:
+            db.close_connection()
+
+    try:
+        with ThreadPoolExecutor(max_workers=3) as workers:
+            notes_by_owner = list(workers.map(create_owner_note, (1, 2, 3)))
+        for owner, note in enumerate(notes_by_owner, 1):
+            db = CharactersRAGDB(tmp_path / f"verify-{owner}.db", client_id=str(owner), backend=backend)
+            try:
+                assert db.get_note_by_id(note) is not None
+                for foreign in set(notes_by_owner) - {note}:
+                    assert db.get_note_by_id(foreign) is None
+            finally:
+                db.close_connection()
+    finally:
+        for owned_backend in set(backends):
+            owned_backend.get_pool().close_all()
+
+
+def test_v70_upgrade_retries_after_late_failure_without_publishing_readiness(
+    pg_database_config: DatabaseConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The readiness version and all reconciliation work share one transaction."""
+    class LegacySchema(CharactersRAGDB):
+        """Build the genuine schema preceding the versioned bootstrap."""
+        _POSTGRES_SCHEMA_VERSION = 70
+
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    legacy = replacement = None
+    try:
+        legacy = LegacySchema(tmp_path / "legacy.db", client_id="1", backend=backend)
+        note = legacy.add_note(title="Survives", content="Existing v70 content")
+        legacy.close_connection()
+        original_execute = backend.execute
+
+        def fail_last_ensure(query: str, *args: object, **kwargs: object):
+            """Fail the final auxiliary table step at the public SQL boundary."""
+            if "CREATE TABLE IF NOT EXISTS conversation_settings(" in query:
+                raise DatabaseError("planned final bootstrap failure")
+            return original_execute(query, *args, **kwargs)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(backend, "execute", fail_last_ensure)
+            with pytest.raises(CharactersRAGDBError, match="planned final bootstrap failure"):
+                CharactersRAGDB(tmp_path / "failed-upgrade.db", client_id="1", backend=backend)
+        assert backend.execute("SELECT version FROM db_schema_version WHERE schema_name=%s",
+                               (legacy._SCHEMA_NAME,)).scalar == 70
+        replacement = CharactersRAGDB(tmp_path / "upgraded.db", client_id="1", backend=backend)
+        assert replacement.get_note_by_id(note)["content"] == "Existing v70 content"
+        assert backend.execute("SELECT version FROM db_schema_version WHERE schema_name=%s",
+                               (legacy._SCHEMA_NAME,)).scalar == 72
+    finally:
+        for db in (legacy, replacement):
+            if db is not None:
+                db.close_connection()
+        backend.get_pool().close_all()
+
+
+def test_current_schema_opens_and_searches_on_a_read_only_cold_backend(
+    pg_bootstrap: tuple[SimpleNamespace, DatabaseConfig], tmp_path: Path,
+) -> None:
+    """Opening a current schema performs no DDL/DML and restores FTS aliases."""
+    from psycopg.conninfo import make_conninfo
+
+    f, config = pg_bootstrap
+    read_only_config = replace(config, connection_string=make_conninfo(
+        host=config.pg_host, port=str(config.pg_port), dbname=config.pg_database,
+        user=config.pg_user, password=config.pg_password,
+        options="-c default_transaction_read_only=on",
+    ))
+    backend = DatabaseBackendFactory.create_backend(read_only_config)
+    replacement = None
+    try:
+        replacement = CharactersRAGDB(tmp_path / "read-only.db", client_id="1", backend=backend)
+        assert replacement.get_note_by_id(f.note)["title"] == "Committed title"
+        result = backend.fts_search(FTSQuery(query="bootstrap", table="notes_fts", filters={"client_id": "1"}))
+        assert [row["id"] for row in result.rows] == [f.note]
+    finally:
+        if replacement is not None:
+            replacement.close_connection()
+        backend.get_pool().close_all()
 
 
 @pytest.mark.parametrize("owner", ["implicit", "raw-begin", "chacha", "nested", "backend"])

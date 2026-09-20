@@ -19,7 +19,10 @@ vi.mock("@/services/model-settings", () => ({
   getModelSettings: async () => ({})
 }))
 vi.mock("@/services/tldw-server", () => ({ getDefaultApiProvider: async () => "openai" }))
-vi.mock("@/utils/resolve-api-provider", () => ({ resolveApiProviderForModel: async () => "openai" }))
+vi.mock("@/utils/resolve-api-provider", async () => ({
+  ...await vi.importActual<typeof import("@/utils/resolve-api-provider")>("@/utils/resolve-api-provider"),
+  resolveApiProviderForModel: async () => "openai"
+}))
 vi.mock("@/utils/ocr", () => ({ processImageForOCR: mocks.ocr }))
 vi.mock("@/libs/openai", () => ({ getAllOpenAIModels: vi.fn() }))
 vi.mock("@/db/dexie/models", async () => {

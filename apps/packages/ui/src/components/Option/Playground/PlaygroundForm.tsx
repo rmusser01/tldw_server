@@ -1,3 +1,4 @@
+import { useDefaultCharacterSelection } from "@/hooks/useDefaultCharacterSelection";
 import {
   ChatComposer,
   useComposerVariantPreference,
@@ -124,8 +125,6 @@ import {
 } from "@/utils/focus-return";
 // resolveApiProviderForModel moved to usePlaygroundRawPreview and usePlaygroundImageGen
 import {
-  DEFAULT_CHARACTER_STORAGE_KEY,
-  defaultCharacterStorage,
   isFreshChatState,
   resolveCharacterSelectionId,
   shouldApplyDefaultCharacter,
@@ -300,9 +299,7 @@ type Props = {
   characterChatModelUsabilityTitle?: string | null;
 };
 
-type DefaultCharacterPreferenceQueryResult = {
-  defaultCharacterId: string | null;
-};
+
 
 type PlaygroundQueuedSourceContext = {
   documents?: ChatDocuments;
@@ -1055,7 +1052,7 @@ export const PlaygroundForm = ({
   );
   const [sttSegEmbeddingsProvider] = useStorage("sttSegEmbeddingsProvider", "");
   const [sttSegEmbeddingsModel] = useStorage("sttSegEmbeddingsModel", "");
-  const [selectedAssistant, setSelectedAssistant] = useSelectedAssistant(null);
+  const [selectedAssistant, setSelectedAssistant, assistantMeta] = useSelectedAssistant(null);
   const selectedAssistantMode = React.useMemo(
     () => getAssistantSelectionMode(selectedAssistant),
     [selectedAssistant]
@@ -1087,25 +1084,8 @@ export const PlaygroundForm = ({
       }),
     [chatSettings, selectedAssistant]
   );
-  const [defaultCharacter, setDefaultCharacter] = useStorage<Character | null>(
-    {
-      key: DEFAULT_CHARACTER_STORAGE_KEY,
-      instance: defaultCharacterStorage,
-    },
-    null,
-  );
-  const { data: defaultCharacterPreference } =
-    useQuery<DefaultCharacterPreferenceQueryResult>({
-      queryKey: ["tldw:defaultCharacterPreference:playground"],
-      queryFn: async () => {
-        await tldwClient.initialize();
-        const defaultCharacterId =
-          await tldwClient.getDefaultCharacterPreference();
-        return { defaultCharacterId };
-      },
-      staleTime: 60 * 1000,
-      throwOnError: false,
-    });
+  const [defaultCharacter, setDefaultCharacter, defaultCharacterMeta] = useDefaultCharacterSelection();
+  const defaultCharacterPreference = defaultCharacterMeta.preference;
   const [showMoodConfidence, setShowMoodConfidence] = useStorage(
     "chatShowMoodConfidence",
     Boolean(selectedCharacter?.id) && !compareMode,
@@ -1251,7 +1231,7 @@ export const PlaygroundForm = ({
   }, [isFreshChat]);
 
   React.useEffect(() => {
-    if (!effectiveDefaultCharacter || !effectiveDefaultCharacterId) return;
+    if (assistantMeta?.isLoading || defaultCharacterMeta.isLoading || !effectiveDefaultCharacter || !effectiveDefaultCharacterId) return;
     if (
       !shouldApplyDefaultCharacter({
         defaultCharacterId: effectiveDefaultCharacterId,
@@ -1266,6 +1246,8 @@ export const PlaygroundForm = ({
     defaultCharacterBootstrapAppliedRef.current = true;
     void setSelectedCharacter(effectiveDefaultCharacter);
   }, [
+    assistantMeta?.isLoading,
+    defaultCharacterMeta.isLoading,
     effectiveDefaultCharacter,
     effectiveDefaultCharacterId,
     isFreshChat,

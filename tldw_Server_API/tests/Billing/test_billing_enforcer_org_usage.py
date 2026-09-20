@@ -70,20 +70,21 @@ class _FakePoolSqlite:
     def acquire(self) -> _AcquireCtx:
         return _AcquireCtx(self._conn)
 
+    async def fetchval(self, query: str, *args: Any):
+        from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 
-class _FakeConnSqliteVariantFallback:
-    """SQLite conn that forces first query variant failure and second success."""
+        return await DatabasePool.fetchval(self, query, *args)
 
-    def __init__(self, row_value: int):
-        self.row_value = int(row_value)
+
+class _FakeConnSqliteUnavailableUsage:
+    """Unavailable usage source; any invented fallback must also fail."""
+
+    def __init__(self):
         self.calls: List[Tuple[str, Tuple[Any, ...]]] = []
 
     async def execute(self, sql: str, params: tuple[Any, ...]) -> _FakeCursor:
         self.calls.append((sql, tuple(params)))
-        normalized_sql = " ".join(sql.lower().split())
-        if "sum(requests)" in normalized_sql:
-            raise RuntimeError("requests column missing")
-        return _FakeCursor((self.row_value,))
+        raise sqlite3.OperationalError("usage source unavailable")
 
 
 class _LiveSqliteCursor:
@@ -330,14 +331,19 @@ async def test_get_api_calls_today_sqlite_backend_selection_uses_execute(monkeyp
 
     assert calls == 456
     assert fake_conn.calls, "Expected SQLite path to call conn.execute"
-    assert "where org_id = ? and day = ?" in " ".join(fake_conn.calls[0][0].lower().split())
+    sql, params = fake_conn.calls[0]
+    normalized = " ".join(sql.lower().split())
+    assert "po.user_id = u.user_id" in normalized
+    assert "where po.org_id = ? and u.day = ?" in normalized
+    assert params == (42, datetime.now(timezone.utc).date().isoformat())
 
 
 @pytest.mark.asyncio
-async def test_get_api_calls_today_query_fallbacks_remain_org_scoped(monkeypatch):
-    """All fallback query variants must remain org-scoped to avoid cross-tenant counting."""
+@pytest.mark.parametrize("failure_mode", ["open", "closed"])
+async def test_get_api_calls_today_unavailable_source_has_no_query_fallback(monkeypatch, failure_mode):
+    """Source failure preserves policy without guessing a different usage schema."""
 
-    fake_conn = _FakeConnSqliteVariantFallback(row_value=789)
+    fake_conn = _FakeConnSqliteUnavailableUsage()
     fake_pool = _FakePoolSqlite(fake_conn)
 
     async def _fake_get_db_pool():
@@ -349,13 +355,15 @@ async def test_get_api_calls_today_query_fallbacks_remain_org_scoped(monkeypatch
         raising=False,
     )
 
+    monkeypatch.setenv("BILLING_ENFORCEMENT_FAILURE_MODE", failure_mode)
     enforcer = BillingEnforcer()
-    calls = await enforcer._get_api_calls_today(org_id=42)
-
-    assert calls == 789
-    assert len(fake_conn.calls) >= 2  # first variant failed, second succeeded
-    for sql, _params in fake_conn.calls:
-        assert "org_id" in sql.lower()
+    if failure_mode == "closed":
+        with pytest.raises(sqlite3.OperationalError, match="usage source unavailable"):
+            await enforcer._get_api_calls_today(org_id=42)
+    else:
+        assert await enforcer._get_api_calls_today(org_id=42) == 0
+    assert len(fake_conn.calls) == 1
+    assert fake_conn.calls[0][1] == (42, datetime.now(timezone.utc).date().isoformat())
 
 
 class _FakeOrgRepoStorage:

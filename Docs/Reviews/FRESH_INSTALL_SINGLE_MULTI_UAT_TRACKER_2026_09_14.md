@@ -6,7 +6,7 @@
 
 - **Qodo review:** All 14 review findings have verified fixes or an accepted disposition in the [review disposition ledger](PR2967_QODO_REVIEW_2026_09_18.md), under TASK13260.219.11–13. All 14 review threads are resolved and Qodo reports zero open findings. Final hosted CI passed before the verified merge. This review does not replace the pending fresh UAT matrix.
 
-- **Current repair gate:** 306 UAT findings: 290 verified; 16 open (261, 283–290, 292, 295, 299–300, 302–303, 306). The frozen post-merge four-cell matrix completed with failures. Targeted repairs now verify291,293,294,296,297,298,301,304 and305. The requester approved a checkpoint PR before further unrelated repairs or another full matrix (TASK13260.242). New PR CI/Qodo review and a new requester-owned Change summary remain merge gates; PR2967's completed gates do not certify this checkpoint. Generated Playwright evidence remains local and excluded. See the [checkpoint plan](../../IMPLEMENTATION_PLAN_postmerge_uat_checkpoint.md) and [post-merge matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_18.md).
+- **Current repair gate:** 350 UAT findings: 349 verified; only261 remains open by requester direction. PR2970 required hosted checks pass on8ae3599714. Follow-up verification repairs pass locally: complete WebUI coverage1483passed/0failed/14unchangedskips,195workflow and affected regression checks, and93unchanged TypeScript diagnostics. Hosted checks must rerun after the follow-up push. The frozen post-merge four-cell matrix completed with failures. Checkpoint [PR2969](https://github.com/rmusser01/tldw_server/pull/2969) merged normally into dev at `1dfdd819b6` after all seven required gates passed, all 12 Qodo threads were resolved, and the requester supplied the Change summary. Follow-up branch `codex/uat295-postgres-notes-20260919` starts from that merge. UAT299 and UAT319/321–323 now pass targeted SQLite/PostgreSQL acceptance, including owner/Bob isolation and controlled source-failure disclosure. PR2970 review/checks and requester Change summary precede merge and another full matrix. Generated Playwright evidence remains local and excluded. See the [checkpoint review](PR2969_CHECKPOINT_REVIEW_2026_09_19.md) and [post-merge matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_18.md).
 
 - **Historical frozen-run findings:246 total —230 previously verified,16 new unresolved (231–246).** The frozen48-row execution is complete with product source unchanged;16new findings await repair/disposition. SQLite multi-user natural session expiry passes; new241 loses source content in Media-to-Chat,242 uses plural wording for one Due review, and243 leaves Character setup visible after an ordinary Chat completion. Existing PostgreSQL RLS failure238 and generation timeout234 remain open.
 
@@ -3138,7 +3138,7 @@ One `Hello, who are you?` submission at21:19:25.943UTC created conversation `473
 The requester explicitly answered **“Continue the matrix; keep UAT261 open.”** This releases fresh SQLite/PostgreSQL × single/multi-user execution with the existing12 named journeys and actual image coverage. It does not close261 or relax its criterion. Private native evidence remains under `.tmp/pr2967-merge-20260918/testbot/`; generated captures remain excluded from Git. Two pre-send helper environment errors (URL global unavailable and mixed Node module syntax) were corrected before any model request; neither is a product failure.
 
 
-## UAT283 — P3: setup-selected llama.cpp appears as Custom with an internal model ID
+## UAT283 — P3, verified: setup-selected llama.cpp appears as Custom with an internal model ID
 
 - Source: frozen post-merge `3cff7962721a60b768464221c1f7fe2a8b25e4d5`, fresh PostgreSQL single-user profile, row1/3.
 - Reproduction: configure llama.cpp through the first-run wizard, choose its discovered model, finish setup, enter ordinary Chat and reload after two successful turns.
@@ -3156,7 +3156,7 @@ The requester explicitly answered **“Continue the matrix; keep UAT261 open.”
 - Status: open. To continue actual image coverage, the operator configures the already running known vision service through the isolated profile’s llama.cpp settings and restarts only that API, preserving the original config and failed turn. No product source edit or finding closure. Evidence: `.tmp/pr2967-merge-20260918/full-matrix/pg-single/07-validate-providers.txt`, `23-model-picker.txt`, `26-vision-search-scoped.txt`, `32-image-uploaded.txt`, `34-image-guard-retained.txt`, `vision-config-safe.json`.
 
 
-## UAT285 — P2: current-model tooltip blocks a model-menu option
+## UAT285 — P2, verified: current-model tooltip blocks a model-menu option
 
 - Source: frozen post-merge3cff, fresh PostgreSQL single-user Chat,1200×960 viewport. Tracking: TASK13260.222.
 - Reproduction: with the failed image turn visible, open the lower-left current-model menu and normally click the Gemma option.
@@ -3172,6 +3172,8 @@ The requester explicitly answered **“Continue the matrix; keep UAT261 open.”
 - At22:07 the exact original setup configuration was restored (SHA256 `88389d18339fa54f0bc61a7f2373b2c35798dfd4757659216144b4e34f0c32d5`) so the profile again uses the user’s relaunched9099. Only this owned API was gracefully restarted; original failure and image conversation remain. Native refresh/recheck follows.
 - Open; actual image generation, same-turn image Retry and canonical image response remain blocked. Evidence: `.tmp/pr2967-merge-20260918/full-matrix/pg-single/vision-props-diagnostic.json`, `app-models-diagnostic.json`, `mmproj-relaunch-probes.json`, `config-restored-safe.json`.
 
+2026-09-20 repair checkpoint: confirmed the same preflight block in fresh04a5 PostgreSQL single-user with the actual128px icon. Added a configured-authority `/props` probe for external llama.cpp, matching only the exact reported alias/path and a boolean vision capability. Both catalog endpoints now publish consistent vision flags and image input modality. The probe uses existing endpoint policy/authentication, forbids redirects, closes responses, and keeps a30-second endpoint/credential-specific snapshot; failures retain conservative defaults. Five causal red tests preceded the fix;78 affected catalog/tokenizer/managed-profile tests pass, scoped Ruff is clean, and Bandit reports no findings (test assertions excluded). The real9099 transport smoke also confirms vision; **native send, Retry and canonical PostgreSQL reload remain pending, so UAT286 stays open**. Evidence `.tmp/uat286-repair`; TASK13260.223.
+
 ### Post-merge provider-analysis failure retained
 
 PostgreSQL file row4: native job1 submitted22:12:29, completed22:13:24 with Media1/UUID `4c639d20-1d8d-420c-8a7b-f53d56560cbe`. The full1914-character/306-word public Rowan source remains visible, chunking is Completed and vector status Pending. Exactly one provider-analysis truncation warning is shown as Saved with warnings; no analysis-success claim. Native full-text query `ORBIT-742` returns the sole source with200. First cited QA submitted22:15:22 through the selected configured llama.cpp. Background minimize/resume was not exercised in this file submission; it remains required. Evidence51–69 under the local PGsingle packet.
@@ -3184,7 +3186,7 @@ The fresh five-card Biology generation/Study, Chat→Note/backlink/card, practic
 Row10 now has successful real analysis: version2 saves `LIVE_TIER_ANALYSIS_ONE` and displays it in Multi-Item Review. Version3 saves the actual model output `"LIVE_TIER_ANALYSIS_TWO"`, including quotes, and normal reload preserves it plus the original1914-character source (SHA256 `a94b1e966d89b7b94e0cd69dafe9ab1c554dc81accf43e57957276b08294225c`). This repeats the historical provider-format deviation, not a claim of exact bare-token compliance. The initial exact-text helper wait failed because the quotes were present; it did not resubmit. Controlled failure preservation remains in progress. Evidence137–164 in the local PGsingle packet; full matrix remains incomplete.
 
 
-## UAT287 — P2: API process remains alive after shutdown completion
+## UAT287 — P2, verified: API process remains alive after shutdown completion
 
 - Frozen post-merge PostgreSQL single-user; TASK13260.224. During the controlled provider outage, API32790 stopped listening after SIGINT23:03:08 and waited on long-lived browser connections. A second SIGINT23:03:24 logged Finished server process and cancellation; process32790 still existed at23:07:20. No generation was active. Earlier API20301 exited after its browser connections closed.
 - Open investigation: identify the remaining lifecycle resource before attributing the cause or changing shutdown behavior. This is not a failed provider response or a PostgreSQL corruption claim. Original configuration was restored byte-for-byte, and replacement33107 serves the same profile. Only the verified task-owned process is eligible for cleanup. Private log1789772418531 and process observations are retained locally.
@@ -3193,14 +3195,18 @@ Post-merge PGmulti update23:51UTC: native Alice two-turn Chat/reload passes with
 
 ## UAT288 — P3: Knowledge QA progress invents stages from elapsed time
 
-- Status: open; TASK13260.225. Frozen3cff PostgreSQL multi-user first retrieval23:57:23.621–23:59:14.478 returns a correct cited answer, but at23:58:10 the UI says Verifying citations (46s) while backend embedding model loading runs23:57:24.850–23:59:08.497. PGsingle showed the same misleading label during its cold load.
+- Verified in `6a30d7ebb7`; TASK13260.225. Original frozen3cff PostgreSQL multi-user first retrieval23:57:23.621–23:59:14.478 returns a correct cited answer, but at23:58:10 the UI says Verifying citations (46s) while backend embedding model loading runs23:57:24.850–23:59:08.497. PGsingle showed the same misleading label during its cold load.
 - Source: apps/packages/ui/src/components/Option/KnowledgeQA/AnswerPanel.tsx:628 selects Searching/Reranking/Generating/Verifying solely at5/10/20seconds. No observed backend stage justifies the claim.
 - Expected: display confirmed stages or neutral activity plus elapsed time; preserve completion and cancellation. The cold-start delay itself is recorded separately and is not a fabricated timeout failure.
 - Evidence: local PGmulti48/50/54/55. No application source changed during the matrix.
 
+- Repair removes elapsed-time stage guesses and unsupported preset-duration estimates; the real elapsed timer remains. Causal regressions fail5/pass39 before the change; all82 focused component, streaming and cancellation tests pass afterward. Independent review is clear. Scoped ESLint has no file diagnostics (one root Next pages-discovery warning); full frontend typecheck retains93 unchanged errors/zero added. Bandit is inapplicable to these TypeScript-only edits.
+- Fresh official restricted PostgreSQL native acceptance on immutable `6a30d7ebb7`: administrator login200; Rowan ingestion succeeds in4seconds. The first QA request runs19:12:29.919–19:14:31.813UTC while the Qwen embedding model loads19:12:31.284–19:14:26.290. Neutral waiting is recorded at38/96/119seconds and visually verified at52seconds; the answer names Dr. Mira Vale and ORBIT-742 with2citations. A second in-flight request is cancelled through Stop, clearing waiting and keeping the earlier answer in history; a third ordinary query succeeds with citations. Cancellation presentation is separately open as308; no backend-computation-stop claim is made.
+- One known character-search429 and UAT303 wording recur. New307 records the search-control overlap. PostgreSQL logs contain zero errors; backend has only the previously recorded optional evaluations-config absence. A late geometry probe waited for an already-completed Searching button and timed out; it does not invalidate the earlier screenshot. Initial sandbox profile preparation was retried with access to the official holder. All24,938 archived source entries match; original profile configuration restored, browser/apps closed, ports free, official holder exits0 (API wrapper1 for requested SIGTERM, frontend0). Private evidence stays ignored in `.tmp/uat288-repair/`; the full matrix remains failed.
+
 ## UAT289 — P3: Study daily statistics use an undisclosed UTC day
 
-- Status: open; TASK13260.226. PGmulti crossed UTC midnight with the browser still on Sep18 America/Los_Angeles. Five16:55local reviews became Reviewed today0 and streak0 at17:10local; completed session still says2026-09-18 16:55. Two more events17:11local make the streak2days although both sessions display the same local date.
+- Verified in f850a44d51 with native acceptance on cd06243f42; TASK13260.226. PGmulti crossed UTC midnight with the browser still on Sep18 America/Los_Angeles. Five16:55local reviews became Reviewed today0 and streak0 at17:10local; completed session still says2026-09-18 16:55. Two more events17:11local make the streak2days although both sessions display the same local date.
 - Backend ChaChaNotes_DB.py:37425/37490 explicitly uses UTC day start and streak grouping. This is a timezone/label consistency issue, not lost review rows. Expected: clearly disclose the UTC boundary or report using the user timezone consistently with session dates.
 - Evidence local PGmulti45/86–90; no clock mutation. Original5 and new2 review events persist. Frozen source unchanged.
 
@@ -3231,10 +3237,14 @@ Additional observation: PostgreSQL logged missing org_id and request_count colum
 
 ## UAT292 — P2: billing usage queries do not match the fresh schema
 
-- Open; TASK13260.229. PGmulti ingestion and QA log missing org_id followed by missing request_count on usage_daily. Both billing enforcement API-count query variants require org_id; the canonical fresh PostgreSQL table instead has user_id/day, requests and no org_id.
+- Verified in `5c3c0927dc`; TASK13260.229. Original PGmulti ingestion and QA log missing org_id followed by missing request_count on usage_daily. Both billing enforcement API-count query variants require org_id; the canonical fresh PostgreSQL table instead has user_id/day, requests and no org_id.
 - Actual read failure is established by matching cluster statements at00:50:22.163/.164 and source pg_migrations_extra.py:1898 / Billing/enforcement.py:359–454. The configured fallback may return zero; a quota-bypass consequence has not been experimentally established. Preserve explicit failure policy and tenant attribution in repair.
 - Native ingests completed; that does not make these failed background reads successful. Safe receipt: ignored PGmulti/291-pg-errors.txt. Application source remains frozen.
 
+
+- Repair verified under TASK13260.229: read canonical per-user/day requests through AuthnzUsageRepo, using existing billing primary-org attribution (earliest dated membership, lowest org ID tie-break). Legacy undated memberships follow SQLite LLM behavior. Nonexistent-column fallbacks removed; existing failure policy preserved. 229 unique scoped tests pass including actual PostgreSQL with zero skips; Bandit zero findings/errors, no new Ruff diagnostics and independent review clear. Five old PostgreSQL fixture failures reproduce on untouched baseline and are repaired using UsersDB without changing assertions.
+- Native acceptance on immutable `5c3c0927dc`, 2026-09-19: fresh official PostgreSQL fixtures use a restricted runtime role. Alice ingests the Rowan source and configured llama.cpp QA returns Dr. Mira Vale and ORBIT-742 with citations. Normal Bob login shows an empty library. Actual usage logging and scheduled rollup produce per-user totals 71/271/119; BillingEnforcer reads exactly 71/271/119 for their respective primary organizations. Bob's raw log count127 reflects the existing rollup interval. No synthetic usage was seeded, and no historical request-time organization attribution is claimed. The acceptance-window cluster audit finds zero missing org_id/request_count errors.
+- The first QA attempt used the template's unconfigured OpenAI default and returned a truthful provider-configuration error. After configuring only the owned profile for the existing llama.cpp9099 and restarting its API, the repeated QA succeeds. Both character-search429s, UAT288/303 recurrences, and optional llm_usage_v2/evaluations-config absence remain recorded. All24,939 archived source entries match. Browser and apps stop, ports18803/18883 are free, official holder exits0, and original profile provider configuration is restored; API wrapper reports1 for requested SIGTERM, frontend0. Evidence stays local/ignored in `.tmp/uat292-repair`. The frozen full matrix remains failed;14 findings remain open.
 
 ## UAT293 — P1: account switch plus Back restores prior Chat transcript and draft
 
@@ -3257,8 +3267,9 @@ Additional observation: PostgreSQL logged missing org_id and request_count colum
 
 ## UAT295 — P1: new PostgreSQL user Notes initialization times out on shared DDL
 
-- Open; TASK13260.232. First Bob Notes load23:59:15.699UTC fails on ALTER TABLE conversations ADD COLUMN IF NOT EXISTS assistant_kind with PostgreSQL lock timeout. Six actual Notes/keywords/collections/persona/buddy reads return500 after4.8–5.2s; Notes bodies say ChaChaNotes DB unavailable. Later recovery does not erase the initial failure. No controlled outage was active. The blocking transaction remains unattributed.
+- Verified in `f5f5b63005`; TASK13260.232. Original first Bob Notes load23:59:15.699UTC fails on ALTER TABLE conversations ADD COLUMN IF NOT EXISTS assistant_kind with PostgreSQL lock timeout. Six actual Notes/keywords/collections/persona/buddy reads return500 after4.8–5.2s; Notes bodies say ChaChaNotes DB unavailable. Later recovery does not erase the initial failure. No controlled outage was active. The blocking transaction remains unattributed.
 - Native event audit and matching backend local16:59:15/cluster UTC23:59:15 identify this failure. Preserve migrations and tenant authorization; investigate repeated shared DDL on per-user initialization.
+- Repair in progress on the branch from PR2969's merged dev. Real official-fixture PostgreSQL reproduction proves a legitimate active conversation read blocks the second user's repeated schema DDL. The v71 repair records successful reconciliation once, retains fail-closed checks on every open, and restores cold-worker FTS aliases without writes. A session advisory lock spans legacy migration commits.206 unique scoped regression cases pass after correcting five baseline-reproduced test-fixture failures; PostgreSQL was exercised with zero skips. Bandit0 findings/errors, no new Ruff diagnostics, independent production review clear. Targeted immutable-source native acceptance completed below; the earlier pending state is superseded. Private failure and success logs remain under ignored .tmp/uat295-repair.
 
 ## UAT296 — P1: ordinary source prose breaks PostgreSQL exemplar search and later queries
 
@@ -3285,7 +3296,7 @@ UAT293 reciprocal control: Bob's own generator text and unsent BOB-PRIVATE-DRAFT
 
 Frozen3cff SQLite single actual PNG attachment reproduces **UAT286**, despite current llama.cpp `/props` vision=true. The browser retains the image and error after reload; canonical conversation `219955da-548f-4763-9a0a-80ea712c3c49` stays empty and no inference request is sent. **UAT283** misleading Custom/raw-provider model label also recurs. These remain open, with no new ID for the same defects. Two ordinary turns and canonical5-row reload pass. File ingestion truthfully reports a truncated-analysis warning while storing Rowan media1; later QA/analysis acceptance remains pending. Evidence `.tmp/pr2967-merge-20260918/full-matrix/sqlite-single/17–38`; details in the matrix. No production source edits during this run.
 
-### UAT299 — P1, open — SQLite natural-language QA fails Character and Chat source searches
+### UAT299 — P1, verified — SQLite natural-language QA fails Character and Chat source searches
 
 - TASK13260.236. Frozen3cff SQLite single native QA at01:40:09UTC asks “Who directs Rowan Observatory, where is it located, and when do public tours begin? Cite the source.” CharacterStore.search_character_cards and MessageStore.search_messages_by_content both raise `fts5: syntax error near comma` (actual log quotes the comma) at18:40:09.641/.757 Pacific. Their SQLite MATCH paths pass ordinary punctuation through unless a double quote is present.
 - The completed UI reports Characters/Chats searched and “Selected sources look ready”, while all five returned chunks are Media. Its Media answer correctly gives Dr. Mira Vale, Cedar Ridge and18:00 Friday with citation1. That success does not establish either failed source worked. No positive Character/Chat match is claimed; causal regressions and repaired native checks remain required.
@@ -3314,9 +3325,9 @@ Ordinary failed-turn Retry03:20:00 returns200 with identical conversation b75013
 
 Character recovery acceptance remains failed: second-turn unavailable-provider response03:16:31 is HTTP200 with truthful error UI. Exactly one user699b26c0-01cd-41e4-ac34-470a28f4cf7b is created. Restored-provider native Retry03:18:44 uses the same conversation a0d0d63a-aa53-417f-afff-2e51b1ba281f and no new userPOST, but after46seconds emits only reasoning, no final answer. Native UI reports interruption; reload shows4 canonical rows, including assistant2ae48078-2265-48f2-aeb4-2d60a9f20963 with12789 raw characters and empty final text (reasoning omitted; SHA71ebd42c…). Preserve this under UAT261's existing reasoning-only/no-final investigation rather than claim successful retry or a proven application cause. The separate first-turn punctuation failure261 stays open. Evidence135–155. Source parity03:18:02 verifies all24899 files/symlinks against3cff with zero mismatches. API outage recovery/audit/teardown remain pending.
 
-## UAT300 — P2: early navigation during login strands work before workspace initialization
+## UAT300 — P2, verified: early navigation during login strands work before workspace initialization
 
-- Open; TASK13260.237. Targeted SQLite UAT293 checks observed Logout and normal navigation becoming available before the Login operation finished assigning a workspace. Alice's first draft was saved for verified user2 with no organization; a later login selected her organization2. The earlier draft remains stored but is correctly excluded by the new organization ownership boundary.
+- Verified in f05c1557ba; TASK13260.237. Original targeted SQLite UAT293 checks observed Logout and normal navigation becoming available before the Login operation finished assigning a workspace. Alice's first draft was saved for verified user2 with no organization; a later login selected her organization2. The earlier draft remains stored but is correctly excluded by the new organization ownership boundary.
 - Native login at05:16:46.115UTC was followed by organization POST400 at05:16:46.173 and GET200 at05:16:46.178 after immediate Chat navigation. The login handler awaits `ensureOrgId`, while token publication occurs earlier. Interrupted navigation or a configuration race needs causal verification before repair; do not migrate drafts across organizations to mask it.
 - Evidence: ignored `.tmp/uat293-repair/sqlite-15-alice-reopened-owned.txt`, `sqlite-22-alice-history.txt`, `sqlite-23-alice-foreign-denial.txt`, and `sqlite-24-draft-diagnostic.txt`. No prior-account content leaked in these checks. The draft recovery failure is distinct from293's account isolation fix. No production change for300 yet.
 
@@ -3355,13 +3366,13 @@ The initial browser observer used an unavailable URL global and failed; its atte
 
 ## UAT302 — P2: admin password rejection gives no actionable policy guidance
 
-- Open; TASK13260.239. Fresh restricted PostgreSQL on7e292d4d13: native Create user returns400 at07:13:40 and07:16:06UTC, showing only “Password does not meet requirements.” The dialog provides no policy guidance or failed-rule detail. The39-character generated test password has every required character class but a prohibited three-character sequence; rejection itself is correct.
+- Verified in cd06243f42 with native SQLite/PostgreSQL acceptance; TASK13260.239. Fresh restricted PostgreSQL on7e292d4d13: native Create user returns400 at07:13:40 and07:16:06UTC, showing only “Password does not meet requirements.” The dialog provides no policy guidance or failed-rule detail. The39-character generated test password has every required character class but a prohibited three-character sequence; rejection itself is correct.
 - The harness generator did not check that policy. A separately retained sequencing mistake navigated away before its two-user helper finished. These are harness errors; neither proves a backend registration failure. The replacement planned password is generated and validated by the application password service, with no account/database injection or policy relaxation. Evidence .tmp/uat296-repair/pg-09-create-alice-result.txt and password-correction.json, with credentials kept private. Native UAT296 acceptance continues; no new full matrix.
 
 
 ## UAT303 — P3: one-file Quick Ingest uses plural item labels
 
-- Open; TASK13260.240. Fresh native PostgreSQL on7e292d4d13: one queued Rowan document shows “Configure 1 items,” the completed Add step says “Add 1 items,” and Review says “1 items | Custom preset.” The queue correctly says “1 item.”
+- Verified in9e30b3154b; TASK13260.240 (combined native acceptance below). Fresh native PostgreSQL on7e292d4d13: one queued Rowan document shows “Configure 1 items,” the completed Add step says “Add 1 items,” and Review says “1 items | Custom preset.” The queue correctly says “1 item.”
 - Use existing localized count handling for all three labels without changing processing behavior. Evidence .tmp/uat296-repair/pg-16-upload.txt, pg-17-ingest-configure.txt and pg-18-ingest-start.txt. Separate from historical Study plural findings.
 
 
@@ -3393,9 +3404,9 @@ After normal reload, native edit at15:11:40 returns200, creates prompt version2 
 - Retained validation limits: first broad invocation used the wrong working directory for one static suite; corrected Node24 invocation has5 StorageEvent fixture failures, reproduced on unchanged3b0 source. CI Node20 passes all489. Bandit cannot parse TypeScript and is not applicable to this two-file frontend correction; its attempted AST error is not a security pass. Backend security verification is recorded with each backend repair. Evidence .tmp/uat305-repair remains ignored.
 - Final touched-file TypeScript check catches a delayed Storage.set test mock dropping its Promise<null> return. Returning the original result preserves its contract; scoped semantic diagnostics are now0 and all15 privacy controls pass again. This is not a whole-repository typecheck.
 
-## UAT306 — P2: subsequent Prompt Save produces no request until reload
+## UAT306 — P2, verified: subsequent Prompt Save produces no request until reload
 
-- Open; TASK13260.244. Fresh3b0 native Alice Prompt create returns201/Synced. Editing system text and pressing Save at15:06:02 produces no mutation request, update notification or new event during30seconds; unsaved text remains while the table and database retain the original. Reload restores the original version. The repeated edit after reload returns200 and persists version2/event3, with correct final reload.
+- Verified in cccf8e0090; TASK13260.244. Original failure: fresh3b0 native Alice Prompt create returns201/Synced. Editing system text and pressing Save at15:06:02 produces no mutation request, update notification or new event during30seconds; unsaved text remains while the table and database retain the original. Reload restores the original version. The repeated edit after reload returns200 and persists version2/event3, with correct final reload.
 - Cause remains unassigned; investigate create-to-edit and reopened-edit controls. Retained browser discard-dialog errors are separate harness limitations, not evidence of a product dialog bug. No unrelated UI repair is added to the checkpoint. Evidence .tmp/uat297-final/pg-05-edit-prompt.txt, pg-07-edit-audit.txt, pg-14-reloaded.txt, pg-15-edit-after-reload.txt and pg-16-edited-sync.json.
 
 Checkpoint totals:306 findings,290 verified,16 open (261,283–290,292,295,299–300,302–303,306). Stop unrelated repairs/full UAT until the authorized checkpoint is reviewed and merged.
@@ -3405,3 +3416,579 @@ Checkpoint totals:306 findings,290 verified,16 open (261,283–290,292,295,299�
 The published checkpoint's first frontend CI run fails the Study Pack handoff test before its drawer title appears. TASK13260.242.1 tracks awaiting the asynchronous React user action without changing assertions/timeouts, plus removal of unsupported role-query options found by scoped TypeScript validation. Qodo's twelve findings are tracked individually in [the PR2969 review ledger](PR2969_CHECKPOINT_REVIEW_2026_09_19.md) under TASK13260.242.2. The confirmed Media hydration transfer bug is fixed; safe retrieval diagnostics, fixture ownership, test contracts and public failure injection are verified. Official PostgreSQL fixture and caller-owned savepoint suggestions have documented technical dispositions.
 
 Targeted validation:54 unique database tests (real PostgreSQL, zero PostgreSQL skips),109 retrieval/streaming tests and36 frontend tests pass. Failed administrative setup attempts are retained; production write guards remain intact. These checkpoint review findings do not replace the sixteen open UAT issues or change the failed full-matrix result. Hosted reruns, final review state and a new requester-owned Change summary remain merge gates.
+
+### PR2969 merged — 2026-09-19 16:15 UTC
+
+The requester-written Change summary is published verbatim. All seven enforced gates pass on46a98a552c, including all eight frontend shards and the WebUI/extension API-key and single-user cookie persistence lifecycles. Hosted coverage reports442 global and222 AuthNZ tests passing. All12Qodo threads are resolved with fixes or supported technical dispositions. Normal merge1dfdd819b6e7056c2e7721d4763c85d5ad07d85c is on origin/dev and has exactly the CI-tested head's tree. The83-file PR contains no generated/private captures. Checkpoint tasks13260.242/.242.1/.242.2 are complete. Resume remaining repairs on codex/uat295-postgres-notes-20260919 from this latest-dev merge, starting with295;306total/290verified/16open and the failed frozen matrix remain unchanged.
+
+
+### UAT295 targeted PostgreSQL acceptance — 2026-09-19 17:00 UTC
+
+Fresh official-fixture PostgreSQL run `uat295-targeted-20260919` uses immutable `f5f5b63005783f6c37a895e282150001ded22611` and a restricted runtime role (no superuser, RLS bypass, database/role creation or role memberships). The administrator creates Alice and Bob through the UI. Alice saves her private cedar note201. A deliberately held Alice-scoped ordinary SELECT transaction retains AccessShare locks on conversations/notes from16:55:16 to17:00:42UTC; this controlled overlap supplements native UI and is not presented as an organic in-flight UI request. While those locks remain active, Bob logs in for the first time, loads Notes/keywords/collections/persona/buddies200, sees no Alice note, and saves his own maple note201. Bob reloads and reopens his unchanged note; normal logout/login back to Alice restores only her unchanged note. Both remain version1. PostgreSQL schema marker71 is independently confirmed.
+
+All50 instrumented application responses are2xx; the wider backend/network audit finds no Notes500, shared-DDL lock timeout or initialization failure. Three401s occur during normal logout and the notification stream aborts on navigation. Existing optional llm_usage_v2 and evaluations_config.yaml absence remain recorded as unexercised-subsystem observations. Early immediate editor reads before row selection/readiness and a diagnostic schema-name literal typo are retained as harness limitations; corrected readiness/schema checks pass without product edits. The final screenshot shows the saved Alice note with no error.
+
+All24,938 archived source entries match. The controlled read rolls back normally, owned browser/apps stop, ports18803/18883 are free, and the official fixture holder exits0. API wrapper reports1 for the requested SIGTERM; frontend exits0. Independent production and final test review are clear;206 unique scoped regression cases pass across final reruns with zero PostgreSQL skips; Bandit0 findings/errors and no new Ruff diagnostics. Private evidence remains ignored in `.tmp/uat295-repair/`. Completed UAT295-specific plan removed under repository guidance. Totals306 findings/291 verified/15 open; frozen full-matrix acceptance remains failed.
+
+
+## UAT307 — P3: QA loading controls overlap long question text
+
+- Verified in0b01ac7e00; TASK13260.245 (combined native acceptance below). Fresh native PostgreSQL UAT288 on6a30d7ebb7 at1200×953 visibly overlays the end of the question with the expanded Searching button and Clear control. The52-second screenshot `.tmp/uat288-repair/cold-wait.png` confirms it. SearchBar uses fixed input padding and absolute control positions while the submit label grows. No data-loss consequence established.
+- Preserve keyboard, clear, submit and cancel behavior while giving text and controls separate space at desktop and narrow widths. The later geometry probe missed the loading state and is retained as a harness timeout, not additional layout evidence.
+
+## UAT308 — P3: user-cancelled QA is presented as failed and still searching
+
+- Verified in0fce064a55; TASK13260.246 (combined native acceptance below). Native Stop after a dispatched QA POST at19:16:05UTC clears the waiting panel but says Search failed / Answer status: Failed search / Search error. Search cancelled, alongside stale Searching your selected sources text. Cancellation itself works; previous cited answer remains in history and a subsequent native query succeeds.
+- Distinguish explicit cancellation from real retrieval/provider failures. Evidence `.tmp/uat288-repair/native-cancellation.txt` and `recovery-completed.txt`; source frozen at6a30d7ebb7. No claim that backend computation stopped immediately.
+
+
+### UAT303 / UAT307 / UAT308 combined targeted acceptance — 2026-09-19 19:48 UTC
+
+Fresh native PostgreSQL acceptance passes on immutable `0fce064a55` using the official restricted fixture profile. Quick Ingest correctly renders zero/one/two counts on Configure, completed Add and Review; removing the second file restores singular wording. The remaining Rowan document ingests1success/0fail in2seconds. During actual QA loading, input/Clear/Searching rectangles are nonoverlapping at1200/768/390px, controls remain within viewport, and wide/mobile screenshots were inspected. Keyboard Escape dismisses suggestions, Tab reaches Clear, Space clears, and Enter submits. Explicit Stop before any answer produces a visible neutral cancelled status with no failed-search or stale-searching text. A retry returns Dr.MiraVale/ORBIT-742 with2citations. Another Stop retains that cited answer and history; a final ordinary query succeeds. This does not claim immediate backend computation cancellation.
+
+Source checks:303 passes234tests/16suites,307 passes66existing functional/layout tests,308 passes135tests/6suites including real failures, partial results and empty first cancellation. Independent reviews clear. No added ESLint diagnostics;308 retains22existing diagnostics including1error. Frontend typecheck retains93identical errors/0new. Bandit is inapplicable to the TS/JSON-only changes.
+
+All24,940 archived source entries match. PostgreSQL logs contain0errors; one known character-search429 and optional evaluations-config absence recur. Retained harness limitations: obsolete Review Back selector and its dependent upload timeout, ambiguous main snapshot selector after an otherwise completed cancellation, and an initial Tab assumption that ignored the suggestion menu. Corrected native controls pass; these failures are not counted as product defects. Browser/apps closed, portsfree, fixtureholderexit0; API wrapper1 for requestedSIGTERM, frontend0; original isolated config restored. Evidence stays local/ignored in `.tmp/uat303-307-308-repair/`. Current308 findings/296verified/12open. The frozen full-matrix acceptance remains failed pending remaining repairs.
+
+
+## UAT309 — P2: generic admin failures log raw exceptions and traceback locals
+
+- Verified in cd06243f42 by controlled failure regressions; TASK13260.247. During UAT302 regression on unchanged production source f850a44d51, existing admin create/list sanitizer tests fail: logger.exception retains raw exception text, injected filesystem paths and diagnostic locals. This is controlled regression evidence, not an assertion that actual credentials leaked in native UAT. Evidence `.tmp/uat302-repair/causal-red.log` has2existing sanitizer failures plus5expected new password-guidance failures and10passes.
+- Use the surrounding service's sanitized logger.error pattern for these two handlers while preserving operational context, HTTP500 and generic client messages. Track separately from302's safe password-rule guidance.
+
+
+### UAT289 / UAT302 / UAT309 acceptance — 2026-09-19 20:20 UTC
+
+Fresh isolated SQLite and official restricted-role PostgreSQL multi-user runs use immutable cd06243f42. Both native administrator Create user forms show password guidance, reject a sequence-containing candidate with the specific safe rule, preserve the entered username, and accept the corrected valid password: SQLite20:05:48UTC and PostgreSQL20:08:55UTC, HTTP200/user2. Enforcement is unchanged; no rejected-user persistence or arbitrary exception disclosure in regressions. Both native manual one-card Study reviews complete with Reviewed today1/streak1day, the visible UTC-midnight explanation, and local America/Los_Angeles session times13:08/13:10. Screenshots were inspected. Native checks do not simulate midnight: the existing actual PostgreSQL regression now uses reviews one hour apart across UTC midnight on the same Honolulu local date, and passes both session-timezone variants.
+
+UAT289 reuses48frontend and6SQLite/PostgreSQL analytics tests (2SQLite/4PostgreSQL, zero skips); the strengthened existing midnight case passes both PostgreSQL variants. UAT302/309 pass35backend and18frontend tests after causal7fail/10pass (5new password-rule cases and2existing log-sanitizer failures). Generic admin failures retain safe context and HTTP500 while omitting raw exceptions/paths/locals; this is controlled regression acceptance, not a claim of an observed native credential leak. Scoped Bandit0findings/errors with standard test assertions excluded; independent reviews clear. No new Ruff/ESLint/type diagnostics;93baseline frontend type errors remain.
+
+Both archives retain24,941matching source entries. All native application requests are200 except one expected invalid-password400 per cell. Browser consoles have0errors/0warnings. The cluster window has one previously recorded optional llm_usage_v2 absence; backend error entries are only optional evaluations_config.yaml absence. New310 records Study Suggestions stuck pending, independently of completed review persistence. Evidence stays local/ignored in .tmp/uat289-302-repair, .tmp/uat289-repair and .tmp/uat302-repair.
+
+Harness limitations retained: a second profile could not reuse an already-bound archive and was prepared from its own fresh copy before initialization; an initial Study helper expected View instead of Viewing completed session; one unquoted query URL and one relative helper path were corrected. No rerating or product change was used to conceal these. Both owned browsers and four app processes are stopped, ports18801/18881/18803/18883 free, official PostgreSQL holder exits0. API wrappers report1 for requested SIGTERM; frontend wrappers0. Provider configuration was never changed. Full frozen-matrix acceptance remains failed pending remaining repairs.
+
+## UAT310 — P2: fresh-install Study Suggestions queue without starting
+
+- Verified on b7d384f788; TASK13260.248. Original failure (acceptance below): On cd06243f42 both fresh multi-user cells complete a manual card review, but Study Suggestions continues Loading study suggestions. SQLite job1 created20:08:28 and PostgreSQL job1 created20:10:26 remain queued with no started_at/worker_id at20:17:31/37UTC. Native status polling returns200/pending/job1/snapshot null. Read-only authenticated job-detail API confirms the queue state; no artificial jobs were inserted.
+- Runtime has no explicit worker flag override. Declarative startup uses route_enabled_predicate, which requires env_flag_enabled(STUDY_SUGGESTIONS_JOBS_WORKER_ENABLED), unlike the legacy route-default startup policy and neighboring repaired Study Pack worker. No Study Suggestions worker start appears in either log. Repair will preserve explicit disables, route gates and sidecar/test policy using the existing worker helper. Snapshot generation/ownership remain to verify after startup repair.
+- Evidence .tmp/uat289-302-repair/{sqlite,pg}-suggestions-status.txt and {sqlite,pg}-job-status.txt; captures remain ignored. Totals310findings/299verified/11open.
+
+
+## UAT311 — P2: cold Study Suggestions workers cache the wrong owner
+
+- Verified on b7d384f788; TASK13260.249. Original failure (acceptance below): Independent source review found a worker-label client_id override. Real SQLite/PostgreSQL factory regression confirms2cold failures/2warm passes: cold SQLite caches study-suggestions-worker-2, cold PostgreSQL cannot find owner2 review. Initial missing tag_filter helper argument is retained separately. Removing the override matches Study Pack canonical-owner loading;4cases pass, pending snapshot-isolation313 and final acceptance. Evidence .tmp/uat310-repair/owner-causal-red-r2.log and owner-and-fixtures-green.log.
+
+## UAT312 — P2: Study Suggestions regressions contain obsolete fixtures
+
+- Verified by the final208-test check; TASK13260.250. Broader suite130cases/127pass/3fail. All3failures reproduce identically on immutable cd06243f42: two grounding-audit cases expect rating>=3 despite canonical non-Again/non-lapse semantics; the PostgreSQL recording backend lacks backend_type and canonical sync_log metadata. Explicit expected counts3/2 and the complete stub preserve grounding/dedupe assertions. No product count bug is established. Combined adapter/storage/owner33cases pass including real PostgreSQL; final full-scope check pending. Evidence .tmp/uat310-repair/study-regression.log and baseline-regression.log.
+
+## UAT313 — P1: PostgreSQL Study Suggestions lack owner boundaries
+
+- Verified on b7d384f788; TASK13260.251. Original failure (acceptance below): Independent review finds snapshot detail/list/refresh-parent and generation-link operations lack owner clauses. Application RLS installation includes neither suggestion table; endpoint returns stored snapshot metadata even when live evidence is denied. Actual restricted PostgreSQL reproduction confirms10failures with12SQLite/owned controls passing; the first owner repair passes22/22. The initial test cleanup/SQLite error-type assumptions are retained separately, and all11test-owned leftover roles were removed. Scope includes reads, refresh lineage and action-link writes; use existing parameterized owner filters and retain per-user SQLite device-label compatibility. Default worker acceptance remains blocked on this finding.
+
+
+## UAT314 — P2: PostgreSQL Study Suggestions detail rejects timestamps
+
+- Verified on b7d384f788; TASK13260.252. Original failure (acceptance below): After313 foreign snapshot/status/refresh/action boundaries pass, actual restricted PostgreSQL GET of the legitimate owner snapshot returns500. The causal HTTP trace reports two Pydantic errors: snapshot.created_at and snapshot.last_modified receive datetime values where the API contract requires strings. SQLite owner response passes. The repair follows neighboring Flashcards response models: serialize datetime to ISO text before validation while retaining existing strings/null. Evidence .tmp/uat310-repair/http-boundaries.log and http-serialization-causal.log. No fresh native acceptance claimed yet.
+
+
+### UAT310–314 source verification checkpoint
+
+The combined final suite passes208tests with zero skips, including actual PostgreSQL and restricted-role privacy controls. Default worker startup preserves flags/routes/sidecar/test controls; cold/warm cached workers use canonical owners; snapshots, refresh parents and action links are scoped; PostgreSQL datetime responses serialize to ISO text. Mismatched/deleted parents and SQLite device-label compatibility have explicit controls. UAT312 fixture-only repair is verified;310/311/313/314 still await fresh native acceptance. Ruff0 and scoped Bandit0findings/errors (standard test assertions excluded); independent review clear. The earlier206pass/2fail run exposed uncommitted legacy fixture setup, corrected using an explicit transaction. All temporary test roles are gone. Private evidence .tmp/uat310-repair stays ignored. Full matrix remains failed pending all remaining repairs.
+
+
+## UAT315 — P2: PostgreSQL Study Suggestions sync triggers assume the wrong schema
+
+- Verified on b7d384f788; TASK13260.253. Original failure (acceptance below): Fresh immutable488fc0f661 multi-user native reviews complete at20:53:55–56UTC. Both default workers start without overrides. SQLite reaches ready/snapshot1; PostgreSQL becomes failed/job1 with no snapshot. Actual PostgreSQL logs at20:53:58 and20:54:12 show suggestion_snapshots_sync_log_fn inserting entity_id into the shared Media-first sync_log, which exposes entity_uuid. The adjacent generation-link trigger has the same fixed column. Existing208tests use a ChaCha-only schema for these writes and did not cover this integration.
+- Apply the existing neighboring Study Pack trigger column selection to these two trigger functions; preserve transactional sync, tenant ownership and SQLite behavior.310/311/313/314 remain open pending complete native acceptance. No frozen full-matrix pass claimed.
+- Evidence stays ignored in .tmp/uat310-repair: both12-review,14-suggestions-ui, PostgreSQL16-job-detail and cluster-current.private.log. Initial harness limitations: wrong /admin/users URL404 (correct /admin/server), exact Refresh missed its reload icon in the accessible name, and URL is unavailable in the Playwright helper sandbox. Each is retained separately from the confirmed PostgreSQL failure. Pre-configuration browser warnings concern missing server/API-key settings, not failed authenticated Study requests.
+
+
+## UAT316 — P3: ready Study Suggestions emits an Ant Design layout deprecation
+
+- Verified on b7d384f788; TASK13260.254. Original failure (acceptance below): Native SQLite488fc0f661 renders ready suggestions but logs one console error: [antd: Space] direction is deprecated in favor of orientation. TopicBuilder has three legacy direction props; its parent panel already uses orientation. Switch those props while preserving layout/behavior; use existing panel/hook/review tests and fresh native console acceptance. Evidence .tmp/uat310-repair/sqlite-18-console-final.txt and sqlite-suggestions.png. No failed Study request or data loss is implied.
+
+UAT315 upgrade follow-up: the existing v71 fast-open path prevents corrected trigger bodies from being installed on prior databases. The real reopen regression fails46pass/1fail; an explicit v71->72 causal check also fails before repair. The repair adds a serialized, transactional trigger-only upgrade and retains read-only current-schema opens, rollback/retry, and older migration coverage. Independent review is clear on source; final verification/native acceptance pending.
+
+
+### UAT315–316 source verification checkpoint
+
+293 backend controls pass with zero skips:79 migration/bootstrap/lock/shared-sync tests and214 worker/privacy/timestamp/Study Suggestions tests. PostgreSQL is actual official-fixture storage; privacy/lifecycle writes use a restricted role and the Media-first shared schema, including foreign sync-event denial. The default-worker factory matrix covers cold/warm and both PostgreSQL sync schemas. Version72 upgrades prior71 triggers once under the existing migration lock, rolls back a failed final trigger without publishing readiness, and preserves read-only current-schema opens. Existing27frontend tests pass after316’s three layout-prop substitutions. Ruff0; scoped Bandit0findings/errors with test assertions excluded; independent review clear. Scoped ESLint has0file diagnostics plus the known root Next pages-path advisory; the first frontend-directory lint skipped the outside-base-path file and was rerun from root. A first frontend edit command used the wrong working directory and did not apply; subsequent tests ran after the successful edit.
+
+Retained failed attempts: UAT315 causal2fail/6pass, first green interrupted because test teardown closed the pool before dropping its role (corrected; ten inventoried test-only roles removed), then46pass/1fail exposed the prior-v71 upgrade gap. Explicit v71 upgrade causal test fails before repair. The native488fc0f661 failure remains preserved: both24949-entry archives match, both browsers and four apps are stopped, ports released, official PostgreSQL holderexit0. API wrappers report1 for requested SIGTERM; frontend wrappers0. Fresh native verification of310/311/313/314/315/316 remains pending; no full-matrix pass is claimed.
+
+
+### UAT310 / UAT311 / UAT313–316 targeted acceptance — 2026-09-19 21:31 UTC
+
+Fresh SQLite multi-user and official restricted PostgreSQL multi-user installs use immutable b7d384f788. Native administrator and Alice card creation/review both succeed; the default Suggestions workers process naturally queued jobs without flag overrides. Admin snapshots become ready, survive native reload/completed-session reopening, and native Refresh returns202 followed by a new200 snapshot with the correct parent. Alice initially has an empty Study workspace; foreign snapshot detail, refresh and action return404 and foreign anchor status is200/none. Alice then creates and reviews her own distinct deck, reaches ready and reopens only her own snapshot after reload. Signing back into admin restores only the original deck/snapshot. Reciprocal PostgreSQL foreign detail/refresh/action return404 and statusnone. No artificial jobs or direct snapshot inserts were used.
+
+PostgreSQL responses contain valid ISO timestamps. Its actual runtime role has no superuser, bypass-RLS, create-database or create-role privileges. Read-only audit confirms schema72 and canonical entity_uuid sync records: owner1 sees only snapshots1/2, owner2 sees only snapshot3, owner3 sees none. Snapshot/link application authorization uses explicit owner filters; this does not claim new RLS on those tables. Cold/warm worker-first ownership, link mutation lifecycle, both sync schemas, prior71 migration/rollback and current read-only opens are covered by the293 passing backend regressions, not inferred from the native warm UI path. The27 frontend controls pass; native ready panels retain their layout and show0console errors/warnings in both accounts. Screenshots were inspected. Ruff/Bandit/review results remain as recorded above.
+
+Both24,951-entry source archives match the committed revision. Ready/reload application requests succeed; logout-time notification401s and sign-in warnings are retained as expected revocation observations, distinct from the clean ready-panel console. Backend errors are only the previously recorded optional evaluations_config.yaml absence; the cluster window contains one known optional llm_usage_v2 absence and no Suggestions error. The initial log audit used the wrong level shape and was corrected against actual JSON fields and backend text. Native evidence remains local/ignored in .tmp/uat315-final; causal/regression evidence stays in .tmp/uat310-repair. No generated browser capture is added to the PR.
+
+Owned browsers and four app processes are stopped, all four ports are free, and the official PostgreSQL holder exits0 after app shutdown. API wrappers report1 for requested SIGTERM; frontend wrappers0. Provider configuration was untouched and shared Docker/llama services remain running. Six findings close;316 total/306verified/10open. These are targeted repairs: the original four-cell full matrix still records failures and has not been recertified. Stage4 continues with the remaining repairs; UAT261 remains open under the requester's explicit allowance.
+
+
+### UAT299 source repair checkpoint — 2026-09-19 21:49 UTC
+
+Causal checks reproduce seven SQLite parse/column-token failures while six actual PostgreSQL search controls pass. Partial retrieval failures are incorrectly classified empty; the first status test had a result-shape assertion error, corrected before confirming that causal failure. Two UI controls reproduce false searched/ready claims. Reuse existing FTS normalization only after a SQLite query parse failure, preserving valid grouping, NEAR and existing quote behavior on the same connection. Request-owned failure collection avoids cross-request contamination and distinguishes retained evidence plus failed variants. Independent review identified grouped-query semantics, mixed-success summaries, and deadline diagnostics; causal failures and fixes are retained. First focused26backend/55frontend pass, then review25backend pass; final broader/native acceptance remains pending.
+
+Broader regression289pass/3fail. All three reproduce on immutable b7d384f788, preceding this repair. SQLite duplicate-ID classification is317. Two obsolete regression assumptions are318. Bandit initially0findings/errors; two Ruff TRY203 findings reproduce on baseline and one new import ordering issue was fixed. Local evidence .tmp/uat299-repair stays ignored; repeated unrelated pytest old-temporary-directory cleanup warnings are retained. No new native acceptance or full-matrix pass is claimed.
+
+## UAT317 — P2, verified: SQLite and PostgreSQL duplicate Note IDs lose conflict classification
+
+- Open; TASK13260.255. Existing test_add_note_duplicate_id fails identically on current and immutable b7d384f788: SQLite reports UNIQUE constraint failed: notes.client_id, notes.id. NoteStore recognizes only the old notes.id spelling, raising generic CharactersRAGDBError rather than ConflictError. Preserve existing owner uniqueness, safe conflict handling and original data; actual-backend and API controls pending.
+
+- Actual PostgreSQL control also fails: the backend emits typed UniqueConstraintError with a sanitized message, so text-only matching loses its conflict classification. Minimal handling recognizes the SQLite composite key and PostgreSQL type. Both owner/original-preservation controls and existing HTTP409 mapping now pass in the six-test focused set. Final broad acceptance pending.
+
+## UAT318 — P2, verified: legacy Note migration and QA regression fixtures are obsolete
+
+- Open; TASK13260.256. Both failures reproduce on immutable b7d384f788. The v12 migration fixture relabels a modern v68 database, so the legitimate v59 attachment-registry collision guard rejects it. Build an actual historical v12 database through registered migrations. The selected-Note QA assertion expects metadata.source notes_db, while actual canonical output is notes; the exact note ID and expected source phrase are present. Retain those substantive identity/content checks and correct only the obsolete source spelling. No product retrieval failure is established by that assertion.
+
+### UAT299 review checkpoint — 2026-09-19
+
+The separate decomposition time budget also reproduced false searched status and unawaited cancelled retrieval work. Its owned tasks now cancel and finish before return, while caller cancellation still propagates. Final focused28backend/56UI and6Note/API/fixture controls pass; actual PostgreSQL is required and not skipped. Independent review has no remaining actionable findings. Bandit has0findings/errors; all9 scoped Ruff findings reproduce under identical rules on baseline. Broader regression and fresh native source acceptance remain pending; no full matrix pass is claimed.
+
+### UAT299 source and UAT317/318 acceptance checkpoint — 2026-09-19 22:06 UTC
+
+Final affected backend suite509passed/0skips, including actual PostgreSQL and all Note/Character ownership controls; frontend56summary/panel plus40streaming/persistence checks pass. UAT317 preserves original Note contents and foreign-owner exclusion on both backends; existing mocked API conflict-to409 mapping also passes (not represented as a native duplicate request). UAT318 historical migration and selected-Note identity/content checks pass without weakening application behavior. Both317/318 close. UAT299 remains open for fresh native acceptance.
+
+Independent review reports no actionable findings. Bandit reports0production findings/errors and0test findings/errors with assertion-onlyB101 excluded. Scoped Ruff has9unchanged baseline findings under identical rules; full TypeScript has exactly93identical baseline errors. ESLint has no file findings, with the known root-pages advisory retained. All causal failures, initial289pass/3fail broad run, immutable-baseline reproductions and successful final receipts stay local in .tmp/uat299-repair. Pytest warnings and unrelated old temporary-directory cleanup warnings are retained.318findings/308verified/10open; the original full matrix still records failures.
+
+
+### UAT299 native acceptance fails — 2026-09-19 22:31 UTC
+
+Fresh immutable63d4581613 SQLite/PostgreSQL multi-user profiles both save a matching Character and real llama.cpp conversation and restore the messages after reload. The PostgreSQL native Fast QA request includes all four intended sources, but returns empty contexts twice. Streaming source inspection also confirms aggregate source_status metadata is discarded by _PrefetchedEvidence before NDJSON dispatch; source-level failure disclosure is therefore not accepted. UAT299 remains open. Native evidence and screenshots stay ignored in .tmp/uat299-native. First observer instrumentation could not retain network state across CLI invocations; the later single-call capture retains the actual POST and NDJSON.
+
+## UAT319 — P2, verified: PostgreSQL QA omits saved Character and Chat evidence
+
+TASK13260.257. Native Fast query Rowan Observatory, returns zero contexts at22:23 and22:26UTC despite owned Character3 and saved Chat c0ed44d0-ea45-46f1-b324-514b860c5bae. Preflight calls Characters/Chats empty: its current non-file backend handling covers only Media, while ChaCha readiness checks local file presence. The retrieval cause remains under investigation; ownership/security filtering must remain intact.
+
+## UAT320 — P2, verified: fresh Balanced QA stalls after embedding model loading
+
+TASK13260.258. SQLite Balanced search begins22:17:00UTC. The default Qwen embedding download completes and model-loaded log appears22:20:27UTC; UI still searches at812seconds with no results or error while unrelated endpoints respond. The neutral progress wording is accurate (UAT288 remains closed). Preserve this first attempt, inspect native cancellation and a lexical control, and establish the cause before repair. An OS sample is retained without a definitive Python-level diagnosis. The full matrix remains completed with failures; no recertification claimed.
+
+### UAT320 timing diagnosis and repair — 2026-09-19
+
+A warm restart completes the same query in about4seconds. A labeled diagnostic run with a190-second delay before the real first embedding load reproduces the indefinite native search. Quickstart's proxy has a180-second idle limit; retrieval emits no body before completion, and the direct browser stream starts its idle timer only after fetch resolves. Backend request work drains after disconnection while the browser remains pending. The repair emits retrieval-only keepalive events through the existing owned task queue and starts the existing browser deadline before response acquisition. It adds no generation replay or generation-stage keepalive.
+
+Causal controls reproduce four missing-heartbeat failures and one missing-response-deadline failure. First backend green has84pass/2fail because the new fixture disabled generation, which the streaming endpoint rejects; the UI correctly uses nonstreaming for that mode. Corrected the fixture to use the existing fake generation provider, without changing product behavior. Final98backend streaming unit/endpoint and126frontend transport tests pass with zero skips. Production Bandit has0findings; the test's synthetic password finding is unchanged. Scoped Ruff and ESLint pass; full TypeScript has93identical baseline errors. Bounded independent review reports no actionable findings. Controlled native timing acceptance remains pending, so320 remains open.
+
+The previous63d native source archives both pass24,954-entry parity audits. Both browsers, all four original app processes and diagnostic restarts are stopped, ports released, provider configs restored byte-for-byte, and the official PostgreSQL fixture holder exits0. Shared Docker and llama.cpp remain running. The original SQLite shutdown reports one leaked semaphore; retained in the evidence. One diagnostic launch initially overlapped a draining original process, then was stopped; later launch explicitly gated prior process exit and port availability. No acceptance result is taken from the overlapping launch.
+
+Separate fresh immutable f7464f7577 SQLite/PostgreSQL profiles now support299/319 native acceptance. An initial SQLite prepare was attempted before dependency copying finished and failed before creating a profile; corrected after the copy completed. Native acceptance is still pending and is distinct from320, which is absent from that source revision. Evidence stays local/ignored in .tmp/uat299-native and .tmp/uat319-native.
+
+### UAT299/319 causal repair — 2026-09-19 22:43 UTC
+
+Authenticated supplemental controls establish that both SQLite and PostgreSQL retrieve the owned Character/Chat, then the native default chunk-type filter removes both because whole records lack chunk_type. Clearing only that filter returns both exact sources with all security filters retained. The repair treats missing chunk annotations as text and preserves explicit code/unknown-type filtering. PostgreSQL preflight now recognizes its shared non-file ChaCha content backend. Stream contexts forward only canonical source names and allowlisted status/count/reason fields.
+
+Causal evidence:9 corrected stream KeyErrors,3unit failures/2controls,2actual SQLite/PostgreSQL pipeline failures. The first stream test setup lacked required metadata in four cases; fixed before reproducing all9 true failures. The first PostgreSQL helper invocation supplied a label as a filename and collected no tests; corrected using the evidence-label environment variable. Final affected203tests pass/0skips, reviewer reports no actionable findings. Production Bandit0; six unchanged baseline test-fixture findings and25 identical baseline Ruff findings. No native closure yet.
+
+SQLite native Stop returns the form and truthful cancellation status. The cold model unloaded normally at22:25:27, so a model-lock deadlock is not established. OS sampling was inconclusive; Python profiler requires macOS root and noninteractive sudo has no cached authorization. No permissions were changed. UAT320 remains under investigation; do not substitute the Fast control for Balanced acceptance. Both screenshots were inspected.
+
+
+### UAT299/319 native retrieval checkpoint — 2026-09-19 23:17 UTC
+
+Immutable f746 SQLite/PostgreSQL native Character saves201 and real local-model Chat completion/persistence200 both survive normal reload. Fast query Rowan Observatory, now returns the exact owned Character plus both Chat messages on each backend with security filtering retained. Stream source_status correctly reports Character1 and Chats2 searched, with Media/Notes empty. Both native cards and screenshots inspected. Narrow retrieval repair acceptance is positive; final isolation/audit/cleanup still pending. This does not certify the full matrix or answer generation. The300-token Fast requests return no generated answer and the UI states that honestly; retain under the existing261 reasoning-only model investigation pending attribution.
+
+The first Chat observer waited for /chat/completions, but Character Chat uses complete-v2; its30-second timeout is a harness error. Actual network receipt, visible completed message and normal reload independently establish success, without resubmission. Recurrent bootstrap-admin profile403 is attributed to Email verification required and remains a tracked observation pending UX/policy assessment.
+
+## UAT321 — P2, verified: saved model reasoning contaminates Chat retrieval evidence
+
+TASK13260.259. Both fresh native QA streams include optional model reasoning in the assistant Chat excerpt, while the visible Chat answer is separately collapsed from that reasoning. Preserve raw source messages but project the visible answer into evidence and downstream generation context. Evidence stays local in .tmp/uat319-native; no provider reasoning is copied into this tracker.
+
+## UAT322 — P2, verified: Character and Chat evidence loses source identity
+
+TASK13260.260. Both native QA pages label each retrieved Character/Chat as Source N and Document. Stream title is null, source uses character_cards/chat_history, and source identity fields are missing. Native View opens the excerpt with the same generic Document label and no original-record link. Keep provenance truthful and allowlist only public metadata. Screenshots inspected; source type/title and supported owner-page navigation require repair.
+
+
+## UAT323 — P1, verified: PostgreSQL Knowledge QA returns another account’s Chat evidence
+
+TASK13260.261. Fresh immutable f746 PostgreSQL multi-user Bob query at23:23UTC returns administrator assistant chat_pa_f840-e8ee-1cc-c25e; the corresponding SQLite Bob query returns zero sources. The shared-backend substring query omits conversation ownership, and the full-text fallback also lacks an explicit owner condition. Repair both paths and metadata lookup with real cross-user/deleted-parent regressions before resuming the matrix. UAT319 stays open because its isolation acceptance failed. Local evidence .tmp/uat323-repair and .tmp/uat319-native remains excluded from the PR.
+
+### UAT320 controlled timing acceptance — 2026-09-19 23:32 UTC
+
+Fresh immutable a944 native Balanced query started23:14:51.199. A labeled diagnostic wrapper delays only the first real HuggingFace load by190seconds; the application source is unchanged. HTTP200 begins after15.371seconds, heartbeats keep the browser alive through the actual fresh1.19GB download, and a correct answer with one citation is visible by23:22:07. Screenshot inspected. Exact response-end timing was not retained; this verifies controlled long-load recovery, not the full matrix. All24,957 tracked source entries match. Browser and owned apps are stopped, ports18821/18901 released, and provider configuration restored byte-for-byte. Shutdown completes; wrapper SIGTERM and one leaked semaphore warning retained.98backend/126frontend regressions and independent review were already green.320 closes.
+
+### UAT323 attribution and repair checkpoint
+
+Bob identity3 returns200 from auth/me and403 for direct access to the administrator Chat. A cache-disabled supplemental QA request nevertheless returns both administrator message IDs, confirming a retrieval ownership bypass independent of cache. Eight real SQLite/PostgreSQL cases fail before repair (foreign PostgreSQL rows and deleted parents on both backends). The bounded patch enforces conversation ownership in both PostgreSQL search paths and Chat metadata, and excludes deleted parents on both backends before pagination. All27 focused tests pass, zero skips. Production/test Bandit has0findings/errors, Ruff is clean, and independent read-only review has no actionable findings. Broader regression and fresh native acceptance remain pending;323 stays open.
+
+UAT323 broader affected regression:259passed/0skips, including actual PostgreSQL. Known pytest deprecation and unrelated old-temporary-directory cleanup warnings retained. Old f746 browsers/apps are stopped and provider configurations restored; official PostgreSQL fixture cleanup requested only after all app ports released. Fresh acceptance remains pending.
+
+### UAT321/322 evidence repairs — 2026-09-19
+
+321 reproduces eight real SQLite/PostgreSQL reasoning-contamination failures; public-text projection reuses the existing helper, retains visible answers and user turns, omits reasoning-only evidence, and leaves raw stored messages unchanged.322 reproduces four actual pipeline-to-stream identity failures and two missing navigation failures. Retrieval now supplies public titles, canonical source types and record IDs; the existing stream allowlist forwards them. Character preview uses the existing focusCharacterId route and Chat uses the existing thread path builder. Initial navigation test assumed characterId; handler inspection corrected that assumption before acceptance.
+
+Combined backend224passes/0skips including actual PostgreSQL; frontend40streaming/navigation and31final source UI/Character route cases pass. Production/test Bandit0, Ruff0, scoped ESLint0filefindings with known pages advisory; full TypeScript has93identical baseline errors. Initial ESLint invocation ignored paths outside its base and was corrected from the repository root. Review and fresh native acceptance remain pending;321/322/323 stay open. Old f746 official PostgreSQL fixture cleanup finished with exit0; shared Docker and llama.cpp were untouched.
+
+UAT322 review caught an off-page/numeric-name ambiguity in the existing Character focus handler. Two causal failures precede the scoped exact-ID lookup. The regression includes a visible different Character named29 while ID29 is off-page; denied lookup yields an unavailable notification.33final source/navigation/cross-feature cases pass, reviewer has no remaining actionable findings. Expanded ESLint scope has28unchanged baseline warnings and0errors; final TypeScript retains93identical baseline errors. Fresh native acceptance is still pending.
+
+Expanded Character first-use plus scoped detail tests finish106passed/0skips in281seconds. The initially quiet default reporter did not establish a hang; the unchanged baseline was observed progressing with verbose output. No new defect is assigned for normal slow test execution. All targeted evidence changes are ready for committed native acceptance.
+
+### UAT319/321–323 native acceptance checkpoint — 2026-09-20 00:18 UTC
+
+Fresh immutable4ac25c7879 SQLite and restricted-role PostgreSQL multi-user profiles each create Alice/Bob, save a Rowan Character, and complete one real llama.cpp Chat through the Character action. Both complete-v2 requests return200 and saved messages survive native source reopening. PostgreSQL normal Chat reload independently restores both messages. Response-finished capture helpers timed out without a repeat submission; completed request receipts, visible messages, and stored reads establish the result. A guessed /knowledge/qa URL404 was a harness mistake, corrected to the verified /knowledge route.
+
+Owner native Fast queries return the exact Character and two Chat messages on both backends. Cards and previews now show their correct titles, Story Character/Conversation types, IDs, and supported source actions. Open in Characters opens the exact authorized preview; Open in Chat loads the correct saved conversation and both message IDs. Raw stored assistant messages still contain optional reasoning; QA excerpts retain the visible answer and ORBIT-742 facts without those reasoning blocks. The300-token Fast answer remains empty with truthful UI disclosure under open261; this is retrieval/source acceptance, not generation acceptance.
+
+Bob logs in normally as user3. Native identical queries return zero contexts on both backends. Supplemental cache-disabled Chat-only requests also return no documents, while direct foreign Chat access returns403 on PostgreSQL and404 on SQLite. Authenticated foreign Character links return404, show Character unavailable, and display no foreign facts. An initial Character observer used unavailable URL in the CLI callback; corrected without changing application code. The formerly authenticated tabs correctly redirect to login after logout and are not counted as Bob's authenticated denial test. Both24,962-entry source parity audits pass; owner source-preview and Bob-empty screenshots inspected. Owned runtime cleanup remains pending while the adjoining299 controlled partial-source failure check uses these profiles. No full matrix recertification is claimed.
+
+Additional observations retained for triage: SQLite's built-in Default Assistant initially shows7h ago in a newly initialized database. Initializer code and fresh DB paths confirm built-in seeds, not reused user data; the exact timestamp projection still needs verification. Character source previews render the generated Markdown literally, including empty Personality/Scenario/First Message headings. Source identity is correct; this readability observation needs a separate UX disposition. Recurrent bootstrap-admin preferences403 remains attributed to Email verification required as previously recorded.
+
+### UAT299 no-answer disclosure repair — 2026-09-20 00:34 UTC
+
+Native Media extraction/chunking succeeds on both backends. Labeled diagnostic wrappers inject only a Chat retrieval exception; successful Media and Character evidence remains real. Both streams correctly report Chats error/retrieval_failed, but neither no-answer results nor Details displays that failure.299 remains open. Removing the fault and using native Retry clears the error on both backends; no stale failure-cache defect is established.
+
+Three causal frontend tests fail for missing no-answer disclosure. The bounded repair reuses source-failure wording in AnswerWorkspace for completed searches with evidence and no visible answer, using completed diagnostics rather than the next-search source selection. It preserves existing generated-answer and zero-result panels.107affected transport/persistence/panel tests and50final layout/no-results/summary tests pass, including single-source partial-success and recovery controls. Independent review found a misleading other-sources phrase; corrected to Retrieved sources are still available, with coverage. No remaining actionable review findings. ESLint0filefindings; TypeScript93identical baseline errors. This increment changes TypeScript only; earlier backend Bandit remains valid, and the ignored diagnostic Python wrapper has0Bandit findings/errors. Controlled committed-frontend acceptance remains pending. The original APIs finish shutdown normally after roughly one minute of draining and exit without a second signal; this does not close287's earlier interrupted-shutdown case.
+
+## UAT324 — P2, verified: fresh Character activity age is incorrect
+
+TASK13260.262. Fresh SQLite's built-in Default Assistant shows7h ago shortly after initialization. Its database is the new owned profile, and seed creation is confirmed. The list parses raw dates with new Date and formats absolute age; verify raw serialized timestamps and non-UTC controls before attributing the repair. Preserve stored dates and correct offset-bearing records.
+
+## UAT325 — P3, verified: Character evidence previews show literal markup and empty sections
+
+Native Character source previews display generated Markdown syntax and empty Personality/Scenario/First Message sections. Correct source identity and authorized navigation are accepted separately under322. Triage readability using existing safe rendering conventions and preserve raw records. Screenshots remain local in .tmp/uat323-native; source-detail behavior is not a full matrix pass.
+
+### UAT299 / UAT319 / UAT321–323 accepted — 2026-09-20 00:48 UTC
+
+Fresh4ac SQLite and actual PostgreSQL owner QA retrieves saved Character/Chat evidence with correct titles, source kinds and IDs; source actions reopen the correct Character or persisted two-message Chat. Excerpts contain visible answers and useful facts without reasoning, while supplemental storage reads retain the original reasoning. Bob's native and cache-disabled queries return zero foreign evidence; direct Chat access is denied and native foreign Character links show unavailable. These controls close319/321–323.
+
+Controlled535 frontend acceptance reuses the4ac diagnostic APIs; backend source is identical across those commits. A task-owned Chat retriever fault retains real Media/Character results and is visibly disclosed when SQLite generation returns no answer and when PostgreSQL generation is disabled through Settings. PostgreSQL's generated-answer failure disclosure also passes. Removing the fault and using native Retry search/Ask clears the warning; PostgreSQL returns searched Chat evidence and SQLite reports an ordinary empty Chat result. This closes299's final partial-failure criterion. This targeted acceptance does not recertify the full fresh matrix.
+
+Final audits check24962 entries in each of four source archives with zero mismatches. Initial audit calls used abbreviated missing filenames; corrected existing manifests pass. Both browser sessions, all owned APIs/frontends and their four listeners are stopped. Original provider configurations are restored byte-for-byte; the official PostgreSQL fixture holder exits0 after release. Shared PostgreSQL and llama.cpp services remain running. Completed task plans are removed under the repository workflow; detailed task verification and ignored evidence remain available. Eleven findings remain open, including newly tracked324/325.
+
+UAT324 native response confirms Default Assistant timestamps omit a timezone while same-install siblings carry Z; the list interprets this as local time and converts the resulting future offset into6h ago. TASK13260.262 owns the bounded repair. TASK13260.263 owns UAT325 preview readability.
+
+### UAT324 repair checkpoint — 2026-09-20 01:00 UTC
+
+Three causal SQLite failures cover the fresh default seed and legacy timestamp formats. The common Character response converter now adds UTC only to naive SQLite dates after validation; all12 callers supply the backend type. Explicit offsets and PostgreSQL values are preserved, as are raw rows.116affected Character API checks pass with actual PostgreSQL and zero skips. Bandit0production/0tests; two unchanged baseline Ruff import-order diagnostics. Independent review clear. Native committed acceptance remains pending alongside325;324 stays open.
+
+## UAT326 — P2, verified: stale retrieval regression fixtures fail current contracts
+
+TASK13260.264. Expanded UAT325 tests expose a minimal SQLite conversations fixture without title and a PostgreSQL Chat fixture whose hardcoded owner differs from its database owner. Labeled committed-ad378 baseline confirms both failures. Repair fixture schema and owner data while retaining production ownership checks and positive retrieval assertions. Initial new325 cleanup called a nonexistent retriever close method; corrected test cleanup then replayed six causal text-mismatch failures against the baseline. Final broader verification pending. This finding concerns regression fixtures, not a newly observed native data leak.
+
+### UAT325 / UAT326 verification checkpoint — 2026-09-20 01:07 UTC
+
+Six corrected causal baseline excerpt failures cover sparse/full Character cards, authored text and SQLite legacy retrieval. The shared formatter emits readable nonblank sections under the existing plain-text preview contract; source metadata and records remain unchanged. Final58affected tests pass with actual PostgreSQL and zero skips. Bandit0production/0tests, Ruff0, independent review clear. The two stale fixtures now use conversations.title and the real database owner, with assertions intact;326 closes. Thirteen Character UI tests include explicit non-UTC age controls for324; ESLint0.324/325 remain open for committed native acceptance.
+
+### UAT324 / UAT325 native acceptance — 2026-09-20 01:22 UTC
+
+Fresh immutable acb1fb9c2f SQLite and actual PostgreSQL installs pass targeted acceptance in America/Los_Angeles. SQLite Default Assistant now serializes its UTC seed time with Z and displays 2m ago alongside its siblings; reload shows the correct 9m age. Normally created Rowan cards show the correct 6m age on both databases. QA with generation disabled retrieves the exact saved cards (SQLite4/PostgreSQL3), showing readable Description text without generated Markdown or blank sections. Source previews are visually inspected; Open in Characters opens the correct saved preview in a new tab, and native reload preserves description and Behavior. These results close324/325 without recertifying the full matrix.
+
+Retained harness corrections: the first Character navigation observer omitted the Open Characters workspace action; the first source-action observer waited on the original page despite successful new-tab navigation. Corrected native steps and reload pass. Bootstrap-admin profile403 remains the previously recorded Email verification required policy observation. Both24964-entry source audits pass with zero mismatches. Both browser sessions, four applications and listeners are stopped; requested backend SIGTERM maps to wrapper1 and frontend wrappers exit0. Official PostgreSQL holder exit0 confirms cleanup. Provider configuration was unchanged and shared services remain untouched. Evidence stays local/ignored in .tmp/uat324325-native. Nine findings remain open.
+
+### UAT283 / UAT285 repair checkpoint — 2026-09-20 01:33 UTC
+
+The model selector now resolves setup-qualified IDs through existing parsing and symmetric provider alias normalization, preserving exact model IDs and canonical menu identity. Four original label failures and four review-discovered llama/local alias controls precede fixes. The current-model Ant tooltip and native title are disabled while the menu is open, retaining closed-menu hover help and the accessible label. Real Ant causal controls include the native-title gap; initial jsdom animation and extra-click harness corrections are retained in .tmp/uat283285-repair. Final146affected tests pass. No added ESLint findings (36 unchanged warnings); TypeScript93 unchanged baseline errors. TypeScript-only scope, Bandit not applicable. Independent review clear; committed fresh native acceptance remains pending and both issues stay open.
+
+### UAT283 / UAT285 native acceptance — 2026-09-20 01:44 UTC
+
+Fresh immutable04a5f706f0 PostgreSQL single-user setup discovers the real9099 llama.cpp model, completes first-chat ready200, and reaches normal Chat through the manual API-key form. The settled button and post-reload state show LLaMa.cpp plus the real model. Ordinary Chat sends api_provider llama.cpp and the exact model, returns READY., and retains that reply in canonical PostgreSQL rows. The first reload capture records transient readiness/loading UI; subsequent settled receipt verifies the correct label. This closes283.
+
+At1200x960, an actual PNG submission reproduces the still-open286 image-capability guard without provider dispatch. Closed-menu model hover help appears; opening the menu removes both Ant tooltip and native title. Ordinary pointer click selects the second configured model without force or event injection, with139ms for the selection/hover receipt; the image stays visible and closed-menu help returns. Visually inspected screenshot confirms the original warning/menu layout is unobstructed. This closes285. Explicitly choosing each discovered model in setup also provides a positive284 control; its unselected non-default/template behavior remains open.
+
+The24964-entry source audit passes unchanged. Final post-reload console has0errors/0warnings. Both owned apps, browser and listeners are stopped; frontend exits0, requested backend SIGTERM maps to wrapper1, official PostgreSQL holder exits0. Setup modified only this fresh profile configuration; shared services/host configuration remain untouched. Retained harness observations: cold frontend readiness request exceeded12s before successful browser startup; provider-save observer used an incorrect /save suffix, so subsequent saved UI/catalogue and request evidence establish the saved selections; standalone props projection initially used status() instead of status and was corrected. Evidence remains ignored in .tmp/uat283285-native. Seven findings remain open; no full-matrix pass claimed.
+
+
+## UAT327 — P2, verified: successful saved Chat regeneration duplicates the user turn on reload
+
+- Fresh committed931e55 PostgreSQL single-user; TASK13260.265. Actual image Send succeeds, then normal Regenerate succeeds on the same conversation83cc300e-7355-4cc8-995b-4136883bef74. In-session UI has one user and assistant variants2of2. Canonical PostgreSQL grows from3 to5rows: original userbc8d591e-9a57-4b19-8938-1c6e86039a0f plus a duplicate64ce7fa2-236e-4cea-ba12-6f83fa53b0a1 and another assistant. Native reload renders both pairs while retaining the variant navigation.
+- Expected: successful response regeneration retains the original user identity and coherent alternate responses, without turning the retry into another user question. This is distinct from prior failed-turn Retry/ACK defects; the existing successful-regeneration regression only checks local acknowledgement.
+- Both user images remain3982characters with SHA256bb4717c251435cdab13f0ee126fef570e8c8279cea53a5c6d2218c14257b89c2. Capability discovery, real image inference and byte retention pass separately as286; this persistence finding remains open.
+- Evidence: ignored `.tmp/uat286-native/{17-image-state.txt,21-retry.txt,22-retry-state.txt,23-reloaded.txt,canonical-after.safe.json,reloaded-image.png}`. Screenshot visually inspected. The initial stream waiter exceeded the55-second helper budget; original request was not resubmitted. Hover-replaced action control required ordinary pointer hover before clicking, matching the previously documented harness observation. Final reload console has0errors/0warnings.
+
+
+### UAT286 — verified external vision discovery on fresh PostgreSQL
+
+Committed931e55 fresh single-user PostgreSQL onboarding validates real llama.cpp9099, saves its exact discovered GGUF, and completes first-chat200ready. Normal Chat sends the actual128.png and returns “A white speech bubble icon containing three black dots.” Canonical conversation83cc300e-7355-4cc8-995b-4136883bef74 initially has3rows with the uploaded image. Regenerate returns200 on the same conversation/model and produces “A white speech bubble containing three black dots.” Normal reload and authenticated include_images API preserve both captions and the exact3982-character image, SHA256bb4717c251435cdab13f0ee126fef570e8c8279cea53a5c6d2218c14257b89c2. No capability override, artificial response, or model-service restart was used. UAT286 is verified; successful regeneration creating another user/assistant pair is independently open as327, so the overall image workflow/full matrix is not certified.
+
+All24964 archived source entries remain unchanged. Final reload console0errors/0warnings. Evidence `.tmp/uat286-native`. The first stream waiter exceeded its55-second helper budget; native state and canonical reads confirmed completion without resubmitting Send. A relative helper path was corrected, and a hover-replaced action control was operated with ordinary pointer hover. These harness observations are preserved.
+
+### UAT287 — reproduced during owned-runtime cleanup
+
+On the same931e55 API10963, firstSIGINT02:13:52Z closes the listener and waits for open browser connections. SecondSIGINT02:14:30Z logs Finished server process and cancellation, yet the process is alive at02:14:50Z. A native thread sample shows Python finalization waiting for thread shutdown, with remaining Python worker threads including one waiting on SimpleQueue.get. Source inspection finds main.py lifespan uses bare yield followed by shutdown, so cancellation can bypass the shutdown sequence; this is the next causal hypothesis to test. No fix is claimed. Only the owned browser, API and frontend were closed/terminated; listener ports and PIDs are clear, with no SIGKILL. Shared PostgreSQL and llama.cpp remain running.
+
+
+## UAT328 — P3: stale lifecycle inventory fixture omits two existing workers
+
+TASK13260.266. Broader287 verification passes42 tests but the exact startup inventory assertion fails because shared_workspace_clone_jobs_task and standalone_html_generation_jobs_task are absent from its expected/stubbed set. The untouched931e55 source archive reproduces the identical failure, establishing baseline drift. The fixture now exercises both existing loops, asserts both receive stop, and retains exact inventory and timeout checks (standalone15seconds; others5seconds). No worker is disabled and no production policy changes for328. Expanded lifecycle/startup suite and review pending. Evidence `.tmp/uat287-repair/{green.log,inventory-baseline.log,final.log}`.
+
+UAT328 verified: expanded lifecycle/startup coverage141passed; independent reviewclear; test-scope Bandit0findings (assertions excluded);17existing lint diagnostics unchanged. The exact worker inventory and shutdown budget assertions remain, and both added stubs confirm stop consumption. No production behavior changes for328.
+
+### UAT287 — partial native acceptance and voice cleanup follow-up
+
+The main lifespan now runs the existing teardown in `finally`. Causal cancellation/body-error tests went2red/1pass to3pass; affected startup/lifecycle141pass and readiness5pass. Fresh committed2a814f PostgreSQL onboarding and first-chat pass. With a real notification stream open, firstSIGINT02:32:44Z waits for connections and secondSIGINT02:33:33Z exitsAPI17651 by02:33:46Z without additional termination. However, the already-cancelled voice cleanup worker raises CancelledError during teardown, skipping later HTTP/database/executor cleanup. UAT287 remains open.
+
+The voice manager now gathers its owned worker result, accepts child cancellation, and preserves caller cancellation and actual worker errors. Two causal regressions fail before the correction; the full voice-manager and affected teardown suites36pass afterward. Bandit0findings (test assertions excluded), existing5Ruff diagnostics unchanged, compile/diff checks pass, and independent bounded review is clear. Fresh committed-source interrupted and ordinary shutdown acceptance is next. First native fixture cleanup exits0; all24967source entries remain unchanged. Evidence `.tmp/uat287-native` and `.tmp/uat287-repair`; generated captures remain excluded.
+
+
+### UAT287 — verified full teardown on fresh PostgreSQL
+
+Committed `9e1a4fb5e4` passes both native shutdown controls. With authenticated Chat notificationstream207HTTP200 open, firstSIGINT02:46:18Z waits for connections; secondSIGINT02:46:47Z completes all application teardown segments in30ms and API19259 exits0. Logs confirm Auth/session/MCP/TTS/HTTP/ChaCha/prompts/workflows/content database and executor cleanup, with no unclosed-session warning. The expected forced-ASGI cancellation still propagates. Restarted API19662 on the same immutable source/profile returns authenticated health200; one SIGINT02:48:12Z with the browser closed completes teardown207ms and exits0, with no traceback or unclosed session. All24967source entries remain unchanged. Owned browser/frontend/API processes are gone,18833/18913 are free, and official PostgreSQL holder19136 exits0. UAT287 is verified; the full matrix still awaits the remaining repairs. Evidence `.tmp/uat287b-native`.
+
+Harness observations: the Open Chat link accessible name includes its description, so an exact short-name locator timed out; the observed native link was then used. The health endpoint correctly returned401 without authentication and200 with the owned key. No product finding was inferred from either control.
+
+
+## UAT329 — P3, verified: stale incomplete-promotion account-boundary assertion
+
+TASK13260.267. The existing saved-normal test expected serverChatId to remain non-null after A→B→A, although the account-isolation reset correctly clears it. Immutable9e1a4fb independently reproduces1failure/2passing boundary cases. The test now requires null after account changes and exactly other-chat after explicit new-history selection; watcher, notification and no-extra-write assertions stay intact. Final affected frontend164pass; independent review agrees. Test-only change, Bandit inapplicable. Evidence `.tmp/uat327-repair/account-boundary-baseline.log` and `frontend-final.log`.
+
+### UAT327 — explicit saved regeneration repaired; native acceptance pending
+
+Successful regeneration now carries the acknowledged reply ID, current system instructions and original user turn. Server context comes from canonical history; additional supplied turns are rejected before message writes. The owned current user text and every image must match; regeneration reuses that user and stores replies under canonical parent links. Legacy parentless replies are linked with version checking. Ordinary repeated Send still creates a new user. Strict attachment reads fail closed.
+
+Eight causal SQLite failures and two frontend failures reproduced the original gaps. Review then found empty-conversation creation on rejection and supplied-prefix duplication with a short context window; four further causal failures reproduced them before correction. The final suites pass156backend tests including real PostgreSQL,6HTTP/continuation cases including both response transports, and164frontend cases. Bandit0, Ruff0;14existing ESLint warnings and93existing TypeScript errors unchanged; independent review clear. The rejection guarantee covers conversation/turn creation and saved message history; established workspace model-selection persistence is unchanged. Native PostgreSQL image Send/Regenerate/reload remains required, so327 stays open. Evidence `.tmp/uat327-repair` and redacted `uat327-*` logs in `.tmp/uat299-repair`.
+
+Harness notes: an initial synthetic PNG checksum was invalid; a generated valid test fixture retained the same causal failures. A test used an integer character ID where the request schema requires text; corrected before recording the four review regressions. Lint and log invocations initially used incorrect workspace-relative paths; corrected runs supplied the final results.
+
+### UAT327 — native persistence passes; reload reconciliation follow-up
+
+Fresh041cb46 actual PostgreSQL Send and Regenerate both return200. Conversation8de931a8-f734-4888-b37b-b11ad1fa1e8d retains one user with the exact icon image and two assistant replies linked to it. In-session2of2 is correct, but settled reload appends the unchanged original assistant as a separate card after the variant group. This is the remaining327 failure, not acceptance. Canonical persistence and image retention pass independently.
+
+Two causal mirror regressions reproduce the duplicate card. Reconciliation now suppresses a local original only when its identity, text, images and every inactive variant are represented unchanged in the incoming group. Review exposed inactive draft loss in the first candidate; three further causal failures cover unsaved variants, edited text and edited images, alongside a fully saved-group control. Final173frontend tests pass; scoped ESLint0;93existing TypeScript errors unchanged; independent review clear. Bandit is inapplicable to this TypeScript-only follow-up. Fresh committed-source native repeat is required before closure.
+
+The041cb46 browser/API/frontend are closed, ports18833/18913 released, and the official PostgreSQL fixture holder exited0. All24970tracked source entries remain unchanged. Evidence `.tmp/uat327-native` and `.tmp/uat327-repair` stays local and excluded from the PR. One verification invocation used outdated test paths and ran only52mirror cases; the corrected five-file invocation produced the173-case result above.
+
+
+### UAT327 — verified fresh PostgreSQL image regeneration and reload
+
+Committed a92eac11b2 passes native Send200, Regenerate200, reload, regeneration from the selected original answer after reload200, and intentional same-prompt/same-image Send200. Conversation f2414e5a-7b9f-4027-8787-9040d0cb576c canonical totals3→4→5→7 preserve one original user across both regenerations, then create a distinct user for the new Send. All replies link to their correct user; exact PNG SHA256bb4717c251435cdab13f0ee126fef570e8c8279cea53a5c6d2218c14257b89c2 remains unchanged. Settled final reload has exactly2user and2assistant cards, with3of3variants confined to the first answer. Screenshots visually confirm grouping. UAT327 is verified.
+
+All24970tracked archive entries match. Owned browser/API/frontend closed, app processes absent and18833/18913 released; official PostgreSQL fixture holder exited0. Shared cluster and real llama.cpp remain running. Evidence `.tmp/uat327b-native` stays excluded from the PR. A harness wait used the wrong accessible name Previous variant; the observed Previous response control passed. The tracker now has329findings/324verified/5open; the full matrix is not yet recertified.
+
+
+### UAT284 — explicit non-default local model selection repair
+
+The setup model input was only shown for the first-chat default. Non-default local validation discovered a real model, but Save could send model:null, preserving the backend template. Selected providers now show model inputs with guidance. Before any save, each selected local endpoint must have an explicit model; an empty model shows an actionable error and focuses its field. Continue requires current local selections to have been saved. Non-default hosted model choice remains optional and local models may be typed without discovery.
+
+Four initial causal failures and one further Continue-bypass failure reproduce the gaps. Affected onboarding116tests pass across5files, including default handoff, first-chat and extension authority. ESLint has0errors with5identical pre-existing warnings;93existing TypeScript errors unchanged. Bandit is inapplicable to TypeScript-only changes. Independent review is clear; fresh native two-provider PostgreSQL acceptance remains pending, so284 stays open. Evidence `.tmp/uat284-repair`.
+
+
+### UAT284 — setup/catalogue acceptance passes; dispatch acceptance blocked by330
+
+Fresh16ca50 actual PostgreSQL native validate-and-save with the non-default local model empty sends0save requests, focuses the visible Custom model field, displays an actionable error and leaves Continue disabled. Explicit real GGUF selection saves both custom_openai(non-default) andllamacpp(default) payloads with exact model IDs. First-chat200 and the Chat catalogue retain both real models, with no template substituted for the selected Custom endpoint. End-to-end Custom reply acceptance fails under330 below, so284 remains open. Confirmed-vision llama.cpp is independently available; generic Custom capability metadata remains unconfirmed and is not falsified.
+
+## UAT330 — P1: Chat displays one selected provider but dispatches to another
+
+TASK13260.268. Fresh16ca50 PostgreSQL native Chat selects Custom OpenAI API for the real GGUF model, but the actual completion request sendsapi_provider=llama.cpp. A settled reload still displays Custom; another native Send repeats the mismatch. Both endpoints target the same authorized localhost9099 here, so no cross-host leakage is claimed. Source trace: chatModePipeline parses the provider-qualified selection and then passes only the bare model ID to pageAssistModel, allowing default-provider resolution and ambiguous capability lookup. Preserve qualified identity through request construction and verify duplicate model names. Evidence `.tmp/uat284-native/{14-model-menu,15-custom-send,18-reloaded,19-custom-steady-send}.txt`.
+
+Additional UX observation for triage: after selecting Custom, the other known llama.cpp model appears under a generic Custom group in20-menu. Retain with330 until attributed; do not silently treat it as correct.
+
+
+## UAT331 — P2: Known local provider grouped under generic Custom heading
+
+TASK13260.269. Native20-menu from UAT284 shows the known llama.cpp entry under Custom, obscuring endpoint identity for duplicate model names. Source confirms intentional local-provider collapsing. Preserve each known provider group using the existing display-name helper; retain Chrome/default and actual custom semantics. Two causal menu-label failures cover provider and local-first sorting; targeted acceptance pending with330.
+
+
+### UAT330 / UAT331 reviewed repair checkpoint
+
+Chat now preserves provider-qualified selection through ordinary and source-grounded generation. Capability lookup matches normalized provider plus exact model ID, preventing duplicate-name capability borrowing. The API still receives the bare model ID. Qualified settings retain precedence, with fallback to existing bare-ID settings when absent. Review found and corrected local/local-llm alias matching and legacy settings lookup; both reproduced with causal tests. Model groups retain known provider names and local-first ordering.
+
+Final275tests across19files pass with0skips. ESLint0errors and43identical existing warnings across touched scopes; TypeScript93existing diagnostics with0added. No Python changes, so Bandit is inapplicable. Independent reviews clear. Fresh committed PostgreSQL setup/selection/send/reload/regenerate/image acceptance remains pending;284/330/331 stay open. Prior284diagnostic apps/browser are closed, officialfixture exit0 and24969archive entries unchanged. Evidence remains ignored/local.
+
+
+### UAT290 tab-session repair checkpoint
+
+Each Chat tab now persists its own restore target in sessionStorage, with the existing durable localStorage last-session fallback retained for new tabs/browser restarts. Legacy fallback is pinned when first read, preventing another tab from replacing that target before first save. Account scope, staleness, queue recovery and clear behavior remain checked. Two causal failures reproduced the cross-tab overwrite;56affected tests pass. ESLint0errors/1unchanged baseline warning; TypeScript93existing diagnostics/0added; Bandit inapplicable to TS-only changes. Independent review clear; fresh committed PostgreSQL native two-tab acceptance remains pending, so290 stays open. Evidence .tmp/uat290-repair.
+
+
+### UAT284 / UAT330 / UAT331 — native PostgreSQL acceptance verified
+
+Fresh immutable f07f27118c real PostgreSQL setup rejects empty non-default local model before any save, focuses its field and explains the fix. Explicit realGGUF saves for both providers, first-chat200, normal Custom Send20004:19:14UTC and Regenerate20004:20:09 after settled reload all pass. Both normal Chat requests now carry custom-openai-api with bare real model ID. Conversation5b59e9ba-71ab-4e75-81a3-0dadd5bb68ea preserves one greeting user and two canonical sibling answers. The menu correctly groups the other model as LLaMa.cpp; screenshot visually checked.
+
+An actual attachedPNG under genericCustom produces the truthful unconfirmed-image error with0completion requests. Native selection of Vision llama followed by Retry sends llama.cpp20004:21:57 with exact3982-character PNG/hashbb4717c251435cdab13f0ee126fef570e8c8279cea53a5c6d2218c14257b89c2. Real caption and image survive normal reload; final canonical6messages retain two users and their answers. Final screenshot inspected.24972archive entries unchanged; all ownedapps stopped, ports18833/18913 clear, wrappers and officialPGholder exit0. Browser session ended during separate306diagnosis. Evidence .tmp/uat330-native remains ignored.284/330/331 close; full matrix remains unrecertified.
+
+### UAT306 — notification obstruction attributed and bounded repair
+
+Fresh frozenf07 native PGsingle create20104:23:15 succeeds, but immediate edit/Save has no update request. Subsequent diagnostic click proves ant-notification-notice-success intercepts the enabled Save button; native screenshot shows Prompt Added covering the header. Hover pauses dismissal and holds the obstruction. Initial response timeout hid the pending click failure; this is a UX obstruction, not an attributed database/sync handler loss. Normal toast Close succeeded, but CLI Session closed interrupted the following Save, so no passing control is claimed.
+
+Prompt create/update success notices now use bottomRight, preserving requests and errors.17affected editor/transport tests pass; ESLint0errors/20identical warnings and TypeScript93baseline diagnostics/0added. Bandit inapplicable to TS-only changes; independent review clear. Fresh committed create→immediate edit→Save without dismissing the toast remains pending;306 stays open.
+
+
+### UAT300 — workspace publication repair checkpoint
+
+Backend password/magic-link login already bootstraps memberships before issuing JWTs with org_ids/active_org_id. The frontend now derives a valid workspace hint from the returned token and publishes it with credentials in its first config update. It prefers an active membership, otherwise highest valid safe-integer org ID; this is a deterministic approximation of the prior newest-created organization default. Missing or unreadable claims explicitly clear the previous account workspace and preserve backend best-effort login semantics. Self-hosted login no longer issues a later org GET/POST/update. Hosted lookup/profile behavior remains intact; server authorization is authoritative.
+
+Sixteen causal failures and two hosted controls preceded the repair. Final90affected tests pass; ESLint0errors/8unchanged warnings, TypeScript93existing diagnostics/0added and TS-only Bandit inapplicable. Independent review clear. This fixes partial login publication, not general concurrent login/config-writer races. Native fresh immediate navigation and owned draft recovery remain pending;300 stays open. Evidence .tmp/uat300-repair.
+
+### UAT290 — native two-tab acceptance finds remaining shared selection and draft
+
+Fresh frozen cccf8e0090 PostgreSQL multi-user now preserves the ordinary conversation b7f2d52c-7c47-407f-8e8f-2bf5e7096f98 when the second tab opens Character conversation 3c1e81a7-a6b5-4695-bf1e-c1018b94f61d. However, ordinary-tab reload adopts TestBot4 selection and the second tab's draft. This is incomplete acceptance, so290 remains open. Local evidence .tmp/uat290306-native/27/30/31 records session IDs, visible mode and drafts. The Character turn completed BEEP BOOP.; a response observer watched the ordinary endpoint and timed out, without resending.
+
+Settled observation31 qualifies the selection failure: canonical metadata clears the transient TestBot selection, and the ordinary title/messages remain correct. The wrong second-tab draft persists after loading. No wrong dispatch or server mutation is claimed. Archive24973entries unchanged, operator config restored byte-for-byte, browser/apps stopped and ports18833/18913 released; official PostgreSQL holder exited0.
+
+### UAT306 — verified native PostgreSQL create/edit/save/reload
+
+Frozen cccf8e0090 PGmulti normal Prompt create201 is followed by immediate edit/Save200 at04:39:48.226UTC while both success notices remain visible. No dismissal or forced click. Exact pirate system text persists after normal reload as Synced#2/version2/parent1. Screenshot prompt-save-clear.png visually confirms unobstructed Save. Evidence .tmp/uat290306-native/11–16 stays local. Archive24973entries unchanged; owned browser/apps closed, ports released, config restored and official fixture holder exited0.306 is verified;290 remains open for tab draft contamination and300 native acceptance is underway.
+
+### UAT300 — verified fresh PostgreSQL early navigation and owned draft recovery
+
+Frozen f05c1557ba PGmulti native Alice login and immediate Chat navigation retain her first draft under org2. Settled reload14 and normal Alice→Bob→Alice login22 recover the exact original draft; Bob starts empty and owns a separate org3 draft. Corrected observer28 records both login config events already org2, no later /orgs request, and login200. No storage migration or injected state. Evidence .tmp/uat300-native remains local. Observer10 could not read the response body after navigation;25 used unavailable Buffer. These harness errors are retained; subsequent observation uses supported config events. Native mail delivery was not exercised; regression covers password and magic-link publication.
+
+All24974archive entries unchanged. Operator config restored byte-for-byte; owned browser/apps stopped, ports18835/18915 clear, wrappers and official fixture holder exit0.300 is verified.329of331findings verified;261 remains allowed open and290 remains open for per-tab draft acceptance. Full matrix remains unrecertified.
+
+### UAT290 — reviewed tab-owned draft repair; native acceptance pending
+
+Playground drafts now pin their own account-scoped record in native sessionStorage, retaining durable last-record recovery for new tabs/restarts. Empty pins prevent later foreign-tab imports. Conditional deletion preserves another tab's newer recovery draft; expiry and cleanup recheck under the same per-record Web Lock as writes. Session-storage failures retain active ownership and invalidate stale pins before durable fallback. Unowned legacy records are still discarded. Sidepanel storage selection is unchanged. Concurrent atomicity requires Web Locks; unsupported browsers retain sequential best-effort behavior.
+
+The four initial tab regressions, seven subsequent recovery/quota/legacy/expiry failures, and two lock/cleanup mutations reproduce the missing guarantees. Final90tests across11files pass, including30account/privacy controls and adjacent Quiz checks. ESLint0errors/25unchanged warnings; TypeScript93existing diagnostics/0added. Bandit inapplicable to TypeScript-only changes. Independent review clear. Original native two-tab acceptance remains required;290 stays open. Evidence .tmp/uat290b-repair is ignored/local.
+
+### UAT290 — native tab/draft controls pass; storage-failure review follow-up
+
+Frozen9dcb native PostgreSQL run uat290b-native-20260920 used two real llama.cpp completions. Ordinary babfd4f2 and Character8e7c25b4 independently restore their own settled messages, mode and distinct drafts (23/25); clearing the ordinary draft leaves the Character draft and new-tab durable fallback intact (26/29/32). Bob has no Alice transcript/draft; Alice returns with her cleared ordinary draft and her original Character draft/messages (48/50/53/56/59/62). Character output includes BEEP BOOP. plus an emote;261 stays open. The first account helper was interrupted while waiting on the general Settings route and later completed Bob login; its timing is not acceptance evidence. The final sequential Bob logout/Alice login and settled account controls are retained separately. URL-parser and stale-ref harness failures are retained without re-sending messages.
+
+All24976source entries unchanged, config restored byte-for-byte, owned browser/apps gone, ports18833/18913 closed, official PostgreSQL holder exit0. Evidence .tmp/uat290b-native remains ignored. Integration review found the earlier session adapter did not guard native storage failures. Six causal regressions fail before the correction (getter/read/pin, quota old-to-new, durable write failure, clear) and all10session tests now pass. Independent review clear; combined53frontend files862tests pass, TypeScript93baseline0added; touched26Python files Bandit0findings/errors. A pre-existing QA test render-side-effect lint error is corrected, with17focused tests passing. Final committed native acceptance remains pending;290 stays open.
+
+## UAT332 — P2: private Character selection survives account change
+
+- Status: verified on frozen2282895f23; TASK13260.271 Done. During the frozen9dcb PostgreSQL account control, Bob sub3/org3 opens empty Chat with Alice's TestBot UAT290 card4 still selected in the header/composer (native48/53). Alice messages and drafts are absent.
+- Read-only review confirms CharacterStore owner filtering rejects another user's private card, while useSelectedAssistant restores unowned global assistant/legacy Character snapshots including name, greeting and system prompt. No successful foreign dispatch is established.
+- Repair scope: bind selection storage, hydration and delayed writers to the existing verified Chat account owner; preserve same-owner selection behavior and reject unowned legacy snapshots. Focused causal tests and fresh native PostgreSQL account verification precede the checkpoint.
+
+## UAT333 — verified: stale PostgreSQL Notes migration fixtures
+
+Combined checkpoint validation returned1050passes/12failures in the data batch; all12 failures came from test_note_task_sync_postgres_tenancy. Eleven failed while rebuilding the historical v59 source because five newer graph tables retained foreign keys to the index being replaced. The current-schema assertion also hardcoded63 while the declared current schema is72. These are fixture failures, with matching baseline evidence; no production defect was established.
+
+TASK13260.272 moves the existing fixed-table teardown into the common historical fixture and checks the declared current version. Original migration, rollback snapshots, catalog, concurrency and exact policy assertions remain. Independent review clear; the complete real PostgreSQL file passes34tests/0skips. Separate authentication25tests and lifecycle98tests also pass without skips. Evidence .tmp/fresh-uat-recovery-20260916/uat333-migration-20260920.redacted.log is local/ignored. Security validation is recorded in the task. Full fresh matrix has not restarted.
+
+## UAT334 — P2: default Character fallback and preference cache cross account boundaries
+
+- Status: verified; TASK13260.273 Done. UAT332 review traced global defaultCharacterSelection into both Playground and Sidepanel bootstrap while the server preference is unresolved. Static preference query keys can also retain another account result. Waiting for the selection owner alone does not prevent adoption of that global default.
+- Preserve the documented same-owner local fallback when a profile preference write fails, but scope its storage, writes and preference queries to the verified owner. Reject unowned legacy payloads. Focused regressions, independent review and native PostgreSQL account acceptance remain required.
+
+## UAT335 — verified: baseline failures in expanded frontend checks
+
+TASK13260.274 tracks15 baseline failures reproduced on frozen9dcb across five Chat test files. The expanded47-file run had700passes/51failures and269 unhandled errors; the sixth replayed file (coordinator) passed on baseline. UAT332 ownership fixtures account for35 additional coordinator failures plus one causal Plasmo readiness test. Missing callable-store getState and asynchronous setter behavior, stale sessionStorage pins in cold-start fixtures, and old scene/selection intent expectations are under repair. No checks are skipped or disabled. Evidence .tmp/uat332-repair/failed-adjacent-baseline.log is local/ignored.
+
+
+### UAT332/334 — implementation and review complete; native acceptance pending
+
+Account-stamped selected/default Character records and verified-owner query keys replace shared browser payloads. Older unowned snapshots are discarded. Route loads and Character commits share one selection owner; scoped preference GET/PATCH pins the expected account. Same-owner local defaults (including clears after a profile-write failure) survive reload without server cache overwrite. Successful writes cancel older pending reads before publishing their result. Ten real default-hook and thirteen real selected-assistant privacy controls pass; the installed Plasmo hook has a causal key-change readiness regression. Production review is clear. The original PostgreSQL browser account/default checks remain required, so both findings stay open.
+
+### UAT335 — verification closure
+
+All15 baseline failures are repaired. Store mocks now expose the real getState/asynchronous setter contract. Cold-start controls clear tab-local pins. Role-play failure tests assert settings-before-scene ordering, retained drafts and successful retry. Cockpit hydration distinguishes canonical loaded identity from raw preference hydration, while the real-picker coordinator suite retains explicit replacement assertions. Independent fixture review is clear.
+
+Expanded49files pass801 assertions (including99 Manager tests), with three unhandled errors isolated to an incomplete service-prompts mock in Manager.crossFeatureStage1. That mock now retains original exports; the affected75tests pass without unhandled errors. Final picker/default42tests also pass. The initial ESLint invocation ignored files outside its base path; corrected repository-root invocation evaluates all30changed files with0errors/1018warnings versus1error/1020warnings on HEAD. No additional warning type remains. TypeScript remains93baseline diagnostics with0added. Bandit is inapplicable to these TypeScript-only changes; the earlier26production-Python scope remains0findings/0errors. All diagnostic and browser evidence stays local/ignored.
+
+Final closure gate:48files702tests pass with exit0 and no skips or unhandled errors; the unchanged Manager first-use file separately passes99tests. The exact lint finding multiset has0added findings. Evidence .tmp/uat332-repair/adjacent-closure.log remains local/ignored.
+
+
+### UAT334 — native server-default transport failure identified
+
+Frozen2282895f23 native PostgreSQL run uat332-native-20260920 creates Alice/Bob through the administrator UI and saves an owned local-only default for Alice. Native26 displays the actual warning: the Service Prompt config is restricted to permitted requests. The exact self-profile GET/PATCH routes were missing from the shared transport allowlist, so the default server write never dispatched. UAT334 remains open. Four causal failures through actual TldwApiClient → bgRequest reproduce this boundary; eleven malformed/other-account/unsupported-method controls already reject. The minimal exact-path GET/PATCH allowance passes97transport/privacy/adjacent checks. Review and committed native server-default verification remain required. The current frozen browser source has not been edited.
+
+Follow-up review confirms self-profile GET/PATCH also lack the expected-user dependency required by hosted/cookie requests. TASK13260.273 adds real HTTP stale-owner and matching/legacy controls against the official PostgreSQL fixture. Those controls first expose UAT336 while seeding preferences; their account-guard assertion has not yet run.
+
+## UAT336 — P1: PostgreSQL profile preference writes wait on their own schema locks
+
+- Status: verified; TASK13260.275 Done.
+- Reproduction: authenticated PATCH /api/v1/users/me/profile setting preferences.chat.default_character_id fails after about sixty seconds on each fresh official isolated PostgreSQL database. All four attempted account-scope cases fail in preference setup, not their scope assertions.
+- Cause: ProfileCommandService reads the profile version on its active write transaction; UserProfileOverridesRepo.ensure_tables then opens another transaction and reruns AuthNZ bootstrap DDL, including unconditional ALTER TABLE users operations. That DDL waits for the first transaction, which is awaiting readiness.
+- Repair in progress: reuse the existing read-only PostgreSQL candidate-schema validator for runtime readiness, retaining bootstrap ownership of migrations and sanitized fail-closed errors. Real PostgreSQL set/clear, account guard controls, SQLite compatibility and independent review remain required.
+- Evidence: local .tmp/fresh-uat-recovery-20260916/uat334-profile-guard-red.redacted.log (4 setup errors; 266.61 seconds; zero skipped).
+
+Harness notes retained locally: native10 attempted to open the model chooser after automatic model discovery had already selected llama.cpp; native11 confirms the healthy selected model. Native20 awaited the missing server PATCH and native25 expected a server-clear notification despite the scoped transport rejection. These timeouts do not count as passing acceptance.
+
+### UAT290/332 — final committed native acceptance complete
+
+Frozen2282895f23, official PostgreSQL multi-user fixture, real llama.cpp9099: ordinary conversation88a16a38 and Character72c750cd retain independent settled transcripts, modes and unsent drafts across reload. Clearing ordinary remains empty; Character survives and recovers in a new tab. Alice sub2/org2 private TestBot4/default/draft are absent for settled Bob sub3/org3. Bob creates private BobBot6/default/draft; Alice re-login restores only her TestBot and draft. Ordinary cleared draft remains empty; original Character tab restores its own draft. Logout deliberately invalidates selected conversation sessions; the saved Character route still reloads its persisted transcript. Native53 incorrectly expected automatic conversation selection after logout and timed out;54/56/57 distinguish expected session clearing from retained owner drafts and persisted data.
+
+Evidence .tmp/uat332-native/31–58: no injected browser application state. Current page console0errors. Operator config restored byte-for-byte, all24985tracked source entries unchanged, owned browser/API/frontend stopped, officialPGholder exit0. UAT290/TASK13260.227 and UAT332/TASK13260.271 are closed. UAT334 server-default writes and UAT336 remain under separate acceptance. UAT261 stays open for extra model emote text by user direction.
+
+### UAT334/336 — causal PostgreSQL and hosted transport checks
+
+Read-only canonical schema validation replaces runtime bootstrap DDL. Review additionally reproduced exhausted-pool timeout in a5-second bounded test; passing the caller transaction connection to readiness removes the extra checkout. Combined real PostgreSQL suite now5passed/0skipped32.28s, including matching/legacy set-clear and stale-account GET/PATCH412 with both preferences unchanged. Hosted cookie-session transport carries the expected-user header;17actual proxy tests pass. TypeScript93baseline/current byte-identical diagnostics, ESLint0errors/0warnings on the transport change. Native committed server-default acceptance remains pending.
+
+## UAT337 — P2: offline profile migration inventory omits existing UUID backfills
+
+- Status: verified; TASK13260.276 Done.
+- Expanded UserProfile suite:334passed/1failed. The exact offline write inventory omitted existing migration093 and097 users.uuid backfills; both migration source and inventory test were unchanged from dev.
+- Repair adds only those two established call sites to EXPECTED_EXCLUDED_WRITES. No exclusion category, runtime write gateway or migration behavior changes. Final full335-case suite passes232.00s with zero skips; independent review clear. Ruff passes; pre-existing Black formatting differences reproduce on HEAD. No runtime enforcement was relaxed.
+
+Final checkpoint follow-up verification:99transport tests plus10default privacy tests pass; complete335UserProfile suite passes; PostgreSQL5passes0skips. Production Bandit on users/overrides/update services reports0findings0errors. Test Bandit retains deliberate pytestassertB101 and two unchanged fake-secret fixtures at test_user_profile_updates.py77/142; no new non-assert findings. Fresh origin/dev remains1dfdd819b6 and is already the branch base.
+
+## UAT338/339 — PR2970 CI test-boundary and shard coverage failures
+
+- Status: verified locally and on GitHub at a80d28d9f6; TASK13260.270.1 Done. HTTP patch, shard coverage and pre-commit checks pass.
+- UAT338: line-based HTTP patch guard flags two provider-readiness fixtures that construct httpx.Response on the same line as patching the application adapter. The library itself is not patched. Separate response construction from the adapter patch; preserve guard and behavioral assertions. Pre-commit failed for this same guard.
+- UAT339: new Services/test_main_lifespan_cancellation.py was absent from CI shards. Add it beside existing lifecycle tests in all five matching matrices; no ignore or skip.
+- Both exact guard commands now pass (806shards,0newuncovered); affected52tests pass49.43s; Ruff clean; testBandit0nonassertfindings. PR2970 is open against latestdev1dfdd819b6; generatedcaptures remain excluded.
+
+## UAT340–344 — PR2970 Qodo review findings
+
+- Status: verified; parent TASK13260.270.2; review posted 2026-09-20. Independent review clear; fixed in6c529b66e7, all five inline replies posted and threads resolved.
+- UAT340 (P1): API usage attribution ranks inactive organization memberships. Verify active-membership policy and add SQLite/real PostgreSQL regression before correcting the CTE. Qodo4056423752.
+- UAT341 (P3): Knowledge QA loading and model-readiness notices bypass translations. Qodo4056423745.
+- UAT342 (P3): cancellation label, accessibility announcement and retained-source notice bypass translations. Qodo4056423746.
+- UAT343 (P3): source health/search summary templates bypass translations. Qodo4056423748.
+- UAT344 (P2): changed Chat search/metadata SQL belongs in DB_Management; preserve PostgreSQL owner filtering, bound parameters and existing execution/connection behavior. Qodo4056423750.
+- Three bounded repair domains run independently; regression evidence and review disposition will be recorded here.
+
+## UAT345 — PR2970 API contract fingerprint drift
+
+- Status: verified locally; TASK13260.270.3 Done. Hosted backend-required fails OpenAPI contract drift at a80d28d9f6, with unchanged2097paths/3207schemas. Investigate exact structure before regenerating API contract/types. This is tracked separately from the now-passing HTTP/shard/pre-commit guards.
+
+### UAT334/336 — native PostgreSQL acceptance complete
+
+Frozen55313054f9 native pg-multi run uat334-native-20260920 passes Alice default4 set200/reloadGET200, Bob empty preference and no Alice card/draft, Bob default6 set200/reloadGET200, Alice re-login selecting only default4, Alice clear200/null on reload, and Bob re-login retaining default6. Stored defaults are owner scoped with localOnlyfalse. Current-page console0errors. No application source changed while the apps ran. Both tasks are Done.
+
+Owned browser/API/frontend stopped and ports18833/18913 released; official fixture holder exited0, leaving the shared cluster available. Cleanup initially copied the operator configuration backup to the stopped source archive instead of the runtime configuration. The parity audit caught that mistake; runtime configuration was restored byte-for-byte and the source file restored from frozen55313054f9. Final24990source entries have no mismatches. The failed and corrected audits remain in ignored .tmp/uat334-native; no captures are included in the PR.
+
+### UAT340–344 — reviewed regression closure
+
+- UAT340: normalized active membership filtering precedes ranking. Twelve causal failures across SQLite/real PostgreSQL become45passing billing tests with0skips. Undated membership and deterministic primary-org behavior stay intact.
+- UAT341–343: existing i18next/ICU paths now render loading/readiness, cancellation visual/live text, retained-source notices and parameterized search/failure summaries. Eight causal translated-render failures become82passing tests across5files. Independent reviewer reran77changed-suite tests and checked13locale values against the public mirror. TypeScript remains93existing diagnostics; touched ESLint passes.
+- UAT344: DB_Management owns the two semantic Chat query helpers; existing executor retains adapter/path fallback, owner parameters and connection behavior. Three missing-helper failures become green. Complete affected SQLite/real PostgreSQL run84passed/0skipped, plus3path-fallback/production-gate controls.
+- Production Bandit reports0findings in changed billing/RAG/helper code. Test scans retain ordinary pytest assertions and pre-existing dummy-credential fixtures only. Independent integration review reports no actionable findings.
+
+### UAT345 — exact contract repair verified locally
+
+CI-matched Python3.12 export reproduces hosted hash d98e55a945e8; fresh dev export reproduces checked-in6dcb5357a7a6. The entire structural delta is optional X-TLDW-Expected-User-ID on self-profile GET and PATCH. Regenerated fingerprint and ignored frontend API types pass the exact drift check. Counts remain2097paths/3207schemas. Hosted recheck remains outstanding. The older root Python3.11 export was not used because its installed dependencies generated a different schema count.
+
+## UAT346 — Backlog CLI task lacks final newline
+
+- Status: verified locally; TASK13260.270.4 Done. The full PR changed-file pre-commit run passes all applicable hooks. Hosted recheck remains a parent merge gate.
+- Hosted pre-commit on6c529b66e7 reports only end-of-file-fixer modifying the billing Backlog child task. Backlog CLI wrote the final implementation-notes marker without a newline. The official formatter adds exactly that newline; no application behavior changes. Local first full hook invocation stashed the unstaged correction and re-exposed the old bytes; stage the correction before rerunning.
+
+## UAT347 — advisory frontend coverage timeout and failures
+
+- Status: verified locally; TASK13260.270.5 Done. All seven required gates on8ae3599714 pass (55successful checks,29configured skips,1neutral), including first-attempt critical E2E, native WebUI/extension API-key persistence and single-user cookie persistence. Fresh dev remains1dfdd819b6.
+- Detailed frontend logs nevertheless show the report-only coverage command reached its15-minute bound/code143. Its retained tail contains two failed ScheduledTasks validation tests (scheduler-invalid cron/timezone and whitespace-only run_at) and Playground.coordinator integration with0collected tests. The shell intentionally masks the advisory command status, so green required checks do not prove this coverage run passed.
+- Investigate correct package ownership/configuration and baseline behavior before disposition. The requester summary question remains pending, but this newly observed verification issue also precedes merge. Full logs are retained locally at .tmp/uat334-native/frontend-final-job.log.
+
+### UAT347 — package ownership and reporting repaired
+
+Both HEAD and origin/dev fail coordinator collection under WebUI because its configuration lacks the UI package OCR alias; the correct UI configuration passes61/61 at HEAD. WebUI coverage had collected2208UI suites without including UI source in its coverage targets. The advisory command now excludes those suites, matching the existing required package-owned unit checks. Nested node_modules and generated .next outputs are excluded from discovery. All160WebUI suites remain selected, and shared UI required checks remain intact.
+
+The command now preserves full output and its exit status under the existing continue-on-error policy. No assertions, source coverage targets or15m/17m timeouts were weakened. Exact CI Node20.20.2 with permitted loopback fixtures completes HEAD/base coverage in about61/58seconds and emits both reports. HEAD1440passed/35failed/14skipped; base1443passed/32failed/14skipped. Twenty-nine shared static/navigation failures are UAT349, six Character failures are UAT350. The extra baseline-only Git fixture failure comes from the source archive lacking its own Git checkout. The earlier sandboxed Node24 run is retained as non-equivalent evidence, including loopback EPERM failures.
+
+Both originally reported reminder cases pass under UI and WebUI coverage; the complete UI reminder suite passes50/50 in73.10seconds. Independent configuration review is clear, six workflow contracts and touched ESLint pass. Bandit is not applicable to YAML/TypeScript; an attempted scan reports AST errors and is not treated as a clean security result. Evidence remains ignored under .tmp/uat347-coverage-audit.
+
+## UAT348 — incomplete platform registration of existing regressions
+
+- Status: verified locally; TASK13260.270.6 Done. The existing full-matrix inventory assertion fails because the Study Pack startup test appears in only one matrix. After adding it, the next assertion exposes a Character raw-message test omission. Complete corresponding-shard comparison also finds the Character behavior snapshot unit test missing.
+- All three omissions are inherited from origin/dev1dfdd819b6. Add the twelve missing registrations to the same startup/Character shards in the other four matrices. Intentional Linux-only gap shards and inventory assertions stay unchanged.
+- Combined workflow contracts and affected regression files:195passed/0skipped11.65seconds. Independent parsed-YAML review confirms each test appears exactly once in its intended shard in allfive matrices; no actionable findings. YAML-only change, so Bandit does not apply. Pytest emits existing temporary-directory cleanup warnings after the successful run.
+
+## UAT349 — inherited WebUI coverage contract failures
+
+- Status: verified locally; TASK13260.270.7 Done. Twenty-nine failures across ten static/navigation suites reproduce on origin/dev and HEAD using exact CI Node20.20.2. They cover page-object readiness, build/setup and extension contracts, route shims, source paths and hosted placeholder instructions.
+- Diagnose each against supported behavior and history before changing assertions. Preserve behavioral intent; no blanket exclusions or passing-coverage claim. Full comparison is retained in .tmp/uat347-coverage-audit/node20-comparison.json.
+- History confirms the old useConfig hook was deleted in661b76c144; public docs-info discovery now belongs to server-capabilities and its unauthenticated background transport. Moderation aliases moved out of the reduced critical-route list in d395c1b756 but remain covered by canonical route metadata. World Book's bounded HTTP429 backoff is not a UI readiness delay. These distinctions guide contract repairs.
+- One actual loading regression is also identified:91c07ebed3 replaced the lazy onboarding component with an eager UnifiedSetupWizard import. Restore the same lazy named-export/Suspense pattern as the other home branches, using the existing loader's translated defaults. Keep setup completion and connection-recovery behavior unchanged and verify the existing setup-flow suite.
+
+## UAT350 — Character integration fixtures assume unowned legacy selection
+
+- Status: verified locally; TASK13260.270.8 Done. Four additional HEAD failures reproduce alone with and without the required deterministic sequencer; two account-boundary cases also fail on dev. The four new failures occur before race actions because no initial profile request begins.
+- Initial diagnosis: the unchanged fixture seeds unowned legacy selectedAssistant/selectedCharacter keys, while the repaired application deliberately discards those keys and requires an owner envelope. Verify that causal link, repair fixture ownership using existing APIs, and retain stale-result and privacy assertions. No product defect is inferred solely from these incompatible fixture prerequisites.
+- Causal verification: an owned-seed-only probe resolves the four added failures. The remaining two fixtures broadcast an account boundary while their mocked request configuration still returns the same authenticated authority. The tracked repair seeds through the real selection setter after owner verification and changes mocked authority before the boundary event. Production code and stale-profile/privacy assertions are unchanged. Full integration7/7 and adjacent selection/privacy/greeting38/38 pass with zero skips; peer review and consolidated coverage remain pending.
+
+### UAT347–350 — combined verification closure
+
+Complete owned WebUI coverage on exact CI Node20.20.2:156files pass,4files retain their existing skips;1483tests pass,0fail,14skip in59.99seconds. Coverage is lines75.15%, statements71.77%, branches63.89%, functions73.12%. Fourteen unchanged skips cover admin maintenance1, Content Review11 and two Writing placeholders; none are PostgreSQL tests. Reports and full output are retained locally, and no skip was added by these repairs.
+
+UAT349 preserves actual contracts: AudioStudio readiness inheritance and Watchlist command-palette navigation; World Book's bounded429backoff with seven behavioral checks; qualified Turbopack plus webpack fallback and ordered build/token/budget checks; actual moderation redirect; setup mock/import ordering; memoized namespace discovery; live public docs-info transport without auth headers or cross-origin credentials; requested-route presentation; shared admin shell; and stable source paths. The updated wizard boundary test fails before restoring lazy loading and passes afterward. Thirteen focused suites155passed, plus the final setup-contract refinement3passed. Existing setup completion/recovery suites pass without edits.
+
+Root review finds no actionable issue in UAT349, and independent fixture review is clear for UAT350. Touched ESLint has0errors and2pre-existing test warnings; the shared production file has0file findings. TypeScript's93diagnostic lines are byte-identical to the earlier334transport baseline, with0new diagnostics. These changes are YAML/TypeScript, outside Bandit's Python scope. The195workflow/affected regression checks and45selection/privacy controls above remain valid. The follow-up commit still requires hosted CI and Qodo review; the requester summary gate remains pending before merge. Full fresh UAT has not resumed.
