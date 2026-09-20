@@ -3960,7 +3960,7 @@ def _is_saved_chat_error_envelope(message: dict[str, Any]) -> bool:
     )
 
 
-def _retry_content_components(content: Any) -> tuple[str, tuple[tuple[str, bytes], ...]]:
+def _retry_content_components(content: Any) -> tuple[str, tuple[tuple[str, bytes, str], ...]]:
     """Compare representable stored text and ordered images, never partial input."""
     from tldw_Server_API.app.core.Utils.image_validation import validate_image_url
 
@@ -3981,7 +3981,7 @@ def _retry_content_components(content: Any) -> tuple[str, tuple[tuple[str, bytes
                 raise HTTPException(status_code=409, detail="Retry does not support multiple text segments in one image turn.")
         elif part.get("type") == "image_url" and set(part) <= {"type", "image_url"}:
             image = part.get("image_url")
-            if not isinstance(image, dict) or set(image) - {"url", "detail"} or image.get("detail", "auto") != "auto":
+            if not isinstance(image, dict) or set(image) - {"url", "detail"} or image.get("detail", "auto") not in {"auto", "high", "low"}:
                 raise HTTPException(status_code=409, detail="Retry cannot discard image detail or unsupported image options.")
             url = image.get("url")
             if not isinstance(url, str) or not url.startswith("data:image/"):
@@ -3989,7 +3989,7 @@ def _retry_content_components(content: Any) -> tuple[str, tuple[tuple[str, bytes
             valid, mime, data = validate_image_url(url)
             if not valid or not data or not mime:
                 raise HTTPException(status_code=409, detail="A failed-turn image is invalid or unavailable.")
-            images.append((mime, data))
+            images.append((mime, data, image.get("detail", "auto")))
         else:
             raise HTTPException(status_code=409, detail="Retry cannot discard unsupported message content.")
     return text, tuple(images)
@@ -4006,18 +4006,30 @@ def _saved_image_text(row: dict[str, Any], extra: Any) -> str:
     return text
 
 
+def _saved_image_details(extra: Any, image_count: int) -> list[str]:
+    """Restore ordered image options, defaulting only legacy rows to auto."""
+    details = extra.get("image_details") if isinstance(extra, dict) else None
+    if details is None:
+        return ["auto"] * image_count
+    if (not isinstance(details, list) or len(details) != image_count
+            or any(not isinstance(detail, str) or detail not in {"auto", "high", "low"} for detail in details)):
+        raise HTTPException(status_code=409, detail="Saved image options are incomplete or unsupported.")
+    return details
+
+
 def _saved_user_content_parts(row: dict[str, Any], extra: Any) -> list[dict[str, Any]]:
     """Reconstruct the literal saved user text and every attachment for reuse."""
     text = _saved_image_text(row, extra)
     parts = [{"type": "text", "text": text}] if text else []
     images = row.get("images") or ([row] if row.get("image_data") else [])
-    for image in images:
+    details = _saved_image_details(extra, len(images))
+    for image, detail in zip(images, details):
         data = image.get("image_data")
         if not data:
             raise HTTPException(status_code=409, detail="A saved chat attachment is incomplete.")
         mime = image.get("image_mime_type") or "image/png"
         parts.append({"type": "image_url", "image_url": {
-            "url": f"data:{mime};base64,{base64.b64encode(data).decode('utf-8')}"
+            "url": f"data:{mime};base64,{base64.b64encode(data).decode('utf-8')}", "detail": detail
         }})
     return parts
 
@@ -4294,7 +4306,8 @@ async def build_context_and_messages(
                     "image_mime_type": db_msg.get("image_mime_type"),
                 }]
 
-            for image_entry in raw_images:
+            image_details = _saved_image_details(metadata.get("extra") if isinstance(metadata, dict) else None, len(raw_images))
+            for image_entry, image_detail in zip(raw_images, image_details):
                 try:
                     img_bytes = image_entry.get("image_data")
                     if isinstance(img_bytes, memoryview):
@@ -4307,7 +4320,7 @@ async def build_context_and_messages(
                     b64_img = await loop.run_in_executor(None, base64.b64encode, img_bytes)
                     image_part = {
                         "type": "image_url",
-                        "image_url": {"url": f"data:{img_mime};base64,{b64_img.decode('utf-8')}"}
+                        "image_url": {"url": f"data:{img_mime};base64,{b64_img.decode('utf-8')}", "detail": image_detail}
                     }
                     if reuse_saved_turn:
                         _retry_content_components([image_part])
