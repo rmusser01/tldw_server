@@ -65,7 +65,7 @@ export const acknowledgePromotedChatMessage = async ({
   })
 }
 
-const canonicalId = (message: ChatMessage) => message.serverMessageId?.trim() || null
+const canonicalId = (message: Pick<ChatMessage, "serverMessageId">) => message.serverMessageId?.trim() || null
 
 /** Content edits do not change the creation time of an acknowledged message. */
 const canonicalCreatedAt = (createdAt: unknown): number | undefined =>
@@ -125,13 +125,21 @@ export const reconcileServerChatMessages = (
   current: ChatMessage[], incoming: ChatMessage[], beforeAwait?: ChatMessage[]
 ): ChatMessage[] => {
   current = recoverAnchoredUsers(current, incoming)
-  const serverIds = new Set(incoming.map(canonicalId).filter(Boolean))
-  const key = (message: ChatMessage) => {
+  const variants = incoming.filter(message => message.isBot).flatMap(message => message.variants || [])
+  const serverIds = new Set([...incoming, ...variants].map(canonicalId).filter(Boolean))
+  const key = (message: Pick<ChatMessage, "id" | "serverMessageId">) => {
     const serverId = canonicalId(message) ||
       (message.id && serverIds.has(String(message.id)) ? String(message.id) : null)
     return serverId ? `server:${serverId}` : message.id ? `local:${message.id}` : null
   }
   const incomingKeys = new Set(incoming.map(key).filter(Boolean))
+  const variantsById = new Map(variants.map(variant => [key(variant), variant]))
+  const isRepresentedVariant = (local: Pick<ChatMessage, "id" | "serverMessageId" | "message" | "images">) => {
+    const id = key(local)
+    const remote = id ? variantsById.get(id) : undefined
+    return remote !== undefined && local.message === remote.message &&
+      JSON.stringify(local.images || []) === JSON.stringify(remote.images || [])
+  }
   const beforeById = new Map((beforeAwait || []).map(message => [key(message), message]))
   const localById = new Map(current.flatMap(message => {
     const id = key(message)
@@ -155,6 +163,9 @@ export const reconcileServerChatMessages = (
   for (const local of current) {
     const id = key(local)
     if (id && incomingKeys.has(id)) continue
+    // The mirror collapses saved alternatives into one visible answer. Do not
+    // append an unchanged copy again; retain edits in any local variant.
+    if (local.isBot && isRepresentedVariant(local) && (local.variants || []).every(isRepresentedVariant)) continue
     // A synthetic greeting is superseded only by an acknowledged server greeting.
     if (!canonicalId(local) && (local.messageType === "character:greeting" || local.messageType === "greeting") &&
       incoming.some(message => message.messageType === "character:greeting" || message.messageType === "greeting")) continue
