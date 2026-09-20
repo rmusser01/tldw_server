@@ -2885,6 +2885,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_export_includes_tools_and_metadata.py
               tldw_Server_API/tests/Character_Chat/test_legacy_complete_deprecation.py
               tldw_Server_API/tests/Character_Chat/test_messages_tool_calls_exposure.py
+              tldw_Server_API/tests/Character_Chat/test_message_listing_raw_content.py
               tldw_Server_API/tests/Character_Chat/test_persona_dialogue_tree_character_eval.py
           - name: chat-character-legacy-files
             paths: >-
@@ -2916,6 +2917,7 @@ jobs:
               tldw_Server_API/tests/Visual_Identities
           - name: chat-character-unit-core
             paths: >-
+              tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_behavior_snapshot.py
               tldw_Server_API/tests/Character_Chat_NEW/test_utils.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_cards_fts_bootstrap.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_chat_default_provider.py
@@ -3267,6 +3269,7 @@ jobs:
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_startup_*.py
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
+              tldw_Server_API/tests/Services/test_study_pack_startup_default.py
           - name: platform-services-shutdown-lifespan
             paths: >-
               tldw_Server_API/tests/Services/test_shutdown_*.py
@@ -4256,6 +4259,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_export_includes_tools_and_metadata.py
               tldw_Server_API/tests/Character_Chat/test_legacy_complete_deprecation.py
               tldw_Server_API/tests/Character_Chat/test_messages_tool_calls_exposure.py
+              tldw_Server_API/tests/Character_Chat/test_message_listing_raw_content.py
               tldw_Server_API/tests/Character_Chat/test_persona_dialogue_tree_character_eval.py
           - name: chat-character-legacy-files
             paths: >-
@@ -4287,6 +4291,7 @@ jobs:
               tldw_Server_API/tests/Visual_Identities
           - name: chat-character-unit-core
             paths: >-
+              tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_behavior_snapshot.py
               tldw_Server_API/tests/Character_Chat_NEW/test_utils.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_cards_fts_bootstrap.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_chat_default_provider.py
@@ -4638,6 +4643,7 @@ jobs:
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_startup_*.py
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
+              tldw_Server_API/tests/Services/test_study_pack_startup_default.py
           - name: platform-services-shutdown-lifespan
             paths: >-
               tldw_Server_API/tests/Services/test_shutdown_*.py
@@ -5550,6 +5556,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_export_includes_tools_and_metadata.py
               tldw_Server_API/tests/Character_Chat/test_legacy_complete_deprecation.py
               tldw_Server_API/tests/Character_Chat/test_messages_tool_calls_exposure.py
+              tldw_Server_API/tests/Character_Chat/test_message_listing_raw_content.py
               tldw_Server_API/tests/Character_Chat/test_persona_dialogue_tree_character_eval.py
           - name: chat-character-legacy-files
             paths: >-
@@ -5581,6 +5588,7 @@ jobs:
               tldw_Server_API/tests/Visual_Identities
           - name: chat-character-unit-core
             paths: >-
+              tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_behavior_snapshot.py
               tldw_Server_API/tests/Character_Chat_NEW/test_utils.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_cards_fts_bootstrap.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_chat_default_provider.py
@@ -5932,6 +5940,7 @@ jobs:
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_startup_*.py
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
+              tldw_Server_API/tests/Services/test_study_pack_startup_default.py
           - name: platform-services-shutdown-lifespan
             paths: >-
               tldw_Server_API/tests/Services/test_shutdown_*.py
@@ -6850,6 +6859,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_export_includes_tools_and_metadata.py
               tldw_Server_API/tests/Character_Chat/test_legacy_complete_deprecation.py
               tldw_Server_API/tests/Character_Chat/test_messages_tool_calls_exposure.py
+              tldw_Server_API/tests/Character_Chat/test_message_listing_raw_content.py
               tldw_Server_API/tests/Character_Chat/test_persona_dialogue_tree_character_eval.py
           - name: chat-character-legacy-files
             paths: >-
@@ -6881,6 +6891,7 @@ jobs:
               tldw_Server_API/tests/Visual_Identities
           - name: chat-character-unit-core
             paths: >-
+              tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_behavior_snapshot.py
               tldw_Server_API/tests/Character_Chat_NEW/test_utils.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_cards_fts_bootstrap.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_chat_default_provider.py
@@ -7232,6 +7243,7 @@ jobs:
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_startup_*.py
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
+              tldw_Server_API/tests/Services/test_study_pack_startup_default.py
           - name: platform-services-shutdown-lifespan
             paths: >-
               tldw_Server_API/tests/Services/test_shutdown_*.py

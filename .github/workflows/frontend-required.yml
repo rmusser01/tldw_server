@@ -643,10 +643,10 @@ jobs:
         timeout-minutes: 17
         working-directory: apps/tldw-frontend
         run: |
-          set -o pipefail
-          # Coreutils timeout owns the process group; GitHub's step timeout can leave Vitest workers alive.
-          timeout --kill-after=30s 15m bun run test:coverage 2>&1 | tail -30 || true
           echo "NOTE: report-only; thresholds land after a baseline is observed in CI (audit F4)."
+          # Coreutils timeout owns the process group; GitHub's step timeout can leave Vitest workers alive.
+          # Shared UI tests run under their package-owned config in the required unit shards.
+          timeout --kill-after=30s 15m bun run test:coverage --exclude '../packages/ui/**'
 
       - name: Run family guardrails parity tests
         if: needs.changes.outputs.family_guardrails_changed == 'true'

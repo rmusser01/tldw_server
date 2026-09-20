@@ -20,7 +20,7 @@ Backlog: TASK13260.270. Branch: `codex/uat295-postgres-notes-20260919`.
 **Tests**: PR check results and focused regressions for any review fixes.
 **Status**: In Progress
 
-PR2970 is published against dev1dfdd819b6. Qodo repairs UAT340–344 have passing regressions and independent review under TASK13260.270.2. Native334/336 acceptance passes. HTTP/shard/pre-commit gates pass; API contract drift UAT345 is repaired locally, with hosted recheck pending.
+PR2970 is published against dev1dfdd819b6. Qodo repairs UAT340–344 have passing regressions and independent review under TASK13260.270.2. Native334/336 acceptance passes. All seven required hosted gates pass on8ae3599714, including the API contract and pre-commit repairs. UAT347–350 repair advisory coverage ownership/reporting, CI matrix omissions and outdated frontend contracts/fixtures. Complete WebUI coverage now1483passed/0failed/14unchangedskips;195workflow/affected regression checks pass; TypeScript93diagnostics match the baseline exactly. Local review is clear. The follow-up push needs hosted checks and any new Qodo feedback addressed before merge.
 
 ## Stage 4: Merge and resume
 **Goal**: Merge normally and resume the fresh four-cell A/B/C matrix.

@@ -718,13 +718,13 @@ describe("extension entry shell performance contracts", () => {
 
   it("keeps mutually exclusive option-home branches lazy instead of bundling onboarding and companion home together", () => {
     expect(optionIndexSource).not.toContain(
-      'import { OnboardingWizard } from "@/components/Option/Onboarding/OnboardingWizard"',
+      'import { UnifiedSetupWizard } from "@/components/Option/Onboarding/UnifiedSetupWizard"',
     )
     expect(optionIndexSource).not.toContain(
       'import { CompanionHomeShell } from "@/components/Option/CompanionHome"',
     )
     expect(optionIndexSource).toContain(
-      'import("@/components/Option/Onboarding/OnboardingWizard")',
+      'import("@/components/Option/Onboarding/UnifiedSetupWizard")',
     )
     expect(optionIndexSource).toContain(
       'import("@/components/Option/CompanionHome")',
@@ -836,8 +836,8 @@ describe("extension entry shell performance contracts", () => {
     expect(i18nEnglishBundleSource).not.toContain(
       'import common from "@/assets/locale/en/common.json"',
     )
-    expect(sharedAppRouteSource).toContain(
-      'const routeNamespaces = getRouteBootstrapNamespaces(kind, location.pathname)',
+    expect(sharedAppRouteSource).toMatch(
+      /const routeNamespaces = React\.useMemo\(\s*\(\) => getRouteBootstrapNamespaces\(kind, location\.pathname\),\s*\[kind, location\.pathname\]/,
     )
     expect(sharedAppRouteSource).toContain('await ensureI18nNamespaces(routeNamespaces, "en")')
     expect(sharedAppRouteSource).toContain("setRouteNamespacesReady(false)")
