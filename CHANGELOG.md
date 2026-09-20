@@ -51,6 +51,15 @@ and this project adheres to Some kind of Versioning
 
 ### Fixed
 
+- **Release review repairs** — Preserve image detail on retry/regeneration; clear
+  missing-chat loading state; retire media requests, bulk mutations and Undo on
+  account changes; scope local collections/favorites; redact anonymous local-model
+  paths while retaining setup resume; enforce finite OSCE request admission and
+  clean up focus lifetimes. Original-release transport, scheduled execution,
+  webhook, clone receipt, Notes and client contract fixes are tracked in the
+  [Qodo ledger](Docs/superpowers/plans/2026-09-20-release-qodo-remediation.md).
+  Unscoped legacy collections/favorites remain stored but are not assigned to an
+  account automatically.
 - **Authentication and account isolation** — Serialized credential mutations,
   preserved workspace identity during login, prevented private conversation,
   draft, Character selection/default, notification and study-source state from

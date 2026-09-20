@@ -10,7 +10,7 @@ import {
 } from "@/services/tldw/runtime-auth-override"
 import { OPEN_PROMPT_SELECT_EVENT } from "@/utils/prompt-select-events"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import React from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -928,9 +928,8 @@ describe("PromptSelect system prompt modal", () => {
       const preview = (
         screen.getByLabelText("Compiled prompt preview") as HTMLTextAreaElement
       ).value
-      await user.click(
-        screen.getByRole("button", { name: "Apply to system prompt" })
-      )
+      fireEvent.click(screen.getByRole("button", { name: "Apply to system prompt" }))
+      expect(screen.getByLabelText("Enter system prompt")).toHaveFocus()
       expect(props.setSystemPrompt).toHaveBeenLastCalledWith(preview)
       expect(props.setSelectedSystemPrompt).not.toHaveBeenCalled()
 

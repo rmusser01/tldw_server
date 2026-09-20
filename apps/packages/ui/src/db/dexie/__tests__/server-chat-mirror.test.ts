@@ -40,6 +40,15 @@ describe("owned server Chat mirror", () => {
     await expect(acknowledgePromotedChatMessage({ historyId: "alice", chatId: "chat-1", ownerKey: "A", source: { ...incoming("source", "Greeting"), role: "assistant", isBot: true }, serverMessageId: "canonical", signal: signal.signal, isCurrent: () => kind !== "target" })).rejects.toThrow()
     expect(state.messages.get("source")?.serverMessageId).toBe(kind === "ack" ? "other-server" : undefined)
   })
+  it.each([
+    { role: "user" as const, isBot: false, expectedName: "You" },
+    { role: "assistant" as const, isBot: true, expectedName: "Assistant" }
+  ])("uses a role-appropriate name for unnamed $role messages", async ({ role, isBot, expectedName }) => {
+    state.histories.set("alice", history("alice", "A"))
+    await reconcileServerChatMirror({ historyId: "alice", chatId: "chat-1", ownerKey: "A", messages: [{ ...incoming("saved", "Hello"), role, isBot, name: undefined }] })
+    expect([...state.messages.values()][0]).toMatchObject({ role, name: expectedName })
+  })
+
   it("persists an exact acknowledged synthetic source ID while preserving a distinct equal row", async () => {
     state.histories.set("alice", history("alice", "A"))
     state.messages.set("distinct", { ...row("distinct", "alice", "Greeting"), role: "assistant" })

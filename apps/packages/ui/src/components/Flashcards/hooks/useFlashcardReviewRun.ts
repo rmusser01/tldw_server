@@ -69,7 +69,7 @@ export function useFlashcardReviewRun({ context, enabled, review, end, onCloseEr
     const pending = (async () => {
       // The first rating may still be creating the session. Close only after its ID arrives.
       await run.rating?.catch(() => null)
-      if (run.sessionId == null || run.controller.signal.aborted) return null
+      if (run.sessionId === null || run.sessionId === undefined || run.controller.signal.aborted) return null
       const lease = await run.lease
       if (lease.scopeSignal.aborted) return null
       const result = await run.end({ reviewSessionId: run.sessionId, options: {
@@ -222,7 +222,7 @@ export function useFlashcardReviewRun({ context, enabled, review, end, onCloseEr
       const lease = await owner.lease
       if (!owns(owner) || lease.scopeSignal.aborted || owner.closing) return null
       const response = await owner.review({ ...rating, reviewContext: owner.context,
-        ...(owner.sessionId == null ? {} : { reviewSessionId: owner.sessionId }),
+        ...((owner.sessionId === null || owner.sessionId === undefined) ? {} : { reviewSessionId: owner.sessionId }),
         options: { signal: lease.scopeSignal, requestScope: lease.requestScope }
       })
       if (lease.scopeSignal.aborted) return null
@@ -236,7 +236,7 @@ export function useFlashcardReviewRun({ context, enabled, review, end, onCloseEr
       return owns(owner) ? result : null
     } catch (error) {
       if (owns(owner)) {
-        if (owner.sessionId != null && isInactiveFlashcardReviewSessionError(error)) owner.inactive = true
+        if (owner.sessionId !== null && owner.sessionId !== undefined && isInactiveFlashcardReviewSessionError(error)) owner.inactive = true
         throw error
       }
       return null

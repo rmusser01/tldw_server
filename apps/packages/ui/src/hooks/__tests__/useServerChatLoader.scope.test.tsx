@@ -155,6 +155,15 @@ describe("useServerChatLoader scoped local history", () => {
     expect(mocks.store.setServerChatTitle).toHaveBeenCalledWith(null)
   })
 
+  it("finishes loading after a missing chat clears the selected server identifier", async () => {
+    mocks.store.setServerChatId.mockImplementationOnce((id) => { mocks.store.serverChatId = id })
+    mocks.listChatMessages.mockRejectedValue(Object.assign(new Error("HTTP 404"), { status: 404 }))
+    renderHook(() => useServerChatLoader({ ensureServerChatHistoryId: vi.fn(), notification: { error: vi.fn() }, t: ((_key: string) => "Error") as TFunction }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(200) })
+    expect(mocks.store.serverChatId).toBeNull()
+    expect(mocks.setIsLoading).toHaveBeenLastCalledWith(false)
+  })
+
   it.each(["normal", "persona", "character"] as const)("keeps canonical raw reads limited to %s presentation", async kind => {
     mocks.store.serverChatAssistantKind = kind === "normal" ? null : kind
     mocks.store.serverChatCharacterId = kind === "character" ? 4 : null

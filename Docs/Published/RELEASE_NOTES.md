@@ -16,6 +16,14 @@ snapshot through PR #2970 after `v0.1.42`, preserving the release-only repairs.
 - PostgreSQL ownership, queries, migrations, timestamps and transaction/shutdown
   repairs across Notes, Study, Characters, World Books, media, prompts and auth.
 - Fresh-install usability/recovery fixes and real macOS guest recovery drills.
+- Release review fixes preserve image quality options during chat retry and
+  regeneration, retire media requests/actions on account changes, isolate saved
+  media collections/favorites, limit OSCE traffic, and keep local model paths out
+  of anonymous setup progress while preserving administrator resume.
+
+Media collections and favorites now belong to an account on a server. Existing
+unscoped local entries are retained in browser storage but are not automatically
+assigned to a signed-in account, because their original owner cannot be verified.
 
 Back up persistent data before upgrading. UAT261 remains open by requester
 direction; the previous full four-configuration UAT matrix failed and subsequent

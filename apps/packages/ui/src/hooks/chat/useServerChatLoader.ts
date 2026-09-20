@@ -822,6 +822,7 @@ export const useServerChatLoader = ({
                 setMessages([])
                 setHistory([])
                 setServerChatTitle(null)
+                setIsLoading(false)
                 setServerChatId(null)
                 return
               }
@@ -1147,6 +1148,7 @@ export const useServerChatLoader = ({
             updatePageTitle()
           }
           if (!isAbort && isMissingServerChatReferenceError(e) && canCommitCurrentLoad()) {
+            setIsLoading(false)
             setServerChatId(null)
             return
           }

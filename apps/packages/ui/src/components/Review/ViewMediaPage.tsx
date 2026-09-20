@@ -1,3 +1,4 @@
+import { watchChatAccountChanges } from '@/services/chat-account-boundary'
 import { useHomeMilestoneScope } from '@/hooks/useHomeMilestoneScope'
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -117,12 +118,17 @@ const ViewMediaPage: React.FC = () => {
   const { uxState } = useConnectionUxState()
   const { checkOnce } = useConnectionActions()
   const [mediaAuthorityGeneration, setMediaAuthorityGeneration] = useState(0)
-  useEffect(() => useConnectionStore.subscribe((next, previous) => {
-    if ((previous.state.isConnected && !next.state.isConnected) ||
-      next.state.serverUrl !== previous.state.serverUrl) {
-      setMediaAuthorityGeneration(value => value + 1)
-    }
-  }), [])
+  useEffect(() => {
+    const retire = () => setMediaAuthorityGeneration(value => value + 1)
+    const stopWatchingAccount = watchChatAccountChanges(invalidated => {
+      if (invalidated) retire()
+    })
+    const unsubscribe = useConnectionStore.subscribe((next, previous) => {
+      if ((previous.state.isConnected && !next.state.isConnected) ||
+        next.state.serverUrl !== previous.state.serverUrl) retire()
+    })
+    return () => { unsubscribe(); stopWatchingAccount() }
+  }, [])
 
   // Check media support
   const mediaUnsupported = !capsLoading && capabilities && !capabilities.hasMedia
@@ -341,7 +347,7 @@ const MediaPageContent: React.FC = () => {
   })
 
   const selection = useMediaSelection({
-    t, message,
+    t, message, ownerScope,
     displayResults: search.results,
     selected: nav.selected,
     setSelected: nav.setSelected,
