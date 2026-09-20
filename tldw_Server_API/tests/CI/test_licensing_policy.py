@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 
 # Git is used only with fixed local inventory arguments.
 import subprocess  # nosec B404
-import tomllib
-
 from hashlib import sha256
 from pathlib import Path
+
+import pytest
+import tomllib
 
 LICENSE_DIGESTS = {
     "LICENSES/PolyForm-Perimeter-1.0.1.txt": "5c7a5ccd847fcc285dda039e511ba013693fe979dfc5faee47f6fb59c7add337",
@@ -30,6 +32,25 @@ PROTECTED_PACKAGES = [
     "apps/extension",
     "apps/packages/ui",
 ]
+
+
+@pytest.mark.unit
+def test_release_candidate_authorities_agree_on_protected_source() -> None:
+    """Human release instructions must identify the same source as the legal record."""
+    record = json.loads(_read("LICENSES/releases/0.1.43/release.json"))
+    authorities = [
+        "Docs/Development/releases/0.1.43-change-inventory.md",
+        "Docs/superpowers/plans/2026-09-20-release-0.1.43-plan.md",
+        "backlog/tasks/task-13263 - Prepare-the-0.1.43-release-with-all-changes-since-v0.1.42.md",
+    ]
+    for path in authorities:
+        text = _read(path)
+        assert re.findall(r"^Protected source: `([0-9a-f]{40})`\.$", text, re.MULTILINE) == [
+            record["protected_source_revision"]
+        ], path
+        assert re.findall(r"^Protected manifest SHA-256: `([0-9a-f]{64})`\.$", text, re.MULTILINE) == [
+            record["protected_file_manifest"]["sha256"]
+        ], path
 
 
 def _read(path: str) -> str:

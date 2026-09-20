@@ -126,3 +126,21 @@ def test_frontend_coverage_report_cannot_starve_required_gates() -> None:
     assert coverage_step["continue-on-error"] is True
     assert coverage_step["timeout-minutes"] == 17
     assert "timeout --kill-after=30s 15m bun run test:coverage" in coverage_step["run"]
+
+
+@pytest.mark.unit
+def test_frontend_coverage_reports_both_package_owned_suites() -> None:
+    """Excluding shared UI from WebUI must retain its own bounded coverage report."""
+    data = yaml.safe_load(Path(".github/workflows/frontend-required.yml").read_text())
+    reports = {
+        step["working-directory"]: step
+        for step in data["jobs"]["frontend-required"]["steps"]
+        if "bun run test:coverage" in step.get("run", "")
+    }
+    assert set(reports) == {"apps/tldw-frontend", "apps/packages/ui"}
+    for step in reports.values():
+        assert step["if"] == "needs.changes.outputs.tldw_frontend_changed == 'true'"
+        assert step["continue-on-error"] is True
+        assert step["timeout-minutes"] == 17
+        assert "timeout --kill-after=30s 15m bun run test:coverage" in step["run"]
+    assert "--exclude" not in reports["apps/packages/ui"]["run"]

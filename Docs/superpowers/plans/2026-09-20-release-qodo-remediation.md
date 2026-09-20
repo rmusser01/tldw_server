@@ -4,6 +4,10 @@ Tracking: TASK-13263.1, under TASK-13263. Original PR: #2761 (published 0.1.42);
 
 Published 0.1.42 source and grants remain immutable. Server repairs land in the 0.1.43 candidate; cross-repository client repairs use an isolated Chatbook checkout. A resolved review finding means a verified fix, an already-landed fix, or an evidence-backed rejection, never merely an unread thread.
 
+## Original-review stages (historical completion)
+
+These stages describe the original review batch. The additional 18-finding agentic batch is tracked below and is still in progress.
+
 ## Stage 1: Inventory
 **Goal**: Capture every Qodo finding.
 **Success Criteria**: All 23 original threads represented; new and recovery PR reviews checked.
@@ -97,3 +101,7 @@ The license gate passed, but its completed workflow event cancelled parallel PR 
 All 23 original Qodo threads now have published dispositions and are resolved. Candidate review findings are implemented; fresh final review and CI are being checked. Additional CodeQL alert2693 is repaired in7bd99f427d: buffered character streams use a constant error with 129 owning-module tests passing and independent security review complete. See [stream report](../reviews/2026-09-20-release-buffered-stream-error.md).
 
 Latest Qodo review at10b11f6acb raised keyword and lifecycle PostgreSQL boolean literals plus relationship endpoint ownership. All three are already enforced by the shared PostgreSQL SQL transformer and dual endpoint EXISTS owner predicates. Added executable driver-boundary and malformed-link canaries:46 passed; live PostgreSQL11 skipped through official unavailable fixtures. See [second Notes report](../reviews/2026-09-20-release-qodo-notes-second.md). CodeQL test-fixture dispositions2688–2692 are published at https://github.com/rmusser01/tldw_server/pull/2972#issuecomment-5752715588 and dismissed as used in tests.
+
+## Current agentic-review batch — in progress
+
+The deeper review returned 18 additional findings after the original threads were closed. Every item is tracked in [the agentic review ledger](../reviews/2026-09-20-release-qodo-agentic.md), including source-authority reconciliation, account isolation, retry persistence, OSCE controls, coverage reporting and host-test dispositions. Finish fixes, independent boundary review, manifest refresh and final CI before treating this batch as closed. Earlier approvals/pending-source statements in this document are historical checkpoints; PR2973 approval is resolved and its publication retry is running.
