@@ -43,6 +43,25 @@ export function formatSourceList(sources: RagSource[]): string {
   return `${labels.slice(0, -1).join(", ")}, and ${labels[labels.length - 1]}`
 }
 
+export function buildSourceFailureSummary(
+  sources: RagSource[],
+  sourceStatus?: Record<string, KnowledgeSourceStatus>
+): string[] {
+  const failedSources = sources.filter((source) =>
+    ["error", "unavailable"].includes(sourceStatus?.[source]?.status ?? "")
+  )
+  const unavailableSources = failedSources.filter((source) => !sourceStatus?.[source]?.count)
+  const partialSources = failedSources.filter((source) => Boolean(sourceStatus?.[source]?.count))
+  const lines: string[] = []
+  if (unavailableSources.length > 0) {
+    lines.push(`Could not search ${formatSourceList(unavailableSources)}.`)
+  }
+  if (partialSources.length > 0) {
+    lines.push(`Some searches failed for ${formatSourceList(partialSources)}.`)
+  }
+  return lines
+}
+
 export function buildAnswerTrustSummary({
   selectedSources,
   resultCount,
@@ -60,7 +79,6 @@ export function buildAnswerTrustSummary({
     ["error", "unavailable"].includes(sourceStatus?.[source]?.status ?? "")
   )
   const unavailableSources = failedSources.filter((source) => !sourceStatus?.[source]?.count)
-  const partialSources = failedSources.filter((source) => Boolean(sourceStatus?.[source]?.count))
   const searchedSources = selectedSources.filter((source) => !unavailableSources.includes(source))
   const searchSummary = searchedSources.length > 0
     ? `Searched ${formatSourceList(searchedSources)}.`
@@ -79,12 +97,7 @@ export function buildAnswerTrustSummary({
   )
   lines.push(`AI model: ${formatGenerationModel(generationProvider, generationModel)}.`)
 
-  if (unavailableSources.length > 0) {
-    lines.push(`Could not search ${formatSourceList(unavailableSources)}.`)
-  }
-  if (partialSources.length > 0) {
-    lines.push(`Some searches failed for ${formatSourceList(partialSources)}.`)
-  }
+  lines.push(...buildSourceFailureSummary(selectedSources, sourceStatus))
   if (sourceHealthCaveatCount > 0) {
     lines.push(
       `${sourceHealthCaveatCount} selected ${pluralize(

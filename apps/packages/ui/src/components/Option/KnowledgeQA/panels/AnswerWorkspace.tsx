@@ -2,7 +2,9 @@ import { hasLowMeasuredRelevance } from "../sourceListUtils"
 import React, { useEffect, useMemo, useRef, useState } from "react"
 import { Loader2 } from "lucide-react"
 import { cn } from "@/libs/utils"
+import { isRagSource } from "@/services/rag/sourceMetadata"
 import type { QueryStage } from "../types"
+import { buildSourceFailureSummary } from "../trustSummary"
 import { useKnowledgeQA } from "../KnowledgeQAProvider"
 import { ConversationThread } from "../ConversationThread"
 import { AnswerPanel } from "../AnswerPanel"
@@ -45,6 +47,8 @@ function truncatePreview(value: string, maxLength = 140): string {
 
 export function AnswerWorkspace({ queryStage, className }: AnswerWorkspaceProps) {
   const {
+    answer = null,
+    searchDetails = null,
     results = [],
     error = null,
     queryWarning = null,
@@ -54,6 +58,13 @@ export function AnswerWorkspace({ queryStage, className }: AnswerWorkspaceProps)
   } = useKnowledgeQA()
   const isActiveStage =
     queryStage !== "idle" && queryStage !== "complete" && queryStage !== "error" && queryStage !== "cancelled"
+  const sourceFailureLines =
+    queryStage === "complete" && results.length > 0 && !answer?.trim()
+      ? buildSourceFailureSummary(
+          Object.keys(searchDetails?.sourceStatus ?? {}).filter(isRagSource),
+          searchDetails?.sourceStatus
+        )
+      : []
   const [politeAnnouncement, setPoliteAnnouncement] = useState("")
   const [assertiveAnnouncement, setAssertiveAnnouncement] = useState("")
   const previousStageRef = useRef<QueryStage | null>(null)
@@ -208,6 +219,12 @@ export function AnswerWorkspace({ queryStage, className }: AnswerWorkspaceProps)
       ) : null}
 
       <ConversationThread />
+      {sourceFailureLines.length > 0 ? (
+        <div role="status" className="rounded-lg border border-warn/25 bg-warn/10 px-4 py-3 text-sm">
+          {sourceFailureLines.map((line) => <p key={line}>{line}</p>)}
+          <p className="mt-1 text-text-muted">Retrieved sources are still available.</p>
+        </div>
+      ) : null}
       <AnswerPanel />
       <FollowUpInput mode={isLowQualityResult ? "recovery" : "default"} />
     </div>

@@ -1,8 +1,11 @@
 import { render, screen } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { AnswerWorkspace } from "../panels/AnswerWorkspace"
+import type { KnowledgeSourceStatus } from "../types"
 
 const state = {
+  answer: null as string | null,
+  searchDetails: null as { sourceStatus: Record<string, KnowledgeSourceStatus> } | null,
   results: [] as Array<{ id: string; score?: number }>,
   error: null as string | null,
   queryWarning: null as string | null,
@@ -18,6 +21,8 @@ const state = {
 
 vi.mock("../KnowledgeQAProvider", () => ({
   useKnowledgeQA: () => ({
+    answer: state.answer,
+    searchDetails: state.searchDetails,
     results: state.results,
     error: state.error,
     queryWarning: state.queryWarning,
@@ -44,6 +49,8 @@ vi.mock("../FollowUpInput", () => ({
 
 describe("AnswerWorkspace accessibility announcements", () => {
   beforeEach(() => {
+    state.answer = null
+    state.searchDetails = null
     state.results = []
     state.error = null
     state.queryWarning = null
@@ -51,6 +58,62 @@ describe("AnswerWorkspace accessibility announcements", () => {
     state.currentThreadId = null
     state.citations = []
     state.settings = { strip_min_relevance: 0.3 }
+  })
+
+  it.each([true, false])("discloses failed sources without an answer when generation is %s", (generationEnabled) => {
+    state.results = [{ id: "owned-media" }]
+    state.settings = { enable_generation: generationEnabled, sources: ["media_db", "chats"] }
+    state.searchDetails = { sourceStatus: {
+      media_db: { status: "searched", count: 1 },
+      chats: { status: "error", count: 0, reason: "retrieval_failed" },
+    } }
+
+    const { rerender } = render(<AnswerWorkspace queryStage="complete" />)
+    expect(screen.getByRole("status")).toHaveTextContent("Could not search Chats.")
+    expect(screen.getByRole("status")).not.toHaveTextContent("Could not search Documents & Media")
+
+    state.searchDetails = { sourceStatus: {
+      media_db: { status: "searched", count: 1 },
+      chats: { status: "searched", count: 2 },
+    } }
+    rerender(<AnswerWorkspace queryStage="complete" />)
+    expect(screen.queryByRole("status")).not.toBeInTheDocument()
+  })
+
+  it("uses completed source diagnostics after the next-search scope changes", () => {
+    state.results = [{ id: "owned-media" }, { id: "retained-character" }]
+    state.settings = { sources: ["media_db"] }
+    state.searchDetails = { sourceStatus: {
+      media_db: { status: "searched", count: 1 },
+      chats: { status: "unavailable", count: 0, reason: "retrieval_failed" },
+      characters: { status: "error", count: 1, reason: "retrieval_failed" },
+    } }
+
+    render(<AnswerWorkspace queryStage="complete" />)
+    expect(screen.getByRole("status")).toHaveTextContent("Could not search Chats.")
+    expect(screen.getByRole("status")).toHaveTextContent("Some searches failed for Characters.")
+  })
+
+  it("leaves generated-answer and zero-result diagnostics to their existing panels", () => {
+    state.searchDetails = { sourceStatus: { chats: { status: "error", count: 0 } } }
+    const { rerender } = render(<AnswerWorkspace queryStage="complete" />)
+    expect(screen.queryByRole("status")).not.toBeInTheDocument()
+    state.results = [{ id: "owned-media" }]
+    state.answer = "An answer [1]."
+    rerender(<AnswerWorkspace queryStage="complete" />)
+    expect(screen.queryByRole("status")).not.toBeInTheDocument()
+    state.answer = null
+    rerender(<AnswerWorkspace queryStage="searching" />)
+    expect(screen.queryByRole("status")).not.toBeInTheDocument()
+  })
+
+  it("retains evidence from a single partially failed source without claiming other sources", () => {
+    state.results = [{ id: "retained-chat" }]
+    state.searchDetails = { sourceStatus: { chats: { status: "error", count: 1 } } }
+    render(<AnswerWorkspace queryStage="complete" />)
+    expect(screen.getByRole("status")).toHaveTextContent("Some searches failed for Chats.")
+    expect(screen.getByRole("status")).toHaveTextContent("Retrieved sources are still available.")
+    expect(screen.getByRole("status")).not.toHaveTextContent("other sources")
   })
 
   it("announces active and completed search stages through live regions", () => {
