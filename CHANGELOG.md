@@ -81,6 +81,13 @@ and this project adheres to Some kind of Versioning
 
 ### Upgrade and release qualifications
 
+- **Review follow-ups** — Rejected transport-owned credential headers and malformed
+  JSON-RPC replies; repaired refresh cancellation, browser speech fallback, batch
+  ingest identifiers, presentation recovery translations, readiness compatibility
+  fields and deleted-link pagination. Scheduled runs now retain execution claims
+  across lease replacement and retry terminal-write failures; macro final replies
+  commit atomically and destructive Personal Context requests validate strictly.
+  See the [Qodo disposition ledger](Docs/superpowers/plans/2026-09-20-release-qodo-remediation.md).
 - Back up persistent databases and files before upgrading; review the included
   migrations and verify the selected SQLite/PostgreSQL deployment after upgrade.
 - UAT261's exact-output criterion remains open by requester direction. A fresh
