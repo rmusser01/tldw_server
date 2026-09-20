@@ -26,7 +26,8 @@ vi.mock("@/services/tldw", () => ({
   }
 }))
 
-vi.mock("@/utils/resolve-api-provider", () => ({
+vi.mock("@/utils/resolve-api-provider", async () => ({
+  ...await vi.importActual<typeof import("@/utils/resolve-api-provider")>("@/utils/resolve-api-provider"),
   resolveApiProviderForModel: vi.fn(async () => "openai")
 }))
 

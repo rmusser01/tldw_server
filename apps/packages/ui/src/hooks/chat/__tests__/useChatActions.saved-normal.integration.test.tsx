@@ -32,6 +32,8 @@ const mocks = vi.hoisted(() => ({
   initialize: vi.fn(),
   pageAssistModel: vi.fn(),
   getModel: vi.fn(),
+  getModels: vi.fn(),
+  realProviderResolution: false,
   ocr: vi.fn(),
   realFormatter: false,
   realPersistence: false,
@@ -96,7 +98,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 }))
 vi.mock("@/services/tldw", async () => {
   const actual = await vi.importActual<typeof import("@/services/tldw")>("@/services/tldw")
-  return { ...actual, tldwModels: { ...actual.tldwModels, getModel: mocks.getModel }, tldwChat: { ...actual.tldwChat, streamMessage: mocks.streamMessage } }
+  return { ...actual, tldwModels: { ...actual.tldwModels, getModel: mocks.getModel, getModels: mocks.getModels }, tldwChat: { ...actual.tldwChat, streamMessage: mocks.streamMessage } }
 })
 vi.mock("@/models", () => ({ pageAssistModel: mocks.pageAssistModel }))
 vi.mock("@/services/title", () => ({
@@ -116,10 +118,11 @@ vi.mock("@/services/model-settings", async () => ({
   getAllDefaultModelSettings: async () => ({}),
   getModelSettings: async () => ({})
 }))
-vi.mock("@/utils/resolve-api-provider", async () => ({
-  ...await vi.importActual<typeof import("@/utils/resolve-api-provider")>("@/utils/resolve-api-provider"),
-  resolveApiProviderForModel: async () => "openai"
-}))
+vi.mock("@/utils/resolve-api-provider", async () => {
+  const actual = await vi.importActual<typeof import("@/utils/resolve-api-provider")>("@/utils/resolve-api-provider")
+  return { ...actual, resolveApiProviderForModel: async (options: Parameters<typeof actual.resolveApiProviderForModel>[0]) =>
+    mocks.realProviderResolution ? actual.resolveApiProviderForModel(options) : "openai" }
+})
 vi.mock("@/utils/ocr", () => ({ processImageForOCR: mocks.ocr }))
 // Existing transport-independent cases retain their simple fixture; image-input
 // controls use the real formatter and model factory, with only OCR disabled.
@@ -799,6 +802,8 @@ describe("saved normal Chat pipeline with autosave", () => {
     mocks.withLoader = false
     mocks.realFormatter = false
     mocks.realPersistence = false
+    mocks.realProviderResolution = false
+    mocks.getModels.mockResolvedValue([])
     mocks.ragSearch.mockReset()
     mocks.getModel.mockResolvedValue({ id: "test-model", name: "Test model", capabilities: [] })
     mocks.ocr.mockResolvedValue("Explicit OCR text")
@@ -1141,6 +1146,55 @@ describe("saved normal Chat pipeline with autosave", () => {
     expect(mocks.serverRows.get("chat-1")?.some(row => row.content.includes("Unanswered source question"))).toBe(false)
     expect(view.result.current.state.messages.filter(row => diagnosticIds.includes(row.id))).toHaveLength(2)
     expect(view.result.current.state.messages.filter(row => realIds.includes(row.id)).every(row => Boolean(row.serverMessageId))).toBe(true)
+    view.unmount()
+  })
+
+  it("preserves the selected provider in source-grounded generation options", async () => {
+    mocks.realProviderResolution = true
+    mocks.ragSearch.mockResolvedValue({ documents: [{ content: "Evidence", metadata: {} }] })
+    const view = renderWorkspace(false, false, { ragMediaIds: [42], fileRetrievalEnabled: true, ragEnableGeneration: true })
+    act(() => useStoreMessageOption.setState({ selectedModel: "custom-openai-api:shared-model" }))
+    await act(async () => { await view.result.current.actions.onSubmit({ message: "Use this source", image: "" }) })
+    expect(mocks.ragSearch).toHaveBeenCalledWith("Use this source", expect.objectContaining({
+      generation_model: "shared-model", generation_provider: "custom-openai-api"
+    }))
+    view.unmount()
+  })
+
+  it.each([
+    { selected: "custom-openai-api:shared-model", provider: "custom-openai-api" },
+    { selected: "tldw:llama:shared-model", provider: "llama.cpp" }
+  ])("retains selected provider through saved Send, remount and Regenerate: $selected", async ({ selected, provider }) => {
+    mocks.realProviderResolution = true
+    mocks.withLoader = true
+    const actualModels = await vi.importActual<typeof import("@/models")>("@/models")
+    mocks.pageAssistModel.mockImplementation(actualModels.pageAssistModel)
+    mocks.getModels.mockResolvedValue([
+      { id: "shared-model", provider: "openai", capabilities: [] },
+      { id: "shared-model", provider: "custom_openai_api", capabilities: [] },
+      { id: "shared-model", provider: "llama", capabilities: [] }
+    ])
+    let answer = 0
+    mocks.streamMessage.mockImplementation(async function* (_messages, options, onChunk) {
+      const rows = mocks.serverRows.get(options.conversationId)!
+      if (!options.regenerateFromMessageId) rows.push({ id: "selected-user", role: "user", content: "Hello" })
+      const id = `selected-answer-${++answer}`
+      rows.push({ id, role: "assistant", content: "Selected reply" })
+      onChunk({ tldw_user_message_id: "selected-user", tldw_message_id: id })
+      yield "Selected reply"
+    })
+    let view = renderWorkspace(false, true)
+    act(() => useStoreMessageOption.setState({ selectedModel: selected }))
+    await act(async () => { await view.result.current.actions.onSubmit({ message: "Hello", image: "" }) })
+    expect(mocks.streamMessage.mock.calls[0][1]).toMatchObject({ apiProvider: provider, model: "shared-model" })
+    view.unmount()
+    act(() => useStoreMessageOption.setState({ serverChatLoadState: "idle", serverChatMetaLoaded: false }))
+    view = renderWorkspace(false, true)
+    await waitFor(() => expect(view.result.current.state.serverChatLoadState).toBe("loaded"))
+    await act(async () => { await view.result.current.actions.regenerateLastMessage() })
+    expect(mocks.streamMessage.mock.calls.at(-1)?.[1]).toMatchObject({
+      apiProvider: provider, model: "shared-model", regenerateFromMessageId: "selected-answer-1"
+    })
     view.unmount()
   })
 

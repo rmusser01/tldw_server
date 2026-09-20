@@ -277,7 +277,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
 
   const context: ChatModeContext<TParams> = {
     ...params,
-    selectedModel,
+    selectedModel: rawSelectedModel,
     modelIdOverride,
     message,
     image,
@@ -684,7 +684,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     const humanMessage = promptData.humanMessage
 
     modelClient = await pageAssistModel({
-      model: selectedModel,
+      model: rawSelectedModel,
       toolChoice,
       conversationId,
       researchContext: context.researchContext,

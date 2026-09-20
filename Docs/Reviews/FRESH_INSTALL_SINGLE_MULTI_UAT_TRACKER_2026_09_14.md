@@ -6,7 +6,7 @@
 
 - **Qodo review:** All 14 review findings have verified fixes or an accepted disposition in the [review disposition ledger](PR2967_QODO_REVIEW_2026_09_18.md), under TASK13260.219.11–13. All 14 review threads are resolved and Qodo reports zero open findings. Final hosted CI passed before the verified merge. This review does not replace the pending fresh UAT matrix.
 
-- **Current repair gate:** 329 UAT findings: 324 verified; 5 open (261, 284, 290, 300, 306). The frozen post-merge four-cell matrix completed with failures. Checkpoint [PR2969](https://github.com/rmusser01/tldw_server/pull/2969) merged normally into dev at `1dfdd819b6` after all seven required gates passed, all 12 Qodo threads were resolved, and the requester supplied the Change summary. Follow-up branch `codex/uat295-postgres-notes-20260919` starts from that merge. UAT299 and UAT319/321–323 now pass targeted SQLite/PostgreSQL acceptance, including owner/Bob isolation and controlled source-failure disclosure. Remaining repairs precede another full matrix. Generated Playwright evidence remains local and excluded. See the [checkpoint review](PR2969_CHECKPOINT_REVIEW_2026_09_19.md) and [post-merge matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_18.md).
+- **Current repair gate:** 331 UAT findings: 324 verified; 7 open (261, 284, 290, 300, 306, 330, 331). The frozen post-merge four-cell matrix completed with failures. Checkpoint [PR2969](https://github.com/rmusser01/tldw_server/pull/2969) merged normally into dev at `1dfdd819b6` after all seven required gates passed, all 12 Qodo threads were resolved, and the requester supplied the Change summary. Follow-up branch `codex/uat295-postgres-notes-20260919` starts from that merge. UAT299 and UAT319/321–323 now pass targeted SQLite/PostgreSQL acceptance, including owner/Bob isolation and controlled source-failure disclosure. Remaining repairs precede another full matrix. Generated Playwright evidence remains local and excluded. See the [checkpoint review](PR2969_CHECKPOINT_REVIEW_2026_09_19.md) and [post-merge matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_18.md).
 
 - **Historical frozen-run findings:246 total —230 previously verified,16 new unresolved (231–246).** The frozen48-row execution is complete with product source unchanged;16new findings await repair/disposition. SQLite multi-user natural session expiry passes; new241 loses source content in Media-to-Chat,242 uses plural wording for one Due review, and243 leaves Character setup visible after an ordinary Chat completion. Existing PostgreSQL RLS failure238 and generation timeout234 remain open.
 
@@ -3763,3 +3763,26 @@ All24970tracked archive entries match. Owned browser/API/frontend closed, app pr
 The setup model input was only shown for the first-chat default. Non-default local validation discovered a real model, but Save could send model:null, preserving the backend template. Selected providers now show model inputs with guidance. Before any save, each selected local endpoint must have an explicit model; an empty model shows an actionable error and focuses its field. Continue requires current local selections to have been saved. Non-default hosted model choice remains optional and local models may be typed without discovery.
 
 Four initial causal failures and one further Continue-bypass failure reproduce the gaps. Affected onboarding116tests pass across5files, including default handoff, first-chat and extension authority. ESLint has0errors with5identical pre-existing warnings;93existing TypeScript errors unchanged. Bandit is inapplicable to TypeScript-only changes. Independent review is clear; fresh native two-provider PostgreSQL acceptance remains pending, so284 stays open. Evidence `.tmp/uat284-repair`.
+
+
+### UAT284 — setup/catalogue acceptance passes; dispatch acceptance blocked by330
+
+Fresh16ca50 actual PostgreSQL native validate-and-save with the non-default local model empty sends0save requests, focuses the visible Custom model field, displays an actionable error and leaves Continue disabled. Explicit real GGUF selection saves both custom_openai(non-default) andllamacpp(default) payloads with exact model IDs. First-chat200 and the Chat catalogue retain both real models, with no template substituted for the selected Custom endpoint. End-to-end Custom reply acceptance fails under330 below, so284 remains open. Confirmed-vision llama.cpp is independently available; generic Custom capability metadata remains unconfirmed and is not falsified.
+
+## UAT330 — P1: Chat displays one selected provider but dispatches to another
+
+TASK13260.268. Fresh16ca50 PostgreSQL native Chat selects Custom OpenAI API for the real GGUF model, but the actual completion request sendsapi_provider=llama.cpp. A settled reload still displays Custom; another native Send repeats the mismatch. Both endpoints target the same authorized localhost9099 here, so no cross-host leakage is claimed. Source trace: chatModePipeline parses the provider-qualified selection and then passes only the bare model ID to pageAssistModel, allowing default-provider resolution and ambiguous capability lookup. Preserve qualified identity through request construction and verify duplicate model names. Evidence `.tmp/uat284-native/{14-model-menu,15-custom-send,18-reloaded,19-custom-steady-send}.txt`.
+
+Additional UX observation for triage: after selecting Custom, the other known llama.cpp model appears under a generic Custom group in20-menu. Retain with330 until attributed; do not silently treat it as correct.
+
+
+## UAT331 — P2: Known local provider grouped under generic Custom heading
+
+TASK13260.269. Native20-menu from UAT284 shows the known llama.cpp entry under Custom, obscuring endpoint identity for duplicate model names. Source confirms intentional local-provider collapsing. Preserve each known provider group using the existing display-name helper; retain Chrome/default and actual custom semantics. Two causal menu-label failures cover provider and local-first sorting; targeted acceptance pending with330.
+
+
+### UAT330 / UAT331 reviewed repair checkpoint
+
+Chat now preserves provider-qualified selection through ordinary and source-grounded generation. Capability lookup matches normalized provider plus exact model ID, preventing duplicate-name capability borrowing. The API still receives the bare model ID. Qualified settings retain precedence, with fallback to existing bare-ID settings when absent. Review found and corrected local/local-llm alias matching and legacy settings lookup; both reproduced with causal tests. Model groups retain known provider names and local-first ordering.
+
+Final275tests across19files pass with0skips. ESLint0errors and43identical existing warnings across touched scopes; TypeScript93existing diagnostics with0added. No Python changes, so Bandit is inapplicable. Independent reviews clear. Fresh committed PostgreSQL setup/selection/send/reload/regenerate/image acceptance remains pending;284/330/331 stay open. Prior284diagnostic apps/browser are closed, officialfixture exit0 and24969archive entries unchanged. Evidence remains ignored/local.

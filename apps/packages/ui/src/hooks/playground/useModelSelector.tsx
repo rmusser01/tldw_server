@@ -368,11 +368,7 @@ export function useModelSelector({
     }
 
     const toGroupKey = (providerRaw: string) =>
-      providerRaw === "chrome"
-        ? "default"
-        : LOCAL_PROVIDERS.has(providerRaw)
-          ? "custom"
-          : providerRaw
+      providerRaw === "chrome" ? "default" : providerRaw
 
     const byLabel = (a: any, b: any) => {
       const aProvider = getProviderDisplayName(getModelProvider(a))

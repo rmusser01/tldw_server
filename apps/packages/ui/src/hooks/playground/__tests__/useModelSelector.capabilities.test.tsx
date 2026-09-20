@@ -381,6 +381,26 @@ describe("useModelSelector capability rendering", () => {
     ).toBeInTheDocument()
   })
 
+  it.each(["provider", "localFirst"])("names known local providers in %s menu groups", (sortMode) => {
+    storageSeed.values.set("modelSelectSortMode", sortMode)
+    const { result } = renderHook(() => useModelSelector({
+      composerModels: [
+        { id: "shared", provider: "llama", is_configured: true },
+        { id: "shared", provider: "custom_openai_api", is_configured: true },
+        { id: "hosted", provider: "anthropic", is_configured: true }
+      ],
+      selectedModel: "custom_openai_api:shared",
+      setSelectedModel: vi.fn(), navigate: vi.fn()
+    }))
+    const groups = result.current.modelDropdownMenuItems.filter(item => item?.type === "group")
+    const local = groups.find(group => group.children.some((item: { key: string }) => item.key === "llama:shared"))
+    render(<>{local?.label}</>)
+    expect(screen.getByText("LLAMA")).toBeInTheDocument()
+    if (sortMode === "localFirst") {
+      expect(groups.indexOf(local)).toBeLessThan(groups.findIndex(group => group.key === "group-anthropic"))
+    }
+  })
+
   it("promotes current and recent configured models ahead of provider groups", () => {
     storageSeed.values.set("chatModelUsageByProviderModel", {
       "google:gemini-1.5-pro": {
