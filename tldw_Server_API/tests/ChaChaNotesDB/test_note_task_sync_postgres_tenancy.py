@@ -60,8 +60,17 @@ def test_postgres_task_operations_do_not_leak_dataset_scope_to_the_session(
 
 
 def _restore_reviewed_postgres_v59_task_source(db: CharactersRAGDB) -> None:
-    """Replace the fresh v61 graph with the exact reviewed empty v59 source."""
+    """Replace the current graph with the exact reviewed empty v59 source."""
     with db.transaction() as conn:
+        # Remove newer graph references before reconstructing the v59 index.
+        for table in (
+            "note_graph_suggestion_evidence",
+            "note_graph_suggestions",
+            "note_graph_suggestion_rejection_sets",
+            "note_graph_suggestion_runs",
+            "note_graph_suggestion_operation_receipts",
+        ):
+            db.backend.execute(f"DROP TABLE {table}", connection=conn)  # nosec B608 -- Fixed fixture tables.
         for table, constraint in (
             ("moodboard_notes", "moodboard_notes_v61_note_fk"),
             ("note_studio_documents", "note_studio_documents_v61_note_fk"),
@@ -427,7 +436,7 @@ def test_postgres_bind_caught_hash_failure_rolls_back_rekey_and_restores_force(
         backend.get_pool().close_all()
 
 
-def test_postgres_note_task_schema_remains_authoritative_at_v63(
+def test_postgres_note_task_schema_remains_authoritative_at_current_version(
     pg_database_config: DatabaseConfig,
 ) -> None:
     owner = "950001"
@@ -446,7 +455,7 @@ def test_postgres_note_task_schema_remains_authoritative_at_v63(
                 "ORDER BY tablename, policyname",
                 (list(CharactersRAGDB._NOTE_TASK_V60_RELATIONS),),
             ).fetchall()
-        assert version == 63
+        assert version == CharactersRAGDB._POSTGRES_SCHEMA_VERSION
         assert [(row["tablename"], row["policyname"]) for row in policy_rows] == [
             (table, f"{table}_tenant_isolation")
             for table in sorted(CharactersRAGDB._NOTE_TASK_V60_RELATIONS)
@@ -1202,14 +1211,6 @@ def test_postgres_concurrent_v59_initializers_serialize_one_migration(
     owner = "950032"
     setup_backend = DatabaseBackendFactory.create_backend(pg_database_config)
     setup_db = CharactersRAGDB(":memory:", client_id=owner, backend=setup_backend)
-    # Remove the v64 graph's references before reconstructing the v59 index.
-    with setup_backend.transaction() as conn:
-        for table in (
-            "note_graph_suggestion_evidence", "note_graph_suggestions",
-            "note_graph_suggestion_rejection_sets", "note_graph_suggestion_runs",
-            "note_graph_suggestion_operation_receipts",
-        ):
-            setup_backend.execute(f"DROP TABLE {table}", connection=conn)  # nosec B608 -- Fixed fixture tables.
     _restore_reviewed_postgres_v59_task_source(setup_db)
     _populate_reviewed_postgres_v59_source(setup_db)
     setup_db.close_all_connections()
