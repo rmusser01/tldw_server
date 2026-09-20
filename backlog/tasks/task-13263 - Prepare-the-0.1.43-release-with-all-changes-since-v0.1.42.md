@@ -4,7 +4,7 @@ title: Prepare the 0.1.43 release with all changes since v0.1.42
 status: In Progress
 assignee: []
 created_date: '2026-09-20 19:56'
-updated_date: '2026-09-20 22:46'
+updated_date: '2026-09-20 23:09'
 labels: []
 dependencies: []
 priority: high
@@ -49,6 +49,10 @@ Requester explicitly approved2973 human-summary waiver/merge/PyPI retry. Recover
 Recovery2973 approved/merged cd2dbc792b; publication35540174556 testgate running; candidate mergedrecovery eb4ec4817d. Backend actualfailureOpenAPIdescriptiondrift fixed222a6833b1,exactCIhashreproducedandtypesgenerated,fulltscpass. Frontendfixture b0585d63de,82pass. Protectedsource222a6833b14bd847cf6783adc0fe4f829a1ba386,7321files,manifest419a2b8f8dd81f23da35360a6ec5771c2d396ae6fc6f6ba5678faa21edac1ba5. Explicitcheck12pass. AdvisorymypyNumPystubs mismatch isnotjobfailure.
 
 Current protected source645e58c6a7 and manifest1d3af39b50da7797f8d6ec2aaabbedee22d5a6d7cf7ee6a76a388cc32c283b51 cover7322 files. Explicit protected-checkout gate13passed. All18 agentic fixes/dispositions locally verified; final push/thread replies/remote CI next. Recovery2973 merged under requester approval, PyPI35540174556 still testing. Sync2971ca39055070 typing repairs verified1125tests/fulltsc. Companion2763all8followups addressed4030d6d58d.
+
+New CI follow-up after Qodo closure: c5453d4385 frontend shards4/8 and8/8 fail in media page tests. Logs identify missing useQueryClient exports in two React Query mocks after authority-cache cleanup and obsolete stale-selection expectation. Reproduce both complete files, repair fixture contract/security-state expectation only if confirmed, then focused media regressions/tsc/lint. Parent owns source commit and protected-manifest refresh.
+
+c545 CI follow-up verified: media page mock regressions reproduce41failed/1pass, then both files plus real-query outage/hydration58pass/4files. Added stable useQueryClient/removeQueries fixture contracts; stale-deletion security test now asserts selection cleared before and after late404, preserving no-warning/no-refetch assertions. Full nonincremental WebUI tsc exits0. ScopedESLint baseline10/current10/new0; diffcheckclean; Bandit N/A TS-only. Two testfiles+this tracking only; no production edits/skip/timeout changes. Evidence /tmp/candidate-c545-frontend-ci-results.md. Parent owns review/sourcecommit/protectedmanifest/push.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
