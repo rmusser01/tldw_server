@@ -1572,7 +1572,13 @@ class VoiceManager:
 
         cleanup_task = self._cleanup_task
         try:
-            await asyncio.wait_for(cleanup_task, timeout=5.0)
+            # ASGI shutdown may already have cancelled this owned worker. Gather
+            # treats that as completion while preserving cancellation of us.
+            (outcome,) = await asyncio.wait_for(
+                asyncio.gather(cleanup_task, return_exceptions=True), timeout=5.0
+            )
+            if isinstance(outcome, BaseException) and not isinstance(outcome, asyncio.CancelledError):
+                raise outcome
         except asyncio.TimeoutError:
             cleanup_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
