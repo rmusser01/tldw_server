@@ -1742,7 +1742,7 @@ async function* bgStreamDirectUnsafe<
             signal: controller.signal
           })
           if (refreshResp.ok) {
-            const tokens = await refreshResp.json().catch(() => null)
+            const tokens = await refreshResp.json()
             if (tokens?.access_token && !controller.signal.aborted) {
               const latestCfg = await commitDirectRefresh(
                 storage,
@@ -1761,6 +1761,9 @@ async function* bgStreamDirectUnsafe<
           }
         }
       } catch (error) {
+        if (isRequestAbort(error, controller.signal)) {
+          throw createAbortError(readErrorMessage(error))
+        }
         if (isRequestConfigScopeChangedError(error)) {
           throw error
         }
