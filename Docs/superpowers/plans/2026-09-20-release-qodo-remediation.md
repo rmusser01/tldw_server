@@ -6,7 +6,7 @@ Published 0.1.42 source and grants remain immutable. Server repairs land in the 
 
 ## Original-review stages (historical completion)
 
-These stages describe the original review batch. The additional 18-finding agentic batch is tracked below and is still in progress.
+These stages describe the original review batch. The additional18-finding agentic batch has verified fixes/dispositions in the linked agentic ledger; final thread publication and remote CI are tracked with the current candidate.
 
 ## Stage 1: Inventory
 **Goal**: Capture every Qodo finding.

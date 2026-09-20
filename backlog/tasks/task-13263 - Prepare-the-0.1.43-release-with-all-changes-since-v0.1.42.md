@@ -4,7 +4,7 @@ title: Prepare the 0.1.43 release with all changes since v0.1.42
 status: In Progress
 assignee: []
 created_date: '2026-09-20 19:56'
-updated_date: '2026-09-20 22:16'
+updated_date: '2026-09-20 22:46'
 labels: []
 dependencies: []
 priority: high
@@ -15,15 +15,15 @@ priority: high
 <!-- SECTION:DESCRIPTION:BEGIN -->
 Prepare a reviewed release candidate based on v0.1.42 and frozen dev d72b1d2850ea947b6d12cac19f6b95867b68a580. Preserve 0.1.42 release fixes, reconcile released main into dev, inventory every new commit and merged PR, update release metadata and protected source records, and open a draft release PR. Track outstanding 0.1.42 publication verification in TASK-13013.3.
 
-Protected source: `222a6833b14bd847cf6783adc0fe4f829a1ba386`.
-Protected manifest SHA-256: `419a2b8f8dd81f23da35360a6ec5771c2d396ae6fc6f6ba5678faa21edac1ba5`.
+Protected source: `645e58c6a701bd2f7936e1bb79b362a12bc0b817`.
+Protected manifest SHA-256: `1d3af39b50da7797f8d6ec2aaabbedee22d5a6d7cf7ee6a76a388cc32c283b51`.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 The candidate includes v0.1.42 and frozen dev as ancestors, with reviewed conflict resolutions.
 - [x] #2 Changelog and release notes cover all post-0.1.42 changes, with an exhaustive commit inventory.
-- [ ] #3 Version metadata, documentation and protected-source records are consistent and verified.
+- [x] #3 Version metadata, documentation and protected-source records are consistent and verified.
 - [x] #4 A draft PR and release plan record checks, publication state and remaining human decisions.
 <!-- AC:END -->
 
@@ -47,6 +47,8 @@ Fresh candidate CodeQL review includes alert2693: buffered character-chat SSE fa
 Requester explicitly approved2973 human-summary waiver/merge/PyPI retry. Recovery merged cd2dbc792b8888555abac5c5c9eafa7a43d9b0e4; package inputs unchanged vs immutablev0.1.42,PyPI404 verified. Publication dispatched. Candidate currentCI exposed backend mypy targeting3.11 while runner NumPy stubs require3.12; frontend shard5 fails separately. Fixing under existing release task; freshQodo Notes boolean/endpoint-owner findings under13263.1.
 
 Recovery2973 approved/merged cd2dbc792b; publication35540174556 testgate running; candidate mergedrecovery eb4ec4817d. Backend actualfailureOpenAPIdescriptiondrift fixed222a6833b1,exactCIhashreproducedandtypesgenerated,fulltscpass. Frontendfixture b0585d63de,82pass. Protectedsource222a6833b14bd847cf6783adc0fe4f829a1ba386,7321files,manifest419a2b8f8dd81f23da35360a6ec5771c2d396ae6fc6f6ba5678faa21edac1ba5. Explicitcheck12pass. AdvisorymypyNumPystubs mismatch isnotjobfailure.
+
+Current protected source645e58c6a7 and manifest1d3af39b50da7797f8d6ec2aaabbedee22d5a6d7cf7ee6a76a388cc32c283b51 cover7322 files. Explicit protected-checkout gate13passed. All18 agentic fixes/dispositions locally verified; final push/thread replies/remote CI next. Recovery2973 merged under requester approval, PyPI35540174556 still testing. Sync2971ca39055070 typing repairs verified1125tests/fulltsc. Companion2763all8followups addressed4030d6d58d.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
