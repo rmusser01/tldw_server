@@ -1296,29 +1296,33 @@ async def lifespan(app: FastAPI):
 
     _run_startup_config_validation()
 
-    yield
-    from tldw_Server_API.app.services.lifespan_shutdown_sequence import (
-        run_lifespan_shutdown_sequence,
-    )
+    try:
+        yield
+    finally:
+        # Forced ASGI shutdown cancels this suspended lifespan. Owned workers
+        # still need teardown before cancellation can leave the application.
+        from tldw_Server_API.app.services.lifespan_shutdown_sequence import (
+            run_lifespan_shutdown_sequence,
+        )
 
-    await run_lifespan_shutdown_sequence(
-        app=app,
-        worker_runtime=worker_runtime,
-        readiness_state=READINESS_STATE,
-        db_pool=locals().get("db_pool"),
-        session_manager=locals().get("session_manager"),
-        heavy_startup_handles=locals().get("heavy_startup_handles"),
-        build_legacy_shutdown_context=_build_legacy_shutdown_context,
-        apply_shutdown_transition_gate=_apply_shutdown_transition_gate,
-        quiesce_owned_job_pollers_for_shutdown=_quiesce_owned_job_pollers_for_shutdown,
-        run_coordinated_shutdown=_run_coordinated_shutdown,
-        startup_guard_exceptions=_STARTUP_GUARD_EXCEPTIONS,
-        import_exceptions=_IMPORT_EXCEPTIONS,
-        in_pytest_runtime=_shared_is_explicit_pytest_runtime(),
-        test_db_instance_ref=test_db_instance_ref,
-        timed_shutdown_segment=_timed_shutdown_segment,
-        record_shutdown_timing_total=_record_shutdown_timing_total,
-    )
+        await run_lifespan_shutdown_sequence(
+            app=app,
+            worker_runtime=worker_runtime,
+            readiness_state=READINESS_STATE,
+            db_pool=db_pool,
+            session_manager=session_manager,
+            heavy_startup_handles=heavy_startup_handles,
+            build_legacy_shutdown_context=_build_legacy_shutdown_context,
+            apply_shutdown_transition_gate=_apply_shutdown_transition_gate,
+            quiesce_owned_job_pollers_for_shutdown=_quiesce_owned_job_pollers_for_shutdown,
+            run_coordinated_shutdown=_run_coordinated_shutdown,
+            startup_guard_exceptions=_STARTUP_GUARD_EXCEPTIONS,
+            import_exceptions=_IMPORT_EXCEPTIONS,
+            in_pytest_runtime=_shared_is_explicit_pytest_runtime(),
+            test_db_instance_ref=test_db_instance_ref,
+            timed_shutdown_segment=_timed_shutdown_segment,
+            record_shutdown_timing_total=_record_shutdown_timing_total,
+        )
 
 
 #
