@@ -23,7 +23,7 @@ import { AssistantSelect } from "@/components/Common/AssistantSelect"
 import { useChatSurfaceCoordinatorStore } from "@/store/chat-surface-coordinator"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { webUIResumeLastChat } from "@/services/app"
-import { getRecentChatFromWebUI } from "@/db/dexie/helpers"
+import { getRecentChatFromWebUI, formatToChatHistory, formatToMessage } from "@/db/dexie/helpers"
 import {
   encodeSidepanelChatWebUiHandoff,
   SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM
@@ -279,8 +279,8 @@ vi.mock("@/store/option", async importOriginal => {
 vi.mock("@/services/service-prompts", async importOriginal => ({
   ...await importOriginal<typeof import("@/services/service-prompts")>(),
   resolveServicePromptScope: async () => ({ scopeKey: `scope-${ordinaryCompletion.owner}`, userId: ordinaryCompletion.owner, clientPrincipalVerified: true, config: { serverUrl: "http://chat.test", authMode: "multi-user" } }),
-  loadServicePromptSnapshot: async (_ids: unknown, { signal }: { signal: AbortSignal }) => ({
-    scopeKey: `scope-${ordinaryCompletion.owner}`, scopeSignal: signal, scopeInvalidatedSignal: realLoader.invalidated.signal,
+  loadServicePromptSnapshot: async (_ids: unknown, { signal }: { signal?: AbortSignal } = {}) => ({
+    scopeKey: `scope-${ordinaryCompletion.owner}`, scopeSignal: signal ?? new AbortController().signal, scopeInvalidatedSignal: realLoader.invalidated.signal,
     requestScope: { config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: ordinaryCompletion.owner }, release: vi.fn()
   })
 }))
@@ -392,6 +392,32 @@ class RouteTestBoundary extends React.Component<{ children: React.ReactNode }, {
 }
 
 describe("Playground coordinator integration", () => {
+  it.each(["logout", "unmount"])("does not republish a recent cached Chat after %s during its read", async boundary => {
+    vi.mocked(formatToChatHistory).mockReturnValue([])
+    vi.mocked(formatToMessage).mockReturnValue([])
+    realLoader.enabled = true
+    useMessageOptionMock.mockImplementation(useRealServerConversation)
+    useStoreMessageOption.setState({ messages: [], history: [], historyId: null, serverChatId: null })
+    vi.mocked(webUIResumeLastChat).mockResolvedValue(true)
+    let release!: (value: unknown) => void
+    const pending = new Promise(resolve => { release = resolve })
+    vi.mocked(getRecentChatFromWebUI).mockReturnValue(pending as ReturnType<typeof getRecentChatFromWebUI>)
+    const view = render(<Playground />)
+    await waitFor(() => expect(getRecentChatFromWebUI).toHaveBeenCalled())
+    if (boundary === "unmount") view.unmount()
+    else act(() => {
+      realLoader.invalidated.abort()
+      ordinaryCompletion.owner = "B"
+      window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed"))
+    })
+    await act(async () => {
+      release({ history: { id: "alice-cache", server_scope_key: '["http://chat.test","multi-user","manual",null,"A",null]' }, messages: [] })
+      await pending
+    })
+    expect(useStoreMessageOption.getState().historyId).toBeNull()
+    view.unmount()
+  })
+
   beforeEach(() => {
     ordinaryCompletion.owner = "A"
     ordinaryCompletion.save.mockClear()
@@ -899,7 +925,7 @@ describe("Playground coordinator integration", () => {
     let release!: () => void
     const held = new Promise<void>(resolve => { release = resolve })
     const read = vi.spyOn(PageAssistDatabase.prototype, "getChatHistory").mockImplementation(async () => { await held; return [] })
-    vi.spyOn(PageAssistDatabase.prototype, "getHistoryInfo").mockResolvedValue({ id: "owned-local", title: "Owned local title", createdAt: 1, is_rag: false })
+    vi.spyOn(PageAssistDatabase.prototype, "getHistoryInfo").mockResolvedValue({ id: "owned-local", title: "Owned local title", createdAt: 1, is_rag: false, server_scope_key: '["http://chat.test","multi-user","manual",null,"A",null]' })
     if (origin === "settings") window.history.pushState({}, "", "/chat?settingsHistoryId=owned-local")
     const view = render(<Playground />)
     if (origin === "timeline") {

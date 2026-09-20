@@ -15,6 +15,9 @@ import { normalizeConversationState } from "@/utils/conversation-state"
 import type { NotificationInstance } from "antd/es/notification/interface"
 import type { ChatScope } from "@/types/chat-scope"
 import type { ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
+import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts"
+import { usePlaygroundSessionStore } from "@/store/playground-session"
+import { runChatPersistenceTransaction } from "@/db/dexie/chat-persistence-transaction"
 
 export const createRegenerateLastMessage = ({
   validateBeforeSubmitFn,
@@ -275,18 +278,22 @@ export const createBranchMessage = ({
   serverOnly?: boolean
   notification: NotificationInstance
 }) => {
+  const sourceRevision = usePlaygroundSessionStore.getState().restoreRevision
+  const isSourceCurrent = () => usePlaygroundSessionStore.getState().restoreRevision === sourceRevision
   const createLocalBranch = async (index: number): Promise<string | null> => {
-    if (!historyId) {
+    if (!historyId || !isSourceCurrent()) {
       // No persisted history; nothing to branch from.
       return null
     }
 
     try {
       const newBranch = await generateBranchMessage(historyId, index)
+      if (!isSourceCurrent()) return null
       setHistory(formatToChatHistory(newBranch.messages))
       setMessages(formatToMessage(newBranch.messages))
       setHistoryId(newBranch.history.id)
       const systemFiles = await getSessionFiles(newBranch.history.id)
+      if (!isSourceCurrent()) return null
       if (setContext) {
         setContext(systemFiles)
       }
@@ -294,7 +301,8 @@ export const createBranchMessage = ({
       const lastUsedPrompt = newBranch?.history?.last_used_prompt
       if (lastUsedPrompt) {
         if (lastUsedPrompt.prompt_id) {
-          const prompt = await getPromptById(lastUsedPrompt.prompt_id)
+            const prompt = await getPromptById(lastUsedPrompt.prompt_id)
+            if (!isSourceCurrent()) return null
           if (prompt && setSelectedSystemPrompt) {
             setSelectedSystemPrompt(lastUsedPrompt.prompt_id)
           }
@@ -313,7 +321,7 @@ export const createBranchMessage = ({
     index: number,
     branchTitle: string
   ): Promise<string | null> => {
-    if (!messages || messages.length === 0) {
+    if (!messages || messages.length === 0 || !isSourceCurrent()) {
       return null
     }
 
@@ -322,44 +330,37 @@ export const createBranchMessage = ({
       return null
     }
 
+    let owner: ServicePromptSnapshot | undefined
     try {
-      const newHistory = await saveHistory(branchTitle, false, "branch")
-      const savedMessages: any[] = []
-
-      for (let i = 0; i < snapshot.length; i++) {
-        const msg = snapshot[i]
-        const role =
-          msg.name === "System"
-            ? "system"
-            : msg.isBot
-              ? "assistant"
-              : "user"
-        const name =
-          msg.name ||
-          (role === "assistant"
-            ? "Assistant"
-            : role === "system"
-              ? "System"
-              : "You")
-        const saved = await saveMessage({
-          history_id: newHistory.id,
-          name,
-          role,
-          content: String(msg.message ?? ""),
-          images: msg.images || [],
-          source: msg.sources || [],
-          time: i,
-          message_type: msg.messageType,
-          clusterId: msg.clusterId,
-          modelId: msg.modelId,
-          modelImage: msg.modelImage,
-          modelName: msg.modelName,
-          parent_message_id: msg.parentMessageId ?? null,
-          documents: msg.documents
-        })
-        savedMessages.push(saved)
-      }
-
+      owner = await loadServicePromptSnapshot([])
+      if (!isSourceCurrent() || owner.scopeSignal.aborted || owner.scopeInvalidatedSignal.aborted) return null
+      const { newHistory, savedMessages } = await runChatPersistenceTransaction(owner.scopeSignal, async () => {
+        const newHistory = await saveHistory(branchTitle, false, "branch", undefined, undefined, owner!.requestScope)
+        const savedMessages: Awaited<ReturnType<typeof saveMessage>>[] = []
+        for (let i = 0; i < snapshot.length; i++) {
+          const msg = snapshot[i]
+          const role = msg.name === "System" ? "system" : msg.isBot ? "assistant" : "user"
+          const name = msg.name || (role === "assistant" ? "Assistant" : role === "system" ? "System" : "You")
+          savedMessages.push(await saveMessage({
+            history_id: newHistory.id,
+            name,
+            role,
+            content: String(msg.message ?? ""),
+            images: msg.images || [],
+            source: msg.sources || [],
+            time: i,
+            message_type: msg.messageType,
+            clusterId: msg.clusterId,
+            modelId: msg.modelId,
+            modelImage: msg.modelImage,
+            modelName: msg.modelName,
+            parent_message_id: msg.parentMessageId ?? null,
+            documents: msg.documents
+          }))
+        }
+        return { newHistory, savedMessages }
+      })
+      if (!isSourceCurrent() || owner.scopeSignal.aborted || owner.scopeInvalidatedSignal.aborted) return null
       setHistory(formatToChatHistory(savedMessages))
       setMessages(formatToMessage(savedMessages))
       setHistoryId(newHistory.id)
@@ -368,7 +369,10 @@ export const createBranchMessage = ({
       }
       return newHistory.id
     } catch (e) {
+      if (isSourceCurrent()) console.warn("Unable to persist local Chat branch:", e)
       return null
+    } finally {
+      owner?.release()
     }
   }
 

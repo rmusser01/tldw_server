@@ -11,6 +11,9 @@ import {
 import { lastUsedChatModelEnabled } from "@/services/model-settings"
 import { updatePageTitle } from "@/utils/update-page-title"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
+import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts"
+import { serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 
 interface LoadLocalConversationDeps {
   setServerChatId: (id: string | null) => void
@@ -53,11 +56,11 @@ export function useLoadLocalConversation(
   React.useEffect(() => {
     mountedRef.current = true
     const invalidate = () => { loadGenerationRef.current += 1 }
-    window.addEventListener("tldw:auth-principal-changed", invalidate)
+    const stop = watchChatAccountChanges(invalidated => { if (invalidated) invalidate() })
     return () => {
       mountedRef.current = false
       invalidate()
-      window.removeEventListener("tldw:auth-principal-changed", invalidate)
+      stop()
     }
   }, [])
 
@@ -69,17 +72,22 @@ export function useLoadLocalConversation(
     async (conversationId: string): Promise<boolean> => {
       const generation = ++loadGenerationRef.current
       const restoreRevision = usePlaygroundSessionStore.getState().restoreRevision
+      let snapshot: ServicePromptSnapshot | undefined
       const isCurrent = () => mountedRef.current &&
+        !snapshot?.scopeSignal.aborted && !snapshot?.scopeInvalidatedSignal.aborted &&
         generation === loadGenerationRef.current &&
         restoreRevision === usePlaygroundSessionStore.getState().restoreRevision
       if (!isCurrent()) return false
       try {
+        snapshot = await loadServicePromptSnapshot([])
+        if (!isCurrent()) return false
         const db = dbRef.current!
         const [history, historyDetails] = await Promise.all([
           db.getChatHistory(conversationId),
           db.getHistoryInfo(conversationId)
         ])
         if (!isCurrent()) return false
+        if (!historyDetails || historyDetails.server_scope_key !== serverChatMirrorOwnerKey(snapshot)) return false
 
         setServerChatId(null)
         if (!isCurrent()) return false
@@ -134,6 +142,8 @@ export function useLoadLocalConversation(
           })
         )
         return false
+      } finally {
+        snapshot?.release()
       }
     },
     [

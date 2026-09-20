@@ -4,11 +4,7 @@ import {
   getTitleById,
   getRecentChatFromCopilot,
   generateID,
-  getFullChatData,
-  getHistoryByServerChatId,
-  getHistoriesWithMetadata,
-  saveHistory,
-  saveMessage
+  getFullChatData
 } from "@/db/dexie/helpers"
 import { getDesignSystemState } from "@/design-system"
 import useBackgroundMessage from "@/hooks/useBackgroundMessage"
@@ -68,7 +64,8 @@ import { normalizeMessageMetadataExtra } from "@/utils/dynamic-ui"
 import { restoreQueuedRequests } from "@/utils/chat-request-queue"
 import { useFlashcardsGenerateTransfer, useStudyPackTransfer } from "@/hooks/useFlashcardsGenerateTransfer"
 import { flashcardsHandoffAuthority, loadFlashcardsTransferSnapshot } from "@/services/tldw/flashcards-generate-transfer"
-import type { ServicePromptSnapshot } from "@/services/service-prompts"
+import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts"
+import { linkServerChatMirror, reconcileServerChatMirror, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import {
   buildCapturedNoteContent,
   CAPTURED_NOTE_KEYWORD
@@ -1487,121 +1484,6 @@ const SidepanelChat = () => {
     [historyId, openLocalHistory]
   )
 
-  const ensureLocalHistoryMirror = React.useCallback(
-    async (
-      chatId: string,
-      chat: ServerChatHistoryItem,
-      list: ServerChatMessageInput[]
-    ) => {
-      let localHistoryId: string | null = null
-      try {
-        const existingHistory = await getHistoryByServerChatId(chatId)
-        if (existingHistory) {
-          localHistoryId = existingHistory.id
-        } else {
-          const newHistory = await saveHistory(
-            chat.title || newChatLabel,
-            false,
-            "server",
-            undefined,
-            chatId
-          )
-          localHistoryId = newHistory.id
-        }
-
-        if (localHistoryId) {
-          const metadataMap = await getHistoriesWithMetadata([localHistoryId])
-          const existingMeta = metadataMap.get(localHistoryId)
-          if (!existingMeta || existingMeta.messageCount === 0) {
-            const now = Date.now()
-            const results = await Promise.allSettled(
-              list.map((m, index) => {
-                const meta = m as Record<string, unknown>
-                const parsedCreatedAt = Date.parse(m.created_at)
-                const resolvedCreatedAt = Number.isNaN(parsedCreatedAt)
-                  ? now + index
-                  : parsedCreatedAt
-                const normalizedId = normalizeServerChatMessageId(m.id)
-                const role =
-                  m.role === "assistant" ||
-                  m.role === "system" ||
-                  m.role === "user"
-                    ? m.role
-                    : "user"
-                const name =
-                  role === "assistant"
-                    ? "Assistant"
-                    : role === "system"
-                      ? "System"
-                      : "You"
-                return saveMessage({
-                  id: normalizedId,
-                  history_id: localHistoryId,
-                  name,
-                  role,
-                  content: m.content,
-                  images: [],
-                  source: [],
-                  time: index,
-                  message_type:
-                    (meta?.message_type as string | undefined) ??
-                    (meta?.messageType as string | undefined),
-                  clusterId:
-                    (meta?.cluster_id as string | undefined) ??
-                    (meta?.clusterId as string | undefined),
-                  modelId:
-                    (meta?.model_id as string | undefined) ??
-                    (meta?.modelId as string | undefined),
-                  modelName:
-                    (meta?.model_name as string | undefined) ??
-                    (meta?.modelName as string | undefined) ??
-                    "Assistant",
-                  modelImage:
-                    (meta?.model_image as string | undefined) ??
-                    (meta?.modelImage as string | undefined),
-                  parent_message_id:
-                    (meta?.parent_message_id as
-                      | string
-                      | null
-                      | undefined) ??
-                    (meta?.parentMessageId as
-                      | string
-                      | null
-                      | undefined) ??
-                    null,
-                  createdAt: resolvedCreatedAt
-                })
-              })
-            )
-            const failed = results
-              .map((result, index) => ({
-                result,
-                messageId:
-                  list[index]?.id === undefined
-                    ? String(index)
-                    : normalizeServerChatMessageId(list[index].id)
-              }))
-              .filter((entry) => entry.result.status === "rejected")
-            if (failed.length > 0) {
-              console.warn(
-                `[ensureLocalHistoryMirror] ${failed.length} messages failed to save`,
-                failed.map(({ messageId, result }) => ({
-                  messageId,
-                  reason:
-                    result.status === "rejected" ? result.reason : undefined
-                }))
-              )
-            }
-          }
-        }
-      } catch (err) {
-        console.error("[ensureLocalHistoryMirror] Failed:", err)
-      }
-      return localHistoryId
-    },
-    [newChatLabel]
-  )
-
   const openServerChat = React.useCallback(
     async (chat: ServerChatHistoryItem) => {
       const chatId = String(chat.id)
@@ -1616,26 +1498,34 @@ const SidepanelChat = () => {
       }
       setDropedFile(undefined)
       setIsLoading(true)
+      let owner: ServicePromptSnapshot | undefined
       try {
-        await tldwClient.initialize().catch(() => null)
+        owner = await loadServicePromptSnapshot([])
         const list = await tldwClient.listChatMessages(chatId, {
           include_deleted: "false",
           include_metadata: "true"
-        })
+        }, { signal: owner.scopeSignal, requestScope: owner.requestScope })
+        if (owner.scopeSignal.aborted || owner.scopeInvalidatedSignal.aborted) return
         const messageList: ServerChatMessageInput[] = list
         const { history, mappedMessages } = mapServerChatMessages(
           messageList,
           userDisplayName
         )
-        const localHistoryId = await ensureLocalHistoryMirror(
-          chatId,
-          chat,
-          messageList
-        )
+        const ownerKey = serverChatMirrorOwnerKey(owner)
+        const localHistoryId = await linkServerChatMirror({
+          chatId, title: chat.title || newChatLabel, ownerKey, signal: owner.scopeSignal
+        })
+        const mirror = await reconcileServerChatMirror({
+          historyId: localHistoryId, chatId, ownerKey,
+          messages: mappedMessages, signal: owner.scopeSignal
+        })
+        if (owner.scopeSignal.aborted || owner.scopeInvalidatedSignal.aborted) return
 
         const snapshot: SidepanelChatSnapshot = {
           history,
-          messages: mappedMessages,
+          messages: mappedMessages.map(message => ({
+            ...message, id: mirror.localIds.get(message.serverMessageId) || message.id
+          })),
           chatMode,
           historyId: localHistoryId,
           webSearch,
@@ -1678,12 +1568,12 @@ const SidepanelChat = () => {
             t("common:serverChatLoadError", "Failed to load conversation.")
         })
       } finally {
+        owner?.release()
         setIsLoading(false)
       }
     },
     [
       chatMode,
-      ensureLocalHistoryMirror,
       handleSelectTab,
       modelSettingsSnapshot,
       notification,

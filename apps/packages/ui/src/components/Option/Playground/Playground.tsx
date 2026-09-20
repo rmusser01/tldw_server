@@ -1,4 +1,4 @@
-import { resolveServicePromptScope } from "@/services/service-prompts";
+import { resolveServicePromptScope, loadServicePromptSnapshot } from "@/services/service-prompts";
 import React from "react";
 import { PlaygroundForm } from "./PlaygroundForm";
 import { PlaygroundChat } from "./PlaygroundChat";
@@ -700,7 +700,7 @@ export const Playground = () => {
   > | null>(null);
   const initializePlaygroundRef = React.useRef(false);
   const initializePlaygroundCallbackRef = React.useRef<
-    () => Promise<void>
+    (signal: AbortSignal) => Promise<void>
   >(async () => {});
   const sidepanelHandoffAppliedRef = React.useRef(false);
   const settingsReturnAppliedRef = React.useRef(false);
@@ -1754,7 +1754,7 @@ export const Playground = () => {
     persistAttachedResearchContext,
   ]);
 
-  const initializePlayground = React.useCallback(async () => {
+  const initializePlayground = React.useCallback(async (signal: AbortSignal) => {
     if (routeCharacterIntentChatId) {
       if (serverChatId !== routeCharacterIntentChatId) {
         setServerChatId(routeCharacterIntentChatId);
@@ -1796,31 +1796,44 @@ export const Playground = () => {
     }
 
     // 2. Fall back to existing webUIResumeLastChat behavior
+    const revision = usePlaygroundSessionStore.getState().restoreRevision;
+    const isCurrent = () => !signal.aborted &&
+      usePlaygroundSessionStore.getState().restoreRevision === revision;
     const isEnabled = await webUIResumeLastChat();
-    if (!isEnabled) return;
+    if (!isEnabled || !isCurrent()) return;
 
     if (messages.length === 0 && history.length === 0) {
-      const recentChat = await getRecentChatFromWebUI();
-      if (recentChat) {
-        setHistoryId(recentChat.history.id);
-        setHistory(formatToChatHistory(recentChat.messages));
-        setMessages(formatToMessage(recentChat.messages));
+      const snapshot = await loadServicePromptSnapshot([], { signal }).catch(() => null);
+      if (!snapshot) return;
+      try {
+        const canPublish = () => isCurrent() && !snapshot.scopeSignal.aborted &&
+          !snapshot.scopeInvalidatedSignal.aborted;
+        if (!canPublish()) return;
+        const recentChat = await getRecentChatFromWebUI(snapshot);
+        if (recentChat && canPublish()) {
+          setHistoryId(recentChat.history.id);
+          setHistory(formatToChatHistory(recentChat.messages));
+          setMessages(formatToMessage(recentChat.messages));
 
-        const lastUsedPrompt = recentChat?.history?.last_used_prompt;
-        if (lastUsedPrompt) {
-          if (lastUsedPrompt.prompt_id) {
-            const prompt = await getPromptById(lastUsedPrompt.prompt_id);
-            if (prompt) {
-              setSelectedSystemPrompt(lastUsedPrompt.prompt_id);
-              if (!lastUsedPrompt.prompt_content?.trim()) {
-                setSystemPrompt(prompt.content);
+          const lastUsedPrompt = recentChat?.history?.last_used_prompt;
+          if (lastUsedPrompt) {
+            if (lastUsedPrompt.prompt_id) {
+              const prompt = await getPromptById(lastUsedPrompt.prompt_id);
+              if (!canPublish()) return;
+              if (prompt) {
+                setSelectedSystemPrompt(lastUsedPrompt.prompt_id);
+                if (!lastUsedPrompt.prompt_content?.trim()) {
+                  setSystemPrompt(prompt.content);
+                }
               }
             }
-          }
-          if (lastUsedPrompt.prompt_content?.trim()) {
-            setSystemPrompt(lastUsedPrompt.prompt_content);
+            if (lastUsedPrompt.prompt_content?.trim()) {
+              setSystemPrompt(lastUsedPrompt.prompt_content);
+            }
           }
         }
+      } finally {
+        snapshot.release();
       }
     }
   }, [
@@ -1856,11 +1869,12 @@ export const Playground = () => {
     }
     initializePlaygroundRef.current = true;
     let cancelled = false;
+    const controller = new AbortController();
     const run = async () => {
       // Invoke through a ref so identity churn of the initialization
       // callback (caused by state updates during startup) cannot re-run
       // this one-shot effect and cancel readiness before init resolves.
-      await initializePlaygroundCallbackRef.current();
+      await initializePlaygroundCallbackRef.current(controller.signal);
       if (!cancelled) {
         setPlaygroundReady(true);
       }
@@ -1868,6 +1882,7 @@ export const Playground = () => {
     void run();
     return () => {
       cancelled = true;
+      controller.abort();
       // Unlatch on teardown: a StrictMode replay or a session-scope change
       // cancels this run's readiness update, so the replacement effect must
       // be allowed to initialize again - otherwise playgroundReady can stay

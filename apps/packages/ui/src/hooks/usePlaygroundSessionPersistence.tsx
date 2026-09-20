@@ -12,6 +12,8 @@ import {
 import { useStoreChatModelSettings } from "@/store/model"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
+import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts"
+import { serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import { useConnectionState } from "@/hooks/useConnectionState"
 import { useSelectedAssistant } from "@/hooks/useSelectedAssistant"
 import {
@@ -532,7 +534,9 @@ export function usePlaygroundSessionPersistence() {
         : usePlaygroundSessionStore.getState().sourceSelectionRevision
     const restoreRevision =
       usePlaygroundSessionStore.getState().restoreRevision
+    let snapshot: ServicePromptSnapshot | undefined
     const isCurrentRestore = () =>
+      !snapshot?.scopeSignal.aborted && !snapshot?.scopeInvalidatedSignal.aborted &&
       usePlaygroundSessionStore.getState().restoreRevision === restoreRevision
     const scopeKey = await resolveCurrentScopeKey()
     if (!isCurrentRestore()) {
@@ -567,11 +571,24 @@ export function usePlaygroundSessionPersistence() {
     try {
       let cachedServerTitle: string | null = null
       if (savedHistoryId) {
+        try {
+          snapshot = await loadServicePromptSnapshot([])
+        } catch (error) {
+          // An unavailable identity service does not prove the saved selection
+          // is invalid. Keep it and its queue for a later verified restore.
+          if (isCurrentRestore()) console.warn("Saved Chat owner verification unavailable; restore deferred:", error)
+          return "cancelled"
+        }
+        if (!isCurrentRestore()) return "cancelled"
         // Restore messages from Dexie
         const chatData = await getFullChatData(savedHistoryId)
         if (!isCurrentRestore()) return "cancelled"
         if (!chatData) {
           // History was deleted, clear session
+          clearSession()
+          return "not-restored"
+        }
+        if (chatData.historyInfo.server_scope_key !== serverChatMirrorOwnerKey(snapshot)) {
           clearSession()
           return "not-restored"
         }
@@ -680,10 +697,12 @@ export function usePlaygroundSessionPersistence() {
 
       return "restored"
     } catch (error) {
+      if (!isCurrentRestore()) return "cancelled"
       console.warn("Failed to restore session:", error)
       clearSession()
       return "not-restored"
     } finally {
+      snapshot?.release()
       isRestoringRef.current = false
       initialRestoreSettledRef.current = true
     }

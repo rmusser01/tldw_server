@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { ChatHistory, Message } from "@/store/option"
 
 const mockTldwClient = vi.hoisted(() => ({
@@ -7,6 +7,10 @@ const mockTldwClient = vi.hoisted(() => ({
   createChat: vi.fn(),
   addChatMessage: vi.fn()
 }))
+const ownership = vi.hoisted(() => ({ revision: 0, loadSnapshot: vi.fn(), release: vi.fn(), controller: new AbortController() }))
+vi.mock("@/store/playground-session", () => ({ usePlaygroundSessionStore: { getState: () => ({ restoreRevision: ownership.revision }) } }))
+vi.mock("@/services/service-prompts", () => ({ loadServicePromptSnapshot: (...args: unknown[]) => ownership.loadSnapshot(...args) }))
+vi.mock("@/db/dexie/chat-persistence-transaction", () => ({ runChatPersistenceTransaction: async (_signal: AbortSignal, operation: () => Promise<unknown>) => operation() }))
 
 vi.mock("@/db/dexie/helpers", () => ({
   deleteChatForEdit: vi.fn(),
@@ -40,8 +44,46 @@ vi.mock("@/utils/conversation-state", () => ({
 }))
 
 import { createBranchMessage } from "../messageHandlers"
+import { saveHistory, saveMessage } from "@/db/dexie/helpers"
 
 describe("createBranchMessage", () => {
+  const requestScope = { config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "alice" }
+  beforeEach(() => {
+    vi.clearAllMocks()
+    ownership.revision = 0
+    ownership.controller = new AbortController()
+    ownership.loadSnapshot.mockReset().mockImplementation(async () => ({
+      requestScope, scopeSignal: ownership.controller.signal, scopeInvalidatedSignal: ownership.controller.signal, release: ownership.release
+    }))
+    vi.mocked(saveHistory).mockResolvedValue({ id: "owned-snapshot-branch" } as any)
+    vi.mocked(saveMessage).mockImplementation(async data => ({ ...data, id: "saved-message" }) as any)
+  })
+
+  const localOptions = () => ({
+    notification: { error: vi.fn(), warning: vi.fn() } as any,
+    historyId: null, setHistory: vi.fn(), setMessages: vi.fn(), setHistoryId: vi.fn(),
+    messages: [{ isBot: false, name: "You", message: "Alice private draft conversation", sources: [] }] as Message[]
+  })
+
+  it("stamps a snapshot-only branch with its verified source owner", async () => {
+    const options = localOptions()
+    expect(await createBranchMessage(options)(0)).toBe("owned-snapshot-branch")
+    expect(saveHistory).toHaveBeenCalledWith("Branch · msg #1", false, "branch", undefined, undefined, requestScope)
+    expect(ownership.release).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not assign an old snapshot to the account selected while ownership resolves", async () => {
+    const options = localOptions()
+    ownership.loadSnapshot.mockImplementationOnce(async () => {
+      ownership.revision++
+      return { requestScope: { ...requestScope, userId: "bob" }, scopeSignal: ownership.controller.signal,
+        scopeInvalidatedSignal: ownership.controller.signal, release: ownership.release }
+    })
+    expect(await createBranchMessage(options)(0)).toBeNull()
+    expect(saveHistory).not.toHaveBeenCalled()
+    expect(options.setMessages).not.toHaveBeenCalled()
+  })
+
   it("prefers the parent server chat character_id when local characterId is stale", async () => {
     mockTldwClient.initialize.mockResolvedValue(undefined)
     mockTldwClient.getChat.mockResolvedValue({

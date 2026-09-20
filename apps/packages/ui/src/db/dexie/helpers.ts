@@ -22,6 +22,8 @@ import {
   Models
 } from "./types"
 import { PageAssistDatabase } from "./chat"
+import type { ServicePromptSnapshot } from "@/services/service-prompts"
+import { serverChatMirrorOwnerKey } from "./server-chat-mirror"
 import { db as chatDB } from "./schema"
 import {
   deletePromptByIdFB,
@@ -49,7 +51,8 @@ export const saveHistory = async (
   is_rag?: boolean,
   message_source?: "copilot" | "web-ui" | "branch" | "server",
   doc_id?: string,
-  server_chat_id?: string
+  server_chat_id?: string,
+  requestScope?: ServicePromptSnapshot["requestScope"]
 ) => {
   const id = generateID()
   const createdAt = Date.now()
@@ -60,7 +63,8 @@ export const saveHistory = async (
     is_rag: is_rag || false,
     message_source,
     doc_id,
-    server_chat_id
+    server_chat_id,
+    ...(requestScope ? { server_scope_key: serverChatMirrorOwnerKey({ requestScope }) } : {})
   }
   const db = new PageAssistDatabase()
   await db.addChatHistory(history)
@@ -72,9 +76,12 @@ export const getHistoryByServerChatId = async (serverChatId: string) => {
   return await db.getHistoryByServerChatId(serverChatId)
 }
 
-export const getHistoryByDocId = async (docId: string) => {
+export const getHistoryByDocId = async (docId: string, requestScope: ServicePromptSnapshot["requestScope"]) => {
   const db = new PageAssistDatabase()
-  return await db.getHistoryByDocId(docId)
+  const ownerKey = serverChatMirrorOwnerKey({ requestScope })
+  const histories = await db.getAllHistoriesByDocId(docId)
+  return histories.filter(history => history.server_scope_key === ownerKey)
+    .sort((a, b) => b.createdAt - a.createdAt)[0] ?? null
 }
 
 export const getAllHistoriesByDocId = async (docId: string) => {
@@ -957,12 +964,13 @@ export const getRecentChatFromCopilot = async () => {
   return { history, messages }
 }
 
-export const getRecentChatFromWebUI = async () => {
+export const getRecentChatFromWebUI = async (snapshot: ServicePromptSnapshot) => {
   const db = new PageAssistDatabase()
   const chatHistories = await db.getChatHistories()
   if (chatHistories.length === 0) return null
   const history = chatHistories.find(
-    (history) => history.message_source === "web-ui"
+    (history) => history.message_source === "web-ui" &&
+      history.server_scope_key === serverChatMirrorOwnerKey(snapshot)
   )
   if (!history) return null
 

@@ -206,7 +206,7 @@ export const saveMessageOnError = async ({
       scopeInvalidatedSignal,
       async () => {
         const targetHistoryId = historyId ?? (
-          await saveHistory(title!, false, message_source)
+          await saveHistory(title!, false, message_source, undefined, undefined, requestScope)
         ).id
         const shouldSaveUser = !isRegenerating && (
           !historyId || !isAbort || !isContinue
@@ -329,7 +329,7 @@ export const saveMessageOnError = async ({
       return historyId
     } else {
       const title = await generateTitleWithFallback(selectedModel, userMessage)
-      const newHistoryId = await saveHistory(title, false, message_source)
+      const newHistoryId = await saveHistory(title, false, message_source, undefined, undefined, requestScope)
       updatePageTitle(title)
       if (!isRegenerating) {
         await saveMessage({
@@ -428,7 +428,7 @@ export const saveMessageOnError = async ({
   } else {
     // Create new history on error
     const title = await generateTitleWithFallback(selectedModel, userMessage)
-    const newHistoryId = await saveHistory(title, false, message_source)
+    const newHistoryId = await saveHistory(title, false, message_source, undefined, undefined, requestScope)
     updatePageTitle(title)
     try {
       if (!isRegenerating) {
@@ -575,7 +575,7 @@ export const saveMessageOnSuccess = async ({
     scopeInvalidatedSignal,
     async () => {
       const targetHistoryId = historyId ?? (
-        await saveHistory(title!, false, message_source)
+        await saveHistory(title!, false, message_source, undefined, undefined, requestScope)
       ).id
 
       if (isRegenerate && retryFailedTurn && userMessageId && userServerMessageId) {

@@ -141,6 +141,23 @@ describe("owned server Chat mirror", () => {
     expect(await link("A", { currentHistoryId: "legacy" })).not.toBe("legacy")
     expect(state.histories.get("legacy").server_scope_key).toBeUndefined()
   })
+  it("fills a fresh owned mirror when legacy rows already use the canonical IDs", async () => {
+    state.histories.set("legacy", history("legacy"))
+    state.messages.set("question", row("question", "legacy", "Legacy question"))
+    state.messages.set("answer", row("answer", "legacy", "Legacy answer"))
+    const ownedId = await link("A")
+    const result = await reconcileServerChatMirror({
+      historyId: ownedId, chatId: "chat-1", ownerKey: "A",
+      messages: [incoming("question", "Current question"), incoming("answer", "Current answer")]
+    })
+    expect(result.rows.map(message => [message.serverMessageId, message.content])).toEqual([
+      ["question", "Current question"], ["answer", "Current answer"]
+    ])
+    expect(result.localIds.get("question")).not.toBe("question")
+    expect(state.messages.get("question")).toMatchObject({ history_id: "legacy", content: "Legacy question" })
+    expect(state.messages.get("answer")).toMatchObject({ history_id: "legacy", content: "Legacy answer" })
+    expect(state.histories.get("legacy").server_scope_key).toBeUndefined()
+  })
   it("does not repurpose an owned history from another conversation", async () => {
     state.histories.set("other", { ...history("other", "A"), server_chat_id: "chat-other" })
     expect(await link("A", { currentHistoryId: "other", legacyHistoryId: "other" })).not.toBe("other")
