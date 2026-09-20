@@ -4,6 +4,36 @@ This page is the release notes index placeholder for published versions.
 
 ## Unreleased
 
+## 0.1.43 - 2026-09-20 (draft)
+
+This candidate includes all 616 commits merged into the frozen development
+snapshot through PR #2970 after `v0.1.42`, preserving the release-only repairs.
+
+- OSCE scenario practice, advanced quiz fixtures/metrics, structured prompt
+  recipes and Writing Predict/Fill service prompts.
+- Provider-aware scheduled-task authoring, Explainer navigation and visual-novel
+  asset generation preflight/recovery.
+- Chat drafts, tab restoration, regeneration, provider/model selection, source
+  evidence and account-isolation repairs.
+- PostgreSQL ownership, queries, migrations, timestamps and transaction/shutdown
+  repairs across Notes, Study, Characters, World Books, media, prompts and auth.
+- Fresh-install usability/recovery fixes and real macOS guest recovery drills.
+
+Back up persistent data before upgrading. UAT261 remains open by requester
+direction; the previous full four-configuration UAT matrix failed and subsequent
+targeted repairs do not establish a new full-matrix pass. Wider certification
+remains separately tracked. The candidate requires exact-head CI/review and a
+requester-written Change summary before merge.
+
+The new protected source record proposes a September 20, 2026 release date and
+September 20, 2028 at 12:00 UTC Countdown start. Requester review is pending.
+The prior 0.1.42 grant is unchanged. Server packages/images exclude protected
+frontend material; no protected frontend binary publication is planned.
+
+See the repository [complete change inventory](https://github.com/rmusser01/tldw_server/blob/main/Docs/Development/releases/0.1.43-change-inventory.md)
+and [execution plan](https://github.com/rmusser01/tldw_server/blob/main/Docs/superpowers/plans/2026-09-20-release-0.1.43-plan.md)
+for all merged PRs, commits, verification and outstanding release decisions.
+
 ## 0.1.42 - 2026-09-10
 
 This candidate refreshes the frozen development train through PR #2941

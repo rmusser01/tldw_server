@@ -4,7 +4,7 @@ title: Prepare the 0.1.43 release with all changes since v0.1.42
 status: In Progress
 assignee: []
 created_date: '2026-09-20 19:56'
-updated_date: '2026-09-20 20:13'
+updated_date: '2026-09-20 20:16'
 labels: []
 dependencies: []
 priority: high
@@ -18,9 +18,9 @@ Prepare a reviewed release candidate based on v0.1.42 and frozen dev d72b1d2850e
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The candidate includes v0.1.42 and frozen dev as ancestors, with reviewed conflict resolutions.
-- [ ] #2 Changelog and release notes cover all post-0.1.42 changes, with an exhaustive commit inventory.
-- [ ] #3 Version metadata, documentation and protected-source records are consistent and verified.
+- [x] #1 The candidate includes v0.1.42 and frozen dev as ancestors, with reviewed conflict resolutions.
+- [x] #2 Changelog and release notes cover all post-0.1.42 changes, with an exhaustive commit inventory.
+- [x] #3 Version metadata, documentation and protected-source records are consistent and verified.
 - [ ] #4 A draft PR and release plan record checks, publication state and remaining human decisions.
 <!-- AC:END -->
 
@@ -32,6 +32,8 @@ Release plan: Docs/superpowers/plans/2026-09-20-release-0.1.43-plan.md. Frozen d
 Strict docs build passes. Sync draft PR2971 opened. Existing plugin isolation test failed before fixing four AuthNZ registrations, then 6 passed; 2559 affected tests collect without error. Prompt/editor regressions:1125 passed. Bandit has no new findings; two pre-existing B105 synthetic-secret fixture findings exactly match HEAD. Source manifest and candidate records will be regenerated after frontend type repairs.
 
 Typing reassessment: intersection return type left unknown-array filter overloads; Omit on the transport index signature erased variables; compiler inferred normalization already preserves both concrete arrays, so use inferred return type rather than layering annotations. Reviewer identified future-development manifest coupling; ordinary CI checks record consistency, while the release plan explicitly runs TLDW_VERIFY_RELEASE_SOURCE=1 for checkout equality.
+
+Final protected source ef64db48f520971bd593e6caec87e368b0354470,7321files,manifest a54e754a3e9edb29ad91ef74c8000244bda720d50b8f7588ce6f213827111eeb. Full WebUI typecheck passes. Metadata/workflow92pass, explicit release source12pass, strict MkDocs and wheel/sdist/backend-boundary checks pass. Legal dates remain proposed; release PR, CI and human Change summary pending.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

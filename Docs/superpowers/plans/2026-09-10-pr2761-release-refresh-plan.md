@@ -440,3 +440,14 @@ are complete. Next candidate tracking: TASK-13263 and
 [0.1.43 plan](2026-09-20-release-0.1.43-plan.md). Do not move the published tag
 or dispatch duplicate publication runs. Deferred certification remains as
 recorded in the September 14 scope reduction.
+
+
+### Publication verification update — 2026-09-20
+
+Automatic PyPI run35533776321 failed before executing tests: duplicate AuthNZ
+conftest plugin registration. Build/publish jobs skipped; PyPI0.1.42 is not verified
+published. The candidate preparation identifies the existing fixture bridge and
+repairs its callers; prepare a reviewed main recovery rather than repeatedly
+rerunning the same failed source. The release tag remains immutable.
+Docker worker/audio-worker jobs pass; app build and digest/provenance verification
+remain pending. Main-to-dev sync draft is [PR #2971](https://github.com/rmusser01/tldw_server/pull/2971).

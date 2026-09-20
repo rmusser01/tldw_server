@@ -1,6 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
+
+# Git is used only with fixed local inventory arguments.
+import subprocess  # nosec B404
+import tomllib
 
 from hashlib import sha256
 from pathlib import Path
@@ -191,3 +197,55 @@ def test_third_party_notices_preserve_frontend_upstream_terms() -> None:
     assert "Host project: multi-license; see LICENSE" in notices
     assert "apps/packages/ui/src/Licenses/Page-Assist-LICENCE" in notices
     assert "apps/extension/public/pdf.worker.min.mjs" in notices
+
+
+def test_current_release_source_record_is_consistent() -> None:
+    version = tomllib.loads(_read("pyproject.toml"))["project"]["version"]
+    release_dir = Path("LICENSES/releases") / version
+    record = json.loads((release_dir / "release.json").read_text(encoding="utf-8"))
+    assert record["release_id"] == record["product_version"] == version
+    assert record["protected_paths"] == PROTECTED_PATHS
+    assert record["human_review_required"] is True
+    assert record["artifact_verification"]["protected_binaries"] == {"published": False, "artifacts": []}
+    snapshot = record["artifact_verification"]["protected_source_snapshot"]
+    assert snapshot["source_revision"] == record["protected_source_revision"]
+    assert len(snapshot["source_revision"]) == 40
+    assert snapshot["result"] == "verified"
+    manifest_path = release_dir / "protected-files.sha256"
+    assert snapshot["manifest"] == record["protected_file_manifest"]["path"] == str(manifest_path)
+    manifest = manifest_path.read_bytes()
+    assert sha256(manifest).hexdigest() == record["protected_file_manifest"]["sha256"]
+    entries = {}
+    for line in manifest.decode().splitlines():
+        digest, path = line.split("  ", 1)
+        assert path not in entries
+        entries[path] = digest
+    # Development may advance without rewriting an immutable release record.
+    # The release plan explicitly enables checkout equality when cutting a release.
+    if os.environ.get("TLDW_VERIFY_RELEASE_SOURCE") == "1":
+        git = shutil.which("git")
+        assert git is not None
+        tracked = subprocess.run(  # nosec B603
+            [git, "ls-files", "-s", "-z", "--", *PROTECTED_PACKAGES], check=True, capture_output=True
+        ).stdout
+        modes = {}
+        for row in tracked.split(b"\0"):
+            if row:
+                metadata, path = row.split(b"\t", 1)
+                modes[os.fsdecode(path)] = metadata.split(b" ", 1)[0]
+        assert set(entries) == set(modes)
+        for path, mode in modes.items():
+            content = os.fsencode(os.readlink(path)) if mode == b"120000" else Path(path).read_bytes()
+            assert sha256(content).hexdigest() == entries[path], path
+    for path, digest in record["legal_file_digests"].items():
+        assert sha256(Path(path).read_bytes()).hexdigest() == digest, path
+    assert record["countdown_start"] == (
+        str(int(record["release_date"][:4]) + 2) + record["release_date"][4:] + "T12:00:00Z"
+    )
+    grant_path = release_dir / "PolyForm-Countdown-1.0.0.txt"
+    expected_grant = (
+        _read("LICENSES/PolyForm-Countdown-1.0.0-template.txt")
+        .replace("{start date}", record["countdown_start"][:10])
+        .replace("{Copy the scheduled license terms here.}", _read("LICENSES/AGPL-3.0-only.txt").rstrip())
+    )
+    assert grant_path.read_text(encoding="utf-8") == expected_grant
