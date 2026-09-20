@@ -229,3 +229,22 @@ def test_sqlite_notes_read_chain_keeps_existing_behavior(tmp_path, operation):
         assert db.get_note_by_id(note_id)["title"] == "Committed title"
     finally:
         db.close_connection()
+
+
+def test_note_duplicate_and_projection_unique_errors_remain_distinct(pg_notes, monkeypatch):
+    from tldw_Server_API.app.core.DB_Management.backends.base import UniqueConstraintError
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError
+
+    db, note_id = pg_notes
+    with pytest.raises(ConflictError, match="already exists"):
+        db.add_note("Replacement", "replacement body", note_id=note_id)
+    assert db.get_note_by_id(note_id)["title"] == "Committed title"
+
+    def failed_projection(**kwargs):
+        raise UniqueConstraintError("PostgreSQL query execution failed")
+
+    monkeypatch.setattr(db.note_graph_projection_store, "replace_projection", failed_projection)
+    with pytest.raises(CharactersRAGDBError) as error:
+        db.add_note("Projection failure", "body", note_id="projection-failure")
+    assert not isinstance(error.value, ConflictError)
+    assert db.get_note_by_id("projection-failure") is None

@@ -263,3 +263,47 @@ def test_search_keywords_postgres_uses_tsquery(monkeypatch: pytest.MonkeyPatch) 
     assert "keywords_fts_tsv" in sql and "to_tsquery('english', ?)" in sql
     assert "k.client_id = ?" in sql
     assert params == ("fruit", "pg-test", "fruit", 5)
+
+
+@pytest.mark.parametrize(
+    "mode", ["fts", "fallback", "keyword_fts", "keyword_only", "keyword_count_fts", "keyword_count_only"]
+)
+def test_postgres_notes_search_uses_selected_owner_predicates(monkeypatch, mode):
+    from tldw_Server_API.app.core.DB_Management.chacha.note_store import NoteStore
+
+    db = _make_postgres_db()
+    store = NoteStore(db)
+    statements = []
+
+    def selected_owner(owner_client_id, alias=""):
+        # Distinct bindings prove the returned predicate and parameters travel
+        # together; production policy still selects the unchanged single owner.
+        return f" AND {alias}.client_id = ?", (f"selected-{alias}",)
+
+    def execute(query, params):
+        statements.append((query, params))
+        return SimpleNamespace(fetchall=lambda: [{"id": "owned-note"}], fetchone=lambda: {"cnt": 1})
+
+    monkeypatch.setattr(db, "_selected_owner_filter", selected_owner)
+    monkeypatch.setattr(db, "execute_query", execute)
+    monkeypatch.setattr(db, "_map_table_for_backend", lambda name: name)
+    if mode == "fallback":
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.DB_Management.chacha.note_store.FTSQueryTranslator.normalize_query",
+            lambda *args: "",
+        )
+    if mode in ("fts", "fallback"):
+        assert store.search_notes("needle", limit=3, offset=2) == [{"id": "owned-note"}]
+    elif mode.startswith("keyword_count"):
+        assert store.count_notes_matching_keywords("needle" if mode.endswith("fts") else None, ["tag"]) == 1
+    else:
+        assert store.search_notes_with_keywords(
+            "needle" if mode.endswith("fts") else None, ["tag"], limit=3, offset=2
+        ) == [{"id": "owned-note"}]
+    query, params = statements[-1]
+    assert "n.client_id = ?" in query
+    assert "selected-n" in params
+    assert db.client_id not in params
+    if mode.startswith("keyword"):
+        assert "k.client_id = ?" in query
+        assert "selected-k" in params
