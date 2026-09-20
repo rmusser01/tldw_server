@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -36,12 +37,11 @@ class _FakeModule:
 
     async def execute_with_circuit_breaker(
         self,
-        func,  # noqa: ANN001
-        tool_name: str,
-        arguments: dict,
-        context=None,  # noqa: ANN001
-    ):
-        return await func(tool_name, arguments, context=context)
+        operation: Any,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
+        return await operation(*args, **kwargs)
 
 
 class _FakeRegistry:

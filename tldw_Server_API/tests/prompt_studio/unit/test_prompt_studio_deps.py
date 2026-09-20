@@ -1,7 +1,10 @@
+import threading
 import types
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock
 
 import pytest
+from cachetools import LRUCache
 from fastapi import HTTPException, status
 from starlette.requests import Request
 
@@ -57,6 +60,48 @@ def _logged_text(mock_method) -> str:
     return " ".join(str(call) for call in mock_method.call_args_list)
 
 
+class _CloseRecordingPromptStudioDb:
+    """Small Prompt Studio DB stand-in with observable connection ownership."""
+
+    def __init__(self, client_id: str, tenant_user_id: str) -> None:
+        self.client_id = client_id
+        self.tenant_user_id = tenant_user_id
+        self.user_id: str | None = None
+        self.close_count = 0
+
+    def close_connection(self) -> None:
+        self.close_count += 1
+
+    def close(self) -> None:
+        self.close_connection()
+
+
+def _install_close_recording_cache(
+    monkeypatch,
+    tmp_path,
+    *,
+    maxsize: int,
+) -> tuple[LRUCache, list[_CloseRecordingPromptStudioDb]]:
+    """Install a bounded cache and a close-recording DB factory."""
+    cache = LRUCache(maxsize=maxsize)
+    created: list[_CloseRecordingPromptStudioDb] = []
+
+    def create_db(client_id, *, tenant_user_id, **_kwargs):
+        db = _CloseRecordingPromptStudioDb(client_id, tenant_user_id)
+        created.append(db)
+        return db
+
+    monkeypatch.setattr(deps, "_db_instances_cache", cache)
+    monkeypatch.setattr(
+        deps,
+        "_get_prompt_studio_db_path_for_user",
+        lambda _user_id: tmp_path / "prompt-studio.db",
+    )
+    monkeypatch.setattr(deps, "get_content_backend_instance", lambda: None)
+    monkeypatch.setattr(deps, "create_prompt_studio_database", create_db)
+    return cache, created
+
+
 def test_get_or_create_prompt_studio_db_passes_backend(monkeypatch, tmp_path):
 
 
@@ -71,7 +116,7 @@ def test_get_or_create_prompt_studio_db_passes_backend(monkeypatch, tmp_path):
     backend = _make_backend("postgres://primary")
     monkeypatch.setattr(deps, "get_content_backend_instance", lambda: backend)
 
-    mock_instance = object()
+    mock_instance = types.SimpleNamespace()
     create_mock = MagicMock(return_value=mock_instance)
     monkeypatch.setattr(deps, "create_prompt_studio_database", create_mock)
 
@@ -87,6 +132,239 @@ def test_get_or_create_prompt_studio_db_passes_backend(monkeypatch, tmp_path):
     assert kwargs["db_path"] == db_path
 
 
+def test_get_or_create_prompt_studio_db_separates_tenant_from_audit_client(
+    monkeypatch,
+    tmp_path,
+):
+    db_path = tmp_path / "tenant-42" / "prompt_studio.db"
+    backend = _make_backend("postgres://primary")
+    instance = types.SimpleNamespace()
+    create_mock = MagicMock(return_value=instance)
+
+    monkeypatch.setattr(
+        deps,
+        "_get_prompt_studio_db_path_for_user",
+        lambda _user_id: db_path,
+    )
+    monkeypatch.setattr(deps, "get_content_backend_instance", lambda: backend)
+    monkeypatch.setattr(deps, "create_prompt_studio_database", create_mock)
+
+    result = deps._get_or_create_prompt_studio_db("tenant-42", "audit-client-9")
+
+    assert result is instance
+    assert create_mock.call_args.args == ("audit-client-9",)
+    assert create_mock.call_args.kwargs["tenant_user_id"] == "tenant-42"
+    assert create_mock.call_args.kwargs["backend"] is backend
+    assert instance.user_id == "tenant-42"
+
+
+def test_prompt_studio_db_cache_isolates_request_audit_clients(
+    monkeypatch,
+    tmp_path,
+):
+    db_path = tmp_path / "tenant-42" / "prompt_studio.db"
+    backend = _make_backend("postgres://primary")
+    instances = [
+        types.SimpleNamespace(client_id="audit-client-a"),
+        types.SimpleNamespace(client_id="audit-client-b"),
+    ]
+    create_mock = MagicMock(side_effect=instances)
+
+    monkeypatch.setattr(
+        deps,
+        "_get_prompt_studio_db_path_for_user",
+        lambda _user_id: db_path,
+    )
+    monkeypatch.setattr(deps, "get_content_backend_instance", lambda: backend)
+    monkeypatch.setattr(deps, "create_prompt_studio_database", create_mock)
+
+    client_a = deps._get_or_create_prompt_studio_db(
+        "tenant-42",
+        "audit-client-a",
+    )
+    client_b = deps._get_or_create_prompt_studio_db(
+        "tenant-42",
+        "audit-client-b",
+    )
+    client_a_again = deps._get_or_create_prompt_studio_db(
+        "tenant-42",
+        "audit-client-a",
+    )
+
+    assert client_a is instances[0]
+    assert client_b is instances[1]
+    assert client_a_again is instances[0]
+    assert client_a is not client_b
+    assert create_mock.call_count == 2
+
+
+def test_prompt_studio_db_cache_isolates_concurrent_audit_clients(
+    monkeypatch,
+    tmp_path,
+):
+    db_path = tmp_path / "tenant-42" / "prompt_studio.db"
+    backend = _make_backend("postgres://primary")
+    request_barrier = threading.Barrier(2)
+
+    class RecordingFactory:
+        def __init__(self):
+            self._lock = threading.Lock()
+            self.calls = []
+
+        def __call__(self, client_id, **kwargs):
+            instance = types.SimpleNamespace(
+                client_id=client_id,
+                tenant_user_id=kwargs["tenant_user_id"],
+            )
+            with self._lock:
+                self.calls.append((client_id, kwargs, instance))
+            return instance
+
+        def snapshot(self):
+            with self._lock:
+                return list(self.calls)
+
+    factory = RecordingFactory()
+    monkeypatch.setattr(
+        deps,
+        "_get_prompt_studio_db_path_for_user",
+        lambda _user_id: db_path,
+    )
+    monkeypatch.setattr(deps, "get_content_backend_instance", lambda: backend)
+    monkeypatch.setattr(deps, "create_prompt_studio_database", factory)
+
+    def lookup_twice(client_id):
+        request_barrier.wait(timeout=5)
+        first = deps._get_or_create_prompt_studio_db("tenant-42", client_id)
+        request_barrier.wait(timeout=5)
+        return first, deps._get_or_create_prompt_studio_db("tenant-42", client_id)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        future_a = executor.submit(lookup_twice, "audit-client-a")
+        future_b = executor.submit(lookup_twice, "audit-client-b")
+        client_a, client_a_again = future_a.result(timeout=10)
+        client_b, client_b_again = future_b.result(timeout=10)
+
+    assert client_a is client_a_again
+    assert client_b is client_b_again
+    assert client_a is not client_b
+    assert client_a.client_id == "audit-client-a"
+    assert client_b.client_id == "audit-client-b"
+    assert client_a.tenant_user_id == "tenant-42"
+    assert client_b.tenant_user_id == "tenant-42"
+
+    calls = factory.snapshot()
+    assert sorted(call[0] for call in calls) == ["audit-client-a", "audit-client-b"]
+    assert all(call[1]["backend"] is backend for call in calls)
+
+
+def test_prompt_studio_db_cache_closes_idle_capacity_eviction(
+    monkeypatch,
+    tmp_path,
+):
+    cache, created = _install_close_recording_cache(
+        monkeypatch,
+        tmp_path,
+        maxsize=1,
+    )
+
+    first = deps._get_or_create_prompt_studio_db("tenant-42", "audit-client-a")
+    second = deps._get_or_create_prompt_studio_db("tenant-42", "audit-client-b")
+
+    assert first is created[0]
+    assert second is created[1]
+    assert first.close_count == 1
+    assert second.close_count == 0
+    assert list(cache.values()) == [second]
+
+
+def test_prompt_studio_db_cache_defers_active_eviction_until_all_callers_release(
+    monkeypatch,
+    tmp_path,
+):
+    cache, created = _install_close_recording_cache(
+        monkeypatch,
+        tmp_path,
+        maxsize=1,
+    )
+    managed_scope = getattr(deps, "managed_prompt_studio_db", None)
+    assert callable(managed_scope), (
+        "Prompt Studio DB callers need a managed scope so capacity eviction can "
+        "defer closing in-use instances"
+    )
+
+    acquired = threading.Barrier(3)
+    release_first = threading.Event()
+    release_second = threading.Event()
+    observed: list[_CloseRecordingPromptStudioDb] = []
+    observed_lock = threading.Lock()
+
+    def hold_db(release: threading.Event):
+        with managed_scope(
+            {"user_id": "tenant-42", "client_id": "audit-client-a"}
+        ) as db:
+            with observed_lock:
+                observed.append(db)
+            acquired.wait(timeout=5)
+            assert release.wait(timeout=5)
+            return db
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first_caller = executor.submit(hold_db, release_first)
+        second_caller = executor.submit(hold_db, release_second)
+        try:
+            acquired.wait(timeout=5)
+            active_db = observed[0]
+            assert observed == [active_db, active_db]
+
+            replacement = deps._get_or_create_prompt_studio_db(
+                "tenant-42",
+                "audit-client-b",
+            )
+            assert list(cache.values()) == [replacement]
+            assert active_db.close_count == 0
+
+            release_first.set()
+            assert first_caller.result(timeout=5) is active_db
+            assert active_db.close_count == 0
+
+            release_second.set()
+            assert second_caller.result(timeout=5) is active_db
+            assert active_db.close_count == 1
+        finally:
+            release_first.set()
+            release_second.set()
+
+    assert created == [active_db, replacement]
+
+
+def test_prompt_studio_db_cache_client_churn_stays_bounded_and_closes_evictions(
+    monkeypatch,
+    tmp_path,
+):
+    cache, created = _install_close_recording_cache(
+        monkeypatch,
+        tmp_path,
+        maxsize=2,
+    )
+
+    for index in range(25):
+        deps._get_or_create_prompt_studio_db(
+            "tenant-42",
+            f"caller-controlled-audit-client-{index}",
+        )
+
+    cached_ids = {id(db) for db in cache.values()}
+    unclosed = [db for db in created if db.close_count == 0]
+    evicted = [db for db in created if db.close_count == 1]
+
+    assert len(cache) == 2
+    assert {id(db) for db in unclosed} == cached_ids
+    assert len(unclosed) == 2
+    assert len(evicted) == 23
+    assert all(db.close_count <= 1 for db in created)
+
+
 def test_backend_signature_in_cache_includes_connection(monkeypatch, tmp_path):
 
 
@@ -98,8 +376,8 @@ def test_backend_signature_in_cache_includes_connection(monkeypatch, tmp_path):
 
     monkeypatch.setattr(deps, "_get_prompt_studio_db_path_for_user", fake_path)
 
-    instance_a = object()
-    instance_b = object()
+    instance_a = types.SimpleNamespace()
+    instance_b = types.SimpleNamespace()
     create_mock = MagicMock(side_effect=[instance_a, instance_b])
     monkeypatch.setattr(deps, "create_prompt_studio_database", create_mock)
 

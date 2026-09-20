@@ -87,4 +87,43 @@ describe("message helper wrappers", () => {
 
     expect(onServerConversationLinked).toHaveBeenCalledWith("server-chat-42")
   })
+
+  it("preserves the active server chat while assigning its local mirror id", async () => {
+    const setHistoryId = vi.fn()
+    const wrapped = createSaveMessageOnSuccess(false, setHistoryId)
+
+    await wrapped({
+      conversationId: "server-chat-42"
+    })
+
+    const payload = (mocks.saveSuccess.mock.calls[0] as unknown[] | undefined)?.[0] as
+      | { setHistoryId?: (id: string) => void }
+      | undefined
+    payload?.setHistoryId?.("local-history-7")
+
+    expect(setHistoryId).toHaveBeenCalledWith("local-history-7", {
+      preserveServerChatId: true
+    })
+  })
+
+  it("preserves the active server chat through an explicit pipeline setter", async () => {
+    const defaultSetHistoryId = vi.fn()
+    const explicitSetHistoryId = vi.fn()
+    const wrapped = createSaveMessageOnSuccess(false, defaultSetHistoryId)
+
+    await wrapped({
+      conversationId: "server-chat-42",
+      setHistoryId: explicitSetHistoryId
+    })
+
+    const payload = (mocks.saveSuccess.mock.calls[0] as unknown[] | undefined)?.[0] as
+      | { setHistoryId?: (id: string) => void }
+      | undefined
+    payload?.setHistoryId?.("local-history-7")
+
+    expect(explicitSetHistoryId).toHaveBeenCalledWith("local-history-7", {
+      preserveServerChatId: true
+    })
+    expect(defaultSetHistoryId).not.toHaveBeenCalled()
+  })
 })

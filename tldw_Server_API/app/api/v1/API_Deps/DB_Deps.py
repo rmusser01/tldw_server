@@ -37,7 +37,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     SchemaError,
 )
 from tldw_Server_API.app.core.DB_Management.scope_context import get_scope
-from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode
+from tldw_Server_API.app.core.testing import is_test_mode
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 
 #######################################################################################################################
@@ -70,46 +70,12 @@ _user_db_lock = threading.Lock() # Protects access to _media_db_factories and le
 
 def _get_db_path_for_user(user_id: int) -> Path:
     """
-    Determines the database file path for a given user ID.
-    Ensures the user's specific directory exists.
-    Uses USER_DB_BASE_DIR assigned from settings.
+    Resolve the media database path through the canonical per-user path policy.
+
+    ``DatabasePaths`` owns environment/config precedence and isolated test
+    fallbacks. Keeping that policy in one place prevents request handling from
+    changing the process-wide storage root after another adapter is initialized.
     """
-    base_dir_env = os.environ.get("USER_DB_BASE_DIR")
-    # Test-mode safety: isolate user DBs to a per-process temp dir unless explicitly overridden
-    if not base_dir_env and env_flag_enabled("TESTING"):
-        run_tag = (
-            os.getenv("TLDW_TEST_RUN_ID")
-            or os.getenv("PYTEST_XDIST_WORKER")
-            or "default"
-        )
-        safe_run_tag = "".join(
-            ch if ch.isalnum() or ch in "-_." else "_"
-            for ch in str(run_tag)
-        )
-        try:
-            import tempfile
-            # Use project Databases/user_databases_test/<run_tag> to keep nearby but stable across processes
-            project_root = settings.get("PROJECT_ROOT")  # type: ignore[attr-defined]
-            if project_root:
-                base_dir_env = str(
-                    Path(project_root) / "Databases" / "user_databases_test" / safe_run_tag
-                )
-            else:
-                base_dir_env = str(
-                    Path(tempfile.gettempdir()) / "tldw_user_databases_test" / safe_run_tag
-                )
-            # Set env so subsequent calls use the same directory
-            os.environ.setdefault("USER_DB_BASE_DIR", base_dir_env)
-        except (OSError, RuntimeError, TypeError, ValueError) as e:
-            logger.warning(
-                "TESTING mode: failed to derive project-root user DB dir; falling back to temp dir ({})",
-                type(e).__name__,
-            )
-            import tempfile
-            base_dir_env = str(
-                Path(tempfile.gettempdir()) / "tldw_user_databases_test" / safe_run_tag
-            )
-            os.environ.setdefault("USER_DB_BASE_DIR", base_dir_env)
     try:
         return DatabasePaths.get_media_db_path(user_id)
     except Exception as e:

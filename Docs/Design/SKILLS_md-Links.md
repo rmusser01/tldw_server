@@ -14,6 +14,9 @@ https://skills.sh/remotion-dev/skills/remotion-best-practices
 https://github.com/coreyhaines31/marketingskills
 https://github.com/anthropics/skills
 https://github.com/squirrelscan/skills
+https://github.com/gadievron/greenlight
+
+
 https://github.com/nextlevelbuilder/ui-ux-pro-max-skill
 https://github.com/callstackincubator/agent-skills
 https://github.com/cyanluna-git/cyanluna.skills/blob/main/kanban/SKILL.md
@@ -34,6 +37,7 @@ Code Review
 	https://github.com/alibaba/aacr-bench
 	https://github.com/weareaisle/nano-analyzer
 	https://dirac.run/posts/hash-anchors-myers-diff-single-token
+	https://github.com/3stoneBrother/code-audit
 
 
 Design

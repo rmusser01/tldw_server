@@ -1,5 +1,5 @@
 import React from "react"
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { MemoryRouter } from "react-router-dom"
 
@@ -381,6 +381,88 @@ describe("BuddyShellHost", () => {
 
   afterEach(() => {
     cleanup()
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  it("keeps expanded controls in the viewport and restores their usable position on remount", () => {
+    vi.stubGlobal("innerWidth", 1280)
+    vi.stubGlobal("innerHeight", 720)
+    usePersonaBuddyShellStore.getState().setPosition("web-desktop", {
+      x: 1120,
+      y: 640
+    })
+    vi.spyOn(HTMLDivElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLDivElement) {
+        const open = Boolean(
+          this.querySelector('[data-testid="persona-buddy-popover"]')
+        )
+        return { width: open ? 220 : 160, height: open ? 687 : 95 } as DOMRect
+      })
+    const context: PersonaBuddyRenderContext = {
+      surface_id: "chat",
+      surface_active: true,
+      active_persona_id: "persona-1",
+      position_bucket: "web-desktop",
+      persona_source: "route-local",
+      buddy_summary: buildBuddySummary("persona-1")
+    }
+    const view = renderHost({ context })
+    expect(screen.getByTestId("persona-buddy-dock")).toHaveStyle({
+      left: "1104px", top: "609px"
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Toggle buddy for Persona persona-1" }))
+    expect(screen.getByTestId("persona-buddy-dock")).toHaveStyle({
+      left: "1044px", top: "17px"
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Toggle buddy for Persona persona-1" }))
+    view.unmount()
+    renderHost({ context })
+    expect(screen.getByTestId("persona-buddy-dock")).toHaveStyle({
+      left: "1044px", top: "17px"
+    })
+    expect(screen.queryByTestId("persona-buddy-popover")).not.toBeInTheDocument()
+  })
+
+  it("reclamps content growth without repeated position writes and responds to viewport resize", () => {
+    vi.stubGlobal("innerWidth", 1280)
+    vi.stubGlobal("innerHeight", 720)
+    usePersonaBuddyShellStore.getState().setPosition("web-desktop", {
+      x: 1120,
+      y: 640
+    })
+    let height = 95
+    const notifications = new Set<() => void>()
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(private callback: () => void) {}
+      observe() { notifications.add(this.callback) }
+      disconnect() { notifications.delete(this.callback) }
+    })
+    vi.spyOn(HTMLDivElement.prototype, "getBoundingClientRect")
+      .mockImplementation(() => ({ width: 220, height }) as DOMRect)
+    renderHost({ context: {
+      surface_id: "chat",
+      surface_active: true,
+      active_persona_id: "persona-1",
+      position_bucket: "web-desktop",
+      persona_source: "route-local",
+      buddy_summary: buildBuddySummary("persona-1")
+    } })
+    fireEvent.click(screen.getByRole("button", { name: "Toggle buddy for Persona persona-1" }))
+
+    height = 600
+    act(() => { [...notifications].forEach((notify) => notify()) })
+    expect(screen.getByTestId("persona-buddy-dock")).toHaveStyle({ left: "1044px", top: "104px" })
+    const settledPosition = usePersonaBuddyShellStore.getState().positions["web-desktop"]
+    act(() => { [...notifications].forEach((notify) => notify()) })
+    expect(usePersonaBuddyShellStore.getState().positions["web-desktop"]).toBe(settledPosition)
+
+    vi.stubGlobal("innerWidth", 1024)
+    vi.stubGlobal("innerHeight", 640)
+    fireEvent(window, new Event("resize"))
+    expect(screen.getByTestId("persona-buddy-dock")).toHaveStyle({ left: "788px", top: "24px" })
   })
 
   it("stays dormant until the current surface explicitly activates buddy rendering", () => {
@@ -1004,7 +1086,7 @@ describe("BuddyShellHost", () => {
 
     expect(screen.getByRole("link", { name: "Stop listening" })).toHaveAttribute(
       "href",
-      "/persona?persona_id=persona-1&tab=live"
+      "/persona?persona_id=persona-1&tab=live&session_id=live-session-1"
     )
   })
 
@@ -1075,6 +1157,36 @@ describe("BuddyShellHost", () => {
       screen.queryByRole("link", { name: "Choose/Change Buddy" })
     ).not.toBeInTheDocument()
   })
+
+  it.each(["idle", "listening", "thinking", "speaking"] as const)(
+    "renders the active Live voice %s state on the floating Buddy",
+    async (state) => {
+      const basePack = buildVisualPack("persona-1")
+      const visualPack = {
+        ...basePack,
+        manifest: {
+          ...basePack.manifest,
+          states: { ...basePack.manifest.states, [state]: { animation_id: state } },
+          animations: { ...basePack.manifest.animations, [state]: {
+            frames: [{ asset_id: "voice-state-asset", duration_ms: 100 }]
+          } }
+        },
+        assets_by_id: { ...basePack.assets_by_id, "voice-state-asset": {
+          ...basePack.assets_by_id["idle-asset"], id: "voice-state-asset", url: `/assets/${state}.png`
+        } }
+      }
+      visualMocks.listPersonaVisualPacks.mockResolvedValue({ packs: [visualPack], active_pack: visualPack })
+      renderHost({ context: {
+        surface_id: "persona-garden", surface_active: true, active_persona_id: "persona-1",
+        position_bucket: "web-desktop", persona_source: "route-local",
+        buddy_summary: buildBuddySummary("persona-1"), live_session_id: "live-session-1",
+        live_voice_state: state, live_voice_is_listening: state === "listening"
+      } })
+      await waitFor(() => expect(screen.getByTestId("persona-visual-frame"))
+        .toHaveAttribute("data-visual-state", state))
+      expect(screen.getByTestId("persona-visual-frame")).toHaveAttribute("src", expect.stringContaining(`/assets/${state}.png`))
+    }
+  )
 
   it("maps active tool status into the tool_running visual state", async () => {
     const visualPack = buildVisualPack("persona-1")

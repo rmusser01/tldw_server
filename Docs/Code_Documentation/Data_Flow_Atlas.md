@@ -939,15 +939,16 @@ flowchart LR
 
 ### Notes And Chatbooks
 
-**Purpose:** Store notes and graph links, support web clipper style captures, and export/import portable Chatbooks that can include notes, conversations, characters, and related artifacts.
+**Purpose:** Store notes and authoritative graph links, review bounded graph suggestions, support web clipper style captures, and export/import portable Chatbooks that can include notes, conversations, characters, and related artifacts.
 
-**Primary entrypoints:** `/api/v1/notes`, `/api/v1/notes/graph`, web clipper/capture paths where enabled, `/api/v1/chatbooks/export`, `/api/v1/chatbooks/import`, preview, continuation, download, and export/import job status routes.
+**Primary entrypoints:** `/api/v1/notes`, `/api/v1/notes/graph`, nested `/api/v1/notes/{note_id}/graph/suggestions/*` routes, web clipper/capture paths where enabled, `/api/v1/chatbooks/export`, `/api/v1/chatbooks/import`, preview, continuation, download, and export/import job status routes.
 
 ```mermaid
 flowchart LR
     subgraph NotesRoutes["Notes routes"]
         Notes[Notes CRUD and search]
         Graph[Graph and links]
+        Suggestions[Suggestion capabilities, runs, and decisions]
         Clip[Web clipper or captured content]
     end
 
@@ -961,6 +962,7 @@ flowchart LR
     subgraph Core["Core services"]
         NotesCore[Notes service]
         GraphCore[Notes graph service]
+        SuggestCore[Grounding, generation, and decisions]
         ChatbookSvc[ChatbookService]
         Validator[ChatbookValidator and quotas]
     end
@@ -970,10 +972,21 @@ flowchart LR
         Temp[Per-user chatbooks temp]
         Archives[Generated chatbook archives]
         Audit[Audit and metrics]
+        SuggestJobs[graph-suggestions Jobs]
+        Receipts[Safe terminal receipts]
+    end
+
+    subgraph SuggestionProvider[Suggestion provider boundary]
+        Provider[Disclosed local or external LLM]
     end
 
     Notes --> NotesCore --> ChaCha
     Graph --> GraphCore --> ChaCha
+    Suggestions --> SuggestCore --> ChaCha
+    SuggestCore --> SuggestJobs --> Provider
+    Provider --> SuggestJobs --> Receipts
+    Receipts --> SuggestCore
+    SuggestCore --> GraphCore
     Clip --> NotesCore
     Export --> Validator --> ChatbookSvc
     Import --> Validator --> ChatbookSvc
@@ -985,9 +998,9 @@ flowchart LR
     ChatbookSvc --> Audit
 ```
 
-**Key storage/provider touchpoints:** Notes, graph edges, chats, and characters are stored in the per-user ChaChaNotes DB. Chatbook import/export uses per-user chatbook temp/export directories, validates archive content, tracks quotas/jobs, and writes audit/metrics events. Generated archives are returned through job-backed download metadata.
+**Key storage/provider touchpoints:** Notes, authoritative graph edges, suggestion runs, provisional suggestions, evidence references, rejection sets, and bounded idempotency receipts are owner/dataset-scoped in the per-user ChaChaNotes DB. Suggestion admission uses the fixed `graph-suggestions` queue with `max_retries=0`; hidden staged results become visible only after the exact owner-scoped terminal Job receipt matches. Capability preflight discloses provider/model, `local`/`remote`/`unknown` boundary, and exact outbound categories before generation. Unknown is treated as external. Only selected-note titles/excerpts, candidate-note titles/excerpts, and existing tag labels may cross that disclosed boundary. Jobs payloads/results and feature logs exclude note text, evidence, prompts, responses, rationales, proposed tags, candidate IDs, credentials, and raw provider errors. Chatbook import/export uses per-user chatbook temp/export directories, validates archive content, tracks quotas/jobs, and writes audit/metrics events.
 
-**Where to look in code:** `app/api/v1/endpoints/notes.py`, `app/api/v1/endpoints/notes_graph.py`, `app/api/v1/endpoints/chatbooks.py`, `app/core/Notes/`, `app/core/Notes_Graph/`, `app/core/WebClipper/`, `app/core/Chatbooks/`, and `app/core/DB_Management/ChaChaNotes_DB.py`.
+**Where to look in code:** `app/api/v1/endpoints/notes.py`, `app/api/v1/endpoints/notes_graph.py`, `app/api/v1/endpoints/notes_graph_suggestions.py`, `app/api/v1/endpoints/chatbooks.py`, `app/core/Notes/`, `app/core/Notes_Graph/`, `app/services/notes_graph_suggestions_worker.py`, `app/services/notes_graph_suggestions_maintenance.py`, `app/core/WebClipper/`, `app/core/Chatbooks/`, and `app/core/DB_Management/ChaChaNotes_DB.py`.
 
 ### Research And Web Scraping
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 from collections.abc import AsyncIterator, Iterator
 from types import SimpleNamespace
 from typing import Any
@@ -344,6 +345,7 @@ async def test_execute_non_stream_call_blocks_before_provider_dispatch(
 
     assert called is False
     assert exc_info.value.status_code == 413
+    assert exc_info.value.detail["code"] == "prompt_cost_guardrail_block"
     assert exc_info.value.detail["type"] == "prompt_cost_guardrail_block"
 
 
@@ -352,6 +354,7 @@ async def test_execute_streaming_call_blocks_before_provider_dispatch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     called = False
+    secret = "never-emit-guardrail-prompt-or-api-key"
     monkeypatch.setattr(
         chat_service,
         "load_prompt_cost_guardrail_config",
@@ -367,7 +370,7 @@ async def test_execute_streaming_call_blocks_before_provider_dispatch(
         current_loop=asyncio.get_running_loop(),
         cleaned_args={
             "api_endpoint": "openai",
-            "api_key": "test-key",
+            "api_key": secret,
             "messages_payload": [{"role": "user", "content": "hi"}],
             "model": "gpt-4o-mini",
             "streaming": True,
@@ -379,7 +382,7 @@ async def test_execute_streaming_call_blocks_before_provider_dispatch(
         request=_chat_request(),
         metrics=_DummyMetrics(),
         provider_manager=None,
-        templated_llm_payload=[{"role": "user", "content": "hello world"}],
+        templated_llm_payload=[{"role": "user", "content": secret}],
         should_persist=False,
         final_conversation_id="conv-guardrail-stream-block",
         character_card_for_context=None,
@@ -397,4 +400,14 @@ async def test_execute_streaming_call_blocks_before_provider_dispatch(
     chunks = await _collect_sse_chunks(response)
 
     assert called is False
-    assert "prompt cost guardrail" in "".join(chunks).lower()
+    assert response.status_code == 200
+    joined = "".join(chunks)
+    error_frame = next(chunk for chunk in chunks if chunk.startswith("data: {") and '"error"' in chunk)
+    payload = json.loads(error_frame.removeprefix("data:").strip())
+    assert payload["error"] == {
+        "code": "prompt_cost_guardrail_block",
+        "type": "prompt_cost_guardrail_block",
+        "message": "Prompt cost guardrail blocked request before provider dispatch.",
+    }
+    assert secret not in joined
+    assert chunks[-1].strip() == "data: [DONE]"

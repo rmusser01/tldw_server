@@ -194,6 +194,20 @@ describe("shouldCommitServerChatLoadResult", () => {
       })
     ).toBe(false)
   })
+
+  it("returns false when the owned request controller has already been aborted", () => {
+    const controller = new AbortController()
+    controller.abort()
+
+    expect(
+      shouldCommitServerChatLoadResult({
+        requestedChatId: "chat-1",
+        activeServerChatId: "chat-1",
+        requestController: controller,
+        activeController: controller
+      })
+    ).toBe(false)
+  })
 })
 
 describe("resolveServerChatAssistantIdentity", () => {

@@ -16,33 +16,13 @@ def _setup_env(tmp_path):
 
 async def _ensure_llm_tables_and_seed():
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+    from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
     pool = await get_db_pool()
-    # Ensure two users exist and capture their IDs (respect FK constraints)
-    import uuid as _uuid
-    if pool.pool:
-        # PostgreSQL-style
-        await pool.execute(
-            "INSERT INTO users (uuid, username, email, password_hash, is_active) VALUES ($1,$2,$3,$4,TRUE) ON CONFLICT (username) DO NOTHING",
-            str(_uuid.uuid4()), "llmuser1", "llmuser1@example.com", "x"
-        )
-        await pool.execute(
-            "INSERT INTO users (uuid, username, email, password_hash, is_active) VALUES ($1,$2,$3,$4,TRUE) ON CONFLICT (username) DO NOTHING",
-            str(_uuid.uuid4()), "llmuser2", "llmuser2@example.com", "x"
-        )
-        u1 = await pool.fetchval("SELECT id FROM users WHERE username = $1", "llmuser1")
-        u2 = await pool.fetchval("SELECT id FROM users WHERE username = $1", "llmuser2")
-    else:
-        # SQLite-style
-        await pool.execute(
-            "INSERT OR IGNORE INTO users (uuid, username, email, password_hash, is_active) VALUES (?,?,?,?,1)",
-            str(_uuid.uuid4()), "llmuser1", "llmuser1@example.com", "x"
-        )
-        await pool.execute(
-            "INSERT OR IGNORE INTO users (uuid, username, email, password_hash, is_active) VALUES (?,?,?,?,1)",
-            str(_uuid.uuid4()), "llmuser2", "llmuser2@example.com", "x"
-        )
-        u1 = await pool.fetchval("SELECT id FROM users WHERE username = ?", "llmuser1")
-        u2 = await pool.fetchval("SELECT id FROM users WHERE username = ?", "llmuser2")
+    # Ensure two users exist and capture their IDs (respect FK constraints).
+    # Seeded through UsersDB, which works on either backend and is the write
+    # path profile_user_write_guard sanctions.
+    u1 = await ensure_test_user(pool, "llmuser1", "llmuser1@example.com")
+    u2 = await ensure_test_user(pool, "llmuser2", "llmuser2@example.com")
     # Create tables if not exist
     if pool.pool:
         await pool.execute(

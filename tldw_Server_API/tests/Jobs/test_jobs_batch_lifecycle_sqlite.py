@@ -1,8 +1,7 @@
 import os
-import pytest
 
-from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
 
 
 def _env(monkeypatch, tmp_path):
@@ -30,13 +29,14 @@ def test_batch_renew_complete_fail_sqlite(monkeypatch, tmp_path):
         ids.append(int(j["id"]))
 
     acquired = []
+    # Test batch operations with live leases; expiry/reclaim has separate tests.
     for jid in ids:
-        acq = jm.acquire_next_job(domain="d", queue="default", lease_seconds=1, worker_id="w1")
+        acq = jm.acquire_next_job(domain="d", queue="default", lease_seconds=60, worker_id="w1")
         assert acq and int(acq["id"]) == jid
         acquired.append(acq)
 
     # Batch renew
-    items = [{"job_id": int(a["id"]), "worker_id": a.get("worker_id") or "w1", "lease_id": a.get("lease_id"), "seconds": 2} for a in acquired]
+    items = [{"job_id": int(a["id"]), "worker_id": a.get("worker_id") or "w1", "lease_id": a.get("lease_id"), "seconds": 120} for a in acquired]
     n = jm.batch_renew_leases(items)
     assert n >= 1
 
@@ -53,6 +53,14 @@ def test_batch_renew_complete_fail_sqlite(monkeypatch, tmp_path):
     ]
     failed = jm.batch_fail_jobs(fail_items)
     assert failed == 1
+
+    for job_id, expected_status in zip(ids, ("completed", "completed", "failed")):
+        terminal = jm.get_job(job_id)
+        assert terminal is not None
+        assert terminal["status"] == expected_status
+        assert terminal["leased_until"] is None
+        assert terminal["worker_id"] is None
+        assert terminal["lease_id"] is None
 
     # Idempotency: re-complete with same token should affect 0
     again = jm.batch_complete_jobs(complete_items)

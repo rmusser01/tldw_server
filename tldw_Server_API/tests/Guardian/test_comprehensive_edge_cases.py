@@ -248,12 +248,12 @@ class TestNotificationDeliveryEdgeCases:
         }
         assert expected_keys.issubset(settings.keys())
 
-    def test_generic_notify_adds_timestamp(self):
-        """notify_generic should add ts field if not present."""
+    def test_generic_notify_does_not_mutate_caller_payload(self):
+        """notify_generic should keep caller-owned payloads unchanged."""
         svc = self._make_service()
         payload = {"type": "test", "severity": "info", "user_id": "u1"}
         svc.notify_generic(payload)
-        assert "ts" in payload
+        assert "ts" not in payload
 
 
 # ═══════════════════════════════════════════════════════════════

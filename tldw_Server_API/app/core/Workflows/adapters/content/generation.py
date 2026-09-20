@@ -16,11 +16,15 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
 from typing import Any
 
 from loguru import logger
 
 from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string
+from tldw_Server_API.app.core.Notes.studio_markdown import (
+    canonical_studio_sections,
+)
 from tldw_Server_API.app.core.Workflows.adapters._common import extract_openai_content
 from tldw_Server_API.app.core.Workflows.adapters._registry import registry
 from tldw_Server_API.app.core.Workflows.adapters.content._config import (
@@ -54,6 +58,8 @@ _GENERATION_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     ValueError,
     json.JSONDecodeError,
 )
+_LOCAL_STUDIO_PROVIDER = "tldw"
+_LOCAL_DIAGRAM_MODEL = "diagram-deterministic-v1"
 
 
 def _build_notes_studio_payload(
@@ -84,9 +90,7 @@ def _build_notes_studio_payload(
     return {
         "meta": {
             "source_note_id": source_note_id,
-            "source_title": source_title_text or None,
             "title": note_title,
-            "template_type": template_type,
         },
         "layout": {
             "template_type": template_type,
@@ -116,11 +120,35 @@ def _build_notes_studio_payload(
     }
 
 
+def _sanitize_notes_studio_llm_payload(payload: object) -> dict[str, Any] | None:
+    """Return only contract-valid LLM sections and supported outer-state aliases."""
+    if not isinstance(payload, Mapping) or "sections" not in payload:
+        return None
+    try:
+        sections = {"sections": canonical_studio_sections(payload["sections"])}
+    except (TypeError, ValueError):
+        return None
+
+    sanitized: dict[str, Any] = sections
+    raw_meta = payload.get("meta")
+    if isinstance(raw_meta, Mapping):
+        meta: dict[str, Any] = {}
+        title = raw_meta.get("title")
+        if isinstance(title, str) and title.strip():
+            meta["title"] = title.strip()
+        source_note_id = raw_meta.get("source_note_id")
+        if source_note_id is None or isinstance(source_note_id, str):
+            meta["source_note_id"] = source_note_id
+        if meta:
+            sanitized["meta"] = meta
+    return sanitized
+
+
 def _build_fallback_diagram(content: str, diagram_type: str) -> str:
     lines = [line.strip(" -") for line in str(content or "").splitlines() if line.strip()]
     labels = lines[:3] or ["Key idea", "Supporting detail", "Summary"]
     sanitized = [label.replace('"', "'") for label in labels]
-    mermaid_lines = [f"flowchart TD", f'    A["{sanitized[0]}"]']
+    mermaid_lines = ["flowchart TD", f'    A["{sanitized[0]}"]']
     for index, label in enumerate(sanitized[1:], start=1):
         node_id = chr(ord("A") + index)
         mermaid_lines.append(f'    A --> {node_id}["{label}"]')
@@ -807,12 +835,13 @@ async def run_notes_studio_generate_adapter(config: dict[str, Any], context: dic
         )
         response_text = extract_openai_content(response) or ""
         json_match = re.search(r"\{[\s\S]*\}", response_text)
-        payload = json.loads(json_match.group()) if json_match else fallback_payload
-        if not isinstance(payload, dict):
-            payload = fallback_payload
-        payload.setdefault("meta", fallback_payload["meta"])
-        payload.setdefault("sections", fallback_payload["sections"])
-        return {"payload": payload, "source": "llm"}
+        if json_match is None:
+            return {"payload": fallback_payload, "source": "deterministic_fallback"}
+        payload = json.loads(json_match.group())
+        sanitized_payload = _sanitize_notes_studio_llm_payload(payload)
+        if sanitized_payload is None:
+            return {"payload": fallback_payload, "source": "deterministic_fallback"}
+        return {"payload": sanitized_payload, "source": "llm"}
     except _GENERATION_NONCRITICAL_EXCEPTIONS:
         logger.warning("Notes Studio generate fallback engaged")
         return {"payload": fallback_payload, "source": "deterministic_fallback", "warning": "notes_studio_generate_warning"}
@@ -861,7 +890,14 @@ async def run_diagram_generate_adapter(config: dict[str, Any], context: dict[str
     model = config.get("model")
     if not provider or not model:
         diagram = _build_fallback_diagram(str(content), str(diagram_type))
-        return {"diagram": diagram.strip(), "format": output_format, "diagram_type": diagram_type}
+        return {
+            "diagram": diagram.strip(),
+            "format": output_format,
+            "diagram_type": diagram_type,
+            "source": "deterministic_fallback",
+            "provider": _LOCAL_STUDIO_PROVIDER,
+            "model": _LOCAL_DIAGRAM_MODEL,
+        }
 
     try:
         format_examples = {
@@ -903,7 +939,17 @@ Content:
                     cleaned.append(line)
             diagram = "\n".join(cleaned)
 
-        return {"diagram": diagram.strip(), "format": output_format, "diagram_type": diagram_type}
+        accepted_diagram = diagram.strip()
+        if not accepted_diagram:
+            return {"diagram": "", "error": "diagram_generate_error"}
+        return {
+            "diagram": accepted_diagram,
+            "format": output_format,
+            "diagram_type": diagram_type,
+            "source": "llm",
+            "provider": str(provider),
+            "model": str(model),
+        }
 
     except _GENERATION_NONCRITICAL_EXCEPTIONS:
         logger.exception("Diagram generate error")

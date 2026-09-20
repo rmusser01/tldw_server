@@ -1,0 +1,118 @@
+{
+  "schema_version": "web-retrieval-quality-fixture-v1",
+  "suite_id": "current-dev-minimal-v1",
+  "baseline_revision": "f676e23549ea8ed82ef53493260621a05b281863",
+  "cases": [
+    {
+      "id": "extraction-navigation-omission",
+      "kind": "extraction",
+      "input": {
+        "url": "https://article.test/research-note",
+        "html": "<html><body><nav>Home Topics Subscribe</nav><article><h1>Research note</h1><p>Offline quality baselines capture useful article text for agents.</p></article><footer>Privacy Contact</footer></body></html>"
+      },
+      "expected": {
+        "text": "Research note Offline quality baselines capture useful article text for agents."
+      },
+      "observed": {
+        "text": "Research note Offline quality baselines capture useful article text for agents.",
+        "output_text": "Research note Offline quality baselines capture useful article text for agents."
+      }
+    },
+    {
+      "id": "search-provider-order-tie",
+      "kind": "search_order",
+      "input": {
+        "provider_results": [
+          {
+            "provider": "provider-b",
+            "url": "https://search-b.test/equal-result",
+            "title": "Equal relevance B"
+          },
+          {
+            "provider": "provider-a",
+            "url": "https://search-a.test/equal-result",
+            "title": "Equal relevance A"
+          }
+        ]
+      },
+      "expected": {
+        "ordered_urls": [
+          "https://search-b.test/equal-result",
+          "https://search-a.test/equal-result"
+        ]
+      },
+      "observed": {
+        "ordered_urls": [
+          "https://search-b.test/equal-result",
+          "https://search-a.test/equal-result"
+        ],
+        "output_text": "1. Equal relevance B\n2. Equal relevance A"
+      }
+    },
+    {
+      "id": "crawl-cycle-page-limit",
+      "kind": "crawl_graph",
+      "input": {
+        "start_url": "https://crawl.test/start",
+        "links": {
+          "https://crawl.test/start": [
+            "https://crawl.test/one"
+          ],
+          "https://crawl.test/one": [
+            "https://crawl.test/start",
+            "https://crawl.test/two"
+          ],
+          "https://crawl.test/two": []
+        },
+        "page_limit": 2
+      },
+      "expected": {
+        "visited_urls": [
+          "https://crawl.test/start",
+          "https://crawl.test/one"
+        ],
+        "stop_reason": "page_limit"
+      },
+      "observed": {
+        "visited_urls": [
+          "https://crawl.test/start",
+          "https://crawl.test/one"
+        ],
+        "stop_reason": "page_limit",
+        "output_text": "visited=start,one stop=page_limit"
+      }
+    },
+    {
+      "id": "provenance-safe-fields",
+      "kind": "provenance",
+      "input": {
+        "required_fields": [
+          "source_url",
+          "final_url",
+          "content_fingerprint",
+          "retrieval_version",
+          "extraction_version",
+          "selected_tier",
+          "truncated",
+          "original_characters",
+          "returned_characters"
+        ]
+      },
+      "expected": {},
+      "observed": {
+        "record": {
+          "source_url": "https://source.test/item",
+          "final_url": "https://source.test/item/final",
+          "content_fingerprint": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "retrieval_version": "retrieval-v1",
+          "extraction_version": "extraction-v1",
+          "selected_tier": "http",
+          "truncated": false,
+          "original_characters": 120,
+          "returned_characters": 120
+        },
+        "output_text": "source=source.test final=source.test tier=http truncated=false"
+      }
+    }
+  ]
+}

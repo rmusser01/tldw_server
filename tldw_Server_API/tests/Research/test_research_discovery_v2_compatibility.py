@@ -81,6 +81,7 @@ _V2_PRODUCTION_MODULES = tuple(
     f"tldw_Server_API.app.core.Research.discovery.{module_name}"
     for module_name in (
         "biorxiv_medrxiv",
+        "clinicaltrials_pubmed_central",
         "contracts",
         "registry",
         "planner",
@@ -780,6 +781,7 @@ forbidden = tuple(
     f"{prefix}.{name}"
     for name in (
         "biorxiv_medrxiv",
+        "clinicaltrials_pubmed_central",
         "contracts",
         "registry",
         "planner",
@@ -863,6 +865,7 @@ def test_standalone_endpoint_calls_each_v1_source_once_and_never_executes_v2(
     from tldw_Server_API.app.api.v1.endpoints import research_discovery as endpoint
     from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
     from tldw_Server_API.app.core.Research.discovery import biorxiv_medrxiv as family_module
+    from tldw_Server_API.app.core.Research.discovery import clinicaltrials_pubmed_central as clinical_family_module
     from tldw_Server_API.app.core.Research.discovery import executor as executor_module
     from tldw_Server_API.app.core.Research.discovery import gateway as gateway_module
     from tldw_Server_API.app.core.Research.discovery import gateway_adapters as gateway_adapters_module
@@ -921,6 +924,21 @@ def test_standalone_endpoint_calls_each_v1_source_once_and_never_executes_v2(
         family_module,
         "biorxiv_medrxiv_gateway_adapters",
         forbidden_family_factory("family_adapters"),
+    )
+    monkeypatch.setattr(
+        clinical_family_module,
+        "clinicaltrials_pubmed_central_shadow_registry",
+        forbidden_family_factory("clinical_family_registry"),
+    )
+    monkeypatch.setattr(
+        clinical_family_module,
+        "clinicaltrials_pubmed_central_shadow_readiness",
+        forbidden_family_factory("clinical_family_readiness"),
+    )
+    monkeypatch.setattr(
+        clinical_family_module,
+        "clinicaltrials_pubmed_central_gateway_adapters",
+        forbidden_family_factory("clinical_family_adapters"),
     )
 
     app = FastAPI()

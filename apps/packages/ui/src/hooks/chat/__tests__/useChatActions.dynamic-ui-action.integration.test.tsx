@@ -301,4 +301,136 @@ describe("useChatActions dynamic UI action integration", () => {
       })
     )
   })
+
+  it("does not commit locally or send the assistant mirror after a scope change", async () => {
+    let resolveFirstMirror!: (value: { id: string }) => void
+    const firstMirror = new Promise<{ id: string }>((resolve) => {
+      resolveFirstMirror = resolve
+    })
+    addChatMessageMock.mockReturnValueOnce(firstMirror)
+    const scopeController = new AbortController()
+    const requestScope = Object.freeze({
+      config: Object.freeze({
+        serverUrl: "https://scope.example",
+        authMode: "multi-user" as const
+      }),
+      userId: 7
+    })
+    normalChatModeMock.mockImplementationOnce(
+      async (
+        message: string,
+        image: string,
+        isRegenerate: boolean,
+        _messages: any[],
+        _history: any[],
+        _signal: AbortSignal,
+        params: any
+      ) => {
+        await params.saveMessageOnSuccess({
+          historyId: "history-1",
+          setHistoryId: params.setHistoryId,
+          isRegenerate,
+          selectedModel: params.selectedModel,
+          message,
+          image,
+          fullText: "Scoped answer",
+          source: [],
+          assistantMessageId: "assistant-response-1",
+          modelId: params.selectedModel,
+          reasoning_time_taken: 0,
+          saveToDb: false,
+          conversationId: "chat-1",
+          scopeSignal: scopeController.signal,
+          scopeInvalidatedSignal: scopeController.signal,
+          requestScope
+        })
+      }
+    )
+    const options = createHookOptions()
+    const { result } = renderHook(() => useChatActions(options as any))
+
+    let submission!: ReturnType<typeof result.current.onSubmit>
+    act(() => {
+      submission = result.current.onSubmit({ message: "Question", image: "" })
+    })
+    await vi.waitFor(() => {
+      expect(addChatMessageMock).toHaveBeenCalledTimes(1)
+    })
+    expect(addChatMessageMock).toHaveBeenCalledWith(
+      "chat-1",
+      expect.objectContaining({ role: "user" }),
+      expect.objectContaining({
+        requestScope,
+        signal: scopeController.signal
+      })
+    )
+    scopeController.abort()
+    resolveFirstMirror({ id: "server-user-1" })
+
+    await act(async () => {
+      await submission
+    })
+
+    expect(addChatMessageMock).toHaveBeenCalledTimes(1)
+    expect(saveMessageOnSuccessMock).not.toHaveBeenCalled()
+  })
+
+  it("does not commit locally after the server rejects the captured account", async () => {
+    addChatMessageMock.mockRejectedValueOnce(Object.assign(
+      new Error("scope changed"),
+      {
+        status: 412,
+        details: {
+          detail: { code: "request_config_scope_changed" }
+        }
+      }
+    ))
+    const scopeController = new AbortController()
+    const requestScope = Object.freeze({
+      config: Object.freeze({
+        serverUrl: "https://scope.example",
+        authMode: "multi-user" as const
+      }),
+      userId: 7
+    })
+    normalChatModeMock.mockImplementationOnce(
+      async (
+        message: string,
+        image: string,
+        isRegenerate: boolean,
+        _messages: any[],
+        _history: any[],
+        _signal: AbortSignal,
+        params: any
+      ) => {
+        await params.saveMessageOnSuccess({
+          historyId: "history-1",
+          setHistoryId: params.setHistoryId,
+          isRegenerate,
+          selectedModel: params.selectedModel,
+          message,
+          image,
+          fullText: "Scoped answer",
+          source: [],
+          assistantMessageId: "assistant-response-1",
+          modelId: params.selectedModel,
+          reasoning_time_taken: 0,
+          saveToDb: false,
+          conversationId: "chat-1",
+          scopeSignal: scopeController.signal,
+          requestScope
+        })
+      }
+    )
+    const options = createHookOptions()
+    const { result } = renderHook(() => useChatActions(options as any))
+
+    await act(async () => {
+      await result.current.onSubmit({ message: "Question", image: "" })
+    })
+
+    expect(scopeController.signal.aborted).toBe(false)
+    expect(addChatMessageMock).toHaveBeenCalledTimes(1)
+    expect(saveMessageOnSuccessMock).not.toHaveBeenCalled()
+  })
 })

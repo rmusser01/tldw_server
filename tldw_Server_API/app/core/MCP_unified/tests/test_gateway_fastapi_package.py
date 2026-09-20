@@ -2440,7 +2440,7 @@ def test_gateway_status_includes_package_boundary_metadata() -> None:
     assert payload["status"] == "ok"
     assert payload["name"] == "unit-gateway"
     assert payload["version"] == "0.0-test"
-    assert payload["package"]["package_status"] == "internal-experimental"
+    assert payload["package"]["package_status"] == "public-alpha"
     assert payload["package"]["publishing_status"] == "published"
     assert payload["package"]["source_distribution"] == "tldw-server"
     assert payload["transport"]["mount_path"] == "/mcp"
@@ -5720,7 +5720,7 @@ def test_gateway_fastapi_app_handles_basic_jsonrpc_flow() -> None:
         assert status_payload["status"] == "ok"
         assert status_payload["name"] == "unit-gateway"
         assert status_payload["version"] == "0.0-test"
-        assert status_payload["package"]["package_status"] == "internal-experimental"
+        assert status_payload["package"]["package_status"] == "public-alpha"
 
         initialized = client.post(
             "/mcp/request",

@@ -6,6 +6,21 @@ const mocks = vi.hoisted(() => ({
   bgRequest: vi.fn()
 }))
 
+vi.mock("@/services/service-prompts", async () => {
+  const { default: fixture } = await import("@/utils/__fixtures__/service-prompt-rendering.json")
+  return {
+    subscribeToServicePromptConfigChanges: () => () => {},
+    loadServicePromptSnapshot: async ([id]: (keyof typeof fixture.defaults)[], { signal }: { signal: AbortSignal }) => ({
+      scopeKey: "owner-a",
+      requestScope: { config: { serverUrl: "https://server.test", authMode: "multi-user" }, userId: "a" },
+      definitions: { [id]: { parts: fixture.defaults[id] } },
+      scopeSignal: signal,
+      scopeInvalidatedSignal: new AbortController().signal,
+      release: () => {},
+    }),
+  }
+})
+
 vi.mock("@/services/background-proxy", () => ({
   bgRequest: mocks.bgRequest
 }))

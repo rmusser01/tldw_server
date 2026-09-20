@@ -19,7 +19,17 @@ def test_batch_endpoint_adds_rate_headers(disable_heavy_startup, admin_user, mon
     monkeypatch.setattr(emb_mod, "_check_backpressure_and_quotas", _stub_check)
 
     # Patch the batch async creator to return deterministic vectors quickly
-    async def _stub_batch(texts, provider, model_id=None, dimensions=None, api_key=None, api_url=None, metadata=None):
+    async def _stub_batch(
+        texts,
+        provider,
+        model_id=None,
+        dimensions=None,
+        api_key=None,
+        api_url=None,
+        metadata=None,
+        cache_scope_sensitive=False,
+    ):
+        _ = cache_scope_sensitive
         return [[0.0, 1.0] for _ in texts]
 
     monkeypatch.setattr(emb_mod, "create_embeddings_batch_async", _stub_batch)

@@ -7,6 +7,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
+from tldw_Server_API.app.api.v1.API_Deps.study_assistant_deps import get_study_assistant_guidance
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.flashcards import (
     StudyAssistantContextResponse,
@@ -615,6 +616,7 @@ async def respond_quiz_attempt_question_assistant(
     question_id: int,
     payload: StudyAssistantRespondRequest,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    guidance: str | None = Depends(get_study_assistant_guidance),
 ):
     try:
         context = build_quiz_attempt_question_context(db, attempt_id, question_id)
@@ -629,6 +631,7 @@ async def respond_quiz_attempt_question_assistant(
             message=user_content,
             provider=payload.provider,
             model=payload.model,
+            guidance=guidance,
         )
         context_snapshot = _build_assistant_context_snapshot(context)
         user_message = db.append_study_assistant_message(

@@ -195,6 +195,44 @@ async def test_early_stop_no_improve(monkeypatch, temp_ps_db):
 
 
 @pytest.mark.asyncio
+async def test_cancellation_state_read_failure_stops_before_next_provider_dispatch(
+    monkeypatch,
+    temp_ps_db,
+):
+    prompt_id, test_ids = _seed_prompt_and_tests(temp_ps_db, n_tests=1)
+    mcts = MCTSOptimizer(temp_ps_db, TestRunner(temp_ps_db))
+    provider_dispatches = 0
+
+    async def fake_evaluate_prompt(*_args, **_kwargs):
+        nonlocal provider_dispatches
+        provider_dispatches += 1
+        return 0.5
+
+    def fail_state_read(_optimization_id: int):
+        raise RuntimeError("optimization state unavailable")
+
+    monkeypatch.setattr(mcts, "_evaluate_prompt", fake_evaluate_prompt, raising=True)
+    monkeypatch.setattr(mcts.decomposer, "decompose_text", lambda _text: [], raising=True)
+    monkeypatch.setattr(temp_ps_db, "get_optimization", fail_state_read, raising=True)
+
+    with pytest.raises(RuntimeError, match="optimization state unavailable"):
+        await mcts.optimize(
+            initial_prompt_id=prompt_id,
+            optimization_id=999,
+            test_case_ids=test_ids,
+            model_config={"model": "dummy"},
+            max_iterations=3,
+            target_metric=MetricType.ACCURACY,
+            strategy_params={
+                "mcts_simulations": 3,
+                "feedback_enabled": False,
+            },
+        )
+
+    assert provider_dispatches == 1
+
+
+@pytest.mark.asyncio
 async def test_scorer_model_parameter_applies_to_runtime(monkeypatch, temp_ps_db):
     prompt_id, test_ids = _seed_prompt_and_tests(temp_ps_db)
     mcts = MCTSOptimizer(temp_ps_db, TestRunner(temp_ps_db))

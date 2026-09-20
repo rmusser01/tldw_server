@@ -214,7 +214,10 @@ describe("OptionIndex unified setup resolver", () => {
     }))
   })
 
-  it("renders setup in focused shell when backend state is not complete", async () => {
+  it("keeps connected users in the app with a resume-setup banner when backend state is not complete", async () => {
+    // The connection mock reports "connected": incomplete backend setup must
+    // no longer wall the home route with the wizard (#2871) - the operator
+    // gets the normal shell plus a dismissible resume-setup banner instead.
     const { default: OptionIndex } = await import("../option-index")
 
     render(
@@ -223,11 +226,20 @@ describe("OptionIndex unified setup resolver", () => {
       </MemoryRouter>
     )
 
-    expect(screen.getByRole("main")).toHaveAttribute("data-hide-header", "true")
-    expect(screen.getByRole("main")).toHaveAttribute("data-hide-sidebar", "true")
     expect(
-      screen.getByRole("heading", { name: /first-time setup/i })
+      await screen.findByTestId("resume-setup-banner")
     ).toBeInTheDocument()
+    expect(screen.getByRole("main")).toHaveAttribute(
+      "data-hide-header",
+      "false"
+    )
+    expect(screen.getByRole("main")).toHaveAttribute(
+      "data-hide-sidebar",
+      "false"
+    )
+    expect(
+      screen.queryByRole("heading", { name: /first-time setup/i })
+    ).not.toBeInTheDocument()
   })
 
   it("offers the first-source milestone after authenticated media readiness succeeds", async () => {

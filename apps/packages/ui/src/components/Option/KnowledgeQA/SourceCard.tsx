@@ -64,19 +64,6 @@ type SourceCardProps = {
   className?: string
 }
 
-function getSourceIcon(sourceType?: string) {
-  switch (sourceType) {
-    case "notes":
-      return FileText
-    case "characters":
-      return MessageSquare
-    case "chats":
-      return MessageSquare
-    default:
-      return FileText
-  }
-}
-
 function truncateText(text: string, maxLength: number): string {
   if (text.length <= maxLength) return text
   return text.slice(0, maxLength).trimEnd() + "..."
@@ -203,7 +190,7 @@ export function SourceCard({
 
   const canOpenInWorkspace = isDocumentType && resolvedMediaId != null
 
-  const Icon = getSourceIcon(sourceType)
+  const Icon = sourceType === "characters" || sourceType === "chats" ? MessageSquare : FileText
 
   React.useEffect(
     () => () => {

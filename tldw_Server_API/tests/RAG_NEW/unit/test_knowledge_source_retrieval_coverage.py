@@ -4,13 +4,12 @@ from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core.RAG.rag_service import unified_pipeline as up
 from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import (
     MultiDatabaseRetriever,
     PromptsDBRetriever,
 )
 from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
-from tldw_Server_API.app.core.RAG.rag_service import unified_pipeline as up
-
 
 pytestmark = pytest.mark.unit
 
@@ -477,5 +476,7 @@ async def test_unified_pipeline_cache_namespace_includes_workspace_scope(
 
     assert len(namespaces) >= 2
     assert namespaces[0] != namespaces[1]
-    assert namespaces[0] and "workspace:global" in namespaces[0]
-    assert namespaces[1] and "workspace:ws-1" in namespaces[1]
+    assert namespaces[0]
+    assert namespaces[1]
+    assert "global" not in namespaces[0]
+    assert "ws-1" not in namespaces[1]

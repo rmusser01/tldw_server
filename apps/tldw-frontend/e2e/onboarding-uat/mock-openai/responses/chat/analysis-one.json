@@ -1,0 +1,20 @@
+{
+  "id": "chatcmpl-live-tier-analysis-one",
+  "object": "chat.completion",
+  "created": 1770000000,
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "LIVE_TIER_ANALYSIS_ONE"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 12,
+    "completion_tokens": 4,
+    "total_tokens": 16
+  }
+}

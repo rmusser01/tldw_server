@@ -16,6 +16,7 @@ import { publishChatLoopEvent } from "@/services/chat-loop/bridge"
 import { extractChatLoopEvent } from "@/services/chat-loop/stream"
 import { extractStreamTransportInterruption } from "@/utils/extract-token-from-chunk"
 import type { ChatRequestDebugMetadata } from "@/services/tldw/chat-request-debug"
+import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
 
 export interface ChatTldwOptions {
   model: string
@@ -47,6 +48,7 @@ export interface ChatTldwOptions {
   extraBody?: Record<string, unknown>
   researchContext?: ChatResearchContext
   chatDebugMetadata?: ChatRequestDebugMetadata
+  requestScope?: ServicePromptRequestScope
 }
 
 export class ChatTldw {
@@ -73,6 +75,7 @@ export class ChatTldw {
   extraBody?: Record<string, unknown>
   researchContext?: ChatResearchContext
   chatDebugMetadata?: ChatRequestDebugMetadata
+  requestScope?: ServicePromptRequestScope
 
   constructor(options: ChatTldwOptions) {
     // Normalize model id: drop internal prefix like "tldw:" so server receives provider/model
@@ -99,6 +102,7 @@ export class ChatTldw {
     this.extraBody = options.extraBody
     this.researchContext = options.researchContext
     this.chatDebugMetadata = options.chatDebugMetadata
+    this.requestScope = options.requestScope
   }
 
   /**
@@ -215,7 +219,8 @@ export class ChatTldw {
         extraHeaders: this.extraHeaders,
         extraBody: this.extraBody,
         researchContext: this.researchContext,
-        chatDebugMetadata: this.chatDebugMetadata
+        chatDebugMetadata: this.chatDebugMetadata,
+        requestScope: this.requestScope
       },
       handleChunk
     )
@@ -266,7 +271,8 @@ export class ChatTldw {
   // Non-streaming helper mirroring the LangChain-style _generate,
   // used only internally if needed.
   async generateOnce(
-    messages: BaseMessage[]
+    messages: BaseMessage[],
+    options?: { signal?: AbortSignal }
   ): Promise<{ text: string; message: AIMessage }> {
     const tldwMessages = this.convertToTldwMessages(messages)
 
@@ -292,7 +298,9 @@ export class ChatTldw {
       extraHeaders: this.extraHeaders,
       extraBody: this.extraBody,
       researchContext: this.researchContext,
-      chatDebugMetadata: this.chatDebugMetadata
+      chatDebugMetadata: this.chatDebugMetadata,
+      requestScope: this.requestScope,
+      signal: options?.signal
     })
 
     return {
@@ -309,8 +317,11 @@ export class ChatTldw {
    * Non-streaming invoke helper to match the simple `.invoke()` shape used
    * by title generation and other one-off calls.
    */
-  async invoke(messages: BaseMessage[]): Promise<{ content: string }> {
-    const { text } = await this.generateOnce(messages)
+  async invoke(
+    messages: BaseMessage[],
+    options?: { signal?: AbortSignal }
+  ): Promise<{ content: string }> {
+    const { text } = await this.generateOnce(messages, options)
     return { content: text }
   }
 

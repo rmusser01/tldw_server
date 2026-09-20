@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from typing import Any, Dict, List
+from typing import Any
 
 import pytest
 from fastapi import FastAPI
@@ -8,7 +8,11 @@ from starlette.requests import Request
 
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.api.v1.endpoints import notes_graph as notes_graph_mod
-from tldw_Server_API.app.core.AuthNZ.permissions import NOTES_GRAPH_READ, NOTES_GRAPH_WRITE
+from tldw_Server_API.app.core.AuthNZ.permissions import (
+    NOTES_GRAPH_READ,
+    NOTES_GRAPH_SUGGEST,
+    NOTES_GRAPH_WRITE,
+)
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError, InputError
 
@@ -41,8 +45,8 @@ def _make_principal(
     *,
     kind: str = "user",
     is_admin: bool = False,
-    roles: List[str] | None = None,
-    permissions: List[str] | None = None,
+    roles: list[str] | None = None,
+    permissions: list[str] | None = None,
 ) -> AuthPrincipal:
     return AuthPrincipal(
         kind=kind,
@@ -62,7 +66,7 @@ def _make_principal(
 def _build_app_with_overrides(
     principal: AuthPrincipal,
     *,
-    user_permissions: List[str],
+    user_permissions: list[str],
 ) -> FastAPI:
     app = FastAPI()
     app.include_router(notes_graph_mod.router, prefix="/api/v1/notes")
@@ -124,7 +128,7 @@ def _build_app_with_overrides(
             weight: float,
             metadata: object,
             created_by: str,
-        ) -> Dict[str, Any]:
+        ) -> dict[str, Any]:
             return {
                 "id": "edge:test",
                 "user_id": user_id,
@@ -168,6 +172,44 @@ def _build_app_with_overrides(
     app.dependency_overrides[notes_graph_mod.get_chacha_db_for_user] = _fake_get_chacha_db_for_user
 
     return app
+
+
+@pytest.mark.parametrize(
+    ("permissions", "query", "expected"),
+    [
+        ([NOTES_GRAPH_READ], "", False),
+        ([NOTES_GRAPH_READ, NOTES_GRAPH_SUGGEST], "", True),
+        ([NOTES_GRAPH_READ, NOTES_GRAPH_SUGGEST], "?format=cytoscape", True),
+    ],
+)
+def test_graph_response_derives_suggestion_authority_after_graph_resolution(
+    permissions: list[str], query: str, expected: bool
+) -> None:
+    principal = _make_principal(roles=["user"], permissions=permissions)
+    app = _build_app_with_overrides(principal, user_permissions=permissions)
+
+    with TestClient(app) as client:
+        response = client.get(f"/api/v1/notes/graph{query}")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["suggestions_authorized"] is expected
+
+
+def test_graph_cache_never_leaks_suggestion_authority_between_principals() -> None:
+    writer_permissions = [NOTES_GRAPH_READ, NOTES_GRAPH_SUGGEST]
+    writer = _build_app_with_overrides(
+        _make_principal(roles=["user"], permissions=writer_permissions),
+        user_permissions=writer_permissions,
+    )
+    reader = _build_app_with_overrides(
+        _make_principal(roles=["user"], permissions=[NOTES_GRAPH_READ]),
+        user_permissions=[NOTES_GRAPH_READ],
+    )
+
+    with TestClient(writer) as client:
+        assert client.get("/api/v1/notes/graph").json()["suggestions_authorized"] is True
+    with TestClient(reader) as client:
+        assert client.get("/api/v1/notes/graph").json()["suggestions_authorized"] is False
 
 
 @pytest.mark.asyncio

@@ -19,6 +19,8 @@ from tldw_Server_API.app.core.Notes_Tasks.service import NotesTaskService
 
 pytestmark = pytest.mark.integration
 
+LOCAL_UNBOUND = "local-unbound"
+
 
 class _NoopRateLimiter:
     async def check_user_rate_limit(self, *_args: Any, **_kwargs: Any) -> tuple[bool, dict[str, Any]]:
@@ -32,7 +34,7 @@ class _FailingRateLimiter:
 
 @pytest.fixture()
 def notes_tasks_api_client(tmp_path: Path) -> Generator[tuple[TestClient, CharactersRAGDB], None, None]:
-    db = CharactersRAGDB(str(tmp_path / "notes_tasks_rest_api.db"), client_id="notes_tasks_rest_user")
+    db = CharactersRAGDB(str(tmp_path / "notes_tasks_rest_api.db"), client_id="1")
 
     async def override_user() -> User:
         return User(id=1, username="tester", email="t@e.com", is_active=True, is_admin=True)
@@ -65,16 +67,18 @@ def _create_note(client: TestClient, *, content: str, title: str = "Tasks") -> d
 
 
 def _task_by_text(db: CharactersRAGDB, note_id: str, text: str) -> dict[str, Any]:
-    tasks = db.list_tasks(note_id=note_id, include_deleted=True, limit=100)
+    tasks = db.list_tasks(
+        owner_user_id=db.client_id, dataset_id=LOCAL_UNBOUND, note_id=note_id, include_deleted=True, limit=100
+    )
     matches = [task for task in tasks if task["text"] == text]
     assert len(matches) == 1
     return matches[0]
 
 
 def _task_with_projection(db: CharactersRAGDB, task_id: str) -> dict[str, Any]:
-    task = db.get_task(task_id)
+    task = db.get_task(owner_user_id=db.client_id, dataset_id=LOCAL_UNBOUND, task_id=task_id)
     assert task is not None
-    projection = db.get_task_projection(task_id)
+    projection = db.get_task_projection(owner_user_id=db.client_id, dataset_id=LOCAL_UNBOUND, task_id=task_id)
     assert projection is not None
     return {"task": task, "projection": projection}
 
@@ -216,7 +220,12 @@ def test_set_status_on_clean_note_rewrites_marker_and_records_event(
     assert saved["content"] == "- [x] Alpha\n"
     assert updated["status"] == "done"
     assert updated["version"] == task["version"] + 1
-    events = db.list_task_activity(task_id=task["id"], limit=20)
+    events = db.list_task_activity(
+        owner_user_id=db.client_id,
+        dataset_id=LOCAL_UNBOUND,
+        task_id=task["id"],
+        limit=20,
+    )
     assert any(event["event_type"] == "status_changed" for event in events)
 
 
@@ -323,9 +332,9 @@ def test_update_projected_task_refreshes_sibling_projection(
     assert alpha_response.status_code == 200, alpha_response.text
     saved = db.get_note_by_id(note["id"])
     assert saved is not None
-    beta_after_alpha = db.get_task(beta["id"])
+    beta_after_alpha = db.get_task(owner_user_id=db.client_id, dataset_id=LOCAL_UNBOUND, task_id=beta["id"])
     assert beta_after_alpha is not None
-    beta_projection = db.get_task_projection(beta["id"])
+    beta_projection = db.get_task_projection(owner_user_id=db.client_id, dataset_id=LOCAL_UNBOUND, task_id=beta["id"])
     assert beta_projection is not None
     assert beta_projection["note_version"] == saved["version"]
 
@@ -342,7 +351,14 @@ def test_update_projected_task_refreshes_sibling_projection(
     saved_after_beta = db.get_note_by_id(note["id"])
     assert saved_after_beta is not None
     assert saved_after_beta["content"] == "- [ ] Alpha updated\n- [ ] Beta updated\n"
-    assert len(db.list_tasks(note_id=note["id"], include_deleted=True, limit=20)) == 2
+    assert (
+        len(
+            db.list_tasks(
+                owner_user_id=db.client_id, dataset_id=LOCAL_UNBOUND, note_id=note["id"], include_deleted=True, limit=20
+            )
+        )
+        == 2
+    )
 
 
 def test_delete_projected_task_refreshes_sibling_projection(
@@ -361,9 +377,9 @@ def test_delete_projected_task_refreshes_sibling_projection(
     assert delete_response.status_code == 200, delete_response.text
     saved = db.get_note_by_id(note["id"])
     assert saved is not None
-    beta_after_delete = db.get_task(beta["id"])
+    beta_after_delete = db.get_task(owner_user_id=db.client_id, dataset_id=LOCAL_UNBOUND, task_id=beta["id"])
     assert beta_after_delete is not None
-    beta_projection = db.get_task_projection(beta["id"])
+    beta_projection = db.get_task_projection(owner_user_id=db.client_id, dataset_id=LOCAL_UNBOUND, task_id=beta["id"])
     assert beta_projection is not None
     assert beta_projection["note_version"] == saved["version"]
 
@@ -521,7 +537,9 @@ def test_delete_projected_task_removes_line_transactionally(
     saved = db.get_note_by_id(note["id"])
     assert saved is not None
     assert saved["content"] == "Before\nAfter\n"
-    deleted = db.get_task(task["id"], include_deleted=True)
+    deleted = db.get_task(
+        owner_user_id=db.client_id, dataset_id=LOCAL_UNBOUND, task_id=task["id"], include_deleted=True
+    )
     assert deleted is not None
     assert bool(deleted["deleted"])
 
@@ -543,7 +561,7 @@ def test_delete_with_nested_child_content_conflicts(
     saved = db.get_note_by_id(note["id"])
     assert saved is not None
     assert saved["content"] == "- [ ] Parent\n  child detail\n"
-    assert db.get_task(task["id"]) is not None
+    assert db.get_task(owner_user_id=db.client_id, dataset_id=LOCAL_UNBOUND, task_id=task["id"]) is not None
 
 
 def test_unlinked_task_record_only_delete_succeeds(
@@ -558,7 +576,7 @@ def test_unlinked_task_record_only_delete_succeeds(
         headers={"expected-version": str(note["version"])},
     )
     assert patched.status_code == 200, patched.text
-    unlinked = db.get_task(task["id"])
+    unlinked = db.get_task(owner_user_id=db.client_id, dataset_id=LOCAL_UNBOUND, task_id=task["id"])
     assert unlinked is not None
     assert unlinked["projection_status"] == "unlinked"
 
@@ -569,7 +587,9 @@ def test_unlinked_task_record_only_delete_succeeds(
     )
 
     assert response.status_code == 200, response.text
-    deleted = db.get_task(task["id"], include_deleted=True)
+    deleted = db.get_task(
+        owner_user_id=db.client_id, dataset_id=LOCAL_UNBOUND, task_id=task["id"], include_deleted=True
+    )
     assert deleted is not None
     assert bool(deleted["deleted"])
 
@@ -586,7 +606,7 @@ def test_unlinked_task_projection_updates_conflict_unless_record_only_metadata(
         headers={"expected-version": str(note["version"])},
     )
     assert patched.status_code == 200, patched.text
-    unlinked = db.get_task(task["id"])
+    unlinked = db.get_task(owner_user_id=db.client_id, dataset_id=LOCAL_UNBOUND, task_id=task["id"])
     assert unlinked is not None
 
     status_response = _status_update(client, task=unlinked, status="done", record_only=True)
@@ -622,7 +642,7 @@ def test_ambiguous_projected_mutations_conflict(
             "UPDATE task_note_projections SET projection_status = ? WHERE task_id = ?",
             ("ambiguous", task["id"]),
         )
-    ambiguous = db.get_task(task["id"])
+    ambiguous = db.get_task(owner_user_id=db.client_id, dataset_id=LOCAL_UNBOUND, task_id=task["id"])
     assert ambiguous is not None
 
     status_response = _status_update(client, task=ambiguous, status="done", expected_note_version=note["version"])
@@ -659,6 +679,8 @@ def test_recent_activity_returns_unread_agent_events_and_supports_dismissal(
     note = _create_note(client, content="- [ ] Alpha\n")
     task = _task_by_text(db, note["id"], "Alpha")
     db.record_task_event(
+        owner_user_id=db.client_id,
+        dataset_id=LOCAL_UNBOUND,
         task_id=task["id"],
         note_id=note["id"],
         event_type="updated",
@@ -670,6 +692,8 @@ def test_recent_activity_returns_unread_agent_events_and_supports_dismissal(
         new_value={"text": "Agent proposal"},
     )
     db.record_task_event(
+        owner_user_id=db.client_id,
+        dataset_id=LOCAL_UNBOUND,
         task_id=task["id"],
         note_id=note["id"],
         event_type="updated",
@@ -712,6 +736,8 @@ def test_recent_activity_includes_latest_agent_event_after_many_older_user_event
     task = _task_by_text(db, note["id"], "Alpha")
     for index in range(201):
         db.record_task_event(
+            owner_user_id=db.client_id,
+            dataset_id=LOCAL_UNBOUND,
             task_id=task["id"],
             note_id=note["id"],
             event_type="updated",
@@ -720,6 +746,8 @@ def test_recent_activity_includes_latest_agent_event_after_many_older_user_event
             new_value={"index": index},
         )
     latest_agent_event = db.record_task_event(
+        owner_user_id=db.client_id,
+        dataset_id=LOCAL_UNBOUND,
         task_id=task["id"],
         note_id=note["id"],
         event_type="updated",
@@ -742,6 +770,8 @@ def test_recent_activity_limit_skips_newer_dismissed_agent_event(
     note = _create_note(client, content="- [ ] Alpha\n")
     task = _task_by_text(db, note["id"], "Alpha")
     older_unread_event = db.record_task_event(
+        owner_user_id=db.client_id,
+        dataset_id=LOCAL_UNBOUND,
         task_id=task["id"],
         note_id=note["id"],
         event_type="updated",
@@ -750,6 +780,8 @@ def test_recent_activity_limit_skips_newer_dismissed_agent_event(
         new_value={"text": "older unread event"},
     )
     newer_dismissed_event = db.record_task_event(
+        owner_user_id=db.client_id,
+        dataset_id=LOCAL_UNBOUND,
         task_id=task["id"],
         note_id=note["id"],
         event_type="updated",
@@ -778,6 +810,8 @@ def test_recent_activity_can_be_scoped_to_note_before_limit(
     first_task = _task_by_text(db, first_note["id"], "Alpha")
     second_task = _task_by_text(db, second_note["id"], "Beta")
     scoped_event = db.record_task_event(
+        owner_user_id=db.client_id,
+        dataset_id=LOCAL_UNBOUND,
         task_id=first_task["id"],
         note_id=first_note["id"],
         event_type="updated",
@@ -786,6 +820,8 @@ def test_recent_activity_can_be_scoped_to_note_before_limit(
         new_value={"text": "scoped"},
     )
     db.record_task_event(
+        owner_user_id=db.client_id,
+        dataset_id=LOCAL_UNBOUND,
         task_id=second_task["id"],
         note_id=second_note["id"],
         event_type="updated",

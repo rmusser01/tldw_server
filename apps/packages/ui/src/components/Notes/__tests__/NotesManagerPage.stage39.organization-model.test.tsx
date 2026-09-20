@@ -3,6 +3,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import userEvent from "@testing-library/user-event"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+
+vi.mock("@/components/Notes/hooks/useNotesGraphAuthorityScope", () => ({
+  useNotesGraphAuthorityScope: () => "test-notes-authority"
+}))
+
 import NotesManagerPage from "../NotesManagerPage"
 
 const {
@@ -343,7 +348,7 @@ describe("NotesManagerPage stage 39 organization model", () => {
     )
   })
 
-  it("saves current keyword filters as a notebook and persists it", async () => {
+  it("persists saved filters to the scoped server without a global local write", async () => {
     mockPromptModal.mockResolvedValue("Research Notebook")
     renderPage()
 
@@ -384,7 +389,7 @@ describe("NotesManagerPage stage 39 organization model", () => {
         payload.some((entry) => entry && typeof entry === "object" && entry.name === "Research Notebook")
       )
     })
-    expect(notebookPersistCall).toBeTruthy()
+    expect(notebookPersistCall).toBeUndefined()
     expect(screen.getByTestId("notes-active-filter-summary-details")).toHaveTextContent(
       "Saved filter: Research Notebook"
     )

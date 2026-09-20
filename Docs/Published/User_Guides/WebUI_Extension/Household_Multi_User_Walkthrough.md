@@ -41,7 +41,7 @@ Any modern machine works. For a household of 3:
 
 | Requirement | How to Check | Install |
 |-------------|-------------|---------|
-| Python 3.10+ | `python3 --version` | [python.org](https://www.python.org/downloads/) |
+| Python 3.11+ | `python3 --version` | [python.org](https://www.python.org/downloads/) |
 | pip | `pip --version` | Included with Python |
 | ffmpeg | `ffmpeg -version` | `brew install ffmpeg` (macOS) / `sudo apt install ffmpeg` (Ubuntu) |
 | Git | `git --version` | `brew install git` / `sudo apt install git` |

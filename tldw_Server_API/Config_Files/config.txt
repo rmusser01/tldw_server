@@ -324,7 +324,7 @@ commands_rate_limit = 10
 # env: CHAT_COMMANDS_MAX_CHARS
 commands_max_chars = 300
 
-# Enforce RBAC permissions on commands (env: CHAT_COMMANDS_REQUIRE_PERMISSIONS)
+# Deprecated compatibility flag; declared command permissions are enforced when commands are enabled
 require_permissions = false
 
 # Fallback default location for /weather when no args provided (env: DEFAULT_LOCATION)
@@ -856,6 +856,37 @@ retention_days_quarantined = 90
 # non-terminal (queued/processing); 0 disables
 retention_days_nonterminal = 0
 
+[SlidesStandaloneHtml]
+# Standalone HTML generation is independently gated and disabled by default.
+enabled = false
+egress_enabled = false
+
+# HMAC secrets are environment-only: SLIDES_STANDALONE_HMAC_KEYS_JSON and
+# SLIDES_STANDALONE_HMAC_CURRENT_KEY_ID. Never put those secrets in this file
+# or a database. Source-free key lifecycle metadata is shared through the Jobs
+# store (implemented by the standalone generation registry).
+
+# Configure one exact target and include that same provider/model/adapter tuple
+# in allowed_targets_json. Endpoint identities come only from the built-in
+# adapter catalog; no endpoint/base URL, proxy, router, or fallback is accepted.
+default_provider =
+default_model =
+default_adapter_id =
+allowed_targets_json = []
+
+# Finite server-owned provider budgets. Timeouts can only be lowered from these
+# defaults. max_output_tokens defaults to 16,384 and may be raised only to the
+# fixed 32,768 safety ceiling.
+connect_timeout_seconds = 10
+read_timeout_seconds = 120
+overall_timeout_seconds = 180
+max_output_tokens = 16384
+
+# Effective exposure limits are clamped to these fixed V1 maxima.
+max_source_chars = 200000
+max_source_tokens = 50000
+max_provider_response_bytes = 8388608
+
 [Diarization]
 # VAD backend:
 #   silero_hub (default): use the Silero PyTorch repo via torch.hub (and optional local checkout under models/).
@@ -1062,7 +1093,7 @@ llama_max_tokens = 4096
 llama_api_timeout = 90
 llama_api_retry = 3
 llama_api_retry_delay = 1
-ooba_api_IP = http://192.168.2.235:5000/v1/chat/completions
+ooba_api_IP = http://127.0.0.1:5000/v1/chat/completions
 # text-generation-webui OpenAI routes accept the OpenAI payload; include model to be explicit
 # (docs/12 - OpenAI API.md; server will fall back to the loaded model if omitted).
 # ooba_model = <model_name_for_openai_endpoint>
@@ -1100,7 +1131,7 @@ vllm_api_timeout = 90
 vllm_api_retry = 3
 vllm_api_retry_delay = 1
 # Ollama API requires model (docs/api.md: POST /api/generate -> model required).
-ollama_api_IP =  http://192.168.2.216:11434/v1
+ollama_api_IP =  http://127.0.0.1:11434/v1
 ollama_model = gemma3:1b
 ollama_streaming = False
 ollama_temperature = 0.7
@@ -1176,6 +1207,16 @@ mlx_overlap_duration = 5.0
 buffered_chunk_duration = 20.0
 buffered_total_buffer = 25.0
 buffered_merge_algo = lcs
+
+# --- audio.cpp external ASR server (disabled by default) ---
+# Environment override: STT_AUDIO_CPP_ENABLED
+audio_cpp_enabled = false
+# Environment override: STT_AUDIO_CPP_BASE_URL
+audio_cpp_base_url = http://127.0.0.1:8080
+# Environment override: STT_AUDIO_CPP_DEFAULT_MODEL
+audio_cpp_default_model =
+# Environment override: STT_AUDIO_CPP_TIMEOUT_SECONDS
+audio_cpp_timeout_seconds = 600
 
 # --- Custom Vocabulary (optional) ---
 # Path to a file with domain terms (one per line) or JSON list.
@@ -1381,11 +1422,6 @@ TTS_VOICE_STRICT_DURATION = false
 
 # Alternatively, place the same setting in [Audio] section if you prefer (optional; env var takes precedence)
 
-# Audio Studio provider configuration is environment-variable only in the MVP.
-# Use .env for AUDIO_STUDIO_EXTERNAL_ENDPOINT_ALLOWLIST,
-# AUDIO_STUDIO_ALLOW_HTTP_ENDPOINTS, AUDIO_STUDIO_ACE_STEP_BASE_URL,
-# AUDIO_STUDIO_ACE_STEP_TIMEOUT_SECONDS, and AUDIO_STUDIO_ACE_STEP_API_KEY.
-
 # ---------------------------------------------
 # API Route Toggles (optional)
 # ---------------------------------------------
@@ -1480,6 +1516,10 @@ web_scraper_ua_mode = fixed
 web_scraper_respect_robots = True
 # Shared outbound safety mode for scraping and websearch data-plane callers: compat|strict
 web_outbound_policy_mode = compat
+# Browser transport admission: auto|disabled|url_guarded|attested_proxy
+# auto allows legacy URL-guarded Playwright only in single_user + compat mode.
+# attested_proxy still requires a concrete in-process governed transport attestation.
+web_browser_transport_mode = auto
 web_scraper_preflight_analyzers = False
 web_scraper_preflight_timeout_s = 0
 web_scraper_preflight_scan_depth = default
@@ -1524,6 +1564,9 @@ cache_ttl = 300
 
 [Web-Scraping]
 stealth_wait_ms = 5000
+# Positive byte limits up to 1073741824 (1 GiB); invalid or larger values use defaults.
+web_scraper_max_article_bytes = 16777216
+web_scraper_max_browser_transfer_bytes = 67108864
 # Ephemeral web-scraping result store tuning (env-only today):
 # - EPHEMERAL_STORE_TTL_SECONDS (default: 900)
 # - EPHEMERAL_STORE_MAX_ENTRIES (default: 256)

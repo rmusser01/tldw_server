@@ -1,21 +1,21 @@
 """
 note_title.py
-Heuristic and pluggable title generation for Notes.
-
-MVP: heuristic-only generation with optional language hint and max length.
-Phase 2: add LLM-backed strategy behind a flag via generate_note_title().
+Heuristic and optional LLM-backed title generation for Notes.
 """
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from tldw_Server_API.app.core.config import settings as core_settings
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 
-# Public strategy type for future extension (Phase 2)
+if TYPE_CHECKING:
+    from tldw_Server_API.app.core.Prompt_Management.service_prompts import ResolvedServicePrompt
+
+# Public strategy type shared with the Notes API.
 TitleStrategy = Literal["heuristic", "llm", "llm_fallback"]
 
 
@@ -110,26 +110,40 @@ def generate_note_title_heuristic(content: str, max_len: int = 250, *, language:
     return _truncate_title(base, max_len)
 
 
-def generate_note_title(content: str, *, options: TitleGenOptions | None = None) -> str:
-    """Entry point used by API code.
-
-    MVP: always uses heuristic, ignoring strategy.
-    Phase 2: respect options.strategy and use LLM where configured.
-    """
+def generate_note_title(
+    content: str,
+    *,
+    options: TitleGenOptions | None = None,
+    service_prompt: ResolvedServicePrompt | None = None,
+) -> str:
+    """Generate a title, using a resolved prompt for enabled LLM strategies."""
     if options is None:
         options = TitleGenOptions()
-    # Phase 2: LLM strategy gated by env flag, with heuristic fallback
+    # LLM strategies remain feature-gated and retain the heuristic fallback.
     try_llm = bool(core_settings.get("NOTES_TITLE_LLM_ENABLED", False))
     if try_llm and options.strategy in ("llm", "llm_fallback"):
-        llm_title = _try_generate_title_llm(content, options)
+        if service_prompt is None:
+            raise RuntimeError("Service Prompt resolution is required for LLM note titles.")
+        llm_title = _try_generate_title_llm(
+            content,
+            options,
+            system_message=service_prompt.parts["system"],
+            title_instruction=service_prompt.parts["title_instruction"],
+        )
         if llm_title:
             return _truncate_title(llm_title, options.max_len)
         # Fallback to heuristic on failure
-    # MVP path / default
+    # Default and fallback path.
     return generate_note_title_heuristic(content, max_len=options.max_len, language=options.language)
 
 
-def _try_generate_title_llm(content: str, options: TitleGenOptions) -> str | None:
+def _try_generate_title_llm(
+    content: str,
+    options: TitleGenOptions,
+    *,
+    system_message: str,
+    title_instruction: str,
+) -> str | None:
     """Best-effort LLM title generation. Returns None on failure.
 
     Keeps synchronous control path; relies on local/adapter-backed sync helpers.
@@ -140,13 +154,11 @@ def _try_generate_title_llm(content: str, options: TitleGenOptions) -> str | Non
         return None
 
     try:
-        # Short prompt instructing concise title; no JSON; single line
-        sys_msg = "You are a helpful assistant that writes concise document titles."
         content_snippet = (content or "").strip()
         if len(content_snippet) > 2000:
             content_snippet = content_snippet[:2000]
         user_msg = (
-            f"Write a descriptive title no longer than {options.max_len} characters for the following note.\n"
+            f"{title_instruction} no longer than {options.max_len} characters for the following note.\n"
             f"Return only the title with no quotes or extra text.\n\n{content_snippet}"
         )
         messages = [{"role": "user", "content": user_msg}]
@@ -154,7 +166,7 @@ def _try_generate_title_llm(content: str, options: TitleGenOptions) -> str | Non
         result = adapter.chat(
             {
                 "messages": messages,
-                "system_message": sys_msg,
+                "system_message": system_message,
                 "model": None,
                 "temperature": 0.2,
                 "max_tokens": 128,

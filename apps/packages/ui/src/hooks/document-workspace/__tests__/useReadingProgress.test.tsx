@@ -18,6 +18,9 @@ vi.mock("@/services/tldw", () => ({
   tldwClient: {
     updateReadingProgress: mocks.updateReadingProgress,
   },
+  tldwModels: {
+    subscribeInvalidation: vi.fn(),
+  },
 }))
 
 const buildWrapper = () => {

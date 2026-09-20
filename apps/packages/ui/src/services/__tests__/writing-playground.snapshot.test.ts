@@ -13,12 +13,27 @@ vi.mock("@/services/background-proxy", () => ({
 import {
   exportWritingSnapshot,
   getWritingDefaults,
-  importWritingSnapshot
+  importWritingSnapshot,
+  listManuscriptCharacters,
+  listManuscriptWorldInfo
 } from "@/services/writing-playground"
 
 describe("writing-playground snapshot service wiring", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+  })
+
+  it.each([
+    [listManuscriptCharacters, "characters", { id: "character-1", project_id: "project-1", name: "Ari", role: "hero" }],
+    [listManuscriptWorldInfo, "items", { id: "world-1", project_id: "project-1", name: "Harbor", kind: "location" }]
+  ] as const)("normalizes manuscript list payloads for %s", async (list, key, item) => {
+    mocks.bgRequest.mockResolvedValueOnce([item])
+    expect(await list("project-1")).toEqual({ [key]: [item], total: 1 })
+    mocks.bgRequest.mockResolvedValueOnce([])
+    expect(await list("project-1")).toEqual({ [key]: [], total: 0 })
+    const wrapped = { [key]: [item], total: 4 }
+    mocks.bgRequest.mockResolvedValueOnce(wrapped)
+    expect(await list("project-1")).toEqual(wrapped)
   })
 
   it("calls snapshot export endpoint", async () => {

@@ -210,9 +210,13 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: tldwClientState,
 }));
 
-vi.mock("@/services/tldw-server", () => ({
-  fetchChatModels: tldwServerState.fetchChatModels,
-}));
+vi.mock("@/services/tldw-server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/tldw-server")>()
+  return {
+    ...actual,
+    fetchChatModels: tldwServerState.fetchChatModels
+  }
+})
 
 vi.mock("@/components/Option/Playground/CharacterChatSessionsPanel", () => ({
   CharacterChatSessionsPanel: (props: Record<string, unknown>) => {

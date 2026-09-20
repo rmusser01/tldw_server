@@ -1,6 +1,6 @@
 import uuid
-import pytest
 
+import pytest
 
 pytestmark = pytest.mark.integration
 
@@ -38,6 +38,12 @@ def test_status_reports_queue_and_leases(prompt_studio_dual_backend_client):
     # Create a queued optimization to bump queue depth
     pid = _mk_project(client, backend_label)
     prompt_id = _mk_prompt(client, pid, backend_label)
+    test_case = db.create_test_case(
+        project_id=pid,
+        name=f"StatusCase-{uuid.uuid4().hex[:6]} ({backend_label})",
+        inputs={"q": "hello"},
+        expected_outputs={"answer": "hello"},
+    )
 
     body = {
         "project_id": pid,
@@ -48,6 +54,7 @@ def test_status_reports_queue_and_leases(prompt_studio_dual_backend_client):
             "target_metric": "accuracy",
             "early_stopping": True,
         },
+        "test_case_ids": [test_case["id"]],
         "name": "qstatus",
     }
     r = client.post("/api/v1/prompt-studio/optimizations/create", json=body)

@@ -13,9 +13,17 @@ pytestmark = pytest.mark.unit
 class _CaptureGenerator:
     last_generate_kwargs = None
 
-    def __init__(self, model=None, provider=None):
+    def __init__(
+        self,
+        model=None,
+        provider=None,
+        system_prompt=None,
+        credential_runtime=None,
+    ):
         self.model = model
         self.provider = provider
+        self.system_prompt = system_prompt
+        self.credential_runtime = credential_runtime
 
     async def generate(self, **kwargs):
         _CaptureGenerator.last_generate_kwargs = kwargs

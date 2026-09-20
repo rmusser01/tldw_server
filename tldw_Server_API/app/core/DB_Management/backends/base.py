@@ -306,6 +306,25 @@ class ConnectionPool(ABC):
         """Return a connection to the pool."""
         pass
 
+    def invalidate_connection(self, connection: Any) -> None:
+        """Close a failed checkout that the caller will no longer use.
+
+        Caching pools must override this default to remove the checkout from
+        their tracking structures as well as closing it.
+
+        Args:
+            connection: Connection borrowed from this pool and owned by the
+                caller. The caller must not reuse or return it afterward.
+
+        Returns:
+            None.
+
+        Raises:
+            Exception: Any driver or wrapper error from ``connection.close()``
+                propagates unchanged; this default does not suppress errors.
+        """
+        connection.close()
+
     @abstractmethod
     @contextmanager
     def connection(self) -> Generator[Any, None, None]:
@@ -397,7 +416,9 @@ class DatabaseBackend(ABC):
         self,
         query: str,
         params: Optional[Union[tuple, dict]] = None,
-        connection: Optional[Any] = None
+        connection: Optional[Any] = None,
+        *,
+        log_errors: bool = True,
     ) -> QueryResult:
         """
         Execute a query and return results.
@@ -406,6 +427,7 @@ class DatabaseBackend(ABC):
             query: SQL query to execute
             params: Query parameters
             connection: Optional connection to use
+            log_errors: Whether backend errors may include raw driver details
 
         Returns:
             QueryResult object

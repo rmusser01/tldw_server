@@ -83,6 +83,53 @@ def _auth_headers(client):
 
 
 @pytest.mark.unit
+def test_real_openai_adapter_predispatch_failure_is_sanitized_terminal(monkeypatch):
+    from loguru import logger
+
+    from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
+    from tldw_Server_API.app.core.Chat.Chat_Deps import SanitizedProviderStreamError
+    from tldw_Server_API.app.core.LLM_Calls.providers import openai_adapter as adapter_module
+    from tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter import OpenAIAdapter
+
+    sentinel = "adapter-secret-/srv/config-https://adapter.invalid"
+    factory_calls = 0
+
+    def fail_before_dispatch(**_kwargs):
+        nonlocal factory_calls
+        factory_calls += 1
+        raise OSError(sentinel)
+
+    monkeypatch.setattr(adapter_module, "http_client_factory", fail_before_dispatch, raising=True)
+    request = {
+        "messages": [{"role": "user", "content": "hi"}],
+        "model": "gpt-4o-mini",
+        "api_key": "runtime-key",
+    }
+    state: dict[str, Any] = {}
+    adapter_stream = OpenAIAdapter().stream(request)
+    wrapped = chat_endpoint._sanitize_provider_stream_call(lambda: adapter_stream, state)()
+    logs: list[str] = []
+    sink_id = logger.add(logs.append, format="{message}")
+    try:
+        with pytest.raises(SanitizedProviderStreamError) as captured:
+            next(wrapped)
+    finally:
+        logger.remove(sink_id)
+
+    assert captured.value.code == "provider_unavailable"
+    assert captured.value.upstream_dispatched is True
+    assert captured.value.output_emitted is False
+    assert captured.value.allow_non_stream_fallback is False
+    assert state.get("replay_certified") is False
+    assert state.get("code") == "provider_unavailable"
+    assert factory_calls == 1
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+    assert sentinel not in str(captured.value)
+    assert sentinel not in "".join(logs)
+
+
+@pytest.mark.unit
 def test_endpoint_streaming_normalizes_openai_sse_frames():
     db, db_path = _make_test_db()
     try:
@@ -99,10 +146,15 @@ def test_endpoint_streaming_normalizes_openai_sse_frames():
             def upstream_stream():
                 yield f"data: {json.dumps(chunk1)}\n\n"
                 yield f"data: {json.dumps(chunk2)}\n\n"
+                yield 'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
                 yield "data: [DONE]\n\n"
 
             with (
                 patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}, clear=False),
+                patch(
+                    "tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS",
+                    {"openai": "sk-test"},
+                ),
                 patch(
                     "tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call", return_value=upstream_stream()
                 ),
@@ -114,7 +166,7 @@ def test_endpoint_streaming_normalizes_openai_sse_frames():
                     "stream": True,
                 }
                 r = _post_with_csrf(client, "/api/v1/chat/completions", json=body, headers=_auth_headers(client))
-                assert r.status_code == 200
+                assert r.status_code == 200, r.text
                 assert "text/event-stream" in r.headers.get("content-type", "").lower()
 
                 # TestClient buffers entire SSE; parse normalized lines
@@ -168,7 +220,11 @@ def test_endpoint_streaming_normalizes_multiline_event_and_data_frames():
             part_a = {"choices": [{"delta": {"content": "Part"}}]}
             part_b = {"choices": [{"delta": {"content": " A"}}]}
             multiline = (
-                "event: chunk\n" f"data: {json.dumps(part_a)}\n" f"data: {json.dumps(part_b)}\n" "data: [DONE]\n\n"
+                "event: chunk\n"
+                f"data: {json.dumps(part_a)}\n"
+                f"data: {json.dumps(part_b)}\n"
+                'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n'
+                "data: [DONE]\n\n"
             )
 
             def upstream_stream():
@@ -178,6 +234,10 @@ def test_endpoint_streaming_normalizes_multiline_event_and_data_frames():
 
             with (
                 patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}, clear=False),
+                patch(
+                    "tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS",
+                    {"openai": "sk-test"},
+                ),
                 patch(
                     "tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call", return_value=upstream_stream()
                 ),
@@ -240,11 +300,16 @@ def test_endpoint_streaming_emits_single_terminal_done_frame():
 
             def upstream_stream():
                 yield f"data: {json.dumps(chunk)}\n\n"
+                yield 'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
                 yield "data: [DONE]\n\n"
                 yield "data: [DONE]\n\n"
 
             with (
                 patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}, clear=False),
+                patch(
+                    "tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS",
+                    {"openai": "sk-test"},
+                ),
                 patch(
                     "tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call",
                     return_value=upstream_stream(),
@@ -314,6 +379,7 @@ def test_endpoint_streaming_emits_tool_results_event_before_stream_end():
 
             def upstream_stream():
                 yield f"data: {json.dumps(tool_delta)}\n\n"
+                yield 'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\n'
                 yield "data: [DONE]\n\n"
 
             async def fake_autoexec(**_kwargs):
@@ -346,6 +412,10 @@ def test_endpoint_streaming_emits_tool_results_event_before_stream_end():
                         "CHAT_TOOL_IDEMPOTENCY": "1",
                     },
                     clear=False,
+                ),
+                patch(
+                    "tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS",
+                    {"openai": "sk-test"},
                 ),
                 patch(
                     "tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call",
@@ -474,6 +544,10 @@ def test_endpoint_non_stream_auto_continue_returns_followup_assistant_content():
                         "CHAT_TOOL_AUTO_CONTINUE_ONCE": "1",
                     },
                     clear=False,
+                ),
+                patch(
+                    "tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS",
+                    {"openai": "sk-test"},
                 ),
                 patch(
                     "tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call",

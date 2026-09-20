@@ -3,31 +3,29 @@
 
 import asyncio
 import json
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from typing import Any, Optional
 
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    ProviderCallCredentials,
+)
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import PromptStudioDatabase
 from tldw_Server_API.app.core.Logging.log_context import (
     log_context,
     new_request_id,
 )
-from tldw_Server_API.app.core.Prompt_Management.prompt_studio.event_broadcaster import (
-    EventBroadcaster,
-)
 
+from ..optimization_model_config import (
+    normalize_durable_optimization_config,
+    reconcile_optimization_strategy,
+    strip_sensitive_optimization_config,
+)
 from .job_types import JobType
 from .test_case_generator import TestCaseGenerator
 from .test_case_manager import TestCaseManager
-
-try:
-    # Import connection manager used by WebSocket endpoints
-    from tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_websocket import (
-        connection_manager as ws_connection_manager,
-    )
-except Exception:
-    ws_connection_manager = None
 
 ########################################################################################################################
 # Job Processor
@@ -89,29 +87,221 @@ class JobProcessor:
         except (TypeError, ValueError):
             return 0
 
-    def _ensure_ps_prompt_exists(self, prompt_id: Optional[int], project_id: Optional[int]) -> None:
-        """Ensure a minimal prompt exists in prompt_studio_prompts for the given IDs.
+    @staticmethod
+    def _positive_id(value: Any, *, label: str) -> int:
+        """Return one positive resource ID or fail closed."""
 
-        Some tests insert evaluation/optimization rows referencing a prompt_id
-        that was not previously created. This guard creates a stub prompt row
-        to prevent foreign key failures when inserting dependent rows like test_runs.
-        """
-        if not prompt_id or not project_id:
-            return
-
+        if isinstance(value, bool):
+            raise ValueError(f"{label} is invalid")
+        if isinstance(value, float) and not value.is_integer():
+            raise ValueError(f"{label} is invalid")
         try:
-            self.db.ensure_prompt_stub(
-                prompt_id=prompt_id,
-                project_id=project_id,
-                name=f"Auto-Created Prompt {prompt_id}",
+            resource_id = int(value)
+        except (OverflowError, TypeError, ValueError):
+            raise ValueError(f"{label} is invalid") from None
+        if resource_id <= 0:
+            raise ValueError(f"{label} is invalid")
+        return resource_id
+
+    @classmethod
+    def _positive_id_list(cls, value: Any, *, label: str) -> list[int]:
+        """Return a validated ordered resource snapshot."""
+
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except json.JSONDecodeError:
+                value = None
+        if not isinstance(value, list):
+            raise ValueError(f"{label} snapshot is invalid")
+        resource_ids = [
+            cls._positive_id(candidate, label=label) for candidate in value
+        ]
+        if len(resource_ids) != len(set(resource_ids)):
+            raise ValueError(f"{label} snapshot is invalid")
+        return resource_ids
+
+    @staticmethod
+    def _model_config_list(value: Any, *, label: str) -> list[dict[str, Any]]:
+        """Return a validated ordered model-config snapshot."""
+
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except json.JSONDecodeError:
+                value = None
+        if isinstance(value, dict):
+            value = [value]
+        if (
+            not isinstance(value, list)
+            or not value
+            or any(not isinstance(candidate, dict) for candidate in value)
+        ):
+            raise ValueError(f"{label} snapshot is invalid")
+        return [dict(candidate) for candidate in value]
+
+    def _require_active_project(self, project_id: Any) -> dict[str, Any]:
+        """Load one non-deleted project in the active tenant scope."""
+
+        selected_project_id = self._positive_id(project_id, label="project")
+        project = self.db.get_project(
+            selected_project_id,
+            include_deleted=True,
+        )
+        if not project or project.get("deleted"):
+            raise ValueError(f"Project {selected_project_id} not found")
+        return project
+
+    def _require_prompt_in_project(
+        self,
+        prompt_id: Any,
+        project_id: Any,
+    ) -> dict[str, Any]:
+        """Load one non-deleted prompt and enforce its persisted project."""
+
+        selected_prompt_id = self._positive_id(prompt_id, label="prompt")
+        selected_project_id = self._positive_id(project_id, label="project")
+        self._require_active_project(selected_project_id)
+        prompt = self.db.get_prompt_with_project(
+            selected_prompt_id,
+            include_deleted=True,
+        )
+        if not prompt or prompt.get("deleted"):
+            raise ValueError(f"Prompt {selected_prompt_id} not found")
+        if self._positive_id(
+            prompt.get("project_id"),
+            label="prompt project",
+        ) != selected_project_id:
+            raise ValueError("Prompt does not belong to the optimization project")
+        return prompt
+
+    def _require_test_case_in_project(
+        self,
+        test_case_id: Any,
+        project_id: Any,
+    ) -> dict[str, Any]:
+        """Load one non-deleted test case and enforce its persisted project."""
+
+        selected_case_id = self._positive_id(test_case_id, label="test case")
+        selected_project_id = self._positive_id(project_id, label="project")
+        test_case = self.db.get_test_case(
+            selected_case_id,
+            include_deleted=True,
+        )
+        if not test_case or test_case.get("deleted"):
+            raise ValueError(f"Test case {selected_case_id} not found")
+        if self._positive_id(
+            test_case.get("project_id"),
+            label="test case project",
+        ) != selected_project_id:
+            raise ValueError(
+                "Test case does not belong to the optimization project"
             )
-        except Exception as exc:  # noqa: BLE001 - defensive guard for legacy sqlite paths
-            logger.warning(
-                "PS ensure_prompt_stub failed: prompt_id={} project_id={} error={}",
-                prompt_id,
-                project_id,
-                exc,
+        return test_case
+
+    def _validated_optimization_resources(
+        self,
+        optimization: dict[str, Any],
+        payload: dict[str, Any],
+    ) -> tuple[int, list[int]]:
+        """Validate persisted resources and reject a stale queued snapshot."""
+
+        project_id = self._positive_id(
+            optimization.get("project_id"),
+            label="project",
+        )
+        prompt_id = self._positive_id(
+            optimization.get("initial_prompt_id"),
+            label="prompt",
+        )
+        test_case_ids = self._positive_id_list(
+            optimization.get("test_case_ids"),
+            label="test case",
+        )
+        if "initial_prompt_id" in payload:
+            queued_prompt_id = self._positive_id(
+                payload.get("initial_prompt_id"),
+                label="queued prompt",
             )
+            if queued_prompt_id != prompt_id:
+                raise ValueError(
+                    "Queued prompt does not match the persisted optimization prompt"
+                )
+        if "test_case_ids" in payload:
+            queued_test_case_ids = self._positive_id_list(
+                payload.get("test_case_ids"),
+                label="queued test case",
+            )
+            if queued_test_case_ids != test_case_ids:
+                raise ValueError(
+                    "Queued test case snapshot does not match the persisted optimization"
+                )
+
+        self._require_prompt_in_project(prompt_id, project_id)
+        for test_case_id in test_case_ids:
+            self._require_test_case_in_project(test_case_id, project_id)
+        return prompt_id, test_case_ids
+
+    @staticmethod
+    def _completed_optimization_result(
+        optimization_id: int,
+        row: dict[str, Any],
+        raw_result: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Return completed fields from the authoritative Prompt row."""
+
+        def _metrics(value: Any) -> dict[str, Any]:
+            if isinstance(value, dict):
+                return dict(value)
+            if isinstance(value, str):
+                try:
+                    parsed = json.loads(value)
+                except json.JSONDecodeError:
+                    return {}
+                return dict(parsed) if isinstance(parsed, dict) else {}
+            return {}
+
+        def _score(metrics: dict[str, Any]) -> Any:
+            return next(
+                (
+                    metrics[key]
+                    for key in ("score", "accuracy", "best_metric")
+                    if metrics.get(key) is not None
+                ),
+                None,
+            )
+
+        initial_metrics = _metrics(row.get("initial_metrics"))
+        final_metrics = _metrics(row.get("final_metrics"))
+        iterations = int(row.get("iterations_completed") or 0)
+        optimized_prompt_id = (
+            row.get("optimized_prompt_id") or row.get("initial_prompt_id")
+        )
+        improvement_percentage = row.get("improvement_percentage")
+        result = {
+            "optimization_id": optimization_id,
+            "status": str(row.get("status") or "completed").lower(),
+            "optimized_prompt_id": optimized_prompt_id,
+            "best_prompt_id": optimized_prompt_id,
+            "iterations": iterations,
+            "iterations_completed": iterations,
+            "initial_score": _score(initial_metrics),
+            "final_score": _score(final_metrics),
+            "best_metric": _score(final_metrics),
+            "improvement": (
+                improvement_percentage / 100
+                if isinstance(improvement_percentage, (int, float))
+                else None
+            ),
+            "initial_metrics": initial_metrics,
+            "final_metrics": final_metrics,
+            "total_tokens": row.get("total_tokens"),
+            "total_cost": row.get("total_cost"),
+        }
+        for key in ("provider_dispatches", "scorer_provider_dispatched"):
+            if raw_result is not None and key in raw_result:
+                result[f"_{key}"] = raw_result[key]
+        return result
 
     ####################################################################################################################
     # Generation Jobs
@@ -269,11 +459,59 @@ class JobProcessor:
                 )
 
                 evaluation = self.db.get_evaluation(evaluation_id)
-                if evaluation:
-                    self._ensure_ps_prompt_exists(
-                        evaluation.get("prompt_id"),
-                        evaluation.get("project_id"),
+                if not evaluation:
+                    raise ValueError(f"Evaluation {evaluation_id} not found")
+                project_id = self._positive_id(
+                    evaluation.get("project_id"),
+                    label="project",
+                )
+                persisted_prompt_id = self._positive_id(
+                    evaluation.get("prompt_id"),
+                    label="prompt",
+                )
+                if prompt_id is not None and self._positive_id(
+                    prompt_id,
+                    label="queued prompt",
+                ) != persisted_prompt_id:
+                    raise ValueError(
+                        "Queued prompt does not match the persisted evaluation prompt"
                     )
+                prompt_id = persisted_prompt_id
+                persisted_test_case_ids = self._positive_id_list(
+                    evaluation.get("test_case_ids"),
+                    label="test case",
+                )
+                if "test_case_ids" in payload:
+                    queued_test_case_ids = self._positive_id_list(
+                        payload.get("test_case_ids"),
+                        label="queued test case",
+                    )
+                    if queued_test_case_ids != persisted_test_case_ids:
+                        raise ValueError(
+                            "Queued test case snapshot does not match the "
+                            "persisted evaluation"
+                        )
+                test_case_ids = persisted_test_case_ids
+
+                persisted_model_configs = self._model_config_list(
+                    evaluation.get("model_configs"),
+                    label="model config",
+                )
+                if "model_configs" in payload:
+                    queued_model_configs = self._model_config_list(
+                        payload.get("model_configs"),
+                        label="queued model config",
+                    )
+                    if queued_model_configs != persisted_model_configs:
+                        raise ValueError(
+                            "Queued model config snapshot does not match the "
+                            "persisted evaluation"
+                        )
+                model_configs = persisted_model_configs
+
+                self._require_prompt_in_project(prompt_id, project_id)
+                for test_case_id in test_case_ids:
+                    self._require_test_case_in_project(test_case_id, project_id)
 
                 self.db.update_evaluation(
                     evaluation_id,
@@ -303,13 +541,6 @@ class JobProcessor:
 
                 # Calculate aggregate metrics
                 aggregate_metrics = self._calculate_aggregate_metrics(test_runs)
-
-                evaluation = self.db.get_evaluation(evaluation_id)
-                if evaluation:
-                    self._ensure_ps_prompt_exists(
-                        evaluation.get("prompt_id"),
-                        evaluation.get("project_id"),
-                    )
 
                 self.db.update_evaluation(
                     evaluation_id,
@@ -373,8 +604,15 @@ class JobProcessor:
         # Simulate execution delay
         await asyncio.sleep(random.uniform(0.5, 1.5))
 
-        # Get test case
+        # Resolve both persisted resources before creating a dependent run.
         test_case = self.test_manager.get_test_case(test_case_id)
+        if not test_case or test_case.get("deleted"):
+            raise ValueError(f"Test case {test_case_id} not found")
+        test_case_project_id = self._positive_id(
+            test_case.get("project_id"),
+            label="test case project",
+        )
+        self._require_prompt_in_project(prompt_id, test_case_project_id)
 
         # Simulate test run result
         test_run = {
@@ -398,8 +636,7 @@ class JobProcessor:
         }
 
         # Store test run in database
-        tc_project_id = test_case.get("project_id")
-        self._ensure_ps_prompt_exists(prompt_id, tc_project_id)
+        tc_project_id = test_case_project_id
 
         persisted = self.db.create_test_run(
             project_id=tc_project_id,
@@ -445,7 +682,21 @@ class JobProcessor:
     ####################################################################################################################
     # Optimization Jobs
 
-    async def process_optimization_job(self, payload: dict[str, Any], entity_id: int) -> dict[str, Any]:
+    async def process_optimization_job(
+        self,
+        payload: dict[str, Any],
+        entity_id: int,
+        *,
+        runtime_model_config: dict[str, Any] | None = None,
+        provider_credentials: ProviderCallCredentials | None = None,
+        on_provider_success: Callable[[], Awaitable[None]] | None = None,
+        runtime_scorer_model_config: dict[str, Any] | None = None,
+        scorer_provider_credentials: ProviderCallCredentials | None = None,
+        on_scorer_provider_success: Callable[[], Awaitable[None]] | None = None,
+        before_finalize: Callable[[], Awaitable[bool]] | None = None,
+        before_completion: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        manage_failure_status: bool = True,
+    ) -> dict[str, Any]:
         """
         Process an optimization job.
 
@@ -491,12 +742,6 @@ class JobProcessor:
             except (TypeError, ValueError):
                 max_iterations = 20
 
-            project_id = optimization.get("project_id")
-            if initial_prompt_id is None:
-                initial_prompt_id = optimization.get("initial_prompt_id")
-
-            self._ensure_ps_prompt_exists(initial_prompt_id, project_id)
-
             optimization_status = str(optimization.get("status") or "").lower()
             if optimization_status == "cancelled":
                 final_metrics = optimization.get("final_metrics")
@@ -521,34 +766,26 @@ class JobProcessor:
                 return {
                     "optimization_id": optimization_id,
                     "iterations_completed": int(optimization.get("iterations_completed") or 0),
-                    "best_prompt_id": optimization.get("optimized_prompt_id") or initial_prompt_id,
+                    "best_prompt_id": optimization.get("optimized_prompt_id")
+                    or optimization.get("initial_prompt_id"),
                     "best_metric": best_metric,
                     "status": "cancelled",
                 }
+            if optimization_status == "completed":
+                return self._completed_optimization_result(
+                    optimization_id,
+                    optimization,
+                )
 
-            # Keep optimization row in sync with queued payload fields so
-            # OptimizationEngine receives the runtime test set/config.
-            payload_test_case_ids = payload.get("test_case_ids")
-            payload_config = payload.get("optimization_config")
-            if isinstance(payload_config, str):
-                try:
-                    payload_config = json.loads(payload_config)
-                except Exception:
-                    payload_config = None
-            updates: dict[str, Any] = {}
-            if isinstance(payload_test_case_ids, list):
-                updates["test_case_ids"] = payload_test_case_ids
-            if isinstance(payload_config, dict) and payload_config:
-                updates["optimization_config"] = payload_config
-            if updates:
-                with log_context(
-                    ps_component="job_processor",
-                    ps_job_kind="optimization",
-                    request_id=req_id,
-                    optimization_id=optimization_id,
-                ):
-                    optimization = self.db.update_optimization(optimization_id, updates)
+            initial_prompt_id, _ = (
+                self._validated_optimization_resources(
+                    optimization,
+                    payload,
+                )
+            )
 
+            # Reconcile every persisted/queued strategy source before allowing
+            # a queued snapshot to update the authoritative row.
             row_cfg = optimization.get("optimization_config")
             if isinstance(row_cfg, str):
                 try:
@@ -558,274 +795,165 @@ class JobProcessor:
             if not isinstance(row_cfg, dict):
                 row_cfg = {}
 
-            strategy = str(
-                payload.get("optimizer_type")
-                or row_cfg.get("optimizer_type")
-                or row_cfg.get("strategy")
-                or optimization.get("optimizer_type")
-                or "mipro"
-            ).strip().lower()
+            payload_config = payload.get("optimization_config")
+            if isinstance(payload_config, str):
+                try:
+                    payload_config = json.loads(payload_config)
+                except Exception:
+                    payload_config = None
+            normalized_payload_config: dict[str, Any] | None = None
+            if isinstance(payload_config, dict) and payload_config:
+                try:
+                    normalized_payload_config = (
+                        normalize_durable_optimization_config(
+                            payload_config,
+                            reject_sensitive=False,
+                        )
+                    )
+                except ValueError:
+                    scrubbed_config = strip_sensitive_optimization_config(
+                        payload_config
+                    )
+                    self.db.update_optimization(
+                        optimization_id,
+                        {"optimization_config": scrubbed_config},
+                    )
+                    raise
 
-            # Stage-1 production wiring: execute real optimization engine for
-            # supported strategies, including MCTS.
-            if strategy in {"mipro", "bootstrap", "mcts"}:
+            strategy = reconcile_optimization_strategy(
+                optimization.get("optimizer_type"),
+                row_cfg.get("optimizer_type"),
+                row_cfg.get("strategy"),
+                payload.get("optimizer_type"),
+                (
+                    normalized_payload_config.get("optimizer_type")
+                    if normalized_payload_config is not None
+                    else None
+                ),
+                (
+                    normalized_payload_config.get("strategy")
+                    if normalized_payload_config is not None
+                    else None
+                ),
+            )
+
+            updates: dict[str, Any] = {}
+            if normalized_payload_config is not None:
+                normalized_payload_config["optimizer_type"] = strategy
+                normalized_payload_config.pop("strategy", None)
+                updates["optimization_config"] = normalized_payload_config
+            if updates:
                 with log_context(
                     ps_component="job_processor",
                     ps_job_kind="optimization",
                     request_id=req_id,
                     optimization_id=optimization_id,
-                    optimizer_type=strategy,
-                    job_id=payload.get("job_id"),
                 ):
-                    logger.info(
-                        "Routing optimization job {} to OptimizationEngine (strategy={})",
-                        optimization_id,
-                        strategy,
-                    )
-                    from .optimization_engine import OptimizationEngine
+                    optimization = self.db.update_optimization(optimization_id, updates)
 
-                    engine = OptimizationEngine(self.db)
-                    engine_result = await engine.optimize(optimization_id)
+            # Normalization above rejects unknown strategies. Every accepted
+            # strategy executes through the provider-bound durable engine;
+            # compatibility strategies are mapped inside that engine.
+            with log_context(
+                ps_component="job_processor",
+                ps_job_kind="optimization",
+                request_id=req_id,
+                optimization_id=optimization_id,
+                optimizer_type=strategy,
+                job_id=payload.get("job_id"),
+            ):
+                logger.info(
+                    "Routing optimization job {} to OptimizationEngine (strategy={})",
+                    optimization_id,
+                    strategy,
+                )
+                from .optimization_engine import OptimizationEngine
 
-                latest = self.db.get_optimization(optimization_id, include_deleted=True) or {}
-                result = dict(engine_result or {})
+                engine = OptimizationEngine(self.db)
+                engine_kwargs: dict[str, Any] = {
+                    "runtime_model_config": runtime_model_config,
+                    "provider_credentials": provider_credentials,
+                    "on_provider_success": on_provider_success,
+                    "runtime_scorer_model_config": runtime_scorer_model_config,
+                    "scorer_provider_credentials": scorer_provider_credentials,
+                    "on_scorer_provider_success": on_scorer_provider_success,
+                    "manage_failure_status": manage_failure_status,
+                    "emit_completion_event": False,
+                }
+                if before_finalize is not None:
+                    engine_kwargs["before_finalize"] = before_finalize
+                if before_completion is not None:
+                    engine_kwargs["before_completion"] = before_completion
+                engine_result = await engine.optimize(
+                    optimization_id,
+                    **engine_kwargs,
+                )
+
+            latest = self.db.get_optimization(optimization_id, include_deleted=True) or {}
+            result = dict(engine_result or {})
+            if str(latest.get("status") or "").lower() == "completed":
+                result = self._completed_optimization_result(
+                    optimization_id,
+                    latest,
+                    result,
+                )
+            else:
                 result.setdefault("optimization_id", optimization_id)
                 result.setdefault("status", str(latest.get("status") or "completed"))
                 result.setdefault(
                     "iterations_completed",
-                    int(latest.get("iterations_completed") or result.get("iterations") or 0),
+                    int(
+                        latest.get("iterations_completed")
+                        or result.get("iterations")
+                        or 0
+                    ),
                 )
-                if result.get("best_prompt_id") is None and result.get("optimized_prompt_id") is not None:
-                    result["best_prompt_id"] = result.get("optimized_prompt_id")
-                if result.get("best_metric") is None and result.get("final_score") is not None:
+                if (
+                    result.get("best_prompt_id") is None
+                    and result.get("optimized_prompt_id") is not None
+                ):
+                    result["best_prompt_id"] = result.get(
+                        "optimized_prompt_id"
+                    )
+                if (
+                    result.get("best_metric") is None
+                    and result.get("final_score") is not None
+                ):
                     result["best_metric"] = result.get("final_score")
 
-                logger.info(
-                    "PS optimization.engine_done optimization_id={} strategy={} status={} iterations={}",
-                    optimization_id,
-                    strategy,
-                    result.get("status"),
-                    result.get("iterations_completed"),
-                )
-                return result
-
             logger.info(
-                "PS optimization.legacy_fallback optimization_id={} strategy={}",
+                "PS optimization.engine_done optimization_id={} strategy={} status={} iterations={}",
                 optimization_id,
                 strategy,
+                result.get("status"),
+                result.get("iterations_completed"),
             )
-            return await self._process_optimization_job_legacy(
-                optimization_id=optimization_id,
-                initial_prompt_id=initial_prompt_id,
-                project_id=project_id,
-                max_iterations=max_iterations,
-            )
+            return result
 
         except Exception as e:  # noqa: BLE001
             logger.error(
-                "PS optimization.error optimization_id={} error={}",
+                "PS optimization.error optimization_id={} error_type={}",
                 locals().get("optimization_id"),
-                e,
+                type(e).__name__,
             )
 
-            try:
-                self.db.set_optimization_status(
-                    optimization_id,
-                    "failed",
-                    error_message=str(e),
-                    mark_completed=True,
-                )
-            except Exception as status_exc:  # noqa: BLE001
-                logger.warning(
-                    "PS optimization.mark_failed_failed optimization_id={} error={}",
-                    optimization_id,
-                    status_exc,
-                )
+            if manage_failure_status:
+                try:
+                    self.db.set_optimization_status(
+                        optimization_id,
+                        "failed",
+                        error_message=(
+                            str(e)
+                            if isinstance(e, ValueError)
+                            else "Optimization provider execution failed"
+                        ),
+                        mark_completed=True,
+                    )
+                except Exception as status_exc:  # noqa: BLE001
+                    logger.warning(
+                        "PS optimization.mark_failed_failed optimization_id={} error_type={}",
+                        optimization_id,
+                        type(status_exc).__name__,
+                    )
 
             raise
-
-    async def _process_optimization_job_legacy(
-        self,
-        *,
-        optimization_id: int,
-        initial_prompt_id: Optional[int],
-        project_id: Optional[int],
-        max_iterations: int,
-    ) -> dict[str, Any]:
-        """Legacy optimization simulation path for unsupported strategies."""
-        initial_row = self.db.get_optimization(optimization_id, include_deleted=True) or {}
-        if str(initial_row.get("status") or "").lower() == "cancelled":
-            logger.info(
-                "PS optimization.legacy_skip_cancelled optimization_id={}",
-                optimization_id,
-            )
-            return {
-                "optimization_id": optimization_id,
-                "iterations_completed": int(initial_row.get("iterations_completed") or 0),
-                "best_prompt_id": initial_row.get("optimized_prompt_id") or initial_prompt_id,
-                "best_metric": None,
-                "improvement_percentage": 0.0,
-                "status": "cancelled",
-            }
-
-        self.db.set_optimization_status(
-            optimization_id,
-            "running",
-            mark_started=True,
-        )
-
-        best_prompt_id = initial_prompt_id
-        best_metric = 0.5
-        iterations: list[dict[str, Any]] = []
-        total_tokens = 0
-        total_cost = 0.0
-        iteration_limit = max(1, min(max_iterations, 5))
-        was_cancelled = False
-
-        for iteration_index in range(1, iteration_limit + 1):
-            current = self.db.get_optimization(optimization_id, include_deleted=True) or {}
-            if str(current.get("status") or "").lower() == "cancelled":
-                logger.info(
-                    "PS optimization.legacy_cancelled optimization_id={} iteration={}",
-                    optimization_id,
-                    iteration_index,
-                )
-                was_cancelled = True
-                break
-
-            iteration_result = await self._run_optimization_iteration(
-                optimization_id,
-                initial_prompt_id,
-                iteration_index,
-            )
-            iterations.append(iteration_result)
-            total_tokens += iteration_result.get("tokens_used", 0)
-            total_cost += iteration_result.get("cost", 0.0)
-
-            try:
-                self.db.record_optimization_iteration(
-                    optimization_id,
-                    iteration_number=iteration_result.get("iteration", iteration_index),
-                    prompt_variant=None,
-                    metrics={"metric": iteration_result.get("metric")},
-                    tokens_used=iteration_result.get("tokens_used"),
-                    cost=iteration_result.get("cost"),
-                    note=None,
-                )
-            except Exception as iteration_exc:  # noqa: BLE001
-                logger.warning(
-                    "PS optimization.iteration_record_failed optimization_id={} iteration={} error={}",
-                    optimization_id,
-                    iteration_index,
-                    iteration_exc,
-                )
-
-            metric_value = iteration_result.get("metric", 0.0)
-            if metric_value > best_metric:
-                best_metric = metric_value
-                best_prompt_id = iteration_result.get("prompt_id", initial_prompt_id)
-
-            if best_metric > 0.95:
-                logger.info(
-                    "PS optimization.early_stop optimization_id={} iteration={} metric={}",
-                    optimization_id,
-                    iteration_index,
-                    round(best_metric, 3),
-                )
-                break
-
-            try:
-                if ws_connection_manager:
-                    broadcaster = EventBroadcaster(ws_connection_manager, self.db)
-                    await broadcaster.broadcast_optimization_iteration(
-                        optimization_id=optimization_id,
-                        iteration=iteration_index,
-                        max_iterations=max_iterations,
-                        current_metric=metric_value,
-                        best_metric=best_metric,
-                    )
-            except Exception as broadcast_exc:  # noqa: BLE001
-                logger.warning(
-                    "PS optimization.broadcast_failed optimization_id={} iteration={} error={}",
-                    optimization_id,
-                    iteration_index,
-                    broadcast_exc,
-                )
-
-            await asyncio.sleep(0.5)
-
-        initial_metric = 0.5
-        improvement = ((best_metric - initial_metric) / initial_metric) * 100
-
-        if best_prompt_id:
-            self._ensure_ps_prompt_exists(best_prompt_id, project_id)
-
-        if was_cancelled:
-            self.db.update_optimization(
-                optimization_id,
-                {
-                    "optimized_prompt_id": best_prompt_id,
-                    "iterations_completed": len(iterations),
-                    "initial_metrics": {"accuracy": initial_metric},
-                    "final_metrics": {"accuracy": best_metric},
-                    "improvement_percentage": improvement,
-                    "total_tokens": total_tokens,
-                    "total_cost": total_cost,
-                },
-                set_completed_at=True,
-            )
-        else:
-            self.db.complete_optimization(
-                optimization_id,
-                optimized_prompt_id=best_prompt_id,
-                iterations_completed=len(iterations),
-                initial_metrics={"accuracy": initial_metric},
-                final_metrics={"accuracy": best_metric},
-                improvement_percentage=improvement,
-                total_tokens=total_tokens,
-                total_cost=total_cost,
-            )
-
-        result = {
-            "optimization_id": optimization_id,
-            "iterations_completed": len(iterations),
-            "best_prompt_id": best_prompt_id,
-            "best_metric": best_metric,
-            "improvement_percentage": improvement,
-            "status": "cancelled" if was_cancelled else "completed",
-        }
-
-        logger.info(
-            "PS optimization.done optimization_id={} iterations={} best_metric={} improvement_pct={} tokens={} cost={}",
-            optimization_id,
-            len(iterations),
-            round(best_metric, 3),
-            round(improvement, 1),
-            total_tokens,
-            total_cost,
-        )
-        return result
-
-    async def _run_optimization_iteration(self, optimization_id: int,
-                                         prompt_id: Optional[int], iteration: int) -> dict[str, Any]:
-        """
-        Run a single optimization iteration (simulation).
-
-        In production, this would implement actual optimization logic.
-        """
-        import random
-
-        # Simulate iteration processing
-        await asyncio.sleep(random.uniform(1, 2))
-
-        # Simulate metric improvement
-        metric = 0.5 + (iteration * 0.1) + random.uniform(-0.05, 0.1)
-        metric = min(1.0, max(0.0, metric))  # Clamp to [0, 1]
-
-        return {
-            "iteration": iteration,
-            "prompt_id": prompt_id,
-            "metric": metric,
-            "tokens_used": random.randint(100, 1000),
-            "cost": random.uniform(0.01, 0.1)
-        }

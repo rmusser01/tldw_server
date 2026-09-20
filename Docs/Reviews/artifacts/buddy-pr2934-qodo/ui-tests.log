@@ -1,0 +1,37 @@
+
+ RUN  v4.0.18 /private/tmp/tldw-server-buddy-persona-ux/apps/packages/ui
+
+stderr | src/components/Common/PersonaBuddy/__tests__/IndependentBuddyHost.test.tsx > loads an attached Buddy directly when it is outside the first page
+react-i18next:: useTranslation: You will need to pass in an i18next instance by using initReactI18next { code: 'NO_I18NEXT_INSTANCE' }
+
+ ✓ src/components/Common/PersonaBuddy/__tests__/IndependentBuddyHost.test.tsx (15 tests) 5034ms
+   ✓ loads an attached Buddy directly when it is outside the first page  364ms
+   ✓ retains conversation drafts when the attached artwork changes  554ms
+   ✓ keeps later workspace conversation choices and drafts through refresh and artwork changes  1333ms
+stderr | src/components/Common/PersonaBuddy/__tests__/BuddyShellHost.test.tsx > BuddyShellHost > keeps expanded controls in the viewport and restores their usable position on remount
+react-i18next:: useTranslation: You will need to pass in an i18next instance by using initReactI18next { code: 'NO_I18NEXT_INSTANCE' }
+
+ ✓ src/components/Common/PersonaBuddy/__tests__/BuddyShellHost.test.tsx (38 tests) 491ms
+ ✓ src/components/Common/PersonaBuddy/__tests__/BuddyManagementModal.test.tsx (14 tests) 6356ms
+   ✓ Cancel does not attach the selected Buddy or change a Persona  500ms
+   ✓ attaches existing artwork to a named conversation without requiring a Persona  330ms
+   ✓ resolves a composer conversation into its workspace before allowing Apply  335ms
+   ✓ waits for preview and prevents follow-up attachment writes after unmount  388ms
+   ✓ applies the new entry-point target when the open modal is retargeted  381ms
+   ✓ retains saved artwork without attaching or replacing the new draft after retargeting during creation  824ms
+   ✓ preserves the new editor after retargeting during attachment completion  536ms
+   ✓ preserves the new editor after retargeting during refresh completion  559ms
+   ✓ distinguishes management choices with distinct dates while attaching their exact IDs  586ms
+   ✓ distinguishes management choices with missing dates while attaching their exact IDs  597ms
+   ✓ distinguishes management choices with colliding dates while attaching their exact IDs  586ms
+   ✓ updates management date labels for the active locale without changing the selected ID  345ms
+ ✓ src/components/Common/PersonaBuddy/__tests__/BuddyInteraction.test.tsx (11 tests) 1487ms
+   ✓ distinguishes duplicate result titles while replies and acknowledgements retain exact IDs  463ms
+ ✓ src/services/__tests__/buddies.test.ts (12 tests) 60ms
+ ✓ src/store/__tests__/persona-buddy-shell.test.ts (6 tests) 16ms
+ ✓ src/components/Common/PersonaBuddy/__tests__/buddy-conversation-labels.test.ts (3 tests) 16ms
+
+ Test Files  7 passed (7)
+      Tests  99 passed (99)
+   Start at  00:03:16
+   Duration  22.11s (transform 1.02s, setup 867ms, import 4.14s, tests 13.46s, environment 2.98s)

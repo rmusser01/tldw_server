@@ -120,6 +120,20 @@ describe("pageAssistModel MCP tools", () => {
     ])
   })
 
+  it("preserves the captured Service Prompt request scope on the model", async () => {
+    const requestScope = {
+      config: {
+        serverUrl: "https://research-one.test",
+        authMode: "multi-user" as const
+      },
+      userId: 42
+    }
+
+    const chat = await pageAssistModel({ model: "tool-model", requestScope })
+
+    expect(chat.requestScope).toBe(requestScope)
+  })
+
   it("omits tool choice and tools when no chat tools remain", async () => {
     useMcpToolsStore.setState({
       tools: [

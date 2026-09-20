@@ -207,9 +207,21 @@ def _job_status_cancelled(job_manager: Any, job_id: int) -> bool:
     return str(current.get("status") or "").lower() == "cancelled"
 
 
-def _finalize_cancelled(job_manager: Any, job_id: int, *, reason: str) -> None:
+def _finalize_cancelled(
+    job_manager: Any,
+    job: dict[str, Any],
+    *,
+    worker_id: str,
+    reason: str,
+) -> None:
     with contextlib.suppress(Exception):
-        job_manager.finalize_cancelled(int(job_id), reason=reason)
+        job_manager.finalize_cancelled(
+            int(job["id"]),
+            reason=reason,
+            expected_uuid=str(job.get("uuid") or ""),
+            worker_id=worker_id,
+            lease_id=str(job.get("lease_id") or ""),
+        )
 
 
 def _safe_error_message(value: Any) -> str:
@@ -232,7 +244,6 @@ async def process_llamacpp_acquisition_job(
 ) -> dict[str, Any]:
     """Download, validate, promote, and optionally register one llama.cpp asset job."""
 
-    del worker_id
     try:
         job_id = int(job.get("id"))
     except (TypeError, ValueError) as exc:
@@ -251,7 +262,12 @@ async def process_llamacpp_acquisition_job(
 
         if _should_cancel(job_manager, job_id, cancel_check):
             acquisition_service.cleanup_partial_if_needed(partial_path)
-            _finalize_cancelled(job_manager, job_id, reason="cancel requested before download")
+            _finalize_cancelled(
+                job_manager,
+                job,
+                worker_id=worker_id,
+                reason="cancel requested before download",
+            )
             return {}
 
         if progress is not None:
@@ -295,7 +311,12 @@ async def process_llamacpp_acquisition_job(
 
         if _should_cancel(job_manager, job_id, cancel_check):
             acquisition_service.cleanup_partial_if_needed(partial_path)
-            _finalize_cancelled(job_manager, job_id, reason="cancel requested during download")
+            _finalize_cancelled(
+                job_manager,
+                job,
+                worker_id=worker_id,
+                reason="cancel requested during download",
+            )
             return {}
 
         warnings = list(validated.warnings)
@@ -348,7 +369,12 @@ async def process_llamacpp_acquisition_job(
     except acquisition_service.LlamaCppDownloadCancelled:
         if partial_path is not None:
             acquisition_service.cleanup_partial_if_needed(partial_path)
-        _finalize_cancelled(job_manager, job_id, reason="cancel requested during download")
+        _finalize_cancelled(
+            job_manager,
+            job,
+            worker_id=worker_id,
+            reason="cancel requested during download",
+        )
         return {}
     except acquisition_service.LlamaCppDownloadError as exc:
         if partial_path is not None:

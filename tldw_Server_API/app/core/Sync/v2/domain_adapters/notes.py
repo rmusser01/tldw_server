@@ -6,8 +6,20 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..adapters import AdapterAccepted, AdapterConflict, SyncAdapterContext, SyncAdapterOutcome
-from ..models import SyncDataset, SyncDomain, SyncEnvelope, SyncEnvelopeCreate
+from ..adapters import (
+    AdapterAccepted,
+    AdapterConflict,
+    AdapterRejected,
+    SyncAdapterContext,
+    SyncAdapterOutcome,
+)
+from ..models import (
+    SyncDataset,
+    SyncDomain,
+    SyncEnvelope,
+    SyncEnvelopeCreate,
+    validate_notes_note_upsert_payload,
+)
 from ._lineage import (
     current_head,
     delete_update_conflict,
@@ -44,6 +56,31 @@ class NotesDomainAdapter:
         """Accept metadata-only changes and conflict concurrent encrypted edits."""
 
         del dataset
+        if envelope.domain == "notes.note" and envelope.operation == "upsert":
+            try:
+                validate_notes_note_upsert_payload(envelope.payload)
+            except ValueError as exc:
+                return AdapterRejected(
+                    client_envelope_id=envelope.client_envelope_id,
+                    error_code="notes_note_payload_invalid",
+                    message=str(exc),
+                )
+        restore_intent = (
+            envelope.routing_metadata.get("restore_intent")
+            if envelope.domain == "notes.note"
+            else None
+        )
+        if restore_intent is not None and (
+            restore_intent is not True or envelope.operation != "upsert"
+        ):
+            return AdapterRejected(
+                client_envelope_id=envelope.client_envelope_id,
+                error_code="notes_note_restore_intent_invalid",
+                message=(
+                    "notes.note restore_intent must be the boolean true on an upsert "
+                    "when supplied"
+                ),
+            )
         prior = prior_envelopes(envelope, context)
         delete_conflict = delete_update_conflict(
             envelope,
@@ -53,6 +90,15 @@ class NotesDomainAdapter:
         )
         if delete_conflict is not None:
             return delete_conflict
+        if restore_intent is True:
+            head = current_head(prior)
+            if (
+                head is None
+                or not _is_delete(head)
+                or not incoming_references_head(envelope, head)
+            ):
+                return _restore_target_conflict(envelope)
+            return AdapterAccepted(client_envelope_id=envelope.client_envelope_id)
         if _is_content_bearing(envelope) and not incoming_references_head(
             envelope, _current_content_head(prior)
         ):
@@ -83,6 +129,16 @@ def _manual_delete_conflict(envelope: SyncEnvelopeCreate) -> AdapterConflict:
     )
 
 
+def _restore_target_conflict(envelope: SyncEnvelopeCreate) -> AdapterConflict:
+    return AdapterConflict(
+        client_envelope_id=envelope.client_envelope_id,
+        domain=envelope.domain,
+        entity_id=envelope.entity_id,
+        conflict_type="restore_target_conflict",
+        message="Note restore requires the exact current tombstone head.",
+    )
+
+
 def _is_delete(envelope: SyncEnvelope | SyncEnvelopeCreate) -> bool:
     return envelope.operation == "tombstone" or bool(
         envelope.payload_clear.get("deleted")
@@ -92,6 +148,8 @@ def _is_delete(envelope: SyncEnvelope | SyncEnvelopeCreate) -> bool:
 
 
 def _is_content_bearing(envelope: SyncEnvelope | SyncEnvelopeCreate) -> bool:
+    if envelope.domain == "notes.note" and envelope.operation == "upsert":
+        return True
     update_kind = _metadata_string(envelope, "update_kind") or _metadata_string(
         envelope, "change_kind"
     )

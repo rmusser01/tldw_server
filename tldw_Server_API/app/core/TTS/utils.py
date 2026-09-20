@@ -29,6 +29,36 @@ _REASONING_BLOCK_RE = re.compile(
     flags=re.IGNORECASE,
 )
 _REASONING_TAG_RE = re.compile(r"</?(?:think|thinking|reasoning)>", flags=re.IGNORECASE)
+_TTS_CREDENTIAL_FIELD_NAMES = frozenset(
+    {
+        "accesstoken",
+        "authorization",
+        "authtoken",
+        "bearertoken",
+        "clientsecret",
+        "providercredentials",
+        "provideroverrides",
+        "refreshtoken",
+        "secret",
+        "secretkey",
+        "token",
+    }
+)
+
+
+def contains_tts_credential_fields(value: Any) -> bool:
+    """Return whether nested request data contains a credential-shaped key."""
+    if isinstance(value, dict):
+        for key, nested_value in value.items():
+            compact_key = re.sub(r"[^a-z0-9]", "", str(key).strip().lower())
+            if compact_key.endswith("apikey") or compact_key in _TTS_CREDENTIAL_FIELD_NAMES:
+                return True
+            if contains_tts_credential_fields(nested_value):
+                return True
+        return False
+    if isinstance(value, (list, tuple)):
+        return any(contains_tts_credential_fields(item) for item in value)
+    return False
 
 
 def parse_bool(value: Any, default: bool | None = False) -> bool:

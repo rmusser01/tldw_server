@@ -1,0 +1,1484 @@
+"""Offline validation for the production reference deployment."""
+
+from __future__ import annotations
+
+import argparse
+import ipaddress
+import json
+import os
+import re
+import stat
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+from urllib.parse import unquote, urlsplit
+
+import yaml
+from loguru import logger
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_COMPOSE_FILE = REPO_ROOT / "Dockerfiles/docker-compose.production.yml"
+DEFAULT_PROXY_FILE = REPO_ROOT / "Dockerfiles/Production/Caddyfile"
+
+REQUIRED_ENV_NAMES = (
+    "TLDW_PUBLIC_DOMAIN",
+    "TLDW_ACME_EMAIL",
+    "ALLOWED_ORIGINS",
+    "JWT_SECRET_KEY",
+    "SESSION_ENCRYPTION_KEY",
+    "POSTGRES_USER",
+    "POSTGRES_DB",
+    "POSTGRES_PASSWORD",
+    "DATABASE_URL",
+    "REDIS_PASSWORD",
+    "REDIS_URL",
+    "ADMIN_USERNAME",
+    "ADMIN_PASSWORD",
+    "ADMIN_EMAIL",
+    "TLDW_EXISTING_INSTALLATION",
+    "TLDW_SETUP_COMPLETED",
+    "TLDW_EDGE_SUBNET",
+    "TLDW_BACKEND_SUBNET",
+    "TLDW_APP_IMAGE",
+    "TLDW_ROLLBACK_IMAGE",
+    "CADDY_IMAGE",
+    "POSTGRES_IMAGE",
+    "REDIS_IMAGE",
+    "TLDW_BACKUP_DIR",
+)
+
+SECRET_NAMES = (
+    "JWT_SECRET_KEY",
+    "SESSION_ENCRYPTION_KEY",
+    "POSTGRES_PASSWORD",
+    "REDIS_PASSWORD",
+    "ADMIN_PASSWORD",
+)
+
+TRUST_ENVIRONMENT = (
+    "FORWARDED_ALLOW_IPS",
+    "AUTH_TRUSTED_PROXY_IPS",
+    "TLDW_TRUSTED_PROXIES",
+    "RG_TRUSTED_PROXIES",
+    "MCP_TRUSTED_PROXY_IPS",
+)
+
+DENIED_PROXY_PATHS = (
+    "/internal/ready",
+    "/ready",
+    "/health/ready",
+    "/api/v1/healthz",
+    "/api/v1/readyz",
+    "/setup",
+    "/setup/*",
+    "/api/v1/setup",
+    "/api/v1/setup/*",
+)
+
+APP_IMAGE_PATTERNS = (
+    re.compile(r"^.+@sha256:[0-9a-f]{64}$"),
+    re.compile(r"^.+:sha-[0-9a-f]{7,64}$"),
+)
+
+_ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_DNS_LABEL = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$", re.ASCII)
+_EMAIL_LOCAL = re.compile(r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+$", re.ASCII)
+_THIRD_PARTY_VERSION = re.compile(r"(?:^|[^0-9])\d+\.\d+(?:\.\d+)?(?:[^0-9]|$)")
+_DIGEST_IMAGE = re.compile(r"^.+@sha256:[0-9a-f]{64}$")
+_SAMPLE_MARKERS = ("example.com", "example.invalid", "localhost", "change-me")
+_PLACEHOLDER_SECRETS = {
+    "password",
+    "postgres",
+    "redis",
+    "secret",
+    "changeme",
+    "change-me",
+    "admin",
+    "default",
+}
+_STATIC_IMAGE_INPUTS = {
+    "preflight": "${TLDW_APP_IMAGE:?Set immutable TLDW_APP_IMAGE}",
+    "app": "${TLDW_APP_IMAGE:?Set immutable TLDW_APP_IMAGE}",
+    "caddy": "${CADDY_IMAGE:?Set exact CADDY_IMAGE version or digest}",
+    "postgres": "${POSTGRES_IMAGE:?Set exact POSTGRES_IMAGE version or digest}",
+    "redis": "${REDIS_IMAGE:?Set exact REDIS_IMAGE version or digest}",
+}
+_EXPECTED_NETWORKS = {
+    "caddy": {"edge"},
+    "app": {"edge", "backend"},
+    "postgres": {"backend"},
+    "redis": {"backend"},
+}
+_EXPECTED_NETWORK_INPUTS = {
+    "edge": "${TLDW_EDGE_SUBNET:?Set private TLDW_EDGE_SUBNET}",
+    "backend": "${TLDW_BACKEND_SUBNET:?Set private TLDW_BACKEND_SUBNET}",
+}
+_EXPECTED_VOLUMES = {
+    "app-data",
+    "postgres_data",
+    "redis_data",
+    "caddy_data",
+    "caddy_config",
+}
+_EXPECTED_SERVICE_VOLUMES = {
+    "preflight": {
+        "./docker-compose.production.yml:/run/tldw/docker-compose.production.yml:ro",
+        "./Production/Caddyfile:/run/tldw/Caddyfile:ro",
+        "${TLDW_BACKUP_DIR:?Set absolute TLDW_BACKUP_DIR}:/backups:ro",
+    },
+    "caddy": {
+        "./Production/Caddyfile:/etc/caddy/Caddyfile:ro",
+        "caddy_data:/data",
+        "caddy_config:/config",
+    },
+    "app": {"app-data:/app/Databases"},
+    "postgres": {"postgres_data:/var/lib/postgresql"},
+    "redis": {"redis_data:/data"},
+}
+_EXPECTED_CADDY_ENVIRONMENT = {
+    "TLDW_PUBLIC_DOMAIN": "${TLDW_PUBLIC_DOMAIN:?Set TLDW_PUBLIC_DOMAIN}",
+    "TLDW_ACME_EMAIL": "${TLDW_ACME_EMAIL:?Set TLDW_ACME_EMAIL}",
+}
+_EXPECTED_RAW_ENV_FILE = [
+    {
+        "path": "${TLDW_ENV_FILE:?Set TLDW_ENV_FILE to the validated absolute raw env path}",
+        "required": True,
+        "format": "raw",
+    }
+]
+_EXPECTED_PREFLIGHT_ENTRYPOINT = ["python", "/app/Helper_Scripts/Deployment/production_preflight.py"]
+_EXPECTED_PREFLIGHT_COMMAND = [
+    "--from-environment",
+    "--compose-file",
+    "/run/tldw/docker-compose.production.yml",
+    "--proxy-file",
+    "/run/tldw/Caddyfile",
+    "--runtime-backup-dir",
+    "/backups",
+]
+_EXPECTED_APP_HEALTHCHECK = (
+    "CMD",
+    "python",
+    "-c",
+    "import sys, urllib.request; "
+    "sys.exit(0 if urllib.request.urlopen('http://localhost:8000/internal/ready', timeout=3).status == 200 else 1)",
+)
+_EXPECTED_POSTGRES_HEALTHCHECK = (
+    "CMD-SHELL",
+    'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"',
+)
+_EXPECTED_REDIS_COMMAND = (
+    "/bin/sh",
+    "-ec",
+    "umask 077; printf 'appendonly yes\\nrequirepass %s\\n' "
+    '"$$REDIS_PASSWORD" > /tmp/tldw-redis.conf; exec redis-server /tmp/tldw-redis.conf',
+)
+_EXPECTED_REDIS_HEALTHCHECK = (
+    "CMD-SHELL",
+    'REDISCLI_AUTH="$$REDIS_PASSWORD" redis-cli ping',
+)
+_DOCKER_SOCKET_PATHS = (Path("/var/run/docker.sock"), Path("/run/docker.sock"))
+
+
+@dataclass(frozen=True, order=True)
+class PreflightIssue:
+    """One sanitized production-preflight failure."""
+
+    code: str
+    field: str
+    message: str
+
+
+@dataclass(frozen=True)
+class PreflightReport:
+    """Deterministic collection of production-preflight failures."""
+
+    issues: tuple[PreflightIssue, ...]
+
+    @property
+    def ok(self) -> bool:
+        """Return whether every preflight invariant passed."""
+
+        return not self.issues
+
+
+def _issue(code: str, field: str, message: str) -> PreflightIssue:
+    """Build an issue whose message never includes a candidate value."""
+
+    return PreflightIssue(code=code, field=field, message=message)
+
+
+def _sorted_issues(issues: list[PreflightIssue]) -> tuple[PreflightIssue, ...]:
+    """Return stable de-duplicated issue output."""
+
+    return tuple(sorted(set(issues)))
+
+
+def load_raw_env(path: Path) -> dict[str, str]:
+    """Parse a literal dotenv file without interpolation or shell evaluation."""
+
+    values: dict[str, str] = {}
+    text = path.read_text(encoding="utf-8")
+    for line_number, raw_line in enumerate(text.splitlines(), start=1):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            raise ValueError(f"line {line_number}: export syntax is not supported")
+        if "=" not in line:
+            raise ValueError(f"line {line_number}: expected NAME=value")
+        name, value = line.split("=", 1)
+        name = name.strip()
+        value = value.strip()
+        if not _ENV_NAME.fullmatch(name):
+            raise ValueError(f"line {line_number}: invalid variable name")
+        if name in values:
+            raise ValueError(f"line {line_number}: duplicate variable name")
+        if value[:1] in {"'", '"'}:
+            if len(value) < 2 or value[-1] != value[0]:
+                raise ValueError(f"line {line_number}: unmatched quote")
+            value = value[1:-1]
+        elif value[-1:] in {"'", '"'}:
+            raise ValueError(f"line {line_number}: unmatched quote")
+        values[name] = value
+    return values
+
+
+def _is_true(value: str) -> bool:
+    """Return whether a production boolean is explicitly true."""
+
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _is_false(value: str) -> bool:
+    """Return whether a production boolean is explicitly false."""
+
+    return value.strip().lower() in {"0", "false", "no", "off"}
+
+
+def _is_placeholder_secret(value: str) -> bool:
+    """Return whether a secret is a recognized deployable placeholder."""
+
+    normalized = value.strip().lower()
+    compact = re.sub(r"[^a-z0-9]", "", normalized)
+    return (
+        normalized in _PLACEHOLDER_SECRETS
+        or compact in {"changeme", "testpassword", "password123", "defaultsecret"}
+        or any(marker in normalized for marker in ("example", "placeholder"))
+    )
+
+
+def _validate_secrets(values: Mapping[str, str]) -> list[PreflightIssue]:
+    """Validate secret strength, placeholders, and accidental reuse."""
+
+    issues: list[PreflightIssue] = []
+    existing = _is_true(values.get("TLDW_EXISTING_INSTALLATION", ""))
+    active_names = SECRET_NAMES if not existing else SECRET_NAMES[:-1]
+    seen: dict[str, str] = {}
+    for name in active_names:
+        value = values.get(name, "")
+        if not value:
+            continue
+        if _is_placeholder_secret(value):
+            issues.append(_issue("placeholder_secret", name, "must not use a known placeholder"))
+        elif len(value) < 32:
+            issues.append(_issue("weak_secret", name, "must contain at least 32 characters"))
+        if value in seen:
+            issues.append(_issue("shared_secret", name, "must be independent from other secrets"))
+        else:
+            seen[value] = name
+    return issues
+
+
+def _validate_database_url(values: Mapping[str, str]) -> list[PreflightIssue]:
+    """Validate the PostgreSQL URL against separately supplied credentials."""
+
+    raw = values.get("DATABASE_URL", "")
+    if not raw:
+        return []
+    try:
+        parsed = urlsplit(raw)
+        username = unquote(parsed.username or "")
+        password = unquote(parsed.password or "")
+        database = unquote(parsed.path.lstrip("/"))
+        hostname = parsed.hostname
+        port = parsed.port
+        if parsed.netloc.rsplit("@", 1)[-1].endswith(":"):
+            raise ValueError
+    except (TypeError, ValueError):
+        return [_issue("invalid_url", "DATABASE_URL", "must be a valid PostgreSQL URL")]
+    expected = (
+        parsed.scheme in {"postgres", "postgresql"}
+        and hostname == "postgres"
+        and port in {None, 5432}
+        and username == values.get("POSTGRES_USER")
+        and password == values.get("POSTGRES_PASSWORD")
+        and database == values.get("POSTGRES_DB")
+    )
+    if expected:
+        return []
+    return [
+        _issue(
+            "credential_mismatch",
+            "DATABASE_URL",
+            "must target postgres and match the separate database credentials",
+        )
+    ]
+
+
+def _validate_redis_url(values: Mapping[str, str]) -> list[PreflightIssue]:
+    """Validate the Redis URL against the separate password."""
+
+    raw = values.get("REDIS_URL", "")
+    if not raw:
+        return []
+    try:
+        parsed = urlsplit(raw)
+        username = unquote(parsed.username or "")
+        password = unquote(parsed.password or "")
+        hostname = parsed.hostname
+        port = parsed.port
+        if parsed.netloc.rsplit("@", 1)[-1].endswith(":"):
+            raise ValueError
+    except (TypeError, ValueError):
+        return [_issue("invalid_url", "REDIS_URL", "must be a valid Redis URL")]
+    if (
+        parsed.scheme in {"redis", "rediss"}
+        and hostname == "redis"
+        and port in {None, 6379}
+        and username in {"", "default"}
+        and password == values.get("REDIS_PASSWORD")
+    ):
+        return []
+    return [
+        _issue(
+            "credential_mismatch",
+            "REDIS_URL",
+            "must target redis and match the separate Redis password",
+        )
+    ]
+
+
+def _parse_origins(raw: str) -> list[str]:
+    """Parse a JSON-list or comma-separated origin setting."""
+
+    if raw.lstrip().startswith("["):
+        loaded = json.loads(raw)
+        if not isinstance(loaded, list) or not all(isinstance(item, str) for item in loaded):
+            raise ValueError("origins must be strings")
+        return [item.strip() for item in loaded]
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def _is_valid_dns_name(value: str) -> bool:
+    """Return whether a value is a bounded multi-label ASCII DNS name."""
+
+    try:
+        value.encode("ascii")
+    except UnicodeEncodeError:
+        return False
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        pass
+    else:
+        return False
+    labels = value.split(".")
+    return (
+        1 <= len(value) <= 253
+        and len(labels) >= 2
+        and not labels[-1].isdigit()
+        and all(1 <= len(label) <= 63 and _DNS_LABEL.fullmatch(label) for label in labels)
+    )
+
+
+def _is_valid_email(value: str) -> bool:
+    """Return whether an ACME contact has a bounded local part and DNS domain."""
+
+    try:
+        value.encode("ascii")
+        local, domain = value.rsplit("@", 1)
+    except (UnicodeEncodeError, ValueError):
+        return False
+    return (
+        value.count("@") == 1
+        and 1 <= len(value) <= 254
+        and 1 <= len(local) <= 64
+        and _EMAIL_LOCAL.fullmatch(local) is not None
+        and not local.startswith(".")
+        and not local.endswith(".")
+        and ".." not in local
+        and _is_valid_dns_name(domain)
+    )
+
+
+def _validate_domain_and_origins(values: Mapping[str, str]) -> list[PreflightIssue]:
+    """Validate TLS identity and HTTPS CORS origin alignment."""
+
+    issues: list[PreflightIssue] = []
+    domain = values.get("TLDW_PUBLIC_DOMAIN", "").strip().lower()
+    contact = values.get("TLDW_ACME_EMAIL", "").strip().lower()
+    if domain and (any(marker in domain for marker in _SAMPLE_MARKERS) or not _is_valid_dns_name(domain)):
+        issues.append(_issue("sample_value", "TLDW_PUBLIC_DOMAIN", "must be a real DNS name"))
+    if contact and (any(marker in contact for marker in _SAMPLE_MARKERS) or not _is_valid_email(contact)):
+        issues.append(_issue("sample_value", "TLDW_ACME_EMAIL", "must be a real contact address"))
+    raw_origins = values.get("ALLOWED_ORIGINS", "")
+    if not raw_origins:
+        return issues
+    try:
+        origins = _parse_origins(raw_origins)
+    except (ValueError, json.JSONDecodeError):
+        return issues + [_issue("unsafe_origin", "ALLOWED_ORIGINS", "must be an explicit HTTPS origin list")]
+    if not origins or "*" in origins:
+        issues.append(_issue("unsafe_origin", "ALLOWED_ORIGINS", "must not contain a wildcard"))
+        return issues
+    for origin in origins:
+        try:
+            parsed = urlsplit(origin)
+        except ValueError:
+            parsed = None
+        if (
+            parsed is None
+            or parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or parsed.path not in {"", "/"}
+            or parsed.query
+            or parsed.fragment
+        ):
+            issues.append(_issue("unsafe_origin", "ALLOWED_ORIGINS", "must contain HTTPS origins only"))
+            continue
+        if domain and parsed.hostname.lower() != domain:
+            issues.append(
+                _issue(
+                    "origin_mismatch",
+                    "ALLOWED_ORIGINS",
+                    "must match the configured public domain",
+                )
+            )
+    return issues
+
+
+def _network(value: str, field: str) -> tuple[ipaddress.IPv4Network | None, PreflightIssue | None]:
+    """Parse one bounded private IPv4 network."""
+
+    try:
+        network = ipaddress.ip_network(value, strict=True)
+    except ValueError:
+        return None, _issue("unsafe_network", field, "must be a strict private IPv4 CIDR")
+    if network.version != 4 or not network.is_private or network.prefixlen == 0:
+        return None, _issue("unsafe_network", field, "must be a bounded private IPv4 CIDR")
+    return network, None  # type: ignore[return-value]
+
+
+def _validate_networks(values: Mapping[str, str]) -> list[PreflightIssue]:
+    """Validate distinct private edge and backend CIDRs."""
+
+    issues: list[PreflightIssue] = []
+    edge, edge_issue = _network(values.get("TLDW_EDGE_SUBNET", ""), "TLDW_EDGE_SUBNET")
+    backend, backend_issue = _network(values.get("TLDW_BACKEND_SUBNET", ""), "TLDW_BACKEND_SUBNET")
+    for issue in (edge_issue, backend_issue):
+        if issue is not None:
+            issues.append(issue)
+    if edge is not None and backend is not None and edge.overlaps(backend):
+        issues.append(
+            _issue(
+                "overlapping_network",
+                "TLDW_BACKEND_SUBNET",
+                "must not overlap the edge network",
+            )
+        )
+    return issues
+
+
+def _is_immutable_app_image(value: str) -> bool:
+    """Return whether an application image is digest or commit pinned."""
+
+    return any(pattern.fullmatch(value) for pattern in APP_IMAGE_PATTERNS)
+
+
+def _is_exact_third_party_image(value: str) -> bool:
+    """Return whether a third-party image uses a digest or full numeric tag."""
+
+    if _DIGEST_IMAGE.fullmatch(value):
+        return True
+    last_segment = value.rsplit("/", 1)[-1]
+    if ":" not in last_segment:
+        return False
+    tag = last_segment.rsplit(":", 1)[-1].lower()
+    return tag != "latest" and bool(_THIRD_PARTY_VERSION.search(tag))
+
+
+def _validate_images(values: Mapping[str, str]) -> list[PreflightIssue]:
+    """Validate current, rollback, and dependency image immutability."""
+
+    issues: list[PreflightIssue] = []
+    for field in ("TLDW_APP_IMAGE", "TLDW_ROLLBACK_IMAGE"):
+        value = values.get(field, "")
+        if value and not _is_immutable_app_image(value):
+            issues.append(_issue("mutable_image", field, "must use a digest or commit-pinned tag"))
+    if values.get("TLDW_APP_IMAGE") and values.get("TLDW_APP_IMAGE") == values.get("TLDW_ROLLBACK_IMAGE"):
+        issues.append(
+            _issue(
+                "identical_images",
+                "TLDW_ROLLBACK_IMAGE",
+                "must differ from the target application image",
+            )
+        )
+    for field in ("CADDY_IMAGE", "POSTGRES_IMAGE", "REDIS_IMAGE"):
+        value = values.get(field, "")
+        if value and not _is_exact_third_party_image(value):
+            issues.append(
+                _issue(
+                    "inexact_third_party_image",
+                    field,
+                    "must use a digest or full numeric version tag",
+                )
+            )
+    return issues
+
+
+def _validate_setup(values: Mapping[str, str]) -> list[PreflightIssue]:
+    """Validate completed setup and mutually exclusive bootstrap modes."""
+
+    issues: list[PreflightIssue] = []
+    if not _is_true(values.get("TLDW_SETUP_COMPLETED", "")):
+        issues.append(_issue("setup_incomplete", "TLDW_SETUP_COMPLETED", "must be explicitly true"))
+    raw_existing = values.get("TLDW_EXISTING_INSTALLATION", "")
+    if not (_is_true(raw_existing) or _is_false(raw_existing)):
+        issues.append(
+            _issue(
+                "invalid_boolean",
+                "TLDW_EXISTING_INSTALLATION",
+                "must be explicitly true or false",
+            )
+        )
+        return issues
+    bootstrap = ("ADMIN_USERNAME", "ADMIN_PASSWORD", "ADMIN_EMAIL")
+    if _is_true(raw_existing):
+        for field in bootstrap:
+            if values.get(field, ""):
+                issues.append(
+                    _issue(
+                        "unexpected_bootstrap_secret",
+                        field,
+                        "must be empty for an existing installation",
+                    )
+                )
+    else:
+        for field in bootstrap:
+            if not values.get(field, ""):
+                issues.append(_issue("missing_required", field, "must be provided"))
+    return issues
+
+
+def _validate_backup(
+    values: Mapping[str, str],
+    runtime_backup_dir: Path | None,
+    *,
+    require_writable: bool,
+) -> list[PreflightIssue]:
+    """Validate the operator backup destination without modifying it."""
+
+    raw = values.get("TLDW_BACKUP_DIR", "")
+    if not raw:
+        return []
+    configured = Path(raw)
+    if not configured.is_absolute():
+        return [_issue("unsafe_backup_path", "TLDW_BACKUP_DIR", "must be an absolute path")]
+    banned = (Path("/app/Databases"), Path("/var/lib/postgresql"), Path("/data"))
+    try:
+        resolved = configured.resolve(strict=False)
+    except OSError:
+        resolved = configured
+    configured_paths = {configured, resolved}
+    socket_paths: set[Path] = set(_DOCKER_SOCKET_PATHS)
+    for socket_path in _DOCKER_SOCKET_PATHS:
+        try:
+            socket_paths.add(socket_path.resolve(strict=False))
+        except OSError:
+            pass
+    if any(
+        backup_path == socket_path or backup_path in socket_path.parents
+        for backup_path in configured_paths
+        for socket_path in socket_paths
+    ):
+        return [
+            _issue(
+                "docker_socket_path",
+                "TLDW_BACKUP_DIR",
+                "must not equal or contain a Docker socket location",
+            )
+        ]
+    if any(resolved == path or path in resolved.parents or resolved in path.parents for path in banned):
+        return [_issue("live_data_path", "TLDW_BACKUP_DIR", "must be separate from live data")]
+    visible = runtime_backup_dir if runtime_backup_dir is not None else configured
+    if not visible.exists():
+        return [_issue("backup_unavailable", "TLDW_BACKUP_DIR", "must already exist")]
+    if not visible.is_dir():
+        return [_issue("backup_unavailable", "TLDW_BACKUP_DIR", "must be a directory")]
+    if not require_writable:
+        return []
+    try:
+        writable_bits = visible.stat().st_mode & 0o222
+    except OSError:
+        writable_bits = 0
+    if not writable_bits or not os.access(visible, os.W_OK):
+        return [_issue("backup_unwritable", "TLDW_BACKUP_DIR", "must be writable")]
+    return []
+
+
+def validate_environment(
+    values: Mapping[str, str],
+    *,
+    env_path: Path | None,
+    runtime_backup_dir: Path | None = None,
+    require_backup_writable: bool = True,
+) -> tuple[PreflightIssue, ...]:
+    """Validate all semantic operator-environment invariants."""
+
+    issues: list[PreflightIssue] = []
+    existing = _is_true(values.get("TLDW_EXISTING_INSTALLATION", ""))
+    for name in REQUIRED_ENV_NAMES:
+        if not values.get(name, "") and not (
+            existing and name in SECRET_NAMES[-1:] + ("ADMIN_USERNAME", "ADMIN_EMAIL")
+        ):
+            issues.append(_issue("missing_required", name, "must be provided"))
+    if env_path is not None and env_path.exists():
+        try:
+            metadata = env_path.lstat()
+            effective_uid = os.geteuid()
+        except (AttributeError, OSError):
+            metadata = None
+            effective_uid = -1
+        if (
+            metadata is None
+            or not stat.S_ISREG(metadata.st_mode)
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+            or metadata.st_uid != effective_uid
+        ):
+            issues.append(
+                _issue(
+                    "env_permissions",
+                    "TLDW_ENV_FILE",
+                    "must be a regular owner-only file",
+                )
+            )
+    issues.extend(_validate_secrets(values))
+    issues.extend(_validate_database_url(values))
+    issues.extend(_validate_redis_url(values))
+    issues.extend(_validate_domain_and_origins(values))
+    issues.extend(_validate_networks(values))
+    issues.extend(_validate_images(values))
+    issues.extend(_validate_setup(values))
+    issues.extend(
+        _validate_backup(
+            values,
+            runtime_backup_dir if env_path is None else None,
+            require_writable=require_backup_writable if env_path is None else True,
+        )
+    )
+    return _sorted_issues(issues)
+
+
+def _network_names(service: Mapping[str, Any]) -> set[str]:
+    """Return service network names from short or long Compose syntax."""
+
+    networks = service.get("networks", [])
+    if isinstance(networks, Mapping):
+        return {str(name) for name in networks}
+    if isinstance(networks, list):
+        return {str(name) for name in networks}
+    return set()
+
+
+def _command_text(service: object) -> str:
+    """Return a service command or healthcheck test as inspection-only text."""
+
+    if not isinstance(service, Mapping):
+        return ""
+    command = service.get("command", service.get("test", ""))
+    if isinstance(command, list):
+        return " ".join(str(item) for item in command)
+    return str(command)
+
+
+def _command_structure(service: object, field: str = "command") -> tuple[str, ...]:
+    """Return a command only when it is an explicit string vector."""
+
+    if not isinstance(service, Mapping):
+        return ()
+    command = service.get(field)
+    if not isinstance(command, list) or not all(isinstance(item, str) for item in command):
+        return ()
+    return tuple(command)
+
+
+def _healthcheck_structure(service: object) -> tuple[str, ...]:
+    """Return the exact test vector from a service healthcheck."""
+
+    if not isinstance(service, Mapping):
+        return ()
+    return _command_structure(service.get("healthcheck"), "test")
+
+
+def _ports(service: Mapping[str, Any]) -> set[tuple[int, int]]:
+    """Normalize short and rendered Compose port declarations."""
+
+    result: set[tuple[int, int]] = set()
+    if "ports" not in service:
+        return result
+    ports = service.get("ports")
+    if not isinstance(ports, list):
+        return {(-1, -1)}
+    for port in ports:
+        normalized = (-1, -1)
+        if isinstance(port, int) and not isinstance(port, bool):
+            normalized = (-1, port) if 1 <= port <= 65535 else (-1, -1)
+        elif isinstance(port, str):
+            raw_parts = port.strip().split(":")
+            target_text, separator, protocol = raw_parts[-1].partition("/")
+            try:
+                if len(raw_parts) >= 3:
+                    host_ip = ":".join(raw_parts[:-2]).strip("[]")
+                    ipaddress.ip_address(host_ip)
+                target = int(target_text)
+                published = int(raw_parts[-2]) if len(raw_parts) >= 2 else -1
+                if not 1 <= target <= 65535 or (published != -1 and not 1 <= published <= 65535):
+                    raise ValueError
+                if separator and protocol not in {"tcp", "udp", "sctp"}:
+                    raise ValueError
+                normalized = (published, target)
+                if separator and protocol != "tcp":
+                    normalized = (-1, -1)
+            except (IndexError, ValueError):
+                normalized = (-1, -1)
+        elif isinstance(port, Mapping):
+            try:
+                allowed_keys = {"target", "published", "host_ip", "protocol", "app_protocol", "mode", "name"}
+                if not set(port) <= allowed_keys:
+                    raise ValueError
+                target = int(port["target"])
+                published_value = port.get("published")
+                published = int(published_value) if published_value is not None else -1
+                if not 1 <= target <= 65535 or (published != -1 and not 1 <= published <= 65535):
+                    raise ValueError
+                if "host_ip" in port:
+                    ipaddress.ip_address(str(port["host_ip"]))
+                if port.get("mode", "ingress") not in {"host", "ingress"}:
+                    raise ValueError
+                normalized = (published, target)
+                if port.get("protocol", "tcp") != "tcp":
+                    normalized = (-1, -1)
+            except (TypeError, ValueError):
+                normalized = (-1, -1)
+            except KeyError:
+                normalized = (-1, -1)
+        if normalized in result:
+            result.add((-1, -1))
+        result.add(normalized)
+    return result
+
+
+def _network_subnet(network: object) -> object:
+    """Return the first Compose IPAM subnet without assuming valid shapes."""
+
+    if not isinstance(network, Mapping):
+        return None
+    ipam = network.get("ipam")
+    if not isinstance(ipam, Mapping):
+        return None
+    config = ipam.get("config")
+    if not isinstance(config, list) or len(config) != 1 or not isinstance(config[0], Mapping):
+        return None
+    return config[0].get("subnet")
+
+
+def _rendered_mounts(service: Mapping[str, Any]) -> dict[str, tuple[str, str, bool]] | None:
+    """Normalize Compose short and JSON long mount syntax by container target."""
+
+    raw_mounts = service.get("volumes", [])
+    if not isinstance(raw_mounts, list):
+        return None
+    mounts: dict[str, tuple[str, str, bool]] = {}
+    for item in raw_mounts:
+        if isinstance(item, str):
+            parts = item.split(":")
+            if len(parts) not in {2, 3}:
+                return None
+            source, target = parts[:2]
+            read_only = len(parts) == 3 and parts[2] == "ro"
+            if len(parts) == 3 and parts[2] not in {"ro", "rw"}:
+                return None
+            mount_type = "bind" if source.startswith((".", "/")) else "volume"
+        elif isinstance(item, Mapping):
+            source = item.get("source")
+            target = item.get("target")
+            mount_type = item.get("type")
+            if not all(isinstance(value, str) and value for value in (source, target, mount_type)):
+                return None
+            if mount_type not in {"bind", "volume"}:
+                return None
+            read_only = item.get("read_only", False) is True
+        else:
+            return None
+        if target in mounts:
+            return None
+        mounts[target] = (mount_type, source, read_only)
+    return mounts
+
+
+def _rendered_mount_source_matches(target: str, source: str, values: Mapping[str, str]) -> bool:
+    """Match one resolved mount source without depending on the checkout path."""
+
+    try:
+        if target == "/run/tldw/docker-compose.production.yml":
+            return (
+                source == "./docker-compose.production.yml" or Path(source).resolve() == DEFAULT_COMPOSE_FILE.resolve()
+            )
+        if target in {"/run/tldw/Caddyfile", "/etc/caddy/Caddyfile"}:
+            return source == "./Production/Caddyfile" or Path(source).resolve() == DEFAULT_PROXY_FILE.resolve()
+    except (OSError, RuntimeError, ValueError):
+        return False
+    if target == "/backups":
+        return source == values.get("TLDW_BACKUP_DIR")
+    expected_named_sources = {
+        "/app/Databases": "app-data",
+        "/var/lib/postgresql": "postgres_data",
+        "/data": None,
+        "/config": "caddy_config",
+    }
+    if target == "/data":
+        return source in {"redis_data", "caddy_data"}
+    return source == expected_named_sources.get(target)
+
+
+def validate_compose(document: Mapping[str, Any]) -> tuple[PreflightIssue, ...]:
+    """Validate the unrendered production Compose topology."""
+
+    issues: list[PreflightIssue] = []
+    if document.get("name") != "tldw-production":
+        issues.append(
+            _issue(
+                "topology_project",
+                "name",
+                "must use the standalone production project name",
+            )
+        )
+    services = document.get("services", {})
+    networks = document.get("networks", {})
+    expected_services = {"preflight", "caddy", "app", "postgres", "redis"}
+    if not isinstance(services, Mapping) or set(services) != expected_services:
+        issues.append(_issue("topology_services", "services", "must match the reference services"))
+        return _sorted_issues(issues)
+    malformed_services = [name for name in expected_services if not isinstance(services[name], Mapping)]
+    for name in malformed_services:
+        issues.append(_issue("topology_service", name, "must be a service mapping"))
+    if malformed_services:
+        return _sorted_issues(issues)
+    if not isinstance(networks, Mapping) or set(networks) != {"edge", "backend"}:
+        issues.append(_issue("topology_network", "networks", "must contain only edge and backend"))
+    else:
+        backend = networks.get("backend")
+        if not isinstance(backend, Mapping) or backend.get("internal") is not True:
+            issues.append(_issue("topology_network", "backend", "must be an internal network"))
+        for name, expected in _EXPECTED_NETWORK_INPUTS.items():
+            if _network_subnet(networks.get(name)) != expected:
+                issues.append(
+                    _issue(
+                        "topology_network",
+                        name,
+                        "must derive its subnet from the required environment input",
+                    )
+                )
+    for name, service_value in services.items():
+        service = service_value if isinstance(service_value, Mapping) else {}
+        declared_ports = _ports(service)
+        if name == "caddy":
+            if declared_ports != {(80, 80), (443, 443)}:
+                issues.append(_issue("topology_ports", name, "must publish only host ports 80 and 443"))
+        elif declared_ports:
+            issues.append(_issue("topology_ports", name, "must not publish a host port"))
+        if "build" in service or "container_name" in service:
+            issues.append(_issue("topology_service", name, "must use the minimal immutable service shape"))
+        service_volumes = service.get("volumes", []) or []
+        if not isinstance(service_volumes, list):
+            service_volumes = []
+        if any("/var/run/docker.sock" in str(item) for item in service_volumes):
+            issues.append(_issue("topology_socket", name, "must not mount the Docker socket"))
+    for name, expected in _EXPECTED_NETWORKS.items():
+        if _network_names(services[name]) != expected:
+            issues.append(_issue("topology_network", name, "has unexpected network membership"))
+    preflight = services["preflight"]
+    if (
+        preflight.get("user") != "0:0"
+        or preflight.get("read_only") is not True
+        or preflight.get("cap_drop") != ["ALL"]
+        or preflight.get("security_opt") != ["no-new-privileges:true"]
+        or preflight.get("network_mode") != "none"
+        or preflight.get("entrypoint") != _EXPECTED_PREFLIGHT_ENTRYPOINT
+        or preflight.get("restart") != "no"
+    ):
+        issues.append(
+            _issue(
+                "topology_preflight",
+                "preflight",
+                "must retain the confined one-shot execution contract",
+            )
+        )
+    app_dependencies = services["app"].get("depends_on", {})
+    dependency = app_dependencies.get("preflight") if isinstance(app_dependencies, Mapping) else None
+    if dependency != {"condition": "service_completed_successfully"}:
+        issues.append(_issue("topology_preflight", "app", "must fail closed on preflight"))
+    if preflight.get("command") != _EXPECTED_PREFLIGHT_COMMAND:
+        issues.append(
+            _issue(
+                "topology_preflight",
+                "preflight.command",
+                "must validate the Compose-injected environment",
+            )
+        )
+    if preflight.get("env_file") != _EXPECTED_RAW_ENV_FILE:
+        issues.append(
+            _issue(
+                "topology_preflight",
+                "preflight.env_file",
+                "must consume the required raw environment through Compose",
+            )
+        )
+    for name in ("preflight", "app", "postgres", "redis"):
+        if services[name].get("env_file") != _EXPECTED_RAW_ENV_FILE:
+            issues.append(
+                _issue(
+                    "topology_env",
+                    name,
+                    "must consume the required raw environment contract",
+                )
+            )
+    for name, expected in _STATIC_IMAGE_INPUTS.items():
+        if services[name].get("image") != expected:
+            issues.append(_issue("topology_image", name, "must use the required image input"))
+    raw_app_environment = services["app"].get("environment", {})
+    app_environment = raw_app_environment if isinstance(raw_app_environment, Mapping) else {}
+    edge_input = "${TLDW_EDGE_SUBNET:?Set private TLDW_EDGE_SUBNET}"
+    if app_environment.get("AUTH_MODE") != "multi_user" or app_environment.get("tldw_production") != "true":
+        issues.append(_issue("topology_mode", "app", "must explicitly use multi-user production mode"))
+    for field in TRUST_ENVIRONMENT:
+        if app_environment.get(field) != edge_input:
+            issues.append(_issue("topology_trust", field, "must derive from the private edge CIDR"))
+    fixed_security_environment = {
+        "TLDW_SETUP_ALLOW_REMOTE": "0",
+        "AUTH_TRUST_X_FORWARDED_FOR": "true",
+        "RG_CLIENT_IP_HEADER": "X-Forwarded-For",
+        "MCP_TRUST_X_FORWARDED": "true",
+    }
+    for field, expected in fixed_security_environment.items():
+        if app_environment.get(field) != expected:
+            issues.append(_issue("topology_trust", field, "must retain the production trust boundary"))
+    if services["caddy"].get("environment") != _EXPECTED_CADDY_ENVIRONMENT:
+        issues.append(
+            _issue(
+                "topology_proxy",
+                "caddy.environment",
+                "must receive only the required domain and ACME contact",
+            )
+        )
+    redis_command = _command_structure(services["redis"])
+    redis_health = _healthcheck_structure(services["redis"])
+    if redis_command != _EXPECTED_REDIS_COMMAND:
+        issues.append(_issue("topology_redis_auth", "redis.command", "must require the external password"))
+    if redis_health != _EXPECTED_REDIS_HEALTHCHECK:
+        issues.append(_issue("topology_redis_auth", "redis.healthcheck", "must authenticate"))
+    postgres_health = _healthcheck_structure(services["postgres"])
+    if postgres_health != _EXPECTED_POSTGRES_HEALTHCHECK:
+        issues.append(
+            _issue(
+                "topology_postgres_auth",
+                "postgres.healthcheck",
+                "must use the external database identity",
+            )
+        )
+    app_health = _healthcheck_structure(services["app"])
+    if app_health != _EXPECTED_APP_HEALTHCHECK:
+        issues.append(
+            _issue(
+                "topology_health",
+                "app.healthcheck",
+                "must use loopback internal readiness",
+            )
+        )
+    declared_volumes = document.get("volumes", {})
+    if not isinstance(declared_volumes, Mapping) or set(declared_volumes) != _EXPECTED_VOLUMES:
+        issues.append(_issue("topology_volumes", "volumes", "must match the persistent volume boundary"))
+    for name, expected in _EXPECTED_SERVICE_VOLUMES.items():
+        raw_volumes = services[name].get("volumes", []) or []
+        actual = {str(item) for item in raw_volumes} if isinstance(raw_volumes, list) else set()
+        if actual != expected:
+            issues.append(
+                _issue(
+                    "topology_mounts",
+                    name,
+                    "must match the required persistent and read-only mounts",
+                )
+            )
+    return _sorted_issues(issues)
+
+
+def validate_rendered_compose(document: Mapping[str, Any], values: Mapping[str, str]) -> tuple[PreflightIssue, ...]:
+    """Revalidate security invariants after Compose interpolation."""
+
+    issues: list[PreflightIssue] = []
+    services = document.get("services", {})
+    networks = document.get("networks", {})
+    expected_services = {"preflight", "caddy", "app", "postgres", "redis"}
+    if document.get("name") != "tldw-production":
+        issues.append(_issue("rendered_project", "name", "must remain the production project"))
+    if not isinstance(services, Mapping):
+        return (_issue("rendered_services", "services", "must be a mapping"),)
+    if set(services) != expected_services:
+        issues.append(_issue("rendered_services", "services", "must match the reference services"))
+    for name in expected_services:
+        if not isinstance(services.get(name), Mapping):
+            issues.append(_issue("rendered_services", name, "is missing from the rendered model"))
+    if any(not isinstance(services.get(name), Mapping) for name in expected_services):
+        return _sorted_issues(issues)
+    for name, service_value in services.items():
+        if not isinstance(service_value, Mapping):
+            issues.append(_issue("rendered_services", name, "must be a service mapping"))
+            continue
+        service = service_value
+        declared_ports = _ports(service)
+        if name == "caddy":
+            if declared_ports != {(80, 80), (443, 443)}:
+                issues.append(_issue("rendered_ports", name, "must publish only ports 80 and 443"))
+        elif declared_ports:
+            issues.append(_issue("rendered_ports", name, "must not publish ports"))
+        if "build" in service or "container_name" in service:
+            issues.append(_issue("rendered_service", name, "must use the minimal immutable service shape"))
+        raw_mounts = service.get("volumes", [])
+        if "/var/run/docker.sock" in str(raw_mounts):
+            issues.append(_issue("rendered_socket", name, "must not mount the Docker socket"))
+    if not isinstance(networks, Mapping) or set(networks) != {"edge", "backend"}:
+        issues.append(_issue("rendered_network", "networks", "must contain only edge and backend"))
+    else:
+        backend = networks.get("backend")
+        if not isinstance(backend, Mapping) or backend.get("internal") is not True:
+            issues.append(_issue("rendered_network", "backend", "must remain internal"))
+        expected_subnets = {
+            "edge": values.get("TLDW_EDGE_SUBNET"),
+            "backend": values.get("TLDW_BACKEND_SUBNET"),
+        }
+        for name, expected in expected_subnets.items():
+            network = networks.get(name)
+            expected_name = f"tldw-production_{name}"
+            invalid_identity = isinstance(network, Mapping) and (
+                network.get("external") is True or ("name" in network and network.get("name") != expected_name)
+            )
+            if not expected or _network_subnet(network) != expected or invalid_identity:
+                issues.append(
+                    _issue(
+                        "rendered_network",
+                        name,
+                        "must match the validated network input",
+                    )
+                )
+    for name, expected in _EXPECTED_NETWORKS.items():
+        if _network_names(services[name]) != expected:
+            issues.append(_issue("rendered_network", name, "has unexpected network membership"))
+    expected_images = {
+        "preflight": values.get("TLDW_APP_IMAGE"),
+        "app": values.get("TLDW_APP_IMAGE"),
+        "caddy": values.get("CADDY_IMAGE"),
+        "postgres": values.get("POSTGRES_IMAGE"),
+        "redis": values.get("REDIS_IMAGE"),
+    }
+    for name, expected in expected_images.items():
+        if not expected or services[name].get("image") != expected:
+            issues.append(_issue("rendered_image", name, "does not match the validated image input"))
+    preflight = services["preflight"]
+    if (
+        preflight.get("user") != "0:0"
+        or preflight.get("read_only") is not True
+        or preflight.get("cap_drop") != ["ALL"]
+        or preflight.get("security_opt") != ["no-new-privileges:true"]
+        or preflight.get("network_mode") != "none"
+        or preflight.get("entrypoint") != _EXPECTED_PREFLIGHT_ENTRYPOINT
+        or preflight.get("command") != _EXPECTED_PREFLIGHT_COMMAND
+        or preflight.get("restart") != "no"
+    ):
+        issues.append(
+            _issue(
+                "rendered_preflight",
+                "preflight",
+                "must retain the confined one-shot execution contract",
+            )
+        )
+    expected_restarts = {
+        "caddy": "unless-stopped",
+        "app": "unless-stopped",
+        "postgres": "unless-stopped",
+        "redis": "unless-stopped",
+    }
+    for name, expected in expected_restarts.items():
+        if services[name].get("restart") != expected:
+            issues.append(_issue("rendered_service", name, "must retain the production restart policy"))
+    expected_dependencies = {
+        "app": {
+            "preflight": "service_completed_successfully",
+            "postgres": "service_healthy",
+            "redis": "service_healthy",
+        },
+        "caddy": {"app": "service_healthy"},
+    }
+    for name, expected in expected_dependencies.items():
+        dependencies = services[name].get("depends_on")
+        if not isinstance(dependencies, Mapping) or set(dependencies) != set(expected):
+            issues.append(_issue("rendered_preflight", name, "must retain the production dependency contract"))
+            continue
+        for dependency_name, condition in expected.items():
+            dependency = dependencies.get(dependency_name)
+            if (
+                not isinstance(dependency, Mapping)
+                or dependency.get("condition") != condition
+                or dependency.get("required", True) is not True
+            ):
+                issues.append(_issue("rendered_preflight", name, "must retain the production dependency contract"))
+                break
+    expected_mounts = {
+        "preflight": {
+            "/run/tldw/docker-compose.production.yml": ("bind", "", True),
+            "/run/tldw/Caddyfile": ("bind", "", True),
+            "/backups": ("bind", "", True),
+        },
+        "caddy": {
+            "/etc/caddy/Caddyfile": ("bind", "", True),
+            "/data": ("volume", "caddy_data", False),
+            "/config": ("volume", "caddy_config", False),
+        },
+        "app": {"/app/Databases": ("volume", "app-data", False)},
+        "postgres": {"/var/lib/postgresql": ("volume", "postgres_data", False)},
+        "redis": {"/data": ("volume", "redis_data", False)},
+    }
+    for name, expected in expected_mounts.items():
+        mounts = _rendered_mounts(services[name])
+        invalid = mounts is None or set(mounts) != set(expected)
+        if not invalid and mounts is not None:
+            for target, (expected_type, expected_source, expected_read_only) in expected.items():
+                mount_type, source, read_only = mounts[target]
+                source_matches = (
+                    _rendered_mount_source_matches(target, source, values)
+                    if expected_type == "bind"
+                    else source == expected_source
+                )
+                if mount_type != expected_type or read_only is not expected_read_only or not source_matches:
+                    invalid = True
+                    break
+        if invalid:
+            issues.append(_issue("rendered_mounts", name, "must match the required resolved mounts"))
+    declared_volumes = document.get("volumes", {})
+    if not isinstance(declared_volumes, Mapping) or set(declared_volumes) != _EXPECTED_VOLUMES:
+        issues.append(_issue("rendered_volumes", "volumes", "must match the persistent volume boundary"))
+    else:
+        for name, volume in declared_volumes.items():
+            expected_name = f"tldw-production_{name}"
+            if volume is not None and (
+                not isinstance(volume, Mapping)
+                or volume.get("external") is True
+                or volume.get("name", expected_name) != expected_name
+            ):
+                issues.append(_issue("rendered_volumes", name, "must remain project-scoped persistent storage"))
+    expected_caddy_environment = {
+        "TLDW_PUBLIC_DOMAIN": values.get("TLDW_PUBLIC_DOMAIN"),
+        "TLDW_ACME_EMAIL": values.get("TLDW_ACME_EMAIL"),
+    }
+    if services["caddy"].get("environment") != expected_caddy_environment:
+        issues.append(
+            _issue(
+                "rendered_proxy",
+                "caddy.environment",
+                "must match the validated TLS identity",
+            )
+        )
+    app_environment = services["app"].get("environment", {})
+    edge = values.get("TLDW_EDGE_SUBNET")
+    if not isinstance(app_environment, Mapping):
+        issues.append(_issue("rendered_trust", "app", "environment must be a mapping"))
+    else:
+        if app_environment.get("AUTH_MODE") != "multi_user" or app_environment.get("tldw_production") != "true":
+            issues.append(_issue("rendered_mode", "app", "must explicitly use multi-user production mode"))
+        for field in TRUST_ENVIRONMENT:
+            if (
+                not edge
+                or app_environment.get(field) != edge
+                or app_environment.get(field)
+                in {
+                    "*",
+                    "0.0.0.0/0",
+                }
+            ):
+                issues.append(_issue("rendered_trust", field, "must equal the bounded edge CIDR"))
+        fixed_security_environment = {
+            "TLDW_SETUP_ALLOW_REMOTE": "0",
+            "AUTH_TRUST_X_FORWARDED_FOR": "true",
+            "RG_CLIENT_IP_HEADER": "X-Forwarded-For",
+            "MCP_TRUST_X_FORWARDED": "true",
+        }
+        for field, expected in fixed_security_environment.items():
+            if app_environment.get(field) != expected:
+                issues.append(_issue("rendered_trust", field, "must retain the production trust boundary"))
+    app_health = _healthcheck_structure(services["app"])
+    if app_health != _EXPECTED_APP_HEALTHCHECK:
+        issues.append(_issue("rendered_health", "app.healthcheck", "must use loopback internal readiness"))
+    redis_command = _command_structure(services["redis"])
+    redis_health = _healthcheck_structure(services["redis"])
+    if redis_command != _EXPECTED_REDIS_COMMAND:
+        issues.append(_issue("rendered_redis_auth", "redis.command", "must require the external password"))
+    if redis_health != _EXPECTED_REDIS_HEALTHCHECK:
+        issues.append(_issue("rendered_redis_auth", "redis.healthcheck", "must authenticate"))
+    postgres_health = _healthcheck_structure(services["postgres"])
+    if postgres_health != _EXPECTED_POSTGRES_HEALTHCHECK:
+        issues.append(
+            _issue(
+                "rendered_postgres_auth",
+                "postgres.healthcheck",
+                "must use the external database identity",
+            )
+        )
+    sensitive_values = [
+        values.get(name, "") for name in ("POSTGRES_PASSWORD", "REDIS_PASSWORD", "DATABASE_URL", "REDIS_URL")
+    ]
+    for name, service in services.items():
+        if not isinstance(service, Mapping):
+            continue
+        command = _command_text(service)
+        if any(value and value in command for value in sensitive_values):
+            issues.append(_issue("rendered_secret", name, "must not contain resolved credential text"))
+    return _sorted_issues(issues)
+
+
+def _caddy_block_end(lines: Sequence[str], start: int) -> int | None:
+    """Return the closing line for one active Caddy block."""
+
+    depth = 0
+    started = False
+    for index in range(start, len(lines)):
+        active = lines[index].split("#", 1)[0]
+        active = re.sub(r"\{[^{}\s]+\}", "", active)
+        depth += active.count("{")
+        if depth:
+            started = True
+        depth -= active.count("}")
+        if started and depth == 0:
+            return index
+        if depth < 0:
+            return None
+    return None
+
+
+def validate_proxy(text: str) -> tuple[PreflightIssue, ...]:
+    """Validate the production Caddy public/private route boundary."""
+
+    issues: list[PreflightIssue] = []
+    lines = text.splitlines()
+    active_indexes = [index for index, line in enumerate(lines) if line.strip() and not line.lstrip().startswith("#")]
+    site_indexes = [
+        index for index, line in enumerate(lines) if re.fullmatch(r"\s*\{\$TLDW_PUBLIC_DOMAIN\}\s*\{\s*", line)
+    ]
+    site_start = site_indexes[0] if len(site_indexes) == 1 else None
+    site_end = _caddy_block_end(lines, site_start) if site_start is not None else None
+    site_is_complete = (
+        site_start is not None
+        and site_end is not None
+        and active_indexes
+        and site_start == active_indexes[0]
+        and site_end == active_indexes[-1]
+    )
+    if not site_is_complete:
+        issues.append(_issue("proxy_domain", "Caddyfile", "must use one active configured-domain block"))
+
+    matcher_indexes = [
+        index for index, line in enumerate(lines) if re.fullmatch(r"\s*@private_control\s+path(?:\s+\S+)+\s*", line)
+    ]
+    matcher_index = matcher_indexes[0] if len(matcher_indexes) == 1 else None
+    matcher_paths = lines[matcher_index].split()[2:] if matcher_index is not None else []
+    if (
+        len(matcher_indexes) != 1
+        or len(matcher_paths) != len(DENIED_PROXY_PATHS)
+        or set(matcher_paths) != set(DENIED_PROXY_PATHS)
+    ):
+        issues.append(_issue("proxy_path", "@private_control", "must equal the intended private path set"))
+    for path in ("/health", "/metrics", "/api/v1/health"):
+        if path in matcher_paths:
+            issues.append(_issue("proxy_public_path", path, "must remain publicly routable"))
+
+    deny_indexes = [
+        index for index, line in enumerate(lines) if re.fullmatch(r"\s*respond\s+@private_control\s+404\s*", line)
+    ]
+    private_responses = [line for line in lines if re.fullmatch(r"\s*respond\s+@private_control(?:\s+\S+)+\s*", line)]
+    if len(deny_indexes) != 1 or len(private_responses) != 1:
+        issues.append(_issue("proxy_response", "Caddyfile", "must deny private routes with 404"))
+    proxy_indexes = [
+        index for index, line in enumerate(lines) if re.fullmatch(r"\s*reverse_proxy\s+app:8000\s*\{\s*", line)
+    ]
+
+    def inside_site(index: int) -> bool:
+        return site_start is not None and site_end is not None and site_start < index < site_end
+
+    if (
+        matcher_index is None
+        or len(deny_indexes) != 1
+        or len(proxy_indexes) != 1
+        or not all(inside_site(index) for index in (matcher_index, deny_indexes[0], proxy_indexes[0]))
+        or matcher_index > deny_indexes[0]
+        or deny_indexes[0] > proxy_indexes[0]
+    ):
+        issues.append(_issue("proxy_order", "Caddyfile", "must deny private routes before proxying"))
+    upstreams = re.findall(r"(?m)^\s*reverse_proxy\s+(\S+)", text)
+    if upstreams != ["app:8000"]:
+        issues.append(_issue("proxy_upstream", "Caddyfile", "must proxy only to the application"))
+
+    tls_indexes = [
+        index for index, line in enumerate(lines) if re.fullmatch(r"\s*tls\s+\{\$TLDW_ACME_EMAIL\}\s*", line)
+    ]
+    if len(tls_indexes) != 1 or not inside_site(tls_indexes[0]):
+        issues.append(_issue("proxy_tls", "Caddyfile", "must terminate TLS inside the public site"))
+
+    proxy_end = _caddy_block_end(lines, proxy_indexes[0]) if len(proxy_indexes) == 1 else None
+    for directive in (
+        "header_up X-Forwarded-For {remote_host}",
+        "header_up X-Real-IP {remote_host}",
+        "header_up X-Forwarded-Proto https",
+    ):
+        indexes = [index for index, line in enumerate(lines) if re.fullmatch(rf"\s*{re.escape(directive)}\s*", line)]
+        if len(indexes) != 1 or proxy_end is None or not proxy_indexes[0] < indexes[0] < proxy_end:
+            issues.append(_issue("proxy_headers", "Caddyfile", "must overwrite client identity headers"))
+    return _sorted_issues(issues)
+
+
+def _validate_reference_files(
+    compose_file: Path,
+    proxy_file: Path,
+) -> list[PreflightIssue]:
+    """Validate the static Compose and proxy assets."""
+
+    issues: list[PreflightIssue] = []
+    try:
+        compose = yaml.safe_load(compose_file.read_text(encoding="utf-8"))
+        if not isinstance(compose, Mapping):
+            raise ValueError("Compose root must be a mapping")
+    except (OSError, UnicodeError, ValueError, yaml.YAMLError):
+        issues.append(_issue("compose_parse", "compose_file", "could not parse the production Compose file"))
+    else:
+        issues.extend(validate_compose(compose))
+    try:
+        proxy_text = proxy_file.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        issues.append(_issue("proxy_parse", "proxy_file", "could not read the production proxy file"))
+    else:
+        issues.extend(validate_proxy(proxy_text))
+    return issues
+
+
+def run_preflight(
+    env_file: Path,
+    compose_file: Path,
+    proxy_file: Path,
+    *,
+    runtime_backup_dir: Path | None = None,
+) -> PreflightReport:
+    """Run host preflight, including raw-file and permission validation."""
+
+    del runtime_backup_dir  # Runtime path substitution is confined-container only.
+
+    issues: list[PreflightIssue] = []
+    try:
+        values = load_raw_env(env_file)
+    except (OSError, UnicodeError, ValueError):
+        issues.append(_issue("env_parse", "TLDW_ENV_FILE", "could not parse the raw environment file"))
+    else:
+        issues.extend(
+            validate_environment(
+                values,
+                env_path=env_file,
+            )
+        )
+    issues.extend(_validate_reference_files(compose_file, proxy_file))
+    return PreflightReport(_sorted_issues(issues))
+
+
+def run_preflight_from_environment(
+    values: Mapping[str, str],
+    compose_file: Path,
+    proxy_file: Path,
+    *,
+    runtime_backup_dir: Path | None = None,
+) -> PreflightReport:
+    """Run confined-container preflight using Compose-injected values."""
+
+    issues = list(
+        validate_environment(
+            values,
+            env_path=None,
+            runtime_backup_dir=runtime_backup_dir,
+            require_backup_writable=False,
+        )
+    )
+    issues.extend(_validate_reference_files(compose_file, proxy_file))
+    return PreflightReport(_sorted_issues(issues))
+
+
+def _parser() -> argparse.ArgumentParser:
+    """Build the side-effect-free production-preflight argument parser."""
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--env-file", type=Path)
+    source.add_argument("--from-environment", action="store_true")
+    parser.add_argument("--compose-file", type=Path, default=DEFAULT_COMPOSE_FILE)
+    parser.add_argument("--proxy-file", type=Path, default=DEFAULT_PROXY_FILE)
+    parser.add_argument("--runtime-backup-dir", type=Path)
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Validate CLI inputs and emit only sanitized deterministic diagnostics."""
+
+    parser = _parser()
+    try:
+        args = parser.parse_args(argv)
+        if args.runtime_backup_dir is not None and not args.from_environment:
+            parser.error("--runtime-backup-dir requires --from-environment")
+    except SystemExit as exc:
+        return int(exc.code)
+    if args.from_environment:
+        report = run_preflight_from_environment(
+            os.environ,
+            args.compose_file,
+            args.proxy_file,
+            runtime_backup_dir=args.runtime_backup_dir,
+        )
+    else:
+        report = run_preflight(
+            args.env_file,
+            args.compose_file,
+            args.proxy_file,
+        )
+    if report.ok:
+        logger.bind(operation="production_preflight").success("Production preflight passed")
+        return 0
+    for issue in report.issues:
+        logger.bind(
+            operation="production_preflight",
+            issue_code=issue.code,
+            field=issue.field,
+        ).error(
+            "Production preflight failed: {}",
+            issue.message,
+        )
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

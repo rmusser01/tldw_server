@@ -1,0 +1,1 @@
+{"case":"numeric_epoch_timestamp","model":"ProfileManifest","valid":false,"structurally_valid":false,"data":{"schema_version":1,"profile_id":"profile-1","revision":2,"purge_generation":0,"created_at":1787875200,"updated_at":1787875200,"current_version_id":"manifest-version-2"}}

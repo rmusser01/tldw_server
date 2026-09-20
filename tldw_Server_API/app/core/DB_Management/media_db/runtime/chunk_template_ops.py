@@ -311,7 +311,8 @@ def process_unvectorized_chunks(
         with self.transaction() as conn:
             media_info = self._fetchone_with_connection(
                 conn,
-                "SELECT uuid FROM Media WHERE id = ? AND deleted = 0",
+                "SELECT uuid FROM Media WHERE id = ? AND deleted = 0 "
+                "AND system_operation_id IS NULL",
                 (media_id,),
             )
             if not media_info:
@@ -425,7 +426,8 @@ def clear_unvectorized_chunks(self: Any, media_id: int) -> int:
         with self.transaction() as conn:
             media_row = self._fetchone_with_connection(
                 conn,
-                "SELECT id FROM Media WHERE id = ? AND deleted = 0",
+                "SELECT id FROM Media WHERE id = ? AND deleted = 0 "
+                "AND system_operation_id IS NULL",
                 (media_id,),
             )
             if not media_row:

@@ -355,6 +355,13 @@ vi.mock("react-router-dom", () => ({
       {children}
     </a>
   ),
+  useLocation: () => ({
+    pathname: "/chat",
+    search: "",
+    hash: "",
+    state: null,
+    key: "test"
+  }),
   useNavigate: () => vi.fn()
 }))
 
@@ -395,6 +402,7 @@ vi.mock("@/store/model", () => ({
       extraBody: "",
       jsonMode: false,
       numCtx: 8192,
+      setActiveSettingsScope: vi.fn(),
       updateSetting: vi.fn(),
       updateSettings: vi.fn()
     })
@@ -433,6 +441,9 @@ vi.mock("@/hooks/useMcpTools", () => ({
     hasMcp: false,
     healthState: "ready",
     tools: [],
+    discoveredTools: [],
+    chatTools: [],
+    toolCounts: { total: 0, enabled: 0 },
     toolsLoading: false,
     catalogs: [],
     catalogsLoading: false,
@@ -445,7 +456,9 @@ vi.mock("@/hooks/useMcpTools", () => ({
     setToolCatalog: vi.fn(),
     setToolCatalogId: vi.fn(),
     setToolModules: vi.fn(),
-    setToolCatalogStrict: vi.fn()
+    setToolCatalogStrict: vi.fn(),
+    setToolEnabled: vi.fn(),
+    resetToolFilter: vi.fn()
   })
 }))
 

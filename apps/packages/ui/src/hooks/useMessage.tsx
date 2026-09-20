@@ -1,6 +1,6 @@
 import React from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { promptForRag, systemPromptForNonRag } from "~/services/tldw-server";
+import { systemPromptForNonRag } from "~/services/tldw-server";
 import { useStoreMessageOption, type Message } from "~/store/option";
 import { useStoreMessage } from "~/store";
 import { getContentFromCurrentTab } from "~/libs/get-html";
@@ -18,7 +18,6 @@ import {
 } from "@/db/dexie/helpers";
 import { useTranslation } from "react-i18next";
 import { usePageAssist } from "@/context";
-import { formatDocs } from "@/utils/format-docs";
 import { buildAssistantErrorContent } from "@/utils/chat-error-message";
 import { buildCharacterChatAssistantErrorContent } from "@/hooks/chat/useCharacterChatMode";
 import { createCharacterEmoteStream } from "@/hooks/chat/character-emote-stream";
@@ -34,6 +33,7 @@ import {
   tldwClient,
   type ConversationState,
 } from "@/services/tldw/TldwApiClient";
+import { resolveWebsiteChatContext } from "@/hooks/useMessage.website-context";
 import { getScreenshotFromCurrentTab } from "@/libs/get-screenshot";
 import {
   isReasoningEnded,
@@ -84,6 +84,7 @@ import { normalizeChatModelId } from "@/utils/chat-model-availability";
 import { validateSelectedChatModelAvailability } from "@/utils/chat-model-validation";
 import { discardAbortedTurnIfRequested } from "@/hooks/chat/abort-turn-cleanup";
 import { resolveSavedDegradedCharacterPersist } from "@/hooks/chat/characterPersistOutcome";
+import { hydrateTrackedCharacterForSend } from "@/hooks/chat/tracked-character-hydration";
 import {
   collectGreetings,
   isGreetingMessageType,
@@ -105,6 +106,12 @@ import { subscribeChatLoopEvents } from "@/services/chat-loop/bridge";
 import { extractChatLoopEvent } from "@/services/chat-loop/stream";
 import { resolveUseMessageSendMode } from "@/hooks/useMessage.routing";
 import { syncChatSettingsForServerChat } from "@/services/chat-settings";
+import {
+  loadServicePromptSnapshot,
+  renderServicePromptPart,
+  type ServicePromptSnapshot,
+} from "@/services/service-prompts";
+import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error";
 
 const extractToolCalls = (generationInfo: unknown): ToolCall[] | undefined => {
   if (!generationInfo || typeof generationInfo !== "object") return undefined;
@@ -486,8 +493,21 @@ export const useMessage = () => {
     history: ChatHistory,
     signal: AbortSignal,
     embeddingSignal: AbortSignal,
+    servicePromptSnapshot: ServicePromptSnapshot,
     regenerateFromMessage?: Message,
   ) => {
+    const executionSignal = servicePromptSnapshot.scopeSignal;
+    const scopeInvalidatedSignal = servicePromptSnapshot.scopeInvalidatedSignal;
+    const shouldAbortForScopeChange = () =>
+      scopeInvalidatedSignal.aborted;
+    const answerPrompt =
+      servicePromptSnapshot.definitions["chat.rag.answer"];
+    const rewritePrompt =
+      servicePromptSnapshot.definitions["chat.rag.question_rewrite"];
+    if (!answerPrompt || !rewritePrompt) {
+      throw new Error("The Sidepanel RAG Service Prompt snapshot is incomplete.");
+    }
+
     if (!selectedModel || selectedModel.trim().length === 0) {
       notification.error({
         message: t("error"),
@@ -502,6 +522,7 @@ export const useMessage = () => {
 
     const ollama = await pageAssistModel({
       model,
+      requestScope: servicePromptSnapshot.requestScope,
     });
 
     let newMessage: Message[] = [];
@@ -609,8 +630,6 @@ export const useMessage = () => {
     setMessages(newMessage);
     try {
       let query = message;
-      const { ragPrompt: systemPrompt, ragQuestionPrompt: questionPrompt } =
-        await promptForRag();
       if (newMessage.length > 2) {
         const lastTenMessages = newMessage.slice(-10);
         lastTenMessages.pop();
@@ -619,13 +638,18 @@ export const useMessage = () => {
             return `${message.isBot ? "Assistant: " : "Human: "}${message.message}`;
           })
           .join("\n");
-        const promptForQuestion = questionPrompt
-          .replaceAll("{chat_history}", chat_history)
-          .replaceAll("{question}", message);
+        const promptForQuestion = renderServicePromptPart(
+          rewritePrompt.definition,
+          "template",
+          rewritePrompt.parts.template,
+          { chat_history, question: message },
+        );
         const questionOllama = await pageAssistModel({
           model,
           toolChoice: "none",
+          tools: [],
           saveToDb: false,
+          requestScope: servicePromptSnapshot.requestScope,
         });
         const questionMessage = await humanMessageFormatter({
           content: [
@@ -637,7 +661,9 @@ export const useMessage = () => {
           model,
           useOCR,
         });
-        const response = await questionOllama.invoke([questionMessage]);
+        const response = await questionOllama.invoke([questionMessage], {
+          signal: executionSignal,
+        });
         query = response.content.toString();
         query = removeReasoning(query);
       }
@@ -653,72 +679,30 @@ export const useMessage = () => {
       }[] = [];
 
       if (chatWithWebsiteEmbedding) {
-        try {
-          await tldwClient.initialize();
-          // Optionally ensure server has the page content in the media index
-          if (embedURL) {
-            try {
-              await tldwClient.addMedia(embedURL);
-            } catch {}
-          }
-          const ragRes = await tldwClient.ragSearch(query, {
-            top_k: 4,
-            filters: { url: embedURL },
-          });
-          const docs =
-            ragRes?.results || ragRes?.documents || ragRes?.docs || [];
-          context = formatDocs(
-            docs.map((d: any) => ({
-              pageContent: d.content || d.text || d.chunk || "",
-              metadata: d.metadata || {},
-            })),
-          );
-          source = docs.map((d: any) => ({
-            name: d.metadata?.source || d.metadata?.title || "untitled",
-            type: d.metadata?.type || "unknown",
-            mode: "chat",
-            url: d.metadata?.url || "",
-            pageContent: d.content || d.text || d.chunk || "",
-            metadata: d.metadata || {},
-          }));
-        } catch (e) {
-          console.error(
-            "tldw ragSearch failed, falling back to inline context",
-            e,
-          );
-        }
-      }
-      if (!context && chatWithWebsiteEmbedding) {
-        if (embedType === "html") {
-          context = embedHTML.slice(0, maxWebsiteContext);
-        } else {
-          context = embedPDF
-            .map((pdf) => pdf.content)
-            .join(" ")
-            .slice(0, maxWebsiteContext);
-        }
-
-        source = [
-          {
-            name: embedURL,
-            type: embedType,
-            mode: "chat",
-            url: embedURL,
-            pageContent: context,
-            metadata: {
-              source: embedURL,
-              url: embedURL,
-            },
-          },
-        ];
+        const websiteContext = await resolveWebsiteChatContext({
+          client: tldwClient,
+          embedURL,
+          embedType,
+          embedHTML,
+          embedPDF,
+          maxWebsiteContext,
+          query,
+          signal: executionSignal,
+          requestScope: servicePromptSnapshot.requestScope,
+        });
+        context = websiteContext.context;
+        source = websiteContext.source;
       }
 
       let humanMessage = await humanMessageFormatter({
         content: [
           {
-            text: systemPrompt
-              .replace("{context}", context)
-              .replace("{question}", query),
+            text: renderServicePromptPart(
+              answerPrompt.definition,
+              "template",
+              answerPrompt.parts.template,
+              { context, question: query },
+            ),
             type: "text",
           },
         ],
@@ -733,7 +717,7 @@ export const useMessage = () => {
       const chunks = await ollama.stream(
         [...applicationChatHistory, humanMessage],
         {
-          signal: signal,
+          signal: executionSignal,
           callbacks: [
             {
               handleLLMEnd(output: any): any {
@@ -791,6 +775,12 @@ export const useMessage = () => {
         count++;
       }
 
+      if (executionSignal.aborted) {
+        const abortError = new Error("Request cancelled");
+        abortError.name = "AbortError";
+        throw abortError;
+      }
+
       const toolCalls = extractToolCalls(generationInfo);
       applyMcpModuleDisclosureFromToolCalls(toolCalls);
       setMessages((prev) => {
@@ -836,11 +826,30 @@ export const useMessage = () => {
         userMessageId: resolvedUserMessageId,
         assistantMessageId: resolvedAssistantMessageId,
         assistantParentMessageId: resolvedAssistantParentMessageId ?? null,
+        scopeSignal: servicePromptSnapshot.scopeSignal,
+        scopeInvalidatedSignal:
+          servicePromptSnapshot.scopeInvalidatedSignal,
+        requestScope: servicePromptSnapshot.requestScope,
       });
+
+      if (scopeInvalidatedSignal.aborted) {
+        const abortError = new Error("Request scope changed");
+        abortError.name = "AbortError";
+        throw abortError;
+      }
 
       setIsProcessing(false);
       setStreaming(false);
     } catch (e) {
+      const scopeAborted = shouldAbortForScopeChange();
+      if (scopeAborted || isRequestConfigScopeChangedError(e)) {
+        setMessages(messages);
+        setHistory(history);
+        setIsProcessing(false);
+        setStreaming(false);
+        setIsEmbedding(false);
+        return;
+      }
       if (
         discardAbortedTurnIfRequested({
           discardRequested: discardCurrentTurnOnAbortRef.current,
@@ -866,22 +875,52 @@ export const useMessage = () => {
             : msg,
         ),
       );
-      const errorSave = await saveMessageOnError({
-        e,
-        botMessage: assistantContent,
-        history,
-        historyId,
-        image,
-        selectedModel: model,
-        setHistory,
-        setHistoryId,
-        userMessage: message,
-        isRegenerating: isRegenerate,
-        message_source: "copilot",
-        userMessageId: resolvedUserMessageId,
-        assistantMessageId: resolvedAssistantMessageId,
-        assistantParentMessageId: resolvedAssistantParentMessageId ?? null,
-      });
+      let errorSave: string | null;
+      try {
+        errorSave = await saveMessageOnError({
+          e,
+          botMessage: assistantContent,
+          history,
+          historyId,
+          image,
+          selectedModel: model,
+          setHistory,
+          setHistoryId,
+          userMessage: message,
+          isRegenerating: isRegenerate,
+          message_source: "copilot",
+          userMessageId: resolvedUserMessageId,
+          assistantMessageId: resolvedAssistantMessageId,
+          assistantParentMessageId: resolvedAssistantParentMessageId ?? null,
+          scopeSignal: servicePromptSnapshot.scopeSignal,
+          scopeInvalidatedSignal:
+            servicePromptSnapshot.scopeInvalidatedSignal,
+          requestScope: servicePromptSnapshot.requestScope,
+          shouldAbortForScopeChange,
+        });
+      } catch (persistenceError) {
+        if (
+          shouldAbortForScopeChange() ||
+          isRequestConfigScopeChangedError(persistenceError)
+        ) {
+          setMessages(messages);
+          setHistory(history);
+          setIsProcessing(false);
+          setStreaming(false);
+          setIsEmbedding(false);
+          return;
+        }
+        throw persistenceError;
+      }
+
+      if (shouldAbortForScopeChange()) {
+        setMessages(messages);
+        setHistory(history);
+        setIsProcessing(false);
+        setStreaming(false);
+        setIsEmbedding(false);
+        return;
+      }
 
       if (!errorSave) {
         notification.error({
@@ -894,7 +933,6 @@ export const useMessage = () => {
       setIsEmbedding(false);
     } finally {
       discardCurrentTurnOnAbortRef.current = false;
-      setAbortController(null);
       setEmbeddingController(null);
     }
   };
@@ -1971,6 +2009,7 @@ export const useMessage = () => {
         userMessageId: resolvedUserMessageId,
         assistantMessageId: resolvedAssistantMessageId,
         assistantParentMessageId: resolvedAssistantParentMessageId ?? null,
+        conversationId: chatId,
       });
 
       setIsProcessing(false);
@@ -2420,7 +2459,6 @@ export const useMessage = () => {
     };
     serverChatIdOverride?: string | null;
   }) => {
-    resetChatLoopState();
     const trimmedImageBackendOverride =
       typeof imageBackendOverride === "string"
         ? imageBackendOverride.trim()
@@ -2431,6 +2469,96 @@ export const useMessage = () => {
       requestOverrides.selectedModel.trim().length > 0
         ? requestOverrides.selectedModel.trim()
         : selectedModel || "";
+    const resolvedChatMode =
+      requestOverrides?.chatMode === "normal" ||
+      requestOverrides?.chatMode === "rag" ||
+      requestOverrides?.chatMode === "vision"
+        ? requestOverrides.chatMode
+        : chatMode;
+    const model =
+      (hasExplicitImageBackend
+        ? trimmedImageBackendOverride || resolvedSelectedModel
+        : resolvedSelectedModel
+      ).trim() || "image-generation";
+    const imageBackendCandidates = hasExplicitImageBackend
+      ? [trimmedImageBackendOverride]
+      : resolveImageBackendCandidates(
+          currentChatModelSettings?.apiProvider,
+          model,
+        );
+    const usesLegacySidepanelRag =
+      !hasExplicitImageBackend &&
+      imageBackendCandidates.length === 0 &&
+      (!uploadedFiles || uploadedFiles.length === 0) &&
+      (!docs || docs.length === 0) &&
+      !messageType &&
+      resolvedChatMode === "rag";
+    const activeController = controller ?? new AbortController();
+    const signal = activeController.signal;
+    const releaseActiveController = () =>
+      setAbortController((current: AbortController | null) =>
+        current === activeController ? null : current,
+      );
+    let servicePromptSnapshot: ServicePromptSnapshot | undefined;
+    if (usesLegacySidepanelRag) {
+      setAbortController(activeController);
+      try {
+        servicePromptSnapshot = await loadServicePromptSnapshot(
+          ["chat.rag.answer", "chat.rag.question_rewrite"],
+          { signal },
+        );
+      } catch (error) {
+        releaseActiveController();
+        const errorName =
+          typeof error === "object" && error !== null && "name" in error
+            ? error.name
+            : undefined;
+        if (signal.aborted || errorName === "AbortError") {
+          return;
+        }
+        if (
+          typeof error === "object" &&
+          error !== null &&
+          "code" in error &&
+          error.code === "service_prompt_migration_required"
+        ) {
+          notification.warning({
+            message: t(
+              "workflowPromptsReviewRequired",
+              "Workflow prompts need review",
+            ),
+            description: (
+              <>
+                Browser-local prompt values must be imported or discarded.{" "}
+                <a
+                  href="/options.html#/settings/prompt"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Review workflow prompts
+                </a>
+              </>
+            ),
+          });
+          return;
+        }
+        notification.error({
+          message: t(
+            "workflowPromptsUnavailable",
+            "Workflow prompts unavailable",
+          ),
+          description: t(
+            "workflowPromptsUnavailableDescription",
+            "Unable to load workflow prompts from your tldw server. Check the connection and try again.",
+          ),
+        });
+        return;
+      }
+    }
+
+    let replyActive = false;
+    try {
+      resetChatLoopState();
     const resolvedSelectedSystemPrompt =
       requestOverrides &&
       Object.prototype.hasOwnProperty.call(
@@ -2453,12 +2581,6 @@ export const useMessage = () => {
       typeof requestOverrides?.webSearch === "boolean"
         ? requestOverrides.webSearch
         : webSearch;
-    const resolvedChatMode =
-      requestOverrides?.chatMode === "normal" ||
-      requestOverrides?.chatMode === "rag" ||
-      requestOverrides?.chatMode === "vision"
-        ? requestOverrides.chatMode
-        : chatMode;
     const conversationContextOverrides = {
       historyForModel: Array.isArray(requestOverrides?.historyForModel)
         ? requestOverrides.historyForModel
@@ -2472,7 +2594,8 @@ export const useMessage = () => {
       if (!validateBeforeSubmit(resolvedSelectedModel, t, notification)) {
         return;
       }
-      const modelAvailable = await ensureSelectedChatModelIsAvailable(
+      let modelAvailable: boolean;
+      modelAvailable = await ensureSelectedChatModelIsAvailable(
         resolvedSelectedModel,
       );
       if (!modelAvailable) {
@@ -2480,24 +2603,8 @@ export const useMessage = () => {
       }
     }
 
-    const model =
-      (hasExplicitImageBackend
-        ? trimmedImageBackendOverride || resolvedSelectedModel
-        : resolvedSelectedModel
-      ).trim() || "image-generation";
-    let signal: AbortSignal;
-    let activeController: AbortController;
-    if (!controller) {
-      const newController = new AbortController();
-      activeController = newController;
-      signal = newController.signal;
-      setAbortController(newController);
-    } else {
-      activeController = controller;
-      setAbortController(controller);
-      signal = controller.signal;
-    }
-    const replyActive =
+    if (!usesLegacySidepanelRag) setAbortController(activeController);
+    replyActive =
       Boolean(replyTarget) &&
       !isRegenerate &&
       !messageType &&
@@ -2516,13 +2623,6 @@ export const useMessage = () => {
         })()
       : {};
 
-    try {
-      const imageBackendCandidates = hasExplicitImageBackend
-        ? [trimmedImageBackendOverride]
-        : resolveImageBackendCandidates(
-            currentChatModelSettings?.apiProvider,
-            model,
-          );
       if (hasExplicitImageBackend || imageBackendCandidates.length > 0) {
         await normalChatMode(
           message,
@@ -2661,6 +2761,11 @@ export const useMessage = () => {
               : null;
 
           if (sendMode === "tracked_character" && trackedCharacterForSend?.id) {
+            const hydratedTrackedCharacter =
+              await hydrateTrackedCharacterForSend(
+                trackedCharacterForSend,
+                (characterId) => tldwClient.getCharacter(characterId),
+              );
             await characterChatMode(
               message,
               image,
@@ -2669,7 +2774,7 @@ export const useMessage = () => {
               memory || history,
               signal,
               model,
-              trackedCharacterForSend,
+              hydratedTrackedCharacter,
               regenerateFromMessage,
               serverChatIdOverride,
               activeController,
@@ -2847,11 +2952,16 @@ export const useMessage = () => {
             memory || history,
             signal,
             embeddingSignal,
+            servicePromptSnapshot!,
             regenerateFromMessage,
           );
         }
       }
     } finally {
+      if (usesLegacySidepanelRag) {
+        servicePromptSnapshot!.release();
+        releaseActiveController();
+      }
       if (replyActive) {
         clearReplyTarget();
       }

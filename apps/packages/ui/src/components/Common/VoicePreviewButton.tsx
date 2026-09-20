@@ -9,6 +9,8 @@ type VoicePreviewButtonProps = {
   model: string
   voice: string
   provider: string
+  backend?: string
+  allowFallback?: boolean
   className?: string
 }
 
@@ -18,6 +20,8 @@ export function VoicePreviewButton({
   model,
   voice,
   provider,
+  backend,
+  allowFallback,
   className,
 }: VoicePreviewButtonProps) {
   const [state, setState] = useState<PreviewState>("idle")
@@ -48,13 +52,15 @@ export function VoicePreviewButton({
 
     setState("loading")
     try {
-      const data = await tldwClient.synthesizeSpeech(PREVIEW_TEXT, {
+      const result = await tldwClient.synthesizeSpeechDetailed(PREVIEW_TEXT, {
         model,
         voice,
         responseFormat: "mp3",
+        backend,
+        allowFallback
       })
 
-      const blob = new Blob([data], { type: "audio/mpeg" })
+      const blob = new Blob([result.buffer], { type: "audio/mpeg" })
       const url = URL.createObjectURL(blob)
       urlRef.current = url
 
@@ -72,7 +78,7 @@ export function VoicePreviewButton({
       cleanup()
       setState("idle")
     }
-  }, [state, model, voice, cleanup])
+  }, [state, model, voice, backend, allowFallback, cleanup])
 
   const disabled = !voice || provider === "browser"
 

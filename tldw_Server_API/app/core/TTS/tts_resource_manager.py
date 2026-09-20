@@ -23,6 +23,8 @@ from loguru import logger
 
 #
 # Local Imports
+from tldw_Server_API.app.core.exceptions import raise_detached_error
+
 from .tts_exceptions import (
     TTSInsufficientMemoryError,
     TTSNetworkError,
@@ -235,6 +237,7 @@ class HTTPConnectionPool:
         async with self._lock:
             if provider not in self._pools:
                 # Use centralized factory for consistent trust_env/http2/limits
+                client_error: Optional[TTSNetworkError] = None
                 try:
                     from tldw_Server_API.app.core.http_client import (
                         build_limits,
@@ -252,13 +255,20 @@ class HTTPConnectionPool:
                     )
                 except _TTS_RESOURCE_NONCRITICAL_EXCEPTIONS as e:
                     # If central factory is unavailable, surface an error instead of constructing directly
-                    raise TTSNetworkError(f"Failed to create HTTP client via factory: {e}") from e
+                    client_error = TTSNetworkError(
+                        "Failed to create TTS HTTP client",
+                        provider=provider,
+                        error_code="NETWORK_ERROR",
+                        details={"error_type": type(e).__name__},
+                    )
+                if client_error is not None:
+                    raise_detached_error(client_error)
 
                 self._pools[provider] = client
                 self._pool_metrics[provider] = ResourceMetrics(
                     created_at=time.time(),
                     last_used=time.time(),
-                    metadata={"provider": provider, "base_url": base_url}
+                    metadata={"provider": provider}
                 )
 
                 logger.debug(f"Created HTTP connection pool for {provider}")

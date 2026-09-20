@@ -1,12 +1,19 @@
 from __future__ import annotations
 
-import inspect
 import json
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
 from loguru import logger
+
+from tldw_Server_API.app.core.Chat.streaming_utils import (
+    MAX_TOOL_ARGUMENT_LENGTH,
+    MAX_TOOL_CALL_INDEX,
+    invoke_stream_close_bounded,
+    normalize_provider_stream_error,
+    provider_result_contains_error,
+)
 
 
 def _blocks_to_text(blocks: list[dict[str, Any]]) -> str:
@@ -262,9 +269,9 @@ def _finish_reason_to_stop_reason(reason: str | None) -> str | None:
         "length": "max_tokens",
         "tool_calls": "tool_use",
         "function_call": "tool_use",
-        "content_filter": "stop_sequence",
+        "content_filter": "refusal",
     }
-    return mapping.get(reason, reason)
+    return mapping.get(reason)
 
 
 def openai_response_to_anthropic(response: dict[str, Any], *, model: str | None) -> dict[str, Any]:
@@ -275,6 +282,9 @@ def openai_response_to_anthropic(response: dict[str, Any], *, model: str | None)
     content_blocks = _openai_content_to_blocks(message.get("content"))
 
     tool_calls = message.get("tool_calls") or []
+    legacy_function_call = message.get("function_call")
+    if not tool_calls and isinstance(legacy_function_call, dict):
+        tool_calls = [{"function": legacy_function_call}]
     if isinstance(tool_calls, list):
         for tc in tool_calls:
             if not isinstance(tc, dict):
@@ -301,8 +311,8 @@ def openai_response_to_anthropic(response: dict[str, Any], *, model: str | None)
 
     finish_reason = (choice or {}).get("finish_reason")
     usage = response.get("usage") or {}
-    input_tokens = usage.get("prompt_tokens") or 0
-    output_tokens = usage.get("completion_tokens") or 0
+    input_tokens = usage.get("prompt_tokens", 0)
+    output_tokens = usage.get("completion_tokens", 0)
 
     msg_id = response.get("id") or f"msg_{uuid.uuid4().hex}"
     return {
@@ -340,9 +350,25 @@ def _parse_openai_sse_line(line: str) -> dict[str, Any] | None:
         return None
     try:
         data = json.loads(payload)
-    except Exception:
-        return None
+    except (TypeError, ValueError):
+        raise ValueError("Malformed provider SSE data") from None
+    if not isinstance(data, dict):
+        raise ValueError("Malformed provider SSE data")
     return data
+
+
+def _openai_error_to_anthropic_event(data: dict[str, Any]) -> str:
+    """Translate an OpenAI-compatible error frame into Anthropic SSE."""
+    del data
+    return _sse_event(
+        "error",
+        {
+            "error": {
+                "type": "api_error",
+                "message": "The upstream provider returned an error.",
+            }
+        },
+    )
 
 
 async def _aiter_lines(stream: Any) -> AsyncIterator[str]:
@@ -362,22 +388,20 @@ async def _maybe_close_stream(stream: Any) -> None:
     if stream is None:
         return
     close_fn = getattr(stream, "aclose", None)
-    if callable(close_fn):
-        try:
-            result = close_fn()
-            if inspect.isawaitable(result):
-                await result
-        except Exception as stream_close_error:
-            logger.debug("Anthropic stream aclose failed", exc_info=stream_close_error)
+    close_kind = "aclose"
+    if not callable(close_fn):
+        close_fn = getattr(stream, "close", None)
+        close_kind = "close"
+    if not callable(close_fn):
         return
-    close_fn = getattr(stream, "close", None)
-    if callable(close_fn):
-        try:
-            result = close_fn()
-            if inspect.isawaitable(result):
-                await result
-        except Exception as stream_close_error:
-            logger.debug("Anthropic stream close failed", exc_info=stream_close_error)
+    try:
+        await invoke_stream_close_bounded(close_fn)
+    except Exception as stream_close_error:
+        logger.debug(
+            "Anthropic stream {} failed; error_type={}",
+            close_kind,
+            type(stream_close_error).__name__,
+        )
 
 
 def _extract_choice(data: dict[str, Any]) -> dict[str, Any]:
@@ -387,6 +411,35 @@ def _extract_choice(data: dict[str, Any]) -> dict[str, Any]:
         if isinstance(choice, dict):
             return choice
     return {}
+
+
+def _openai_stream_payload_has_structural_error(data: dict[str, Any]) -> bool:
+    """Inspect response envelopes without treating assistant text as an error."""
+
+    if normalize_provider_stream_error(data) is not None:
+        return True
+    choices = data.get("choices")
+    if not isinstance(choices, list):
+        return False
+    for choice in choices:
+        if not isinstance(choice, dict):
+            continue
+        if normalize_provider_stream_error(choice) is not None:
+            return True
+        for field in ("message", "delta"):
+            container = choice.get(field)
+            if not isinstance(container, dict):
+                continue
+            if normalize_provider_stream_error(container) is not None:
+                return True
+            content = container.get("content")
+            if isinstance(content, list) and any(
+                isinstance(block, dict)
+                and normalize_provider_stream_error(block) is not None
+                for block in content
+            ):
+                return True
+    return False
 
 
 async def openai_stream_to_anthropic(
@@ -401,19 +454,129 @@ async def openai_stream_to_anthropic(
     open_blocks: list[int] = []
     tool_blocks_by_id: dict[str, dict[str, Any]] = {}
     tool_blocks_by_index: dict[int, dict[str, Any]] = {}
+    tool_states: list[dict[str, Any]] = []
+    tool_stream_invalid = False
+    tool_retained_chars = 0
     final_usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0}
+
+    def retain_tool_chars(length: int) -> bool:
+        """Account for request-local buffered tool state within the repo cap."""
+        nonlocal tool_retained_chars
+        if length < 0 or tool_retained_chars + length > MAX_TOOL_ARGUMENT_LENGTH:
+            return False
+        tool_retained_chars += length
+        return True
+
+    def finalized_tool_events(
+        *,
+        start_index: int,
+        allow_partial: bool = False,
+    ) -> list[str] | None:
+        """Return valid buffered tool events, or ``None`` for malformed state."""
+        if tool_stream_invalid:
+            return None
+        events: list[str] = []
+        for offset, state in enumerate(tool_states):
+            tool_id = state.get("id")
+            name = state.get("name")
+            if state.get("invalid") or state.get("arguments_before_identity"):
+                return None
+            if not isinstance(tool_id, str) or not tool_id.strip():
+                return None
+            if not isinstance(name, str) or not name.strip():
+                return None
+            buffered_input = state.get("buffer")
+            if not isinstance(buffered_input, str):
+                return None
+            if allow_partial:
+                partial_json = buffered_input
+            else:
+                try:
+                    tool_input = json.loads(buffered_input or "")
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    return None
+                if not isinstance(tool_input, dict):
+                    return None
+                partial_json = json.dumps(
+                    tool_input,
+                    ensure_ascii=True,
+                    separators=(",", ":"),
+                )
+            block_index = start_index + offset
+            events.append(
+                _sse_event(
+                    "content_block_start",
+                    {
+                        "index": block_index,
+                        "content_block": {
+                            "type": "tool_use",
+                            "id": tool_id,
+                            "name": name,
+                            "input": {},
+                        },
+                    },
+                )
+            )
+            events.append(
+                _sse_event(
+                    "content_block_delta",
+                    {
+                        "index": block_index,
+                        "delta": {
+                            "type": "input_json_delta",
+                            "partial_json": partial_json,
+                        },
+                    },
+                )
+            )
+            events.append(
+                _sse_event(
+                    "content_block_stop",
+                    {"index": block_index},
+                )
+            )
+        return events
+
+    def valid_usage_count(value: Any) -> bool:
+        return type(value) is int and value >= 0
 
     try:
         async for raw_line in _aiter_lines(stream):
+            if provider_result_contains_error(raw_line, legacy_error_prefix=True):
+                yield _openai_error_to_anthropic_event({})
+                return
             data = _parse_openai_sse_line(raw_line)
             if not data:
                 continue
             if data.get("_done"):
                 break
+            if _openai_stream_payload_has_structural_error(data):
+                yield _openai_error_to_anthropic_event(data)
+                return
 
+            choices = data.get("choices")
+            if (
+                not isinstance(choices, list)
+                or not choices
+                or not isinstance(choices[0], dict)
+            ):
+                yield _openai_error_to_anthropic_event({})
+                return
             choice = _extract_choice(data)
-            delta = choice.get("delta") or {}
+            raw_delta = choice.get("delta")
+            if raw_delta is None:
+                delta: dict[str, Any] = {}
+            elif isinstance(raw_delta, dict):
+                delta = raw_delta
+            else:
+                yield _openai_error_to_anthropic_event({})
+                return
             finish_reason = choice.get("finish_reason")
+            if finish_reason is not None and (
+                not isinstance(finish_reason, str) or not finish_reason.strip()
+            ):
+                yield _openai_error_to_anthropic_event({})
+                return
 
             if not message_started:
                 message_started = True
@@ -436,6 +599,9 @@ async def openai_stream_to_anthropic(
             if isinstance(delta, dict):
                 content = delta.get("content")
                 if content is not None:
+                    if not isinstance(content, str):
+                        yield _openai_error_to_anthropic_event({})
+                        return
                     if text_block_index is None:
                         text_block_index = next_block_index
                         next_block_index += 1
@@ -451,100 +617,184 @@ async def openai_stream_to_anthropic(
                         "content_block_delta",
                         {
                             "index": text_block_index,
-                            "delta": {"type": "text_delta", "text": str(content)},
+                            "delta": {"type": "text_delta", "text": content},
                         },
                     )
 
             tool_calls = delta.get("tool_calls")
+            legacy_function_call = delta.get("function_call")
+            if not tool_calls and isinstance(legacy_function_call, dict):
+                tool_calls = [
+                    {
+                        "index": 0,
+                        "function": legacy_function_call,
+                        "_legacy_function_call": True,
+                    }
+                ]
+            elif tool_calls is not None and not isinstance(tool_calls, list):
+                tool_stream_invalid = True
             if isinstance(tool_calls, list):
                 for tool_delta in tool_calls:
                     if not isinstance(tool_delta, dict):
+                        tool_stream_invalid = True
                         continue
-                    func = tool_delta.get("function") or {}
+                    func = tool_delta.get("function")
+                    if not isinstance(func, dict):
+                        tool_stream_invalid = True
+                        continue
                     name = func.get("name")
                     args = func.get("arguments")
                     tool_id = tool_delta.get("id")
                     tool_index = tool_delta.get("index")
+                    is_legacy = tool_delta.get("_legacy_function_call") is True
+
+                    if tool_index is not None and (
+                        type(tool_index) is not int
+                        or tool_index < 0
+                        or tool_index > MAX_TOOL_CALL_INDEX
+                    ):
+                        tool_stream_invalid = True
+                        continue
 
                     state = None
-                    if isinstance(tool_index, int):
+                    if type(tool_index) is int:
                         state = tool_blocks_by_index.get(tool_index)
                     if state is None and isinstance(tool_id, str) and tool_id:
                         state = tool_blocks_by_id.get(tool_id)
 
                     if state is None:
+                        output_index = next_block_index + len(tool_states)
+                        retained_index = (
+                            tool_index if type(tool_index) is int else output_index
+                        )
+                        legacy_id = f"tool_{output_index}" if is_legacy else None
+                        if not retain_tool_chars(
+                            1
+                            + len(str(retained_index))
+                            + (len(legacy_id) if legacy_id is not None else 0)
+                        ):
+                            yield _openai_error_to_anthropic_event({})
+                            return
                         state = {
-                            "index": next_block_index,
-                            "name": name if isinstance(name, str) else None,
+                            "provider_index": tool_index,
+                            "name": None,
                             "buffer": "",
-                            "id": tool_id if isinstance(tool_id, str) and tool_id else None,
-                            "started": False,
+                            "id": legacy_id,
+                            "legacy": is_legacy,
+                            "invalid": False,
+                            "arguments_before_identity": False,
                         }
-                        next_block_index += 1
-                        if isinstance(tool_index, int):
+                        tool_states.append(state)
+                        if type(tool_index) is int:
                             tool_blocks_by_index[tool_index] = state
-                        if isinstance(tool_id, str) and tool_id:
-                            tool_blocks_by_id[tool_id] = state
-                    else:
-                        if isinstance(tool_id, str) and tool_id and tool_id not in tool_blocks_by_id:
-                            tool_blocks_by_id[tool_id] = state
+                    elif is_legacy != bool(state.get("legacy")):
+                        state["invalid"] = True
 
-                    if not state.get("started"):
-                        if not state.get("id"):
-                            if isinstance(tool_id, str) and tool_id:
-                                state["id"] = tool_id
-                            else:
-                                fallback_index = tool_index if isinstance(tool_index, int) else state["index"]
-                                state["id"] = f"tool_{fallback_index}"
-                        open_blocks.append(state["index"])
-                        yield _sse_event(
-                            "content_block_start",
-                            {
-                                "index": state["index"],
-                                "content_block": {
-                                    "type": "tool_use",
-                                    "id": state["id"],
-                                    "name": state["name"] or "",
-                                    "input": {},
-                                },
-                            },
+                    if type(tool_index) is int:
+                        provider_index = state.get("provider_index")
+                        indexed_state = tool_blocks_by_index.get(tool_index)
+                        if provider_index is None and indexed_state in (None, state):
+                            state["provider_index"] = tool_index
+                            tool_blocks_by_index[tool_index] = state
+                        elif provider_index != tool_index or indexed_state not in (
+                            None,
+                            state,
+                        ):
+                            state["invalid"] = True
+
+                    if tool_id is not None:
+                        existing_state = (
+                            tool_blocks_by_id.get(tool_id)
+                            if isinstance(tool_id, str)
+                            else None
                         )
-                        state["started"] = True
-                    elif isinstance(name, str) and name and not state.get("name"):
-                        state["name"] = name
-                        yield _sse_event(
-                            "content_block_delta",
-                            {
-                                "index": state["index"],
-                                "delta": {"type": "tool_use_delta", "name": name},
-                            },
-                        )
-                    if isinstance(args, str) and args:
-                        state["buffer"] += args
-                        yield _sse_event(
-                            "content_block_delta",
-                            {
-                                "index": state["index"],
-                                "delta": {"type": "input_json_delta", "partial_json": args},
-                            },
-                        )
+                        if (
+                            not isinstance(tool_id, str)
+                            or not tool_id.strip()
+                            or state.get("id") not in (None, tool_id)
+                            or (
+                                existing_state is not None
+                                and existing_state is not state
+                            )
+                        ):
+                            state["invalid"] = True
+                        else:
+                            if state.get("id") is None and not retain_tool_chars(
+                                len(tool_id)
+                            ):
+                                yield _openai_error_to_anthropic_event({})
+                                return
+                            state["id"] = tool_id
+                            tool_blocks_by_id.setdefault(tool_id, state)
+                    if name is not None:
+                        if (
+                            not isinstance(name, str)
+                            or not name.strip()
+                            or state.get("name") not in (None, name)
+                        ):
+                            state["invalid"] = True
+                        else:
+                            if state.get("name") is None and not retain_tool_chars(
+                                len(name)
+                            ):
+                                yield _openai_error_to_anthropic_event({})
+                                return
+                            state["name"] = name
+                    if args is not None:
+                        if not isinstance(args, str):
+                            state["invalid"] = True
+                        elif args:
+                            if not state.get("id") or not state.get("name"):
+                                state["arguments_before_identity"] = True
+                            if not retain_tool_chars(len(args)):
+                                yield _openai_error_to_anthropic_event({})
+                                return
+                            state["buffer"] += args
 
             usage = data.get("usage")
             if isinstance(usage, dict):
                 prompt_tokens = usage.get("prompt_tokens")
                 completion_tokens = usage.get("completion_tokens")
-                if isinstance(prompt_tokens, int):
+                if "prompt_tokens" in usage and not valid_usage_count(prompt_tokens):
+                    yield _openai_error_to_anthropic_event({})
+                    return
+                if "completion_tokens" in usage and not valid_usage_count(
+                    completion_tokens
+                ):
+                    yield _openai_error_to_anthropic_event({})
+                    return
+                if valid_usage_count(prompt_tokens):
                     final_usage["input_tokens"] = prompt_tokens
-                if isinstance(completion_tokens, int):
+                if valid_usage_count(completion_tokens):
                     final_usage["output_tokens"] = completion_tokens
+            elif usage is not None:
+                yield _openai_error_to_anthropic_event({})
+                return
 
             if finish_reason:
                 stop_reason = _finish_reason_to_stop_reason(finish_reason)
+                has_tools = bool(tool_states)
+                if stop_reason is None or (
+                    has_tools
+                    and stop_reason not in {"max_tokens", "tool_use"}
+                ) or (not has_tools and stop_reason == "tool_use"):
+                    yield _openai_error_to_anthropic_event({})
+                    return
+                tool_events = finalized_tool_events(
+                    start_index=next_block_index,
+                    allow_partial=stop_reason == "max_tokens",
+                )
+                if tool_events is None:
+                    yield _openai_error_to_anthropic_event({})
+                    return
                 for idx in list(open_blocks):
                     yield _sse_event(
                         "content_block_stop",
                         {"index": idx},
                     )
+                open_blocks.clear()
+                for event in tool_events:
+                    yield event
                 yield _sse_event(
                     "message_delta",
                     {
@@ -558,13 +808,6 @@ async def openai_stream_to_anthropic(
                 yield _sse_event("message_stop", {})
                 return
 
-        if message_started:
-            for idx in list(open_blocks):
-                yield _sse_event("content_block_stop", {"index": idx})
-            yield _sse_event(
-                "message_delta",
-                {"delta": {"stop_reason": "end_turn", "stop_sequence": None}, "usage": dict(final_usage)},
-            )
-            yield _sse_event("message_stop", {})
+        yield _openai_error_to_anthropic_event({})
     finally:
         await _maybe_close_stream(stream)

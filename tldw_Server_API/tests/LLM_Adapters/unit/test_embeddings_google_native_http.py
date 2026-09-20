@@ -1,3 +1,5 @@
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 
 import pytest
@@ -98,3 +100,491 @@ def test_google_embeddings_adapter_native_http_multi(monkeypatch):
         assert isinstance(out, dict)
         embs = [d["embedding"] for d in out.get("data", [])]
         assert embs == [[0.1, 0.2], [0.3, 0.4]]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "model",
+    [
+        "../files",
+        "../../v1beta/files#",
+        "org\\model",
+        "%2e%2e/files",
+        "model?key=attacker",
+        "model#fragment",
+    ],
+)
+def test_google_embeddings_reject_unsafe_model_paths_before_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+    model: str,
+) -> None:
+    monkeypatch.setenv("LLM_EMBEDDINGS_NATIVE_HTTP_GOOGLE", "1")
+
+    import tldw_Server_API.app.core.LLM_Calls.providers.google_embeddings_adapter as module
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatBadRequestError
+    from tldw_Server_API.app.core.LLM_Calls.providers.google_embeddings_adapter import (
+        GoogleEmbeddingsAdapter,
+    )
+
+    monkeypatch.setattr(
+        module,
+        "create_client",
+        lambda **_kwargs: pytest.fail("unsafe model must fail before HTTP dispatch"),
+    )
+
+    with pytest.raises(ChatBadRequestError, match="model identifier") as exc_info:
+        GoogleEmbeddingsAdapter().embed(
+            {"input": "hi", "model": model, "api_key": "trusted-key"}
+        )
+
+    assert model not in str(exc_info.value)
+    assert "trusted-key" not in str(exc_info.value)
+
+
+@pytest.mark.unit
+@pytest.mark.concurrent
+def test_concurrent_google_embedding_model_routes_keep_url_and_key_paired(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LLM_EMBEDDINGS_NATIVE_HTTP_GOOGLE", "1")
+
+    import tldw_Server_API.app.core.LLM_Calls.providers.google_embeddings_adapter as module
+    from tldw_Server_API.app.core.AuthNZ.byok_config import (
+        runtime_base_url_override_provenance,
+    )
+    from tldw_Server_API.app.core.LLM_Calls.providers.google_embeddings_adapter import (
+        GoogleEmbeddingsAdapter,
+    )
+
+    calls: list[tuple[str, str, str]] = []
+    lock = threading.Lock()
+    both_arrived = threading.Event()
+    release = threading.Event()
+
+    class _Resp:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self):
+            return {"embedding": {"values": [0.1, 0.2]}}
+
+    class _Client:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback) -> bool:
+            del exc_type, exc, traceback
+            return False
+
+        def post(self, url, params=None, headers=None, json=None, **_kwargs):
+            assert params is None
+            assert "key=" not in url
+            with lock:
+                calls.append(
+                    (
+                        url,
+                        headers["x-goog-api-key"],
+                        json["content"]["parts"][0]["text"],
+                    )
+                )
+                if len(calls) == 2:
+                    both_arrived.set()
+            if not release.wait(10):
+                raise TimeoutError("concurrent Google embedding calls were not released")
+            return _Resp()
+
+    monkeypatch.setattr(module, "create_client", lambda **_kwargs: _Client())
+    adapter = GoogleEmbeddingsAdapter()
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(
+                adapter.embed,
+                {
+                    "input": "alpha",
+                    "model": "model-alpha",
+                    "api_key": "key-alpha",
+                    "base_url": "https://google-alpha.example/v1",
+                    "credentials_resolved": True,
+                    "_runtime_base_url_override": runtime_base_url_override_provenance(),
+                },
+            ),
+            executor.submit(
+                adapter.embed,
+                {
+                    "input": "beta",
+                    "model": "model-beta",
+                    "api_key": "key-beta",
+                    "base_url": "https://google-beta.example/v1",
+                    "credentials_resolved": True,
+                    "_runtime_base_url_override": runtime_base_url_override_provenance(),
+                },
+            ),
+        ]
+        try:
+            assert both_arrived.wait(10)
+        finally:
+            release.set()
+        assert all(future.result(timeout=10)["data"] for future in futures)
+
+    assert len(calls) == 2
+    assert set(calls) == {
+        (
+            "https://google-alpha.example/v1/models/model-alpha:embedContent",
+            "key-alpha",
+            "alpha",
+        ),
+        (
+            "https://google-beta.example/v1/models/model-beta:embedContent",
+            "key-beta",
+            "beta",
+        ),
+    }
+
+
+@pytest.mark.unit
+@pytest.mark.concurrent
+def test_concurrent_invalid_google_embedding_cannot_affect_legitimate_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LLM_EMBEDDINGS_NATIVE_HTTP_GOOGLE", "1")
+
+    import tldw_Server_API.app.core.LLM_Calls.providers.google_embeddings_adapter as module
+    from tldw_Server_API.app.core.AuthNZ.byok_config import (
+        runtime_base_url_override_provenance,
+    )
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatBadRequestError
+    from tldw_Server_API.app.core.LLM_Calls.providers.google_embeddings_adapter import (
+        GoogleEmbeddingsAdapter,
+    )
+
+    calls = []
+    arrived = threading.Event()
+    release = threading.Event()
+
+    class _Resp:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"embedding": {"values": [0.1, 0.2]}}
+
+    class _Client:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def post(self, url, params=None, headers=None, json=None, **_kwargs):
+            calls.append((url, params, headers["x-goog-api-key"], json))
+            arrived.set()
+            if not release.wait(10):
+                raise TimeoutError("legitimate Google embedding call was not released")
+            return _Resp()
+
+    monkeypatch.setattr(module, "create_client", lambda **_kwargs: _Client())
+    provenance = runtime_base_url_override_provenance()
+    adapter = GoogleEmbeddingsAdapter()
+    legitimate = {
+        "input": "legitimate",
+        "model": "embedding-model",
+        "api_key": "legitimate-key",
+        "base_url": "https://legitimate-google.example/v1",
+        "credentials_resolved": True,
+        "_runtime_base_url_override": provenance,
+    }
+    malicious = legitimate | {
+        "model": "../../credential-admin",
+        "api_key": "must-not-dispatch",
+        "base_url": "https://malicious-google.example/v1",
+    }
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        legitimate_future = executor.submit(adapter.embed, legitimate)
+        try:
+            assert arrived.wait(10)
+            malicious_future = executor.submit(adapter.embed, malicious)
+            with pytest.raises(ChatBadRequestError):
+                malicious_future.result(timeout=5)
+        finally:
+            release.set()
+        assert legitimate_future.result(timeout=10)["data"]
+
+    assert len(calls) == 1
+    assert calls[0][0] == (
+        "https://legitimate-google.example/v1/models/embedding-model:embedContent"
+    )
+    assert calls[0][2] == "legitimate-key"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "model",
+    ["gemini-embedding-001", "models/gemini-embedding-001"],
+)
+def test_google_embeddings_uses_one_models_prefix_and_header_auth(
+    monkeypatch: pytest.MonkeyPatch,
+    model: str,
+) -> None:
+    monkeypatch.setenv("LLM_EMBEDDINGS_NATIVE_HTTP_GOOGLE", "1")
+    monkeypatch.setenv("GOOGLE_GEMINI_BASE_URL", "https://google.example/v1")
+
+    import tldw_Server_API.app.core.LLM_Calls.providers.google_embeddings_adapter as module
+    from tldw_Server_API.app.core.LLM_Calls.providers.google_embeddings_adapter import (
+        GoogleEmbeddingsAdapter,
+    )
+
+    calls = []
+
+    class _Resp:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self):
+            return {"embedding": {"values": [0.1, 0.2]}}
+
+    class _Client:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback) -> bool:
+            del exc_type, exc, traceback
+            return False
+
+        def post(self, url, params=None, headers=None, json=None, **_kwargs):
+            calls.append((url, params, headers, json))
+            return _Resp()
+
+    monkeypatch.setattr(module, "create_client", lambda **_kwargs: _Client())
+    assert GoogleEmbeddingsAdapter().embed(
+        {"input": "hello", "model": model, "api_key": "trusted-key"}
+    )["data"]
+
+    assert len(calls) == 1
+    url, params, headers, _payload = calls[0]
+    assert url == "https://google.example/v1/models/gemini-embedding-001:embedContent"
+    assert params is None
+    assert headers == {"Content-Type": "application/json", "x-goog-api-key": "trusted-key"}
+    assert "trusted-key" not in url
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("first_status", [401, 403])
+def test_google_custom_endpoint_query_key_fallback_requires_opt_in_and_auth_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    first_status: int,
+) -> None:
+    monkeypatch.setenv("LLM_EMBEDDINGS_NATIVE_HTTP_GOOGLE", "1")
+    monkeypatch.setenv("GOOGLE_EMBEDDINGS_QUERY_KEY_FALLBACK", "1")
+    monkeypatch.setenv("GOOGLE_GEMINI_BASE_URL", "https://google-compatible.example/v1")
+
+    import tldw_Server_API.app.core.LLM_Calls.providers.google_embeddings_adapter as module
+    from tldw_Server_API.app.core.LLM_Calls.providers.google_embeddings_adapter import (
+        GoogleEmbeddingsAdapter,
+    )
+
+    calls = []
+
+    class _Resp:
+        def __init__(self, status_code):
+            self.status_code = status_code
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise RuntimeError(f"HTTP {self.status_code} raw-body-sentinel")
+
+        def json(self):
+            return {"embedding": {"values": [0.1, 0.2]}}
+
+    class _Client:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def post(self, url, params=None, headers=None, json=None, **_kwargs):
+            calls.append((url, params, dict(headers or {}), json))
+            return _Resp(first_status if len(calls) == 1 else 200)
+
+    monkeypatch.setattr(module, "create_client", lambda **_kwargs: _Client())
+
+    result = GoogleEmbeddingsAdapter().embed(
+        {"input": "hello", "model": "embedding-model", "api_key": "trusted-key"}
+    )
+
+    assert result["data"]
+    assert len(calls) == 2
+    assert calls[0][1] is None
+    assert calls[0][2]["x-goog-api-key"] == "trusted-key"
+    assert calls[1][1] == {"key": "trusted-key"}
+    assert "x-goog-api-key" not in calls[1][2]
+    assert all("trusted-key" not in call[0] for call in calls)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("fallback_enabled", "base_url", "status_code"),
+    [
+        (False, "https://google-compatible.example/v1", 401),
+        (True, "https://generativelanguage.googleapis.com/v1", 401),
+        (True, "https://google-compatible.example/v1", 400),
+        (True, "https://google-compatible.example/v1", 429),
+        (True, "https://google-compatible.example/v1", 500),
+    ],
+)
+def test_google_query_key_fallback_never_runs_outside_explicit_custom_auth_case(
+    monkeypatch: pytest.MonkeyPatch,
+    fallback_enabled: bool,
+    base_url: str,
+    status_code: int,
+) -> None:
+    monkeypatch.setenv("LLM_EMBEDDINGS_NATIVE_HTTP_GOOGLE", "1")
+    monkeypatch.setenv("GOOGLE_GEMINI_BASE_URL", base_url)
+    if fallback_enabled:
+        monkeypatch.setenv("GOOGLE_EMBEDDINGS_QUERY_KEY_FALLBACK", "1")
+    else:
+        monkeypatch.delenv("GOOGLE_EMBEDDINGS_QUERY_KEY_FALLBACK", raising=False)
+
+    import tldw_Server_API.app.core.LLM_Calls.providers.google_embeddings_adapter as module
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatProviderError
+    from tldw_Server_API.app.core.LLM_Calls.providers.google_embeddings_adapter import (
+        GoogleEmbeddingsAdapter,
+    )
+
+    calls = []
+
+    class _Resp:
+        def raise_for_status(self):
+            raise RuntimeError(f"HTTP {status_code} raw-body-sentinel")
+
+        @property
+        def status_code(self):
+            return status_code
+
+    class _Client:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def post(self, url, params=None, headers=None, json=None, **_kwargs):
+            calls.append((url, params, dict(headers or {}), json))
+            return _Resp()
+
+    monkeypatch.setattr(module, "create_client", lambda **_kwargs: _Client())
+
+    with pytest.raises(ChatProviderError) as exc_info:
+        GoogleEmbeddingsAdapter().embed(
+            {"input": "hello", "model": "embedding-model", "api_key": "trusted-key"}
+        )
+
+    assert len(calls) == 1
+    assert calls[0][1] is None
+    assert calls[0][2]["x-goog-api-key"] == "trusted-key"
+    assert "raw-body-sentinel" not in str(exc_info.value)
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
+
+
+@pytest.mark.unit
+@pytest.mark.concurrent
+def test_concurrent_google_official_hostname_equivalent_never_uses_query_key_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A trailing-dot official host stays header-only beside a custom retry."""
+    monkeypatch.setenv("LLM_EMBEDDINGS_NATIVE_HTTP_GOOGLE", "1")
+    monkeypatch.setenv("GOOGLE_EMBEDDINGS_QUERY_KEY_FALLBACK", "1")
+
+    import tldw_Server_API.app.core.LLM_Calls.providers.google_embeddings_adapter as module
+    from tldw_Server_API.app.core.AuthNZ.byok_config import (
+        runtime_base_url_override_provenance,
+    )
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatProviderError
+    from tldw_Server_API.app.core.LLM_Calls.providers.google_embeddings_adapter import (
+        GoogleEmbeddingsAdapter,
+    )
+
+    calls: list[tuple[str, dict[str, str] | None, dict[str, str], str]] = []
+    lock = threading.Lock()
+    both_initial_arrived = threading.Event()
+    release = threading.Event()
+
+    class _Response:
+        def __init__(self, status_code: int) -> None:
+            self.status_code = status_code
+
+        def raise_for_status(self) -> None:
+            if self.status_code >= 400:
+                raise RuntimeError("raw-google-auth-body-sentinel")
+
+        def json(self) -> dict[str, object]:
+            return {"embedding": {"values": [0.1, 0.2]}}
+
+    class _Client:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def post(self, url, params=None, headers=None, json=None, **_kwargs):
+            label = json["content"]["parts"][0]["text"]
+            call = (url, params, dict(headers or {}), label)
+            with lock:
+                calls.append(call)
+                initial_labels = {item[3] for item in calls if item[1] is None}
+                if initial_labels == {"official", "custom"}:
+                    both_initial_arrived.set()
+            if params is None and not release.wait(10):
+                raise TimeoutError("concurrent Google auth calls were not released")
+            return _Response(200 if params is not None else 401)
+
+    monkeypatch.setattr(module, "create_client", lambda **_kwargs: _Client())
+    provenance = runtime_base_url_override_provenance()
+    adapter = GoogleEmbeddingsAdapter()
+
+    def _invoke(label: str, base_url: str, key: str):
+        return adapter.embed(
+            {
+                "input": label,
+                "model": f"embedding-{label}",
+                "api_key": key,
+                "base_url": base_url,
+                "credentials_resolved": True,
+                "_runtime_base_url_override": provenance,
+            }
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        official = executor.submit(
+            _invoke,
+            "official",
+            "https://generativelanguage.googleapis.com./v1",
+            "official-secret-key",
+        )
+        custom = executor.submit(
+            _invoke,
+            "custom",
+            "https://google-compatible.example/v1",
+            "custom-secret-key",
+        )
+        try:
+            assert both_initial_arrived.wait(10)
+        finally:
+            release.set()
+        with pytest.raises(ChatProviderError):
+            official.result(timeout=10)
+        assert custom.result(timeout=10)["data"]
+
+    official_calls = [call for call in calls if call[3] == "official"]
+    custom_calls = [call for call in calls if call[3] == "custom"]
+    assert len(official_calls) == 1
+    assert official_calls[0][1] is None
+    assert official_calls[0][2]["x-goog-api-key"] == "official-secret-key"
+    assert "official-secret-key" not in official_calls[0][0]
+    assert len(custom_calls) == 2
+    assert custom_calls[0][1] is None
+    assert custom_calls[1][1] == {"key": "custom-secret-key"}

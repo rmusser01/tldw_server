@@ -1,0 +1,68 @@
+{
+  "synthetic_speech": "The blue notebook is ready.",
+  "speech_source": "local Kokoro af_heart",
+  "microphone_used": false,
+  "external_provider_used": false,
+  "results": [
+    {
+      "sample": "silence_5s",
+      "vad_filter": false,
+      "transcript": "You",
+      "elapsed_seconds": 0.132
+    },
+    {
+      "sample": "silence_5s",
+      "vad_filter": true,
+      "transcript": "",
+      "elapsed_seconds": 0.027
+    },
+    {
+      "sample": "silence_1s",
+      "vad_filter": false,
+      "transcript": "",
+      "elapsed_seconds": 0.129
+    },
+    {
+      "sample": "silence_1s",
+      "vad_filter": true,
+      "transcript": "",
+      "elapsed_seconds": 0.003
+    },
+    {
+      "sample": "low_noise_5s",
+      "vad_filter": false,
+      "transcript": "",
+      "elapsed_seconds": 0.124
+    },
+    {
+      "sample": "low_noise_5s",
+      "vad_filter": true,
+      "transcript": "",
+      "elapsed_seconds": 0.011
+    },
+    {
+      "sample": "speech",
+      "vad_filter": false,
+      "transcript": "The blue notebook is ready.",
+      "elapsed_seconds": 0.133
+    },
+    {
+      "sample": "speech",
+      "vad_filter": true,
+      "transcript": "The blue notebook is ready.",
+      "elapsed_seconds": 0.138
+    },
+    {
+      "sample": "silence_then_speech",
+      "vad_filter": false,
+      "transcript": "The blue notebook is ready.",
+      "elapsed_seconds": 0.141
+    },
+    {
+      "sample": "silence_then_speech",
+      "vad_filter": true,
+      "transcript": "The Blue Notebook is ready.",
+      "elapsed_seconds": 0.154
+    }
+  ]
+}

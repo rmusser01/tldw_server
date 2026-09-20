@@ -1,0 +1,311 @@
+{
+  "synthetic_speech": "Reply with the blue notebook is ready.",
+  "microphone_used": false,
+  "external_provider_used": false,
+  "results": [
+    {
+      "leading_silence": 0,
+      "overlap": 0.5,
+      "final_snapshot": "Reply with the Blue Notebook is ready.",
+      "events": [
+        {
+          "at": 0.768,
+          "kind": "partial",
+          "text": "Reply with the blue...",
+          "snapshot": "Reply with the blue..."
+        },
+        {
+          "at": 1.28,
+          "kind": "partial",
+          "text": "Reply with the blue notebook.",
+          "snapshot": "Reply with the blue notebook."
+        },
+        {
+          "at": 1.792,
+          "kind": "partial",
+          "text": "Reply with the Blue Notebook is ready.",
+          "snapshot": "Reply with the Blue Notebook is ready."
+        }
+      ]
+    },
+    {
+      "leading_silence": 0,
+      "overlap": 0.0,
+      "final_snapshot": "Reply with the Blue Notebook is ready.",
+      "events": [
+        {
+          "at": 0.768,
+          "kind": "partial",
+          "text": "Reply with the blue...",
+          "snapshot": "Reply with the blue..."
+        },
+        {
+          "at": 1.28,
+          "kind": "partial",
+          "text": "Reply with the blue notebook.",
+          "snapshot": "Reply with the blue notebook."
+        },
+        {
+          "at": 1.792,
+          "kind": "partial",
+          "text": "Reply with the Blue Notebook is ready.",
+          "snapshot": "Reply with the Blue Notebook is ready."
+        }
+      ]
+    },
+    {
+      "leading_silence": 3.8,
+      "overlap": 0.5,
+      "final_snapshot": "Reply with the blue nose. with the Blue Notebook is ready.",
+      "events": [
+        {
+          "at": 3.84,
+          "kind": "partial",
+          "text": "Rips.",
+          "snapshot": "Rips."
+        },
+        {
+          "at": 4.352,
+          "kind": "partial",
+          "text": "Reply with...",
+          "snapshot": "Reply with..."
+        },
+        {
+          "at": 4.864,
+          "kind": "partial",
+          "text": "Reply with the blue note.",
+          "snapshot": "Reply with the blue note."
+        },
+        {
+          "at": 5.12,
+          "kind": "final",
+          "text": "Reply with the blue nose.",
+          "snapshot": "Reply with the blue nose."
+        },
+        {
+          "at": 5.376,
+          "kind": "partial",
+          "text": "with the blue notebook as red.",
+          "snapshot": "Reply with the blue nose. with the blue notebook as red."
+        },
+        {
+          "at": 5.888,
+          "kind": "partial",
+          "text": "with the Blue Notebook is ready.",
+          "snapshot": "Reply with the blue nose. with the Blue Notebook is ready."
+        }
+      ]
+    },
+    {
+      "leading_silence": 3.8,
+      "overlap": 0.0,
+      "final_snapshot": "Reply with the blue nose. notebook is ready.",
+      "events": [
+        {
+          "at": 3.84,
+          "kind": "partial",
+          "text": "Rips.",
+          "snapshot": "Rips."
+        },
+        {
+          "at": 4.352,
+          "kind": "partial",
+          "text": "Reply with...",
+          "snapshot": "Reply with..."
+        },
+        {
+          "at": 4.864,
+          "kind": "partial",
+          "text": "Reply with the blue note.",
+          "snapshot": "Reply with the blue note."
+        },
+        {
+          "at": 5.12,
+          "kind": "final",
+          "text": "Reply with the blue nose.",
+          "snapshot": "Reply with the blue nose."
+        },
+        {
+          "at": 5.888,
+          "kind": "partial",
+          "text": "notebook is ready.",
+          "snapshot": "Reply with the blue nose. notebook is ready."
+        }
+      ]
+    },
+    {
+      "leading_silence": 4.3,
+      "overlap": 0.5,
+      "final_snapshot": "Reply. apply with the Blue Notebook is ready.",
+      "events": [
+        {
+          "at": 4.352,
+          "kind": "partial",
+          "text": "Rips.",
+          "snapshot": "Rips."
+        },
+        {
+          "at": 4.864,
+          "kind": "partial",
+          "text": "Reply with...",
+          "snapshot": "Reply with..."
+        },
+        {
+          "at": 5.12,
+          "kind": "final",
+          "text": "Reply.",
+          "snapshot": "Reply."
+        },
+        {
+          "at": 5.376,
+          "kind": "partial",
+          "text": "apply with the blue note.",
+          "snapshot": "Reply. apply with the blue note."
+        },
+        {
+          "at": 5.888,
+          "kind": "partial",
+          "text": "apply with the blue notebook as red.",
+          "snapshot": "Reply. apply with the blue notebook as red."
+        },
+        {
+          "at": 6.4,
+          "kind": "partial",
+          "text": "apply with the Blue Notebook is ready.",
+          "snapshot": "Reply. apply with the Blue Notebook is ready."
+        },
+        {
+          "at": 7.424,
+          "kind": "partial",
+          "text": "apply with the blue notebook is ready.",
+          "snapshot": "Reply. apply with the blue notebook is ready."
+        },
+        {
+          "at": 8.448,
+          "kind": "partial",
+          "text": "apply with the Blue Notebook is ready.",
+          "snapshot": "Reply. apply with the Blue Notebook is ready."
+        }
+      ]
+    },
+    {
+      "leading_silence": 4.3,
+      "overlap": 0.0,
+      "final_snapshot": "Reply. with the Blue Notebook is ready.",
+      "events": [
+        {
+          "at": 4.352,
+          "kind": "partial",
+          "text": "Rips.",
+          "snapshot": "Rips."
+        },
+        {
+          "at": 4.864,
+          "kind": "partial",
+          "text": "Reply with...",
+          "snapshot": "Reply with..."
+        },
+        {
+          "at": 5.12,
+          "kind": "final",
+          "text": "Reply.",
+          "snapshot": "Reply."
+        },
+        {
+          "at": 5.888,
+          "kind": "partial",
+          "text": "with the blue notebook as red.",
+          "snapshot": "Reply. with the blue notebook as red."
+        },
+        {
+          "at": 6.4,
+          "kind": "partial",
+          "text": "with the Blue Notebook is ready.",
+          "snapshot": "Reply. with the Blue Notebook is ready."
+        }
+      ]
+    },
+    {
+      "leading_silence": 4.8,
+      "overlap": 0.5,
+      "final_snapshot": "Reply with the Blue Notebook is ready.",
+      "events": [
+        {
+          "at": 4.864,
+          "kind": "partial",
+          "text": "Rips.",
+          "snapshot": "Rips."
+        },
+        {
+          "at": 5.376,
+          "kind": "partial",
+          "text": "Reply with...",
+          "snapshot": "Reply with..."
+        },
+        {
+          "at": 5.888,
+          "kind": "partial",
+          "text": "Reply with the blue note.",
+          "snapshot": "Reply with the blue note."
+        },
+        {
+          "at": 6.4,
+          "kind": "partial",
+          "text": "Reply with the blue notebook is red.",
+          "snapshot": "Reply with the blue notebook is red."
+        },
+        {
+          "at": 6.912,
+          "kind": "partial",
+          "text": "Reply with the Blue Notebook is ready.",
+          "snapshot": "Reply with the Blue Notebook is ready."
+        }
+      ]
+    },
+    {
+      "leading_silence": 4.8,
+      "overlap": 0.0,
+      "final_snapshot": "apply with the Blue Notebook is ready.",
+      "events": [
+        {
+          "at": 4.864,
+          "kind": "partial",
+          "text": "Rips.",
+          "snapshot": "Rips."
+        },
+        {
+          "at": 5.888,
+          "kind": "partial",
+          "text": "apply with the blue note.",
+          "snapshot": "apply with the blue note."
+        },
+        {
+          "at": 6.4,
+          "kind": "partial",
+          "text": "apply with the blue notebook as red.",
+          "snapshot": "apply with the blue notebook as red."
+        },
+        {
+          "at": 6.912,
+          "kind": "partial",
+          "text": "apply with the Blue Notebook is ready.",
+          "snapshot": "apply with the Blue Notebook is ready."
+        },
+        {
+          "at": 8.448,
+          "kind": "partial",
+          "text": "apply with the blue notebook is ready.",
+          "snapshot": "apply with the blue notebook is ready."
+        },
+        {
+          "at": 8.96,
+          "kind": "partial",
+          "text": "apply with the Blue Notebook is ready.",
+          "snapshot": "apply with the Blue Notebook is ready."
+        }
+      ]
+    }
+  ],
+  "clock": "simulated 256 ms audio callback cadence; real local model decoding",
+  "base_revision": "f71d593e6701ef2e4f8fdfec26f2be09b5ca64ef"
+}

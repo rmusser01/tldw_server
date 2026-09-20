@@ -1,0 +1,126 @@
+{
+  "microphone_used": false,
+  "external_provider_used": false,
+  "selection": "parakeet-onnx",
+  "device": "cpu",
+  "model": "istupakov/parakeet-tdt-0.6b-v3-onnx",
+  "snapshots": [
+    {
+      "type": "partial",
+      "text": "H",
+      "history": "",
+      "snapshot": "H"
+    },
+    {
+      "type": "final",
+      "text": "Reps.",
+      "history": "Reps.",
+      "snapshot": "Reps."
+    },
+    {
+      "type": "partial",
+      "text": "Reply",
+      "history": "Reps.",
+      "snapshot": "Reps. Reply"
+    },
+    {
+      "type": "partial",
+      "text": "Reply with the blow.",
+      "history": "Reps.",
+      "snapshot": "Reps. Reply with the blow."
+    },
+    {
+      "type": "partial",
+      "text": "Reply with the blue notebook.",
+      "history": "Reps.",
+      "snapshot": "Reps. Reply with the blue notebook."
+    },
+    {
+      "type": "partial",
+      "text": "Reply with the blue notebook.",
+      "history": "Reps.",
+      "snapshot": "Reps. Reply with the blue notebook."
+    },
+    {
+      "type": "partial",
+      "text": "Reply with the blue notebook is ready.",
+      "history": "Reps.",
+      "snapshot": "Reps. Reply with the blue notebook is ready."
+    },
+    {
+      "type": "partial",
+      "text": "Reply with the blue notebook is read.",
+      "history": "Reps.",
+      "snapshot": "Reps. Reply with the blue notebook is read."
+    },
+    {
+      "type": "partial",
+      "text": "Reply with the blue notebook is ready.",
+      "history": "Reps.",
+      "snapshot": "Reps. Reply with the blue notebook is ready."
+    },
+    {
+      "type": "partial",
+      "text": "Reply with the blue notebook is ready.",
+      "history": "Reps.",
+      "snapshot": "Reps. Reply with the blue notebook is ready."
+    },
+    {
+      "type": "partial",
+      "text": "Reply with the blue notebook is ready.",
+      "history": "Reps.",
+      "snapshot": "Reps. Reply with the blue notebook is ready."
+    },
+    {
+      "type": "partial",
+      "text": "Reply with the blue notebook is ready.",
+      "history": "Reps.",
+      "snapshot": "Reps. Reply with the blue notebook is ready."
+    },
+    {
+      "type": "partial",
+      "text": "Reply with the blue notebook is ready.",
+      "history": "Reps.",
+      "snapshot": "Reps. Reply with the blue notebook is ready."
+    },
+    {
+      "type": "partial",
+      "text": "Reply with the blue notebook is ready.",
+      "history": "Reps.",
+      "snapshot": "Reps. Reply with the blue notebook is ready."
+    }
+  ],
+  "callback_duration_ms": [
+    0.041,
+    2292.058,
+    0.373,
+    0.072,
+    1.218,
+    0.068,
+    0.643,
+    1.072,
+    0.726,
+    0.04,
+    0.506,
+    0.07,
+    319.803,
+    303.258,
+    223.926,
+    0.075,
+    273.634,
+    0.084,
+    373.355,
+    399.451,
+    444.449,
+    401.864,
+    477.729,
+    447.79,
+    509.254,
+    462.756,
+    492.732,
+    545.581
+  ],
+  "silence_frame_count": 0,
+  "silence_history": "",
+  "source_sha256": "171f1c906cbdaf29cd708e6bf3af005d9a7991b040008ff7786a50389c996e07"
+}

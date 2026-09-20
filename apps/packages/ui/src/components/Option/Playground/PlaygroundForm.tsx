@@ -8,6 +8,7 @@ import { BetaTag } from "@/components/Common/Beta";
 // getImageBackendConfigs, normalizeImageBackendConfig, resolveImageBackendConfig moved to usePlaygroundImageGen
 import { CharacterSelect } from "@/components/Common/CharacterSelect";
 import { ChatQueuePanel } from "@/components/Common/ChatQueuePanel";
+import { BuddyManagementButton } from "@/components/Common/PersonaBuddy/BuddyManagementButton";
 import { type KnowledgeTab } from "@/components/Knowledge";
 import type { SlashCommandItem } from "@/components/Sidepanel/Chat/SlashCommandMenu";
 import { isFirefoxTarget } from "@/config/platform";
@@ -663,6 +664,24 @@ export const PlaygroundForm = ({
   const mcpSettingsReturnFocusSelectorRef = React.useRef<string | null>(null);
   const [openActorSettings, setOpenActorSettings] = React.useState(false);
   const [rolePlaySetupOpen, setRolePlaySetupOpen] = React.useState(false);
+  const rolePlaySetupReturnFocusRef = React.useRef<HTMLElement | null>(null);
+  const openRolePlaySetup = React.useCallback(() => {
+    const active = document.activeElement;
+    if (
+      active instanceof HTMLElement &&
+      active !== document.body &&
+      !active.closest('[role="dialog"]')
+    ) {
+      rolePlaySetupReturnFocusRef.current = active;
+    } else if (!rolePlaySetupReturnFocusRef.current?.isConnected) {
+      rolePlaySetupReturnFocusRef.current =
+        document.querySelector<HTMLElement>(
+          '[data-testid="composer-role-play-setup"]',
+        ) ??
+        textareaRef.current;
+    }
+    setRolePlaySetupOpen(true);
+  }, [textareaRef]);
   const [noticesExpanded, setNoticesExpanded] = React.useState(false);
   const actorSettings = useActorStore((state) => state.settings);
   const setActorSettings = useActorStore((state) => state.setSettings);
@@ -732,6 +751,13 @@ export const PlaygroundForm = ({
     config: canonicalConnectionConfig,
     loading: canonicalConnectionLoading,
   } = useCanonicalConnectionConfig();
+  const promptAssistBackendKey = React.useMemo(
+    () =>
+      canonicalConnectionLoading || !canonicalConnectionConfig
+        ? null
+        : buildChatSurfaceScopeKeyFromConfig(canonicalConnectionConfig),
+    [canonicalConnectionConfig, canonicalConnectionLoading],
+  );
   const [ttsProvider] = useStorage("ttsProvider", "browser");
   const [tldwTtsModel] = useStorage("tldwTtsModel", "kokoro");
   const [tldwTtsVoice] = useStorage("tldwTtsVoice", "af_heart");
@@ -1887,6 +1913,11 @@ export const PlaygroundForm = ({
   });
   const {
     form,
+    messageRevision,
+    promptAssistMutation,
+    beginPromptAssistReset,
+    markPromptAssistAttemptSaved,
+    promptAssistSavedAttemptId,
     typing,
     setMessageValue,
     restoreMessageValue,
@@ -2098,10 +2129,17 @@ export const PlaygroundForm = ({
   }, [updateChatModelSetting]);
   const setSelectedSystemPromptForComposer = React.useCallback(
     (id: string | undefined) => {
+      if (id === selectedSystemPrompt) return;
       clearBehaviorTemplateIdentity();
+      updateChatModelSetting("systemPrompt", undefined);
       setSelectedSystemPrompt(id);
     },
-    [clearBehaviorTemplateIdentity, setSelectedSystemPrompt],
+    [
+      clearBehaviorTemplateIdentity,
+      selectedSystemPrompt,
+      setSelectedSystemPrompt,
+      updateChatModelSetting,
+    ],
   );
   const setSelectedQuickPromptForComposer = React.useCallback(
     (prompt: string | undefined) => {
@@ -2122,7 +2160,32 @@ export const PlaygroundForm = ({
   const handleApplyRolePlaySetup = React.useCallback(
     async (payload: RolePlaySetupApplyPayload) => {
       if (payload.clearIdentity) {
-        clearRolePlayIdentity();
+        await setSelectedAssistant(null);
+      } else if (payload.identitySelection) {
+        const selection = payload.identitySelection;
+        const activeChat = useStoreMessageOption.getState();
+        const matchesActiveChat = selection.kind === "character"
+          ? activeChat.serverChatAssistantKind === "character" &&
+            String(activeChat.serverChatCharacterId) === selection.id
+          : activeChat.serverChatAssistantKind === "persona" &&
+            String(activeChat.serverChatAssistantId) === selection.id;
+
+        await setSelectedAssistant(selection);
+        if (
+          getAssistantSelectionMode(selection) !== "overlay" &&
+          activeChat.serverChatId &&
+          !matchesActiveChat
+        ) {
+          activeChat.setHistoryId(null, { preserveServerChatId: false });
+          activeChat.setHistory([]);
+          activeChat.setMessages([]);
+          activeChat.setServerChatCharacterId(null);
+          activeChat.setServerChatAssistantKind(null);
+          activeChat.setServerChatAssistantId(null);
+          activeChat.setServerChatPersonaMemoryMode(null);
+          activeChat.setServerChatMetaLoaded(false);
+          activeChat.setServerChatId(null);
+        }
       }
       if (payload.clearBehavior) {
         clearPromptContext();
@@ -2140,9 +2203,9 @@ export const PlaygroundForm = ({
     },
     [
       clearPromptContext,
-      clearRolePlayIdentity,
       handleTemplateSelect,
       resetRolePlayGenerationStyle,
+      setSelectedAssistant,
       updateChatModelSettings,
     ],
   );
@@ -2252,6 +2315,11 @@ export const PlaygroundForm = ({
       connectionStatusWarning={
         !isConnectionReady || connectionUxState === "connected_degraded"
       }
+      modelUsabilityLabel={characterChatModelUsabilityLabel ?? undefined}
+      modelUsabilityTitle={characterChatModelUsabilityTitle ?? undefined}
+      modelUsabilityWarning={Boolean(
+        characterChatModelUsability && !characterChatModelUsability.canSend
+      )}
       modelDropdownMenuItems={modelDropdownMenuItems}
       modelDropdownOpen={modelDropdownOpen}
       modelSearchQuery={modelSearchQuery}
@@ -3052,6 +3120,10 @@ export const PlaygroundForm = ({
     clearSelectedDocuments,
     clearUploadedFiles,
     textAreaFocus,
+    onEnqueueSuccess: () => {
+      const attemptId = beginPromptAssistReset();
+      markPromptAssistAttemptSaved(attemptId);
+    },
     notificationApi,
     t,
   });
@@ -3151,6 +3223,8 @@ export const PlaygroundForm = ({
 
   const { submitForm, submitFormRef, isPreparingDocuments } = usePlaygroundSubmit({
     form,
+    beginPromptAssistReset,
+    markPromptAssistAttemptSaved,
     isSending,
     isConnectionReady,
     webSearch,
@@ -4281,7 +4355,7 @@ export const PlaygroundForm = ({
     onClearRolePlayBehavior: clearPromptContext,
     onResetRolePlayGenerationStyle: resetRolePlayGenerationStyle,
     onDisableCompareMode: compareModeActive ? toggleCompareMode : undefined,
-    onOpenRolePlaySetup: () => setRolePlaySetupOpen(true),
+    onOpenRolePlaySetup: openRolePlaySetup,
     t,
   });
 
@@ -5960,6 +6034,9 @@ export const PlaygroundForm = ({
                                 onDictationToggle={handleDictationToggle}
                                 onTemplateSelect={handleTemplateSelect}
                                 selectedModel={selectedModel}
+                                currentProvider={
+                                  currentChatModelSettings.apiProvider
+                                }
                                 resolvedProviderKey={resolvedProviderKey}
                                 messages={messages}
                                 selectedDocumentsCount={
@@ -5967,6 +6044,36 @@ export const PlaygroundForm = ({
                                 }
                                 uploadedFilesCount={uploadedFiles.length}
                                 serverChatId={serverChatId}
+                                promptAssistContextKey={
+                                  serverChatId
+                                    ? `server:${serverChatId}`
+                                    : historyId
+                                      ? `local:${historyId}`
+                                      : "local:playground-draft"
+                                }
+                                promptAssistBackendKey={promptAssistBackendKey}
+                                promptAssistComposer={{
+                                  form,
+                                  messageRevision,
+                                  promptAssistMutation,
+                                  promptAssistSavedAttemptId,
+                                  modelSelection: selectedModel?.trim()
+                                    ? {
+                                        selected_model: selectedModel,
+                                        provider_hint:
+                                          currentChatModelSettings.apiProvider,
+                                      }
+                                    : null,
+                                  promptAssistContextKey: serverChatId
+                                    ? `server:${serverChatId}`
+                                    : historyId
+                                      ? `local:${historyId}`
+                                      : "local:playground-draft",
+                                  promptAssistBackendKey,
+                                  sending: isSending,
+                                  surfaceOpen: true,
+                                  onReturnFocus: textAreaFocus,
+                                }}
                                 showServerPersistenceHint={
                                   showServerPersistenceHint
                                 }
@@ -5976,8 +6083,7 @@ export const PlaygroundForm = ({
                                 onFocusConnectionCard={focusConnectionCard}
                                 contextItems={contextItems}
                                 rolePlayActions={{
-                                  onOpenRolePlaySetup: () =>
-                                    setRolePlaySetupOpen(true),
+                                  onOpenRolePlaySetup: openRolePlaySetup,
                                 }}
                               />,
                             )}
@@ -5986,7 +6092,24 @@ export const PlaygroundForm = ({
                         const composerToolbarSlot =
                           suppressComposerToolbarForMobileCockpit
                             ? (
-                                <div className="hidden">{composerToolbarNode}</div>
+                                <>
+                                  <div
+                                    className="flex min-w-0 justify-end"
+                                    onClickCapture={(event) => {
+                                      rolePlaySetupReturnFocusRef.current =
+                                        event.currentTarget.querySelector("button");
+                                    }}
+                                  >
+                                    <BuddyManagementButton
+                                      target={serverChatId ? {
+                                        scope_type: "conversation",
+                                        scope_id: serverChatId,
+                                      } : null}
+                                      onConversationSettings={openRolePlaySetup}
+                                    />
+                                  </div>
+                                  <div className="hidden">{composerToolbarNode}</div>
+                                </>
                               )
                             : composerToolbarNode;
 
@@ -6412,6 +6535,7 @@ export const PlaygroundForm = ({
           <React.Suspense fallback={null}>
             <LazyRolePlaySetupDrawer
               open={rolePlaySetupOpen}
+              returnFocusRef={rolePlaySetupReturnFocusRef}
               beforeState={rolePlayState}
               historyId={historyId}
               serverChatId={serverChatId}

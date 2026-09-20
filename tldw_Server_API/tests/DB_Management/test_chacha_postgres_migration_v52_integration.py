@@ -1,4 +1,4 @@
-"""PostgreSQL integration coverage for ChaChaNotes schema v53."""
+"""PostgreSQL migration coverage from ChaChaNotes schema v52 to current v62."""
 
 import pytest
 
@@ -6,10 +6,10 @@ from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.timeout(30)]
 
 
-def test_postgres_v52_to_v53_preserves_questions_and_is_rerunnable(
+def test_postgres_v52_to_current_v62_preserves_questions_and_is_rerunnable(
     pg_database_config: DatabaseConfig,
 ) -> None:
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
@@ -62,7 +62,26 @@ def test_postgres_v52_to_v53_preserves_questions_and_is_rerunnable(
         question = db.get_question(question_id)
 
         assert columns == {"group_id", "group_prompt"}
-        assert int(version) == 53
+        assert CharactersRAGDB._CURRENT_SCHEMA_VERSION == 62
+        assert int(version) == CharactersRAGDB._CURRENT_SCHEMA_VERSION
+        relations = {
+            row["table_name"]
+            for row in backend.execute(
+                """
+                SELECT table_name
+                  FROM information_schema.tables
+                 WHERE table_schema = current_schema()
+                   AND table_name IN (
+                       'shared_workspace_chat_threads',
+                       'shared_workspace_chat_requests'
+                   )
+                """
+            ).rows
+        }
+        assert relations == {
+            "shared_workspace_chat_threads",
+            "shared_workspace_chat_requests",
+        }
         assert question is not None
         assert question["question_text"] == "Preserved question"
         assert question["options"] == ["A", "B"]
@@ -71,6 +90,7 @@ def test_postgres_v52_to_v53_preserves_questions_and_is_rerunnable(
         assert question["group_id"] is None
         assert question["group_prompt"] is None
 
+        db.close_connection()
         db._initialize_schema_postgres()
 
         rerun_version = backend.execute(
@@ -78,7 +98,7 @@ def test_postgres_v52_to_v53_preserves_questions_and_is_rerunnable(
             (CharactersRAGDB._SCHEMA_NAME,),
         ).scalar
         rerun_question = db.get_question(question_id)
-        assert int(rerun_version) == 53
+        assert int(rerun_version) == CharactersRAGDB._CURRENT_SCHEMA_VERSION
         assert rerun_question is not None
         assert rerun_question["question_text"] == "Preserved question"
         assert rerun_question["group_id"] is None

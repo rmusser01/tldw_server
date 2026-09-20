@@ -326,7 +326,7 @@ export function usePromptFilteredData(deps: UsePromptFilteredDataDeps) {
         serverId: prompt?.serverId,
         updatedAt: getPromptModifiedAt(prompt),
         createdAt:
-          typeof prompt?.createdAt === "number" ? prompt.createdAt : Date.now(),
+          typeof prompt?.createdAt === "number" ? prompt.createdAt : 0,
         usageCount: getPromptUsageCount(prompt),
         lastUsedAt: getPromptLastUsedAt(prompt)
       }

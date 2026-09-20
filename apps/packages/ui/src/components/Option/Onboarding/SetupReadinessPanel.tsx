@@ -192,6 +192,14 @@ export function SetupReadinessPanel({
                   </span>
                 </div>
 
+                {lane.status === "ready_with_warnings" &&
+                !laneHasDetails(lane) ? (
+                  <p className="mt-2 text-xs text-text-muted">
+                    Ready with warnings, but the server did not include the
+                    warning details. Review this lane&apos;s settings after
+                    setup.
+                  </p>
+                ) : null}
                 {laneHasDetails(lane) ? (
                   <details className="mt-2">
                     <summary className="cursor-pointer text-xs font-medium text-text-muted hover:text-text">

@@ -1,12 +1,16 @@
 // @vitest-environment jsdom
 
 import React from "react"
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 type QueryOptions = {
   queryKey?: readonly unknown[]
 }
+
+type VoicePickerProps = React.ComponentProps<
+  typeof import("../VoicePickerModal").VoicePickerModal
+>
 
 const updateStoredValue = (
   storageValues: Map<string, unknown>,
@@ -45,6 +49,7 @@ const {
   getElevenLabsVoicesMock,
   getElevenLabsModelsMock,
   addRenderMock,
+  generateSegmentsMock,
   setTTSSettingsMock,
   inferTldwProviderFromModelMock,
   isTimeoutLikeErrorMock,
@@ -53,6 +58,8 @@ const {
   ttsSegmentsRef,
   audioPresetControlPropsRef,
   tldwConfigRef,
+  ttsAdvancedPropsRef,
+  voicePickerPropsRef,
 } =
   vi.hoisted(() => ({
     invalidateQueriesMock: vi.fn(),
@@ -63,6 +70,7 @@ const {
     getElevenLabsVoicesMock: vi.fn(),
     getElevenLabsModelsMock: vi.fn(),
     addRenderMock: vi.fn(),
+    generateSegmentsMock: vi.fn(async () => []),
     setTTSSettingsMock: vi.fn(async () => undefined),
     inferTldwProviderFromModelMock: vi.fn(() => null),
     isTimeoutLikeErrorMock: vi.fn(() => false),
@@ -112,6 +120,8 @@ const {
         apiKey: "test-key",
       } as Record<string, unknown>,
     },
+    ttsAdvancedPropsRef: { current: null as any },
+    voicePickerPropsRef: { current: null as VoicePickerProps | null },
   }))
 
 const { storageValues, setSpeechModeMock, setSpeechHistoryMock, tMock } = vi.hoisted(() => ({
@@ -287,7 +297,23 @@ vi.mock("@/components/Option/Speech/TtsOutputTab", () => ({
 }))
 
 vi.mock("@/components/Option/Speech/TtsAdvancedTab", () => ({
-  TtsAdvancedTab: () => <div data-testid="tts-advanced-tab">tts-advanced-tab</div>,
+  TtsAdvancedTab: (props: any) => {
+    ttsAdvancedPropsRef.current = props
+    return (
+      <div data-testid="tts-advanced-tab">
+        tts-advanced-tab
+        <label>
+          Allow configured fallback
+          <input
+            aria-label="Allow configured fallback"
+            type="checkbox"
+            checked={props.allowFallback}
+            onChange={(event) => props.onAllowFallbackChange(event.target.checked)}
+          />
+        </label>
+      </div>
+    )
+  },
 }))
 
 vi.mock("@/components/Option/TTS/VoiceCloningManager", () => ({
@@ -331,7 +357,10 @@ vi.mock("@/components/Option/Audio/AudioPresetControls", () => ({
 }))
 
 vi.mock("@/components/Option/Speech/VoicePickerModal", () => ({
-  VoicePickerModal: () => <div data-testid="voice-picker-modal" />,
+  VoicePickerModal: (props: VoicePickerProps) => {
+    voicePickerPropsRef.current = props
+    return <div data-testid="voice-picker-modal" />
+  },
 }))
 
 vi.mock("@/hooks/useTtsPlayground", () => ({
@@ -344,7 +373,7 @@ vi.mock("@/hooks/useTtsPlayground", () => ({
   useTtsPlayground: () => ({
     segments: ttsSegmentsRef.current,
     isGenerating: false,
-    generateSegments: vi.fn(async () => []),
+    generateSegments: generateSegmentsMock,
     clearSegments: vi.fn(),
     setSegments: vi.fn(),
   }),
@@ -493,8 +522,12 @@ describe("SpeechPlaygroundPage", () => {
     getElevenLabsVoicesMock.mockReset()
     getElevenLabsModelsMock.mockReset()
     addRenderMock.mockReset()
+    generateSegmentsMock.mockReset()
+    generateSegmentsMock.mockResolvedValue([])
     setTTSSettingsMock.mockClear()
     audioPresetControlPropsRef.current = null
+    ttsAdvancedPropsRef.current = null
+    voicePickerPropsRef.current = null
     inferTldwProviderFromModelMock.mockReset()
     inferTldwProviderFromModelMock.mockReturnValue(null)
     isTimeoutLikeErrorMock.mockReset()
@@ -520,6 +553,30 @@ describe("SpeechPlaygroundPage", () => {
     setSpeechModeMock.mockReset()
     setSpeechHistoryMock.mockReset()
     tMock.mockClear()
+  })
+
+  it("persists only voice preference fields when a selection includes credentials", (): void => {
+    render(<SpeechPlaygroundPage />)
+    const selection = {
+      provider: "tldw",
+      backend: "kokoro",
+      voice: "af_heart",
+      model: "kokoro-v1",
+      apiKey: "fixture-secret",
+      credentials: { token: "fixture-token" },
+    }
+
+    act(() => {
+      voicePickerPropsRef.current!.onSelect(selection)
+    })
+
+    expect(JSON.parse(localStorage.getItem("tts-last-render-config")!)).toEqual({
+      provider: "tldw",
+      backend: "kokoro",
+      voice: "af_heart",
+      model: "kokoro-v1",
+      allowFallback: true,
+    })
   })
 
   it("renders without triggering a temporal dead zone error", (): void => {
@@ -636,6 +693,86 @@ describe("SpeechPlaygroundPage", () => {
         voice: "Bella",
       })
     )
+  })
+
+  it("persists explicit gateway settings through renders, presets, and buffered generation", async (): Promise<void> => {
+    ttsSettingsRef.current = {
+      ...ttsSettingsRef.current,
+      ttsProvider: "tldw",
+      tldwTtsBackend: "gateway:primary",
+      tldwTtsModel: "SpeechModel",
+      tldwTtsVoice: "narrator",
+      tldwTtsResponseFormat: "mp3"
+    }
+    ttsProviderDataRef.current = {
+      ...ttsProviderDataRef.current,
+      providersInfo: {
+        supports_explicit_backend: true,
+        providers: {
+          "gateway:primary": {
+            display_name: "Primary gateway",
+            models: ["SpeechModel"],
+            supports_streaming: false
+          }
+        },
+        voices: {
+          "gateway:primary": [{ id: "narrator", name: "Narrator" }]
+        }
+      },
+      tldwTtsModels: [{ id: "SpeechModel", label: "SpeechModel" }],
+      tldwVoiceCatalog: [{ id: "narrator", name: "Narrator" }]
+    }
+
+    render(<SpeechPlaygroundPage lockedMode="listen" hideModeSwitcher />)
+
+    expect(screen.getByLabelText("Allow configured fallback")).toBeChecked()
+    expect(audioPresetControlPropsRef.current?.currentConfig).toMatchObject({
+      backend: "gateway:primary",
+      allow_fallback: true
+    })
+
+    fireEvent.click(screen.getByTestId("tts-add-render"))
+    expect(addRenderMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        backend: "gateway:primary",
+        allowFallback: true
+      })
+    )
+
+    fireEvent.change(screen.getByLabelText("Enter some text to hear it spoken."), {
+      target: { value: "Gateway narration" }
+    })
+    fireEvent.click(screen.getByTestId("tts-play-button"))
+
+    await waitFor(() => {
+      expect(generateSegmentsMock).toHaveBeenCalledWith(
+        "Gateway narration",
+        expect.objectContaining({
+          tldwBackend: "gateway:primary",
+          tldwAllowFallback: true
+        })
+      )
+    })
+  })
+
+  it("shows actual gateway and fallback provenance for generated audio", (): void => {
+    ttsSegmentsRef.current = [
+      {
+        id: "segment-1",
+        text: "Gateway narration",
+        url: "blob:gateway",
+        format: "mp3",
+        requestedBackend: "gateway:primary",
+        actualBackend: "gateway:backup",
+        fallbackUsed: true
+      }
+    ]
+
+    render(<SpeechPlaygroundPage lockedMode="listen" hideModeSwitcher />)
+
+    expect(screen.getByText("Requested gateway:primary")).toBeInTheDocument()
+    expect(screen.getByText("Actual gateway:backup")).toBeInTheDocument()
+    expect(screen.getByText("Fallback used")).toBeInTheDocument()
   })
 
   it("uses TTS-specific page copy and history controls when locked to listen mode", (): void => {

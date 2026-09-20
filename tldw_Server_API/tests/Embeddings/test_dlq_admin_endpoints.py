@@ -1,4 +1,5 @@
 import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -154,3 +155,42 @@ def test_dlq_requeue_sanitizes_backend_failure(monkeypatch, admin_user):
 
     assert response.status_code == 500
     assert response.json()["detail"] == "Failed to requeue DLQ item"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("bulk", [False, True], ids=["single", "bulk"])
+def test_dlq_requeue_sanitizes_schema_warning(monkeypatch, admin_user, bulk):
+    """Invalid payload diagnostics must not leak input values into responses."""
+    import redis.asyncio as aioredis
+
+    client = TestClient(app)
+    client.cookies.set("csrf_token", "x")
+    client.headers["X-CSRF-Token"] = "x"
+    client.headers["Authorization"] = "Bearer key"
+    fake = FakeAsyncRedis()
+    fake.streams["embeddings:embedding:dlq"] = [
+        ("1-0", {"payload": json.dumps({
+            "job_id": "job-123",
+            "user_id": "42",
+            "media_id": "secret-token-at-/private/config.json",
+        })})
+    ]
+
+    async def fake_from_url(url, decode_responses=True):
+        return fake
+
+    monkeypatch.setattr(aioredis, "from_url", fake_from_url)
+    request = {"stage": "embedding", "delete_from_dlq": True}
+    request["entry_ids" if bulk else "entry_id"] = ["1-0"] if bulk else "1-0"
+    response = client.post(
+        "/api/v1/embeddings/dlq/requeue" + ("/bulk" if bulk else ""),
+        json=request,
+    )
+
+    assert response.status_code == 200
+    result = response.json()["results"][0] if bulk else response.json()
+    assert result["warning"] == "Payload schema validation failed"
+    assert "secret-token" not in response.text
+    assert len(fake.streams["embeddings:embedding"]) == 1
+    assert fake.streams["embeddings:embedding:dlq"] == []
+    assert fake.closed

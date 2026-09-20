@@ -1,12 +1,16 @@
+from types import SimpleNamespace
+
 import pytest
 
-from tldw_Server_API.app.core.RAG.rag_service import citations
-from tldw_Server_API.app.core.RAG.rag_service import evidence_chains
+from tldw_Server_API.app.core.RAG.rag_service import citations, evidence_chains
 from tldw_Server_API.app.core.RAG.rag_service.citations import (
     AcademicCitationFormatter,
     CitationGenerator,
 )
 from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
+from tldw_Server_API.tests.RAG_NEW.unit.test_generation_executor import (
+    _RecordingCredentialRuntime,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -88,3 +92,36 @@ async def test_evidence_chain_building_fallback_log_omits_exception_details(
     assert "/private/" not in joined
     assert "secret-token" not in joined
     assert "evidence.db" not in joined
+
+
+@pytest.mark.asyncio
+async def test_citation_chain_builder_receives_credential_runtime(monkeypatch) -> None:
+    runtime = _RecordingCredentialRuntime()
+    captured: dict[str, object] = {}
+
+    class FakeChainBuilder:
+        def __init__(self, **kwargs) -> None:
+            captured.update(kwargs)
+
+        async def build_chains(self, **_kwargs):
+            return SimpleNamespace(chains=[])
+
+    monkeypatch.setattr(evidence_chains, "EvidenceChainBuilder", FakeChainBuilder)
+    document = Document(
+        id="chunk-runtime",
+        content="Credential runtime evidence.",
+        source=DataSource.MEDIA_DB,
+        metadata={"title": "Runtime Evidence"},
+    )
+
+    await CitationGenerator().generate_citations_with_chains(
+        documents=[document],
+        query="credential runtime",
+        credential_runtime=runtime,
+        llm_provider="anthropic",
+        llm_model="claude-test",
+    )
+
+    assert captured["credential_runtime"] is runtime
+    assert captured["llm_provider"] == "anthropic"
+    assert captured["llm_model"] == "claude-test"

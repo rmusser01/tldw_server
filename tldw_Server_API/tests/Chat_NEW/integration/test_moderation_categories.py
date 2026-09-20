@@ -113,13 +113,13 @@ class _Svc:
 
 
 @pytest.mark.unit
-def test_categories_allow_pii_redaction():
+def test_categories_allow_pii_redaction(credentialed_test_client_factory):
     db, db_path = _make_test_db()
     try:
         app.dependency_overrides[get_chacha_db_for_user] = lambda: db
         policy = _Policy(categories_enabled={'pii'})
         with patch("tldw_Server_API.app.api.v1.endpoints.chat.get_moderation_service", return_value=_Svc(policy)):
-            with TestClient(app) as client:
+            with credentialed_test_client_factory(app) as client:
                 resp = client.get("/api/v1/health")
                 client.csrf_token = resp.cookies.get("csrf_token", "")
                 body = {
@@ -156,13 +156,13 @@ def test_categories_allow_pii_redaction():
 
 
 @pytest.mark.unit
-def test_categories_disable_pii_redaction():
+def test_categories_disable_pii_redaction(credentialed_test_client_factory):
     db, db_path = _make_test_db()
     try:
         app.dependency_overrides[get_chacha_db_for_user] = lambda: db
         policy = _Policy(categories_enabled={'confidential'})  # no 'pii'
         with patch("tldw_Server_API.app.api.v1.endpoints.chat.get_moderation_service", return_value=_Svc(policy)):
-            with TestClient(app) as client:
+            with credentialed_test_client_factory(app) as client:
                 resp = client.get("/api/v1/health")
                 client.csrf_token = resp.cookies.get("csrf_token", "")
                 body = {
@@ -198,7 +198,9 @@ def test_categories_disable_pii_redaction():
 
 
 @pytest.mark.unit
-def test_output_guardian_proxy_receives_character_chat_type_for_continued_character_conversation():
+def test_output_guardian_proxy_receives_character_chat_type_for_continued_character_conversation(
+    credentialed_test_client_factory,
+):
     db, db_path = _make_test_db()
     try:
         app.dependency_overrides[get_chacha_db_for_user] = lambda: db
@@ -254,7 +256,7 @@ def test_output_guardian_proxy_receives_character_chat_type_for_continued_charac
                 },
             ),
         ):
-            with TestClient(app) as client:
+            with credentialed_test_client_factory(app) as client:
                 resp = client.get("/api/v1/health")
                 client.csrf_token = resp.cookies.get("csrf_token", "")
                 body = {
@@ -283,7 +285,9 @@ def test_output_guardian_proxy_receives_character_chat_type_for_continued_charac
 
 
 @pytest.mark.unit
-def test_output_guardian_proxy_receives_regular_chat_type_for_resumed_default_assistant_conversation():
+def test_output_guardian_proxy_receives_regular_chat_type_for_resumed_default_assistant_conversation(
+    credentialed_test_client_factory,
+):
     db, db_path = _make_test_db()
     try:
         app.dependency_overrides[get_chacha_db_for_user] = lambda: db
@@ -340,7 +344,7 @@ def test_output_guardian_proxy_receives_regular_chat_type_for_resumed_default_as
                 },
             ),
         ):
-            with TestClient(app) as client:
+            with credentialed_test_client_factory(app) as client:
                 resp = client.get("/api/v1/health")
                 client.csrf_token = resp.cookies.get("csrf_token", "")
                 body = {

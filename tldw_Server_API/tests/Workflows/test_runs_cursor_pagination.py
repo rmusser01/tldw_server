@@ -13,7 +13,8 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_u
 
 
 @pytest.fixture()
-def client(tmp_path, auth_headers):
+def client(tmp_path, auth_headers, monkeypatch):
+    monkeypatch.setenv("WORKFLOWS_SQLITE_POOL_SIZE", "4")
     db = WorkflowsDatabase(str(tmp_path / "wf.db"))
 
     async def override_user():
@@ -23,6 +24,7 @@ def client(tmp_path, auth_headers):
             email="t@e.com",
             is_active=True,
             is_admin=True,
+            tenant_id="default",
             roles=["admin"],
             permissions=["*"],
         )
@@ -45,10 +47,12 @@ def client(tmp_path, auth_headers):
     app.dependency_overrides[get_auth_principal] = override_principal
     app.dependency_overrides[wf_mod._get_db] = override_db
 
-    with TestClient(app, headers=auth_headers) as c:
-        yield c
-
-    app.dependency_overrides.clear()
+    try:
+        with TestClient(app, headers=auth_headers) as c:
+            yield c
+    finally:
+        app.dependency_overrides.clear()
+        db.close()
 
 
 def _create_def(client: TestClient) -> int:
@@ -79,6 +83,13 @@ def _wait_status(client: TestClient, run_id: str, timeout=3.0):
             return s.json()
         time.sleep(0.05)
     return s.json()
+
+
+@pytest.mark.integration
+def test_client_fixture_uses_four_sqlite_connections(client: TestClient):
+    db = app.dependency_overrides[wf_mod._get_db]()
+
+    assert len([db._conn, *db._sqlite_pool]) == 4
 
 
 @pytest.mark.integration

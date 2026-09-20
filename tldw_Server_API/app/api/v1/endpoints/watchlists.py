@@ -103,7 +103,6 @@ from tldw_Server_API.app.core.Watchlists.briefing_projection import build_briefi
 from tldw_Server_API.app.core.Watchlists.fetchers import (
     fetch_rss_feed,
     fetch_site_items_with_rules,
-    validate_selector_rules,
 )
 from tldw_Server_API.app.core.Watchlists.filters import evaluate_filters as _evaluate_filters
 from tldw_Server_API.app.core.Watchlists.filters import normalize_filters as _normalize_job_filters
@@ -118,6 +117,7 @@ from tldw_Server_API.app.core.Watchlists.watchlists_telemetry_metrics import (
     record_onboarding_ingest_result,
     record_summary_request,
 )
+from tldw_Server_API.app.core.Web_Scraping.selectors import validate_selector_rules
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError as _DatabaseError
 from tldw_Server_API.app.services.outputs_service import (
     _build_output_filename,

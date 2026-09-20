@@ -4,7 +4,6 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -87,7 +86,7 @@ def test_sqlite_legacy_reopen_uses_registry_for_v50(
         assert version == 50  # nosec B101
 
 
-def test_sqlite_migration_v38_to_v39_reopens_legacy_database(tmp_path) -> None:
+def test_sqlite_migration_v38_to_v39_historical_step_is_additive(tmp_path) -> None:
     db_path = tmp_path / "chacha_v38.db"
 
     db = CharactersRAGDB(db_path=str(db_path), client_id="migration-v39-bootstrap")
@@ -95,15 +94,17 @@ def test_sqlite_migration_v38_to_v39_reopens_legacy_database(tmp_path) -> None:
 
     _downgrade_schema_version_to_v38(str(db_path))
 
-    migrated_db = CharactersRAGDB(db_path=str(db_path), client_id="migration-v39-reopen")
-    migrated_db.close_connection()
+    historical_step = CharactersRAGDB.__new__(CharactersRAGDB)
+    historical_step.db_path_str = str(db_path)
 
     with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        historical_step._migrate_from_v38_to_v39(conn)
         version = conn.execute(
             "SELECT version FROM db_schema_version WHERE schema_name = ?",
             ("rag_char_chat_schema",),
         ).fetchone()[0]
-        assert version == CharactersRAGDB._CURRENT_SCHEMA_VERSION  # nosec B101
+        assert version == 39  # nosec B101
 
         workspace_cols = {
             row[1] for row in conn.execute("PRAGMA table_info('workspaces')").fetchall()

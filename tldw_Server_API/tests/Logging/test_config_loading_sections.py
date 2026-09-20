@@ -42,8 +42,10 @@ def test_load_and_log_configs_includes_section_dicts():
 
 def test_load_and_log_configs_exposes_stt_default_model_keys():
     data = load_and_log_configs()
-    stt = data.get("STT-Settings") or {}
+    stt = data.get("STT_Settings") or {}
+    legacy_stt = data.get("STT-Settings") or {}
     assert isinstance(stt, dict)
+    assert isinstance(legacy_stt, dict)
     assert "default_batch_transcription_model" in stt
     assert "default_streaming_transcription_model" in stt
     assert "parakeet_onnx_model_id" in stt
@@ -56,3 +58,11 @@ def test_load_and_log_configs_exposes_stt_default_model_keys():
     assert stt["nemo_model_variant"] == "onnx"
     assert stt["nemo_chunk_duration"] == 120.0
     assert stt["nemo_overlap_duration"] == 15.0
+    expected_audio_cpp = {
+        "audio_cpp_enabled": "false",
+        "audio_cpp_base_url": "http://127.0.0.1:8080",
+        "audio_cpp_default_model": "",
+        "audio_cpp_timeout_seconds": "600",
+    }
+    assert {key: stt[key] for key in expected_audio_cpp} == expected_audio_cpp
+    assert {key: legacy_stt[key] for key in expected_audio_cpp} == expected_audio_cpp

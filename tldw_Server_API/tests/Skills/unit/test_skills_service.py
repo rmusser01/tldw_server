@@ -1119,9 +1119,13 @@ Body
             onerror(_retry_remove, str(readonly_file), (PermissionError, error, None))
             original_rmtree(path)
 
-        monkeypatch.setattr(shutil, "rmtree", _simulate_windows_rmtree)
-
-        assert service._remove_cleanup_path_best_effort(cleanup_path) is True
+        # Keep the global shutil patch inside the assertion. Python 3.13 uses
+        # the newer ``onexc`` callback while tearing down TemporaryDirectory;
+        # leaking this older-signature fake into fixture teardown breaks an
+        # otherwise successful test.
+        with monkeypatch.context() as scoped_patch:
+            scoped_patch.setattr(shutil, "rmtree", _simulate_windows_rmtree)
+            assert service._remove_cleanup_path_best_effort(cleanup_path) is True
         assert not cleanup_path.exists()
 
     def test_cleanup_rejects_symlink_to_sibling_queue_entry(self, service):

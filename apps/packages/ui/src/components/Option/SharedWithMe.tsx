@@ -1,6 +1,6 @@
 import React from "react"
 import { CopyOutlined, ExportOutlined } from "@ant-design/icons"
-import { Button, Card, Empty, List, Space, Spin, Tag, Typography, message } from "antd"
+import { Button, Card, Empty, Space, Spin, Tag, Typography, message } from "antd"
 import { useNavigate } from "react-router-dom"
 
 import { useCloneWorkspace, useSharedWithMe } from "@/hooks/useSharing"
@@ -20,7 +20,7 @@ export const SharedWithMe: React.FC = () => {
   const { data, isLoading, error } = useSharedWithMe()
   const cloneWorkspace = useCloneWorkspace()
   const navigate = useNavigate()
-  const shares = Array.isArray(data) ? data : []
+  const shares = data?.items ?? []
   const [messageApi, messageContext] = message.useMessage()
 
   const _cloneWorkspace = (shareId: number, workspaceName: string) => {
@@ -69,9 +69,12 @@ export const SharedWithMe: React.FC = () => {
   return (
     <Card title="Shared With Me">
       {messageContext}
-      <List
-        dataSource={shares}
-        renderItem={(share) => {
+      <ul
+        aria-label="Shared workspaces"
+        className="m-0 list-none divide-y divide-border p-0"
+      >
+        {shares.map((share) => {
+          const workspaceLabel = share.workspace_name?.trim() || share.workspace_id
           const accessLevel = String(share.access_level || "")
           const hasValidAccessLevel = isValidAccessLevel(accessLevel)
           const accessLevelColor = hasValidAccessLevel
@@ -82,55 +85,52 @@ export const SharedWithMe: React.FC = () => {
             : accessLevel || "Unknown access"
 
           return (
-            <List.Item
-              actions={[
+            <li
+              key={share.share_id}
+              className="flex min-w-0 flex-col gap-3 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between"
+            >
+              <div className="min-w-0 flex-1">
+                <Space size="small" wrap>
+                  <span>{workspaceLabel}</span>
+                  <Tag color={accessLevelColor}>{accessLevelLabel}</Tag>
+                </Space>
+                <Space orientation="vertical" size={2} className="mt-1">
+                  {share.workspace_description ? (
+                    <Text type="secondary">{share.workspace_description}</Text>
+                  ) : null}
+                  <Text type="secondary">
+                    {`Shared by workspace owner (account ${share.owner_user_id})`}
+                  </Text>
+                </Space>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
                 <Button
-                  key="open"
                   type="link"
                   onClick={() =>
                     navigate(`/research-workspace?shared=${share.share_id}`)
                   }
-                  aria-label="Open shared workspace"
+                  aria-label={`Open ${workspaceLabel}`}
                   icon={<ExportOutlined />}
                 >
                   Open
-                </Button>,
+                </Button>
                 <Button
-                  key="clone"
+                  aria-label={`Clone ${workspaceLabel}`}
                   disabled={!share.allow_clone}
                   icon={<CopyOutlined />}
                   loading={
                     cloneWorkspace.isPending &&
                     cloneWorkspace.variables?.shareId === share.share_id
                   }
-                  onClick={() => _cloneWorkspace(share.share_id, share.workspace_name)}
+                  onClick={() => _cloneWorkspace(share.share_id, workspaceLabel)}
                 >
                   Clone
                 </Button>
-              ]}
-            >
-              <List.Item.Meta
-                title={
-                  <Space size="small">
-                    <span>{share.workspace_name}</span>
-                    <Tag color={accessLevelColor}>{accessLevelLabel}</Tag>
-                  </Space>
-                }
-                description={
-                  <Space direction="vertical" size={2}>
-                    {share.workspace_description ? (
-                      <Text type="secondary">{share.workspace_description}</Text>
-                    ) : null}
-                    <Text type="secondary">
-                      {`Shared by workspace owner (account ${share.owner_user_id})`}
-                    </Text>
-                  </Space>
-                }
-              />
-            </List.Item>
+              </div>
+            </li>
           )
-        }}
-      />
+        })}
+      </ul>
     </Card>
   )
 }

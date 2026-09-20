@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import signal
 import subprocess
 import time
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -119,3 +121,51 @@ def terminate_process(task: SubprocessTask, grace_ms: int = 5000) -> tuple[bool,
     except Exception as e:
         logger.error(f"Terminate process failed: {e}")
     return terminated, forced
+
+
+async def _reap(proc: asyncio.subprocess.Process) -> None:
+    """Kill and await a child process so it is never left running."""
+    with suppress(ProcessLookupError):
+        proc.kill()
+    with suppress(Exception):
+        await proc.communicate()
+
+
+async def run_checked_async(
+    cmd: list[str],
+    *,
+    timeout: float,
+    check: bool = True,
+    capture_output: bool = True,
+) -> subprocess.CompletedProcess[bytes]:
+    """Await an external command without blocking the event loop.
+
+    Drop-in replacement for ``subprocess.run(cmd, check=True, capture_output=True,
+    timeout=N)``. It raises the same exceptions as the blocking call, so existing
+    ``except subprocess.CalledProcessError`` / ``except subprocess.TimeoutExpired``
+    handlers keep working unchanged:
+
+    - ``subprocess.CalledProcessError`` on a non-zero exit when ``check`` is set
+    - ``subprocess.TimeoutExpired`` when the command outlives ``timeout``
+
+    Workflow adapters are awaited on the API event loop, so a blocking
+    ``subprocess.run`` here stalls every concurrent request for the duration of
+    the command.
+    """
+    pipe = asyncio.subprocess.PIPE if capture_output else None
+    proc = await asyncio.create_subprocess_exec(*cmd, stdout=pipe, stderr=pipe)
+
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        await _reap(proc)
+        raise subprocess.TimeoutExpired(cmd, timeout) from None
+    except BaseException:
+        # Includes cancellation: still reap the child before propagating.
+        await _reap(proc)
+        raise
+
+    returncode = proc.returncode if proc.returncode is not None else -1
+    if check and returncode != 0:
+        raise subprocess.CalledProcessError(returncode, cmd, output=stdout, stderr=stderr)
+    return subprocess.CompletedProcess(cmd, returncode, stdout, stderr)

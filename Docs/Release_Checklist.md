@@ -162,9 +162,9 @@ Confirm that you can build, install, and run the project from release artifacts.
 - [ ] In a fresh virtual environment, install from the built artifacts and verify that the server starts and passes a small smoke test (basic API calls).
 - [ ] Build the main Docker image with the new version tag and confirm that it starts correctly and reports the expected version (via logs or an explicit version endpoint).
 - [ ] If you publish images or packages to a registry, verify that tags and metadata match the release version and that consumers can pull and run them.
-- [ ] Confirm the GitHub Actions publish workflow ran for the release, and that GHCR + Docker Hub have updated tags for `tldw-server`, `tldw-server-worker`, and `tldw-server-audio-worker`.
-- [ ] Verify release publish prerequisites are set: `DOCKERHUB_IMAGE` repo variable and `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` secrets.
-- [ ] Verify that release-published tags are the source of truth for artifact verification and are not replaced by main snapshots (note: WebUI/Admin UI currently have snapshot tags only).
+- [ ] Confirm the GitHub Actions publish workflow ran for the release, and that GHCR has updated tags for `tldw-server`, `tldw-server-worker`, and `tldw-server-audio-worker`.
+- [ ] Verify the release workflow retains `packages: write`, `attestations: write`, and `id-token: write` permissions for GHCR publication and provenance.
+- [ ] Verify that release-published tags are the source of truth for artifact verification and are not replaced by the rolling backend `main` snapshot. During the frontend licensing freeze, workflows publish no new WebUI/Admin UI snapshot or release tags; historical tags may remain and must not be treated as current releases.
 - [ ] Validate GHCR attestations exist for each published image version (app/worker/audio-worker).
 - [ ] From a clean host environment, run the released Docker image with minimal configuration and exercise a short ingest → search → chat flow end-to-end.
 - [ ] Verify that contributor-friendly dev entrypoints (for example `make server-up-dev`) still work as documented.

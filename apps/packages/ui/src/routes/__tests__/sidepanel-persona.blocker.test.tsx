@@ -1,7 +1,16 @@
 import React from "react"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
-import { MemoryRouter } from "react-router-dom"
+import {
+  MemoryRouter,
+  UNSAFE_DataRouterContext,
+  useLocation,
+  useNavigate
+} from "react-router-dom"
+
+import { MemoryRouterWithFuture } from "@/entries/shared/router-utils"
+import { usePersonaStateDocs } from "../hooks/usePersonaStateDocs"
 
 vi.mock("@/hooks/useServerOnline", () => ({
   useServerOnline: () => false
@@ -207,6 +216,37 @@ vi.mock("~/components/Sidepanel/Chat/SidepanelHeaderSimple", () => ({
 
 import SidepanelPersona from "../sidepanel-persona"
 
+const PersonaRouteBlockerHarness: React.FC<{
+  onRouter: (router: { navigate: (...args: any[]) => Promise<void> } | null) => void
+}> = ({ onRouter }) => {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const dataRouter = React.useContext(UNSAFE_DataRouterContext)
+  React.useEffect(() => {
+    onRouter(dataRouter?.router ?? null)
+    return () => onRouter(null)
+  }, [dataRouter?.router, onRouter])
+  const [, setError] = React.useState<string | null>(null)
+  const stateDocs = usePersonaStateDocs({
+    getTargetPersonaId: () => null,
+    appendLog: () => undefined,
+    setError
+  })
+  return (
+    <div>
+      <label htmlFor="persona-route-draft">Persona draft</label>
+      <textarea
+        id="persona-route-draft"
+        value={stateDocs.soulMd}
+        onChange={(event) => stateDocs.setSoulMd(event.currentTarget.value)}
+      />
+      <output aria-label="Current persona route">{location.pathname}</output>
+      <button type="button" onClick={() => navigate("/next")}>Open next route</button>
+      <button type="button" onClick={() => navigate(-1)}>Persona browser Back</button>
+    </div>
+  )
+}
+
 describe("SidepanelPersona route blocker integration", () => {
   it("renders the companion route under a standard MemoryRouter", () => {
     render(
@@ -217,5 +257,60 @@ describe("SidepanelPersona route blocker integration", () => {
 
     expect(screen.getByTestId("feature-empty-state")).toBeInTheDocument()
     expect(screen.getByText("Connect to use Companion")).toBeInTheDocument()
+  })
+
+  it("cancels a confirmed dirty numeric Back when its StrictMode owner retires before the next task", async () => {
+    const user = userEvent.setup()
+    const confirm = vi.spyOn(window, "confirm")
+    let blockerProceed: ReturnType<typeof vi.spyOn> | null = null
+    const errors: unknown[] = []
+    const onError = (event: ErrorEvent) => {
+      errors.push(event.error)
+      event.preventDefault()
+    }
+    const onUnhandled = (event: PromiseRejectionEvent) => {
+      errors.push(event.reason)
+      event.preventDefault()
+    }
+    window.addEventListener("error", onError)
+    window.addEventListener("unhandledrejection", onUnhandled)
+
+    try {
+      let router: { navigate: (...args: any[]) => Promise<void> } | null = null
+      const view = render(
+        <React.StrictMode>
+          <MemoryRouterWithFuture>
+            <PersonaRouteBlockerHarness onRouter={(nextRouter) => { router = nextRouter }} />
+          </MemoryRouterWithFuture>
+        </React.StrictMode>
+      )
+      await waitFor(() => expect(router).not.toBeNull())
+      await user.click(await screen.findByRole("button", { name: "Open next route" }))
+      await waitFor(() =>
+        expect(screen.getByRole("status", { name: "Current persona route" })).toHaveTextContent("/next")
+      )
+      await user.type(screen.getByLabelText("Persona draft"), "dirty persona draft")
+      confirm.mockImplementationOnce(() => {
+        const blockers = Array.from((router as any).state.blockers.values()) as Array<{
+          proceed: () => void
+        }>
+        blockerProceed = vi.spyOn(blockers[0], "proceed")
+        return true
+      })
+
+      fireEvent.click(screen.getByRole("button", { name: "Persona browser Back" }))
+      expect(confirm).toHaveBeenCalledTimes(1)
+      expect(blockerProceed).not.toBeNull()
+      expect(blockerProceed).not.toHaveBeenCalled()
+      expect(screen.getByRole("status", { name: "Current persona route" })).toHaveTextContent("/next")
+      view.unmount()
+      await new Promise((resolve) => window.setTimeout(resolve, 10))
+
+      expect(blockerProceed).not.toHaveBeenCalled()
+      expect(errors).toEqual([])
+    } finally {
+      window.removeEventListener("error", onError)
+      window.removeEventListener("unhandledrejection", onUnhandled)
+    }
   })
 })

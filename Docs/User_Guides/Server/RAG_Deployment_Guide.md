@@ -19,7 +19,7 @@ This guide provides step-by-step instructions for deploying the tldw RAG module 
 
 ```bash
 # Required
-python3.10+
+python3.11+
 pip
 git
 sqlite3

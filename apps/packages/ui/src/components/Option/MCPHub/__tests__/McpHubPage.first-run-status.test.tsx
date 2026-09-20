@@ -19,49 +19,45 @@ vi.mock("@/services/tldw/domains/setup-onboarding", () => ({
   }
 }))
 
-vi.mock(
-  "antd",
-  () => ({
-    Button: ({
-      children,
-      onClick,
-      "aria-pressed": ariaPressed,
-      "data-testid": dataTestId
-    }: {
-      children: ReactNode
-      onClick?: () => void
-      "aria-pressed"?: boolean
-      "data-testid"?: string
-    }) => (
-      <button type="button" aria-pressed={ariaPressed} data-testid={dataTestId} onClick={onClick}>
-        {children}
-      </button>
-    ),
-    Tabs: ({
-      activeKey,
-      items,
-      onChange
-    }: {
-      activeKey: string
-      items: Array<{ key: string; label: ReactNode; children: ReactNode }>
-      onChange?: (key: string) => void
-    }) => (
-      <div>
-        {items.map((item) => (
-          <button type="button" key={item.key} onClick={() => onChange?.(item.key)}>
-            {item.label}
-          </button>
-        ))}
-        <div>{items.find((item) => item.key === activeKey)?.children}</div>
-      </div>
-    ),
-    Typography: {
-      Title: ({ children }: { children: ReactNode }) => <h1>{children}</h1>,
-      Text: ({ children }: { children: ReactNode }) => <span>{children}</span>
-    }
-  }),
-  { virtual: true }
-)
+vi.mock("antd", () => ({
+  Button: ({
+    children,
+    onClick,
+    "aria-pressed": ariaPressed,
+    "data-testid": dataTestId
+  }: {
+    children: ReactNode
+    onClick?: () => void
+    "aria-pressed"?: boolean
+    "data-testid"?: string
+  }) => (
+    <button type="button" aria-pressed={ariaPressed} data-testid={dataTestId} onClick={onClick}>
+      {children}
+    </button>
+  ),
+  Tabs: ({
+    activeKey,
+    items,
+    onChange
+  }: {
+    activeKey: string
+    items: Array<{ key: string; label: ReactNode; children: ReactNode }>
+    onChange?: (key: string) => void
+  }) => (
+    <div>
+      {items.map((item) => (
+        <button type="button" key={item.key} onClick={() => onChange?.(item.key)}>
+          {item.label}
+        </button>
+      ))}
+      <div>{items.find((item) => item.key === activeKey)?.children}</div>
+    </div>
+  ),
+  Typography: {
+    Title: ({ children }: { children: ReactNode }) => <h1>{children}</h1>,
+    Text: ({ children }: { children: ReactNode }) => <span>{children}</span>
+  }
+}))
 
 vi.mock("../PermissionProfilesTab", () => ({
   PermissionProfilesTab: ({

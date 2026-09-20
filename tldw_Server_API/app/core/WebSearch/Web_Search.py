@@ -33,7 +33,7 @@ from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
 )
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.Utils.Utils import logging
-from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import scrape_article
+from tldw_Server_API.app.core.Web_Scraping.orchestration import scrape_article
 from tldw_Server_API.app.core.Web_Scraping.ua_profiles import (
     build_browser_headers,
     pick_ua_profile,

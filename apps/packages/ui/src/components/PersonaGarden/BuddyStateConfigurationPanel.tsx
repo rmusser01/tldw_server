@@ -47,14 +47,14 @@ const StateRow: React.FC<{
           <div className="flex flex-wrap items-center gap-1.5 text-xs font-medium text-text">
             <span>{state.label}</span>
             {state.required ? (
-              <Badge variant="danger" size="sm">
+              <Badge variant="danger" size="md" className="!text-text">
                 {t("sidepanel:personaGarden.visuals.builder.configure.requiredTag", {
                   defaultValue: "required"
                 })}
               </Badge>
             ) : null}
             {state.kind ? (
-              <Badge variant="info" size="sm">
+              <Badge variant="info" size="md" className="!text-text">
                 {state.kind}
               </Badge>
             ) : null}
@@ -67,14 +67,14 @@ const StateRow: React.FC<{
           {state.tags.length ? (
             <div className="mt-1 flex flex-wrap gap-1">
               {state.tags.map((tag) => (
-                <Badge key={`${state.id}-${tag}`} size="sm">
+                <Badge key={`${state.id}-${tag}`} size="md" className="!text-text">
                   {tag}
                 </Badge>
               ))}
             </div>
           ) : null}
         </div>
-        <Badge variant={getStateBadgeVariant(state)} size="sm">
+        <Badge variant={getStateBadgeVariant(state)} size="md" className="!text-text">
           {state.animationId
             ? t("sidepanel:personaGarden.visuals.builder.configure.mappedTag", {
                 defaultValue: "mapped"
@@ -140,7 +140,7 @@ const StateSection: React.FC<{
   t: (key: string, options: Record<string, unknown>) => string
 }> = ({ title, testId, states, emptyText, showDescription = false, t }) => (
   <section data-testid={testId} className="space-y-2">
-    <div className="text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
+    <div className="text-xs font-semibold uppercase tracking-wide text-text-muted">
       {title}
     </div>
     {states.length ? (
@@ -167,7 +167,7 @@ const TriggerList: React.FC<{
   emptyText: string
 }> = ({ title, testId, triggers, emptyText }) => (
   <section data-testid={testId} className="space-y-2">
-    <div className="text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
+    <div className="text-xs font-semibold uppercase tracking-wide text-text-muted">
       {title}
     </div>
     {triggers.length ? (
@@ -179,7 +179,7 @@ const TriggerList: React.FC<{
           >
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="font-medium text-text">{trigger.match}</div>
-              <Badge variant="primary" size="sm">
+              <Badge variant="primary" size="md" className="!text-text">
                 {trigger.source}
               </Badge>
             </div>

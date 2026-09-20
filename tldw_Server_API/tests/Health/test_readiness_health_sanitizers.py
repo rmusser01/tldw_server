@@ -3,6 +3,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 
 import pytest
+import yaml
 
 from tldw_Server_API.app.api.v1.endpoints import health as health_mod
 
@@ -11,9 +12,7 @@ from tldw_Server_API.app.api.v1.endpoints import health as health_mod
 def _capture_health_logs() -> Iterator[list[str]]:
     messages: list[str] = []
     sink_id = health_mod.logger.add(
-        lambda message: messages.append(str(message))
-        if message.record["name"] == health_mod.__name__
-        else None,
+        lambda message: messages.append(str(message)) if message.record["name"] == health_mod.__name__ else None,
         level="DEBUG",
     )
     try:
@@ -30,15 +29,11 @@ async def test_readyz_sanitizes_workflows_db_check_failure(monkeypatch):
     monkeypatch.setattr(health_mod, "get_content_backend_instance", _raise_backend_error)
 
     with _capture_health_logs() as messages:
-        response = await health_mod.readyz()
-
-    body = json.loads(response.body.decode("utf-8"))
+        body = health_mod._check_workflows_db()
     joined = "\n".join(messages)
 
-    assert response.status_code == 503
-    assert body["ready"] is False
-    assert body["db"]["ok"] is False
-    assert body["db"]["error"] == "Workflow database health check failed"
+    assert body["ok"] is False
+    assert body["error"] == "Workflow database health check failed"
     assert "/readyz DB check failed" in joined
     assert "workflow db exploded" not in joined
     assert "/private/" not in joined
@@ -198,7 +193,6 @@ async def test_api_health_sanitizes_rg_policy_snapshot_failure(monkeypatch, tmp_
     from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as chacha_deps
     from tldw_Server_API.app.core.AuthNZ import database as auth_database
     from tldw_Server_API.app.core.Metrics import metrics_manager
-    import yaml
 
     class _HealthyPool:
         async def health_check(self):

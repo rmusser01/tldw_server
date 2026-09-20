@@ -1,0 +1,26 @@
+{
+  "observed_at": "2026-09-06T01:36:04.837745+00:00",
+  "tested_revision": "31046b8937de99e12f36daef731e1a06e037a61a",
+  "source_matches": true,
+  "idle_before_explicit_start": true,
+  "observed_states": [
+    "idle",
+    "preparing",
+    "listening",
+    "thinking",
+    "idle"
+  ],
+  "submission_actor": "human clicked Send now",
+  "committed_transcript": "Reply with, the blue notebook is ready.",
+  "assistant_reply": "the blue notebook is ready",
+  "tts_chunk_notices": 4,
+  "extra_words": false,
+  "duplicate_words": false,
+  "final_connection": "disconnected",
+  "human_playback_confirmation": "Yes, clearly",
+  "acceptance": "manual human speech \u2192 local Whisper \u2192 DeepSeek reply \u2192 audible Kokoro passed",
+  "limits": [
+    "speaking state was shorter than DOM sampling interval",
+    "direct MediaStream track state was not inspected"
+  ]
+}

@@ -96,7 +96,7 @@ export const SETTINGS_ROUTE_NAV_ITEMS: SettingsNavRouteMeta[] = [
   {
     path: "/settings/prompt",
     group: "preferencesWorkflow",
-    labelToken: "settings:managePrompts.title",
+    labelToken: "settings:servicePrompts.title",
     icon: BookIcon,
     order: 8
   },
@@ -114,6 +114,13 @@ export const SETTINGS_ROUTE_NAV_ITEMS: SettingsNavRouteMeta[] = [
     labelToken: "settings:chatSettingsNav",
     icon: MessageSquare,
     order: 2
+  },
+  {
+    path: "/settings/chat-macros",
+    group: "preferencesWorkflow",
+    labelToken: "settings:chatMacrosNav",
+    icon: CombineIcon,
+    order: 2.5
   },
   {
     path: "/settings/ui",

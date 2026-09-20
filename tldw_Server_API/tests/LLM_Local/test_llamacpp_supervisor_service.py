@@ -14,8 +14,6 @@ from tldw_Server_API.app.api.v1.schemas.llamacpp_admin_schemas import (
     LlamaCppProfileCreateRequest,
     LlamaCppProfileUpdateRequest,
 )
-from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ModelNotFoundError, ServerError
-from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Schemas import LlamaCppConfig
 from tldw_Server_API.app.core.Local_LLM.llamacpp_profile_store import JsonLlamaCppProfileStore
 from tldw_Server_API.app.core.Local_LLM.llamacpp_runtime_models import (
     LlamaCppPortPolicy,
@@ -26,6 +24,10 @@ from tldw_Server_API.app.core.Local_LLM.llamacpp_runtime_models import (
     LlamaCppRuntimeState,
 )
 from tldw_Server_API.app.core.Local_LLM.llamacpp_supervisor_service import LlamaCppSupervisor
+from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ModelNotFoundError, ServerError
+from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Schemas import LlamaCppConfig
+
+pytestmark = pytest.mark.integration
 
 
 def make_config(tmp_path: Path) -> LlamaCppConfig:
@@ -170,6 +172,345 @@ class FakeRunnerFactory:
         runner = FakeRunner(profile_id, self.calls)
         self.runners[profile_id] = runner
         return runner
+
+
+async def test_snapshot_profile_toggle_propagates_without_restart_and_busy_fences(tmp_path):
+    from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_operations import SnapshotOperationError
+
+    config = make_config(tmp_path)
+    model = make_model(config)
+    factory = FakeRunnerFactory()
+    supervisor = LlamaCppSupervisor(
+        config=config, store=JsonLlamaCppProfileStore(tmp_path / "profiles.json"), runner_factory=factory
+    )
+    created = await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(
+            profile_id="one", name="one", model_path=str(model), snapshots_enabled=True, snapshot_retention=8
+        )
+    )
+    assert created.snapshots_enabled and created.snapshot_retention == 8
+    await supervisor.start_profile("one")
+    await supervisor.update_profile("one", LlamaCppProfileUpdateRequest(snapshots_enabled=False))
+    assert factory.calls == {"one": 1}
+    service = await supervisor._snapshot_service()
+    service.active["one"] = "operation"
+    for action in [
+        supervisor.stop_profile,
+        supervisor.pause_profile,
+        supervisor.resume_profile,
+        supervisor.start_profile,
+        supervisor.delete_profile,
+    ]:
+        with pytest.raises(SnapshotOperationError):
+            await action("one")
+    service.active.clear()
+    await supervisor.shutdown()
+
+
+async def test_snapshot_failed_start_keeps_child_ownership_until_confirmed_death(tmp_path):
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_store import SnapshotStore, SnapshotStoreError
+
+    config = make_config(tmp_path)
+    model = make_model(config)
+    child = SimpleNamespace(returncode=None)
+
+    class BrokenRunner(FakeRunner):
+        async def start(self, model_path, profile):
+            self.snapshot_generation = "failedlaunch"
+            self.snapshot_working = self.snapshot_store.launch_directory("one", "failedlaunch")
+            self.snapshot_process = child
+            raise RuntimeError("readiness failed")
+
+        async def stop(self):
+            raise RuntimeError("cannot confirm exit")
+
+    supervisor = LlamaCppSupervisor(
+        config=config,
+        store=JsonLlamaCppProfileStore(tmp_path / "profiles.json"),
+        runner_factory=lambda c, p: BrokenRunner(p, {}),
+    )
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(profile_id="one", name="one", model_path=str(model), snapshots_enabled=True)
+    )
+    with pytest.raises(RuntimeError):
+        await supervisor.start_profile("one")
+    with pytest.raises(RuntimeError):
+        await supervisor.shutdown()
+    with pytest.raises(SnapshotStoreError):
+        SnapshotStore(tmp_path / "llamacpp-snapshots")
+    child.returncode = 1
+    with pytest.raises(RuntimeError):
+        await supervisor.shutdown()
+    with SnapshotStore(tmp_path / "llamacpp-snapshots"):
+        assert not (tmp_path / "llamacpp-snapshots" / "one" / "working" / "failedlaunch").exists()
+
+
+async def test_overlapping_cleanup_preserves_new_live_child_and_owner_on_failed_stop(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_store import SnapshotStore, SnapshotStoreError
+
+    old_child = SimpleNamespace(returncode=None)
+    live = SimpleNamespace(returncode=None)
+    starting, register = asyncio.Event(), asyncio.Event()
+
+    class OldRunner(FakeRunner):
+        async def start(self, model_path, profile):
+            self.snapshot_generation = "oldgeneration"
+            self.snapshot_working = self.snapshot_store.launch_directory("old", "oldgeneration")
+            self.snapshot_process = old_child
+            return await super().start(model_path, profile)
+
+        async def stop(self):
+            old_child.returncode = 0
+            return await super().stop()
+
+    class NewRunner(StopFailingRunner):
+        async def start(self, model_path, profile):
+            self.snapshot_generation = "newgeneration"
+            self.snapshot_working = self.snapshot_store.launch_directory("new", "newgeneration")
+            self.snapshot_process = live
+            starting.set()
+            await register.wait()
+            return await super().start(model_path, profile)
+
+    config = make_config(tmp_path)
+    model = make_model(config)
+    supervisor = LlamaCppSupervisor(
+        config=config,
+        store=JsonLlamaCppProfileStore(tmp_path / "profiles.json"),
+        runner_factory=lambda c, p: {"old": OldRunner, "new": NewRunner, "helper": FakeRunner}[p](p, {}),
+    )
+    for port, profile_id in enumerate(("old", "helper", "new"), start=8181):
+        await supervisor.create_profile(
+            LlamaCppProfileCreateRequest(
+                profile_id=profile_id,
+                name=profile_id,
+                model_path=str(model),
+                snapshots_enabled=profile_id != "helper",
+                port=port,
+            )
+        )
+    await supervisor.start_profile("old")
+    await supervisor.start_profile("helper")
+    start = asyncio.create_task(supervisor.start_profile("new"))
+    await asyncio.wait_for(starting.wait(), 2)
+    entered, release = threading.Event(), threading.Event()
+    calls = 0
+    original_cleanup = SnapshotStore.cleanup_launch
+
+    def controlled_cleanup(store, profile_id, generation):
+        nonlocal calls
+        if profile_id == "old":
+            calls += 1
+            if calls == 1:
+                entered.set()
+                assert release.wait(2), "cleanup release timed out"
+        return original_cleanup(store, profile_id, generation)
+
+    monkeypatch.setattr(SnapshotStore, "cleanup_launch", controlled_cleanup)
+    first = asyncio.create_task(supervisor.stop_profile("old"))
+    assert await asyncio.to_thread(entered.wait, 2)
+    second = asyncio.create_task(supervisor.stop_profile("helper"))
+    # Two public stops overlap cleanup while another public start registers its child.
+    await asyncio.sleep(0)
+    register.set()
+    await start
+    release.set()
+    await asyncio.gather(first, second)
+    root = tmp_path / "llamacpp-snapshots"
+    try:
+        assert not (root / "old" / "working" / "oldgeneration").exists()
+        with pytest.raises(RuntimeError, match="Failed to stop"):
+            await supervisor.shutdown()
+        supervisor.cleanup_sync()
+        with pytest.raises(SnapshotStoreError):
+            SnapshotStore(root)
+        assert live.returncode is None
+        assert (root / "new" / "working" / "newgeneration").is_dir()
+    finally:
+        live.returncode = 1
+        with pytest.raises(RuntimeError, match="Failed to stop"):
+            await supervisor.shutdown()
+    with SnapshotStore(root):
+        assert not (root / "new" / "working" / "newgeneration").exists()
+
+
+@pytest.mark.parametrize("retained", ["corrupt_manifest", "binary_only", "manifest_only"])
+async def test_profile_deletion_rejects_uncertain_retained_snapshot_state(tmp_path: Path, retained: str):
+    from datetime import UTC, datetime
+
+    from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_models import Fingerprint, SnapshotMetadata
+    from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_operations import SnapshotOperationError
+    from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_store import SnapshotStore
+
+    supervisor, config, _factory = make_supervisor(tmp_path)
+    model = make_model(config)
+    await supervisor.create_profile(LlamaCppProfileCreateRequest(profile_id="one", name="One", model_path=str(model)))
+    root = tmp_path / "llamacpp-snapshots"
+    with SnapshotStore(root) as store:
+        store.list("one")
+    profile_root = root / "one"
+    if retained != "manifest_only":
+        binary = profile_root / "snapshots" / "retained.bin"
+        binary.write_bytes(b"retained cache")
+        binary.chmod(0o600)
+    if retained != "binary_only":
+        manifest = profile_root / "manifests" / "retained.json"
+        content = "invalid manifest"
+        if retained == "manifest_only":
+            content = SnapshotMetadata(
+                profile_id="one",
+                snapshot_id="retained",
+                source_slot=0,
+                created_at=datetime(2026, 9, 5, tzinfo=UTC),
+                commit_sequence=1,
+                byte_count=14,
+                token_count=4,
+                sha256="e" * 64,
+                actor_id="admin",
+                fingerprint=Fingerprint(
+                    model_sha256="a" * 64,
+                    executable_sha256="b" * 64,
+                    effective_options_sha256="c" * 64,
+                    adapters_sha256="d" * 64,
+                ),
+            ).model_dump_json()
+        manifest.write_text(content, encoding="utf-8")
+        manifest.chmod(0o600)
+    try:
+        with pytest.raises(SnapshotOperationError, match="delete_snapshots_first"):
+            await supervisor.delete_profile("one")
+        assert [item.profile_id for item in supervisor.list_profiles()] == ["one"]
+    finally:
+        await supervisor.shutdown()
+
+
+async def test_default_profile_compatibility_path_cannot_change_reserved_snapshot_profile(tmp_path):
+    from tldw_Server_API.app.core.Local_LLM.llamacpp_profile_store import DEFAULT_PROFILE_ID
+    from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_operations import SnapshotOperationError
+
+    config = make_config(tmp_path)
+    model = make_model(config)
+    supervisor = LlamaCppSupervisor(config=config, store=JsonLlamaCppProfileStore(tmp_path / "profiles.json"))
+    await supervisor.ensure_default_profile_from_path(model, {})
+    service = await supervisor._snapshot_service()
+    service.active[DEFAULT_PROFILE_ID] = "busy"
+    replacement = make_model(config, "replacement.gguf")
+    with pytest.raises(SnapshotOperationError):
+        await supervisor.ensure_default_profile_from_path(replacement, {})
+    assert supervisor.store.get(DEFAULT_PROFILE_ID).model_path == str(model)
+    service.active.clear()
+    await supervisor.shutdown()
+
+
+async def test_cancelled_snapshot_factory_keeps_created_owner_for_shutdown(tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_supervisor_service as module
+    from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_store import SnapshotStore
+
+    config = make_config(tmp_path)
+    supervisor = LlamaCppSupervisor(config=config, store=JsonLlamaCppProfileStore(tmp_path / "profiles.json"))
+    entered, release = threading.Event(), threading.Event()
+    original = module.SnapshotOperations
+
+    def slow_factory(*args, **kwargs):
+        entered.set()
+        release.wait(5)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(module, "SnapshotOperations", slow_factory)
+    initialization = asyncio.create_task(supervisor._snapshot_service())
+    assert await asyncio.to_thread(entered.wait, 2)
+    initialization.cancel()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await initialization
+    assert supervisor._snapshots is not None
+    await supervisor.shutdown()
+    with SnapshotStore(tmp_path / "llamacpp-snapshots"):
+        pass
+
+
+async def test_shutdown_waits_for_inflight_snapshot_factory_then_releases_owner(tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_supervisor_service as module
+    from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_store import SnapshotStore
+
+    supervisor = LlamaCppSupervisor(
+        config=make_config(tmp_path), store=JsonLlamaCppProfileStore(tmp_path / "profiles.json")
+    )
+    entered, release = threading.Event(), threading.Event()
+    original = module.SnapshotOperations
+
+    def slow_factory(*args, **kwargs):
+        entered.set()
+        release.wait(5)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(module, "SnapshotOperations", slow_factory)
+    initializing = asyncio.create_task(supervisor._snapshot_service())
+    assert await asyncio.to_thread(entered.wait, 2)
+    shutdown = asyncio.create_task(supervisor.shutdown())
+    await asyncio.sleep(0)
+    try:
+        assert not shutdown.done()
+    finally:
+        release.set()
+        await initializing
+        await shutdown
+    with SnapshotStore(tmp_path / "llamacpp-snapshots"):
+        pass
+
+
+async def test_shutdown_drains_admission_that_registers_after_shutdown_begins(tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_models import SnapshotRequest
+    from tldw_Server_API.tests.LLM_Local.test_llamacpp_snapshot_operations import Runner, Transport
+
+    config = make_config(tmp_path)
+    model = make_model(config)
+    profiles = JsonLlamaCppProfileStore(tmp_path / "profiles.json")
+    profiles.upsert(LlamaCppProfile(profile_id="p1", name="one", model_path=str(model), snapshots_enabled=True))
+    supervisor = LlamaCppSupervisor(config=config, store=profiles)
+    service = await supervisor._snapshot_service()
+    runner = Runner(model, config.executable_path)
+    runner.snapshot_working = service.store.launch_directory("p1", "generation1")
+    supervisor._runners["p1"] = runner
+    service.supported_builds = {runner.snapshot_fingerprint.executable_sha256}
+    transport = Transport(runner)
+    service.transport = transport
+    stopped_states = []
+
+    async def stop():
+        stopped_states.extend(item.state for item in service.store.list_receipts("p1"))
+        runner.snapshot_process.returncode = 0
+
+    runner.stop = stop
+    entered, release = threading.Event(), threading.Event()
+    original = service.store.write_receipt
+
+    def blocked_receipt(receipt):
+        if receipt.state == "validating":
+            entered.set()
+            release.wait(5)
+        original(receipt)
+
+    monkeypatch.setattr(service.store, "write_receipt", blocked_receipt)
+    admission = asyncio.create_task(
+        supervisor.save_snapshot(
+            "p1",
+            SnapshotRequest(slot_id=0, expected_launch_generation="generation1", request_id=service.issue_token("p1")),
+            "admin",
+        )
+    )
+    assert await asyncio.to_thread(entered.wait, 2)
+    shutdown = asyncio.create_task(supervisor.shutdown())
+    await asyncio.sleep(0)
+    release.set()
+    await admission
+    await shutdown
+    assert stopped_states == ["complete"]
+    assert service.tasks == {}
 
 
 class StopFailingRunnerFactory(FakeRunnerFactory):
@@ -385,7 +726,7 @@ async def test_supervisor_rejects_path_arg_outside_allowlist_before_persisting(t
     model_path = make_model(config)
     grammar_path = tmp_path / "outside" / "grammar.gbnf"
     grammar_path.parent.mkdir()
-    grammar_path.write_text("root ::= \"ok\"", encoding="utf-8")
+    grammar_path.write_text('root ::= "ok"', encoding="utf-8")
 
     with pytest.raises(ServerError, match="grammar_file"):
         await supervisor.create_profile(
@@ -713,6 +1054,95 @@ async def test_supervisor_delete_running_profile_awaits_stop_before_removing(tmp
 
 
 @pytest.mark.asyncio
+async def test_supervisor_deletes_snapshot_disabled_profile_without_fcntl(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_snapshot_store as snapshot_store_module
+    from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_store import SnapshotStore
+
+    supervisor, config, factory = make_supervisor(tmp_path)
+    model_path = make_model(config)
+    snapshot_root = tmp_path / "llamacpp-snapshots"
+    with SnapshotStore(snapshot_root) as snapshot_store:
+        assert snapshot_store.list("other-profile") == []
+
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(profile_id="one", name="One", model_path=str(model_path), port=8181)
+    )
+    await supervisor.start_profile("one")
+    monkeypatch.setattr(snapshot_store_module, "fcntl", None)
+
+    deleted = await supervisor.delete_profile("one")
+
+    assert deleted is True
+    assert supervisor.list_profiles() == []
+    assert factory.runners["one"].stop_calls == 1
+    assert not (snapshot_root / "one").exists()
+
+
+@pytest.mark.asyncio
+async def test_supervisor_fails_closed_without_fcntl_when_disabled_profile_has_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import hashlib
+    from datetime import UTC, datetime
+
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_snapshot_store as snapshot_store_module
+    from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_models import Fingerprint, SnapshotMetadata
+    from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_store import (
+        SnapshotStorageUnavailableError,
+        SnapshotStore,
+    )
+
+    supervisor, config, _factory = make_supervisor(tmp_path)
+    model_path = make_model(config)
+    await supervisor.create_profile(
+        LlamaCppProfileCreateRequest(
+            profile_id="one",
+            name="One",
+            model_path=str(model_path),
+            port=8181,
+            snapshots_enabled=True,
+        )
+    )
+    payload = b"retained cache"
+    staged = tmp_path / "snapshot.bin"
+    staged.write_bytes(payload)
+    fingerprint = Fingerprint(
+        model_sha256="a" * 64,
+        executable_sha256="b" * 64,
+        effective_options_sha256="c" * 64,
+        adapters_sha256="d" * 64,
+    )
+    with SnapshotStore(tmp_path / "llamacpp-snapshots") as snapshot_store:
+        snapshot_store.commit(
+            "one",
+            staged,
+            SnapshotMetadata(
+                profile_id="one",
+                snapshot_id="snapshot_1",
+                source_slot=0,
+                created_at=datetime(2026, 9, 5, tzinfo=UTC),
+                commit_sequence=1,
+                byte_count=len(payload),
+                token_count=4,
+                sha256=hashlib.sha256(payload).hexdigest(),
+                fingerprint=fingerprint,
+                actor_id="admin_1",
+            ),
+        )
+    await supervisor.update_profile("one", LlamaCppProfileUpdateRequest(snapshots_enabled=False))
+    monkeypatch.setattr(snapshot_store_module, "fcntl", None)
+
+    with pytest.raises(SnapshotStorageUnavailableError):
+        await supervisor.delete_profile("one")
+
+    assert supervisor.store.get("one") is not None
+
+
+@pytest.mark.asyncio
 async def test_supervisor_releases_deleted_profile_lock(tmp_path: Path):
     supervisor, config, _factory = make_supervisor(tmp_path)
     model_path = make_model(config)
@@ -864,9 +1294,7 @@ async def test_supervisor_default_profile_bridge_accepts_model_path(tmp_path: Pa
 
 
 @pytest.mark.asyncio
-async def test_supervisor_serializes_default_start_profile_updates(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+async def test_supervisor_serializes_default_start_profile_updates(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     from tldw_Server_API.app.core.Local_LLM import llamacpp_supervisor_service as supervisor_module
 
     config = make_config(tmp_path)

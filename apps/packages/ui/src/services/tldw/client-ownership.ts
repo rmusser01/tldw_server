@@ -57,7 +57,6 @@ export const TRANSITIONAL_DOMAIN_OVERLAPS = {
     "startLlamacppServer",
     "stopLlamacppProfile",
     "stopLlamacppServer",
-    "synthesizeSpeech",
     "tailLlamacppInstanceLogs",
     "tailLlamacppLogs",
     "transcribeAudio",

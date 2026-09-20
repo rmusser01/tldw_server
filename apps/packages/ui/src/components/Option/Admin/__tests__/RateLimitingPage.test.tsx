@@ -142,4 +142,42 @@ describe("RateLimitingPage", () => {
     expect(alert).toHaveAttribute("role", "status")
     expect(mocks.listAdminRateLimits).not.toHaveBeenCalled()
   })
+
+  it("reads the diag coverage payload's real field names (protected_routes/counts)", async () => {
+    // Regression: the page read coverage.protected/unprotected while the diag
+    // endpoint returns protected_routes/unprotected_routes (+ counts), so it
+    // rendered "78.9%" above "Protected: 0 routes | Unprotected: 0 routes".
+    mocks.getGovernorCoverage.mockResolvedValueOnce({
+      total_routes: 10,
+      protected_count: 8,
+      unprotected_count: 2,
+      coverage_pct: 80,
+      protected_routes: Array.from({ length: 8 }, (_, i) => ({
+        method: "GET",
+        path: `/api/v1/protected-${i}`
+      })),
+      unprotected_routes: [
+        { method: "GET", path: "/api/v1/open-a" },
+        { method: "POST", path: "/api/v1/open-b" }
+      ]
+    })
+
+    render(<RateLimitingPage />)
+
+    await screen.findByText("/api/v1/open-a")
+    const summary = screen.getByText("Protected:").closest("div")
+    expect(summary?.textContent).toContain("Protected: 8 routes")
+    expect(summary?.textContent).toContain("Unprotected: 2 routes")
+    expect(screen.getByText("/api/v1/open-b")).toBeInTheDocument()
+  })
+
+  it("explains that empty per-user overrides still leave baseline limits active", async () => {
+    render(<RateLimitingPage />)
+
+    expect(
+      await screen.findByText(
+        "No per-user overrides configured. The governor policy's baseline limits still apply."
+      )
+    ).toBeInTheDocument()
+  })
 })

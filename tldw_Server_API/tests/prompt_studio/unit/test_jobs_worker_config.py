@@ -1,9 +1,8 @@
-import os
-
 import pytest
 
-from tldw_Server_API.app.core.Prompt_Management.prompt_studio.services import jobs_worker
-
+from tldw_Server_API.app.core.Prompt_Management.prompt_studio.services import (
+    jobs_worker,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -102,6 +101,44 @@ async def test_handle_job_marks_owner_active_during_processing(monkeypatch):
     assert "user-1" not in jobs_worker._ACTIVE_USER_COUNTS
 
 
+def test_worker_database_separates_owner_tenant_from_audit_client(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeDB:
+        user_id: str | None = None
+
+    def _fake_create_prompt_studio_database(**kwargs):
+        captured.update(kwargs)
+        return FakeDB()
+
+    backend = object()
+    monkeypatch.setattr(
+        jobs_worker,
+        "get_content_backend_instance",
+        lambda: backend,
+        raising=True,
+    )
+    monkeypatch.setattr(
+        jobs_worker.DatabasePaths,
+        "get_prompt_studio_db_path",
+        lambda user_id: f"/tmp/{user_id}/prompt-studio.db",
+        raising=True,
+    )
+    monkeypatch.setattr(
+        jobs_worker,
+        "create_prompt_studio_database",
+        _fake_create_prompt_studio_database,
+        raising=True,
+    )
+
+    db = jobs_worker._get_db("7")
+
+    assert captured["client_id"] == "prompt_studio_jobs_worker:7"
+    assert captured["tenant_user_id"] == "7"
+    assert captured["backend"] is backend
+    assert db.user_id == "7"
+
+
 def test_db_cache_is_bounded_and_closes_evicted_entries(monkeypatch):
     class FakeDB:
         def __init__(self, user_id: str) -> None:
@@ -113,7 +150,10 @@ def test_db_cache_is_bounded_and_closes_evicted_entries(monkeypatch):
 
     created: list[FakeDB] = []
 
-    def _fake_create_prompt_studio_database(*, client_id, db_path, backend):
+    def _fake_create_prompt_studio_database(
+        *, client_id, db_path, tenant_user_id, backend
+    ):
+        assert tenant_user_id == db_path.rsplit("/", 1)[-1]
         db = FakeDB(db_path.rsplit("/", 1)[-1])
         created.append(db)
         return db
@@ -153,7 +193,10 @@ def test_db_cache_defers_closing_active_evicted_entries(monkeypatch):
 
     created: list[FakeDB] = []
 
-    def _fake_create_prompt_studio_database(*, client_id, db_path, backend):
+    def _fake_create_prompt_studio_database(
+        *, client_id, db_path, tenant_user_id, backend
+    ):
+        assert tenant_user_id == db_path.rsplit("/", 1)[-1]
         db = FakeDB(db_path.rsplit("/", 1)[-1])
         created.append(db)
         return db

@@ -2,6 +2,7 @@ import React from 'react'
 import type { InputRef } from 'antd'
 import { Input, Typography, Select, Button, Tooltip, Popover, Spin } from 'antd'
 import {
+  Network as NetworkIcon,
   Plus as PlusIcon,
   Search as SearchIcon,
 } from 'lucide-react'
@@ -517,6 +518,19 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                   >
                     {t('option:notesSearch.viewModeMoodboard', {
                       defaultValue: 'Collection'
+                    })}
+                  </Button>
+                  <Button
+                    size="small"
+                    type={listViewMode === 'graph' ? 'primary' : 'default'}
+                    onClick={() => switchViewMode('graph')}
+                    disabled={listMode !== 'active'}
+                    icon={<NetworkIcon size={14} aria-hidden="true" />}
+                    className="col-span-2"
+                    data-testid="notes-view-mode-graph"
+                  >
+                    {t('option:notesSearch.viewModeGraph', {
+                      defaultValue: 'Graph'
                     })}
                   </Button>
                 </div>

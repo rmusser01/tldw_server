@@ -25,7 +25,9 @@ All three commands call `Helper_Scripts/release.py`, which:
 Treat main snapshots republish as a first-class side effect of the release command.
 
 - Formal release artifacts are the `app`, `worker`, and `audio-worker` images published by the GitHub Release workflow with versioned release tags.
-- `main` snapshots are the rolling GHCR `app`, `webui`, and `admin-ui` images republished by pushes to `main`.
+- During the frontend licensing freeze, the only `main` snapshot is the rolling
+  GHCR GPL backend `app` image. WebUI and Admin UI remain build-checked but are
+  not published.
 - Pushing the release commit republishes `main` snapshots before GitHub Release publication triggers the formal Docker release artifacts.
 - `Docs/_site/` is generated documentation-site output, not release source material. It remains ignored and is not staged by the release helper.
 

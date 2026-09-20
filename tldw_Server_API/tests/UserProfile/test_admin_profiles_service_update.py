@@ -4,8 +4,6 @@ import asyncio
 import json
 from datetime import datetime, timezone
 
-import pytest
-
 from tldw_Server_API.app.api.v1.schemas.user_profile_schemas import (
     UserProfileUpdateEntry,
     UserProfileUpdateRequest,
@@ -65,7 +63,7 @@ def test_admin_profile_update_delegates_to_command_service(monkeypatch) -> None:
             captured["scope"] = scope
             return LegacyProfileCommandResult(
                 profile_version=version,
-                applied=("preferences.ui.theme",),
+                applied=("preferences.ui.theme", "preferences.ui.theme"),
             )
 
     class _DirectUpdateServiceTrap:
@@ -85,7 +83,10 @@ def test_admin_profile_update_delegates_to_command_service(monkeypatch) -> None:
     principal = _admin_principal()
     payload = UserProfileUpdateRequest(
         profile_version=version,
-        updates=[UserProfileUpdateEntry(key="preferences.ui.theme", value="paper")],
+        updates=[
+            UserProfileUpdateEntry(key="preferences.ui.theme", value="paper"),
+            UserProfileUpdateEntry(key="preferences.ui.theme", value="midnight"),
+        ],
     )
 
     response, audit_info = _run_async(
@@ -100,7 +101,10 @@ def test_admin_profile_update_delegates_to_command_service(monkeypatch) -> None:
     command = captured["command"]
     assert command.actor_user_id == 5
     assert command.target_user_id == 7
-    assert command.updates == (("preferences.ui.theme", "paper"),)
+    assert command.updates == (
+        ("preferences.ui.theme", "paper"),
+        ("preferences.ui.theme", "midnight"),
+    )
     assert "admin" in command.roles
     assert command.dry_run is False
     assert command.expected_profile_version == version
@@ -115,9 +119,9 @@ def test_admin_profile_update_delegates_to_command_service(monkeypatch) -> None:
     assert scope.active_team_id == 22
 
     assert response.profile_version == version
-    assert response.applied == ["preferences.ui.theme"]
+    assert response.applied == ["preferences.ui.theme", "preferences.ui.theme"]
     assert response.skipped == []
-    assert audit_info["metadata"]["applied_count"] == 1
+    assert audit_info["metadata"]["applied_count"] == 2
     assert audit_info["metadata"]["skipped_count"] == 0
 
 
@@ -179,4 +183,39 @@ def test_admin_profile_update_maps_command_error_to_legacy_error_response(monkey
         "error_code": "profile_version_mismatch",
         "detail": "profile_version_mismatch",
         "errors": [{"key": "profile_version", "message": "mismatch"}],
+    }
+
+
+def test_admin_profile_update_rejects_empty_updates_before_scope_or_command(
+    monkeypatch,
+) -> None:
+    async def _scope_trap(*_args, **_kwargs) -> None:
+        raise AssertionError("empty update must be rejected before scope lookup")
+
+    class _CommandTrap:
+        def __init__(self, *_args, **_kwargs) -> None:
+            raise AssertionError("empty update must not construct the command service")
+
+    monkeypatch.setattr(
+        admin_profiles_service.admin_scope_service,
+        "enforce_admin_user_scope",
+        _scope_trap,
+    )
+    monkeypatch.setattr(admin_profiles_service, "ProfileCommandService", _CommandTrap)
+
+    response, audit_info = _run_async(
+        admin_profiles_service.update_user_profile(
+            user_id=7,
+            payload=UserProfileUpdateRequest(updates=[]),
+            principal=_admin_principal(),
+            db=object(),
+        )
+    )
+
+    assert audit_info is None
+    assert response.status_code == 400
+    assert json.loads(response.body.decode("utf-8")) == {
+        "error_code": "profile_update_invalid",
+        "detail": "No updates provided",
+        "errors": [{"key": "updates", "message": "missing"}],
     }

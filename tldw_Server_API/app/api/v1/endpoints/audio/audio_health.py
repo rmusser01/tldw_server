@@ -684,6 +684,27 @@ async def get_tts_health(request: Request, tts_service: TTSServiceV2 = Depends(g
         except Exception:
             logger.debug("Kokoro health enrichment failed")
 
+        # Kitten registry availability means its lazy adapter can accept requests;
+        # only a successful selected-model load proves assets and dependencies ready.
+        kitten_detail = provider_details.get("kitten_tts")
+        if isinstance(kitten_detail, dict):
+            registry = getattr(factory, "registry", None)
+            cached_adapters = getattr(registry, "_adapters", {})
+            kitten_adapter = cached_adapters.get("kitten_tts")
+            if kitten_adapter is not None:
+                runtime_info = kitten_adapter.get_runtime_readiness()
+                kitten_detail.update(runtime_info)
+                if not runtime_info["runtime_ready"]:
+                    failed = runtime_info["runtime_reason"] == "model_load_failed"
+                    availability = "unhealthy" if failed else "unprepared"
+                    kitten_detail.update(status=availability, availability=availability, failed=failed)
+                for entry in capability_envelopes:
+                    if entry.get("provider") == "kitten_tts":
+                        entry.update(runtime_info)
+                        if not runtime_info["runtime_ready"]:
+                            entry["availability"] = kitten_detail["availability"]
+                _recompute_health_rollup(health, provider_details, capability_envelopes)
+
         return health
     except Exception as e:
         logger.exception("Error getting TTS health")

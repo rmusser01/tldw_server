@@ -2,6 +2,7 @@
 # Description: Handles user authentication and identification based on application mode.
 #
 # Imports
+import asyncio
 import contextlib
 import os
 from typing import Any, Optional, Union
@@ -35,18 +36,18 @@ from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.rbac_repo import AuthnzRbacRepo
 from tldw_Server_API.app.core.AuthNZ.session_manager import get_session_manager
-from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode, is_truthy
 
 #
 # Local Imports
 # New unified settings
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
-from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-from tldw_Server_API.app.core.DB_Management.scope_context import set_scope
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
+from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.DB_Management.scope_context import set_scope
 from tldw_Server_API.app.core.exceptions import InactiveUserError
+from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode, is_truthy
 
 _USER_DB_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -211,6 +212,29 @@ def _normalize_active_id(raw: Any, ids: list[int]) -> Optional[int]:
         return active
     return None
 
+
+def _extract_impersonation_claims(payload: dict[str, Any]) -> tuple[bool, Optional[int]]:
+    """Validate the impersonation flag and actor as one inseparable claim pair."""
+    has_flag = "impersonation" in payload
+    has_actor = "impersonated_by" in payload
+    if not has_flag:
+        if has_actor:
+            raise ValueError("impersonation actor without flag")
+        return False, None
+
+    impersonation = payload["impersonation"]
+    if type(impersonation) is not bool:
+        raise ValueError("impersonation flag must be boolean")
+    if not impersonation:
+        if has_actor:
+            raise ValueError("non-impersonation token has actor")
+        return False, None
+
+    actor = payload.get("impersonated_by")
+    if type(actor) is not int:
+        raise ValueError("impersonation actor must be an integer")
+    return True, actor
+
 # --- User Model ---
 # Standardized User object, used even for the dummy single user.
 class User(BaseModel):
@@ -229,6 +253,12 @@ class User(BaseModel):
     roles: list[str] = Field(default_factory=list)
     permissions: list[str] = Field(default_factory=list)
     is_admin: bool = False
+    org_ids: list[int] = Field(default_factory=list)
+    team_ids: list[int] = Field(default_factory=list)
+    active_org_id: Optional[int] = None
+    active_team_id: Optional[int] = None
+    impersonation: bool = False
+    impersonated_by: Optional[int] = None
 
     # Convenience properties for downstream code that expects int ids
     @property
@@ -537,6 +567,10 @@ async def verify_jwt_and_fetch_user(request: Request, token: str = Depends(oauth
         token_team_ids = _coerce_int_list(payload.get("team_ids"))
         token_active_org_id = payload.get("active_org_id")
         token_active_team_id = payload.get("active_team_id")
+        token_impersonation, token_impersonated_by = _extract_impersonation_claims(payload)
+    except ValueError as e:
+        logger.warning("Token contains invalid impersonation claims")
+        raise credentials_exception from e
     except (InvalidTokenError, TokenExpiredError) as e:
         logger.warning(f"Token validation failed: {e}")
         raise credentials_exception from e
@@ -663,13 +697,22 @@ async def verify_jwt_and_fetch_user(request: Request, token: str = Depends(oauth
         subject_db_id_int = None
 
     # --- Enrich with roles/permissions from central AuthNZ RBAC tables ---
-    roles, perms, is_admin = _enrich_user_with_rbac(
-        subject_db_id_int, user_data, pii_redact_logs=pii_redact_logs
+    roles, perms, is_admin = await asyncio.to_thread(
+        _enrich_user_with_rbac, subject_db_id_int, user_data, pii_redact_logs=pii_redact_logs
     )
 
     # --- Create and validate the User Pydantic model ---
     try:
-        user = User(**{**user_data, "roles": roles, "permissions": perms, "is_admin": is_admin})
+        user = User(
+            **{
+                **user_data,
+                "roles": roles,
+                "permissions": perms,
+                "is_admin": is_admin,
+                "impersonation": token_impersonation,
+                "impersonated_by": token_impersonated_by,
+            }
+        )
     except ValidationError as e:  # Catch Pydantic validation errors specifically
         if pii_redact_logs:
             logger.error("Failed to validate user data for authenticated user into User model (details redacted)", exc_info=True)
@@ -841,6 +884,10 @@ async def verify_jwt_and_fetch_user(request: Request, token: str = Depends(oauth
     user.permissions = list(scoped_result.permissions or [])
     active_org_id = scoped_result.active_org_id
     active_team_id = scoped_result.active_team_id
+    user.org_ids = list(org_ids)
+    user.team_ids = list(team_ids)
+    user.active_org_id = active_org_id
+    user.active_team_id = active_team_id
     try:
         request.state.team_ids = team_ids
         request.state.org_ids = org_ids
@@ -875,6 +922,8 @@ async def verify_jwt_and_fetch_user(request: Request, token: str = Depends(oauth
             subject=None,
             token_type="access",
             jti=None,
+            impersonation=user.impersonation,
+            impersonated_by=user.impersonated_by,
             roles=list(user.roles or []),
             permissions=list(user.permissions or []),
             is_admin=bool(user.is_admin),
@@ -1119,8 +1168,8 @@ async def authenticate_api_key_user(request: Request, api_key: str) -> User:
         if user_data.get("is_superuser"):
             user_data.setdefault("is_admin", True)
 
-        roles, perms, is_admin_flag = _enrich_user_with_rbac(
-            user_id, user_data, pii_redact_logs=getattr(settings, "PII_REDACT_LOGS", False)
+        roles, perms, is_admin_flag = await asyncio.to_thread(
+            _enrich_user_with_rbac, user_id, user_data, pii_redact_logs=getattr(settings, "PII_REDACT_LOGS", False)
         )
 
         user_data["roles"] = roles
@@ -1254,6 +1303,10 @@ async def authenticate_api_key_user(request: Request, api_key: str) -> User:
         user_obj.permissions = list(scoped_result.permissions or [])
         active_org_id = scoped_result.active_org_id
         active_team_id = scoped_result.active_team_id
+        user_obj.org_ids = list(org_ids)
+        user_obj.team_ids = list(team_ids)
+        user_obj.active_org_id = active_org_id
+        user_obj.active_team_id = active_team_id
 
         try:
             request.state.team_ids = team_ids
@@ -1429,6 +1482,7 @@ async def get_request_user(
       via the same AuthNZ tables and RBAC as multi-user, with the
       bootstrapped admin treated as a normal user with roles/permissions.
     - Treats non-JWT Bearer tokens as API keys for compatibility.
+    - Delegates headerless requests to the canonical cookie-aware resolver.
     """
     # Test-mode bypasses are disabled in production for safety
     try:
@@ -1524,6 +1578,20 @@ async def get_request_user(
         user = await authenticate_api_key_user(request, api_key)
         _warn_single_user_context_mismatch(request, user, "x_api_key")
         return user
+
+    # Resolve cookie sessions through their canonical owner, including explicit
+    # header precedence and session revocation. Import locally: the resolver also
+    # uses this module's JWT/API-key helpers.
+    if (
+        request.headers.get("Authorization") is None
+        and request.headers.get("X-API-KEY") is None
+    ):
+        from tldw_Server_API.app.core.AuthNZ.auth_principal_resolver import get_auth_principal
+
+        await get_auth_principal(request)
+        user = getattr(request.state, "_auth_user", None)
+        if isinstance(user, User):
+            return user
 
     # Neither Bearer token nor API key provided
     logger.warning(

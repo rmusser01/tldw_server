@@ -62,6 +62,7 @@ from tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps import (
     PromptStudioDatabase,
     get_prompt_studio_db,
     get_prompt_studio_user,
+    managed_prompt_studio_db,
     require_project_access,
 )
 from tldw_Server_API.app.api.v1.endpoints.agent_client_protocol import _authenticate_ws
@@ -541,8 +542,8 @@ async def _authorize_prompt_studio_project(
 ) -> bool:
     """Authorize one project before binding a WebSocket to its event scope."""
     try:
-        db = await get_prompt_studio_db(user_context)
-        await require_project_access(project_id, user_context, db)
+        with managed_prompt_studio_db(user_context) as db:
+            await require_project_access(project_id, user_context, db)
         return True
     except HTTPException as exc:
         await websocket.close(code=4404 if exc.status_code == 404 else 4403)

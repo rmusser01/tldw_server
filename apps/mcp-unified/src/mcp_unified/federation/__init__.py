@@ -18,6 +18,12 @@ from .config_schema import (
     load_external_server_registry,
     parse_external_server_registry,
 )
+from .http_transport import (
+    HttpExternalTransportError,
+    SseExternalTransport,
+    StreamableHttpExternalTransport,
+    create_http_external_transport,
+)
 from .installers import ExternalServerInstaller, NullExternalServerInstaller
 from .manager import ExternalFederationManager
 from .models import (
@@ -39,6 +45,10 @@ from .stdio_transport import (
 from .transports import ExternalFederationTransport, FakeExternalTransport
 
 __all__ = [
+    "HttpExternalTransportError",
+    "SseExternalTransport",
+    "StreamableHttpExternalTransport",
+    "create_http_external_transport",
     "BrokeredExternalCredential",
     "ExternalAuthConfig",
     "ExternalAuthMode",

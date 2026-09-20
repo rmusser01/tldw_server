@@ -51,6 +51,22 @@ export const ALL_FEATURE_FLAGS_DISABLED = {
   ff_compareMode: false
 }
 
+export const createRealServerWorkflowTldwConfig = (
+  serverUrl: string,
+  apiKey: string
+) => {
+  const normalizedServerUrl = serverUrl.replace(/\/$/, "")
+  return {
+    serverUrl: normalizedServerUrl,
+    apiKey,
+    authMode: "single-user" as const,
+    authSource: "manual" as const,
+    credentialSource: "manual" as const,
+    apiKeyPersistence: "device" as const,
+    apiKeyServerOrigin: new URL(normalizedServerUrl).origin
+  }
+}
+
 export const FEATURE_FLAG_KEYS = {
   NEW_CHAT: "ff_newChat",
   NEW_SETTINGS: "ff_newSettings",
@@ -59,6 +75,61 @@ export const FEATURE_FLAG_KEYS = {
   CHAT_SIDEBAR: "ff_chatSidebar",
   COMPARE_MODE: "ff_compareMode"
 } as const
+
+export const createRealServerWorkflowStorageSeed = (
+  dismissedAt = Date.now()
+): Record<string, unknown> => ({
+  __tldw_first_run_complete: true,
+  assistant_setup_dismissed: true,
+  tldw_skip_landing_hub: true,
+  quickIngestInspectorIntroDismissed: true,
+  quickIngestOnboardingDismissed: true,
+  "tldw:workflow:landing-config": {
+    showOnFirstRun: true,
+    dismissedAt,
+    completedWorkflows: []
+  }
+})
+
+export const REAL_SERVER_WORKFLOW_LOCAL_STORAGE_SEED = {
+  "playground-tour-completed": "true",
+  "notes-tutorial-shown": "1",
+  "tldw-tutorials": JSON.stringify({
+    state: {
+      completedTutorials: ["playground", "chat", "notes", "media", "settings"],
+      seenPromptPages: [
+        "/",
+        "/chat",
+        "/notes",
+        "/media",
+        "/settings",
+        "/playground",
+        "/research-workspace"
+      ]
+    },
+    version: 0
+  })
+} as const
+
+export const LEGACY_REAL_SERVER_WORKFLOW_TITLES = [
+  "chat -> save to notes -> open linked conversation",
+  "notes lifecycle: create, tag, preview, export, delete",
+  "chat -> save to flashcards -> review card",
+  "quick ingest -> media review",
+  "knowledge QA search -> open chat with RAG settings",
+  "prompts -> use in chat -> send message",
+  "world books -> entries -> attach -> export -> stats",
+  "dictionaries -> entries -> validate -> preview -> export -> stats",
+  "playground -> server chat -> open history -> pin/unpin",
+  "quiz -> take attempt -> review score",
+  "chatbooks export -> download archive",
+  "tts playback -> server provider -> audio segments",
+  "compare mode -> multi-model answers -> choose winner",
+  "data tables -> chat source -> generate -> save -> delete",
+  "media trash -> delete -> restore",
+  "media ingestion -> analysis -> review -> re-analyze",
+  "characters -> chat persona -> send message"
+] as const
 
 export function withFeatures(
   flags: Array<keyof typeof ALL_FEATURE_FLAGS_ENABLED>,
@@ -361,15 +432,141 @@ const setSelectedModel = async (page: Page, model: string) => {
   )
 }
 
-const getFirstModelId = (payload: any): string | null => {
-  const list = Array.isArray(payload)
-    ? payload
-    : Array.isArray(payload?.models)
-      ? payload.models
+export type RunnableChatModel = {
+  id: string
+  provider: string
+}
+
+const modelRecord = (value: unknown): Record<string, unknown> | null =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
+
+const nonEmptyString = (value: unknown): string | null => {
+  if (typeof value !== "string" && typeof value !== "number") return null
+  const normalized = String(value).trim()
+  return normalized || null
+}
+
+const normalizeProviderKey = (value: unknown): string =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replaceAll("-", "_")
+
+const configuredProviderModels = (payload: unknown): RunnableChatModel[] => {
+  const root = modelRecord(payload)
+  const providers = Array.isArray(root?.providers)
+    ? root.providers
+    : Array.isArray(payload)
+      ? payload
       : []
-  const candidate = list.find((m: any) => m?.id || m?.model || m?.name)
-  const id = candidate?.id || candidate?.model || candidate?.name
-  return id ? String(id) : null
+
+  return providers.flatMap((value) => {
+    const provider = modelRecord(value)
+    if (!provider || provider.is_configured !== true) return []
+    const providerId = nonEmptyString(
+      provider.chat_provider ??
+        provider.chatProvider ??
+        provider.api_provider ??
+        provider.provider_key ??
+        provider.name ??
+        provider.id ??
+        provider.provider
+    )
+    if (!providerId || !Array.isArray(provider.models)) return []
+
+    return provider.models.flatMap((modelValue) => {
+      const model = modelRecord(modelValue)
+      const id = nonEmptyString(
+        model?.id ?? model?.model ?? model?.name ?? modelValue
+      )
+      return id ? [{ id, provider: providerId }] : []
+    })
+  })
+}
+
+const configuredMetadataModels = (payload: unknown): RunnableChatModel[] => {
+  const root = modelRecord(payload)
+  const entries = Array.isArray(payload)
+    ? payload
+    : Array.isArray(root?.models)
+      ? root.models
+      : Array.isArray(root?.items)
+        ? root.items
+        : []
+
+  return entries.flatMap((value) => {
+    const model = modelRecord(value)
+    if (!model) return []
+    const details = modelRecord(model.details)
+    const provider = nonEmptyString(
+      model.chat_provider ??
+        model.chatProvider ??
+        model.api_provider ??
+        model.provider_key ??
+        model.provider ??
+        details?.chat_provider ??
+        details?.api_provider ??
+        details?.provider
+    )
+    const id = nonEmptyString(model.id ?? model.model ?? model.name)
+    if (!provider || !id) return []
+
+    const configured =
+      model.is_configured ??
+      model.configured ??
+      model.provider_is_configured ??
+      details?.is_configured ??
+      details?.configured
+    if (configured !== true) return []
+
+    const capabilities = [
+      model.type,
+      model.model_type,
+      model.capabilities,
+      details?.type,
+      details?.model_type,
+      details?.capabilities
+    ]
+      .flatMap((field) => (Array.isArray(field) ? field : [field]))
+      .map((field) =>
+        String(field || "")
+          .trim()
+          .toLowerCase()
+      )
+      .filter(Boolean)
+    if (!capabilities.some((capability) => capability.includes("chat"))) {
+      return []
+    }
+
+    return [{ id, provider }]
+  })
+}
+
+export const resolveRunnableChatModel = (
+  payload: unknown
+): RunnableChatModel | null => {
+  const candidates = [
+    ...configuredProviderModels(payload),
+    ...configuredMetadataModels(payload)
+  ]
+  return (
+    candidates.find(
+      (candidate) =>
+        normalizeProviderKey(candidate.provider) === "custom_openai_api"
+    ) ??
+    candidates[0] ??
+    null
+  )
+}
+
+export const toSelectedModelId = ({
+  id,
+  provider
+}: RunnableChatModel): string => {
+  if (id.startsWith("tldw:")) return id
+  return `tldw:${provider}:${id}`
 }
 
 const fetchWithKey = async (
@@ -856,58 +1053,63 @@ const logMessageBusDiagnostics = async (page: Page, label: string) => {
   console.log(`[E2E_MSG_DIAG] ${label}`, safeStringify(result))
 }
 
-const waitForConnected = async (page: Page, label: string) => {
+const waitForConnected = async (
+  page: Page,
+  label: string,
+  surface: WorkflowDriver["kind"]
+) => {
   // First check that the page has actually rendered content (not blank)
   await waitForPageContent(page, label, 20000)
 
   await waitForConnectionStore(page, label)
 
-  // Log that we're about to ping
-  await page.evaluate(() => {
-    console.log("PING_DEBUG starting ping test")
-  })
+  if (surface === "extension") {
+    // The callback ping is an extension background-liveness probe. The WebUI
+    // runtime shim intentionally has no extension background listener.
+    await page.evaluate(() => {
+      console.log("PING_DEBUG starting ping test")
+    })
 
-  // Verify background script is responding before connection check
-  const pingResult = await pingBackgroundScript(page)
+    const pingResult = await pingBackgroundScript(page)
 
-  // Log via page evaluate so it shows in console logs
-  await page.evaluate((res) => {
-    console.log("PING_DEBUG background script ping result", JSON.stringify(res))
-  }, pingResult)
+    await page.evaluate((res) => {
+      console.log("PING_DEBUG background script ping result", JSON.stringify(res))
+    }, pingResult)
 
-  if (!pingResult.ok) {
-    console.warn(`[PING_DEBUG] background ping failed for ${label}:`, pingResult?.error || "unknown error")
-    await logRuntimeDiagnostics(page, `${label}-ping-failed`)
-    await logMessageBusDiagnostics(page, `${label}-ping-failed`)
-    const shouldForceConnected =
-      process.env.TLDW_E2E_FORCE_CONNECTED !== "0" &&
-      process.env.TLDW_E2E_FORCE_CONNECTED !== "false"
-    if (shouldForceConnected) {
-      await page.evaluate(() => {
-        const store = (window as any).__tldw_useConnectionStore
-        if (!store?.getState || !store?.setState) return
-        const prev = store.getState().state || {}
-        const now = Date.now()
-        store.setState({
-          state: {
-            ...prev,
-            phase: "connected",
-            isConnected: true,
-            isChecking: false,
-            offlineBypass: true,
-            errorKind: "none",
-            lastError: null,
-            lastStatusCode: null,
-            lastCheckedAt: now,
-            knowledgeStatus: "ready",
-            knowledgeLastCheckedAt: now,
-            knowledgeError: null,
-            mode: "normal",
-            configStep: "health",
-            hasCompletedFirstRun: true
-          }
+    if (!pingResult.ok) {
+      console.warn(`[PING_DEBUG] background ping failed for ${label}:`, pingResult?.error || "unknown error")
+      await logRuntimeDiagnostics(page, `${label}-ping-failed`)
+      await logMessageBusDiagnostics(page, `${label}-ping-failed`)
+      const shouldForceConnected =
+        process.env.TLDW_E2E_FORCE_CONNECTED !== "0" &&
+        process.env.TLDW_E2E_FORCE_CONNECTED !== "false"
+      if (shouldForceConnected) {
+        await page.evaluate(() => {
+          const store = (window as any).__tldw_useConnectionStore
+          if (!store?.getState || !store?.setState) return
+          const prev = store.getState().state || {}
+          const now = Date.now()
+          store.setState({
+            state: {
+              ...prev,
+              phase: "connected",
+              isConnected: true,
+              isChecking: false,
+              offlineBypass: true,
+              errorKind: "none",
+              lastError: null,
+              lastStatusCode: null,
+              lastCheckedAt: now,
+              knowledgeStatus: "ready",
+              knowledgeLastCheckedAt: now,
+              knowledgeError: null,
+              mode: "normal",
+              configStep: "health",
+              hasCompletedFirstRun: true
+            }
+          })
         })
-      })
+      }
     }
   }
 
@@ -1001,6 +1203,153 @@ const ensureServerPersistence = async (page: Page) => {
   }
 }
 
+const selectTrackedCharacterFromRuntimeRail = async (
+  page: Page,
+  characterName: string,
+  surface: WorkflowDriver["kind"],
+  characterId?: string | number | null
+) => {
+  if (surface === "extension") {
+    const trigger = page.getByTestId("chat-character-controls-trigger").first()
+    await expect(trigger).toBeVisible({ timeout: 30000 })
+    await trigger.click()
+
+    const controls = page.getByTestId("chat-character-controls-sheet")
+    await expect(controls).toBeVisible({ timeout: 15000 })
+    await controls
+      .getByRole("button", { name: "Start tracked character chat" })
+      .click()
+
+    const panel = page.getByTestId("assistant-select-panel")
+    await expect(panel).toBeVisible({ timeout: 15000 })
+    const search = panel.getByRole("textbox", {
+      name: /Search characters and personas/i
+    })
+    if (await search.isVisible().catch(() => false)) {
+      await search.fill(characterName)
+    }
+
+    const characterButton = panel.getByRole("button", {
+      name: characterName,
+      exact: true
+    })
+    const retryButton = panel.getByRole("button", { name: "Retry characters" })
+    await expect
+      .poll(
+        async () => {
+          if (await characterButton.isVisible().catch(() => false)) return true
+          if (await retryButton.isVisible().catch(() => false)) {
+            await retryButton.click()
+          }
+          return false
+        },
+        {
+          timeout: 30000,
+          intervals: [500, 1000, 2000],
+          message: `Timed out finding extension character ${characterName}`
+        }
+      )
+      .toBe(true)
+    await characterButton.click()
+    await expect(panel).toBeHidden({ timeout: 10000 })
+
+    const controlsDialog = page.getByRole("dialog", {
+      name: "Character controls"
+    })
+    // CharacterControlsSheet closes only after the selected assistant has been
+    // committed and its completion callback has reset the previous chat. Waiting
+    // for that lifecycle boundary avoids racing a send against the async storage
+    // commit (and accidentally routing the turn as an untracked local chat).
+    await expect(controlsDialog).toBeHidden({ timeout: 10000 })
+
+    const selectedCharacterText = page.getByText(characterName, {
+      exact: false
+    })
+    await expect
+      .poll(
+        async () => {
+          const matches = await selectedCharacterText.count()
+          for (let index = 0; index < matches; index += 1) {
+            if (await selectedCharacterText.nth(index).isVisible()) return true
+          }
+          return false
+        },
+        {
+          timeout: 30000,
+          intervals: [250, 500, 1000],
+          message: `Timed out waiting for extension character ${characterName} to become active`
+        }
+      )
+      .toBe(true)
+    return
+  }
+
+  const trigger = page
+    .getByRole("button", { name: "Select character or persona" })
+    .first()
+  await expect(trigger).toBeVisible({ timeout: 30000 })
+  await trigger.click()
+
+  const panel = page.getByTestId("assistant-select-panel")
+  await expect(panel).toBeVisible({ timeout: 15000 })
+  const charactersTab = page.getByRole("tab", { name: "Characters" })
+  await charactersTab.click()
+  await expect(charactersTab).toHaveAttribute("aria-selected", "true")
+
+  const search = panel.getByRole("textbox", {
+    name: /Search characters and personas/i
+  })
+  if (await search.isVisible().catch(() => false)) {
+    await search.fill(characterName)
+  }
+
+  const characterButton = panel.getByRole("button", {
+    name: characterName,
+    exact: true
+  })
+  const retryButton = panel.getByRole("button", { name: "Retry characters" })
+  await expect
+    .poll(
+      async () => {
+        if (await characterButton.isVisible().catch(() => false)) return true
+        if (await retryButton.isVisible().catch(() => false)) {
+          await retryButton.click()
+        }
+        return false
+      },
+      {
+        timeout: 30000,
+        intervals: [500, 1000, 2000],
+        message: `Timed out finding tracked character ${characterName}`
+      }
+    )
+    .toBe(true)
+
+  await characterButton.click()
+  await expect(panel).toBeHidden({ timeout: 10000 })
+
+  const selectionTriggers = page.getByTestId("character-select")
+  await expect
+    .poll(
+      async () => {
+        const triggerCount = await selectionTriggers.count()
+        for (let index = 0; index < triggerCount; index += 1) {
+          const candidate = selectionTriggers.nth(index)
+          if (!(await candidate.isVisible().catch(() => false))) continue
+          const label = await candidate.getAttribute("aria-label").catch(() => null)
+          if (label?.includes(characterName)) return true
+        }
+        return false
+      },
+      {
+        timeout: 30000,
+        intervals: [250, 500, 1000],
+        message: `Timed out waiting for tracked character ${characterName} to become active`
+      }
+    )
+    .toBe(true)
+}
+
 const ensureChatSidebarExpanded = async (page: Page) => {
   const sidebar = page.getByTestId("chat-sidebar")
   await expect(sidebar).toBeVisible({ timeout: 20000 })
@@ -1045,7 +1394,7 @@ const clickQuickIngestRun = async (modal: Locator) => {
   const resolveQuickIngestAction = async (): Promise<Locator> => {
     const candidates = [
       modal.getByTestId("quick-ingest-run"),
-      modal.getByRole("button", { name: /Use defaults & process/i }),
+      modal.getByRole("button", { name: "Next", exact: true }),
       modal.getByRole("button", { name: /Start Processing/i }),
       modal.getByRole("button", { name: /Run quick ingest/i }),
       modal.getByRole("button", { name: /Configure \d+ items?/i }),
@@ -1061,9 +1410,13 @@ const clickQuickIngestRun = async (modal: Locator) => {
       }
     }
 
-    return modal.getByRole("button", {
-      name: /Use defaults & process|Start Processing|Run quick ingest|Configure|Review|Process|Ingest/i
-    }).first()
+    const buttonLabels = await modal
+      .getByRole("button")
+      .allTextContents()
+      .catch(() => [])
+    throw new Error(
+      `Quick Ingest action was not visible. Buttons: ${JSON.stringify(buttonLabels)}`
+    )
   }
 
   const waitForStableConnection = async (label: string) => {
@@ -1086,58 +1439,68 @@ const clickQuickIngestRun = async (modal: Locator) => {
   }
   await waitForStableConnection("before-click")
 
-  let activeAction = await resolveQuickIngestAction()
-  const getRunState = async () => ({
-    disabled: await activeAction.isDisabled().catch(() => false),
-    text: ((await activeAction.textContent().catch(() => "")) || "").trim(),
-    dataState: await activeAction.getAttribute("data-state").catch(() => null),
-    dataRunning: await activeAction.getAttribute("data-running").catch(() => null),
-    ariaDisabled: await activeAction.getAttribute("aria-disabled").catch(() => null)
-  })
   const triggerRun = async () => {
-    activeAction = await resolveQuickIngestAction()
-    await activeAction.waitFor({ state: "visible", timeout: 15000 })
-    await activeAction.scrollIntoViewIfNeeded()
-    await expect(activeAction).toBeEnabled({ timeout: 15000 })
-    const label = ((await activeAction.textContent().catch(() => "")) || "").trim()
-    await activeAction.click({ timeout: 10000, force: true })
+    let activeAction: Locator | null = null
+    await expect
+      .poll(
+        async () => {
+          activeAction = await resolveQuickIngestAction().catch(() => null)
+          return activeAction !== null
+        },
+        { timeout: 15000 }
+      )
+      .toBe(true)
+    if (!activeAction) {
+      throw new Error("Quick Ingest action did not render.")
+    }
+    const resolvedAction: Locator = activeAction
+    await resolvedAction.scrollIntoViewIfNeeded()
+    await expect(resolvedAction).toBeEnabled({ timeout: 15000 })
+    const label = ((await resolvedAction.textContent().catch(() => "")) || "").trim()
+    await resolvedAction.click({ timeout: 10000, force: true })
     return label
   }
 
-  let clickedLabel = await triggerRun()
-  for (let step = 0; step < 3; step += 1) {
-    if (/use defaults|start processing|run quick ingest|process|ingest/i.test(clickedLabel)) {
-      break
-    }
-    await page.waitForTimeout(500)
-    clickedLabel = await triggerRun()
-  }
-  let lastState: Awaited<ReturnType<typeof getRunState>> | null = null
-  const detectStarted = async () => {
-    return expect
-      .poll(async () => {
-        const state = await getRunState()
-        lastState = state
-        const normalizedText = state.text.trim()
-        return (
-          state.dataRunning === "true" ||
-          state.dataState === "running" ||
-          /^(step 4:\s*)?processing$/i.test(normalizedText) ||
-          state.disabled
-        )
-      }, { timeout: 15000 })
+  const processingHeading = modal.getByRole("heading", { name: /^Processing$/i })
+  const resultsStep = modal.getByTestId("wizard-results-step")
+  const currentStep = modal.locator('[aria-current="step"]').first()
+  const hasStarted = async () =>
+    (await processingHeading.isVisible().catch(() => false)) ||
+    (await resultsStep.isVisible().catch(() => false))
+  const clickedLabels: string[] = []
+  let started = false
+
+  for (let step = 0; step < 4; step += 1) {
+    const previousStep = await currentStep.getAttribute("aria-label").catch(() => null)
+    clickedLabels.push(await triggerRun())
+    const advanced = await expect
+      .poll(
+        async () => {
+          if (await hasStarted()) return true
+          const nextStep = await currentStep
+            .getAttribute("aria-label")
+            .catch(() => null)
+          return Boolean(nextStep && nextStep !== previousStep)
+        },
+        { timeout: 15000 }
+      )
       .toBe(true)
       .then(() => true)
       .catch(() => false)
-  }
-  let started = await detectStarted()
-  if (!started) {
-    await waitForStableConnection("retry")
-    await triggerRun()
-    started = await detectStarted()
+    started = await hasStarted()
+    if (started || !advanced) break
   }
   if (!started) {
-    const state = lastState || await getRunState()
+    const buttons = await modal
+      .getByRole("button")
+      .evaluateAll((elements) =>
+        elements.map((element) => ({
+          text: element.textContent?.trim() || "",
+          disabled: (element as HTMLButtonElement).disabled,
+          ariaCurrent: element.getAttribute("aria-current")
+        }))
+      )
+      .catch(() => [])
     const notices = await page
       .locator(".ant-message-notice-content")
       .allTextContents()
@@ -1152,8 +1515,9 @@ const clickQuickIngestRun = async (modal: Locator) => {
       return store?.getState?.().state || null
     }).catch(() => null)
     throw new Error(
-      `Quick ingest run did not start (button stayed enabled). Debug: ${JSON.stringify({
-        state,
+      `Quick ingest run did not render a processing or result state. Debug: ${JSON.stringify({
+        clickedLabels,
+        buttons,
         notices,
         warnings,
         reattach,
@@ -1163,25 +1527,61 @@ const clickQuickIngestRun = async (modal: Locator) => {
   }
 }
 
+const selectQuickIngestQuickPreset = async (modal: Locator) => {
+  const quickPreset = modal.getByRole("button", {
+    name: "Quick preset",
+    exact: true
+  })
+  if (!(await quickPreset.isVisible().catch(() => false))) {
+    const configureButton = modal
+      .getByRole("button", { name: /Configure \d+ items?/i })
+      .first()
+    await expect(configureButton).toBeVisible({ timeout: 15000 })
+    await expect(configureButton).toBeEnabled({ timeout: 15000 })
+    await configureButton.click()
+  }
+  await expect(quickPreset).toBeVisible({ timeout: 15000 })
+  if ((await quickPreset.getAttribute("aria-pressed")) !== "true") {
+    await quickPreset.click()
+    await expect(quickPreset).toHaveAttribute("aria-pressed", "true", {
+      timeout: 15000
+    })
+  }
+}
+
 const waitForQuickIngestCompletion = async (
   modal: Locator,
   timeoutMs = 120000
 ) => {
-  // Try multiple indicators for completion
-  const indicators = [
-    modal.locator('[data-testid="quick-ingest-complete"]'),
-    modal.getByText(/Quick ingest completed/i)
-  ]
+  const resultsStep = modal.getByTestId("wizard-results-step")
+  const completedRegion = modal
+    .getByRole("region", { name: /completed items/i })
+    .first()
+  const errorRegion = modal
+    .getByRole("region", { name: /error items/i })
+    .first()
 
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    for (const indicator of indicators) {
-      const visible = await indicator.isVisible().catch(() => false)
-      if (visible) return true
-    }
-    await new Promise((r) => setTimeout(r, 1000))
-  }
-  return false
+  await expect
+    .poll(
+      async () =>
+        (await resultsStep.isVisible().catch(() => false)) ||
+        (await completedRegion.isVisible().catch(() => false)) ||
+        (await errorRegion.isVisible().catch(() => false)),
+      {
+        timeout: timeoutMs,
+        message: "Timed out waiting for quick ingest to reach a result state"
+      }
+    )
+    .toBe(true)
+}
+
+const closeQuickIngestModal = async (modal: Locator) => {
+  const closeButton = modal
+    .getByRole("button", { name: "Close", exact: true })
+    .first()
+  await expect(closeButton).toBeVisible({ timeout: 15000 })
+  await closeButton.click({ timeout: 15000 })
+  await expect(modal).toBeHidden({ timeout: 15000 })
 }
 
 const resolveQuickIngestModal = (page: Page) =>
@@ -1203,14 +1603,27 @@ const openQuickIngestModal = async (page: Page) => {
     page.getByRole("button", { name: /Quick ingest/i })
   ]
   for (const trigger of triggerCandidates) {
-    if ((await trigger.count()) === 0) continue
-    const visible = await trigger.first().isVisible().catch(() => false)
+    const visible = await trigger
+      .first()
+      .isVisible({ timeout: 3000 })
+      .catch(() => false)
     if (!visible) continue
     await trigger.first().click()
-    if (await modal.isVisible().catch(() => false)) return modal
+    if (await modal.isVisible({ timeout: 3000 }).catch(() => false)) return modal
   }
 
   await page.evaluate(() => {
+    ;(
+      window as Window & {
+        __tldwPendingQuickIngestOpen?: {
+          mode: "normal"
+          at: number
+        }
+      }
+    ).__tldwPendingQuickIngestOpen = {
+      mode: "normal",
+      at: Date.now()
+    }
     window.dispatchEvent(new CustomEvent("tldw:open-quick-ingest"))
   })
   await waitForQuickIngestReady(modal)
@@ -1295,13 +1708,93 @@ const sendChatMessage = async (page: Page, message: string) => {
   }
   await expect(input).toBeVisible({ timeout: 15000 })
   await expect(input).toBeEditable({ timeout: 15000 })
-  await input.fill(message)
 
-  const sendButton = page.locator('[data-testid="chat-send"]')
-  if ((await sendButton.count()) > 0) {
-    await sendButton.click()
-  } else {
-    await input.press("Enter")
+  const checkingModelReadiness = page.getByText(
+    /Checking chat model readiness/i
+  )
+  const healthyModelStatus = page.getByText(/^Healthy$/i)
+  const isExtensionSidepanel =
+    page.url().startsWith("chrome-extension://") &&
+    page.url().includes("/sidepanel.html")
+  if (!isExtensionSidepanel) {
+    await expect
+      .poll(
+        async () => {
+          const count = await healthyModelStatus.count()
+          for (let index = 0; index < count; index += 1) {
+            if (await healthyModelStatus.nth(index).isVisible().catch(() => false)) {
+              return true
+            }
+          }
+          return false
+        },
+        {
+          timeout: 90000,
+          message: "Timed out waiting for the selected chat model to become healthy"
+        }
+      )
+      .toBe(true)
+    await expect(checkingModelReadiness).toHaveCount(0, { timeout: 15000 })
+  }
+
+  await input.fill(message)
+  await expect(input).toHaveValue(message)
+
+  const dispatchAttempt = page
+    .context()
+    .waitForEvent(
+      "request",
+      {
+        predicate: (request) => {
+          if (request.method().toUpperCase() !== "POST") return false
+          const pathname = new URL(request.url()).pathname
+          return (
+            pathname === "/api/v1/chat/completions" ||
+            pathname === "/api/v1/chats" ||
+            pathname === "/api/v1/chats/" ||
+            /^\/api\/v1\/chats\/[^/]+\/(?:complete-v2|completions)$/.test(
+              pathname
+            )
+          )
+        },
+        timeout: 20000
+      }
+    )
+    .catch(() => null)
+
+  const sendButton = page.getByRole("button", { name: /Send message/i })
+  await expect(sendButton).toBeVisible({ timeout: 15000 })
+  await expect(sendButton).toBeEnabled({ timeout: 15000 })
+  await sendButton.click()
+
+  if (!(await dispatchAttempt) && isExtensionSidepanel) {
+    // Sidepanel chat streams are proxied through the MV3 service worker and
+    // are not consistently surfaced as BrowserContext request events. The
+    // cleared draft proves the composer accepted the send; the following
+    // message-store assertion remains the authoritative completion check.
+    await expect(input).toHaveValue("", { timeout: 20000 })
+    return
+  }
+
+  if (!(await dispatchAttempt)) {
+    const diagnostics = await page.evaluate(() => {
+      const store = (window as any).__tldw_useStoreMessageOption
+      return {
+        selectedModel: store?.getState?.().selectedModel ?? null,
+        draft: (document.querySelector("#textarea-message") as HTMLTextAreaElement)
+          ?.value ?? null
+      }
+    })
+    const alerts = await page
+      .locator('[role="alert"], .mantine-InputWrapper-error')
+      .allTextContents()
+      .catch(() => [])
+    throw new Error(
+      `Composer did not dispatch the chat request: ${JSON.stringify({
+        diagnostics,
+        alerts
+      })}`
+    )
   }
 }
 
@@ -1577,50 +2070,6 @@ const pollForRagSearch = async (
   )
 }
 
-const createSeedFlashcard = async (
-  serverUrl: string,
-  apiKey: string,
-  front: string,
-  back: string
-) => {
-  const normalized = serverUrl.replace(/\/$/, "")
-  const decksRes = await fetchWithKey(
-    `${normalized}/api/v1/flashcards/decks`,
-    apiKey
-  )
-  if (!decksRes.ok) {
-    const body = await decksRes.text().catch(() => "")
-    throw new Error(
-      `Flashcards decks fetch failed: ${decksRes.status} ${decksRes.statusText} ${body}`
-    )
-  }
-  const decksPayload = await decksRes.json().catch(() => [])
-  const decks = parseListPayload(decksPayload, ["decks"])
-  const deckId =
-    decks.length > 0 && decks[0]?.id != null ? decks[0].id : undefined
-  const createRes = await fetchWithKey(
-    `${normalized}/api/v1/flashcards`,
-    apiKey,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        deck_id: deckId,
-        front,
-        back
-      })
-    }
-  )
-  if (!createRes.ok) {
-    const body = await createRes.text().catch(() => "")
-    throw new Error(
-      `Flashcard create failed: ${createRes.status} ${createRes.statusText} ${body}`
-    )
-  }
-  const card = await createRes.json().catch(() => null)
-  return { deckId, card }
-}
-
 const clearRequestErrors = async (page: Page) => {
   await page.evaluate(async () => {
     const w: any = window as any
@@ -1879,87 +2328,26 @@ const pollForNewFlashcard = async (
   throw new Error("New flashcard did not appear after saving.")
 }
 
-const clearReviewDeckSelection = async (page: Page) => {
-  const reviewDeckSelect = page.getByTestId("flashcards-review-deck-select")
-  if ((await reviewDeckSelect.count()) === 0) return
-  const clearButton = reviewDeckSelect.locator(".ant-select-clear")
-  const clearVisible = await clearButton.isVisible().catch(() => false)
-  if (clearVisible) {
-    await clearButton.click()
-    return
-  }
-  await reviewDeckSelect.click().catch(() => {})
-  await page.keyboard.press("Backspace").catch(() => {})
-}
-
-const normalizeCharacterForStorage = (record: any) => {
-  const id =
-    record?.id ??
-    record?.slug ??
-    record?.name ??
-    record?.title ??
-    null
-  const name =
-    record?.name ??
-    record?.title ??
-    record?.slug ??
-    ""
-  return {
-    id: id != null ? String(id) : "",
-    name: String(name),
-    system_prompt:
-      record?.system_prompt ??
-      record?.systemPrompt ??
-      record?.instructions ??
-      "",
-    greeting:
-      record?.greeting ??
-      record?.first_message ??
-      record?.firstMessage ??
-      record?.greet ??
-      "",
-    avatar_url: record?.avatar_url ?? ""
-  }
-}
-
-const setSelectedCharacterInStorage = async (
-  page: Page,
-  character: ReturnType<typeof normalizeCharacterForStorage>
+const cleanupFlashcard = async (
+  serverUrl: string,
+  apiKey: string,
+  cardUuid: string
 ) => {
-  await page.evaluate(async (payload) => {
-    const w: any = window as any
-    const hasLocal =
-      w?.chrome?.storage?.local?.set && w?.chrome?.storage?.local?.get
-    const hasSync =
-      w?.chrome?.storage?.sync?.set && w?.chrome?.storage?.sync?.get
-
-    const setValue = (
-      area: typeof chrome.storage.local | typeof chrome.storage.sync,
-      items: Record<string, unknown>
-    ) =>
-      new Promise<void>((resolve, reject) => {
-        area.set(items, () => {
-          const err = w?.chrome?.runtime?.lastError
-          if (err) reject(err)
-          else resolve()
-        })
-      })
-
-    const stored = JSON.stringify(payload)
-    if (hasLocal) {
-      await setValue(w.chrome.storage.local, { selectedCharacter: stored })
-    }
-    if (hasSync) {
-      await setValue(w.chrome.storage.sync, { selectedCharacter: stored })
-    }
-    if (!hasLocal && !hasSync) {
-      try {
-        localStorage.setItem("selectedCharacter", stored)
-      } catch {
-        // ignore localStorage errors
-      }
-    }
-  }, character)
+  const normalized = serverUrl.replace(/\/$/, "")
+  const encodedUuid = encodeURIComponent(cardUuid)
+  const latestResponse = await fetchWithKey(
+    `${normalized}/api/v1/flashcards/${encodedUuid}`,
+    apiKey
+  ).catch(() => null)
+  if (!latestResponse?.ok) return
+  const latest = await latestResponse.json().catch(() => null)
+  const version = Number(latest?.version)
+  if (!Number.isInteger(version) || version < 1) return
+  await fetchWithKey(
+    `${normalized}/api/v1/flashcards/${encodedUuid}?expected_version=${version}`,
+    apiKey,
+    { method: "DELETE" }
+  ).catch(() => {})
 }
 
 const setLastNoteId = async (page: Page, noteId: string) => {
@@ -2300,6 +2688,62 @@ const getAssistantMessageLocator = (
     .last()
 }
 
+const clickMessageOverflowAction = async (
+  page: Page,
+  message: Locator,
+  actionName: RegExp
+) => {
+  await message.hover()
+
+  const overflowTriggers = message.getByRole("button", {
+    name: /More actions/i
+  })
+  let visibleTrigger: Locator | null = null
+  await expect
+    .poll(
+      async () => {
+        const count = await overflowTriggers.count()
+        for (let index = 0; index < count; index += 1) {
+          const candidate = overflowTriggers.nth(index)
+          if (await candidate.isVisible().catch(() => false)) {
+            visibleTrigger = candidate
+            return true
+          }
+        }
+        return false
+      },
+      { timeout: 15000, intervals: [250, 500, 1000] }
+    )
+    .toBe(true)
+  if (!visibleTrigger) {
+    throw new Error("Message overflow trigger did not become visible.")
+  }
+  await visibleTrigger.click()
+
+  const actions = page.getByRole("button", { name: actionName })
+  let visibleAction: Locator | null = null
+  await expect
+    .poll(
+      async () => {
+        const count = await actions.count()
+        for (let index = 0; index < count; index += 1) {
+          const candidate = actions.nth(index)
+          if (await candidate.isVisible().catch(() => false)) {
+            visibleAction = candidate
+            return true
+          }
+        }
+        return false
+      },
+      { timeout: 15000, intervals: [250, 500, 1000] }
+    )
+    .toBe(true)
+  if (!visibleAction) {
+    throw new Error(`Message overflow action ${actionName} did not become visible.`)
+  }
+  await visibleAction.click()
+}
+
 const pollForServerAssistantMessageId = async (
   serverUrl: string,
   apiKey: string,
@@ -2475,6 +2919,63 @@ const pollForMediaMatch = async (
   )
 }
 
+const extractPersistedMediaAnalysis = (detail: any): string => {
+  const candidates: unknown[] = [
+    detail?.processing?.analysis,
+    detail?.analysis,
+    detail?.analysis_content,
+    detail?.analysisContent,
+    detail?.latest_version?.analysis_content,
+    detail?.latestVersion?.analysisContent
+  ]
+  if (Array.isArray(detail?.analyses)) {
+    for (const entry of detail.analyses) {
+      candidates.push(
+        typeof entry === "string"
+          ? entry
+          : entry?.content ?? entry?.text ?? entry?.summary ?? entry?.analysis_content
+      )
+    }
+  }
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim()
+    }
+  }
+  return ""
+}
+
+const pollForPersistedMediaAnalysis = async (
+  serverUrl: string,
+  apiKey: string,
+  mediaId: string | number,
+  timeoutMs = 60000,
+  expectedAnalysis?: string
+): Promise<string> => {
+  const normalized = serverUrl.replace(/\/$/, "")
+  const deadline = Date.now() + timeoutMs
+  let lastStatus: number | null = null
+  while (Date.now() < deadline) {
+    const response = await fetchWithKeyTimeout(
+      `${normalized}/api/v1/media/${encodeURIComponent(String(mediaId))}`,
+      apiKey
+    ).catch(() => null)
+    lastStatus = response?.status ?? null
+    if (response?.ok) {
+      const detail = await response.json().catch(() => null)
+      const analysis = extractPersistedMediaAnalysis(detail)
+      if (
+        analysis &&
+        (!expectedAnalysis || analysis.includes(expectedAnalysis))
+      ) return analysis
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+  }
+  throw new Error(
+    `Timed out waiting for persisted analysis on media ${String(mediaId)}. Last status: ${String(lastStatus ?? "unknown")}`
+  )
+}
+
 const deleteCharacterByName = async (
   serverUrl: string,
   apiKey: string,
@@ -2500,8 +3001,10 @@ const deleteCharacterByName = async (
     return label === name
   })
   if (!match?.id) return
+  const expectedVersion = Number(match?.version ?? match?.version_number)
+  if (!Number.isFinite(expectedVersion)) return
   await fetchWithKeyTimeout(
-    `${normalized}/api/v1/characters/${encodeURIComponent(String(match.id))}`,
+    `${normalized}/api/v1/characters/${encodeURIComponent(String(match.id))}?expected_version=${encodeURIComponent(String(expectedVersion))}`,
     apiKey,
     { method: "DELETE" }
   ).catch(() => {})
@@ -2513,7 +3016,12 @@ const createCharacterByName = async (
   name: string
 ) => {
   const normalized = serverUrl.replace(/\/$/, "")
-  const payload = { name }
+  const greeting = `Hello from ${name}.`
+  const payload = {
+    name,
+    greeting,
+    first_message: greeting
+  }
   const createPrimary = await fetchWithKey(
     `${normalized}/api/v1/characters/`,
     apiKey,
@@ -3047,7 +3555,7 @@ test.describe("Real server end-to-end workflows", () => {
 
       const modelsResponse = await step("preflight: models", async () => {
         const response = await fetchWithKey(
-          `${normalizedServerUrl}/api/v1/llm/models/metadata`,
+          `${normalizedServerUrl}/api/v1/llm/providers`,
           apiKey
         )
         logStep("models preflight response", {
@@ -3065,18 +3573,19 @@ test.describe("Real server end-to-end workflows", () => {
         )
         return
       }
-      const modelId = getFirstModelId(
+      const runnableModel = resolveRunnableChatModel(
         await modelsResponse.json().catch(() => [])
       )
-      if (!modelId) {
-        skipOrThrow(true, "No chat models returned from tldw_server.")
+      if (!runnableModel) {
+        skipOrThrow(
+          true,
+          "No configured chat-capable model is available on tldw_server."
+        )
         return
       }
-      const selectedModelId = modelId.startsWith("tldw:")
-        ? modelId
-        : `tldw:${modelId}`
+      const selectedModelId = toSelectedModelId(runnableModel)
       logStep("selected model resolved", { selectedModelId })
-  
+
       const notesResponse = await step("preflight: notes list", async () => {
         const response = await fetchWithKey(
           `${normalizedServerUrl}/api/v1/notes/?page=1&results_per_page=1`,
@@ -3134,6 +3643,15 @@ test.describe("Real server end-to-end workflows", () => {
         targetPage.on("pageerror", (error) => {
           logStep(`${tag} pageerror`, { error: String(error) })
         })
+        targetPage.on("response", (response) => {
+          if (response.status() >= 400) {
+            logStep(`${tag} failed response`, {
+              status: response.status(),
+              method: response.request().method(),
+              url: response.url()
+            })
+          }
+        })
       }
       attachPageLogging(page, "options")
   
@@ -3187,8 +3705,7 @@ test.describe("Real server end-to-end workflows", () => {
           return id
         })
         if (!characterId) {
-          skipOrThrow(true, "Unable to create character for notes flow.")
-          return
+          throw new Error("Unable to create character for notes flow.")
         }
         createdCharacter = true
         characterRecord = await step("poll for character", async () => {
@@ -3205,23 +3722,15 @@ test.describe("Real server end-to-end workflows", () => {
           return record
         })
         if (!characterRecord) {
-          skipOrThrow(
-            true,
-            "Character created but not returned by search; skipping notes flow."
+          throw new Error(
+            "Character created but not returned by search for notes flow."
           )
-          return
         }
-  
+
         await step("seed model selection", async () => {
           await setSelectedModel(page, selectedModelId)
         })
-        await step("seed selected character", async () => {
-          await setSelectedCharacterInStorage(
-            page,
-            normalizeCharacterForStorage(characterRecord)
-          )
-        })
-  
+
         const chatPage = await step("open sidepanel", async () => {
           const panel = await openChatSidepanel(driver)
           logStep("sidepanel opened", { url: panel.url() })
@@ -3229,7 +3738,15 @@ test.describe("Real server end-to-end workflows", () => {
         })
         attachPageLogging(chatPage, "sidepanel")
         await step("wait for sidepanel connected", async () => {
-          await waitForConnected(chatPage, "workflow-chat-notes")
+          await waitForConnected(chatPage, "workflow-chat-notes", driver.kind)
+        })
+        await step("select tracked character", async () => {
+          await selectTrackedCharacterFromRuntimeRail(
+            chatPage,
+            characterName,
+            driver.kind,
+            characterId
+          )
         })
         await step("ensure server persistence", async () => {
           await ensureServerPersistence(chatPage)
@@ -3243,15 +3760,14 @@ test.describe("Real server end-to-end workflows", () => {
         await step("wait for message store", async () => {
           await waitForMessageStore(chatPage, "notes-assistant-snapshot", 30000)
         })
-        const assistantSnapshot = await step("wait for assistant snapshot", async () =>
-          waitForAssistantSnapshot(chatPage)
+        const assistantSnapshot = await step(
+          "wait for assistant snapshot",
+          async () => waitForAssistantSnapshot(chatPage)
         )
         if (!assistantSnapshot?.serverChatId || !assistantSnapshot?.text) {
-          skipOrThrow(
-            true,
+          throw new Error(
             "Assistant server message not available after streaming."
           )
-          return
         }
         logStep("assistant snapshot resolved", {
           serverChatId: assistantSnapshot.serverChatId,
@@ -3304,30 +3820,34 @@ test.describe("Real server end-to-end workflows", () => {
           }
         }
         if (!serverMessageId) {
-          skipOrThrow(
-            true,
+          throw new Error(
             "Assistant server message not available after streaming."
           )
-          return
         }
-        await step("wait for assistant save action to become eligible", async () => {
-          await expect
-            .poll(
-              async () => {
-                const latestId = await waitForAssistantServerMessageIdInStore(chatPage, {
-                  localId: assistantSnapshot.localId,
-                  assistantText,
-                  timeoutMs: 2000
-                })
-                return latestId ?? serverMessageId
-              },
-              { timeout: 30000, intervals: [500, 1000, 2000] }
-            )
-            .toBeTruthy()
-        })
+        await step(
+          "wait for assistant save action to become eligible",
+          async () => {
+            await expect
+              .poll(
+                async () => {
+                  const latestId = await waitForAssistantServerMessageIdInStore(
+                    chatPage,
+                    {
+                      localId: assistantSnapshot.localId,
+                      assistantText,
+                      timeoutMs: 2000
+                    }
+                  )
+                  return latestId ?? serverMessageId
+                },
+                { timeout: 30000, intervals: [500, 1000, 2000] }
+              )
+              .toBeTruthy()
+          }
+        )
         const snippet = assistantText.slice(0, 80)
         logStep("assistant snippet", { snippet })
-  
+
         await step("save assistant to notes", async () => {
           await clickSaveToNotesAction(chatPage, assistantMessage)
         })
@@ -3345,23 +3865,17 @@ test.describe("Real server end-to-end workflows", () => {
           return note
         })
         if (!savedNote) {
-          skipOrThrow(true, "Saved note not found for conversation.")
-          return
+          throw new Error("Saved note not found for conversation.")
         }
         const backlink = extractNoteBacklink(savedNote)
         logStep("saved note backlink", backlink)
         if (!backlink.conversation_id) {
-          skipOrThrow(true, "Saved note missing linked conversation id.")
-          return
+          throw new Error("Saved note missing linked conversation id.")
         }
         const savedNoteId =
-          savedNote?.id ??
-          savedNote?.note_id ??
-          savedNote?.noteId ??
-          null
+          savedNote?.id ?? savedNote?.note_id ?? savedNote?.noteId ?? null
         if (savedNoteId == null) {
-          skipOrThrow(true, "Saved note missing id.")
-          return
+          throw new Error("Saved note missing id.")
         }
         logStep("saved note id resolved", { savedNoteId })
         await step("seed last note id", async () => {
@@ -3374,24 +3888,24 @@ test.describe("Real server end-to-end workflows", () => {
           })
         })
         await step("wait for notes connected", async () => {
-          await waitForConnected(page, "workflow-notes-view")
+          await waitForConnected(page, "workflow-notes-view", driver.kind)
         })
   
         const noteTitle = String(savedNote?.title || "").trim()
         const query =
           noteTitle.length > 0 ? noteTitle.slice(0, 40) : snippet.slice(0, 40)
         logStep("notes search query", { noteTitle, query })
-        const openConversation = page.getByRole("button", {
-          name: /Open conversation/i
-        })
-        const openVisible = await step("wait for note selection", async () =>
-          openConversation
+        const linkedConversationLabel = page
+          .getByText(/Linked to conversation/i)
+          .first()
+        const backlinkVisible = await step("wait for note selection", async () =>
+          linkedConversationLabel
             .waitFor({ state: "visible", timeout: 30000 })
             .then(() => true)
             .catch(() => false)
         )
-        logStep("open conversation visible", { openVisible })
-        if (!openVisible) {
+        logStep("linked conversation visible", { backlinkVisible })
+        if (!backlinkVisible) {
           await step("clear notes search", async () => {
             const searchInput = page.getByPlaceholder(
               /Search titles and contents|Search notes/i
@@ -3404,41 +3918,38 @@ test.describe("Real server end-to-end workflows", () => {
             findNoteRowInList(page, backlink.conversation_id, query, 6)
           )
           if (!resultRow) {
-            skipOrThrow(true, "Note row not visible in notes list.")
-            return
+            throw new Error("Note row not visible in notes list.")
           }
           await step("select note row", async () => {
             await expect(resultRow).toBeVisible({ timeout: 10000 })
             await resultRow.click()
           })
-          await expect(openConversation).toBeVisible({ timeout: 15000 })
+          await expect(linkedConversationLabel).toBeVisible({ timeout: 15000 })
         }
   
       await step("verify linked conversation", async () => {
-        const editorPanel = page.locator('div[aria-disabled]').first()
-        await expect(
-          editorPanel.getByText(/Linked to conversation/i)
-        ).toBeVisible({ timeout: 10000 })
-        await expect(
-          editorPanel.getByText(backlink.conversation_id, { exact: false })
-        ).toBeVisible({ timeout: 10000 })
+        await expect(linkedConversationLabel).toBeVisible({ timeout: 10000 })
       })
   
       await step("open linked conversation", async () => {
-        const openConversationCount = await openConversation.count()
-        logStep("open conversation button count", {
-          count: openConversationCount
+        const overflowMenu = page.getByTestId("notes-overflow-menu-button")
+        await expect(overflowMenu).toBeVisible({ timeout: 10000 })
+        await overflowMenu.click()
+        const openConversation = page.getByRole("menuitem", {
+          name: /Open linked conversation|Open conversation/i
         })
-        if (openConversationCount > 0) {
-          logStep("open conversation url before", { url: page.url() })
-          await openConversation.click()
-          await waitForChatLanding(page, driver, 20000)
-          await waitForConnected(page, "workflow-notes-open-linked")
-          logStep("open conversation url after", { url: page.url() })
-          await expect(
-            page.locator("#textarea-message")
-          ).toBeVisible({ timeout: 20000 })
-        }
+        await expect(openConversation).toBeVisible({ timeout: 10000 })
+        logStep("open conversation url before", { url: page.url() })
+        await openConversation.click()
+        await waitForChatLanding(page, driver, 20000)
+        await waitForConnected(page, "workflow-notes-open-linked", driver.kind)
+        logStep("open conversation url after", { url: page.url() })
+        await expect(
+          page.locator("#textarea-message")
+        ).toBeVisible({ timeout: 20000 })
+        await expect(
+          page.getByRole("log", { name: /chat messages/i })
+        ).toContainText(userMessage, { timeout: 30000 })
       })
       } finally {
         await testInfo.attach("notes-flow-debug", {
@@ -3454,1192 +3965,33 @@ test.describe("Real server end-to-end workflows", () => {
           )
         }
       }
-  })
+    })
 
-  test(
-    "notes lifecycle: create, tag, preview, export, delete",
-    async ({ page: fixturePage, context: fixtureContext }) => {
-    test.setTimeout(150000)
-    const { serverUrl, apiKey } = requireRealServerConfig()
-    const normalizedServerUrl = normalizeServerUrl(serverUrl)
-
-    const notesResponse = await fetchWithKey(
-      `${normalizedServerUrl}/api/v1/notes/?page=1&results_per_page=1`,
-      apiKey
-    )
-    if (!notesResponse.ok) {
-      const body = await notesResponse.text().catch(() => "")
-      skipOrThrow(
-        true,
-        `Notes API preflight failed: ${notesResponse.status} ${notesResponse.statusText} ${body}`
-      )
-      return
-    }
-
-    const driver = await createDriverForTest({
-      serverUrl: normalizedServerUrl,
-      apiKey,
+    test("chat -> save to flashcards -> review card", async ({
       page: fixturePage,
       context: fixtureContext
-    })
-    const { context, page } = driver
-
-    try {
-      const granted = await driver.ensureHostPermission()
-      if (!granted) {
-        skipOrThrow(
-          true,
-          "Host permission not granted for tldw_server origin; allow it in chrome://extensions > tldw Assistant > Site access, then re-run"
-        )
-        return
-      }
-
-      await driver.goto(page, "/notes", {
-        waitUntil: "domcontentloaded"
-      })
-      await waitForConnected(page, "workflow-notes-lifecycle")
-      page.setDefaultTimeout(15000)
-
-      const unique = Date.now()
-      const title = `E2E Note ${unique}`
-      const content = `# Note ${unique}\n\nThis is a real-server notes workflow.`
-      const keyword = `e2e-${unique}`
-
-      await ensureFreshNoteEditor(page)
-      const titleInput = page.getByPlaceholder("Title", { exact: true })
-      await titleInput.waitFor({ state: "visible", timeout: 15000 })
-      const titleEditable = await titleInput.isEditable().catch(() => false)
-      if (!titleEditable) {
-        const notesUnavailable = await page
-          .getByText(
-            /Connect to use Notes|Notes API not available on this server/i
-          )
-          .isVisible()
-          .catch(() => false)
-        if (notesUnavailable) {
-          skipOrThrow(
-            true,
-            "Notes editor is disabled; server not connected or Notes API unavailable."
-          )
-          return
-        }
-        await expect(titleInput).toBeEditable({ timeout: 15000 })
-      }
-      await titleInput.fill(title, { timeout: 15000 })
-      await page
-        .getByPlaceholder(/Write your note here/i)
-        .fill(content, { timeout: 15000 })
-
-      const keywordInput = page.getByTestId("notes-keywords-editor")
-      await expect(keywordInput).toBeVisible({ timeout: 15000 })
-      await keywordInput.click({ timeout: 15000 })
-      await page.keyboard.type(keyword)
-      await page.keyboard.press("Enter")
-      await page.keyboard.press("Escape").catch(() => {})
-
-      const saveButton = page.getByRole("button", { name: /Save note/i })
-      await expect(saveButton).toBeEnabled({ timeout: 15000 })
-      await saveButton.click({ timeout: 15000 })
-      const savedNotePromise = pollForNoteByTitle(
-        normalizedServerUrl,
-        apiKey,
-        title,
-        30000
-      )
-      try {
-        await expect(
-          page.getByText(/Note created|Note updated/i)
-        ).toBeVisible({ timeout: 15000 })
-      } catch (error: any) {
-        const savedNote = await savedNotePromise
-        const noteHint = savedNote
-          ? `found id=${savedNote?.id ?? "unknown"} title=${savedNote?.title ?? "unknown"}`
-          : "not found"
-        throw new Error(`Save toast missing; note lookup after save: ${noteHint}`, {
-          cause: error
-        })
-      }
-
-      const savedNote = await savedNotePromise
-
-      const expandSidebar = page.getByRole("button", {
-        name: /Expand sidebar/i
-      })
-      if (await expandSidebar.isVisible().catch(() => false)) {
-        await expandSidebar.click({ timeout: 15000 })
-      }
-
-      const searchInput = page.getByPlaceholder(/Search notes/i)
-      const searchVisible = await searchInput.isVisible().catch(() => false)
-      if (searchVisible) {
-        await searchInput.fill(title, { timeout: 15000 })
-        await searchInput.press("Enter", { timeout: 15000 })
-        const resultRow = page
-          .locator("button")
-          .filter({ hasText: title })
-          .first()
-        await expect(resultRow).toBeVisible({ timeout: 20000 })
-        await resultRow.click({ timeout: 15000 })
-      } else {
-        await expect(titleInput).toHaveValue(title, { timeout: 15000 })
-      }
-
-      const previewToggle = page.getByRole("button", {
-        name: /Preview rendered Markdown|Preview/i
-      })
-      if ((await previewToggle.count()) > 0) {
-        await previewToggle.click()
-        await expect(
-          page.getByText(/Preview \(Markdown/i)
-        ).toBeVisible({ timeout: 10000 })
-      }
-
-      const exportButton = page.getByRole("button", {
-        name: /Export note as Markdown/i
-      })
-      await expect(exportButton).toBeEnabled({ timeout: 15000 })
-      const downloadPromise = page
-        .waitForEvent("download", { timeout: 15000 })
-        .catch(() => null)
-      await exportButton.click({ timeout: 15000 })
-      const download = await downloadPromise
-      if (download) {
-        await download.path().catch(() => {})
-      }
-      await expect(
-        page.getByText(/Exported/i)
-      ).toBeVisible({ timeout: 15000 })
-
-      const deleteButton = page.getByRole("button", { name: /Delete note/i })
-      await expect(deleteButton).toBeEnabled({ timeout: 15000 })
-      await deleteButton.click({ timeout: 15000 })
-      const confirmDelete = page.getByRole("button", { name: /^Delete$/ })
-      await expect(confirmDelete).toBeVisible({ timeout: 15000 })
-      const deleteResponsePromise =
-        savedNote?.id != null
-          ? page
-              .waitForResponse(
-                (response) => {
-                  const url = response.url()
-                  if (!url.includes("/api/v1/notes/")) return false
-                  if (!url.includes(String(savedNote.id))) return false
-                  const method = response.request().method()
-                  return method === "DELETE" || method === "POST"
-                },
-                { timeout: 15000 }
-              )
-              .catch(() => null)
-          : null
-      await confirmDelete.click({ timeout: 15000 })
-      if (deleteResponsePromise) {
-        const deleteResponse = await deleteResponsePromise
-        if (deleteResponse) {
-          let bodyText = ""
-          try {
-            bodyText = await deleteResponse.text()
-          } catch (error) {
-            console.log(
-              "[e2e] delete response: failed to read body",
-              error
-            )
-          }
-          const bodySnippet =
-            bodyText.length > 500
-              ? `${bodyText.slice(0, 500)}...(truncated)`
-              : bodyText
-          console.log(
-            `[e2e] delete response: status=${deleteResponse.status()} ok=${deleteResponse.ok()} body=${bodySnippet}`
-          )
-        } else {
-          console.log("[e2e] delete response: not captured")
-        }
-      }
-      if (savedNote?.id != null) {
-        let deletePollAttempt = 0
-        await expect
-          .poll(async () => {
-            deletePollAttempt += 1
-            let res: Response | null = null
-            try {
-              res = await fetchWithKey(
-                `${normalizedServerUrl.replace(/\/$/, "")}/api/v1/notes/${encodeURIComponent(
-                  String(savedNote.id)
-                )}`,
-                apiKey
-              )
-            } catch (error) {
-              console.log(
-                `[e2e] delete poll attempt ${deletePollAttempt}: fetch error`,
-                error
-              )
-              return false
-            }
-            if (!res) return false
-            let bodyText = ""
-            try {
-              bodyText = await res.text()
-            } catch (error) {
-              console.log(
-                `[e2e] delete poll attempt ${deletePollAttempt}: read body error`,
-                error
-              )
-            }
-            const bodySnippet =
-              bodyText.length > 500
-                ? `${bodyText.slice(0, 500)}...(truncated)`
-                : bodyText
-            console.log(
-              `[e2e] delete poll attempt ${deletePollAttempt}: status=${res.status} ok=${res.ok} body=${bodySnippet}`
-            )
-            if (res.status === 404) return true
-            if (!res.ok) return false
-            let payload: { id?: string | number } | null = null
-            if (bodyText) {
-              try {
-                payload = JSON.parse(bodyText)
-              } catch {
-                payload = null
-              }
-            }
-            if (!payload || payload?.id == null) return true
-            if ((payload as any)?.deleted === true) return true
-            return false
-          }, { timeout: 30000 })
-          .toBe(true)
-      } else if (searchVisible) {
-        await searchInput.fill(title, { timeout: 15000 })
-        await searchInput.press("Enter", { timeout: 15000 })
-        await expect
-          .poll(
-            async () =>
-              page
-                .locator("button")
-                .filter({ hasText: title })
-                .count(),
-            { timeout: 30000 }
-          )
-          .toBe(0)
-      } else {
-        await expect(
-          page.getByText(/Note deleted|Deleted/i)
-        ).toBeVisible({ timeout: 15000 })
-      }
-    } finally {
-      await driver.close()
-    }
-  })
-
-  test(
-    "chat -> save to flashcards -> review card",
-    async ({ page: fixturePage, context: fixtureContext }) => {
-    test.setTimeout(180000)
-    const { serverUrl, apiKey } = requireRealServerConfig()
-    const normalizedServerUrl = normalizeServerUrl(serverUrl)
-
-    const decksResponse = await fetchWithKey(
-      `${normalizedServerUrl}/api/v1/flashcards/decks`,
-      apiKey
-    )
-    if (!decksResponse.ok) {
-      const body = await decksResponse.text().catch(() => "")
-      skipOrThrow(
-        true,
-        `Flashcards API preflight failed: ${decksResponse.status} ${decksResponse.statusText} ${body}`
-      )
-      return
-    }
-
-    const modelsResponse = await fetchWithKey(
-      `${normalizedServerUrl}/api/v1/llm/models/metadata`,
-      apiKey
-    )
-    if (!modelsResponse.ok) {
-      const body = await modelsResponse.text().catch(() => "")
-      skipOrThrow(
-        true,
-        `Chat models preflight failed: ${modelsResponse.status} ${modelsResponse.statusText} ${body}`
-      )
-      return
-    }
-    const modelId = getFirstModelId(
-      await modelsResponse.json().catch(() => [])
-    )
-    if (!modelId) {
-      skipOrThrow(true, "No chat models returned from tldw_server.")
-      return
-    }
-    const selectedModelId = modelId.startsWith("tldw:")
-      ? modelId
-      : `tldw:${modelId}`
-
-    const unique = Date.now()
-    const characterName = `E2E Flashcards Character ${unique}`
-    let createdCharacter = false
-    let characterRecord: any | null = null
-    const characterListResponse = await fetchWithKey(
-      `${normalizedServerUrl}/api/v1/characters/?page=1&results_per_page=1`,
-      apiKey
-    ).catch(() => null)
-    if (!characterListResponse?.ok) {
-      const body = await characterListResponse?.text().catch(() => "")
-      skipOrThrow(
-        true,
-        `Characters API preflight failed: ${characterListResponse?.status} ${characterListResponse?.statusText} ${body}`
-      )
-      return
-    }
-    const characterId = await createCharacterByName(
-      normalizedServerUrl,
-      apiKey,
-      characterName
-    )
-    if (!characterId) {
-      skipOrThrow(true, "Unable to create character for flashcards flow.")
-      return
-    }
-    createdCharacter = true
-    characterRecord = await pollForCharacterByName(
-      normalizedServerUrl,
-      apiKey,
-      characterName,
-      30000
-    )
-    if (!characterRecord) {
-      skipOrThrow(
-        true,
-        "Character created but not returned by search; skipping flashcards flow."
-      )
-      return
-    }
-
-    const driver = await createDriverForTest({
-      serverUrl: normalizedServerUrl,
-      apiKey,
-      page: fixturePage,
-      context: fixtureContext
-    })
-    const { context, page, openSidepanel } = driver
-
-    try {
-      const granted = await driver.ensureHostPermission()
-      if (!granted) {
-        skipOrThrow(
-          true,
-          "Host permission not granted for tldw_server origin; allow it in chrome://extensions > tldw Assistant > Site access, then re-run"
-        )
-        return
-      }
-
-      await setSelectedModel(page, selectedModelId)
-      await setSelectedCharacterInStorage(
-        page,
-        normalizeCharacterForStorage(characterRecord)
-      )
-
-      const chatPage = await openChatSidepanel(driver)
-      await waitForConnected(chatPage, "workflow-chat-flashcards")
-      await ensureServerPersistence(chatPage)
-
-      const userMessage = `E2E flashcards flow ${unique}`
-      await sendChatMessage(chatPage, userMessage)
-      await waitForAssistantMessage(chatPage)
-      await waitForMessageStore(chatPage, "flashcards-assistant-snapshot", 30000)
-      const assistantSnapshot = await waitForAssistantSnapshot(chatPage)
-      if (!assistantSnapshot?.serverChatId || !assistantSnapshot?.text) {
-        skipOrThrow(
-          true,
-          "Assistant server message not available after streaming."
-        )
-        return
-      }
-      const assistantText = normalizeMessageContent(assistantSnapshot.text)
-      if (!assistantText) {
-        throw new Error("Assistant message did not contain text.")
-      }
-      const serverChatId = String(assistantSnapshot.serverChatId)
-      let serverMessageId = assistantSnapshot.serverMessageId
-        ? String(assistantSnapshot.serverMessageId)
-        : null
-      const assistantMessage = getAssistantMessageLocator(chatPage, assistantSnapshot)
-      await expect(assistantMessage).toBeVisible({ timeout: 30000 })
-      if (!serverMessageId) {
-        serverMessageId = await waitForAssistantServerMessageIdInStore(chatPage, {
-          localId: assistantSnapshot.localId,
-          assistantText
-        })
-      }
-      if (!serverMessageId) {
-        serverMessageId = await pollForServerAssistantMessageId(
-          normalizedServerUrl,
-          apiKey,
-          serverChatId,
-          assistantText
-        )
-        if (serverMessageId) {
-          await syncAssistantServerMessageIdIntoStore(chatPage, {
-            localId: assistantSnapshot.localId,
-            serverMessageId
-          })
-        }
-      }
-      if (!serverMessageId) {
-        skipOrThrow(
-          true,
-          "Assistant server message not available after streaming."
-        )
-        return
-      }
-      await expect
-        .poll(
-          async () =>
-            waitForAssistantServerMessageIdInStore(chatPage, {
-              localId: assistantSnapshot.localId,
-              assistantText,
-              timeoutMs: 2000
-            }),
-          { timeout: 30000, intervals: [500, 1000, 2000] }
-        )
-        .toBeTruthy()
-      const baselineFlashcards = await fetchRecentFlashcards(
-        normalizedServerUrl,
-        apiKey,
-        20
-      )
-      const baselineFlashcardIds = new Set(
-        baselineFlashcards
-          .map((item: any) => (item?.uuid != null ? String(item.uuid) : null))
-          .filter((id: string | null): id is string => Boolean(id))
-      )
-
-      await assistantMessage.hover().catch(() => {})
-      const saveToFlashcards = assistantMessage.getByRole("button", {
-        name: /Save to Flashcards/i
-      })
-      await expect
-        .poll(() => saveToFlashcards.count(), { timeout: 15000 })
-        .toBeGreaterThan(0)
-      await clearRequestErrors(chatPage)
-      await saveToFlashcards.first().click()
-      await expect(
-        chatPage.getByText(/Saved to Flashcards/i)
-      ).toBeVisible({ timeout: 15000 })
-      const requestErrors = await readLastRequestError(chatPage)
-      if (requestErrors?.last || requestErrors?.recent?.length) {
-        console.log(
-          "[e2e] flashcards save request errors",
-          JSON.stringify(requestErrors)
-        )
-      }
-      await logFlashcardsSnapshot(
-        normalizedServerUrl,
-        apiKey,
-        "after-save"
-      )
-      try {
-        await pollForNewFlashcard(
-          normalizedServerUrl,
-          apiKey,
-          baselineFlashcardIds,
-          assistantText
-        )
-      } catch (error) {
-        await probeSaveChatKnowledge(
-          normalizedServerUrl,
-          apiKey,
-          {
-            conversation_id: serverChatId,
-            message_id: serverMessageId,
-            snippet: assistantText.slice(0, 1000),
-            make_flashcard: true
-          },
-          "after-save-timeout"
-        )
-        await logChatMessagesSnapshot(
-          normalizedServerUrl,
-          apiKey,
-          serverChatId,
-          "after-save-timeout"
-        )
-        await logFlashcardsSnapshot(
-          normalizedServerUrl,
-          apiKey,
-          "after-save-timeout"
-        )
-        throw error
-      }
-
-      await driver.goto(page, "/flashcards", {
-        waitUntil: "domcontentloaded"
-      })
-      await waitForConnected(page, "workflow-flashcards-view")
-
-      const cardsTab = page.getByRole("tab", { name: /Cards/i })
-      await cardsTab.click()
-
-      const cardRow = page
-        .locator('[data-testid^="flashcard-item-"]')
-        .first()
-      await expect(cardRow).toBeVisible({ timeout: 30000 })
-
-      const reviewTab = page.getByRole("tab", { name: /Review/i })
-      await reviewTab.click()
-
-      const showAnswer = page.getByTestId("flashcards-review-show-answer")
-      const emptyState = page.getByText(
-        /No cards are due for review|Create your first flashcard/i
-      )
-      await expect
-        .poll(
-          async () =>
-            (await showAnswer.isVisible().catch(() => false)) ||
-            (await emptyState.isVisible().catch(() => false)),
-          { timeout: 30000 }
-        )
-        .toBe(true)
-      const showAnswerVisible = await showAnswer.isVisible().catch(() => false)
-      if (!showAnswerVisible) {
-        const emptyVisible = await emptyState.isVisible().catch(() => false)
-        if (emptyVisible) {
-          const seedToken = `e2e-review-${Date.now()}`
-          await createSeedFlashcard(
-            normalizedServerUrl,
-            apiKey,
-            `E2E Seed Front ${seedToken}`,
-            `E2E Seed Back ${seedToken}`
-          )
-          await page.reload({ waitUntil: "domcontentloaded" })
-          await waitForConnected(page, "workflow-flashcards-review-seed")
-          await reviewTab.click()
-          await clearReviewDeckSelection(page)
-          await expect(showAnswer).toBeVisible({ timeout: 30000 })
-        }
-      }
-
-      await expect(showAnswer).toBeVisible({ timeout: 15000 })
-      await showAnswer.click()
-      const rateButton = page.getByTestId("flashcards-review-rate-2")
-      await rateButton.click()
-    } finally {
-      await driver.close()
-      if (createdCharacter) {
-        await deleteCharacterByName(
-          normalizedServerUrl,
-          apiKey,
-          characterName
-        )
-      }
-    }
-  })
-
-  test(
-    "quick ingest -> media review",
-    async ({ page: fixturePage, context: fixtureContext }, testInfo) => {
-    test.setTimeout(360000)
-    const debugLines: string[] = []
-    const startedAt = Date.now()
-    const safeStringify = (value: unknown) => {
-      try {
-        return JSON.stringify(value)
-      } catch {
-        return "\"[unserializable]\""
-      }
-    }
-    const logStep = (message: string, details?: Record<string, unknown>) => {
-      const payload = {
-        elapsedMs: Date.now() - startedAt,
-        ...(details || {})
-      }
-      const line = `[real-server-quick-ingest] ${message} ${safeStringify(
-        payload
-      )}`
-      debugLines.push(line)
-      console.log(line)
-    }
-    const { serverUrl, apiKey } = requireRealServerConfig()
-    const normalizedServerUrl = normalizeServerUrl(serverUrl)
-    const { apiBase: mediaApiBase, mediaBasePath } = await resolveMediaApi(
-      normalizedServerUrl,
-      apiKey
-    )
-    await preflightMediaApi(mediaApiBase, mediaBasePath, apiKey)
-
-    const driver = await createDriverForTest({
-      serverUrl: mediaApiBase,
-      apiKey,
-      page: fixturePage,
-      context: fixtureContext
-    })
-    const { context, page } = driver
-
-    // Capture page console for debugging quick ingest message passing
-    page.on('console', (msg) => {
-      const text = msg.text()
-      if (text.includes('[QI_MODAL]') || text.includes('[QUICK_INGEST]') || text.includes('[API_SEND_DEBUG]') || text.includes('error')) {
-        console.log('[PAGE_CONSOLE]', msg.type(), text)
-      }
-    })
-
-    try {
-      const granted = await driver.ensureHostPermission()
-      if (!granted) {
-        skipOrThrow(
-          true,
-          "Host permission not granted for tldw_server origin; allow it in chrome://extensions > tldw Assistant > Site access, then re-run"
-        )
-        return
-      }
-
-      await driver.goto(page, "/media", {
-        waitUntil: "domcontentloaded"
-      })
-      await waitForConnected(page, "workflow-quick-ingest")
-
-      let modal: Locator
-      try {
-        modal = await openQuickIngestModal(page)
-      } catch {
-        await driver.goto(page, "/playground", {
-          waitUntil: "domcontentloaded"
-        })
-        await waitForConnected(page, "workflow-quick-ingest-fallback")
-        modal = await openQuickIngestModal(page)
-      }
-      await waitForQuickIngestReady(modal)
-
-      const unique = Date.now()
-      const fileName = `e2e-media-${unique}.txt`
-      await page.setInputFiles('[data-testid="qi-file-input"]', {
-        name: fileName,
-        mimeType: "text/plain",
-        buffer: Buffer.from(`E2E Quick ingest ${unique}`)
-      })
-
-      const fileRow = modal.getByText(fileName).first()
-      await expect(fileRow).toBeVisible({ timeout: 15000 })
-      await dismissQuickIngestInspectorIntro(page)
-
-      const analysisToggle = page.getByLabel(/Ingestion options .*analysis/i)
-      if ((await analysisToggle.count()) > 0) {
-        await analysisToggle.click()
-      }
-      const chunkingToggle = page.getByLabel(/Ingestion options .*chunking/i)
-      if ((await chunkingToggle.count()) > 0) {
-        await chunkingToggle.click()
-      }
-
-      const runButton = modal
-        .getByRole("button", {
-          name: /Use defaults & process|Configure \d+ items?|Start Processing|Run quick ingest/i
-        })
-        .first()
-      await expect(runButton).toBeEnabled({ timeout: 15000 })
-      logStep("pre-run state", {
-        url: page.url(),
-        connection: await page
-          .evaluate(() => {
-            const store = (window as any).__tldw_useConnectionStore
-            return store?.getState?.().state ?? null
-          })
-          .catch(() => null),
-        quickIngest: await page
-          .evaluate(() => {
-            const store = (window as any).__tldw_useQuickIngestStore
-            return store?.getState?.() ?? null
-          })
-          .catch(() => null),
-        runLabel: await runButton.textContent().catch(() => null)
-      })
-      logStep("run click")
-      await clickQuickIngestRun(modal)
-      try {
-        await expect
-          .poll(async () => {
-            const disabled = await runButton.isDisabled().catch(() => false)
-            const hidden = !(await runButton.isVisible().catch(() => false))
-            const processing = await modal
-              .getByRole("button", { name: /Step 4: Processing|Processing/i })
-              .isVisible()
-              .catch(() => false)
-            const results = await modal
-              .getByRole("button", { name: /Step 5: Results|Results/i })
-              .isVisible()
-              .catch(() => false)
-            return disabled || hidden || processing || results
-          }, { timeout: 15000 })
-          .toBe(true)
-      } catch (error) {
-        logStep("run did not start", {
-          runLabel: await runButton.textContent().catch(() => null),
-          runDisabled: await runButton.isDisabled().catch(() => null),
-          connection: await page
-            .evaluate(() => {
-              const store = (window as any).__tldw_useConnectionStore
-              return store?.getState?.().state ?? null
-            })
-            .catch(() => null)
-        })
-        throw error
-      }
-
-      logStep("waiting for completion")
-      // Debug logging for quick ingest modal state before waiting
-      const modalVisible = await modal.isVisible().catch(() => false)
-      const modalTexts = await modal.locator("*").allTextContents().catch(() => [])
-      const relevantTexts = modalTexts.filter(t =>
-        t.toLowerCase().includes("ingest") ||
-        t.toLowerCase().includes("complet") ||
-        t.toLowerCase().includes("progress") ||
-        t.toLowerCase().includes("error") ||
-        t.toLowerCase().includes("success") ||
-        t.toLowerCase().includes("done")
-      ).slice(0, 5)
-      logStep("modal state before wait", {
-        modalVisible,
-        relevantTexts
-      })
-      // Wait for completion - check multiple possible success indicators
-      const completionIndicators = [
-        modal.locator('[data-testid="quick-ingest-complete"]'),
-        modal.getByText(/Quick ingest completed/i),
-        modal.getByText(/completed successfully/i),
-        modal.getByText(/ingestion complete/i),
-        modal.locator('[data-status="success"]'),
-        modal.locator('[data-testid="quick-ingest-success"]')
-      ]
-      // Also detect error/stalled states
-      const errorIndicators = [
-        modal.getByText(/error/i),
-        modal.getByText(/failed/i),
-        modal.locator('[data-status="error"]')
-      ]
-      let pollCount = 0
-      try {
-        await expect.poll(async () => {
-          pollCount += 1
-          // Log progress every 30 polls (~30s at 1s intervals)
-          if (pollCount % 30 === 0) {
-            const runLabel = await runButton.textContent().catch(() => "")
-            const runEnabled = await runButton.isEnabled().catch(() => false)
-            const progressText = await modal.locator('.ant-progress').textContent().catch(() => null)
-            logStep(`poll check ${pollCount}`, { runLabel, runEnabled, progressText })
-          }
-
-          // Check completion indicators
-          for (const indicator of completionIndicators) {
-            if ((await indicator.count().catch(() => 0)) > 0) {
-              const vis = await indicator.first().isVisible().catch(() => false)
-              if (vis) {
-                logStep("completion indicator found", {
-                  pollCount,
-                  indicatorText: await indicator.first().textContent().catch(() => null)
-                })
-                return true
-              }
-            }
-          }
-          // Also check if run button is re-enabled (indicating completion)
-          const runEnabled = await runButton.isEnabled().catch(() => false)
-          const runLabel = await runButton.textContent().catch(() => "")
-          if (runEnabled && !runLabel.toLowerCase().includes("running")) {
-            logStep("run button re-enabled (completion)", { pollCount, runLabel })
-            return true
-          }
-          return false
-        }, { timeout: 180000, intervals: [1000, 2000, 5000] }).toBeTruthy()
-      } catch (error) {
-        // Gather comprehensive diagnostic info
-        const errorIndicatorTexts: string[] = []
-        for (const indicator of errorIndicators) {
-          const count = await indicator.count().catch(() => 0)
-          if (count > 0) {
-            const text = await indicator.first().textContent().catch(() => null)
-            if (text) errorIndicatorTexts.push(text.slice(0, 100))
-          }
-        }
-        logStep("completion timeout", {
-          pollCount,
-          activeTab: await page
-            .evaluate(() => {
-              const tab = document.querySelector(
-                '[role="tab"][aria-selected="true"]'
-              )
-              return tab?.getAttribute("id") || tab?.textContent || null
-            })
-            .catch(() => null),
-          connection: await page
-            .evaluate(() => {
-              const store = (window as any).__tldw_useConnectionStore
-              return store?.getState?.().state ?? null
-            })
-            .catch(() => null),
-          quickIngestStore: await page
-            .evaluate(() => {
-              const store = (window as any).__tldw_useQuickIngestStore
-              const state = store?.getState?.() ?? null
-              if (!state) return null
-              // Return relevant fields only
-              return {
-                running: state.running,
-                resultsCount: state.results?.length ?? 0,
-                hasResultSummary: !!state.resultSummary,
-                resultSummary: state.resultSummary
-              }
-            })
-            .catch(() => null),
-          modalVisibleAfter: await modal.isVisible().catch(() => false),
-          completeTestidCount: await modal.locator('[data-testid="quick-ingest-complete"]').count().catch(() => -1),
-          completionTextCount: await modal.getByText(/Quick ingest completed/i).count().catch(() => -1),
-          runEnabled: await runButton.isEnabled().catch(() => null),
-          runLabel: await runButton.textContent().catch(() => null),
-          errorIndicatorTexts: errorIndicatorTexts.length > 0 ? errorIndicatorTexts : null
-        })
-        throw error
-      }
-      logStep("completion visible")
-
-      const searchQuery = `e2e-media-${unique}` // Use filename prefix with words for FTS5 tokenization
-      logStep("polling media", { query: searchQuery })
-
-      // First try to find media with a short timeout
-      let mediaMatch: any = null
-      try {
-        mediaMatch = await pollForMediaMatch(
-          mediaApiBase,
-          apiKey,
-          searchQuery,
-          30000, // 30 second initial poll
-          mediaBasePath
-        )
-      } catch (pollError) {
-        logStep("initial poll failed or timed out, will try direct upload")
-      }
-
-      // If no media found, try direct upload as fallback (extension messaging may have failed)
-      if (!mediaMatch) {
-        logStep("media not found via UI, trying direct API upload as fallback")
-        const uploadResult = await directMediaUpload(
-          mediaApiBase,
-          apiKey,
-          fileName,
-          `E2E Quick ingest ${unique}`,
-          mediaBasePath
-        )
-        if (uploadResult.ok) {
-          logStep("direct upload succeeded", { mediaId: uploadResult.mediaId })
-          // Poll again to find the uploaded media
-          mediaMatch = await pollForMediaMatch(
-            mediaApiBase,
-            apiKey,
-            searchQuery,
-            60000, // 60 seconds after direct upload
-            mediaBasePath
-          )
-        } else {
-          logStep("direct upload failed", { error: uploadResult.error })
-          throw new Error(`Direct upload fallback failed: ${uploadResult.error}`)
-        }
-      }
-
-      logStep("media found", {
-        id: mediaMatch?.id ?? null,
-        title: mediaMatch?.title ?? null
-      })
-
-      const closeQuickIngestModal = async () => {
-        const modalRoot = resolveQuickIngestModal(page)
-        const isOpen = await modalRoot.isVisible().catch(() => false)
-        if (!isOpen) return
-        logStep("closing quick ingest modal")
-        const closeButton = modalRoot.getByRole("button", { name: /^Close$/i })
-        const closeVisible = await closeButton.isVisible().catch(() => false)
-        if (closeVisible) {
-          await closeButton.click()
-        } else {
-          await page.keyboard.press("Escape").catch(() => {})
-        }
-        await expect(modalRoot).toBeHidden({ timeout: 10000 })
-      }
-      await closeQuickIngestModal()
-
-      await driver.goto(page, "/media", {
-        waitUntil: "domcontentloaded"
-      })
-      await waitForConnected(page, "workflow-media-review")
-
-      const searchInput = page.getByPlaceholder(
-        /Search media \(title\/content\)/i
-      )
-      await searchInput.fill(String(unique))
-      const searchPanel = page.locator("#media-search-panel")
-      await expect(searchPanel).toBeVisible({ timeout: 10000 })
-      await searchPanel.getByRole("button", { name: /^Search$/i }).click()
-
-      const expectedTitle = fileName.replace(/\.txt$/i, "")
-      const resultsRow = page
-        .getByRole("button", { name: new RegExp(expectedTitle, "i") })
-        .first()
-      await expect(resultsRow).toBeVisible({ timeout: 30000 })
-    } finally {
-      await testInfo.attach("quick-ingest-debug", {
-        body: debugLines.join("\n"),
-        contentType: "text/plain"
-      })
-      await driver.close()
-    }
-  })
-
-  test(
-    "knowledge QA search -> open chat with RAG settings",
-    async ({ page: fixturePage, context: fixtureContext }) => {
-    test.setTimeout(300000)
-    const { serverUrl, apiKey } = requireRealServerConfig()
-    const normalizedServerUrl = normalizeServerUrl(serverUrl)
-
-    const ragHealth = await fetchWithKey(
-      `${normalizedServerUrl}/api/v1/rag/health`,
-      apiKey
-    )
-    if (!ragHealth.ok) {
-      const body = await ragHealth.text().catch(() => "")
-      skipOrThrow(
-        true,
-        `RAG health preflight failed: ${ragHealth.status} ${ragHealth.statusText} ${body}`
-      )
-      return
-    }
-
-    const modelsResponse = await fetchWithKey(
-      `${normalizedServerUrl}/api/v1/llm/models/metadata`,
-      apiKey
-    )
-    if (!modelsResponse.ok) {
-      const body = await modelsResponse.text().catch(() => "")
-      skipOrThrow(
-        true,
-        `Chat models preflight failed: ${modelsResponse.status} ${modelsResponse.statusText} ${body}`
-      )
-      return
-    }
-    const modelId = getFirstModelId(
-      await modelsResponse.json().catch(() => [])
-    )
-    if (!modelId) {
-      skipOrThrow(true, "No chat models returned from tldw_server.")
-      return
-    }
-    const selectedModelId = modelId.startsWith("tldw:")
-      ? modelId
-      : `tldw:${modelId}`
-
-    const ragSeedToken = `e2e-rag-${Date.now()}`
-    await createSeedNoteForRag(
-      normalizedServerUrl,
-      apiKey,
-      ragSeedToken
-    )
-    await pollForRagSearch(
-      normalizedServerUrl,
-      apiKey,
-      ragSeedToken,
-      180000
-    )
-
-    const driver = await createDriverForTest({
-      serverUrl: normalizedServerUrl,
-      apiKey,
-      page: fixturePage,
-      context: fixtureContext
-    })
-    const { context, page } = driver
-
-    try {
-      const granted = await driver.ensureHostPermission()
-      if (!granted) {
-        skipOrThrow(
-          true,
-          "Host permission not granted for tldw_server origin; allow it in chrome://extensions > tldw Assistant > Site access, then re-run"
-        )
-        return
-      }
-
-      await setSelectedModel(page, selectedModelId)
-
-      await driver.goto(page, "/knowledge", {
-        waitUntil: "domcontentloaded"
-      })
-      await waitForConnected(page, "workflow-knowledge-search")
-
-      const noSources = await page
-        .getByText(/Index knowledge to use Knowledge QA|No sources yet/i)
-        .isVisible()
-        .catch(() => false)
-      if (noSources) {
-        await page.reload({ waitUntil: "domcontentloaded" })
-        await waitForConnected(page, "workflow-knowledge-search-retry")
-        await expect(
-          page.getByText(/Index knowledge to use Knowledge QA|No sources yet/i)
-        ).toBeHidden({ timeout: 30000 })
-      }
-      const ragUnsupportedBanner = await page
-        .getByText(/RAG search is not available on this server/i)
-        .isVisible()
-        .catch(() => false)
-      if (ragUnsupportedBanner) {
-        throw new Error(
-          "RAG search is unavailable according to server capabilities."
-        )
-      }
-
-      const query = ragSeedToken
-      const searchInput = page.getByPlaceholder(
-        /Search across configured RAG sources|Search your knowledge/i
-      )
-      await searchInput.fill(query)
-      await page
-        .locator("#media-search-panel")
-        .getByRole("button", { name: /^Search$/i })
-        .click()
-
-      const listItem = page.locator(".ant-list-item")
-      const hasResults = await listItem
-        .first()
-        .waitFor({ state: "visible", timeout: 30000 })
-        .then(() => true)
-        .catch(() => false)
-      const ragErrorVisible = await page
-        .getByText(/RAG search failed/i)
-        .isVisible()
-        .catch(() => false)
-      if (ragErrorVisible) {
-        throw new Error("RAG search failed in Knowledge QA flow.")
-      }
-      const hasAnswer = await page
-        .getByText(/RAG answer/i)
-        .isVisible()
-        .catch(() => false)
-      if (!hasResults && !hasAnswer) {
-        const noResults = await page
-          .getByText(/No RAG results yet/i)
-          .isVisible()
-          .catch(() => false)
-        if (noResults) {
-          throw new Error(
-            `Knowledge QA returned no results for seeded query "${query}".`
-          )
-        }
-      }
-
-      const copySnippet = page.getByRole("button", {
-        name: /Copy snippet/i
-      })
-      if ((await copySnippet.count()) > 0) {
-        await copySnippet.first().click()
-      }
-
-      const openChatButtons = page
-        .locator("button")
-        .filter({ hasText: /Open Chat with/i })
-      if ((await openChatButtons.count()) === 0) {
-        skipOrThrow(
-          true,
-          "Knowledge chat panel not available; ensure Knowledge workspace is visible."
-        )
-        return
-      }
-      const knowledgeButton = openChatButtons.filter({
-        hasText: /knowledge search settings/i
-      })
-      const ragButton = openChatButtons.filter({ hasText: /RAG/i })
-      const openChatButton =
-        (await knowledgeButton.count()) > 0
-          ? knowledgeButton.first()
-          : (await ragButton.count()) > 0
-            ? ragButton.first()
-            : openChatButtons.first()
-      await expect(openChatButton).toBeVisible({ timeout: 15000 })
-      let chatPage = page
-      try {
-        await openChatButton.click({ noWaitAfter: true })
-      } catch (error) {
-        if (!page.isClosed()) {
-          throw error
-        }
-      }
-      if (page.isClosed()) {
-        chatPage = await openChatSidepanel(driver)
-        await waitForConnected(chatPage, "workflow-knowledge-chat")
-      }
-      await expect(await resolveChatInput(chatPage)).toBeVisible({
-        timeout: 20000
-      })
-
-      await sendChatMessage(
-        chatPage,
-        `Summarize what you know about "${query}".`
-      )
-      await waitForAssistantMessage(chatPage)
-    } finally {
-      await driver.close()
-    }
-  })
-
-  test(
-    "prompts -> use in chat -> send message",
-    async ({ page: fixturePage, context: fixtureContext }, testInfo) => {
-      test.setTimeout(300000)
-      const debugLines: string[] = []
-      const startedAt = Date.now()
-      const safeStringify = (value: unknown) => {
-        try {
-          return JSON.stringify(value)
-        } catch {
-          return "\"[unserializable]\""
-        }
-      }
-      const logStep = (message: string, details?: Record<string, unknown>) => {
-        const payload = {
-          elapsedMs: Date.now() - startedAt,
-          ...(details || {})
-        }
-        const line = `[real-server-prompts] ${message} ${safeStringify(
-          payload
-        )}`
-        debugLines.push(line)
-        console.log(line)
-      }
-      const step = async <T>(label: string, fn: () => Promise<T>) => {
-        logStep(`start ${label}`)
-        const stepStart = Date.now()
-        try {
-          const result = await test.step(label, fn)
-          logStep(`done ${label}`, {
-            durationMs: Date.now() - stepStart
-          })
-          return result
-        } catch (error) {
-          logStep(`error ${label}`, {
-            durationMs: Date.now() - stepStart,
-            error: String(error)
-          })
-          throw error
-        }
-      }
+    }) => {
+      test.setTimeout(180000)
       const { serverUrl, apiKey } = requireRealServerConfig()
       const normalizedServerUrl = normalizeServerUrl(serverUrl)
-      logStep("test config", { serverUrl: normalizedServerUrl })
 
-      const modelsResponse = await step("preflight: models", async () => {
-        const response = await fetchWithKey(
-          `${normalizedServerUrl}/api/v1/llm/models/metadata`,
-          apiKey
+      const decksResponse = await fetchWithKey(
+        `${normalizedServerUrl}/api/v1/flashcards/decks`,
+        apiKey
+      )
+      if (!decksResponse.ok) {
+        const body = await decksResponse.text().catch(() => "")
+        skipOrThrow(
+          true,
+          `Flashcards API preflight failed: ${decksResponse.status} ${decksResponse.statusText} ${body}`
         )
-        logStep("models preflight response", {
-          ok: response.ok,
-          status: response.status,
-          statusText: response.statusText
-        })
-        return response
-      })
+        return
+      }
+
+      const modelsResponse = await fetchWithKey(
+        `${normalizedServerUrl}/api/v1/llm/providers`,
+        apiKey
+      )
       if (!modelsResponse.ok) {
         const body = await modelsResponse.text().catch(() => "")
         skipOrThrow(
@@ -4648,900 +4000,34 @@ test.describe("Real server end-to-end workflows", () => {
         )
         return
       }
-      const modelId = getFirstModelId(
+      const runnableModel = resolveRunnableChatModel(
         await modelsResponse.json().catch(() => [])
       )
-      if (!modelId) {
-        skipOrThrow(true, "No chat models returned from tldw_server.")
-        return
-      }
-      const selectedModelId = modelId.startsWith("tldw:")
-        ? modelId
-        : `tldw:${modelId}`
-      logStep("selected model resolved", { selectedModelId })
-
-      const driver = await step("launch driver", async () =>
-        createDriverForTest({
-          serverUrl: normalizedServerUrl,
-          apiKey,
-          page: fixturePage,
-          context: fixtureContext
-        })
-      )
-      const { context, page, optionsUrl } = driver
-      logStep("driver launched", { kind: driver.kind, optionsUrl })
-
-      const attachPageLogging = (targetPage: Page, tag: string) => {
-        targetPage.on("console", (msg) => {
-          const type = msg.type()
-          const text = msg.text()
-          if (
-            type === "error" ||
-            type === "warning" ||
-            text.includes("CONNECTION_DEBUG") ||
-            text.includes("CONN_DEBUG") ||
-            text.includes("API_SEND_DEBUG") ||
-            text.includes("BG_DEBUG") ||
-            text.includes("PING_DEBUG")
-          ) {
-            logStep(`${tag} console`, { type, text })
-          }
-        })
-        targetPage.on("pageerror", (error) => {
-          logStep(`${tag} pageerror`, { error: String(error) })
-        })
-        targetPage.on("requestfailed", (request) => {
-          logStep(`${tag} requestfailed`, {
-            url: request.url(),
-            failure: request.failure()?.errorText
-          })
-        })
-      }
-      attachPageLogging(page, "options")
-      page.on("framenavigated", (frame) => {
-        if (frame === page.mainFrame()) {
-          const url = frame.url()
-          if (!url.startsWith(optionsUrl)) {
-            logStep("unexpected navigation", { url })
-          }
-        }
-      })
-
-      const logNotifications = async (label: string) => {
-        const notices = await page
-          .locator(".ant-notification-notice")
-          .allTextContents()
-          .catch(() => [])
-        if (notices.length) {
-          logStep("notification", { label, notices })
-        }
-      }
-
-      const promptName = `E2E Prompt ${Date.now()}`
-      const promptUser = `${promptName} User prompt`
-      logStep("generated test identifiers", { promptName, promptUser })
-
-      const searchInput = page.getByTestId("prompts-search")
-      const promptRow = page
-        .locator("tr")
-        .filter({ hasText: promptName })
-        .first()
-
-      try {
-        const granted = await step("grant host permission", async () => {
-          const result = await driver.ensureHostPermission()
-          logStep("host permission result", {
-            origin: new URL(normalizedServerUrl).origin,
-            granted: result
-          })
-          return result
-        })
-        if (!granted) {
-          skipOrThrow(
-            true,
-            "Host permission not granted for tldw_server origin; allow it in chrome://extensions > tldw Assistant > Site access, then re-run"
-          )
-          return
-        }
-
-        await step("seed model selection", async () => {
-          await setSelectedModel(page, selectedModelId)
-        })
-
-        await step("open prompts route", async () => {
-          await driver.goto(page, "/prompts", {
-            waitUntil: "domcontentloaded"
-          })
-          await waitForConnected(page, "workflow-prompts")
-          logStep("prompts route ready", { url: page.url() })
-        })
-
-        await step("open prompt drawer", async () => {
-          await expect(page.getByTestId("prompts-custom")).toBeVisible({
-            timeout: 15000
-          })
-          await page.getByTestId("prompts-add").click()
-          const drawer = page
-            .locator(".ant-drawer")
-            .filter({ has: page.getByTestId("prompt-drawer-name") })
-            .first()
-          await expect(page.getByTestId("prompt-drawer-name")).toBeVisible({
-            timeout: 15000
-          })
-          await page.getByTestId("prompt-drawer-name").fill(promptName)
-          await page
-            .getByTestId("prompt-drawer-system")
-            .fill(`${promptName} System prompt`)
-          await page.getByTestId("prompt-drawer-user").fill(promptUser)
-          const saveButton = drawer.getByRole("button", {
-            name: /Add Prompt|Save/i
-          })
-          logStep("prompt drawer buttons", {
-            buttons: await drawer
-              .getByRole("button")
-              .allTextContents()
-              .catch(() => [])
-          })
-          await saveButton.click()
-          await expect(page.getByTestId("prompt-drawer-name")).toBeHidden({
-            timeout: 15000
-          })
-          await logNotifications("after prompt save")
-        })
-
-        await step("filter prompt list", async () => {
-          await searchInput.fill(promptName)
-          await expect(promptRow).toBeVisible({ timeout: 20000 })
-          logStep("prompt row visible", {
-            rowText: await promptRow.innerText().catch(() => null)
-          })
-        })
-
-        await step("use prompt in chat", async () => {
-          const useButton = promptRow.getByRole("button", {
-            name: /Use in chat/i
-          })
-          await useButton.click()
-
-          const insertQuick = page.getByTestId("prompt-insert-quick")
-          await expect(insertQuick).toBeVisible({ timeout: 15000 })
-          await insertQuick.click()
-          await expect(insertQuick).toBeHidden({ timeout: 15000 })
-          await driver.goto(page, "/chat", {
-            waitUntil: "domcontentloaded"
-          })
-          await waitForChatLanding(page, driver, 15000)
-          logStep("prompt insert state", {
-            selectedQuickPrompt: await page
-              .evaluate(() => {
-                const store = (window as any).__tldw_useStoreMessageOption
-                return store?.getState?.().selectedQuickPrompt ?? null
-              })
-              .catch(() => null),
-            storedQuickPrompt: await page
-              .evaluate(async () => {
-                const w: any = window as any
-                const area =
-                  w?.chrome?.storage?.sync || w?.chrome?.storage?.local
-                if (area?.get) {
-                  return await new Promise((resolve) => {
-                    area.get("selectedQuickPrompt", (res: any) =>
-                      resolve(res?.selectedQuickPrompt ?? null)
-                    )
-                  })
-                }
-                const raw = localStorage.getItem("selectedQuickPrompt")
-                if (!raw) return null
-                try {
-                  return JSON.parse(raw)
-                } catch {
-                  return raw
-                }
-              })
-              .catch(() => null),
-            url: page.url()
-          })
-          await waitForConnected(page, "workflow-prompts-chat")
-          await logNotifications("after use in chat")
-        })
-
-        await step("confirm prompt inserted", async () => {
-          const overwriteDialog = page.getByRole("dialog").filter({
-            hasText: /Overwrite message/i
-          })
-          if (await overwriteDialog.isVisible().catch(() => false)) {
-            await overwriteDialog
-              .getByRole("button", { name: /Overwrite message/i })
-              .click()
-          }
-
-          // Click "Start chatting" if visible (may need to start a new chat)
-          await clickStartChatIfVisible(page)
-
-          // Debug logging for chat input selector
-          logStep("looking for chat input", {
-            url: page.url(),
-            temporaryChatCount: await page.locator('[data-istemporary-chat]').count().catch(() => -1),
-            textareaCount: await page.locator('textarea').count().catch(() => -1),
-            combinedCount: await page.locator('[data-istemporary-chat] textarea').count().catch(() => -1),
-            testIdCount: await page.locator('[data-testid="chat-input"]').count().catch(() => -1)
-          })
-
-          // Wait for any chat input to appear using polling
-          await expect.poll(async () => {
-            const input = await resolveChatInput(page)
-            return await input.count()
-          }, { timeout: 30000, intervals: [500, 1000, 2000] }).toBeGreaterThan(0)
-
-          // Use the robust resolveChatInput helper that tries multiple selectors
-          const chatInput = await resolveChatInput(page)
-          await expect(chatInput).toBeVisible({ timeout: 20000 })
-          const readChatValue = async () =>
-            chatInput.inputValue().catch(() => "")
-          const waitForPrompt = async (timeoutMs: number) => {
-            try {
-              await expect
-                .poll(readChatValue, { timeout: timeoutMs })
-                .toContain(promptUser)
-              return true
-            } catch {
-              return false
-            }
-          }
-          const inserted = await waitForPrompt(8000)
-          if (!inserted) {
-            logStep("prompt missing before fallback", {
-              value: await readChatValue(),
-              selectedQuickPrompt: await page
-                .evaluate(() => {
-                  const store = (window as any).__tldw_useStoreMessageOption
-                  return store?.getState?.().selectedQuickPrompt ?? null
-                })
-                .catch(() => null)
-            })
-            await page.evaluate((prompt) => {
-              const store = (window as any).__tldw_useStoreMessageOption
-              store?.getState?.().setSelectedQuickPrompt?.(prompt)
-            }, promptUser)
-            const overwriteAfter = page.getByRole("dialog").filter({
-              hasText: /Overwrite message/i
-            })
-            if (await overwriteAfter.isVisible().catch(() => false)) {
-              await overwriteAfter
-                .getByRole("button", { name: /Overwrite message/i })
-                .click()
-            }
-            const insertedAfter = await waitForPrompt(10000)
-            if (!insertedAfter) {
-              const currentValue = await readChatValue()
-              logStep("prompt still missing after fallback", {
-                value: currentValue
-              })
-              await chatInput.fill(promptUser)
-            }
-          }
-        })
-
-        await step("send message", async () => {
-          const overwriteButton = page.getByRole("button", {
-            name: /Overwrite message/i
-          })
-          if (await overwriteButton.isVisible().catch(() => false)) {
-            await overwriteButton.click()
-          }
-
-          const chatInput = await resolveChatInput(page)
-          const sendButton = page.locator('[data-testid="chat-send"]')
-          if ((await sendButton.count()) > 0) {
-            await sendButton.click()
-          } else {
-            await chatInput.press("Enter")
-          }
-          await waitForAssistantMessage(page)
-        })
-
-        await step("cleanup prompt", async () => {
-          await driver.goto(page, "/prompts", {
-            waitUntil: "domcontentloaded"
-          })
-          await waitForConnected(page, "workflow-prompts-cleanup")
-          await searchInput.fill(promptName)
-          await expect(promptRow).toBeVisible({ timeout: 15000 })
-
-          const moreButton = promptRow.getByRole("button", {
-            name: /More actions/i
-          })
-          await moreButton.click()
-
-          const deleteItem = page.getByRole("menuitem", { name: /Delete/i })
-          await deleteItem.click()
-          const confirmDialog = page
-            .getByRole("dialog")
-            .filter({ hasText: /Delete prompt/i })
-          if ((await confirmDialog.count()) > 0) {
-            await confirmDialog
-              .getByRole("button", { name: /^Delete$/ })
-              .click()
-          } else {
-            await page.getByRole("button", { name: /^Delete$/ }).click()
-          }
-
-          await expect(
-            page.locator("tr").filter({ hasText: promptName })
-          ).toHaveCount(0, { timeout: 20000 })
-          await logNotifications("after delete")
-        })
-      } finally {
-        await testInfo.attach("prompts-debug", {
-          body: debugLines.join("\n"),
-          contentType: "text/plain"
-        })
-        await driver.close()
-      }
-    }
-  )
-
-  test(
-    "world books -> entries -> attach -> export -> stats",
-    async ({ page: fixturePage, context: fixtureContext }) => {
-    test.setTimeout(300000)
-    const { serverUrl, apiKey } = requireRealServerConfig()
-    const normalizedServerUrl = normalizeServerUrl(serverUrl)
-
-    const worldBooksResponse = await fetchWithKey(
-      `${normalizedServerUrl}/api/v1/characters/world-books`,
-      apiKey
-    )
-    if (!worldBooksResponse.ok) {
-      const body = await worldBooksResponse.text().catch(() => "")
-      skipOrThrow(
-        true,
-        `World books API preflight failed: ${worldBooksResponse.status} ${worldBooksResponse.statusText} ${body}`
-      )
-      return
-    }
-
-    const driver = await createDriverForTest({
-      serverUrl: normalizedServerUrl,
-      apiKey,
-      page: fixturePage,
-      context: fixtureContext
-    })
-    const { context, page } = driver
-
-    const unique = Date.now()
-    const worldBookName = `E2E World Book ${unique}`
-    const characterName = `E2E WB Character ${unique}`
-    let attachCharacterName = characterName
-
-    try {
-      await createCharacterByName(normalizedServerUrl, apiKey, characterName)
-      const createdCharacter = await pollForCharacterByName(
-        normalizedServerUrl,
-        apiKey,
-        characterName,
-        30000
-      )
-      if (!createdCharacter) {
-        throw new Error(`Character not found on server after create: "${characterName}"`)
-      }
-      const characterListRes = await fetchWithKey(
-        `${normalizedServerUrl}/api/v1/characters?limit=100&offset=0`,
-        apiKey
-      ).catch(() => null)
-      if (characterListRes?.ok) {
-        const payload = await characterListRes.json().catch(() => [])
-        const list = parseListPayload(payload, ["characters"])
-        const match = list.find((item: any) => String(item?.name || "") === characterName)
-        attachCharacterName = (match?.name || characterName) as string
-      }
-
-      const granted = await driver.ensureHostPermission()
-      if (!granted) {
+      if (!runnableModel) {
         skipOrThrow(
           true,
-          "Host permission not granted for tldw_server origin; allow it in chrome://extensions > tldw Assistant > Site access, then re-run"
+          "No configured chat-capable model is available on tldw_server."
         )
         return
       }
-
-      await driver.goto(page, "/world-books", {
-        waitUntil: "domcontentloaded"
-      })
-      await waitForConnected(page, "workflow-world-books")
-
-      await page.getByRole("button", { name: /New World Book/i }).click()
-      const createModal = page.getByRole("dialog", {
-        name: /Create World Book/i
-      })
-      await expect(createModal).toBeVisible({ timeout: 15000 })
-      await createModal.getByLabel("Name").fill(worldBookName)
-      await createModal
-        .getByLabel("Description")
-        .fill("World book created by Playwright.")
-      await createModal.getByRole("button", { name: /^Create$/i }).click()
-
-      // Wait for modal to close
-      await expect(createModal).toBeHidden({ timeout: 10000 }).catch(() => {})
-
-      const createdBook = await pollForWorldBookByName(
-        normalizedServerUrl,
-        apiKey,
-        worldBookName,
-        30000
-      )
-      if (!createdBook) {
-        throw new Error(
-          `World book not found on server after create: "${worldBookName}"`
-        )
-      }
-
-      // Debug logging for table row selector
-      const debugTableState = async () => {
-        const tableRows = await page
-          .locator(".ant-table-tbody tr")
-          .count()
-          .catch(() => -1)
-        const matchingRows = await page
-          .locator(".ant-table-tbody tr")
-          .filter({ hasText: worldBookName })
-          .count()
-          .catch(() => -1)
-        const tableVisible = await page.locator("table").isVisible().catch(() => false)
-        console.log(
-          `[world-books-row] tableVisible=${tableVisible} totalRows=${tableRows} matchingRows=${matchingRows} worldBookName="${worldBookName}"`
-        )
-      }
-
-      // Wait for table data to load before checking for specific row
-      await expect.poll(async () => {
-        await debugTableState()
-        const rows = await page.locator(".ant-table-tbody tr").count()
-        return rows
-      }, { timeout: 30000, intervals: [500, 1000, 2000] }).toBeGreaterThan(0)
-
-      const findRowOnCurrentPage = async () => {
-        const candidate = page
-          .locator(".ant-table-tbody tr")
-          .filter({ hasText: worldBookName })
-          .first()
-        if ((await candidate.count()) > 0) return candidate
-        return null
-      }
-
-      const findRowAcrossPages = async () => {
-        const direct = await findRowOnCurrentPage()
-        if (direct) return direct
-        const paginationItems = page.locator(".ant-pagination-item")
-        const totalPages = await paginationItems.count().catch(() => 0)
-        for (let i = 0; i < totalPages; i += 1) {
-          const item = paginationItems.nth(i)
-          const classes = (await item.getAttribute("class")) || ""
-          if (!classes.includes("ant-pagination-item-active")) {
-            await item.click()
-            await page.waitForTimeout(500)
-          }
-          const candidate = await findRowOnCurrentPage()
-          if (candidate) return candidate
-        }
-        return null
-      }
-
-      let row = await findRowAcrossPages()
-      if (!row) {
-        await driver.goto(page, "/world-books", {
-          waitUntil: "domcontentloaded"
-        })
-        await waitForConnected(page, "workflow-world-books-reload")
-        row = await findRowAcrossPages()
-      }
-      if (!row) {
-        const sampleRows = await page
-          .locator(".ant-table-tbody tr")
-          .allTextContents()
-          .catch(() => [])
-        throw new Error(
-          `World book row not found in UI after create. name="${worldBookName}" sampleRows="${sampleRows
-            .slice(0, 3)
-            .join(" | ")}"`
-        )
-      }
-      await expect(row).toBeVisible({ timeout: 20000 })
-
-      const entriesButton = row.getByRole("button", {
-        name: /^Entries$/i
-      })
-      await entriesButton.click()
-      const entriesDrawer = page
-        .locator(".ant-drawer")
-        .filter({ hasText: /Entries/i })
-        .first()
-      await expect(entriesDrawer).toBeVisible({ timeout: 15000 })
-      await entriesDrawer
-        .getByLabel(/Keywords/i)
-        .fill("e2e,workflow")
-      await entriesDrawer
-        .getByLabel("Content")
-        .fill("World book entry from real-server workflow.")
-      await entriesDrawer
-        .getByRole("button", { name: /Add Entry/i })
-        .click()
-      await expect(
-        entriesDrawer
-          .locator(".ant-table-tbody tr")
-          .filter({ hasText: /e2e|workflow/i })
-      ).toHaveCount(1, { timeout: 20000 })
-      await page.keyboard.press("Escape")
-
-      const attachButton = row.getByRole("button", { name: /Link/i })
-      await attachButton.click()
-      const attachModal = page.getByRole("dialog", {
-        name: /Manage Character Attachments/i
-      })
-      await expect(attachModal).toBeVisible({ timeout: 15000 })
-      const characterSelect = attachModal.locator(".ant-select-selector").first()
-      await characterSelect.click()
-      const characterInput = attachModal
-        .locator('input[role="combobox"]')
-        .first()
-      if ((await characterInput.count()) > 0) {
-        await characterInput.fill(attachCharacterName)
-      }
-      const dropdown = page.locator(
-        ".ant-select-dropdown:not(.ant-select-dropdown-hidden)"
-      )
-      await expect(dropdown).toBeVisible({ timeout: 15000 })
-      const option = dropdown.locator(".ant-select-item-option-content", {
-        hasText: attachCharacterName
-      })
-      if ((await option.count()) > 0) {
-        await option.first().click()
-      } else {
-        const fallbackOption = dropdown
-          .locator(".ant-select-item-option-content")
-          .first()
-        const fallbackText = await fallbackOption.textContent().catch(() => "")
-        throw new Error(
-          `Character option not found in dropdown. wanted="${attachCharacterName}" fallback="${fallbackText ?? ""}"`
-        )
-      }
-      await attachModal.getByRole("button", { name: /^Attach$/i }).click()
-      await expect
-        .poll(
-          async () =>
-            attachModal.getByRole("button", { name: /Detach/i }).count(),
-          { timeout: 20000, intervals: [500, 1000, 2000] }
-        )
-        .toBeGreaterThan(0)
-      const closeAttach = attachModal.locator(".ant-modal-close").first()
-      if ((await closeAttach.count()) > 0) {
-        await closeAttach.click()
-      } else {
-        await page.keyboard.press("Escape")
-      }
-      await expect(attachModal).toBeHidden({ timeout: 10000 }).catch(() => {})
-
-      await page.evaluate(() => {
-        const w = window as any
-        if (!w.__tldw_downloadCaptureInstalled) {
-          w.__tldw_downloadCaptureInstalled = true
-          const originalClick = HTMLAnchorElement.prototype.click
-          w.__tldw_originalAnchorClick = originalClick
-          HTMLAnchorElement.prototype.click = function (...args) {
-            try {
-              w.__tldw_lastDownload = {
-                href: (this as HTMLAnchorElement).href,
-                download: (this as HTMLAnchorElement).download,
-                at: Date.now()
-              }
-            } catch {
-              // ignore capture errors
-            }
-            const name = (this as HTMLAnchorElement).download || ""
-            if (
-              typeof name === "string" &&
-              name.toLowerCase().endsWith(".json") &&
-              ((this as HTMLAnchorElement).href || "").startsWith("blob:")
-            ) {
-              return
-            }
-            return originalClick.apply(this, args as any)
-          }
-        }
-        w.__tldw_lastDownload = null
-      })
-
-      try {
-        await row.getByRole("button", { name: /Export/i }).click()
-        await page.waitForFunction(
-          () => {
-            const w = window as any
-            const name = w?.__tldw_lastDownload?.download || ""
-            return typeof name === "string" && name.toLowerCase().endsWith(".json")
-          },
-          undefined,
-          { timeout: 15000 }
-        )
-      } finally {
-        await page.evaluate(() => {
-          const w = window as any
-          if (w.__tldw_originalAnchorClick) {
-            HTMLAnchorElement.prototype.click = w.__tldw_originalAnchorClick
-            delete w.__tldw_originalAnchorClick
-            delete w.__tldw_downloadCaptureInstalled
-          }
-        })
-      }
-
-      await row.getByRole("button", { name: /Stats/i }).click()
-      const statsModal = page.getByRole("dialog", {
-        name: /World Book Statistics/i
-      })
-      await expect(statsModal).toBeVisible({ timeout: 15000 })
-      await statsModal.getByRole("button", { name: /Close/i }).click()
-      await expect(statsModal).toBeHidden({ timeout: 15000 })
-
-      const deleteButton = row.locator("button").last()
-      await deleteButton.click()
-      await page.getByRole("button", { name: /^Delete$/ }).click()
-      const listRows = page.locator(".ant-table-tbody tr")
-      await expect(
-        listRows.filter({ hasText: worldBookName })
-      ).toHaveCount(0, { timeout: 20000 })
-    } finally {
-      await Promise.race([
-        driver.close().catch(() => {}),
-        new Promise((resolve) => setTimeout(resolve, 10000))
-      ])
-      await Promise.race([
-        deleteWorldBookByName(normalizedServerUrl, apiKey, worldBookName).catch(
-          () => {}
-        ),
-        new Promise((resolve) => setTimeout(resolve, 10000))
-      ])
-      await Promise.race([
-        deleteCharacterByName(
-          normalizedServerUrl,
-          apiKey,
-          characterName
-        ).catch(() => {}),
-        new Promise((resolve) => setTimeout(resolve, 10000))
-      ])
-    }
-  })
-
-  test(
-    "dictionaries -> entries -> validate -> preview -> export -> stats",
-    async ({ page: fixturePage, context: fixtureContext }, testInfo) => {
-      test.setTimeout(300000)
-      const debugLines: string[] = []
-      const startedAt = Date.now()
-      const safeStringify = (value: unknown) => {
-        try {
-          return JSON.stringify(value)
-        } catch {
-          return "\"[unserializable]\""
-        }
-      }
-      const logStep = (message: string, details?: Record<string, unknown>) => {
-        const payload = {
-          elapsedMs: Date.now() - startedAt,
-          ...(details || {})
-        }
-        const line = `[real-server-dictionaries] ${message} ${safeStringify(
-          payload
-        )}`
-        debugLines.push(line)
-        console.log(line)
-      }
-      const step = async <T>(label: string, fn: () => Promise<T>) => {
-        logStep(`start ${label}`)
-        const stepStart = Date.now()
-        try {
-          const result = await test.step(label, fn)
-          logStep(`done ${label}`, {
-            durationMs: Date.now() - stepStart
-          })
-          return result
-        } catch (error) {
-          logStep(`error ${label}`, {
-            durationMs: Date.now() - stepStart,
-            error: String(error)
-          })
-          throw error
-        }
-      }
-      const { serverUrl, apiKey } = requireRealServerConfig()
-      const normalizedServerUrl = normalizeServerUrl(serverUrl)
-      logStep("test config", { serverUrl: normalizedServerUrl })
-
-      const dictionariesResponse = await step(
-        "preflight: dictionaries",
-        async () => {
-          const response = await fetchWithKey(
-            `${normalizedServerUrl}/api/v1/chat/dictionaries?include_inactive=true`,
-            apiKey
-          )
-          logStep("dictionaries preflight response", {
-            ok: response.ok,
-            status: response.status,
-            statusText: response.statusText
-          })
-          return response
-        }
-      )
-      if (!dictionariesResponse.ok) {
-        const body = await dictionariesResponse.text().catch(() => "")
-        skipOrThrow(
-          true,
-          `Dictionaries API preflight failed: ${dictionariesResponse.status} ${dictionariesResponse.statusText} ${body}`
-        )
-        return
-      }
-
-      const driver = await step("launch driver", async () =>
-        createDriverForTest({
-          serverUrl: normalizedServerUrl,
-          apiKey,
-          page: fixturePage,
-          context: fixtureContext
-        })
-      )
-      const { context, page, optionsUrl } = driver
-      logStep("driver launched", { kind: driver.kind, optionsUrl })
-
-      const attachPageLogging = (targetPage: Page, tag: string) => {
-        targetPage.on("console", (msg) => {
-          const type = msg.type()
-          const text = msg.text()
-          if (
-            type === "error" ||
-            type === "warning" ||
-            text.includes("CONNECTION_DEBUG") ||
-            text.includes("CONN_DEBUG") ||
-            text.includes("API_SEND_DEBUG") ||
-            text.includes("BG_DEBUG")
-          ) {
-            logStep(`${tag} console`, { type, text })
-          }
-        })
-        targetPage.on("pageerror", (error) => {
-          logStep(`${tag} pageerror`, { error: String(error) })
-        })
-        targetPage.on("requestfailed", (request) => {
-          logStep(`${tag} requestfailed`, {
-            url: request.url(),
-            failure: request.failure()?.errorText
-          })
-        })
-      }
-      attachPageLogging(page, "options")
-
-      const logNotifications = async (label: string) => {
-        const notices = await page
-          .locator(".ant-notification-notice")
-          .allTextContents()
-          .catch(() => [])
-        if (notices.length) {
-          logStep("notification", { label, notices })
-        }
-      }
-
-      const ensureOnDictionariesRoute = async (label: string) => {
-        const url = page.url()
-        if (!url.startsWith(optionsUrl)) {
-          logStep("recovering navigation", { label, url })
-          await driver.goto(page, "/dictionaries", {
-            waitUntil: "domcontentloaded"
-          })
-          await waitForConnected(page, `workflow-dictionaries-recover-${label}`)
-          logStep("navigation recovered", { label, url: page.url() })
-        }
-      }
+      const selectedModelId = toSelectedModelId(runnableModel)
 
       const unique = Date.now()
-      const dictionaryName = `E2E Dictionary ${unique}`
-      logStep("generated test identifiers", { unique, dictionaryName })
+      const characterName = `E2E Flashcards Character ${unique}`
+      let createdCharacter = false
+      let characterRecord: any | null = null
+      let savedFlashcardUuid: string | null = null
 
-      let row: Locator | null = null
-      const debugDictionaryTableState = async (label: string) => {
-        const tableRows = await page
-          .locator(".ant-table-tbody tr")
-          .count()
-          .catch(() => -1)
-        const matchingRows = await page
-          .locator(".ant-table-tbody tr")
-          .filter({ hasText: dictionaryName })
-          .count()
-          .catch(() => -1)
-        const tableVisible = await page
-          .locator("table")
-          .isVisible()
-          .catch(() => false)
-        logStep("dictionary table state", {
-          label,
-          tableVisible,
-          totalRows: tableRows,
-          matchingRows,
-          dictionaryName
-        })
-      }
-
-      const resolveDictionaryRow = async (label: string) => {
-        await ensureOnDictionariesRoute(label)
-        await expect
-          .poll(async () => {
-            await debugDictionaryTableState(label)
-            const rows = await page.locator(".ant-table-tbody tr").count()
-            return rows
-          }, { timeout: 30000, intervals: [500, 1000, 2000] })
-          .toBeGreaterThan(0)
-
-        const findRowOnCurrentPage = async () => {
-          const candidate = page
-            .locator(".ant-table-tbody tr")
-            .filter({ hasText: dictionaryName })
-            .first()
-          if ((await candidate.count()) > 0) return candidate
-          return null
-        }
-
-        const findRowAcrossPages = async () => {
-          const direct = await findRowOnCurrentPage()
-          if (direct) return direct
-          const paginationItems = page.locator(".ant-pagination-item")
-          const totalPages = await paginationItems.count().catch(() => 0)
-          for (let i = 0; i < totalPages; i += 1) {
-            const item = paginationItems.nth(i)
-            const classes = (await item.getAttribute("class")) || ""
-            if (!classes.includes("ant-pagination-item-active")) {
-              await ensureOnDictionariesRoute(`${label}-page-${i + 1}`)
-              await item.click()
-              await page.waitForTimeout(500)
-            }
-            const candidate = await findRowOnCurrentPage()
-            if (candidate) return candidate
-          }
-          return null
-        }
-
-        let candidate = await findRowAcrossPages()
-        if (!candidate) {
-          await driver.goto(page, "/dictionaries", {
-            waitUntil: "domcontentloaded"
-          })
-          await waitForConnected(page, `workflow-dictionaries-reload-${label}`)
-          candidate = await findRowAcrossPages()
-        }
-        if (!candidate) {
-          const sampleRows = await page
-            .locator(".ant-table-tbody tr")
-            .allTextContents()
-            .catch(() => [])
-          throw new Error(
-            `Dictionary row not found in UI (${label}). name="${dictionaryName}" sampleRows="${sampleRows
-              .slice(0, 3)
-              .join(" | ")}"`
-          )
-        }
-        await candidate
-          .waitFor({ state: "attached", timeout: 5000 })
-          .catch(() => {})
-        await candidate
-          .scrollIntoViewIfNeeded({ timeout: 5000 })
-          .catch(() => {})
-        return candidate
-      }
+      const driver = await createDriverForTest({
+        serverUrl: normalizedServerUrl,
+        apiKey,
+        page: fixturePage,
+        context: fixtureContext
+      })
+      const { context, page, openSidepanel } = driver
 
       try {
-        const granted = await step("grant host permission", async () => {
-          const result = await driver.ensureHostPermission()
-          logStep("host permission result", {
-            origin: new URL(normalizedServerUrl).origin,
-            granted: result
-          })
-          return result
-        })
+        const granted = await driver.ensureHostPermission()
         if (!granted) {
           skipOrThrow(
             true,
@@ -5550,1734 +4036,607 @@ test.describe("Real server end-to-end workflows", () => {
           return
         }
 
-        await step("open dictionaries route", async () => {
-          await driver.goto(page, "/dictionaries", {
-            waitUntil: "domcontentloaded"
-          })
-          await waitForConnected(page, "workflow-dictionaries")
-          logStep("connected", { url: page.url() })
-        })
-
-        await step("create dictionary", async () => {
-          await page.getByRole("button", { name: /New Dictionary/i }).click()
-          const createModal = page.getByRole("dialog", {
-            name: /Create Dictionary/i
-          })
-          await expect(createModal).toBeVisible({ timeout: 15000 })
-          await createModal.getByLabel("Name").fill(dictionaryName)
-          await createModal
-            .getByLabel("Description")
-            .fill("Dictionary created by Playwright.")
-          await createModal.getByRole("button", { name: /^Create$/i }).click()
-
-          // Wait for modal to close
-          await expect(createModal).toBeHidden({ timeout: 10000 }).catch(() => {})
-
-          const createdDictionary = await pollForDictionaryByName(
-            normalizedServerUrl,
-            apiKey,
-            dictionaryName,
-            30000
+        const characterListResponse = await fetchWithKey(
+          `${normalizedServerUrl}/api/v1/characters/?page=1&results_per_page=1`,
+          apiKey
+        ).catch(() => null)
+        if (!characterListResponse?.ok) {
+          const body = await characterListResponse?.text().catch(() => "")
+          skipOrThrow(
+            true,
+            `Characters API preflight failed: ${characterListResponse?.status} ${characterListResponse?.statusText} ${body}`
           )
-          if (!createdDictionary) {
-            throw new Error(
-              `Dictionary not found on server after create: "${dictionaryName}"`
-            )
-          }
-
-          row = await resolveDictionaryRow("after-create")
-          await expect(row).toBeVisible({ timeout: 20000 })
-          logStep("dictionary row visible", {
-            rowText: await row.textContent().catch(() => null)
-          })
-          await logNotifications("after create dictionary")
-        })
-
-        if (!row) {
-          throw new Error("Dictionary row did not resolve.")
+          return
         }
-
-        await step("manage entries", async () => {
-          const entriesModal = page.getByRole("dialog", {
-            name: /Manage Entries/i
-          })
-          let opened = false
-          let lastClickError: unknown = null
-          for (let attempt = 1; attempt <= 3; attempt += 1) {
-            await ensureOnDictionariesRoute(`manage-entries-${attempt}-before`)
-            row = await resolveDictionaryRow(`manage-entries-${attempt}`)
-            const entriesButton = row!.getByRole("button", {
-              name: /^Entries$/i
-            })
-            try {
-              await entriesButton
-                .scrollIntoViewIfNeeded({ timeout: 5000 })
-                .catch(() => {})
-              const buttonCount = await entriesButton.count().catch(() => 0)
-              if (buttonCount === 0) {
-                throw new Error("Entries button not found on row")
-              }
-              await entriesButton.click({
-                timeout: 5000,
-                force: true,
-                noWaitAfter: true
-              })
-              if (!entriesModal.isVisible()) {
-                await entriesButton.evaluate((el) => {
-                  ;(el as HTMLElement).click()
-                }).catch(() => {})
-              }
-              await ensureOnDictionariesRoute(`manage-entries-${attempt}-after`)
-              const visible = await entriesModal
-                .waitFor({ state: "visible", timeout: 10000 })
-                .then(() => true)
-                .catch(() => false)
-              if (visible) {
-                opened = true
-                lastClickError = null
-                break
-              }
-            } catch (error) {
-              lastClickError = error
-            }
-            logStep("entries click retry", {
-              attempt,
-              error: String(lastClickError ?? "modal not visible"),
-              url: page.url()
-            })
-            await page.waitForTimeout(1000)
-          }
-          if (!opened) {
-            throw new Error(
-              `Entries modal did not open after retries: ${String(lastClickError)}`
-            )
-          }
-          await entriesModal.getByLabel("Pattern").fill("hello")
-          const replacementInput = entriesModal.locator("#replacement")
-          if ((await replacementInput.count()) > 0) {
-            await replacementInput.fill("hi")
-          } else {
-            await entriesModal
-              .getByRole("textbox", { name: /Replacement/i })
-              .first()
-              .fill("hi")
-          }
-          await entriesModal.getByRole("button", { name: /Add Entry/i }).click()
-          const entryRows = entriesModal.locator(".ant-table-tbody tr")
-          await expect(
-            entryRows.filter({ hasText: "hello" })
-          ).toHaveCount(1, { timeout: 15000 })
-          logStep("entry added", {
-            entryRows: await entryRows.count().catch(() => null)
-          })
-          await logNotifications("after add entry")
-
-          await entriesModal.getByText(/Validate dictionary/i).click()
-          const validateButton = entriesModal.getByRole("button", {
-            name: /Run validation/i
-          })
-          await expect(validateButton).toBeEnabled({ timeout: 15000 })
-          await validateButton.click()
-          const validationReport = entriesModal
-            .locator(".rounded-md")
-            .filter({ hasText: /Schema version/i })
-          await expect(validationReport).toBeVisible({ timeout: 20000 })
-          await expect(
-            validationReport.getByText("No errors found.", { exact: true })
-          ).toBeVisible({ timeout: 20000 })
-          await logNotifications("after validation")
-
-          await entriesModal.getByText(/Preview transforms/i).click()
-          const sampleText = "hello world"
-          await entriesModal
-            .getByPlaceholder(/Paste text to preview dictionary substitutions/i)
-            .fill(sampleText)
-          await entriesModal
-            .getByRole("button", { name: /Run preview/i })
-            .click()
-          await expect(
-            entriesModal.getByText(/Processed text/i)
-          ).toBeVisible({ timeout: 15000 })
-          const processedPanel = entriesModal
-            .locator(".rounded-md")
-            .filter({ hasText: /Processed text/i })
-          const processedText = processedPanel.locator("textarea")
-          await expect(processedText).toHaveValue(/hi world/i, {
-            timeout: 20000
-          })
-          await logNotifications("after preview")
-
-          await page.keyboard.press("Escape")
-          await expect(entriesModal).toBeHidden({ timeout: 15000 })
-        })
-
-        await step("export dictionary", async () => {
-          const [download] = await Promise.all([
-            page.waitForEvent("download", { timeout: 15000 }),
-            row!.getByRole("button", { name: /Export JSON/i }).click()
-          ])
-          const filename = download.suggestedFilename()
-          logStep("export download", { filename })
-          expect(filename).toMatch(/\.json$/i)
-          await logNotifications("after export")
-        })
-
-        await step("open stats", async () => {
-          await row!.getByRole("button", { name: /Stats/i }).click()
-          const statsDialog = page.getByRole("dialog", {
-            name: /Dictionary Statistics/i
-          })
-          await expect(statsDialog).toBeVisible({ timeout: 15000 })
-          const closeButton = statsDialog.locator(".ant-modal-close")
-          if ((await closeButton.count()) > 0) {
-            await closeButton.click()
-          } else {
-            await page.keyboard.press("Escape")
-          }
-          await expect(statsDialog).toBeHidden({ timeout: 15000 })
-          const visibleModals = page.locator(".ant-modal-wrap:visible")
-          await expect(visibleModals).toHaveCount(0, { timeout: 15000 })
-          await logNotifications("after stats")
-        })
-
-        await step("delete dictionary", async () => {
-          const deleteButton = row!.locator("button").last()
-          await deleteButton.click()
-          const confirmDialog = page
-            .getByRole("dialog")
-            .filter({ hasText: /Delete dictionary/i })
-          await expect(confirmDialog).toBeVisible({ timeout: 15000 })
-          await confirmDialog.getByRole("button", { name: /^Delete$/ }).click()
-          await expect(confirmDialog).toBeHidden({ timeout: 15000 })
-          await logNotifications("after delete confirm")
-
-          const serverRecord = await pollForDictionaryRemoval(
-            normalizedServerUrl,
-            apiKey,
-            dictionaryName,
-            20000
-          )
-          logStep("server delete status", {
-            removed: !serverRecord,
-            id: serverRecord?.id ?? null,
-            is_active: serverRecord?.is_active ?? null,
-            status: serverRecord?.status ?? null
-          })
-
-          const rowLocator = page
-            .locator("tr")
-            .filter({ hasText: dictionaryName })
-          const waitForRowRemovalOrInactive = async () => {
-            const deadline = Date.now() + 20000
-            let lastText = ""
-            while (Date.now() < deadline) {
-              const count = await rowLocator.count()
-              if (count === 0) {
-                return { removed: true, inactive: false, rowText: "" }
-              }
-              lastText = await rowLocator.first().innerText().catch(() => "")
-              if (/Inactive/i.test(lastText)) {
-                return { removed: false, inactive: true, rowText: lastText }
-              }
-              await page.waitForTimeout(1000)
-            }
-            return { removed: false, inactive: false, rowText: lastText }
-          }
-
-          const uiResult = await waitForRowRemovalOrInactive()
-          logStep("ui delete status", uiResult)
-          if (!uiResult.removed && !uiResult.inactive) {
-            if (!serverRecord) {
-              await page.reload({ waitUntil: "domcontentloaded" })
-              await waitForConnected(page, "workflow-dictionaries-delete")
-              const refreshedCount = await rowLocator.count()
-              logStep("ui delete after reload", {
-                refreshedCount
-              })
-              if (refreshedCount === 0) {
-                return
-              }
-            }
-            throw new Error(
-              `Dictionary still visible after delete (rowText="${uiResult.rowText}")`
-            )
-          }
-          await logNotifications("after delete")
-        })
-      } finally {
-        await testInfo.attach("dictionaries-debug", {
-          body: debugLines.join("\n"),
-          contentType: "text/plain"
-        })
-        await driver.close()
-        await deleteDictionaryByName(normalizedServerUrl, apiKey, dictionaryName)
-      }
-    }
-  )
-
-  test(
-    "playground -> server chat -> open history -> pin/unpin",
-    async ({ page: fixturePage, context: fixtureContext }) => {
-    test.setTimeout(300000)
-    const { serverUrl, apiKey } = requireRealServerConfig()
-    const normalizedServerUrl = normalizeServerUrl(serverUrl)
-
-    const chatResponse = await fetchWithKey(
-      `${normalizedServerUrl}/api/v1/chats/?limit=1&offset=0`,
-      apiKey
-    ).catch(() => null)
-    if (!chatResponse?.ok) {
-      const body = await chatResponse?.text().catch(() => "")
-      skipOrThrow(
-        true,
-        `Server chats preflight failed: ${chatResponse?.status} ${chatResponse?.statusText} ${body}`
-      )
-      return
-    }
-
-    const modelsResponse = await fetchWithKey(
-      `${normalizedServerUrl}/api/v1/llm/models/metadata`,
-      apiKey
-    )
-    if (!modelsResponse.ok) {
-      const body = await modelsResponse.text().catch(() => "")
-      skipOrThrow(
-        true,
-        `Chat models preflight failed: ${modelsResponse.status} ${modelsResponse.statusText} ${body}`
-      )
-      return
-    }
-    const modelId = getFirstModelId(
-      await modelsResponse.json().catch(() => [])
-    )
-    if (!modelId) {
-      skipOrThrow(true, "No chat models returned from tldw_server.")
-      return
-    }
-    const selectedModelId = modelId.startsWith("tldw:")
-      ? modelId
-      : `tldw:${modelId}`
-
-    const driver = await createDriverForTest({
-      serverUrl: normalizedServerUrl,
-      apiKey,
-      page: fixturePage,
-      context: fixtureContext
-    })
-    const { context, page } = driver
-
-    const unique = Date.now()
-    const chatTitle = `E2E Server Chat ${unique}`
-    let chatId: string | null = null
-
-    try {
-      const granted = await driver.ensureHostPermission()
-      if (!granted) {
-        skipOrThrow(
-          true,
-          "Host permission not granted for tldw_server origin; allow it in chrome://extensions > tldw Assistant > Site access, then re-run"
-        )
-        return
-      }
-
-      await driver.goto(page, "/", {
-        waitUntil: "domcontentloaded"
-      })
-      await waitForConnected(page, "workflow-server-chat")
-      await setSelectedModel(page, selectedModelId)
-      await ensureServerPersistence(page)
-
-      await sendChatMessage(page, chatTitle)
-      await waitForAssistantMessage(page)
-
-      const savedHint = page
-        .getByText(/Chat now saved on server|Saved locally \+ on your server/i)
-        .first()
-      await savedHint.waitFor({ state: "visible", timeout: 10000 }).catch(() => {})
-
-      const chatRecord = await pollForChatByTitle(
-        normalizedServerUrl,
-        apiKey,
-        chatTitle,
-        60000
-      )
-      if (!chatRecord?.id) {
-        skipOrThrow(
-          true,
-          `Server chat "${chatTitle}" was not found after saving.`
-        )
-        return
-      }
-      chatId = String(chatRecord.id)
-
-      const sidebar = await ensureChatSidebarExpanded(page)
-      await selectServerTab(sidebar)
-
-      const chatButton = sidebar.getByRole("button", {
-        name: new RegExp(escapeRegExp(chatTitle))
-      })
-      await expect(chatButton).toBeVisible({ timeout: 30000 })
-      await chatButton.click()
-
-      const chatRow = chatButton.locator("..")
-      const pinButton = chatRow.getByRole("button", { name: /^Pin$/i })
-      if ((await pinButton.count()) > 0) {
-        await pinButton.click()
-        await expect(
-          chatRow.getByRole("button", { name: /^Unpin$/i })
-        ).toBeVisible({ timeout: 10000 })
-        await chatRow.getByRole("button", { name: /^Unpin$/i }).click()
-      } else {
-        skipOrThrow(true, "Pin action not available on server chat rows.")
-      }
-
-      const transcript = page
-        .locator('[data-testid="chat-message"]')
-        .filter({ hasText: chatTitle })
-        .first()
-      await expect(transcript).toBeVisible({ timeout: 20000 })
-    } finally {
-      await driver.close()
-      if (chatId) {
-        await deleteChatById(normalizedServerUrl, apiKey, chatId)
-      }
-    }
-  })
-
-  test(
-    "quiz -> take attempt -> review score",
-    async ({ page: fixturePage, context: fixtureContext }) => {
-    test.setTimeout(200000)
-    const { serverUrl, apiKey } = requireRealServerConfig()
-    const normalizedServerUrl = normalizeServerUrl(serverUrl)
-
-    const preflight = await fetchWithKey(
-      `${normalizedServerUrl}/api/v1/quizzes?limit=1&offset=0`,
-      apiKey
-    ).catch(() => null)
-    if (!preflight?.ok) {
-      const body = await preflight?.text().catch(() => "")
-      skipOrThrow(
-        true,
-        `Quiz API preflight failed: ${preflight?.status} ${preflight?.statusText} ${body}`
-      )
-      return
-    }
-
-    const driver = await createDriverForTest({
-      serverUrl: normalizedServerUrl,
-      apiKey,
-      page: fixturePage,
-      context: fixtureContext
-    })
-    const { context, page } = driver
-
-    const unique = Date.now()
-    const quizName = `E2E Quiz ${unique}`
-    let quizId: string | number | null = null
-
-    try {
-      quizId = await createQuiz(normalizedServerUrl, apiKey, quizName)
-      if (!quizId) {
-        skipOrThrow(true, "Quiz creation did not return an id.")
-        return
-      }
-
-      await addQuizQuestion(normalizedServerUrl, apiKey, quizId, {
-        question_type: "multiple_choice",
-        question_text: `${quizName} Q1: 1 + 1 = ?`,
-        options: ["2", "1", "3"],
-        correct_answer: 0,
-        points: 1,
-        order_index: 0
-      })
-      await addQuizQuestion(normalizedServerUrl, apiKey, quizId, {
-        question_type: "true_false",
-        question_text: `${quizName} Q2: The sky is blue.`,
-        correct_answer: "true",
-        points: 1,
-        order_index: 1
-      })
-
-      const granted = await driver.ensureHostPermission()
-      if (!granted) {
-        skipOrThrow(
-          true,
-          "Host permission not granted for tldw_server origin; allow it in chrome://extensions > tldw Assistant > Site access, then re-run"
-        )
-        return
-      }
-
-      await driver.goto(page, "/quiz", {
-        waitUntil: "domcontentloaded"
-      })
-      await waitForConnected(page, "workflow-quiz")
-
-      const unsupportedBanner = page.getByText(/Quiz API not available/i)
-      if (await unsupportedBanner.isVisible().catch(() => false)) {
-        skipOrThrow(true, "Quiz API not available on configured server.")
-        return
-      }
-      const connectBanner = page.getByText(/Connect to use Quiz Playground/i)
-      if (await connectBanner.isVisible().catch(() => false)) {
-        skipOrThrow(true, "Quiz workspace is offline or not connected.")
-        return
-      }
-
-      const takeTab = page.getByRole("tab", { name: /Take Quiz/i })
-      await takeTab.click()
-
-      let quizCard = page
-        .locator(".ant-card")
-        .filter({ hasText: quizName })
-        .first()
-      await expect(quizCard).toBeVisible({ timeout: 30000 })
-      await quizCard.getByRole("button", { name: /Start Quiz/i }).click()
-
-      let quizCardForAnswers = page
-        .locator(".ant-card")
-        .filter({ hasText: quizName })
-        .first()
-      if ((await quizCardForAnswers.count()) === 0) {
-        quizCardForAnswers = page.locator(".ant-card").first()
-      }
-      const questionItems = quizCardForAnswers.locator(".ant-list-item")
-      await expect(questionItems.first()).toBeVisible({ timeout: 15000 })
-      const questionCount = await questionItems.count()
-      for (let i = 0; i < questionCount; i += 1) {
-        const item = questionItems.nth(i)
-        const radios = item.locator('input[type="radio"]')
-        if ((await radios.count()) > 0) {
-          await radios.first().click()
-          continue
-        }
-        const textbox = item.getByRole("textbox").first()
-        if ((await textbox.count()) > 0) {
-          await textbox.fill("test")
-        }
-      }
-
-      await page.getByRole("button", { name: /Submit/i }).click()
-      await expect(page.getByText(/Score:/i)).toBeVisible({
-        timeout: 30000
-      })
-      await expect(
-        page.getByRole("button", { name: /Retake Quiz/i })
-      ).toBeVisible({ timeout: 30000 })
-    } finally {
-      await driver.close()
-      if (quizId != null) {
-        await deleteQuizById(normalizedServerUrl, apiKey, quizId)
-      }
-    }
-  })
-
-  test(
-    "chatbooks export -> download archive",
-    async ({ page: fixturePage, context: fixtureContext }) => {
-    test.setTimeout(220000)
-    const { serverUrl, apiKey } = requireRealServerConfig()
-    const normalizedServerUrl = normalizeServerUrl(serverUrl)
-
-    const healthRes = await fetchWithKey(
-      `${normalizedServerUrl}/api/v1/chatbooks/health`,
-      apiKey
-    ).catch(() => null)
-    if (!healthRes?.ok) {
-      const body = await healthRes?.text().catch(() => "")
-      skipOrThrow(
-        true,
-        `Chatbooks API preflight failed: ${healthRes?.status} ${healthRes?.statusText} ${body}`
-      )
-      return
-    }
-    const healthPayload = await healthRes.json().catch(() => null)
-    if (healthPayload?.available === false) {
-      skipOrThrow(true, "Chatbooks API disabled on the configured server.")
-      return
-    }
-
-    const promptName = `E2E Chatbook Prompt ${Date.now()}`
-    let promptId: string | number | null = null
-
-    const driver = await createDriverForTest({
-      serverUrl: normalizedServerUrl,
-      apiKey,
-      page: fixturePage,
-      context: fixtureContext
-    })
-    const { context, page } = driver
-
-    try {
-      promptId = await createPrompt(normalizedServerUrl, apiKey, {
-        name: promptName,
-        system_prompt: "You are an export prompt for chatbooks.",
-        user_prompt: "Generate a short answer.",
-        keywords: ["e2e", "chatbook"]
-      })
-
-      const granted = await driver.ensureHostPermission()
-      if (!granted) {
-        skipOrThrow(
-          true,
-          "Host permission not granted for tldw_server origin; allow it in chrome://extensions > tldw Assistant > Site access, then re-run"
-        )
-        return
-      }
-
-      await driver.goto(page, "/chatbooks", {
-        waitUntil: "domcontentloaded"
-      })
-      await waitForConnected(page, "workflow-chatbooks")
-
-      await expect(
-        page.getByRole("heading", { name: /Chatbooks Playground/i })
-      ).toBeVisible({ timeout: 15000 })
-
-      const unavailableAlert = page.getByText(
-        /Chatbooks is not available on this server/i
-      )
-      if (await unavailableAlert.isVisible().catch(() => false)) {
-        skipOrThrow(true, "Chatbooks API not available on this server.")
-        return
-      }
-
-      const exportName = `E2E Chatbook ${Date.now()}`
-      await page.getByPlaceholder(/^Name$/i).fill(exportName)
-      await page.getByPlaceholder(/Description/i).fill("E2E chatbook export")
-
-      const promptCard = page
-        .locator(".ant-card")
-        .filter({ has: page.getByText(/Prompts/i) })
-        .first()
-      await expect(promptCard).toBeVisible({ timeout: 15000 })
-
-      const includeAllSwitch = promptCard.getByRole("switch")
-      if ((await includeAllSwitch.count()) > 0) {
-        const checked = await includeAllSwitch.getAttribute("aria-checked")
-        if (checked !== "true") {
-          await includeAllSwitch.click()
-        }
-      }
-
-      await page.getByRole("button", { name: /Export chatbook/i }).click()
-
-      const errorNotice = page
-        .getByText(
-          /Select at least one item to export|Name and description are required|Export failed/i
-        )
-        .first()
-      const errorVisible = await errorNotice
-        .waitFor({ state: "visible", timeout: 5000 })
-        .then(() => true)
-        .catch(() => false)
-      if (errorVisible) {
-        const errorText = await errorNotice.textContent()
-        throw new Error(
-          `Chatbook export failed: ${errorText?.trim() || "unknown error"}`
-        )
-      }
-
-      await page
-        .getByText(/Export job created|Export complete/i)
-        .first()
-        .waitFor({ state: "visible", timeout: 30000 })
-        .catch(() => {})
-
-      const jobsTab = page.getByRole("tab", { name: /Jobs/i })
-      await jobsTab.click()
-      const jobsPanelId = await jobsTab.getAttribute("aria-controls")
-      const jobsPanel = jobsPanelId ? page.locator(`#${jobsPanelId}`) : page
-
-      const exportCard = jobsPanel
-        .locator(".ant-card")
-        .filter({ hasText: /Export jobs/i })
-        .first()
-      await expect(exportCard).toBeVisible({ timeout: 15000 })
-
-      const exportRow = exportCard
-        .locator(".ant-table-row")
-        .filter({ hasText: exportName })
-        .first()
-      await expect(exportRow).toBeVisible({ timeout: 90000 })
-
-      const downloadButton = exportRow.getByRole("button", {
-        name: /Download/i
-      })
-      await expect(downloadButton).toBeVisible({ timeout: 120000 })
-
-      await page.evaluate(() => {
-        const win = window as any
-        if (!win.__e2e_downloadHooked) {
-          win.__e2e_downloadHooked = true
-          const original = URL.createObjectURL
-          win.__e2e_downloadOriginal = original
-          URL.createObjectURL = function (blob: Blob) {
-            win.__e2e_lastDownload = { size: blob.size, type: blob.type }
-            return original.call(URL, blob)
-          }
-        }
-        win.__e2e_lastDownload = null
-      })
-
-      const downloadEvent = page
-        .waitForEvent("download", { timeout: 15000 })
-        .catch(() => null)
-      await downloadButton.click()
-      const download = await downloadEvent
-      if (download) {
-        expect(download.suggestedFilename()).toMatch(/\.zip$/i)
-      } else {
-        await page.waitForFunction(
-          () => (window as any).__e2e_lastDownload != null,
-          undefined,
-          { timeout: 15000 }
-        )
-        const meta = await page.evaluate(
-          () => (window as any).__e2e_lastDownload
-        )
-        const type = String(meta?.type || "")
-        expect(type).toMatch(/zip|octet-stream/i)
-      }
-    } finally {
-      await driver.close()
-      if (promptId != null) {
-        await deletePromptById(normalizedServerUrl, apiKey, promptId)
-      }
-    }
-  })
-
-  test(
-    "tts playback -> server provider -> audio segments",
-    async ({ page: fixturePage, context: fixtureContext }) => {
-    test.setTimeout(300000)
-    const { serverUrl, apiKey } = requireRealServerConfig()
-    const normalizedServerUrl = normalizeServerUrl(serverUrl)
-
-    const providers = await fetchAudioProviders(normalizedServerUrl, apiKey)
-    if (!providers) {
-      skipOrThrow(true, "Audio providers not available on the configured server.")
-      return
-    }
-
-    const driver = await createDriverForTest({
-      serverUrl: normalizedServerUrl,
-      apiKey,
-      page: fixturePage,
-      context: fixtureContext
-    })
-    const { context, page } = driver
-
-    try {
-      const granted = await driver.ensureHostPermission()
-      if (!granted) {
-        skipOrThrow(
-          true,
-          "Host permission not granted for tldw_server origin; allow it in chrome://extensions > tldw Assistant > Site access, then re-run"
-        )
-        return
-      }
-
-      await driver.goto(page, "/tts", {
-        waitUntil: "domcontentloaded"
-      })
-      await waitForConnected(page, "workflow-tts")
-
-      await expect(page.getByText(/Current provider/i)).toBeVisible({
-        timeout: 15000
-      })
-
-      const providerSelected = await selectTldwProvider(page)
-      if (!providerSelected) {
-        skipOrThrow(true, "tldw server option not available in provider list.")
-        return
-      }
-
-      const saveButton = page.getByRole("button", { name: /save/i }).first()
-      if ((await saveButton.count()) > 0 && !(await saveButton.isDisabled())) {
-        await saveButton.click()
-      }
-
-      const textarea = page.getByPlaceholder(
-        /Type or paste text here, then use Play to listen./i
-      )
-      await textarea.fill("Hello from the TTS playback workflow.")
-
-      await page.getByRole("button", { name: /^Play$/i }).click()
-
-      await expect(
-        page.getByText(/Generated audio segments/i)
-      ).toBeVisible({ timeout: 20000 })
-      await expect(page.locator("audio")).toBeVisible({ timeout: 20000 })
-    } finally {
-      await driver.close()
-    }
-  })
-
-  test(
-    "compare mode -> multi-model answers -> choose winner",
-    async ({ page: fixturePage, context: fixtureContext }) => {
-    test.setTimeout(300000)
-    const { serverUrl, apiKey } = requireRealServerConfig()
-    const normalizedServerUrl = normalizeServerUrl(serverUrl)
-
-    const modelsResponse = await fetchWithKey(
-      `${normalizedServerUrl}/api/v1/llm/models/metadata`,
-      apiKey
-    )
-    if (!modelsResponse.ok) {
-      const body = await modelsResponse.text().catch(() => "")
-      skipOrThrow(
-        true,
-        `Compare mode preflight failed: ${modelsResponse.status} ${modelsResponse.statusText} ${body}`
-      )
-      return
-    }
-    const modelsPayload = await modelsResponse.json().catch(() => [])
-    const modelsList = Array.isArray(modelsPayload)
-      ? modelsPayload
-      : Array.isArray((modelsPayload as any)?.models)
-        ? (modelsPayload as any).models
-        : []
-    const modelIds = modelsList
-      .map((model: any) => model?.model || model?.id || model?.name)
-      .filter(Boolean)
-    if (modelIds.length < 2) {
-      skipOrThrow(true, "Need at least 2 models to run compare workflow.")
-      return
-    }
-
-    const driver = await createDriverForTest({
-      serverUrl: normalizedServerUrl,
-      apiKey,
-      page: fixturePage,
-      context: fixtureContext,
-      featureFlags: {
-        [FEATURE_FLAG_KEYS.COMPARE_MODE]: true
-      }
-    })
-    const { context, page } = driver
-
-    try {
-      const granted = await driver.ensureHostPermission()
-      if (!granted) {
-        skipOrThrow(
-          true,
-          "Host permission not granted for tldw_server origin; allow it in chrome://extensions > tldw Assistant > Site access, then re-run"
-        )
-        return
-      }
-
-      await waitForConnected(page, "workflow-compare-mode")
-      await setSelectedModel(page, String(modelIds[0]))
-      await page.evaluate(async () => {
-        const w: any = window as any
-        const chromeApi = w?.chrome
-        const setFlag = (area: typeof chrome.storage.local) =>
-          new Promise<void>((resolve) => {
-            area.set({ ff_compareMode: true }, () => resolve())
-          })
-        if (chromeApi?.storage?.local) {
-          await setFlag(chromeApi.storage.local)
-        }
-        if (chromeApi?.storage?.sync) {
-          await setFlag(chromeApi.storage.sync)
-        }
-        if (!chromeApi?.storage?.local && !chromeApi?.storage?.sync) {
-          try {
-            localStorage.setItem("ff_compareMode", "true")
-          } catch {
-            // ignore localStorage errors
-          }
-        }
-      })
-
-      // Reload to ensure feature flag takes effect
-      await page.reload({ waitUntil: "domcontentloaded" })
-      await waitForConnected(page, "workflow-compare-mode-reload")
-
-      // Debug logging for compare button selector
-      const debugCompareButtonState = async () => {
-        const compareExactCount = await page.getByRole("button", { name: /^Compare$/i }).count().catch(() => -1)
-        const compareModelsCount = await page.getByRole("button", { name: /compare models/i }).count().catch(() => -1)
-        const allButtonsCount = await page.getByRole("button").count().catch(() => -1)
-        const featureFlagState = await page.evaluate(() => {
-          try {
-            return localStorage.getItem("ff_compareMode")
-          } catch {
-            return null
-          }
-        }).catch(() => null)
-        console.log(
-          `[compare-mode-button] compareExactCount=${compareExactCount} compareModelsCount=${compareModelsCount} allButtonsCount=${allButtonsCount} ff_compareMode=${featureFlagState} url=${page.url()}`
-        )
-      }
-      await debugCompareButtonState()
-
-      // Compare button may be a <button> or <Link> (anchor element)
-      // Try multiple selectors in order of specificity
-      const findCompareButton = async () => {
-        // Try exact "Compare" text first
-        const compareExact = page.locator('button, a').filter({ hasText: /^Compare$/i })
-        if ((await compareExact.count()) > 0) return compareExact.first()
-
-        // Try "Compare Models" or "Compare models"
-        const compareModels = page.locator('button, a').filter({ hasText: /compare\s*models/i })
-        if ((await compareModels.count()) > 0) return compareModels.first()
-
-        // Try data-testid or aria-label containing compare
-        const compareTestId = page.locator('[data-testid*="compare" i], [aria-label*="compare" i]')
-        if ((await compareTestId.count()) > 0) return compareTestId.first()
-
-        // Fallback to any element with compare text
-        return page.locator('button, a, [role="button"]').filter({ hasText: /compare/i }).first()
-      }
-      const compareButton = await findCompareButton()
-      await expect(compareButton).toBeVisible({ timeout: 20000 })
-      await compareButton.click()
-
-      const dialog = page.getByRole("dialog", { name: /compare settings/i })
-      await expect(dialog).toBeVisible({ timeout: 10000 })
-
-      const switches = dialog.getByRole("switch")
-      const ensureSwitchOn = async (index: number) => {
-        const toggle = switches.nth(index)
-        const checked = await toggle.getAttribute("aria-checked")
-        if (checked !== "true") {
-          await toggle.click()
-        }
-      }
-      if ((await switches.count()) >= 2) {
-        await ensureSwitchOn(0)
-        await ensureSwitchOn(1)
-      } else {
-        await ensureSwitchOn(0)
-      }
-
-      const modelPicker = dialog.locator(".ant-select-multiple").first()
-      await modelPicker.click()
-      const options = page.locator(
-        ".ant-select-dropdown:visible .ant-select-item-option"
-      )
-      const optionCount = await options.count()
-      if (optionCount < 2) {
-        skipOrThrow(true, "Compare model picker returned fewer than 2 options.")
-        return
-      }
-      await options.nth(0).click()
-      await options.nth(1).click()
-      await page.keyboard.press("Escape")
-      await expect(dialog).toBeHidden({ timeout: 10000 })
-
-      const input = page.locator("#textarea-message")
-      await expect(input).toBeVisible({ timeout: 15000 })
-      await input.fill(
-        "Compare mode workflow: summarize key differences in one sentence."
-      )
-      const sendButton = page.getByRole("button", { name: /send/i }).first()
-      await sendButton.click()
-
-      const clusterLabel = page.getByText("Multi-model answers").first()
-      await expect(clusterLabel).toBeVisible({ timeout: 60000 })
-
-      const compareAnswerButtons = page.getByRole("button", {
-        name: /^Compare$/
-      })
-      await expect(compareAnswerButtons.first()).toBeVisible({
-        timeout: 60000
-      })
-      const compareCount = await compareAnswerButtons.count()
-      if (compareCount < 2) {
-        skipOrThrow(true, "Need at least 2 compare responses to continue.")
-        return
-      }
-
-      await compareAnswerButtons.nth(0).click()
-      await compareAnswerButtons.nth(1).click()
-
-      const bulkSplit = page.getByRole("button", {
-        name: /open each selected answer as its own chat/i
-      })
-      if ((await bulkSplit.count()) > 0) {
-        await bulkSplit.first().click()
-      }
-
-      await compareAnswerButtons.nth(1).click()
-      const continueButton = page.getByRole("button", {
-        name: /continue with this model/i
-      })
-      await expect(continueButton).toBeVisible({ timeout: 15000 })
-      await continueButton.click()
-
-      await expect(page.getByText("Chosen").first()).toBeVisible({
-        timeout: 15000
-      })
-
-      const compareAgainHint = page.getByText(
-        "Continue with the chosen answer or compare again."
-      )
-      if (await compareAgainHint.isVisible().catch(() => false)) {
-        const compareAgainButton = compareAgainHint
-          .locator("..")
-          .getByRole("button", { name: /compare/i })
-        await compareAgainButton.click()
-      }
-
-      const canonicalButton = page
-        .getByRole("button", { name: /pin as canonical/i })
-        .first()
-      if ((await canonicalButton.count()) > 0) {
-        await canonicalButton.click()
-      }
-    } finally {
-      await driver.close()
-    }
-  })
-
-  test(
-    "data tables -> chat source -> generate -> save -> delete",
-    async ({ page: fixturePage, context: fixtureContext }) => {
-    test.setTimeout(360000)
-    const { serverUrl, apiKey } = requireRealServerConfig()
-    const normalizedServerUrl = normalizeServerUrl(serverUrl)
-
-    const tablesResponse = await fetchWithKey(
-      `${normalizedServerUrl}/api/v1/data-tables?page=1&page_size=1`,
-      apiKey
-    ).catch(() => null)
-    if (!tablesResponse?.ok) {
-      const body = await tablesResponse?.text().catch(() => "")
-      skipOrThrow(
-        true,
-        `Data tables preflight failed: ${tablesResponse?.status} ${tablesResponse?.statusText} ${body}`
-      )
-      return
-    }
-
-    const unique = Date.now()
-    const characterName = `E2E DataTables Character ${unique}`
-    const chatTitle = `E2E DataTables Chat ${unique}`
-    const tableName = `E2E Table ${unique}`
-    let characterId: string | number | null = null
-    let chatId: string | null = null
-
-    const driver = await createDriverForTest({
-      serverUrl: normalizedServerUrl,
-      apiKey,
-      page: fixturePage,
-      context: fixtureContext
-    })
-    const { context, page } = driver
-
-    try {
-      characterId = await createCharacterByName(
-        normalizedServerUrl,
-        apiKey,
-        characterName
-      )
-      if (!characterId) {
-        skipOrThrow(true, "Unable to create character for data tables chat.")
-        return
-      }
-      chatId = await createChatWithMessage(
-        normalizedServerUrl,
-        apiKey,
-        characterId,
-        chatTitle,
-        `Data tables source message ${unique}`
-      )
-      await pollForChatByTitle(
-        normalizedServerUrl,
-        apiKey,
-        chatTitle,
-        30000
-      )
-
-      const granted = await driver.ensureHostPermission()
-      if (!granted) {
-        skipOrThrow(
-          true,
-          "Host permission not granted for tldw_server origin; allow it in chrome://extensions > tldw Assistant > Site access, then re-run"
-        )
-        return
-      }
-
-      await driver.goto(page, "/data-tables", {
-        waitUntil: "domcontentloaded"
-      })
-      await waitForConnected(page, "workflow-data-tables")
-
-      await expect(page.getByText(/Data Tables Studio/i)).toBeVisible({
-        timeout: 15000
-      })
-
-      const createTab = page.getByRole("tab", {
-        name: /Create Table/i
-      })
-      await createTab.click()
-
-      const chatsSegment = page.getByRole("radio", { name: /Chats/i })
-      if ((await chatsSegment.count()) > 0) {
-        await chatsSegment.first().click()
-      } else {
-        const chatsButton = page.getByRole("button", { name: /Chats/i })
-        if ((await chatsButton.count()) > 0) {
-          await chatsButton.first().click()
-        }
-      }
-
-      const searchInput = page.getByPlaceholder(/Search\.\.\./i)
-      await expect(searchInput).toBeVisible({ timeout: 15000 })
-      await searchInput.fill(chatTitle)
-
-      const chatRow = page
-        .locator(".ant-list-item")
-        .filter({ hasText: chatTitle })
-        .first()
-      await expect(chatRow).toBeVisible({ timeout: 20000 })
-      await chatRow.click()
-      await expect(chatRow.getByText(/Selected/i)).toBeVisible({
-        timeout: 10000
-      })
-
-      await page.getByRole("button", { name: /^Next$/i }).click()
-
-      const nameInput = page.getByPlaceholder(/Enter a name for your table/i)
-      await expect(nameInput).toBeVisible({ timeout: 15000 })
-      await nameInput.fill(tableName)
-
-      const promptInput = page.getByPlaceholder(/E\.g\., Create a table/i)
-      await expect(promptInput).toBeVisible({ timeout: 15000 })
-      await promptInput.fill(
-        "Create a table with columns for topic and key takeaway."
-      )
-
-      await page.getByRole("button", { name: /^Next$/i }).click()
-
-      const previewReady = await Promise.race([
-        page
-          .locator(".ant-table")
-          .first()
-          .waitFor({ state: "visible", timeout: 120000 })
-          .then(() => "table"),
-        page
-          .getByText(/Generation Failed/i)
-          .waitFor({ state: "visible", timeout: 120000 })
-          .then(() => "error")
-      ])
-      if (previewReady !== "table") {
-        throw new Error("Data table generation failed.")
-      }
-
-      await page.getByRole("button", { name: /^Next$/i }).click()
-
-      const downloadPromise = page
-        .waitForEvent("download", { timeout: 15000 })
-        .catch(() => null)
-      await page.getByRole("button", { name: /^CSV$/i }).click()
-      const download = await downloadPromise
-      if (download) {
-        await download.path().catch(() => {})
-      }
-
-      await page.getByRole("button", { name: /Save to Library/i }).click()
-      await expect(page.getByText(/Table Saved!/i)).toBeVisible({
-        timeout: 20000
-      })
-
-      await page.getByRole("button", { name: /View My Tables/i }).click()
-      const tablesSearch = page.getByPlaceholder(/Search tables\.\.\./i)
-      await tablesSearch.fill(tableName)
-
-      const tableRow = page
-        .locator(".ant-table-row")
-        .filter({ hasText: tableName })
-        .first()
-      await expect(tableRow).toBeVisible({ timeout: 20000 })
-      const deleteButton = tableRow.locator("button").last()
-      await deleteButton.click()
-      await page.getByRole("button", { name: /^Delete$/ }).click()
-
-      await expect(
-        page.locator(".ant-table-row").filter({ hasText: tableName })
-      ).toHaveCount(0, { timeout: 20000 })
-    } finally {
-      await driver.close()
-      await deleteDataTableByName(normalizedServerUrl, apiKey, tableName)
-      if (chatId) {
-        await deleteChatById(normalizedServerUrl, apiKey, chatId)
-      }
-      if (characterId) {
-        await deleteCharacterByName(
+        const characterId = await createCharacterByName(
           normalizedServerUrl,
           apiKey,
           characterName
         )
-      }
-    }
-  })
-
-  test(
-    "media trash -> delete -> restore",
-    async ({ page: fixturePage, context: fixtureContext }) => {
-    test.setTimeout(360000)
-    const { serverUrl, apiKey } = requireRealServerConfig()
-    const normalizedServerUrl = normalizeServerUrl(serverUrl)
-
-    const trashResponse = await fetchWithKey(
-      `${normalizedServerUrl}/api/v1/media/trash?page=1&results_per_page=1`,
-      apiKey
-    ).catch(() => null)
-    if (!trashResponse?.ok) {
-      const body = await trashResponse?.text().catch(() => "")
-      skipOrThrow(
-        true,
-        `Media trash preflight failed: ${trashResponse?.status} ${trashResponse?.statusText} ${body}`
-      )
-      return
-    }
-
-    const driver = await createDriverForTest({
-      serverUrl: normalizedServerUrl,
-      apiKey,
-      page: fixturePage,
-      context: fixtureContext
-    })
-    const { context, page } = driver
-
-    const unique = Date.now()
-    const fileName = `e2e-trash-${unique}.txt`
-    let mediaId: string | number | null = null
-
-    try {
-      const granted = await driver.ensureHostPermission()
-      if (!granted) {
-        skipOrThrow(
-          true,
-          "Host permission not granted for tldw_server origin; allow it in chrome://extensions > tldw Assistant > Site access, then re-run"
-        )
-        return
-      }
-
-      await driver.goto(page, "/media", {
-        waitUntil: "domcontentloaded"
-      })
-      await waitForConnected(page, "workflow-media-trash-ingest")
-
-      let modal: Locator
-      try {
-        modal = await openQuickIngestModal(page)
-      } catch {
-        await driver.goto(page, "/playground", {
-          waitUntil: "domcontentloaded"
-        })
-        await waitForConnected(page, "workflow-media-trash-ingest-fallback")
-        modal = await openQuickIngestModal(page)
-      }
-      await waitForQuickIngestReady(modal)
-
-      await page.setInputFiles('[data-testid="qi-file-input"]', {
-        name: fileName,
-        mimeType: "text/plain",
-        buffer: Buffer.from(`E2E media trash ${unique}`)
-      })
-
-      const fileRow = modal.getByText(fileName).first()
-      await expect(fileRow).toBeVisible({ timeout: 15000 })
-      await fileRow.click()
-      await dismissQuickIngestInspectorIntro(page)
-
-      await clickQuickIngestRun(modal)
-      void waitForQuickIngestCompletion(modal, 180000)
-
-      const mediaMatch = await pollForMediaMatch(
-        normalizedServerUrl,
-        apiKey,
-        `e2e-trash-${unique}`, // Use filename prefix with words for FTS5 tokenization
-        300000
-      )
-      mediaId = mediaMatch?.id ?? null
-      const expectedTitle = String(
-        mediaMatch?.title || mediaMatch?.filename || fileName
-      ).replace(/\.txt$/i, "")
-
-      await driver.goto(page, "/media", {
-        waitUntil: "domcontentloaded"
-      })
-      await waitForConnected(page, "workflow-media-trash-delete")
-
-      const searchInput = page.getByPlaceholder(
-        /Search media \(title\/content\)/i
-      )
-      await searchInput.fill(String(unique))
-      await page
-        .locator("#media-search-panel")
-        .getByRole("button", { name: /^Search$/i })
-        .click()
-
-      const resultRow = page
-        .getByRole("button", {
-          name: new RegExp(escapeRegExp(expectedTitle), "i")
-        })
-        .first()
-      await expect(resultRow).toBeVisible({ timeout: 30000 })
-      await resultRow.click()
-
-      const deleteButton = page.getByRole("button", {
-        name: /Delete item/i
-      })
-      await expect(deleteButton).toBeVisible({ timeout: 15000 })
-      await deleteButton.click()
-      await page.getByRole("button", { name: /^Delete$/ }).click()
-
-      await expect(page.getByText(/Moved to trash/i)).toBeVisible({
-        timeout: 15000
-      })
-
-      const trashButton = page.getByRole("button", { name: /^Trash$/i })
-      await trashButton.click()
-      await waitForConnected(page, "workflow-media-trash-view")
-
-      const trashRow = page
-        .locator("div")
-        .filter({
-          has: page.getByText(fileName)
-        })
-        .filter({
-          has: page.getByRole("button", { name: /^Restore$/i })
-        })
-        .first()
-      await expect(trashRow).toBeVisible({ timeout: 30000 })
-      const restoreButton = trashRow.getByRole("button", {
-        name: /^Restore$/i
-      })
-      await restoreButton.click()
-
-      await expect(page.getByText(/Item restored/i)).toBeVisible({
-        timeout: 20000
-      })
-      await expect(page.getByText(fileName)).toHaveCount(0, {
-        timeout: 20000
-      })
-    } finally {
-      await driver.close()
-      if (mediaId != null) {
-        await cleanupMediaItem(normalizedServerUrl, apiKey, mediaId)
-      }
-    }
-  })
-
-  test(
-    "media ingestion -> analysis -> review -> re-analyze",
-    async ({ page: fixturePage, context: fixtureContext }) => {
-    test.setTimeout(300000)
-    const { serverUrl, apiKey } = requireRealServerConfig()
-    const normalizedServerUrl = normalizeServerUrl(serverUrl)
-
-    const mediaResponse = await fetchWithKey(
-      `${normalizedServerUrl}/api/v1/media?page=1&results_per_page=1`,
-      apiKey
-    )
-    if (!mediaResponse.ok) {
-      const body = await mediaResponse.text().catch(() => "")
-      skipOrThrow(
-        true,
-        `Media API preflight failed: ${mediaResponse.status} ${mediaResponse.statusText} ${body}`
-      )
-      return
-    }
-
-    const modelsResponse = await fetchWithKey(
-      `${normalizedServerUrl}/api/v1/llm/models/metadata`,
-      apiKey
-    )
-    if (!modelsResponse.ok) {
-      const body = await modelsResponse.text().catch(() => "")
-      skipOrThrow(
-        true,
-        `Chat models preflight failed: ${modelsResponse.status} ${modelsResponse.statusText} ${body}`
-      )
-      return
-    }
-    const modelId = getFirstModelId(
-      await modelsResponse.json().catch(() => [])
-    )
-    if (!modelId) {
-      skipOrThrow(true, "No chat models returned from tldw_server.")
-      return
-    }
-    const selectedModelId = modelId.startsWith("tldw:")
-      ? modelId
-      : `tldw:${modelId}`
-
-    const driver = await createDriverForTest({
-      serverUrl: normalizedServerUrl,
-      apiKey,
-      page: fixturePage,
-      context: fixtureContext
-    })
-    const { context, page } = driver
-
-    const unique = Date.now()
-    const fileName = `e2e-analysis-${unique}.txt`
-    const token1 = `analysis-token-1-${unique}`
-    const token2 = `analysis-token-2-${unique}`
-    let mediaId: string | number | null = null
-
-    const runAnalysis = async (token: string) => {
-      const generateButton = page
-        .getByRole("button", { name: /^Generate$/i })
-        .first()
-      await generateButton.scrollIntoViewIfNeeded()
-      await generateButton.click()
-
-      const modal = page.getByRole("dialog", {
-        name: /Generate Analysis/i
-      })
-      await expect(modal).toBeVisible({ timeout: 15000 })
-
-      const systemPrompt = modal.getByLabel(/System Prompt/i)
-      await systemPrompt.fill(
-        `Return exactly the token "${token}" and nothing else.`
-      )
-      const userPrefix = modal.getByLabel(/User Prompt Prefix/i)
-      await userPrefix.fill("")
-
-      const generateAnalysis = modal.getByRole("button", {
-        name: /Generate Analysis/i
-      })
-      await expect(generateAnalysis).toBeEnabled({ timeout: 30000 })
-      await generateAnalysis.click()
-
-      await expect(modal).toBeHidden({ timeout: 180000 })
-      const analysisOutput = page.getByRole("main").getByText(token).first()
-      await expect(analysisOutput).toBeVisible({ timeout: 60000 })
-    }
-
-    try {
-      const granted = await driver.ensureHostPermission()
-      if (!granted) {
-        skipOrThrow(
-          true,
-          "Host permission not granted for tldw_server origin; allow it in chrome://extensions > tldw Assistant > Site access, then re-run"
-        )
-        return
-      }
-
-      await setSelectedModel(page, selectedModelId)
-
-      await waitForConnected(page, "workflow-analysis-ingest")
-
-      let modal: Locator
-      try {
-        modal = await openQuickIngestModal(page)
-      } catch {
-        await driver.goto(page, "/playground", {
-          waitUntil: "domcontentloaded"
-        })
-        await waitForConnected(page, "workflow-analysis-ingest-fallback")
-        modal = await openQuickIngestModal(page)
-      }
-      await waitForQuickIngestReady(modal)
-
-      await page.setInputFiles('[data-testid="qi-file-input"]', {
-        name: fileName,
-        mimeType: "text/plain",
-        buffer: Buffer.from(`E2E analysis content ${unique}`)
-      })
-
-      const fileRow = modal.getByText(fileName).first()
-      await expect(fileRow).toBeVisible({ timeout: 15000 })
-      await fileRow.click()
-      await dismissQuickIngestInspectorIntro(page)
-
-      await clickQuickIngestRun(modal)
-      void waitForQuickIngestCompletion(modal, 180000)
-
-      const mediaMatch = await pollForMediaMatch(
-        normalizedServerUrl,
-        apiKey,
-        `e2e-analysis-${unique}`, // Use filename prefix with words for FTS5 tokenization
-        300000
-      )
-      mediaId = mediaMatch?.id ?? null
-      const expectedTitle = String(
-        mediaMatch?.title || mediaMatch?.filename || fileName
-      ).replace(/\.txt$/i, "")
-
-      await driver.goto(page, "/media", {
-        waitUntil: "domcontentloaded"
-      })
-      await waitForConnected(page, "workflow-analysis-media")
-
-      const searchInput = page.getByPlaceholder(
-        /Search media \(title\/content\)/i
-      )
-      await searchInput.fill(String(unique))
-      await page
-        .locator("#media-search-panel")
-        .getByRole("button", { name: /^Search$/i })
-        .click()
-
-      const resultRow = page
-        .getByRole("button", {
-          name: new RegExp(escapeRegExp(expectedTitle), "i")
-        })
-        .first()
-      await expect(resultRow).toBeVisible({ timeout: 30000 })
-      await resultRow.click()
-
-      await runAnalysis(token1)
-
-      await driver.goto(page, "/media-multi", {
-        waitUntil: "domcontentloaded"
-      })
-      await waitForConnected(page, "workflow-analysis-review")
-
-      const reviewSearch = page.getByPlaceholder(/Search media/i)
-      await expect(reviewSearch).toBeVisible({ timeout: 15000 })
-      await reviewSearch.fill(String(unique))
-      await page.getByRole("button", { name: /^Search$/i }).click()
-
-      const reviewRow = page
-        .getByTestId("media-review-results-list")
-        .getByRole("button", {
-          name: new RegExp(escapeRegExp(expectedTitle), "i")
-        })
-        .first()
-      await expect(reviewRow).toBeVisible({ timeout: 30000 })
-      await reviewRow.click()
-
-      const reviewAnalysis = page.getByText(token1).first()
-      await expect(reviewAnalysis).toBeVisible({ timeout: 60000 })
-
-      await driver.goto(page, "/media", {
-        waitUntil: "domcontentloaded"
-      })
-      await waitForConnected(page, "workflow-analysis-reanalyze")
-
-      await searchInput.fill(String(unique))
-      await page
-        .locator("#media-search-panel")
-        .getByRole("button", { name: /^Search$/i })
-        .click()
-      await expect(resultRow).toBeVisible({ timeout: 30000 })
-      await resultRow.click()
-
-      await runAnalysis(token2)
-    } finally {
-      await driver.close()
-      if (mediaId != null) {
-        await cleanupMediaItem(normalizedServerUrl, apiKey, mediaId)
-      }
-    }
-  })
-
-  test(
-    "characters -> chat persona -> send message",
-    async ({ page: fixturePage, context: fixtureContext }) => {
-    test.setTimeout(300000)
-    const { serverUrl, apiKey } = requireRealServerConfig()
-    const normalizedServerUrl = normalizeServerUrl(serverUrl)
-
-    const characterList = await fetchWithKey(
-      `${normalizedServerUrl}/api/v1/characters/`,
-      apiKey
-    )
-    if (!characterList.ok) {
-      const body = await characterList.text().catch(() => "")
-      skipOrThrow(
-        true,
-        `Characters API preflight failed: ${characterList.status} ${characterList.statusText} ${body}`
-      )
-      return
-    }
-
-    const modelsResponse = await fetchWithKey(
-      `${normalizedServerUrl}/api/v1/llm/models/metadata`,
-      apiKey
-    )
-    if (!modelsResponse.ok) {
-      const body = await modelsResponse.text().catch(() => "")
-      skipOrThrow(
-        true,
-        `Chat models preflight failed: ${modelsResponse.status} ${modelsResponse.statusText} ${body}`
-      )
-      return
-    }
-    const modelId = getFirstModelId(
-      await modelsResponse.json().catch(() => [])
-    )
-    if (!modelId) {
-      skipOrThrow(true, "No chat models returned from tldw_server.")
-      return
-    }
-    const selectedModelId = modelId.startsWith("tldw:")
-      ? modelId
-      : `tldw:${modelId}`
-
-    const driver = await createDriverForTest({
-      serverUrl: normalizedServerUrl,
-      apiKey,
-      page: fixturePage,
-      context: fixtureContext
-    })
-    const { context, page } = driver
-
-    const unique = Date.now()
-    const characterName = `E2E Persona ${unique}`
-
-    try {
-      const granted = await driver.ensureHostPermission()
-      if (!granted) {
-        skipOrThrow(
-          true,
-          "Host permission not granted for tldw_server origin; allow it in chrome://extensions > tldw Assistant > Site access, then re-run"
-        )
-        return
-      }
-
-      await setSelectedModel(page, selectedModelId)
-
-      await driver.goto(page, "/characters", {
-        waitUntil: "domcontentloaded"
-      })
-      await waitForConnected(page, "workflow-characters")
-
-      const newCharacterButton = page
-        .getByRole("button", { name: /New character|Create character/i })
-        .first()
-      await expect(newCharacterButton).toBeVisible({ timeout: 15000 })
-      await newCharacterButton.click()
-
-      const createModal = page.getByRole("dialog", {
-        name: /New character/i
-      })
-      await expect(createModal).toBeVisible({ timeout: 15000 })
-
-      await createModal.getByLabel(/Name/i).fill(characterName)
-      await createModal
-        .getByLabel(/Description/i)
-        .fill("Created by Playwright for persona workflow.")
-      const tagsInput = createModal.getByRole("combobox", {
-        name: /^Tags$/i
-      })
-      if ((await tagsInput.count()) > 0) {
-        await tagsInput.click()
-        await page.keyboard.type("e2e")
-        await page.keyboard.press("Enter")
-      }
-      await createModal
-        .getByLabel(/Greeting message/i)
-        .fill("Hello from the E2E persona.")
-      await createModal
-        .getByLabel(/Behavior \/ instructions|System prompt/i)
-        .fill("Be concise and friendly.")
-
-      const createButton = createModal
-        .getByRole("button", { name: /Create character|Save changes/i })
-        .first()
-      await createButton.click()
-      await expect(
-        page.getByText(/Character created/i)
-      ).toBeVisible({ timeout: 15000 })
-      await expect(createModal).toBeHidden({ timeout: 15000 })
-
-      const searchCharacters = page.getByRole("textbox", {
-        name: /Search characters/i
-      })
-      if ((await searchCharacters.count()) > 0) {
-        await searchCharacters.fill(characterName)
-        await page.waitForTimeout(400)
-      }
-      const characterRow = page
-        .locator("tbody tr")
-        .filter({ hasText: characterName })
-        .first()
-      let usedChatButton = false
-      const rowVisible = await characterRow
-        .waitFor({ state: "visible", timeout: 15000 })
-        .then(() => true)
-        .catch(() => false)
-      if (rowVisible) {
-        const chatAsButton = characterRow.getByRole("button", {
-          name: new RegExp(`Chat as ${escapeRegExp(characterName)}`)
-        })
-        const chatVisible = await chatAsButton
-          .isVisible()
-          .catch(() => false)
-        if (chatVisible) {
-          await chatAsButton.click({ timeout: 15000 })
-          usedChatButton = true
+        if (!characterId) {
+          throw new Error("Unable to create character for flashcards flow.")
         }
-      }
-
-      if (!usedChatButton) {
-        const record = await pollForCharacterByName(
+        createdCharacter = true
+        characterRecord = await pollForCharacterByName(
           normalizedServerUrl,
           apiKey,
           characterName,
           30000
         )
-        if (!record) {
+        if (!characterRecord) {
+          throw new Error(
+            "Character created but not returned by search for flashcards flow."
+          )
+      }
+
+      await setSelectedModel(page, selectedModelId)
+
+      const chatPage = await openChatSidepanel(driver)
+      await waitForConnected(chatPage, "workflow-chat-flashcards", driver.kind)
+      await selectTrackedCharacterFromRuntimeRail(
+        chatPage,
+        characterName,
+        driver.kind,
+        characterId
+      )
+      await ensureServerPersistence(chatPage)
+
+        const userMessage = `E2E flashcards flow ${unique}`
+        await sendChatMessage(chatPage, userMessage)
+        await waitForAssistantMessage(chatPage)
+        await waitForMessageStore(
+          chatPage,
+          "flashcards-assistant-snapshot",
+          30000
+        )
+        const assistantSnapshot = await waitForAssistantSnapshot(chatPage)
+        if (!assistantSnapshot?.serverChatId || !assistantSnapshot?.text) {
+          throw new Error(
+            "Assistant server message not available after streaming."
+          )
+        }
+        const assistantText = normalizeMessageContent(assistantSnapshot.text)
+        if (!assistantText) {
+          throw new Error("Assistant message did not contain text.")
+        }
+        const serverChatId = String(assistantSnapshot.serverChatId)
+        let serverMessageId = assistantSnapshot.serverMessageId
+          ? String(assistantSnapshot.serverMessageId)
+          : null
+        const assistantMessage = getAssistantMessageLocator(
+          chatPage,
+          assistantSnapshot
+        )
+        await expect(assistantMessage).toBeVisible({ timeout: 30000 })
+        if (!serverMessageId) {
+          serverMessageId = await waitForAssistantServerMessageIdInStore(
+            chatPage,
+            {
+              localId: assistantSnapshot.localId,
+              assistantText
+            }
+          )
+        }
+        if (!serverMessageId) {
+          serverMessageId = await pollForServerAssistantMessageId(
+            normalizedServerUrl,
+            apiKey,
+            serverChatId,
+            assistantText
+          )
+          if (serverMessageId) {
+            await syncAssistantServerMessageIdIntoStore(chatPage, {
+              localId: assistantSnapshot.localId,
+              serverMessageId
+            })
+          }
+        }
+        if (!serverMessageId) {
+          throw new Error(
+            "Assistant server message not available after streaming."
+          )
+        }
+        await expect
+          .poll(
+            async () =>
+              waitForAssistantServerMessageIdInStore(chatPage, {
+                localId: assistantSnapshot.localId,
+                assistantText,
+                timeoutMs: 2000
+              }),
+            { timeout: 30000, intervals: [500, 1000, 2000] }
+          )
+          .toBeTruthy()
+        const baselineFlashcards = await fetchRecentFlashcards(
+          normalizedServerUrl,
+          apiKey,
+          20
+        )
+        const baselineFlashcardIds = new Set(
+          baselineFlashcards
+            .map((item: any) => (item?.uuid != null ? String(item.uuid) : null))
+            .filter((id: string | null): id is string => Boolean(id))
+        )
+
+        await clearRequestErrors(chatPage)
+        await clickMessageOverflowAction(
+          chatPage,
+          assistantMessage,
+          /Save to Flashcards/i
+        )
+        await expect(chatPage.getByText(/Saved to Flashcards/i)).toBeVisible({
+          timeout: 15000
+        })
+        const requestErrors = await readLastRequestError(chatPage)
+        if (requestErrors?.last || requestErrors?.recent?.length) {
+          console.log(
+            "[e2e] flashcards save request errors",
+            JSON.stringify(requestErrors)
+          )
+        }
+        await logFlashcardsSnapshot(normalizedServerUrl, apiKey, "after-save")
+        try {
+          const savedFlashcard = await pollForNewFlashcard(
+            normalizedServerUrl,
+            apiKey,
+            baselineFlashcardIds,
+            assistantText
+          )
+          savedFlashcardUuid = String(savedFlashcard?.uuid || "").trim() || null
+          if (!savedFlashcardUuid) {
+            throw new Error("Saved flashcard did not include a UUID.")
+          }
+        } catch (error) {
+          await probeSaveChatKnowledge(
+            normalizedServerUrl,
+            apiKey,
+            {
+              conversation_id: serverChatId,
+              message_id: serverMessageId,
+              snippet: assistantText.slice(0, 1000),
+              make_flashcard: true
+            },
+            "after-save-timeout"
+          )
+          await logChatMessagesSnapshot(
+            normalizedServerUrl,
+            apiKey,
+            serverChatId,
+            "after-save-timeout"
+          )
+          await logFlashcardsSnapshot(
+            normalizedServerUrl,
+            apiKey,
+            "after-save-timeout"
+          )
+          throw error
+        }
+        if (!savedFlashcardUuid) {
+          throw new Error("Saved flashcard UUID was unavailable after polling.")
+        }
+
+        await driver.goto(page, "/flashcards", {
+          waitUntil: "domcontentloaded"
+        })
+        await waitForConnected(page, "workflow-flashcards-view", driver.kind)
+
+        const manageTab = page.getByRole("tab", { name: /^Manage$/i })
+        await manageTab.click()
+
+        const cardRow = page.getByTestId(
+          `flashcard-item-${savedFlashcardUuid}`
+        )
+        await expect(cardRow).toBeVisible({ timeout: 30000 })
+
+        const studyTab = page.getByRole("tab", { name: /^Study$/i })
+        await studyTab.click()
+
+        const showAnswer = page.getByTestId("flashcards-review-show-answer")
+        if (!(await showAnswer.isVisible().catch(() => false))) {
+          const reviewAllDue = page.getByTestId("flashcards-review-all-due")
+          await expect(reviewAllDue).toBeVisible({ timeout: 30000 })
+          await expect(reviewAllDue).toBeEnabled({ timeout: 30000 })
+          await reviewAllDue.click()
+        }
+
+        await expect(showAnswer).toBeVisible({ timeout: 30000 })
+        await showAnswer.click()
+        const rateButton = page.getByTestId("flashcards-review-rate-2")
+        await rateButton.click()
+        await expect(rateButton).toBeHidden({ timeout: 30000 })
+      } finally {
+        await driver.close()
+        if (savedFlashcardUuid) {
+          await cleanupFlashcard(
+            normalizedServerUrl,
+            apiKey,
+            savedFlashcardUuid
+          )
+        }
+        if (createdCharacter) {
+          await deleteCharacterByName(
+            normalizedServerUrl,
+            apiKey,
+            characterName
+          )
+        }
+      }
+    })
+
+    test("media trash -> delete -> restore", async ({
+      page: fixturePage,
+      context: fixtureContext
+    }) => {
+      test.setTimeout(360000)
+      const { serverUrl, apiKey } = requireRealServerConfig()
+      const normalizedServerUrl = normalizeServerUrl(serverUrl)
+
+      const trashResponse = await fetchWithKey(
+        `${normalizedServerUrl}/api/v1/media/trash?page=1&results_per_page=1`,
+        apiKey
+      ).catch(() => null)
+      if (!trashResponse?.ok) {
+        const body = await trashResponse?.text().catch(() => "")
+        skipOrThrow(
+          true,
+          `Media trash preflight failed: ${trashResponse?.status} ${trashResponse?.statusText} ${body}`
+        )
+        return
+      }
+
+      const driver = await createDriverForTest({
+        serverUrl: normalizedServerUrl,
+        apiKey,
+        page: fixturePage,
+        context: fixtureContext
+      })
+      const { context, page } = driver
+
+      const unique = Date.now()
+      const fileName = `e2e-trash-${unique}.txt`
+      let mediaId: string | number | null = null
+
+      try {
+        const granted = await driver.ensureHostPermission()
+        if (!granted) {
           skipOrThrow(
             true,
-            "Character created but not returned by search; skipping chat step."
+            "Host permission not granted for tldw_server origin; allow it in chrome://extensions > tldw Assistant > Site access, then re-run"
           )
           return
         }
-        await setSelectedCharacterInStorage(
-          page,
-          normalizeCharacterForStorage(record)
-        )
-        await driver.goto(page, "/", {
+
+        await driver.goto(page, "/media", {
           waitUntil: "domcontentloaded"
         })
-        await waitForConnected(page, "workflow-characters-chat")
-      } else {
-        await waitForChatLanding(page, driver, 15000).catch(() => {})
-        await waitForConnected(page, "workflow-characters-chat")
-      }
+        await waitForConnected(page, "workflow-media-trash-ingest", driver.kind)
 
-      const selectedCharacterButton = page.getByRole("button", {
-        name: new RegExp(
-          `${escapeRegExp(characterName)}.*Clear character`,
-          "i"
+        const modal = await openQuickIngestModal(page)
+        await waitForQuickIngestReady(modal)
+
+        await page.setInputFiles('[data-testid="qi-file-input"]', {
+          name: fileName,
+          mimeType: "text/plain",
+          buffer: Buffer.from(`E2E media trash ${unique}`)
+        })
+
+        const fileRow = modal.getByText(fileName).first()
+        await expect(fileRow).toBeVisible({ timeout: 15000 })
+        await fileRow.click()
+        await dismissQuickIngestInspectorIntro(page)
+
+        await selectQuickIngestQuickPreset(modal)
+        await clickQuickIngestRun(modal)
+        await waitForQuickIngestCompletion(modal, 180000)
+        await closeQuickIngestModal(modal)
+
+        const mediaMatch = await pollForMediaMatch(
+          normalizedServerUrl,
+          apiKey,
+          `e2e-trash-${unique}`, // Use filename prefix with words for FTS5 tokenization
+          300000
         )
-      })
-      await expect(selectedCharacterButton).toBeVisible({ timeout: 20000 })
+        mediaId = mediaMatch?.id ?? null
+        if (mediaId == null) {
+          throw new Error("Ingested media was returned without an ID.")
+        }
+        const expectedTitle = String(
+          mediaMatch?.title || mediaMatch?.filename || fileName
+        ).replace(/\.txt$/i, "")
 
-      const startChat = page.getByRole("button", {
-        name: /Start chatting/i
-      })
-      await clickStartChatIfVisible(page)
+        await driver.goto(
+          page,
+          `/media?id=${encodeURIComponent(String(mediaId))}`,
+          {
+          waitUntil: "domcontentloaded"
+          }
+        )
+        await waitForConnected(page, "workflow-media-trash-delete", driver.kind)
 
-      await expect(
-        await resolveChatInput(page)
-      ).toBeVisible({ timeout: 20000 })
-      // Notification toast may disappear quickly or not appear at all
-      // The selectedCharacterButton check above already confirms character selection
-      // This is a soft check - we don't fail the test if the notification isn't visible
-      try {
-        await expect.poll(async () => {
-          return (await page.getByText(
-            new RegExp(`You are chatting with ${escapeRegExp(characterName)}`)
-          ).count()) > 0
-        }, { timeout: 8000, intervals: [100, 200, 500, 1000] }).toBeTruthy()
-      } catch {
-        // Notification may have already disappeared or not shown - that's OK
-        console.log(`[characters] notification not found for "${characterName}", continuing`)
+        const searchInput = page.getByTestId("media-search-input")
+        await expect(searchInput).toBeVisible({ timeout: 30000 })
+        await searchInput.fill(String(unique))
+        await page.getByTestId("media-search-submit").click({ timeout: 15000 })
+
+        const resultRow = page
+          .getByRole("button", {
+            name: new RegExp(escapeRegExp(expectedTitle), "i")
+          })
+          .first()
+        await expect(resultRow).toBeVisible({ timeout: 30000 })
+        await resultRow.click({ timeout: 15000 })
+
+        const deleteButton = page.getByRole("button", {
+          name: /Delete item/i
+        })
+        await expect(deleteButton).toBeVisible({ timeout: 15000 })
+        await deleteButton.click({ timeout: 15000 })
+        await page
+          .getByRole("button", { name: /^Delete$/ })
+          .click({ timeout: 15000 })
+
+        await expect(
+          page.getByText("Moved to trash", { exact: true })
+        ).toBeVisible({ timeout: 15000 })
+
+        const trashButton = page.getByRole("button", { name: /^Trash$/i })
+        await trashButton.click({ timeout: 15000 })
+        await waitForConnected(page, "workflow-media-trash-view", driver.kind)
+
+        const trashRow = page
+          .locator("div")
+          .filter({
+            has: page.getByText(expectedTitle, { exact: true })
+          })
+          .filter({
+            has: page.getByRole("button", { name: /^Restore$/i })
+          })
+          .first()
+        await expect(trashRow).toBeVisible({ timeout: 30000 })
+        const restoreButton = trashRow.getByRole("button", {
+          name: /^Restore$/i
+        })
+        await restoreButton.click({ timeout: 15000 })
+
+        await expect(page.getByText(/Item restored/i)).toBeVisible({
+          timeout: 20000
+        })
+        await expect(
+          page.getByText(expectedTitle, { exact: true })
+        ).toHaveCount(0, {
+          timeout: 20000
+        })
+      } finally {
+        await driver.close()
+        if (mediaId != null) {
+          await cleanupMediaItem(normalizedServerUrl, apiKey, mediaId)
+        }
+      }
+    })
+
+    test("media ingestion -> analysis -> review -> re-analyze", async ({
+      page: fixturePage,
+      context: fixtureContext
+    }) => {
+      test.setTimeout(300000)
+      const { serverUrl, apiKey } = requireRealServerConfig()
+      const normalizedServerUrl = normalizeServerUrl(serverUrl)
+
+      const mediaResponse = await fetchWithKey(
+        `${normalizedServerUrl}/api/v1/media?page=1&results_per_page=1`,
+        apiKey
+      )
+      if (!mediaResponse.ok) {
+        const body = await mediaResponse.text().catch(() => "")
+        skipOrThrow(
+          true,
+          `Media API preflight failed: ${mediaResponse.status} ${mediaResponse.statusText} ${body}`
+        )
+        return
       }
 
-      await sendChatMessage(
-        page,
-        `Hello ${characterName}, give me a quick intro.`
+      const modelsResponse = await fetchWithKey(
+        `${normalizedServerUrl}/api/v1/llm/providers`,
+        apiKey
       )
-      await waitForAssistantMessage(page)
-    } finally {
-      await driver.close()
-      await deleteCharacterByName(normalizedServerUrl, apiKey, characterName)
-    }
+      if (!modelsResponse.ok) {
+        const body = await modelsResponse.text().catch(() => "")
+        skipOrThrow(
+          true,
+          `Chat models preflight failed: ${modelsResponse.status} ${modelsResponse.statusText} ${body}`
+        )
+        return
+      }
+      const runnableModel = resolveRunnableChatModel(
+        await modelsResponse.json().catch(() => [])
+      )
+      if (!runnableModel) {
+        skipOrThrow(
+          true,
+          "No configured chat-capable model is available on tldw_server."
+        )
+        return
+      }
+      const selectedModelId = toSelectedModelId(runnableModel)
+
+      const driver = await createDriverForTest({
+        serverUrl: normalizedServerUrl,
+        apiKey,
+        page: fixturePage,
+        context: fixtureContext
+      })
+      const { context, page } = driver
+
+      const unique = Date.now()
+      const fileName = `e2e-analysis-${unique}.txt`
+      const token1 = "LIVE_TIER_ANALYSIS_ONE"
+      const token2 = "LIVE_TIER_ANALYSIS_TWO"
+      let mediaId: string | number | null = null
+
+      const runAnalysis = async (token: string) => {
+        const generateButton = page
+          .getByRole("button", { name: /^Generate$/i })
+          .first()
+        await generateButton.scrollIntoViewIfNeeded()
+        await generateButton.click({ timeout: 15000 })
+
+        const modal = page.getByRole("dialog", { name: /^Generate$/i })
+        await expect(modal).toBeVisible({ timeout: 15000 })
+
+        const systemPrompt = modal.getByLabel(/System Prompt/i)
+        await systemPrompt.fill(
+          `Return exactly the token "${token}" and nothing else.`
+        )
+        const userPrefix = modal.getByLabel(/User Prompt Prefix/i)
+        await userPrefix.fill("")
+
+        const generateAnalysis = modal.getByRole("button", {
+          name: /^Generate$/i
+        })
+        await expect(generateAnalysis).toBeEnabled({ timeout: 30000 })
+        await generateAnalysis.click()
+
+        await expect(modal).toBeHidden({ timeout: 180000 })
+        if (mediaId == null) {
+          throw new Error("Media ID was unavailable after analysis generation.")
+        }
+        const persistedAnalysis = await pollForPersistedMediaAnalysis(
+          normalizedServerUrl,
+          apiKey,
+          mediaId,
+          60000,
+          token
+        )
+        const analysisOutput = page
+          .getByRole("main")
+          .getByText(persistedAnalysis, { exact: true })
+          .first()
+        await expect(analysisOutput).toBeVisible({ timeout: 60000 })
+        await expect(
+          page.getByText("Pending save", { exact: true })
+        ).toHaveCount(0, { timeout: 30000 })
+        return persistedAnalysis
+      }
+
+      try {
+        const granted = await driver.ensureHostPermission()
+        if (!granted) {
+          skipOrThrow(
+            true,
+            "Host permission not granted for tldw_server origin; allow it in chrome://extensions > tldw Assistant > Site access, then re-run"
+          )
+          return
+        }
+
+        await setSelectedModel(page, selectedModelId)
+
+        await driver.goto(page, "/media", {
+          waitUntil: "domcontentloaded"
+        })
+        await waitForConnected(page, "workflow-analysis-ingest", driver.kind)
+
+        const modal = await openQuickIngestModal(page)
+        await waitForQuickIngestReady(modal)
+
+        await page.setInputFiles('[data-testid="qi-file-input"]', {
+          name: fileName,
+          mimeType: "text/plain",
+          buffer: Buffer.from(`E2E analysis content ${unique}`)
+        })
+
+        const fileRow = modal.getByText(fileName).first()
+        await expect(fileRow).toBeVisible({ timeout: 15000 })
+        await fileRow.click()
+        await dismissQuickIngestInspectorIntro(page)
+
+        await selectQuickIngestQuickPreset(modal)
+        await clickQuickIngestRun(modal)
+        await waitForQuickIngestCompletion(modal, 180000)
+        await closeQuickIngestModal(modal)
+
+        const mediaMatch = await pollForMediaMatch(
+          normalizedServerUrl,
+          apiKey,
+          `e2e-analysis-${unique}`, // Use filename prefix with words for FTS5 tokenization
+          300000
+        )
+        mediaId = mediaMatch?.id ?? null
+        if (mediaId == null) {
+          throw new Error("Ingested analysis media was returned without an ID.")
+        }
+        const expectedTitle = String(
+          mediaMatch?.title || mediaMatch?.filename || fileName
+        ).replace(/\.txt$/i, "")
+
+        await driver.goto(
+          page,
+          `/media?id=${encodeURIComponent(String(mediaId))}`,
+          { waitUntil: "domcontentloaded" }
+        )
+        await waitForConnected(page, "workflow-analysis-media", driver.kind)
+
+        const searchInput = page.getByTestId("media-search-input")
+        await expect(searchInput).toBeVisible({ timeout: 30000 })
+        await searchInput.fill(String(unique))
+        await page.getByTestId("media-search-submit").click({ timeout: 15000 })
+
+        const resultRow = page
+          .getByRole("button", {
+            name: new RegExp(escapeRegExp(expectedTitle), "i")
+          })
+          .first()
+        await expect(resultRow).toBeVisible({ timeout: 30000 })
+        await resultRow.click()
+
+        const firstAnalysis = await runAnalysis(token1)
+
+        await driver.goto(page, "/media-multi", {
+          waitUntil: "domcontentloaded"
+        })
+        await waitForConnected(page, "workflow-analysis-review", driver.kind)
+
+        const reviewSearch = page.getByPlaceholder(/Search media/i)
+        await expect(reviewSearch).toBeVisible({ timeout: 15000 })
+        await reviewSearch.fill(String(unique))
+        await page
+          .getByRole("button", { name: /^Search$/i })
+          .click({ timeout: 15000 })
+
+        const reviewRow = page
+          .getByTestId("media-review-results-list")
+          .getByRole("button", {
+            name: new RegExp(escapeRegExp(expectedTitle), "i")
+          })
+          .first()
+        await expect(reviewRow).toBeVisible({ timeout: 30000 })
+        await reviewRow.click()
+
+        const reviewAnalysis = page
+          .getByText(firstAnalysis, { exact: true })
+          .first()
+        await expect(reviewAnalysis).toBeVisible({ timeout: 60000 })
+
+        await driver.goto(
+          page,
+          `/media?id=${encodeURIComponent(String(mediaId))}`,
+          { waitUntil: "domcontentloaded" }
+        )
+        await waitForConnected(page, "workflow-analysis-reanalyze", driver.kind)
+
+        await expect(searchInput).toBeVisible({ timeout: 30000 })
+        await searchInput.fill(String(unique))
+        await page.getByTestId("media-search-submit").click({ timeout: 15000 })
+        await expect(resultRow).toBeVisible({ timeout: 30000 })
+        await resultRow.click()
+
+        const secondAnalysis = await runAnalysis(token2)
+        expect(secondAnalysis).not.toBe(firstAnalysis)
+      } finally {
+        await driver.close()
+        if (mediaId != null) {
+          await cleanupMediaItem(normalizedServerUrl, apiKey, mediaId)
+        }
+      }
+    })
   })
-})
 }

@@ -1,0 +1,12 @@
+{
+  "health": {
+    "state": "ready",
+    "degradedChecks": [],
+    "healthUrl": "http://127.0.0.1:18385/health",
+    "httpStatus": 200,
+    "healthStatus": "ok",
+    "checkedAt": "2026-09-05T15:47:18.363Z"
+  },
+  "frames": [],
+  "assets": []
+}

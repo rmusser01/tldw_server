@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path as FilePath
 from typing import Any, Callable, Mapping
 from urllib.parse import urlparse
+from uuid import uuid4
 
 from fastapi import BackgroundTasks, HTTPException, Request, UploadFile, status
 from loguru import logger
@@ -38,6 +39,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     DatabaseError,
     InputError,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.repositories.media_files_repository import MediaFilesRepository
 from tldw_Server_API.app.core.DB_Management.media_db.legacy_transcripts import (
     upsert_transcript,
 )
@@ -2604,6 +2606,63 @@ def determine_add_media_final_status(results: list[dict[str, Any]]) -> int:
     return status.HTTP_207_MULTI_STATUS
 
 
+async def cleanup_superseded_original_files(
+    db: Any, storage: Any, media_id: int, *, user_id: str | None = None,
+) -> list[str]:
+    """Retire older originals after a replacement commits, preserving plaintext history.
+
+    Shared paths remain available to retained registrations, including recoverable
+    originals. Return warnings and retain failed cleanup rows for retry on the next
+    replacement. Cancellation propagates. Storage backends must honor the delete
+    contract that an absent file returns False.
+    """
+    files = await asyncio.to_thread(db.get_media_files, media_id, include_deleted=True)
+    active_originals = [row for row in files if row["file_type"] == "original" and not row["deleted"]]
+    if not active_originals:
+        return []
+
+    # Use the newest committed registration, even if this upload committed out of order.
+    current_id = max(row["id"] for row in active_originals)
+    obsolete: dict[str, list[dict[str, Any]]] = {}
+    retained_paths = set()
+    for row in files:
+        if row["file_type"] == "original" and row["id"] < current_id:
+            obsolete.setdefault(row["storage_path"], []).append(row)
+        else:
+            retained_paths.add(row["storage_path"])
+
+    warnings = []
+    repository = MediaFilesRepository.from_legacy_db(db)
+    for path, rows in obsolete.items():
+        try:
+            shared_path = path in retained_paths or await asyncio.to_thread(
+                repository.has_retained_references, path, {row["id"] for row in rows},
+            )
+            if path and not shared_path:
+                delete_storage = storage
+                if path.startswith("imported_media/"):
+                    # Chatbook originals are relative to this user's data directory.
+                    parts = FilePath(path).parts
+                    if user_id is None or len(parts) != 3 or parts[:2] != ("imported_media", f"media_{media_id}"):
+                        raise ValueError("Imported original path is outside this media's directory")
+                    from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+                    from tldw_Server_API.app.core.Storage.filesystem_storage import FileSystemStorage
+
+                    delete_storage = FileSystemStorage(DatabasePaths.resolve_user_base_directory(user_id))
+                # False means already absent, including overlapping cleanup attempts.
+                await delete_storage.delete(path)
+            for row in rows:
+                await asyncio.to_thread(db.soft_delete_media_file, row["id"], hard_delete=True)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - retirement must not invalidate a committed replacement
+            logger.opt(exception=True).warning(
+                "Failed to clean up superseded original {} for media_id={}: {}", path, media_id, exc,
+            )
+            warnings.append("Original stored, but cleanup of an older original failed.")
+    return warnings
+
+
 async def add_media_orchestrate(
     background_tasks: BackgroundTasks,
     form_data: Any,
@@ -2763,7 +2822,8 @@ async def add_media_orchestrate(
 
     results: list[dict[str, Any]] = []
     temp_dir_manager = TempDirManagerCls(  # type: ignore[call-arg]
-        cleanup=not form_data.keep_original_file,
+        # Document originals are stored permanently; their staging copies are disposable.
+        cleanup=not form_data.keep_original_file or form_data.media_type in {"pdf", "document", "ebook"},
     )
     temp_dir_path: FilePath | None = None
     loop = asyncio.get_running_loop()
@@ -3309,7 +3369,8 @@ async def add_media_orchestrate(
                                 storage_path = await storage.store(
                                     user_id=user_id_str,
                                     media_id=media_id,
-                                    filename="original" + source_file.suffix,
+                                    # Each registration owns its blob, including concurrent reuploads.
+                                    filename=f"original-{uuid4().hex}{source_file.suffix}",
                                     data=handle,
                                     mime_type=mime_type,
                                 )
@@ -3320,25 +3381,64 @@ async def add_media_orchestrate(
                                     logger.debug("Failed to close original file handle for {}", source_file)
 
                             # Insert database record
-                            db.insert_media_file(
-                                media_id=media_id,
-                                file_type="original",
-                                storage_path=storage_path,
-                                original_filename=original_filename,
-                                file_size=file_size,
-                                mime_type=mime_type,
-                                checksum=checksum,
-                            )
+                            try:
+                                db.insert_media_file(
+                                    media_id=media_id,
+                                    file_type="original",
+                                    storage_path=storage_path,
+                                    original_filename=original_filename,
+                                    file_size=file_size,
+                                    mime_type=mime_type,
+                                    checksum=checksum,
+                                )
+                            except Exception:  # noqa: BLE001 - cleanup must run for any registration failure
+                                try:
+                                    deleted = await storage.delete(storage_path)
+                                    if not deleted:
+                                        logger.warning(
+                                            "Stored original file {} was not deleted after registration failure "
+                                            "for media_id={}",
+                                            storage_path,
+                                            media_id,
+                                        )
+                                except Exception as cleanup_err:  # noqa: BLE001 - cleanup failure must not mask registration error
+                                    logger.warning(
+                                        "Failed to delete stored original file {} after registration failure "
+                                        "for media_id={}: {}",
+                                        storage_path,
+                                        media_id,
+                                        cleanup_err,
+                                    )
+                                raise
 
                             logger.info(f"Stored original file for media_id={media_id}: {storage_path}")
                             result["original_file_stored"] = True
+                            try:
+                                cleanup_warnings = await cleanup_superseded_original_files(
+                                    db, storage, media_id, user_id=user_id_str,
+                                )
+                                if cleanup_warnings:
+                                    _ensure_warnings_list(result).extend(cleanup_warnings)
+                            except asyncio.CancelledError:
+                                raise
+                            except Exception as cleanup_err:  # noqa: BLE001 - preserve committed replacement on cleanup errors
+                                logger.opt(exception=True).warning(
+                                    "Failed to clean up superseded originals for media_id={}: {}", media_id, cleanup_err,
+                                )
+                                _ensure_warnings_list(result).append(
+                                    "Original stored, but cleanup of older originals failed."
+                                )
 
+                        except asyncio.CancelledError:
+                            raise
                         except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as store_err:
                             logger.error(f"Failed to store original file for media_id={media_id}: {store_err}")
                             # Non-fatal - don't fail the entire ingestion
                             result["original_file_stored"] = False
                             _ensure_warnings_list(result).append(f"Failed to store original file: {store_err}")
 
+                except asyncio.CancelledError:
+                    raise
                 except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as storage_init_err:
                     logger.error(f"Failed to initialize storage backend: {storage_init_err}")
 
@@ -3419,6 +3519,8 @@ async def add_media_orchestrate(
             content={"results": results},
         )
 
+    except asyncio.CancelledError:
+        raise
     except HTTPException as exc:
         request_outcome = "error"
         logger.warning(

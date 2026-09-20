@@ -8,15 +8,16 @@ import {
   type TldwTtsVoiceInfo,
   type TldwTtsProviderCapabilities
 } from "@/services/tldw/audio-providers"
-import { PROVIDER_REGISTRY, type ProviderCapability } from "@/utils/provider-registry"
+import { PROVIDER_REGISTRY } from "@/utils/provider-registry"
 import { OPENAI_TTS_VOICES } from "@/hooks/useTtsProviderData"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { normalizeTtsProviderKey } from "@/services/tldw/tts-provider-keys"
 
-const { Text, Title } = Typography
+const { Text } = Typography
 
 export type VoiceSelection = {
   provider: string
+  backend?: string
   voice: string
   model?: string
 }
@@ -27,6 +28,7 @@ type VoicePickerModalProps = {
   onSelect: (selection: VoiceSelection) => void
   /** Current server provider info (passed to avoid duplicate queries) */
   providersInfo?: TldwTtsProvidersInfo | null
+  allowFallback?: boolean
 }
 
 const RECENT_VOICES_KEY = "tts-recent-voices"
@@ -45,7 +47,12 @@ const saveRecentVoice = (selection: VoiceSelection) => {
   try {
     const existing = getRecentVoices()
     const filtered = existing.filter(
-      (v) => !(v.provider === selection.provider && v.voice === selection.voice)
+      (v) =>
+        !(
+          v.provider === selection.provider &&
+          v.backend === selection.backend &&
+          v.voice === selection.voice
+        )
     )
     const next = [selection, ...filtered].slice(0, MAX_RECENT)
     localStorage.setItem(RECENT_VOICES_KEY, JSON.stringify(next))
@@ -54,6 +61,9 @@ const saveRecentVoice = (selection: VoiceSelection) => {
 
 type ProviderGroup = {
   key: string
+  providerKey: string
+  backend?: string
+  model?: string
   label: string
   category: "local" | "cloud"
   caps?: TldwTtsProviderCapabilities
@@ -61,7 +71,7 @@ type ProviderGroup = {
 }
 
 const categorizeProvider = (key: string): "local" | "cloud" => {
-  const cloudProviders = new Set(["elevenlabs", "openai"])
+  const cloudProviders = new Set(["elevenlabs", "openai", "openrouter"])
   if (cloudProviders.has(key)) return "cloud"
   return "local"
 }
@@ -75,7 +85,8 @@ export const VoicePickerModal: React.FC<VoicePickerModalProps> = ({
   open,
   onClose,
   onSelect,
-  providersInfo: externalProvidersInfo
+  providersInfo: externalProvidersInfo,
+  allowFallback = true
 }) => {
   const [searchQuery, setSearchQuery] = React.useState("")
   const [previewingVoice, setPreviewingVoice] = React.useState<string | null>(null)
@@ -91,7 +102,7 @@ export const VoicePickerModal: React.FC<VoicePickerModalProps> = ({
 
   const providersInfo = externalProvidersInfo || fetchedProvidersInfo
 
-  const recentVoices = React.useMemo(() => getRecentVoices(), [open])
+  const recentVoices = open ? getRecentVoices() : []
 
   // Build provider groups
   const providerGroups = React.useMemo((): ProviderGroup[] => {
@@ -100,6 +111,7 @@ export const VoicePickerModal: React.FC<VoicePickerModalProps> = ({
     // Add browser TTS
     groups.push({
       key: "browser",
+      providerKey: "browser",
       label: "Browser TTS",
       category: "local",
       voices: [{ id: "default", name: "System Default" }]
@@ -112,6 +124,7 @@ export const VoicePickerModal: React.FC<VoicePickerModalProps> = ({
     )
     groups.push({
       key: "openai",
+      providerKey: "openai",
       label: "OpenAI",
       category: "cloud",
       voices: Array.from(allOpenAiVoices).map((v) => ({
@@ -130,8 +143,23 @@ export const VoicePickerModal: React.FC<VoicePickerModalProps> = ({
 
         const provVoices = voices[provKey] || voices[normalizedKey] || []
         groups.push({
-          key: normalizedKey,
-          label: getProviderLabel(normalizedKey) || caps.provider_name || provKey,
+          key: provKey,
+          providerKey: normalizedKey,
+          backend:
+            providersInfo.supports_explicit_backend === true
+              ? provKey
+              : undefined,
+          model:
+            caps.default_model ||
+            caps.models?.[0] ||
+            (providersInfo.supports_explicit_backend === true
+              ? undefined
+              : normalizedKey),
+          label:
+            caps.display_name ||
+            caps.provider_name ||
+            getProviderLabel(normalizedKey) ||
+            provKey,
           category: categorizeProvider(normalizedKey),
           caps,
           voices: provVoices
@@ -147,12 +175,12 @@ export const VoicePickerModal: React.FC<VoicePickerModalProps> = ({
     if (!searchQuery.trim()) return providerGroups
     const q = searchQuery.toLowerCase()
     return providerGroups
-      .map((group) => ({
+        .map((group) => ({
         ...group,
         voices: group.voices.filter(
           (v) =>
             (v.name || "").toLowerCase().includes(q) ||
-            (v.id || "").toLowerCase().includes(q) ||
+            (v.voice_id || v.id || "").toLowerCase().includes(q) ||
             group.label.toLowerCase().includes(q) ||
             (v.language || "").toLowerCase().includes(q)
         )
@@ -163,24 +191,27 @@ export const VoicePickerModal: React.FC<VoicePickerModalProps> = ({
   const localGroups = filteredGroups.filter((g) => g.category === "local")
   const cloudGroups = filteredGroups.filter((g) => g.category === "cloud")
 
-  const handleSelect = (providerKey: string, voice: TldwTtsVoiceInfo) => {
-    const voiceId = voice.id || voice.name || ""
+  const handleSelect = (group: ProviderGroup, voice: TldwTtsVoiceInfo) => {
+    const voiceId = voice.voice_id || voice.id || voice.name || ""
+    const providerKey = group.providerKey
+    const isDirectProvider =
+      providerKey === "browser" ||
+      providerKey === "openai" ||
+      providerKey === "elevenlabs"
     const selection: VoiceSelection = {
-      provider: providerKey === "browser" || providerKey === "openai" || providerKey === "elevenlabs"
-        ? providerKey
-        : "tldw",
+      provider: isDirectProvider ? providerKey : "tldw",
+      backend: group.backend,
       voice: voiceId,
-      model: providerKey !== "browser" && providerKey !== "openai" && providerKey !== "elevenlabs"
-        ? providerKey
-        : undefined
+      model: isDirectProvider ? undefined : group.model
     }
     saveRecentVoice(selection)
     onSelect(selection)
     onClose()
   }
 
-  const handlePreview = async (providerKey: string, voice: TldwTtsVoiceInfo) => {
-    const voiceId = voice.id || voice.name || ""
+  const handlePreview = async (group: ProviderGroup, voice: TldwTtsVoiceInfo) => {
+    const voiceId = voice.voice_id || voice.id || voice.name || ""
+    const providerKey = group.providerKey
     if (previewingVoice === voiceId) {
       // Stop preview
       previewAudioRef.current?.pause()
@@ -201,9 +232,13 @@ export const VoicePickerModal: React.FC<VoicePickerModalProps> = ({
       }
 
       // Generate a quick preview via the server
-      const model = providerKey !== "browser" && providerKey !== "openai" && providerKey !== "elevenlabs"
-        ? providerKey
-        : undefined
+      const model = group.backend
+        ? group.model
+        : providerKey !== "browser" &&
+            providerKey !== "openai" &&
+            providerKey !== "elevenlabs"
+          ? providerKey
+          : undefined
       const provider = providerKey === "browser" || providerKey === "openai" || providerKey === "elevenlabs"
         ? providerKey
         : "tldw"
@@ -216,11 +251,17 @@ export const VoicePickerModal: React.FC<VoicePickerModalProps> = ({
         return
       }
 
-      const buffer = await tldwClient.synthesizeSpeech(
+      const result = await tldwClient.synthesizeSpeechDetailed(
         "Hello, this is a voice preview.",
-        { model: model || "tts-1", voice: voiceId, responseFormat: "mp3" }
+        {
+          model: model || "tts-1",
+          voice: voiceId,
+          responseFormat: "mp3",
+          backend: group.backend,
+          allowFallback: group.backend ? allowFallback : undefined
+        }
       )
-      const blob = new Blob([buffer], { type: "audio/mpeg" })
+      const blob = new Blob([result.buffer], { type: "audio/mpeg" })
       const url = URL.createObjectURL(blob)
       // Track blob URL so cleanup effect can revoke it if modal closes during playback
       previewBlobUrlRef.current = url
@@ -259,24 +300,24 @@ export const VoicePickerModal: React.FC<VoicePickerModalProps> = ({
   const renderVoiceList = (group: ProviderGroup) => (
     <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
       {group.voices.map((voice, idx) => {
-        const voiceId = voice.id || voice.name || `voice-${idx}`
+        const voiceId = voice.voice_id || voice.id || voice.name || `voice-${idx}`
         const isActive = previewingVoice === voiceId
         return (
           <div
             key={voiceId}
             className="flex items-center gap-2 rounded-md border border-border px-3 py-2 transition-colors hover:bg-surface-hover cursor-pointer"
-            onClick={() => handleSelect(group.key, voice)}
+            onClick={() => handleSelect(group, voice)}
             role="option"
             aria-selected={false}
             tabIndex={0}
             onKeyDown={(e) => {
-              if (e.key === "Enter") handleSelect(group.key, voice)
+              if (e.key === "Enter") handleSelect(group, voice)
             }}
           >
             <Volume2 className="h-3.5 w-3.5 shrink-0 text-text-muted" />
             <div className="flex-1 min-w-0">
               <Text className="block truncate text-sm">
-                {voice.name || voice.id || `Voice ${idx + 1}`}
+                {voice.name || voice.voice_id || voice.id || `Voice ${idx + 1}`}
               </Text>
               {voice.language && (
                 <Text className="text-xs text-text-muted">{voice.language}</Text>
@@ -302,9 +343,9 @@ export const VoicePickerModal: React.FC<VoicePickerModalProps> = ({
                 icon={<Play className="h-3 w-3" />}
                 onClick={(e) => {
                   e.stopPropagation()
-                  handlePreview(group.key, voice)
+                  handlePreview(group, voice)
                 }}
-                aria-label={`Preview ${voice.name || voice.id}`}
+                aria-label={`Preview ${voice.name || voice.voice_id || voice.id}`}
               />
             </Tooltip>
           </div>
@@ -390,7 +431,11 @@ export const VoicePickerModal: React.FC<VoicePickerModalProps> = ({
                   onClose()
                 }}
               >
-                {rv.model ? `${rv.model}/${rv.voice}` : `${rv.provider}/${rv.voice}`}
+                {rv.backend
+                  ? `${rv.backend}/${rv.voice}`
+                  : rv.model
+                    ? `${rv.model}/${rv.voice}`
+                    : `${rv.provider}/${rv.voice}`}
               </Tag>
             ))}
           </div>

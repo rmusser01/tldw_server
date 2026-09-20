@@ -17,7 +17,15 @@ from typing import Any, Optional
 from loguru import logger
 
 from ....DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError
+from ....Notes.organization_capture import (
+    active_coordinator,
+    capture_note_tombstone,
+    capture_note_upsert,
+    replace_keywords,
+    stable_note_id,
+)
 from ....Notes_Tasks import NotesTaskService, TaskActor
+from ....Notes_Tasks.service import TaskStoreScope, resolve_task_compatibility_scope
 from ...persona_scope import assert_identifier_in_scope, get_explicit_scope_ids, merge_requested_ids_with_scope
 from ..base import BaseModule, create_tool_definition
 from ..disk_space import get_free_disk_space_gb
@@ -528,7 +536,9 @@ class NotesModule(BaseModule):
         chacha_path = context.db_paths.get("chacha")
         if not chacha_path:
             raise ValueError("ChaChaNotes DB path not available in context")
-        return CharactersRAGDB(db_path=chacha_path, client_id=f"mcp_notes_{self.config.name}")
+        owner_user_id = str(getattr(context, "user_id", "") or "").strip()
+        client_id = owner_user_id or f"mcp_notes_{self.config.name}"
+        return CharactersRAGDB(db_path=chacha_path, client_id=client_id)
 
     async def _search_notes(self, args: dict[str, Any], context: Any | None) -> dict[str, Any]:
         query: str = args.get("query")
@@ -973,6 +983,7 @@ class NotesModule(BaseModule):
 
         db = self._open_db(context)
         try:
+            scope = self._task_scope(db, context)
             if note_id is not None:
                 assert_identifier_in_scope(context, "note_id", note_id, label="Note")
                 if reconcile_limit > 0:
@@ -980,10 +991,13 @@ class NotesModule(BaseModule):
                         db=db,
                         note_id=str(note_id),
                         actor=actor,
+                        owner_user_id=str(getattr(context, "user_id", "")),
                     )
                 else:
                     reconciliation = {"status": "clean", "processed_notes": 0, "remaining_stale_notes": 0}
                 tasks = db.list_tasks(
+                    owner_user_id=scope.owner_user_id,
+                    dataset_id=scope.dataset_id,
                     note_id=str(note_id),
                     status=status,
                     projection_status=projection_status,
@@ -1001,10 +1015,13 @@ class NotesModule(BaseModule):
                             db=db,
                             limit=reconcile_limit,
                             actor=actor,
+                            owner_user_id=str(getattr(context, "user_id", "")),
                         )
                     else:
                         reconciliation = {"status": "clean", "processed_notes": 0, "remaining_stale_notes": 0}
                     tasks = db.list_tasks(
+                        owner_user_id=scope.owner_user_id,
+                        dataset_id=scope.dataset_id,
                         status=status,
                         projection_status=projection_status,
                         query=query,
@@ -1027,6 +1044,7 @@ class NotesModule(BaseModule):
                                     db=db,
                                     note_id=str(scoped_note_id),
                                     actor=actor,
+                                    owner_user_id=str(getattr(context, "user_id", "")),
                                 )
                                 processed += 1
                             else:
@@ -1035,6 +1053,8 @@ class NotesModule(BaseModule):
                         while len(fetched_tasks) < target_fetch:
                             page_limit = min(500, target_fetch - len(fetched_tasks))
                             batch = db.list_tasks(
+                                owner_user_id=scope.owner_user_id,
+                                dataset_id=scope.dataset_id,
                                 note_id=str(scoped_note_id),
                                 status=status,
                                 projection_status=projection_status,
@@ -1058,7 +1078,7 @@ class NotesModule(BaseModule):
                     }
 
             return {
-                "tasks": [self._task_response(db, task) for task in tasks],
+                "tasks": [self._task_response(db, task, scope=scope) for task in tasks],
                 "reconciliation": self._task_reconciliation_response(reconciliation),
                 "pagination": {
                     "limit": limit,
@@ -1091,8 +1111,9 @@ class NotesModule(BaseModule):
         task_id = str(args.get("task_id"))
         db = self._open_db(context)
         try:
+            scope = self._task_scope(db, context)
             task = self._require_scoped_task(db, context, task_id)
-            return self._task_response(db, task)
+            return self._task_response(db, task, scope=scope)
         finally:
             self._close_task_db(db, "task fetch")
 
@@ -1105,9 +1126,11 @@ class NotesModule(BaseModule):
         expected_note_version = int(args.get("expected_note_version"))
         db = self._open_db(context)
         try:
+            scope = self._task_scope(db, context)
             self._require_scoped_note(db, context, note_id)
             task = self._task_service.create_task_for_note(
                 db=db,
+                owner_user_id=str(getattr(context, "user_id", "")),
                 note_id=note_id,
                 text=text,
                 status=status,
@@ -1119,7 +1142,7 @@ class NotesModule(BaseModule):
                     idempotency_key=self._get_idempotency_key(args),
                 ),
             )
-            response = self._task_response(db, task)
+            response = self._task_response(db, task, scope=scope)
             response["insertion"] = {"mode": "append"}
             return response
         finally:
@@ -1130,9 +1153,11 @@ class NotesModule(BaseModule):
         task_id = str(args.get("task_id"))
         db = self._open_db(context)
         try:
+            scope = self._task_scope(db, context)
             self._require_scoped_task(db, context, task_id)
             task = self._task_service.update_task(
                 db=db,
+                owner_user_id=str(getattr(context, "user_id", "")),
                 task_id=task_id,
                 expected_task_version=int(args.get("expected_task_version")),
                 expected_note_version=int(args["expected_note_version"]),
@@ -1145,7 +1170,7 @@ class NotesModule(BaseModule):
                 ),
                 record_only=bool(args.get("record_only", False)),
             )
-            return self._task_response(db, task)
+            return self._task_response(db, task, scope=scope)
         finally:
             self._close_task_db(db, "task update")
 
@@ -1162,6 +1187,7 @@ class NotesModule(BaseModule):
             idempotency_key=self._get_idempotency_key(args),
         )
         try:
+            scope = self._task_scope(db, context)
             for item in self._task_status_updates(args) or []:
                 task_id = str(item.get("task_id") or "")
                 if task_id in seen_task_ids:
@@ -1174,6 +1200,7 @@ class NotesModule(BaseModule):
                     self._require_task_expected_versions(
                         db,
                         current,
+                        scope=scope,
                         expected_task_version=int(item.get("expected_task_version")),
                         expected_note_version=int(item["expected_note_version"]),
                     )
@@ -1181,11 +1208,12 @@ class NotesModule(BaseModule):
                         skipped.append({
                             "task_id": task_id,
                             "reason": f"already_{requested_status}",
-                            "task": self._task_response(db, current),
+                            "task": self._task_response(db, current, scope=scope),
                         })
                         continue
                     task = self._task_service.update_task(
                         db=db,
+                        owner_user_id=str(getattr(context, "user_id", "")),
                         task_id=task_id,
                         expected_task_version=int(item.get("expected_task_version")),
                         expected_note_version=int(item["expected_note_version"]),
@@ -1193,8 +1221,11 @@ class NotesModule(BaseModule):
                         actor=actor,
                         record_only=bool(item.get("record_only", False)),
                     )
-                    succeeded.append({"task_id": task_id, "task": self._task_response(db, task)})
-                except Exception as exc:
+                    succeeded.append({
+                        "task_id": task_id,
+                        "task": self._task_response(db, task, scope=scope),
+                    })
+                except Exception as exc:  # noqa: BLE001 - keep per-item batch failures isolated.
                     failed.append({
                         "task_id": task_id,
                         "error_type": exc.__class__.__name__,
@@ -1213,6 +1244,7 @@ class NotesModule(BaseModule):
         db: CharactersRAGDB,
         task: dict[str, Any],
         *,
+        scope: TaskStoreScope,
         expected_task_version: int,
         expected_note_version: int,
     ) -> None:
@@ -1227,8 +1259,11 @@ class NotesModule(BaseModule):
             )
         if task.get("projection_status") != "live":
             return
-        task_store = getattr(db, "task_store", None)
-        projection = task_store._fetch_projection(task_id) if task_store is not None else None
+        projection = db.get_task_projection(
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            task_id=task_id,
+        )
         if projection is None:
             raise ConflictError(
                 f"Task projection is missing for task '{task_id}'.",
@@ -1264,9 +1299,11 @@ class NotesModule(BaseModule):
         task_id = str(args.get("task_id"))
         db = self._open_db(context)
         try:
+            scope = self._task_scope(db, context)
             self._require_scoped_task(db, context, task_id)
             task = self._task_service.delete_task(
                 db=db,
+                owner_user_id=str(getattr(context, "user_id", "")),
                 task_id=task_id,
                 expected_task_version=int(args.get("expected_task_version")),
                 expected_note_version=int(args["expected_note_version"]),
@@ -1277,7 +1314,7 @@ class NotesModule(BaseModule):
                     idempotency_key=self._get_idempotency_key(args),
                 ),
             )
-            return self._task_response(db, task)
+            return self._task_response(db, task, scope=scope)
         finally:
             self._close_task_db(db, "task delete")
 
@@ -1296,6 +1333,7 @@ class NotesModule(BaseModule):
                     )
             result = self._task_service.reconcile_note_current(
                 db=db,
+                owner_user_id=str(getattr(context, "user_id", "")),
                 note_id=note_id,
                 actor=self._task_actor(context, tool_name=tool_name),
             )
@@ -1310,6 +1348,17 @@ class NotesModule(BaseModule):
         if context is None or not str(getattr(context, "user_id", "") or "").strip():
             raise ValueError("Missing user context for Notes task write")
 
+    @staticmethod
+    def _task_scope(db: CharactersRAGDB, context: Any | None) -> TaskStoreScope:
+        """Resolve task scope from authenticated MCP context only."""
+        owner_user_id = str(getattr(context, "user_id", "") or "").strip()
+        if not owner_user_id:
+            raise ValueError("Missing user context for Notes task access")
+        return resolve_task_compatibility_scope(
+            db,
+            authenticated_owner_user_id=owner_user_id,
+        )
+
     def _require_scoped_note(self, db: CharactersRAGDB, context: Any | None, note_id: str) -> dict[str, Any]:
         assert_identifier_in_scope(context, "note_id", note_id, label="Note")
         note = db.get_note_by_id(note_id)
@@ -1318,7 +1367,12 @@ class NotesModule(BaseModule):
         return dict(note)
 
     def _require_scoped_task(self, db: CharactersRAGDB, context: Any | None, task_id: str) -> dict[str, Any]:
-        task = db.get_task(task_id)
+        scope = self._task_scope(db, context)
+        task = db.get_task(
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            task_id=task_id,
+        )
         if task is None:
             raise ValueError(f"Task not found: {task_id}")
         note_id = str(task.get("note_id") or "")
@@ -1327,17 +1381,21 @@ class NotesModule(BaseModule):
             raise ValueError(f"Task note not found: {note_id}")
         return dict(task)
 
-    def _task_response(self, db: CharactersRAGDB, task: dict[str, Any]) -> dict[str, Any]:
+    def _task_response(
+        self,
+        db: CharactersRAGDB,
+        task: dict[str, Any],
+        *,
+        scope: TaskStoreScope,
+    ) -> dict[str, Any]:
         task_id = str(task.get("id"))
         note_id = str(task.get("note_id"))
         note = db.get_note_by_id(note_id)
-        projection = None
-        try:
-            task_store = getattr(db, "task_store", None)
-            if task_store is not None:
-                projection = task_store._fetch_projection(task_id)
-        except _NOTES_MODULE_NONCRITICAL_EXCEPTIONS:
-            projection = None
+        projection = db.get_task_projection(
+            owner_user_id=scope.owner_user_id,
+            dataset_id=scope.dataset_id,
+            task_id=task_id,
+        )
 
         return {
             "id": task_id,
@@ -1436,7 +1494,7 @@ class NotesModule(BaseModule):
                 approval_id=approval_id,
                 idempotency_key=idempotency_key,
             )
-        actor_id = str(getattr(context, "user_id", "") or getattr(context, "client_id", "") or "") or None
+        actor_id = str(getattr(context, "user_id", "") or "") or None
         return TaskActor(
             actor_type="user",
             actor_id=actor_id,
@@ -1871,12 +1929,29 @@ class NotesModule(BaseModule):
             raise PermissionError("Cannot create a note outside explicit persona scope")
         db = self._open_db(context)
         try:
-            note_id = db.add_note(title=title, content=content)
-            if not note_id:
-                raise ValueError("Failed to create note")
             norm_tags = self._normalize_tags(tags)
-            if norm_tags:
-                self._apply_tags(db, note_id, norm_tags)
+            coordinator = active_coordinator(db, user_id=getattr(context, "user_id", None))
+            if coordinator is not None:
+                key = coordinator.request_fingerprint(
+                    "mcp.note.create",
+                    {"title": title, "content": content, "tags": norm_tags},
+                )
+                note_id = stable_note_id("mcp-notes", key)
+                capture_note_upsert(
+                    coordinator,
+                    note_id=note_id,
+                    title=title,
+                    content=content,
+                    keywords=norm_tags,
+                    source="mcp-notes",
+                    key=key,
+                )
+            else:
+                note_id = db.add_note(title=title, content=content)
+                if not note_id:
+                    raise ValueError("Failed to create note")
+                if norm_tags:
+                    self._apply_tags(db, note_id, norm_tags)
             row = db.get_note_by_id(note_id)
             if not row:
                 raise ValueError("Created note not found")
@@ -1904,7 +1979,20 @@ class NotesModule(BaseModule):
             current_version = int(row.get("version") or 1)
             ev = int(expected_version) if expected_version is not None else current_version
             updated_fields = list(updates.keys())
-            db.update_note(note_id, updates, ev)
+            coordinator = active_coordinator(db, user_id=getattr(context, "user_id", None))
+            if coordinator is not None:
+                capture_note_upsert(
+                    coordinator,
+                    note_id=note_id,
+                    title=str(updates.get("title", row.get("title") or "")),
+                    content=str(updates.get("content", row.get("content") or "")),
+                    conversation_id=row.get("conversation_id"),
+                    message_id=row.get("message_id"),
+                    expected_version=ev,
+                    source="mcp-notes",
+                )
+            else:
+                db.update_note(note_id, updates, ev)
             return {"note_id": note_id, "updated_fields": updated_fields, "success": True}
         finally:
             try:
@@ -1929,9 +2017,20 @@ class NotesModule(BaseModule):
                 raise ValueError(f"Note not found: {note_id}")
             current_version = int(row.get("version") or 1) if row else None
             ev = int(expected_version) if expected_version is not None else current_version
-            deleted = db.delete_note(note_id, expected_version=ev, hard_delete=permanent)
-            if not deleted:
-                raise ValueError(f"Note not found: {note_id}")
+            coordinator = active_coordinator(db, user_id=getattr(context, "user_id", None))
+            if coordinator is not None:
+                if permanent:
+                    raise ValueError("Permanent note delete is unavailable while Sync is active")
+                capture_note_tombstone(
+                    coordinator,
+                    note_id=note_id,
+                    expected_version=int(ev),
+                    source="mcp-notes",
+                )
+            else:
+                deleted = db.delete_note(note_id, expected_version=ev, hard_delete=permanent)
+                if not deleted:
+                    raise ValueError(f"Note not found: {note_id}")
             return {
                 "note_id": note_id,
                 "action": "permanently_deleted" if permanent else "soft_deleted",
@@ -1950,7 +2049,17 @@ class NotesModule(BaseModule):
             if not db.get_note_by_id(note_id):
                 raise ValueError(f"Note not found: {note_id}")
             norm_tags = self._normalize_tags(tags)
-            if norm_tags:
+            coordinator = active_coordinator(db, user_id=getattr(context, "user_id", None))
+            if coordinator is not None:
+                desired = [*self._tags_for_note(db, note_id), *norm_tags]
+                replace_keywords(
+                    coordinator,
+                    subject_type="note",
+                    subject_id=note_id,
+                    keywords=desired,
+                    source="mcp-notes",
+                )
+            elif norm_tags:
                 existing = {t.lower() for t in self._tags_for_note(db, note_id)}
                 for tag in norm_tags:
                     if tag in existing:
@@ -1972,10 +2081,22 @@ class NotesModule(BaseModule):
             if not db.get_note_by_id(note_id):
                 raise ValueError(f"Note not found: {note_id}")
             norm_tags = self._normalize_tags(tags)
-            for tag in norm_tags:
-                kw = db.get_keyword_by_text(tag)
-                if kw and kw.get("id") is not None:
-                    db.unlink_note_from_keyword(note_id, int(kw["id"]))
+            coordinator = active_coordinator(db, user_id=getattr(context, "user_id", None))
+            if coordinator is not None:
+                removed = set(norm_tags)
+                desired = [tag for tag in self._tags_for_note(db, note_id) if tag not in removed]
+                replace_keywords(
+                    coordinator,
+                    subject_type="note",
+                    subject_id=note_id,
+                    keywords=desired,
+                    source="mcp-notes",
+                )
+            else:
+                for tag in norm_tags:
+                    kw = db.get_keyword_by_text(tag)
+                    if kw and kw.get("id") is not None:
+                        db.unlink_note_from_keyword(note_id, int(kw["id"]))
             return {"note_id": note_id, "tags": self._tags_for_note(db, note_id), "success": True}
         finally:
             try:
@@ -1990,6 +2111,16 @@ class NotesModule(BaseModule):
             if not db.get_note_by_id(note_id):
                 raise ValueError(f"Note not found: {note_id}")
             desired = set(self._normalize_tags(tags))
+            coordinator = active_coordinator(db, user_id=getattr(context, "user_id", None))
+            if coordinator is not None:
+                replace_keywords(
+                    coordinator,
+                    subject_type="note",
+                    subject_id=note_id,
+                    keywords=sorted(desired),
+                    source="mcp-notes",
+                )
+                return {"note_id": note_id, "tags": self._tags_for_note(db, note_id), "success": True}
             existing_rows = db.get_keywords_for_note(note_id)
             existing = {str(r.get("keyword")).lower(): int(r.get("id")) for r in existing_rows if r.get("keyword") is not None}
 

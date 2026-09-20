@@ -1,0 +1,23 @@
+{
+  "recorded_at": "2026-09-06T03:02:44.324283+00:00",
+  "base_revision": "472d6ff62cfcbefb19a996936d478b49673b13c3",
+  "source_sha256": {
+    "apps/packages/ui/src/components/PersonaGarden/BuddyStarterCatalogPicker.tsx": "d3fbbf4578d7c4f17db2bd3ad960edd6ea55dad25f3bc9fdccbcac2afd9e4451",
+    "apps/packages/ui/src/components/PersonaGarden/BuddyGuidedBuilder.tsx": "e90069bc48d3397a3ae90d6e9797d9e72d8c6a1f0ea08ec26be3ba198eec82f9",
+    "apps/packages/ui/src/components/PersonaGarden/VisualPackEditor.tsx": "448fc63596948933d2e301d89808130710f08b3748cddd716248f2a81060ab91"
+  },
+  "scenario": "Controlled isolated backend outage, catalog Refresh, backend restart, dismiss outage dialog, Retry catalog",
+  "failed_catalog_retry_visible": true,
+  "active_pack_preserved": "Migu Marker Basic",
+  "recovered_catalog_contains": [
+    "Search Lens Basic",
+    "Migu Marker Basic",
+    "pixel-migu"
+  ],
+  "image_state": "idle",
+  "image_complete": true,
+  "image_natural_width": 96,
+  "pack_copy_or_activation_requested": false,
+  "microphone_started": false,
+  "limitations": "This verifies explicit recovery from a network failure; it does not identify or repair the intermittent first-request cross-origin failure."
+}

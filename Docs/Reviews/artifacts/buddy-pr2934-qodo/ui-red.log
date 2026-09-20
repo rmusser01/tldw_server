@@ -1,0 +1,656 @@
+
+ RUN  v4.0.18 /private/tmp/tldw-server-buddy-persona-ux/apps/packages/ui
+
+ ❯ src/components/Common/PersonaBuddy/__tests__/BuddyInteraction.test.tsx (11 tests | 1 failed) 2469ms
+   ✓ distinguishes duplicate result titles while replies and acknowledgements retain exact IDs  492ms
+   ✓ preserves an encoded error quoted in a user message verbatim 22ms
+   ✓ presents a saved chat failure without its encoded envelope or diagnostic details 38ms
+   ✓ never relabels old transcript content as a newly selected conversation 57ms
+   ✓ preserves an ambiguous send's request identity on retry 94ms
+   ✓ hides stale content on access failure and clears the fetch error after recovery 30ms
+   ✓ reads a newly arrived assistant failure with its conversation title and friendly text only 146ms
+   ✓ does not start speech after unmount while its authorized transcript read is pending 193ms
+   ✓ shows missing reply settings before Send and preserves the draft while recovering 111ms
+   ✓ uses saved conversation settings without sending overrides and blocks a newly selected target until checked 85ms
+   × uses current labels after a pending speech read and for the next queued response without restarting playback 1200ms
+ ❯ src/components/Common/PersonaBuddy/__tests__/BuddyManagementModal.test.tsx (14 tests | 4 failed) 4991ms
+   ✓ Cancel does not attach the selected Buddy or change a Persona  443ms
+   ✓ attaches existing artwork to a named conversation without requiring a Persona  313ms
+   ✓ resolves a composer conversation into its workspace before allowing Apply  339ms
+   ✓ waits for preview and prevents follow-up attachment writes after unmount  399ms
+   ✓ applies the new entry-point target when the open modal is retargeted  416ms
+   ✓ preserves staged target edits when the same entry-point target is supplied again 163ms
+   ✓ retains saved artwork without attaching or replacing the new draft after retargeting during creation  832ms
+   ✓ reports the saved old workspace default without attaching or overwriting a retargeted workspace draft 206ms
+   ✓ preserves the new editor after retargeting during attachment completion  470ms
+   ✓ preserves the new editor after retargeting during refresh completion  464ms
+   × distinguishes management choices with distinct dates while attaching their exact IDs 208ms
+   × distinguishes management choices with missing dates while attaching their exact IDs 201ms
+   × distinguishes management choices with colliding dates while attaching their exact IDs 202ms
+   × updates management date labels for the active locale without changing the selected ID 333ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Common/PersonaBuddy/__tests__/BuddyInteraction.test.tsx > uses current labels after a pending speech read and for the next queued response without restarting playback
+AssertionError: expected 1st "vi.fn()" call to have been called with [ { …(2) } ]
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<section[39m
+        [33maria-label[39m=[32m"Buddy conversation"[39m
+        [33mclass[39m=[32m"space-y-3 text-sm text-text"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33maria-label[39m=[32m"New conversation results"[39m
+          [33mclass[39m=[32m"space-y-2"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex flex-wrap items-center justify-between gap-2 rounded-md border border-border p-2"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"min-w-0 flex-1 text-left font-medium text-primaryStrong underline"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m8. Sept. 2026, 05:00:00 — Renamed research[0m
+              [0m —[0m
+              [0m [0m
+              [0mNew response[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined ant-btn-sm"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<span>[39m
+                [0mMark read[0m
+              [36m</span>[39m
+            [36m</button>[39m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex flex-wrap items-center justify-between gap-2 rounded-md border border-border p-2"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"min-w-0 flex-1 text-left font-medium text-primaryStrong underline"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [0m9. Sept. 2026, 05:00:00 — Renamed research[0m
+              [0m —[0m
+              [0m [0m
+              [0mNew response[0m
+            [36m</button>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined ant-btn-sm"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<span>[39m
+                [0mMark read[0m
+              [36m</span>[39m
+            [36m</button>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33maria-label[39m=[32m"Conversation history: 8. Sept. 2026, 05:00:00 — Renamed research"[39m
+          [33mclass[39m=[32m"max-h-[35dvh] min-h-24 space-y-3 overflow-y-auto rounded-md border border-border p-3"[39m
+          [33mrole[39m=[32m"log"[39m
+        [36m>[39m
+          [36m<p[39m
+            [33mclass[39m=[32m"text-text-muted"[39m
+          [36m>[39m
+            [0mNo messages loaded yet.[0m
+          [36m</p>[39m
+        [36m</div>[39m
+        [36m<form[39m
+          [33mclass[39m=[32m"space-y-2"[39m
+        [36m>[39m
+          [36m<label[39m
+            [33mclass[39m=[32m"block font-medium"[39m
+            [33mfor[39m=[32m"buddy-reply"[39m
+          [36m>[39m
+            [0mReply to[0m
+            [0m [0m
+            [0m8. Sept. 2026, 05:00:00 — Renamed research[0m
+          [36m</label>[39m
+          [36m<textarea[39m
+            [33mclass[39m=[32m"block w-full resize-y rounded-md border border-border bg-surface p-3 text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"[39m
+            [33mid[39m=[32m"buddy-reply"[39m
+            [33mmaxlength[39m=[32m"12000"[39m
+            [33mrows[39m=[32m"3"[39m
+          [36m/>[39m
+          [36m<p[39m
+            [33maria-live[39m=[32m"polite"[39m
+            [33mclass[39m=[32m"text-text-muted"[39m
+            [33mrole[39m=[32m"status"[39m
+          [36m>[39m
+            [0mChecking reply model…[0m
+          [36m</p>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"flex flex-wrap items-center justify-between gap-2"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-primary ant-btn-color-primary ant-btn-variant-solid"[39m
+              [33mdisabled[39m=[32m""[39m
+              [33mtype[39m=[32m"submit"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33mclass[39m=[32m"ant-btn-icon"[39m
+              [36m>[39m
+                [36m<svg[39m
+                  [33maria-hidden[39m=[32m"true"[39m
+                  [33mclass[39m=[32m"lucide lucide-send"[39m
+                  [33mfill[39m=[32m"none"[39m
+                  [33mheight[39m=[32m"16"[39m
+                  [33mstroke[39m=[32m"currentColor"[39m
+                  [33mstroke-linecap[39m=[32m"round"[39m
+                  [33mstroke-linejoin[39m=[32m"round"[39m
+                  [33mstroke-width[39m=[32m"2"[39m
+                  [33mviewBox[39m=[32m"0 0 24 24"[39m
+                  [33mwidth[39m=[32m"16"[39m
+                  [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                [36m>[39m
+                  [36m<path[39m
+                    [33md[39m=[32m"M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"[39m
+                  [36m/>[39m
+                  [36m<path[39m
+                    [33md[39m=[32m"m21.854 2.147-10.94 10.939"[39m
+                  [36m/>[39m
+                [36m</svg>[39m
+              [36m</span>[39m
+              [36m<span>[39m
+                [0mSend[0m
+              [36m</span>[39m
+            [36m</button>[39m
+          [36m</div>[39m
+          [36m<details>[39m
+            [36m<summary[39m
+              [33mclass[39m=[32m"cursor-pointer text-text-muted"[39m
+            [36m>[39m
+              [0mReply model settings[0m
+            [36m</summary>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"mt-2 grid gap-2 sm:grid-cols-2"[39m
+            [36m>[39m
+              [36m<label>[39m
+                [0mModel override (optional)[0m
+                [36m<input[39m
+                  [33mclass[39m=[32m"w-full rounded border border-border bg-surface p-2"[39m
+                  [33mplaceholder[39m=[32m"Model ID from your configured provider"[39m
+                  [33mvalue[39m=[32m""[39m
+                [36m/>[39m
+              [36m</label>[39m
+              [36m<label>[39m
+                [0mProvider override (optional)[0m
+                [36m<input[39m
+                  [33mclass[39m=[32m"w-full rounded border border-border bg-surface p-2"[39m
+                  [33mplaceholder[39m=[32m"Provider ID, e.g. custom-openai-api"[39m
+                  [33mvalue[39m=[32m""[39m
+                [36m/>[39m
+              [36m</label>[39m
+...
+
+- Expected
++ Received
+
+  [
+    {
+      "saveClip": false,
+-     "utterance": "8. Sept. 2026, 05:00:00 — Renamed research. First reply",
++     "utterance": "Sep 8, 2026, 05:00:00 AM — Research. First reply",
+    },
+  ]
+
+ ❯ src/components/Common/PersonaBuddy/__tests__/BuddyInteraction.test.tsx:429:43
+    427|     year: "numeric", month: "short", day: "numeric", hour: "2-digit", …
+    428|   }).format(new Date(createdAt))
+    429|   await waitFor(() => expect(mocks.speak).toHaveBeenNthCalledWith(1, {
+       |                                           ^
+    430|     utterance: `${dateLabel("de-DE", dated[0].created_at)} — Renamed r…
+    431|   }))
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../../../../../../Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../../../../../../Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../../../../../../Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  src/components/Common/PersonaBuddy/__tests__/BuddyManagementModal.test.tsx > distinguishes management choices with distinct dates while attaching their exact IDs
+ FAIL  src/components/Common/PersonaBuddy/__tests__/BuddyManagementModal.test.tsx > distinguishes management choices with missing dates while attaching their exact IDs
+ FAIL  src/components/Common/PersonaBuddy/__tests__/BuddyManagementModal.test.tsx > distinguishes management choices with colliding dates while attaching their exact IDs
+AssertionError: expected 1 to be 2 // Object.is equality
+
+- Expected
++ Received
+
+- 2
++ 1
+
+ ❯ src/components/Common/PersonaBuddy/__tests__/BuddyManagementModal.test.tsx:292:69
+    290|   const choices = screen.getAllByRole("option", { name: /Research/ })
+    291|   expect(choices).toHaveLength(2)
+    292|   expect(new Set(choices.map((choice) => choice.textContent)).size).to…
+       |                                                                     ^
+    293|   if (!firstDate || firstDate === secondDate) {
+    294|     expect(choices[0]).toHaveAccessibleName(/sharedid-one.*Research/)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  src/components/Common/PersonaBuddy/__tests__/BuddyManagementModal.test.tsx > updates management date labels for the active locale without changing the selected ID
+TestingLibraryElementError: Unable to find an accessible element with the role "option" and name "Sep 8, 2026, 05:00:00 AM — Research"
+
+Here are the accessible roles:
+
+  dialog:
+
+  Name "Buddy & Persona Management":
+  [36m<div[39m
+    [33maria-labelledby[39m=[32m"test-id"[39m
+    [33maria-modal[39m=[32m"true"[39m
+    [33mclass[39m=[32m"ant-modal css-dev-only-do-not-override-3uaqrl ant-zoom-appear ant-zoom-appear-prepare ant-zoom"[39m
+    [33mrole[39m=[32m"dialog"[39m
+    [33mstyle[39m=[32m"max-width: calc(100vw - 24px); top: 24px; width: 760px;"[39m
+    [33mtabindex[39m=[32m"-1"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  button:
+
+  Name "Close":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Close"[39m
+    [33mclass[39m=[32m"ant-modal-close"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Use Duck":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Use Duck"[39m
+    [33maria-pressed[39m=[32m"false"[39m
+    [33mclass[39m=[32m"min-w-0 rounded-md border p-3 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary border-border bg-surface"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Cancel":
+  [36m<button[39m
+    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined"[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  Name "Apply":
+  [36m<button[39m
+    [33maria-label[39m=[32m"Apply"[39m
+    [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-primary ant-btn-color-primary ant-btn-variant-solid"[39m
+    [33mdisabled[39m=[32m""[39m
+    [33mtype[39m=[32m"button"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  img:
+
+  Name "close":
+  [36m<span[39m
+    [33maria-label[39m=[32m"close"[39m
+    [33mclass[39m=[32m"anticon anticon-close ant-modal-close-icon"[39m
+    [33mrole[39m=[32m"img"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  paragraph:
+
+  Name "":
+  [36m<p[39m
+    [33mclass[39m=[32m"text-sm text-text-muted"[39m
+  [36m/>[39m
+
+  Name "":
+  [36m<p[39m
+    [33mclass[39m=[32m"text-sm text-text-muted"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  searchbox:
+
+  Name "Find a Buddy":
+  [36m<input[39m
+    [33mclass[39m=[32m"block w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"[39m
+    [33mtype[39m=[32m"search"[39m
+    [33mvalue[39m=[32m""[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  region:
+
+  Name "Your Buddies":
+  [36m<section[39m
+    [33maria-label[39m=[32m"Your Buddies"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  heading:
+
+  Name "Your Buddies":
+  [36m<h3[39m
+    [33mclass[39m=[32m"mb-2 text-base font-semibold"[39m
+  [36m/>[39m
+
+  Name "Attach to":
+  [36m<h3[39m
+    [33mclass[39m=[32m"text-base font-semibold"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  group:
+
+  Name "":
+  [36m<details />[39m
+
+  --------------------------------------------------
+  combobox:
+
+  Name "Scope":
+  [36m<select[39m
+    [33maria-label[39m=[32m"Scope"[39m
+    [33mclass[39m=[32m"block w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"[39m
+  [36m/>[39m
+
+  Name "Conversation location":
+  [36m<select[39m
+    [33maria-label[39m=[32m"Conversation location"[39m
+    [33mclass[39m=[32m"block w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"[39m
+  [36m/>[39m
+
+  Name "Conversation":
+  [36m<select[39m
+    [33maria-label[39m=[32m"Conversation"[39m
+    [33mclass[39m=[32m"block w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+  option:
+
+  Name "One conversation":
+  [36m<option[39m
+    [33mvalue[39m=[32m"conversation"[39m
+  [36m/>[39m
+
+  Name "Workspace":
+  [36m<option[39m
+    [33mvalue[39m=[32m"workspace"[39m
+  [36m/>[39m
+
+  Name "Outside a workspace":
+  [36m<option[39m
+    [33mvalue[39m=[32m""[39m
+  [36m/>[39m
+
+  Name "Choose a conversation":
+  [36m<option[39m
+    [33mvalue[39m=[32m""[39m
+  [36m/>[39m
+
+  Name "Research":
+  [36m<option[39m
+    [33mvalue[39m=[32m"one"[39m
+  [36m/>[39m
+
+  Name "Research":
+  [36m<option[39m
+    [33mvalue[39m=[32m"two"[39m
+  [36m/>[39m
+
+  --------------------------------------------------
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div />[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"ant-modal-root css-dev-only-do-not-override-3uaqrl css-var-root ant-modal-css-var"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"ant-modal-mask ant-fade-appear ant-fade-appear-start ant-fade ant-modal-mask-blur"[39m
+      [36m/>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"ant-modal-wrap"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33maria-labelledby[39m=[32m"test-id"[39m
+          [33maria-modal[39m=[32m"true"[39m
+          [33mclass[39m=[32m"ant-modal css-dev-only-do-not-override-3uaqrl ant-zoom-appear ant-zoom-appear-prepare ant-zoom"[39m
+          [33mrole[39m=[32m"dialog"[39m
+          [33mstyle[39m=[32m"max-width: calc(100vw - 24px); top: 24px; width: 760px;"[39m
+          [33mtabindex[39m=[32m"-1"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"ant-modal-container"[39m
+            [33mstyle[39m=[32m"background: var(--surface); color: var(--text);"[39m
+          [36m>[39m
+            [36m<button[39m
+              [33maria-label[39m=[32m"Close"[39m
+              [33mclass[39m=[32m"ant-modal-close"[39m
+              [33mtype[39m=[32m"button"[39m
+            [36m>[39m
+              [36m<span[39m
+                [33maria-label[39m=[32m"Close"[39m
+                [33mclass[39m=[32m"ant-modal-close-x"[39m
+              [36m>[39m
+                [36m<span[39m
+                  [33maria-label[39m=[32m"close"[39m
+                  [33mclass[39m=[32m"anticon anticon-close ant-modal-close-icon"[39m
+                  [33mrole[39m=[32m"img"[39m
+                [36m>[39m
+                  [36m<svg[39m
+                    [33maria-hidden[39m=[32m"true"[39m
+                    [33mdata-icon[39m=[32m"close"[39m
+                    [33mfill[39m=[32m"currentColor"[39m
+                    [33mfill-rule[39m=[32m"evenodd"[39m
+                    [33mfocusable[39m=[32m"false"[39m
+                    [33mheight[39m=[32m"1em"[39m
+                    [33mviewBox[39m=[32m"64 64 896 896"[39m
+                    [33mwidth[39m=[32m"1em"[39m
+                  [36m>[39m
+                    [36m<path[39m
+                      [33md[39m=[32m"M799.86 166.31c.02 0 .04.02.08.06l57.69 57.7c.04.03.05.05.06.08a.12.12 0 010 .06c0 .03-.02.05-.06.09L569.93 512l287.7 287.7c.04.04.05.06.06.09a.12.12 0 010 .07c0 .02-.02.04-.06.08l-57.7 57.69c-.03.04-.05.05-.07.06a.12.12 0 01-.07 0c-.03 0-.05-.02-.09-.06L512 569.93l-287.7 287.7c-.04.04-.06.05-.09.06a.12.12 0 01-.07 0c-.02 0-.04-.02-.08-.06l-57.69-57.7c-.04-.03-.05-.05-.06-.07a.12.12 0 010-.07c0-.03.02-.05.06-.09L454.07 512l-287.7-287.7c-.04-.04-.05-.06-.06-.09a.12.12 0 010-.07c0-.02.02-.04.06-.08l57.7-57.69c.03-.04.05-.05.07-.06a.12.12 0 01.07 0c.03 0 .05.02.09.06L512 454.07l287.7-287.7c.04-.04.06-.05.09-.06a.12.12 0 01.07 0z"[39m
+                    [36m/>[39m
+                  [36m</svg>[39m
+                [36m</span>[39m
+              [36m</span>[39m
+            [36m</button>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-modal-header"[39m
+              [33mstyle[39m=[32m"background: var(--surface);"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"ant-modal-title"[39m
+                [33mid[39m=[32m"test-id"[39m
+                [33mstyle[39m=[32m"color: var(--text); padding-right: 24px; overflow-wrap: anywhere;"[39m
+              [36m>[39m
+                [0mBuddy & Persona Management[0m
+              [36m</div>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-modal-body"[39m
+              [33mstyle[39m=[32m"max-height: calc(100dvh - 190px); overflow-y: auto;"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"space-y-5 text-text"[39m
+              [36m>[39m
+                [36m<p[39m
+                  [33mclass[39m=[32m"text-sm text-text-muted"[39m
+                [36m>[39m
+                  [0mChoose a Buddy and where it belongs. Artwork is independent of the conversation’s Persona.[0m
+                [36m</p>[39m
+                [36m<label[39m
+                  [33mclass[39m=[32m"block text-sm"[39m
+                [36m>[39m
+                  [0mFind a Buddy[0m
+                  [36m<input[39m
+                    [33mclass[39m=[32m"block w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"[39m
+                    [33mtype[39m=[32m"search"[39m
+                    [33mvalue[39m=[32m""[39m
+                  [36m/>[39m
+                [36m</label>[39m
+                [36m<section[39m
+                  [33maria-label[39m=[32m"Your Buddies"[39m
+                [36m>[39m
+                  [36m<h3[39m
+                    [33mclass[39m=[32m"mb-2 text-base font-semibold"[39m
+                  [36m>[39m
+                    [0mYour Buddies[0m
+                  [36m</h3>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"grid grid-cols-2 gap-3 sm:grid-cols-3"[39m
+                  [36m>[39m
+                    [36m<button[39m
+                      [33maria-label[39m=[32m"Use Duck"[39m
+                      [33maria-pressed[39m=[32m"false"[39m
+                      [33mclass[39m=[32m"min-w-0 rounded-md border p-3 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary border-border bg-surface"[39m
+                      [33mtype[39m=[32m"button"[39m
+                    [36m>[39m
+                      [36m<div[39m
+                        [33mclass[39m=[32m"flex h-32 items-center justify-center overflow-hidden"[39m
+                      [36m>[39m
+                        [36m<span>[39m
+                          [0mArtwork preview[0m
+                        [36m</span>[39m
+                      [36m</div>[39m
+                      [36m<span[39m
+                        [33mclass[39m=[32m"mt-2 block font-medium"[39m
+                      [36m>[39m
+                        [0mDuck[0m
+                      [36m</span>[39m
+                    [36m</button>[39m
+                  [36m</div>[39m
+                [36m</section>[39m
+                [36m<details>[39m
+                  [36m<summary[39m
+                    [33mclass[39m=[32m"cursor-pointer text-base font-semibold"[39m
+                  [36m>[39m
+                    [0mChoose a ready-made Buddy[0m
+                  [36m</summary>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"mt-3 grid gap-3 sm:grid-cols-2"[39m
+                  [36m/>[39m
+                [36m</details>[39m
+                [36m<section[39m
+                  [33mclass[39m=[32m"space-y-3 border-t border-border pt-4"[39m
+                [36m>[39m
+                  [36m<h3[39m
+                    [33mclass[39m=[32m"text-base font-semibold"[39m
+                  [36m>[39m
+                    [0mAttach to[0m
+                  [36m</h3>[39m
+                  [36m<label[39m
+                    [33mclass[39m=[32m"block text-sm"[39m
+                  [36m>[39m
+                    [0mScope[0m
+                    [36m<select[39m
+                      [33maria-label[39m=[32m"Scope"[39m
+                      [33mclass[39m=[32m"block w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"[39m
+                    [36m>[39m
+                      [36m<option[39m
+                        [33mvalue[39m=[32m"conversation"[39m
+                      [36m>[39m
+                        [0mOne conversation[0m
+                      [36m</option>[39m
+                      [36m<option[39m
+                        [33mvalue[39m=[32m"workspace"[39m
+                      [36m>[39m
+                        [0mWorkspace[0m
+                      [36m</option>[39m
+                    [36m</select>[39m
+                  [36m</label>[39m
+                  [36m<label[39m
+                    [33mclass[39m=[32m"block text-sm"[39m
+                  [36m>[39m
+                    [0mConversation location[0m
+                    [36m<select[39m
+                      [33maria-label[39m=[32m"Conversation location"[39m
+                      [33mclass[39m=[32m"block w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"[39m
+                    [36m>[39m
+                      [36m<option[39m
+                        [33mvalue[39m=[32m""[39m
+                      [36m>[39m
+                        [0mOutside a workspace[0m
+                      [36m</option>[39m
+                    [36m</select>[39m
+                  [36m</label>[39m
+                  [36m<label[39m
+                    [33mclass[39m=[32m"block text-sm"[39m
+                  [36m>[39m
+                    [0mConversation[0m
+                    [36m<select[39m
+                      [33maria-label[39m=[32m"Conversation"[39m
+                      [33mclass[39m=[32m"block w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"[39m
+                    [36m>[39m
+                      [36m<option[39m
+                        [33mvalue[39m=[32m""[39m
+                      [36m>[39m
+                        [0mChoose a conversation[0m
+                      [36m</option>[39m
+                      [36m<option[39m
+                        [33mvalue[39m=[32m"one"[39m
+                      [36m>[39m
+                        [0mResearch[0m
+                      [36m</option>[39m
+                      [36m<option[39m
+                        [33mvalue[39m=[32m"two"[39m
+                      [36m>[39m
+                        [0mResearch[0m
+                      [36m</option>[39m
+                    [36m</select>[39m
+                  [36m</label>[39m
+                  [36m<p[39m
+                    [33mclass[39m=[32m"text-sm text-text-muted"[39m
+                  [36m>[39m
+                    [0mThe conversation keeps its current Persona. Use conversation settings to change its identity or behavior.[0m
+                  [36m</p>[39m
+                [36m</section>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"ant-modal-footer"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-default ant-btn-color-default ant-btn-variant-outlined"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span>[39m
+                  [0mCancel[0m
+                [36m</span>[39m
+              [36m</button>[39m
+              [36m<button[39m
+                [33maria-label[39m=[32m"Apply"[39m
+                [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-primary ant-btn-color-primary ant-btn-variant-solid"[39m
+                [33mdisabled[39m=[32m""[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [36m<span>[39m
+                  [0mApply[0m
+                [36m</span>[39m
+              [36m</button>[39m
+            [36m</div>[39m
+          [36m</div>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+    [36m</div>[39m
+  [36m</div>[39m
+[36m</body>[39m
+ ❯ Object.getElementError ../../../../../../Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/config.js:37:19
+ ❯ ../../../../../../Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:76:38
+ ❯ ../../../../../../Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:52:17
+ ❯ ../../../../../../Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:95:19
+ ❯ src/components/Common/PersonaBuddy/__tests__/BuddyManagementModal.test.tsx:324:17
+    322|     year: "numeric", month: "short", day: "numeric", hour: "2-digit", …
+    323|   }).format(new Date(createdAt))
+    324|   expect(screen.getByRole("option", { name: `${dateLabel("en-US")} — R…
+       |                 ^
+    325|   mocks.locale = "de-DE"
+    326|   rerender(<BuddyManagementModal {...props} />)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  5 failed | 20 passed (25)
+   Start at  23:57:19
+   Duration  11.51s (transform 483ms, setup 318ms, import 2.58s, tests 7.46s, environment 981ms)

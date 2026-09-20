@@ -46,6 +46,10 @@ class NormalizationOptions(BaseModel):
 class OpenAISpeechRequest(BaseModel):
     """Request schema for OpenAI-compatible speech endpoint"""
 
+    backend: Optional[str] = Field(
+        default=None,
+        description="Explicit TTS backend identity. Omit to retain legacy model inference.",
+    )
     model: str = Field(
         ...,
         min_length=1,
@@ -92,6 +96,10 @@ class OpenAISpeechRequest(BaseModel):
     stream: bool = Field(
         default=True,  # Default to streaming for OpenAI compatibility
         description="If true (default), audio will be streamed as it's generated. Each chunk will be a complete sentence.",
+    )
+    allow_fallback: bool = Field(
+        default=True,
+        description="Allow the selected backend's administrator-configured fallback policy.",
     )
     target_sample_rate: Optional[int] = Field(
         default=None,

@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { getProjectEnv, shouldManageBackend } from '@/tests/e2e/real-backend/helpers/project-env';
+import {
+  getProjectEnv,
+  getRequestedRealBackendProjects,
+  shouldManageBackend,
+} from '@/tests/e2e/real-backend/helpers/project-env';
 
 describe('real-backend project env', () => {
   it('returns the default real-backend project urls when no overrides are present', () => {
@@ -27,5 +31,30 @@ describe('real-backend project env', () => {
 
     expect(shouldManageBackend('chromium-real-jwt', env)).toBe(false);
     expect(shouldManageBackend('chromium-real-single-user', env)).toBe(false);
+  });
+
+  it('selects an equals-delimited real-backend Playwright project', () => {
+    expect(
+      getRequestedRealBackendProjects([
+        'node',
+        'playwright',
+        'test',
+        '--project=chromium-real-jwt',
+      ]),
+    ).toEqual(['chromium-real-jwt']);
+  });
+
+  it('selects a space-delimited real-backend project and ignores generic projects', () => {
+    expect(
+      getRequestedRealBackendProjects([
+        'node',
+        'playwright',
+        'test',
+        '--project',
+        'chromium',
+        '--project',
+        'chromium-real-single-user',
+      ]),
+    ).toEqual(['chromium-real-single-user']);
   });
 });

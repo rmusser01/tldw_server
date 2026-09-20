@@ -17,10 +17,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Copy packaging metadata and source to build/install python deps.
-COPY pyproject.toml README.md /app/
+# Copy packaging metadata, legal corpus, and source to build/install python deps.
+COPY pyproject.toml README.md LICENSE /app/
+COPY LICENSES /app/LICENSES
 COPY tldw_Server_API /app/tldw_Server_API
 COPY apps/mcp-unified/src /app/apps/mcp-unified/src
+COPY packages/tldw_profile_core/src /app/packages/tldw_profile_core/src
 
 RUN pip install --upgrade pip && \
     pip install --prefix=/install .
@@ -44,14 +46,19 @@ WORKDIR /app
 # Bring in installed Python deps from the builder image.
 COPY --from=builder /install /usr/local
 
+# Verify local packages are installed, without relying on repository PYTHONPATH.
+RUN python -c "import mcp_unified; import tldw_profile_core"
+
 # Create runtime user up front so content copies can avoid recursive chown.
 RUN useradd -m -u 10001 appuser
 
 # Runtime source/docs/scripts expected by server routes and helpers.
 COPY --chown=appuser:appuser tldw_Server_API /app/tldw_Server_API
-COPY --chown=appuser:appuser apps/tldw-frontend /app/apps/tldw-frontend
 COPY --chown=appuser:appuser Docs /app/Docs
 COPY --chown=appuser:appuser Helper_Scripts /app/Helper_Scripts
+COPY --chown=appuser:appuser LICENSE /app/LICENSE
+COPY --chown=appuser:appuser LICENSES /app/LICENSES
+COPY --chown=appuser:appuser THIRD_PARTY_NOTICES.txt /app/THIRD_PARTY_NOTICES.txt
 COPY Dockerfiles/entrypoints/tldw-app-first-run.sh /usr/local/bin/tldw-app-first-run
 
 # Create writable runtime DB directory without copying host runtime data.
@@ -74,9 +81,9 @@ ENV PYTHONPATH=/app/tldw_Server_API \
 EXPOSE 8000
 
 # Basic healthcheck using the readiness probe (avoid extra curl dependency).
-HEALTHCHECK --interval=30s --timeout=5s --retries=5 CMD python -c "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/ready', timeout=3).status == 200 else 1)"
+HEALTHCHECK --interval=30s --timeout=5s --retries=5 CMD python -c "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/internal/ready', timeout=3).status == 200 else 1)"
 
 ENTRYPOINT ["/usr/local/bin/tldw-app-first-run"]
 
-# Start the server using runtime-expanded env vars so compose overrides take effect.
-CMD ["/bin/sh", "-c", "exec python -m uvicorn tldw_Server_API.app.main:app --host \"$HOST\" --port \"$PORT\" --workers \"$UVICORN_WORKERS\" --log-level \"$LOG_LEVEL\" --proxy-headers"]
+# Start through the pinned receive-time MCP WebSocket guard.
+CMD ["/bin/sh", "-c", "exec python -m tldw_Server_API.scripts.run_server_guarded_mcp --host \"$HOST\" --port \"$PORT\" --workers \"$UVICORN_WORKERS\" --log-level \"$LOG_LEVEL\" --proxy-headers"]

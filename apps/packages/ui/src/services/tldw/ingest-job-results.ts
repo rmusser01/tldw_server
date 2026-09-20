@@ -77,10 +77,22 @@ export const extractCompletedIngestJobMediaId = (
   value: unknown
 ): string | number | null => {
   const payload = extractCompletedIngestJobPayload(value)
+  const record = asRecord(value)
+  const results = Array.isArray(value)
+    ? value
+    : Array.isArray(payload?.results)
+      ? payload.results
+      : Array.isArray(record?.results)
+        ? record.results
+        : []
+  const firstResult = asRecord(results[0])
   const mediaId =
     payload?.media_id ??
     payload?.mediaId ??
     payload?.db_id ??
+    firstResult?.media_id ??
+    firstResult?.mediaId ??
+    firstResult?.db_id ??
     null
 
   return typeof mediaId === "string" || typeof mediaId === "number"

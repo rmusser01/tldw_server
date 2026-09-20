@@ -1,16 +1,55 @@
-"""Integration tests for cross-user database access via SharedWorkspaceDBResolver."""
+"""Cross-user isolation tests for legacy and canonical shared-workspace access."""
 from __future__ import annotations
 
 from unittest.mock import MagicMock
 
 import pytest
 
+from tldw_Server_API.app.core.Sharing.shared_workspace_access_service import (
+    SharedWorkspaceAccessService,
+    SharedWorkspaceNotFound,
+)
 from tldw_Server_API.app.core.Sharing.shared_workspace_resolver import (
     SharedWorkspaceContext,
     SharedWorkspaceDBResolver,
 )
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.mark.asyncio
+async def test_canonical_recipient_access_rejects_nonmember_before_owner_database(
+    repo,
+    sharing_db,
+) -> None:
+    sharing_db.execute(
+        "INSERT INTO users (id, username, email, password_hash) VALUES (3, 'eve', 'eve@test.com', 'hash')"
+    )
+    sharing_db.commit()
+    share = await repo.create_share(
+        workspace_id="ws-canonical-cross-user",
+        owner_user_id=1,
+        share_scope_type="team",
+        share_scope_id=10,
+        access_level="view_chat",
+        created_by=1,
+    )
+    owner_loader_calls: list[int] = []
+
+    class _UsersRepo:
+        async def get_user_by_id(self, user_id: int):
+            return {"id": user_id, "username": "owner"}
+
+    async def _load_owner(owner_user_id: int):
+        owner_loader_calls.append(owner_user_id)
+        return MagicMock()
+
+    service = SharedWorkspaceAccessService(repo, _UsersRepo(), _load_owner)
+
+    with pytest.raises(SharedWorkspaceNotFound):
+        await service.resolve(share_id=share["id"], recipient_user_id=3)
+
+    assert owner_loader_calls == []
 
 
 @pytest.fixture

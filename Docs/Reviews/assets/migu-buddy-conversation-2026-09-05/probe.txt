@@ -1,0 +1,86 @@
+import asyncio
+import json
+import time
+from pathlib import Path
+
+import httpx
+import websockets
+from dotenv import dotenv_values
+
+OUT = Path('/private/tmp/migu-server-conversation-runset')
+
+
+async def main():
+    cfg = dotenv_values('/private/tmp/migu-server-uat/runtime.env')
+    result = {'microphone_opened': False, 'audio_played': False, 'provider': 'deepseek', 'events': []}
+    async with httpx.AsyncClient(base_url='http://127.0.0.1:9101', headers={'X-API-KEY': cfg['SINGLE_USER_API_KEY']}, timeout=30) as client:
+        response = await client.post('/api/v1/persona/live/sessions', json={'persona_id': 'e19c631e-e2ac-452d-9935-293af03cee4e', 'surface': 'migu-conversation-uat'})
+        response.raise_for_status()
+        sid = response.json()['session']['session_id']
+        result['session_id'] = sid
+        try:
+            async with websockets.connect('ws://127.0.0.1:9101/api/v1/persona/stream', subprotocols=['bearer', cfg['SINGLE_USER_API_KEY']], origin='http://127.0.0.1:18384') as ws:
+                async def receive_until(predicate, timeout=95):
+                    async with asyncio.timeout(timeout):
+                        while True:
+                            raw = await ws.recv()
+                            if isinstance(raw, bytes):
+                                frame = {'event': 'binary', 'bytes': len(raw)}
+                            else:
+                                frame = json.loads(raw)
+                            result['events'].append(frame)
+                            if predicate(frame):
+                                return frame
+
+                async def send_text(cid, text):
+                    await ws.send(json.dumps({'type': 'user_message', 'session_id': sid, 'client_message_id': cid, 'text': text}))
+
+                started = time.monotonic()
+                await send_text('uat-greeting', 'Reply with exactly: The blue notebook is ready.')
+                first = await receive_until(lambda f: f.get('client_message_id') == 'uat-greeting' and (f.get('event') in {'assistant_delta', 'tool_plan'} or f.get('level') == 'error'))
+                result['first'] = first
+                result['first_seconds'] = round(time.monotonic()-started, 2)
+                if first.get('event') != 'assistant_delta':
+                    return
+                await send_text('uat-stop', 'Write a detailed 500-word essay about blue notebooks. Do not call any tools.')
+                await asyncio.sleep(0.5)
+                await ws.send(json.dumps({'type': 'cancel', 'session_id': sid}))
+                await receive_until(lambda f: f.get('reason_code') == 'PLAN_CANCELLED', 15)
+                await send_text('uat-retry', 'Reply with exactly: Migu recovered.')
+                retry = await receive_until(lambda f: f.get('client_message_id') == 'uat-retry' and (f.get('event') == 'assistant_delta' or f.get('level') == 'error'))
+                result['retry'] = retry
+                result['cancelled_answer_published'] = any(f.get('event') == 'assistant_delta' and f.get('client_message_id') == 'uat-stop' for f in result['events'])
+                await ws.send(json.dumps({'type': 'voice_config', 'session_id': sid, 'stt': {'model': 'tiny.en', 'language': 'en'}, 'tts': {'provider': 'kokoro', 'voice': 'af_heart'}}))
+                await receive_until(lambda f: f.get('reason_code') == 'VOICE_CONFIG_UPDATED', 15)
+                await ws.send(json.dumps({'type': 'voice_prepare', 'session_id': sid, 'client_message_id': 'voice-prepare-uat'}))
+                prepared = await receive_until(lambda f: f.get('event') == 'voice_readiness', 40)
+                result['prepared'] = prepared.get('ready')
+                if not prepared.get('ready'):
+                    return
+                await ws.send(json.dumps({'type': 'voice_commit', 'session_id': sid, 'client_message_id': 'voice-reply-uat', 'transcript': 'Reply with exactly: The blue notebook is ready.'}))
+                await receive_until(lambda f: f.get('client_message_id') == 'voice-reply-uat' and f.get('event') == 'assistant_delta')
+                total = 0
+                while True:
+                    header = await receive_until(lambda f: f.get('event') == 'tts_audio' or f.get('level') == 'error', 40)
+                    if header.get('event') != 'tts_audio':
+                        result['tts_error'] = header
+                        break
+                    audio = await receive_until(lambda f: f.get('event') == 'binary', 15)
+                    total += audio['bytes']
+                    if header['chunk_index'] + 1 == header['chunk_count']:
+                        break
+                result['tts_bytes'] = total
+                await send_text('uat-tool', 'Search my notes for blue notebooks')
+                plan = await receive_until(lambda f: f.get('client_message_id') == 'uat-tool' and f.get('event') == 'tool_plan')
+                result['explicit_tool_plan'] = [step.get('tool') for step in plan['steps']]
+                result['tools_approved'] = False
+        except Exception as exc:
+            result['error_type'] = type(exc).__name__
+        finally:
+            stopped = await client.post('/api/v1/persona/live/sessions/' + sid + '/stop')
+            result['stop_status'] = stopped.status_code
+            (OUT/'result.json').write_text(json.dumps(result, indent=2))
+            print(json.dumps({k:v for k,v in result.items() if k != 'events'}))
+
+
+asyncio.run(main())

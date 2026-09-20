@@ -2,7 +2,6 @@
 # Comprehensive end-to-end test for Prompt Studio evaluation system
 
 import pytest
-import asyncio
 import json
 import tempfile
 import os
@@ -505,44 +504,38 @@ class TestPromptStudioEvaluationEndToEnd:
             )
             test_case_ids.append(test_case_id)
 
-        # Patch asyncio.to_thread to work with our mock
-        async def mock_to_thread(func, *args, **kwargs):
-            return func(*args, **kwargs)
+        with patch(
+            'tldw_Server_API.app.core.Prompt_Management.prompt_studio.test_runner.TestRunner._call_adapter',
+            mock_chat_api_call,
+        ):
+            test_runner = TestRunner(test_db)
 
-        with patch('asyncio.to_thread', mock_to_thread):
-            with patch(
-                'tldw_Server_API.app.core.Prompt_Management.prompt_studio.test_runner.TestRunner._call_adapter',
-                mock_chat_api_call,
-            ):
+            # Run single test case
+            result = await test_runner.run_test_case(
+                prompt_id=prompt_id,
+                test_case_id=test_case_ids[0],
+                model="gpt-3.5-turbo"
+            )
 
-                test_runner = TestRunner(test_db)
+            assert result is not None
+            assert result["prompt_id"] == prompt_id
+            assert result["test_case_id"] == test_case_ids[0]
+            assert "actual" in result
 
-                # Run single test case
-                result = await test_runner.run_test_case(
-                    prompt_id=prompt_id,
-                    test_case_id=test_case_ids[0],
-                    model="gpt-3.5-turbo"
-                )
+            # Run multiple test cases in parallel
+            results = await test_runner.run_multiple_tests(
+                prompt_id=prompt_id,
+                test_case_ids=test_case_ids,
+                model="gpt-3.5-turbo",
+                parallel=True
+            )
 
-                assert result is not None
-                assert result["prompt_id"] == prompt_id
-                assert result["test_case_id"] == test_case_ids[0]
+            assert len(results) == 3
+            for i, result in enumerate(results):
+                assert result["test_case_id"] == test_case_ids[i]
                 assert "actual" in result
 
-                # Run multiple test cases in parallel
-                results = await test_runner.run_multiple_tests(
-                    prompt_id=prompt_id,
-                    test_case_ids=test_case_ids,
-                    model="gpt-3.5-turbo",
-                    parallel=True
-                )
-
-                assert len(results) == 3
-                for i, result in enumerate(results):
-                    assert result["test_case_id"] == test_case_ids[i]
-                    assert "actual" in result
-
-                logger.info(f"Async test runner completed {len(results)} tests successfully")
+            logger.info(f"Async test runner completed {len(results)} tests successfully")
 
     def test_database_integrity(self, test_db):
 

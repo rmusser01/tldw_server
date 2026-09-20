@@ -3,6 +3,14 @@
 from __future__ import annotations
 
 
+class PersonaArtworkValidationError(ValueError):
+    """A pack's artwork credit record or carrier violates the native contract.
+
+    The message is a stable metadata error code, without imported record contents.
+    ValueError compatibility preserves existing import and export error handling.
+    """
+
+
 class PromptCatalogError(Exception):
     """Sanitized prompt catalog error suitable for MCP protocol mapping."""
 

@@ -1,11 +1,13 @@
 import React from "react"
 import { Button, Drawer, Input, Skeleton, Switch } from "antd"
 import { useTranslation } from "react-i18next"
+import { X } from "lucide-react"
 import { shallow } from "zustand/shallow"
 
 import { AssistantSelect } from "@/components/Common/AssistantSelect"
 import { useActorStore } from "@/store/actor"
 import { createDefaultActorSettings, type ActorSettings } from "@/types/actor"
+import type { AssistantSelection } from "@/types/assistant-selection"
 import {
   getActorSettingsForChatWithCharacterFallback,
   saveActorSettingsForChat
@@ -32,6 +34,7 @@ import type {
 } from "./startup-template-bundles"
 
 export type RolePlaySetupApplyPayload = {
+  identitySelection?: AssistantSelection
   clearIdentity?: boolean
   clearBehavior?: boolean
   resetGenerationStyle?: boolean
@@ -118,7 +121,14 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
     shallow
   )
   const [loading, setLoading] = React.useState(false)
+  const [saving, setSaving] = React.useState(false)
+  const applyingRef = React.useRef(false)
+  const contentRef = React.useRef<HTMLFieldSetElement>(null)
+  const originalSceneRef = React.useRef<ActorSettings | null>(null)
   const [sceneDraft, setSceneDraft] = React.useState<ActorSettings | null>(null)
+  const [stagedIdentity, setStagedIdentity] =
+    React.useState<AssistantSelection | null>(null)
+  const [applyError, setApplyError] = React.useState<string | null>(null)
   const [clearIdentity, setClearIdentity] = React.useState(false)
   const [clearBehavior, setClearBehavior] = React.useState(false)
   const [resetGenerationStyle, setResetGenerationStyle] = React.useState(false)
@@ -130,15 +140,41 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
     React.useState<PresetKey | null>(null)
 
   const closeAndReturnFocus = React.useCallback(() => {
+    if (applyingRef.current) return
     onClose()
-    returnFocusRef?.current?.focus()
+    // The parent can unmount the drawer immediately; restore after its portal
+    // has released background focus suppression.
+    window.requestAnimationFrame(() => returnFocusRef?.current?.focus())
   }, [onClose, returnFocusRef])
+
+  React.useEffect(() => {
+    if (!open || saving || templatesOpen) return
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.isComposing) return
+      const content = contentRef.current
+      const dialog = content?.closest('[role="dialog"]')
+      const target = event.target instanceof Element ? event.target : null
+      // Shell capture handlers can stop Ant's bubble listener. Keep dismissal
+      // local to this drawer, leaving nested menus and dialogs in control.
+      if (!dialog || target?.closest('[role="dialog"]') !== dialog) return
+      if (content?.querySelector('[aria-expanded="true"]')) return
+      event.preventDefault()
+      event.stopPropagation()
+      closeAndReturnFocus()
+    }
+    window.addEventListener("keydown", handleEscape, true)
+    return () => window.removeEventListener("keydown", handleEscape, true)
+  }, [open, saving, templatesOpen, closeAndReturnFocus])
 
   React.useEffect(() => {
     if (!open) return
 
     let cancelled = false
     setLoading(true)
+    setSceneDraft(null)
+    originalSceneRef.current = null
+    setStagedIdentity(null)
+    setApplyError(null)
     setClearIdentity(false)
     setClearBehavior(false)
     setResetGenerationStyle(false)
@@ -156,9 +192,7 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
         })
         if (cancelled) return
         setSceneDraft(actor)
-        setSettings(actor)
-        const preview = summarizeRolePlayScene(actor)
-        setPreviewAndTokens(preview.prompt, preview.tokenCount)
+        originalSceneRef.current = actor
       } catch (error) {
         console.error("Failed to load role-play scene settings", error)
         if (!cancelled) {
@@ -189,19 +223,6 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
     setSettings
   ])
 
-  React.useEffect(() => {
-    if (!open) return
-    const handler = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        closeAndReturnFocus()
-      }
-    }
-    document.addEventListener("keydown", handler)
-    return () => {
-      document.removeEventListener("keydown", handler)
-    }
-  }, [closeAndReturnFocus, open])
-
   const scenePreview = React.useMemo(
     () => summarizeRolePlayScene(sceneDraft),
     [sceneDraft]
@@ -212,7 +233,7 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
       ? PRESETS.find((preset) => preset.key === stagedGenerationKey)
       : null
     const next = {
-      identity: clearIdentity ? null : beforeState.identity,
+      identity: clearIdentity ? null : stagedIdentity ?? beforeState.identity,
       behavior: clearBehavior
         ? null
         : stagedBehaviorTemplate
@@ -257,6 +278,7 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
     scenePreview.summary,
     stagedBehaviorTemplate,
     stagedGenerationKey,
+    stagedIdentity,
     t
   ])
 
@@ -292,9 +314,87 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
     []
   )
 
+  const applyWithScene = React.useCallback(
+    async (
+      scene: ActorSettings | null,
+      applySettings: () => void | Promise<void>
+    ) => {
+      if (applyingRef.current || loading || sceneLoadError) return
+      const originalScene = originalSceneRef.current
+      applyingRef.current = true
+      setSaving(true)
+      setApplyError(null)
+      let sceneSaved = false
+      let applyingSettings = false
+      try {
+        if (scene) {
+          const saved = await saveActorSettingsForChat({
+            historyId,
+            serverChatId,
+            settings: scene
+          })
+          if (!saved) throw new Error("Scene settings save failed")
+          sceneSaved = true
+        }
+        applyingSettings = true
+        await applySettings()
+        if (scene) {
+          setSettings(scene)
+          const preview = summarizeRolePlayScene(scene)
+          setPreviewAndTokens(preview.prompt, preview.tokenCount)
+        }
+        applyingRef.current = false
+        closeAndReturnFocus()
+      } catch {
+        let restored = true
+        if (sceneSaved && originalScene) {
+          try {
+            restored = await saveActorSettingsForChat({
+              historyId,
+              serverChatId,
+              settings: originalScene
+            })
+          } catch {
+            restored = false
+          }
+        }
+        setApplyError(
+          !restored
+            ? t(
+                "playground:composer.rolePlayRestoreError",
+                "Settings could not be applied, and the previous scene could not be restored. Keep this drawer open and retry Apply."
+              )
+            : applyingSettings
+              ? t(
+                  "playground:composer.rolePlayApplyError",
+                  "Settings could not be applied. Your draft is still here; retry Apply."
+                )
+              : t(
+                  "playground:composer.rolePlaySaveError",
+                  "Scene settings could not be saved. Your draft is still here; retry Apply."
+                )
+        )
+      } finally {
+        applyingRef.current = false
+        setSaving(false)
+      }
+    },
+    [
+      closeAndReturnFocus,
+      historyId,
+      loading,
+      sceneLoadError,
+      serverChatId,
+      setPreviewAndTokens,
+      setSettings,
+      t
+    ]
+  )
+
   const handleApply = React.useCallback(async () => {
     const payload: RolePlaySetupApplyPayload = {}
     if (clearIdentity) payload.clearIdentity = true
+    else if (stagedIdentity) payload.identitySelection = stagedIdentity
     if (clearBehavior) payload.clearBehavior = true
     if (!clearBehavior && stagedBehaviorTemplate) {
       payload.behaviorTemplate = stagedBehaviorTemplate
@@ -306,31 +406,19 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
 
     if (sceneDraft) {
       payload.sceneSettings = sceneDraft
-      await saveActorSettingsForChat({
-        historyId,
-        serverChatId,
-        settings: sceneDraft
-      })
-      setSettings(sceneDraft)
-      const preview = summarizeRolePlayScene(sceneDraft)
-      setPreviewAndTokens(preview.prompt, preview.tokenCount)
     }
 
-    await onApply(payload)
-    closeAndReturnFocus()
+    await applyWithScene(sceneDraft, () => onApply(payload))
   }, [
+    applyWithScene,
     clearBehavior,
     clearIdentity,
-    closeAndReturnFocus,
-    historyId,
     onApply,
     resetGenerationStyle,
     sceneDraft,
-    serverChatId,
-    setPreviewAndTokens,
-    setSettings,
     stagedBehaviorTemplate,
-    stagedGenerationKey
+    stagedGenerationKey,
+    stagedIdentity
   ])
 
   const handleBehaviorTemplateSelect = React.useCallback((template: PromptTemplate) => {
@@ -427,31 +515,29 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
 
   const handleApplySavedSetup = React.useCallback(
     async (setup: StartupTemplateBundle) => {
-      if (setup.rolePlay?.source === "role-play-setup") {
-        const nextScene = setup.rolePlay.scene ?? createDefaultActorSettings()
-        await saveActorSettingsForChat({
-          historyId,
-          serverChatId,
-          settings: nextScene
-        })
-        setSettings(nextScene)
-        const preview = summarizeRolePlayScene(nextScene)
-        setPreviewAndTokens(preview.prompt, preview.tokenCount)
-      }
-      await onApplySavedSetup?.(setup)
-      closeAndReturnFocus()
+      const nextScene =
+        setup.rolePlay?.source === "role-play-setup"
+          ? setup.rolePlay.scene ?? createDefaultActorSettings()
+          : null
+      await applyWithScene(nextScene, () => onApplySavedSetup?.(setup))
     },
-    [
-      closeAndReturnFocus,
-      historyId,
-      onApplySavedSetup,
-      serverChatId,
-      setPreviewAndTokens,
-      setSettings
-    ]
+    [applyWithScene, onApplySavedSetup]
   )
 
   const draft = getDraft(sceneDraft)
+  const selectedIdentity: AssistantSelection | null = clearIdentity
+    ? null
+    : stagedIdentity ??
+      (
+        beforeState.identity?.kind !== "assistant" &&
+        beforeState.identity?.id && beforeState.identity.name
+          ? {
+              kind: beforeState.identity.kind,
+              id: beforeState.identity.id,
+              name: beforeState.identity.name
+            }
+          : null
+      )
   const visibleAspects = (draft.aspects ?? []).slice(0, 4)
   const activeGenerationKey =
     stagedGenerationKey ??
@@ -462,11 +548,55 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
   return (
     <Drawer
       placement="right"
+      closeIcon={<X className="h-4 w-4 text-text-muted" aria-hidden="true" />}
       size={480}
+      styles={{
+        wrapper: { maxWidth: "100vw" },
+        section: {
+          background: "rgb(var(--color-surface))",
+          color: "rgb(var(--color-text))"
+        },
+        header: { borderColor: "rgb(var(--color-border))" },
+        body: { padding: 16 },
+        footer: {
+          borderColor: "rgb(var(--color-border))",
+          padding: "12px 16px max(12px, env(safe-area-inset-bottom))"
+        }
+      }}
       open={open}
       onClose={closeAndReturnFocus}
+      keyboard={!saving && !templatesOpen}
+      afterOpenChange={(isOpen) => {
+        if (!isOpen) returnFocusRef?.current?.focus()
+      }}
+      footer={
+        <div className="space-y-2">
+          {applyError ? (
+            <p role="alert" className="rounded-md border border-danger/40 bg-danger/10 p-2 text-sm text-text">
+              {applyError}
+            </p>
+          ) : null}
+          <div className="flex justify-end gap-2">
+            <Button disabled={saving} onClick={closeAndReturnFocus}>
+              {t("common:cancel", "Cancel")}
+            </Button>
+            <Button
+              type="primary"
+              aria-label={t("common:apply", "Apply")}
+              loading={saving}
+              disabled={loading || Boolean(sceneLoadError)}
+              onClick={handleApply}>
+              {t("common:apply", "Apply")}
+            </Button>
+          </div>
+        </div>
+      }
       title={t("playground:composer.rolePlaySetup", "Role-play setup")}>
-      <div className="space-y-4" data-testid="role-play-setup-drawer">
+      <fieldset
+        ref={contentRef}
+        disabled={saving || loading || Boolean(sceneLoadError)}
+        className="min-w-0 space-y-4"
+        data-testid="role-play-setup-drawer">
         {loading && !sceneDraft ? (
           <div role="status" aria-live="polite">
             <Skeleton active />
@@ -516,6 +646,11 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
               </div>
               <AssistantSelect
                 variant="dropdown"
+                selection={selectedIdentity}
+                onSelectionChange={(selection) => {
+                  setStagedIdentity(selection)
+                  setClearIdentity(false)
+                }}
                 showLabel
                 className="inline-flex min-h-9 w-full items-center justify-start gap-2 rounded-md border border-border bg-surface2 px-3 py-2 text-text"
                 iconClassName="h-4 w-4"
@@ -577,7 +712,7 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
 
           <div className="flex flex-wrap gap-2">
             <Button
-              disabled={!beforeState.identity}
+              disabled={!afterState.identity}
               onClick={() => setClearIdentity(true)}>
               {t("playground:composer.clearIdentity", "Clear identity")}
             </Button>
@@ -653,15 +788,7 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
           </div>
         </section>
 
-        <div className="flex justify-end gap-2 border-t border-border pt-3">
-          <Button onClick={closeAndReturnFocus}>
-            {t("common:cancel", "Cancel")}
-          </Button>
-          <Button type="primary" onClick={handleApply}>
-            {t("common:apply", "Apply")}
-          </Button>
-        </div>
-      </div>
+      </fieldset>
       <SystemPromptTemplatesModal
         open={templatesOpen}
         onClose={() => setTemplatesOpen(false)}

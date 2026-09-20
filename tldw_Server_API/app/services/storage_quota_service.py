@@ -15,6 +15,7 @@ from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
 from tldw_Server_API.app.core.AuthNZ.exceptions import QuotaExceededError, StorageError, UserNotFoundError
+from tldw_Server_API.app.core.AuthNZ.profile_version import VersionedUserWriteGateway
 from tldw_Server_API.app.core.AuthNZ.repos.generated_files_repo import (
     FILE_CATEGORY_VOICE_CLONE,
     AuthnzGeneratedFilesRepo,
@@ -130,19 +131,25 @@ class StorageQuotaService:
         # Update database if requested
         if update_database:
             async with self.db_pool.transaction() as conn:
+                gateway = VersionedUserWriteGateway(
+                    "postgres" if self._is_postgres_backend() else "sqlite"
+                )
                 if self._is_postgres_backend():
-                    # PostgreSQL
-                    await conn.execute(
-                        "UPDATE users SET storage_used_mb = $1 WHERE id = $2",
-                        total_mb, user_id
+                    await gateway.execute_update(
+                        conn,
+                        user_id=user_id,
+                        profile_visible_fields=("storage_used_mb",),
+                        statement="UPDATE users SET storage_used_mb = $1 WHERE id = $2",
+                        parameters=(total_mb, user_id),
                     )
                 else:
-                    # SQLite
-                    await conn.execute(
-                        "UPDATE users SET storage_used_mb = ? WHERE id = ?",
-                        (total_mb, user_id)
+                    await gateway.execute_update(
+                        conn,
+                        user_id=user_id,
+                        profile_visible_fields=("storage_used_mb",),
+                        statement="UPDATE users SET storage_used_mb = ? WHERE id = ?",
+                        parameters=(total_mb, user_id),
                     )
-                    await conn.commit()
 
             # Invalidate quota cache
             self.quota_cache.pop(f"quota:{user_id}", None)
@@ -269,33 +276,41 @@ class StorageQuotaService:
 
         try:
             async with self.db_pool.transaction() as conn:
+                gateway = VersionedUserWriteGateway(
+                    "postgres" if self._is_postgres_backend() else "sqlite"
+                )
                 if self._is_postgres_backend():
-                    # PostgreSQL
-                    result = await conn.fetchrow(
+                    await gateway.execute_update(
+                        conn,
+                        user_id=user_id,
+                        profile_visible_fields=("storage_used_mb",),
+                        statement=
                         """
                         UPDATE users
                         SET storage_used_mb = GREATEST(0, storage_used_mb + $1)
                         WHERE id = $2
-                        RETURNING storage_used_mb, storage_quota_mb
                         """,
-                        mb_delta, user_id
+                        parameters=(mb_delta, user_id),
                     )
-
-                    if not result:
-                        raise UserNotFoundError(f"User {user_id}")
-
+                    result = await conn.fetchrow(
+                        "SELECT storage_used_mb, storage_quota_mb FROM users WHERE id = $1",
+                        user_id,
+                    )
                     new_usage = float(result['storage_used_mb'])
                     quota = result['storage_quota_mb']
 
                 else:
-                    # SQLite
-                    await conn.execute(
+                    await gateway.execute_update(
+                        conn,
+                        user_id=user_id,
+                        profile_visible_fields=("storage_used_mb",),
+                        statement=
                         """
                         UPDATE users
                         SET storage_used_mb = MAX(0, storage_used_mb + ?)
                         WHERE id = ?
                         """,
-                        (mb_delta, user_id)
+                        parameters=(mb_delta, user_id),
                     )
 
                     cursor = await conn.execute(
@@ -310,7 +325,6 @@ class StorageQuotaService:
                     new_usage = float(result[0])
                     quota = result[1]
 
-                    await conn.commit()
 
                 # Check if over quota
                 if new_usage > quota:
@@ -434,23 +448,34 @@ class StorageQuotaService:
             quota_mb = 100
         try:
             async with self.db_pool.transaction() as conn:
+                gateway = VersionedUserWriteGateway(
+                    "postgres" if self._is_postgres_backend() else "sqlite"
+                )
                 if self._is_postgres_backend():
-                    result = await conn.fetchrow(
+                    await gateway.execute_update(
+                        conn,
+                        user_id=user_id,
+                        profile_visible_fields=("storage_quota_mb",),
+                        statement=
                         """
                         UPDATE users
                         SET storage_quota_mb = $1
                         WHERE id = $2
-                        RETURNING storage_used_mb, storage_quota_mb
                         """,
-                        quota_mb, user_id
+                        parameters=(quota_mb, user_id),
                     )
-                    if not result:
-                        raise UserNotFoundError(f"User {user_id}")
+                    result = await conn.fetchrow(
+                        "SELECT storage_used_mb FROM users WHERE id = $1",
+                        user_id,
+                    )
                     current_usage = float(result['storage_used_mb'])
                 else:
-                    await conn.execute(
-                        "UPDATE users SET storage_quota_mb = ? WHERE id = ?",
-                        (quota_mb, user_id)
+                    await gateway.execute_update(
+                        conn,
+                        user_id=user_id,
+                        profile_visible_fields=("storage_quota_mb",),
+                        statement="UPDATE users SET storage_quota_mb = ? WHERE id = ?",
+                        parameters=(quota_mb, user_id),
                     )
                     cursor = await conn.execute(
                         "SELECT storage_used_mb FROM users WHERE id = ?",
@@ -460,7 +485,6 @@ class StorageQuotaService:
                     if not row:
                         raise UserNotFoundError(f"User {user_id}")
                     current_usage = float(row[0])
-                    await conn.commit()
             self.quota_cache.pop(f"quota:{user_id}", None)
             logger.info(f"Set quota for user {user_id}: {quota_mb}MB")
             return {

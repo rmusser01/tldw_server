@@ -10,7 +10,7 @@ from tldw_Server_API.app.api.v1.schemas.user_keys import (
     UserProviderKeyUpsertRequest,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatProviderError
 
 pytestmark = pytest.mark.unit
 
@@ -44,6 +44,12 @@ def _assert_sanitized_debug_log(logger_stub: _LoggerStub, expected_message: str)
     rendered = " ".join(logger_stub.debugs)
     assert "exploded" not in rendered
     assert "/private/" not in rendered
+
+
+def _assert_detached_validation_error(exc: HTTPException, sentinel: str) -> None:
+    assert exc.__cause__ is None
+    assert exc.__context__ is None
+    assert sentinel not in repr(exc)
 
 
 async def _allow_scope(*_args, **_kwargs) -> None:
@@ -139,6 +145,10 @@ async def test_scoped_shared_key_upsert_sanitizes_credential_validation(
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail == "Invalid provider credential fields"
     assert raw_token not in exc_info.value.detail
+    _assert_detached_validation_error(
+        exc_info.value,
+        f"shared credential token at {raw_token}",
+    )
 
 
 @pytest.mark.asyncio
@@ -175,6 +185,109 @@ async def test_scoped_shared_key_upsert_sanitizes_provider_validation(
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail == "Provider credential validation failed"
     assert raw_token not in exc_info.value.detail
+    _assert_detached_validation_error(
+        exc_info.value,
+        f"shared provider token at {raw_token}",
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope", ["org", "team"])
+async def test_scoped_shared_key_upsert_detaches_unexpected_provider_validation_failure(
+    monkeypatch,
+    scope: str,
+) -> None:
+    sentinel = f"sk-{scope}-runtime-error-/private/{scope}-provider-runtime.json"
+
+    async def fail_provider_test(**_kwargs):
+        raise RuntimeError(sentinel)
+
+    _install_common_patches(monkeypatch)
+    monkeypatch.setattr(routes, "validate_credential_fields", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(routes, "test_provider_credentials", fail_provider_test)
+
+    endpoint = routes.upsert_org_shared_key if scope == "org" else routes.upsert_team_shared_key
+    kwargs = {"org_id": 42} if scope == "org" else {"team_id": 42}
+    with pytest.raises(HTTPException) as exc_info:
+        await endpoint(
+            **kwargs,
+            payload=UserProviderKeyUpsertRequest(provider="openai", api_key="sk-test"),
+            request=SimpleNamespace(),
+            principal=_principal(),
+        )
+
+    assert exc_info.value.status_code == 502
+    assert exc_info.value.detail == "Provider test call failed"
+    _assert_detached_validation_error(exc_info.value, sentinel)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope", ["org", "team"])
+async def test_scoped_shared_key_upsert_sanitizes_chat_provider_error_context(
+    monkeypatch,
+    scope: str,
+) -> None:
+    sentinel = f"sk-{scope}-upstream-secret-/private/{scope}-provider-body.json"
+
+    async def fail_provider_test(**_kwargs):
+        raise ChatProviderError(
+            message=f"hostile upstream body {sentinel}",
+            status_code=502,
+            provider="openai",
+            details={"endpoint": f"https://provider.invalid/{sentinel}"},
+        )
+
+    _install_common_patches(monkeypatch)
+    monkeypatch.setattr(routes, "validate_credential_fields", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(routes, "test_provider_credentials", fail_provider_test)
+
+    endpoint = routes.upsert_org_shared_key if scope == "org" else routes.upsert_team_shared_key
+    kwargs = {"org_id": 42} if scope == "org" else {"team_id": 42}
+    with pytest.raises(HTTPException) as exc_info:
+        await endpoint(
+            **kwargs,
+            payload=UserProviderKeyUpsertRequest(provider="openai", api_key="sk-test"),
+            request=SimpleNamespace(),
+            principal=_principal(),
+        )
+
+    assert exc_info.value.status_code == 502
+    assert exc_info.value.detail == "The chat service provider is currently unavailable."
+    _assert_detached_validation_error(exc_info.value, sentinel)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope", ["org", "team"])
+async def test_scoped_shared_key_upsert_detaches_encryption_failure(
+    monkeypatch,
+    scope: str,
+) -> None:
+    sentinel = f"sk-{scope}-encrypt-failure-/private/{scope}-credential.json"
+
+    async def pass_provider_test(**_kwargs):
+        return "gpt-test"
+
+    def fail_encrypt(_payload):
+        raise ValueError(sentinel)
+
+    _install_common_patches(monkeypatch)
+    monkeypatch.setattr(routes, "validate_credential_fields", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(routes, "test_provider_credentials", pass_provider_test)
+    monkeypatch.setattr(routes, "encrypt_byok_payload", fail_encrypt)
+
+    endpoint = routes.upsert_org_shared_key if scope == "org" else routes.upsert_team_shared_key
+    kwargs = {"org_id": 42} if scope == "org" else {"team_id": 42}
+    with pytest.raises(HTTPException) as exc_info:
+        await endpoint(
+            **kwargs,
+            payload=UserProviderKeyUpsertRequest(provider="openai", api_key="sk-test"),
+            request=SimpleNamespace(),
+            principal=_principal(),
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "BYOK encryption is not configured"
+    _assert_detached_validation_error(exc_info.value, sentinel)
 
 
 @pytest.mark.asyncio
@@ -213,6 +326,10 @@ async def test_scoped_shared_key_test_sanitizes_stored_credential_validation(
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail == "Invalid provider credential fields"
     assert raw_token not in exc_info.value.detail
+    _assert_detached_validation_error(
+        exc_info.value,
+        f"stored credential token at {raw_token}",
+    )
 
 
 @pytest.mark.asyncio
@@ -252,3 +369,7 @@ async def test_scoped_shared_key_test_sanitizes_provider_validation(
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail == "Provider credential validation failed"
     assert raw_token not in exc_info.value.detail
+    _assert_detached_validation_error(
+        exc_info.value,
+        f"stored provider token at {raw_token}",
+    )

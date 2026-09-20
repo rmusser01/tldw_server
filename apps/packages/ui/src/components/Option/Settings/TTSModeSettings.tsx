@@ -22,7 +22,8 @@ import {
   fetchTtsProviders,
   type TldwTtsProvidersInfo,
   type TldwTtsVoiceInfo,
-  type TldwTtsProviderCapabilities
+  type TldwTtsProviderCapabilities,
+  type TldwTtsModelCapabilities
 } from "@/services/tldw/audio-providers"
 import {
   fetchTldwTtsModels,
@@ -48,6 +49,47 @@ import { isTimeoutLikeError } from "@/utils/request-timeout"
 const ELEVENLABS_KEY_DEBOUNCE_MS = 350
 const TTS_PREVIEW_TEXT =
   "This is a quick voice preview from your current audio settings."
+const isCanonicalBackendId = (value: unknown): value is string =>
+  value === "openrouter" ||
+  (typeof value === "string" &&
+    /^gateway:[a-z0-9][a-z0-9-]{0,62}$/.test(value))
+
+const normalizedFormats = (formats: readonly string[] | undefined): string[] =>
+  Array.from(
+    new Set(
+      (formats || [])
+        .map((format) => format.toLowerCase())
+        .filter(Boolean)
+    )
+  )
+
+const resolveResponseFormat = (
+  current: string,
+  providerCaps?: TldwTtsProviderCapabilities | null,
+  modelCaps?: TldwTtsModelCapabilities
+): string => {
+  const formats = normalizedFormats(
+    modelCaps?.formats?.length
+      ? modelCaps.formats
+      : providerCaps?.formats?.length
+        ? providerCaps.formats
+        : SUPPORTED_TLDW_TTS_FORMATS
+  )
+  const normalizedCurrent = current.toLowerCase()
+  if (formats.includes(normalizedCurrent)) return normalizedCurrent
+
+  const preferred = [
+    modelCaps?.default_format,
+    providerCaps?.default_format,
+    ...(modelCaps?.native_formats || []),
+    formats[0]
+  ]
+    .filter((format): format is string => typeof format === "string")
+    .map((format) => format.toLowerCase())
+    .find((format) => formats.includes(format))
+
+  return preferred || formats[0] || "mp3"
+}
 
 const formatValidationTimestamp = (value?: string | null) => {
   if (!value) return ""
@@ -97,6 +139,7 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
     elevenApiKey: "elevenlabs-api-key",
     elevenVoice: "elevenlabs-voice-select",
     elevenModel: "elevenlabs-model-select",
+    tldwBackend: "tldw-backend-select",
     tldwModel: "tldw-model-select",
     tldwVoice: "tldw-voice-select",
     tldwResponseFormat: "tldw-response-format",
@@ -139,6 +182,7 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
       openAITTSKeyTestedAt: "",
       ttsAutoPlay: false,
       playbackSpeed: 1,
+    tldwTtsBackend: "",
     tldwTtsModel: "",
     tldwTtsVoice: "",
     tldwTtsResponseFormat: "mp3",
@@ -164,6 +208,10 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
           : null
     }
   })
+  const {
+    setFieldValue: setFormFieldValue,
+    setValues: setFormValues
+  } = form
 
   const { status, data, refetch } = useQuery({
     queryKey: ["fetchTTSSettings"],
@@ -281,18 +329,93 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
   )
 
   const {
+    data: tldwProvidersInfo,
+    isLoading: tldwProvidersLoading,
+    error: tldwProvidersError,
+    refetch: refetchTldwProviders
+  } = useQuery<TldwTtsProvidersInfo | null>({
+    queryKey: ["fetchTldwTtsProviders"],
+    queryFn: () => fetchTtsProviders({ throwOnError: true }),
+    enabled: form.values.ttsProvider === "tldw",
+    retry: false
+  })
+
+  const explicitBackendSupported =
+    tldwProvidersInfo?.supports_explicit_backend === true
+  const configuredBackend = String(form.values.tldwTtsBackend || "")
+  const selectedBackend = explicitBackendSupported ? configuredBackend : ""
+  const selectedBackendCaps = selectedBackend
+    ? tldwProvidersInfo?.providers?.[selectedBackend] || null
+    : null
+  const selectedModelCaps = selectedBackendCaps?.model_capabilities?.[
+    form.values.tldwTtsModel
+  ]
+  const selectedModelVoices = React.useMemo(
+    () =>
+      Array.isArray(selectedModelCaps?.voices)
+        ? selectedModelCaps.voices.filter(
+            (voice): voice is string =>
+              typeof voice === "string" && Boolean(voice)
+          )
+        : [],
+    [selectedModelCaps]
+  )
+  const selectedModelDefaultVoice =
+    typeof selectedModelCaps?.default_voice === "string"
+      ? selectedModelCaps.default_voice
+      : ""
+  const requiresFreeformVoice = Boolean(
+    selectedBackend &&
+      (!selectedModelCaps ||
+        selectedModelCaps.requires_freeform_voice === true ||
+        (!selectedModelDefaultVoice && selectedModelVoices.length === 0))
+  )
+
+  const tldwBackendOptions = React.useMemo(
+    () => [
+      {
+        label: "Automatic (legacy model inference)",
+        value: ""
+      },
+      ...Object.entries(tldwProvidersInfo?.providers || {})
+        .filter(
+          ([backend, caps]) =>
+            typeof caps.display_name === "string" ||
+            backend === "openrouter" ||
+            backend.startsWith("gateway:")
+        )
+        .map(([backend, caps]) => ({
+          label: caps.display_name || backend,
+          value: backend
+        }))
+    ],
+    [tldwProvidersInfo]
+  )
+
+  const catalogProvider = selectedBackend || inferredTldwProviderKey
+
+  const {
     data: tldwVoices = [],
     isLoading: tldwVoicesLoading,
     error: tldwVoicesError,
     refetch: refetchTldwVoices
   } = useQuery<TldwVoice[]>({
-    queryKey: ["fetchTldwVoices", inferredTldwProviderKey],
+    queryKey: [
+      "fetchTldwVoices",
+      catalogProvider,
+      selectedBackend ? form.values.tldwTtsModel : undefined
+    ],
     queryFn: async () => {
-      if (inferredTldwProviderKey) {
+      if (catalogProvider) {
         const catalog = await fetchTldwVoiceCatalog(
-          toServerTtsProviderKey(inferredTldwProviderKey)
+          selectedBackend
+            ? selectedBackend
+            : toServerTtsProviderKey(catalogProvider),
+          selectedBackend
+            ? { model: form.values.tldwTtsModel }
+            : undefined
         )
-        if (catalog.length > 0) return catalog
+        if (selectedBackend || catalog.length > 0) return catalog
       }
       return fetchTldwVoices({ throwOnError: true })
     },
@@ -303,23 +426,11 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
   const { data: customVoices = [] } = useQuery<TldwCustomVoice[]>({
     queryKey: ["tts-custom-voices"],
     queryFn: listCustomVoices,
-    enabled: form.values.ttsProvider === "tldw"
+    enabled: form.values.ttsProvider === "tldw" && !selectedBackend
   })
 
-  const {
-    data: tldwProvidersInfo,
-    isLoading: tldwProvidersLoading,
-    error: tldwProvidersError,
-    refetch: refetchTldwProviders
-  } =
-    useQuery<TldwTtsProvidersInfo | null>({
-      queryKey: ["fetchTldwTtsProviders"],
-      queryFn: () => fetchTtsProviders({ throwOnError: true }),
-      enabled: form.values.ttsProvider === "tldw",
-      retry: false
-    })
-
   const activeProviderCaps = React.useMemo((): TldwTtsProviderCapabilities | null => {
+    if (selectedBackendCaps) return selectedBackendCaps
     if (!tldwProvidersInfo || !inferredTldwProviderKey) return null
     const providers = tldwProvidersInfo.providers || {}
     const matchKey = Object.keys(providers).find(
@@ -327,11 +438,12 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
         toServerTtsProviderKey(key) === toServerTtsProviderKey(inferredTldwProviderKey)
     )
     return matchKey ? providers[matchKey] : null
-  }, [tldwProvidersInfo, inferredTldwProviderKey])
+  }, [inferredTldwProviderKey, selectedBackendCaps, tldwProvidersInfo])
 
   const tldwFormatOptions = React.useMemo(() => {
-    const formats =
-      activeProviderCaps?.formats?.length
+    const formats = selectedModelCaps?.formats?.length
+      ? selectedModelCaps.formats
+      : activeProviderCaps?.formats?.length
         ? activeProviderCaps.formats
         : SUPPORTED_TLDW_TTS_FORMATS
     const unique = Array.from(
@@ -341,7 +453,7 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
       label: fmt === "pcm" ? "pcm (raw)" : fmt,
       value: fmt
     }))
-  }, [activeProviderCaps])
+  }, [activeProviderCaps, selectedModelCaps])
 
   const tldwLanguageOptions = React.useMemo(() => {
     const languages = activeProviderCaps?.languages || []
@@ -372,13 +484,25 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
     error: tldwModelsError,
     refetch: refetchTldwModels
   } = useQuery<TldwTtsModel[]>({
-    queryKey: ["fetchTldwTtsModels"],
-    queryFn: fetchTldwTtsModels,
+    queryKey: ["fetchTldwTtsModels", selectedBackend || undefined],
+    queryFn: () => fetchTldwTtsModels(selectedBackend || undefined),
     enabled: form.values.ttsProvider === "tldw",
     retry: false
   })
 
+  const displayedTldwModels = selectedBackend
+    ? (selectedBackendCaps?.models || [])
+        .filter(
+          (model): model is string =>
+            typeof model === "string" && Boolean(model)
+        )
+        .map((model) => ({ id: model, label: model }))
+    : tldwModels
+
   const providerVoices = React.useMemo((): TldwTtsVoiceInfo[] => {
+    if (selectedBackend) {
+      return selectedModelVoices.map((voice) => ({ id: voice, name: voice }))
+    }
     if (!tldwProvidersInfo || !inferredTldwProviderKey) return []
     const allVoices = tldwProvidersInfo.voices || {}
     const direct = allVoices[inferredTldwProviderKey]
@@ -391,7 +515,12 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
       return fallback
     }
     return []
-  }, [inferredTldwProviderKey, tldwProvidersInfo])
+  }, [
+    inferredTldwProviderKey,
+    selectedBackend,
+    selectedModelVoices,
+    tldwProvidersInfo
+  ])
 
   const tldwVoiceOptions = React.useMemo(() => {
     const options: { label: string; value: string }[] = []
@@ -408,11 +537,13 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
       options.push({ label, value })
     }
 
-    const normalizedProvider = inferredTldwProviderKey
-      ? normalizeTtsProviderKey(inferredTldwProviderKey)
+    const normalizedProvider = catalogProvider
+      ? normalizeTtsProviderKey(catalogProvider)
       : ""
 
-    const filteredCustomVoices = normalizedProvider
+    const filteredCustomVoices = selectedBackend
+      ? []
+      : normalizedProvider
       ? customVoices.filter((voice) => {
           const voiceProvider = normalizeTtsProviderKey(voice.provider)
           return !voiceProvider || voiceProvider === normalizedProvider
@@ -425,7 +556,7 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
       pushOption(`custom:${id}`, `Custom: ${voice.name || id}`)
     })
 
-    const providerKey = inferredTldwProviderKey?.toLowerCase() || ""
+    const providerKey = catalogProvider?.toLowerCase() || ""
     const scopedVoices = providerKey
       ? tldwVoices.filter((voice) => {
           const voiceProvider = String(voice.provider || "").toLowerCase()
@@ -448,6 +579,10 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
     providerVoices.forEach(pushVoice)
     scopedVoices.forEach(pushVoice)
 
+    if (requiresFreeformVoice) {
+      return []
+    }
+
     if (options.length > 0) {
       return options
     }
@@ -456,20 +591,175 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
     return fallback ? [{ label: fallback, value: fallback }] : []
   }, [
     customVoices,
+    catalogProvider,
     form.values.tldwTtsVoice,
-    inferredTldwProviderKey,
     providerVoices,
+    requiresFreeformVoice,
+    selectedBackend,
     tldwVoices
   ])
 
   React.useEffect(() => {
     if (form.values.ttsProvider !== "tldw") return
+    if (requiresFreeformVoice) return
     if (tldwVoiceOptions.length === 0) return
     const current = String(form.values.tldwTtsVoice || "").trim()
     const values = tldwVoiceOptions.map((option) => option.value)
     if (current && values.includes(current)) return
-    form.setFieldValue("tldwTtsVoice", values[0])
-  }, [form.values.ttsProvider, form.values.tldwTtsVoice, form.setFieldValue, tldwVoiceOptions])
+    setFormFieldValue("tldwTtsVoice", values[0])
+  }, [
+    form.values.ttsProvider,
+    form.values.tldwTtsVoice,
+    requiresFreeformVoice,
+    setFormFieldValue,
+    tldwVoiceOptions
+  ])
+
+  const getBackendDefaults = React.useCallback(
+    (backend: string) => {
+      if (!backend) {
+        return {
+          tldwTtsBackend: "",
+          tldwTtsModel: DEFAULT_TLDW_TTS_MODEL,
+          tldwTtsVoice: "",
+          tldwTtsResponseFormat: resolveResponseFormat(
+            form.values.tldwTtsResponseFormat
+          )
+        }
+      }
+      const caps = tldwProvidersInfo?.providers?.[backend]
+      const models = Array.isArray(caps?.models)
+        ? caps.models.filter(
+            (model): model is string =>
+              typeof model === "string" && Boolean(model)
+          )
+        : []
+      const model =
+        typeof caps?.default_model === "string" &&
+        models.includes(caps.default_model)
+          ? caps.default_model
+          : models[0] || ""
+      const modelCaps = caps?.model_capabilities?.[model]
+      const voice =
+        (typeof modelCaps?.default_voice === "string"
+          ? modelCaps.default_voice
+          : "") ||
+        modelCaps?.voices?.find(
+          (candidate): candidate is string =>
+            typeof candidate === "string" && Boolean(candidate)
+        ) ||
+        ""
+      return {
+        tldwTtsBackend: backend,
+        tldwTtsModel: model,
+        tldwTtsVoice: voice,
+        tldwTtsResponseFormat: resolveResponseFormat(
+          form.values.tldwTtsResponseFormat,
+          caps,
+          modelCaps
+        )
+      }
+    },
+    [form.values.tldwTtsResponseFormat, tldwProvidersInfo]
+  )
+
+  const handleTldwBackendChange = React.useCallback(
+    (backend: string) => {
+      setFormValues(getBackendDefaults(backend))
+    },
+    [getBackendDefaults, setFormValues]
+  )
+
+  const handleTldwModelChange = React.useCallback(
+    (model: string) => {
+      const modelCaps = selectedBackendCaps?.model_capabilities?.[model]
+      const voice =
+        (typeof modelCaps?.default_voice === "string"
+          ? modelCaps.default_voice
+          : "") ||
+        modelCaps?.voices?.find(
+          (candidate): candidate is string =>
+            typeof candidate === "string" && Boolean(candidate)
+        ) ||
+        ""
+      setFormValues({
+        tldwTtsModel: model,
+        tldwTtsVoice: voice,
+        tldwTtsResponseFormat: resolveResponseFormat(
+          form.values.tldwTtsResponseFormat,
+          selectedBackendCaps,
+          modelCaps
+        )
+      })
+    },
+    [
+      form.values.tldwTtsResponseFormat,
+      selectedBackendCaps,
+      setFormValues
+    ]
+  )
+
+  React.useEffect(() => {
+    if (
+      form.values.ttsProvider !== "tldw" ||
+      !explicitBackendSupported ||
+      !selectedBackend
+    ) {
+      return
+    }
+    const caps = tldwProvidersInfo?.providers?.[selectedBackend]
+    const models = Array.isArray(caps?.models)
+      ? caps.models.filter(
+          (model): model is string =>
+            typeof model === "string" && Boolean(model)
+        )
+      : []
+    if (!caps || !models.includes(form.values.tldwTtsModel)) {
+      const defaults = getBackendDefaults(caps ? selectedBackend : "")
+      if (
+        defaults.tldwTtsBackend !== form.values.tldwTtsBackend ||
+        defaults.tldwTtsModel !== form.values.tldwTtsModel ||
+        defaults.tldwTtsVoice !== form.values.tldwTtsVoice ||
+        defaults.tldwTtsResponseFormat !==
+          form.values.tldwTtsResponseFormat
+      ) {
+        setFormValues(defaults)
+      }
+      return
+    }
+    const modelCaps = caps.model_capabilities?.[form.values.tldwTtsModel]
+    const allowedVoices = [
+      typeof modelCaps?.default_voice === "string"
+        ? modelCaps.default_voice
+        : "",
+      ...(modelCaps?.voices || [])
+    ].filter(
+      (voice): voice is string => typeof voice === "string" && Boolean(voice)
+    )
+    if (
+      modelCaps?.requires_freeform_voice !== true &&
+      allowedVoices.length > 0 &&
+      !allowedVoices.includes(form.values.tldwTtsVoice)
+    ) {
+      setFormFieldValue("tldwTtsVoice", allowedVoices[0])
+    }
+  }, [
+    explicitBackendSupported,
+    form.values.tldwTtsBackend,
+    form.values.tldwTtsModel,
+    form.values.tldwTtsResponseFormat,
+    form.values.tldwTtsVoice,
+    form.values.ttsProvider,
+    getBackendDefaults,
+    selectedBackend,
+    setFormFieldValue,
+    setFormValues,
+    tldwProvidersInfo
+  ])
+
+  const fallbackTargets = (selectedBackendCaps?.fallback?.targets || []).filter(
+    isCanonicalBackendId
+  )
 
   const tldwCatalogError = React.useMemo(() => {
     const issue = tldwVoicesError || tldwProvidersError || tldwModelsError
@@ -1179,53 +1469,97 @@ export const TTSModeSettings = ({ hideBorder }: { hideBorder?: boolean }) => {
                 }
               />
             )}
+            {explicitBackendSupported && (
+              <div className="flex sm:flex-row flex-col gap-2 sm:justify-between">
+                <div className="flex flex-col gap-0.5">
+                  <label className="text-text" htmlFor={ids.tldwBackend}>
+                    TTS Backend
+                  </label>
+                  <span className="text-xs text-text-subtle">
+                    Choose a configured gateway or keep legacy model inference.
+                  </span>
+                </div>
+                <div className="flex flex-col gap-1 sm:items-end">
+                  <Select
+                    id={ids.tldwBackend}
+                    aria-label="tldw TTS backend"
+                    className="w-full sm:w-[300px] focus-ring"
+                    options={tldwBackendOptions}
+                    value={selectedBackend}
+                    onChange={handleTldwBackendChange}
+                  />
+                  {fallbackTargets.length > 0 && (
+                    <span className="text-xs text-text-subtle sm:max-w-[300px] sm:text-right">
+                      Possible fallback targets: {fallbackTargets.join(", ")}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
             <div className="flex sm:flex-row flex-col space-y-4 sm:space-y-0 sm:justify-between">
-              <span className="text-text">
+              <label className="text-text" htmlFor={ids.tldwModel}>
                 TTS Model
-              </span>
-              {tldwModels && tldwModels.length > 0 ? (
+              </label>
+              {displayedTldwModels && displayedTldwModels.length > 0 ? (
                 <Select
                   id={ids.tldwModel}
                   aria-label="tldw TTS model"
                   className=" mt-4 sm:mt-0 !w-[300px] sm:w-[200px] focus-ring"
                   placeholder="Select a model"
-                  options={tldwModels.map((m: TldwTtsModel) => ({
+                  options={displayedTldwModels.map((m: TldwTtsModel) => ({
                     label: m.label,
                     value: m.id
                   }))}
-                  {...form.getInputProps("tldwTtsModel")}
+                  value={form.values.tldwTtsModel}
+                  onChange={handleTldwModelChange}
                 />
               ) : (
                 <Input
+                  id={ids.tldwModel}
+                  aria-label="tldw TTS model"
                   placeholder={DEFAULT_TLDW_TTS_MODEL}
                   className=" mt-4 sm:mt-0 !w-[300px] sm:w-[200px]"
-                  {...form.getInputProps("tldwTtsModel")}
+                  value={form.values.tldwTtsModel}
+                  onChange={(event) => handleTldwModelChange(event.target.value)}
                 />
               )}
             </div>
             <div className="flex sm:flex-row flex-col space-y-4 sm:space-y-0 sm:justify-between">
               <div className="flex flex-col gap-0.5">
-                <span className="text-text">
+                <label className="text-text" htmlFor={ids.tldwVoice}>
                   TTS Voice
-                </span>
-                <a href="https://github.com/rmusser01/tldw_server/tree/main/Docs/STT-TTS/" target="_blank" rel="noopener noreferrer" className="text-xs text-text-muted underline">Voice cloning setup guide</a>
+                </label>
+                {!selectedBackend && (
+                  <a href="https://github.com/rmusser01/tldw_server/tree/main/Docs/STT-TTS/" target="_blank" rel="noopener noreferrer" className="text-xs text-text-muted underline">Voice cloning setup guide</a>
+                )}
               </div>
-              <Select
-                id={ids.tldwVoice}
-                aria-label="tldw TTS voice"
-                className="w-full mt-4 sm:mt-0 sm:w-[200px] focus-ring"
-                placeholder="Select a voice"
-                options={tldwVoiceOptions}
-                loading={tldwVoicesLoading || tldwProvidersLoading}
-                disabled={
-                  !tldwVoicesLoading &&
-                  !tldwProvidersLoading &&
-                  tldwVoiceOptions.length === 0
-                }
-                showSearch
-                optionFilterProp="label"
-                {...form.getInputProps("tldwTtsVoice")}
-              />
+              {requiresFreeformVoice ? (
+                <Input
+                  id={ids.tldwVoice}
+                  aria-label="tldw TTS voice"
+                  className="w-full mt-4 sm:mt-0 sm:w-[300px]"
+                  placeholder="Enter the required voice ID"
+                  required
+                  {...form.getInputProps("tldwTtsVoice")}
+                />
+              ) : (
+                <Select
+                  id={ids.tldwVoice}
+                  aria-label="tldw TTS voice"
+                  className="w-full mt-4 sm:mt-0 sm:w-[200px] focus-ring"
+                  placeholder="Select a voice"
+                  options={tldwVoiceOptions}
+                  loading={tldwVoicesLoading || tldwProvidersLoading}
+                  disabled={
+                    !tldwVoicesLoading &&
+                    !tldwProvidersLoading &&
+                    tldwVoiceOptions.length === 0
+                  }
+                  showSearch
+                  optionFilterProp="label"
+                  {...form.getInputProps("tldwTtsVoice")}
+                />
+              )}
             </div>
             <div className="flex sm:flex-row flex-col space-y-4 sm:space-y-0 sm:justify-between">
               <span className="text-text">

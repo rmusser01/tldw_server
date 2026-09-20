@@ -7,7 +7,8 @@ import {
   type SetupReadinessStatusResponse,
 } from "@/services/tldw/setup-readiness";
 
-const SETUP_READINESS_ERROR = "Setup readiness could not be loaded.";
+const SETUP_READINESS_ERROR =
+  "Setup readiness could not be loaded. The server may still be starting, or the connection details may be missing - retry once your tldw server is reachable.";
 
 const hasItems = <T,>(items?: T[]) => Array.isArray(items) && items.length > 0;
 

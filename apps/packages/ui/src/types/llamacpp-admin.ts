@@ -192,8 +192,12 @@ export type LlamacppProfileMode =
 
 export type LlamacppCapabilityKey = "chat" | "vision" | "embeddings" | "rerank"
 export type LlamacppModalityDirection = "input" | "output"
-export type LlamacppCapabilityMap = Partial<Record<LlamacppCapabilityKey, boolean>>
-export type LlamacppModalities = Partial<Record<LlamacppModalityDirection, string[]>>
+export type LlamacppCapabilityMap = Partial<
+  Record<LlamacppCapabilityKey, boolean>
+>
+export type LlamacppModalities = Partial<
+  Record<LlamacppModalityDirection, string[]>
+>
 
 export type LlamacppPortPolicy = "explicit" | "autoselect"
 
@@ -206,6 +210,8 @@ export type LlamacppRuntimeState =
   | "paused"
 
 export interface LlamacppProfile {
+  snapshots_enabled?: boolean
+  snapshot_retention?: number
   profile_id: string
   name: string
   enabled: boolean
@@ -266,6 +272,7 @@ export interface LlamacppProfileListResponse {
 }
 
 export interface LlamacppRuntime {
+  launch_generation?: string | null
   profile_id: string
   state: LlamacppRuntimeState
   pid?: number | null
@@ -320,4 +327,67 @@ export interface LlamacppHardwareSnapshotResponse {
   cpu_count?: number | null
   gpus: LlamacppGpuSnapshot[]
   warnings: string[]
+}
+
+export interface LlamacppSnapshotSlotsResponse {
+  capability:
+    | "ready"
+    | "stopped"
+    | "disabled"
+    | "restart_required"
+    | "busy"
+    | "unsupported"
+    | "unavailable"
+  reason?: string | null
+  launch_generation: string | null
+  request_id: string
+  latest_operation_id?: string | null
+  slots: Array<{ slot_id: number; busy: boolean; token_count: number }>
+}
+
+export interface LlamacppSnapshotItem {
+  snapshot_id: string
+  source_slot: number
+  created_at: string
+  commit_sequence: number
+  byte_count: number
+  token_count: number
+  compatibility: "compatible" | "incompatible" | "unknown"
+  reasons: string[]
+}
+
+export interface LlamacppSnapshotCatalogResponse {
+  snapshots: LlamacppSnapshotItem[]
+  total: number
+  total_bytes: number
+  offset: number
+  limit: number
+  retention: number
+}
+
+export interface LlamacppSnapshotRequest {
+  slot_id: number
+  expected_launch_generation: string
+  request_id: string
+  replace_confirmed?: boolean
+}
+
+export interface LlamacppSnapshotOperationResponse {
+  profile_id: string
+  operation_id: string
+  launch_generation: string
+  kind: "save" | "restore"
+  state:
+    | "validating"
+    | "saving"
+    | "verifying"
+    | "restoring"
+    | "complete"
+    | "failed"
+    | "outcome_unknown"
+  snapshot_id?: string | null
+  token_count?: number | null
+  error_code?: string | null
+  warning_code?: string | null
+  recovery_action: "none" | "retry_manually" | "stop_runtime"
 }

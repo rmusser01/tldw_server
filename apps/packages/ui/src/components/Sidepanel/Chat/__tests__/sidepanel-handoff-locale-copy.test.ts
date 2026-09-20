@@ -2,12 +2,12 @@ import sidepanel from "@/assets/locale/en/sidepanel.json"
 import { describe, expect, it } from "vitest"
 
 describe("sidepanel handoff locale copy", () => {
-  it("keeps English full-chat handoff copy aligned with route-only behavior", () => {
+  it("keeps English full-chat handoff copy explicit about transfer behavior", () => {
     expect(sidepanel.header.openFullChatWebuiDescription).toBe(
       "Opens /chat in a new tab. Use Continue in WebUI from the composer tools to carry a draft or page context."
     )
     expect(sidepanel.header.openFullChatWebuiRouteOnlyDescription).toBe(
-      sidepanel.header.openFullChatWebuiDescription
+      "Opens /chat in a new tab without transferring the current draft or page context."
     )
     expect(sidepanel.controlRow.openFullAppDescription).toBe(
       "Opens /chat in a new tab. Use Continue in WebUI to carry a draft or page context."

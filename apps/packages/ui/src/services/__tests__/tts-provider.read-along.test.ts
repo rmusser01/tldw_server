@@ -11,6 +11,7 @@ vi.mock('@/services/tts', () => ({
   getSpeechPlaybackSpeed: vi.fn(async () => 1),
   getTTSProvider: vi.fn(async () => 'browser'),
   getTldwTTSModel: vi.fn(async () => 'kokoro'),
+  getTldwTTSBackend: vi.fn(async () => ''),
   getTldwTTSResponseFormat: vi.fn(async () => 'mp3'),
   getTldwTTSSpeed: vi.fn(async () => 1),
   getTldwTTSVoice: vi.fn(async () => 'af_heart'),
@@ -49,7 +50,10 @@ vi.mock('@/utils/provider-registry', () => ({
 
 vi.mock('@/services/tldw/TldwApiClient', () => ({
   tldwClient: {
-    synthesizeSpeech: vi.fn(async () => new ArrayBuffer(8))
+    synthesizeSpeechDetailed: vi.fn(async () => ({
+      buffer: new ArrayBuffer(8),
+      fallbackUsed: false
+    }))
   }
 }))
 
@@ -63,6 +67,7 @@ import {
   getElevenLabsVoiceId,
   getOpenAITTSModel,
   getOpenAITTSVoice,
+  getTldwTTSBackend,
   getVoice,
   isSSMLEnabled
 } from '@/services/tts'
@@ -82,10 +87,84 @@ describe('tts provider read-along synthesis', () => {
 
     await context.synthesize?.('hello', { signal })
 
-    expect(tldwClient.synthesizeSpeech).toHaveBeenCalledWith(
+    expect(tldwClient.synthesizeSpeechDetailed).toHaveBeenCalledWith(
       'hello',
       expect.objectContaining({ signal })
     )
+  })
+
+  it('uses an override backend before the stored preference and preserves the exact model', async () => {
+    const context = await resolveTtsProviderContext('hello', {
+      provider: 'tldw',
+      tldwBackend: 'gateway:company-proxy',
+      tldwAllowFallback: false,
+      tldwModel: 'Vendor/Case-Sensitive-TTS'
+    })
+
+    await context.synthesize?.('hello')
+
+    expect(tldwClient.synthesizeSpeechDetailed).toHaveBeenCalledWith(
+      'hello',
+      expect.objectContaining({
+        backend: 'gateway:company-proxy',
+        allowFallback: false,
+        model: 'Vendor/Case-Sensitive-TTS'
+      })
+    )
+    expect(context.cacheSettings).toMatchObject({
+      backend: 'gateway:company-proxy',
+      cacheable: false
+    })
+    expect(getTldwTTSBackend).not.toHaveBeenCalled()
+  })
+
+  it('passes the stored backend with an explicit fallback default', async () => {
+    vi.mocked(getTldwTTSBackend).mockResolvedValueOnce('openrouter')
+    const context = await resolveTtsProviderContext('hello', {
+      provider: 'tldw'
+    })
+
+    await context.synthesize?.('hello')
+
+    expect(tldwClient.synthesizeSpeechDetailed).toHaveBeenCalledWith(
+      'hello',
+      expect.objectContaining({
+        backend: 'openrouter',
+        allowFallback: true
+      })
+    )
+  })
+
+  it('keeps empty backend preferences on the legacy inference path', async () => {
+    vi.mocked(getTldwTTSBackend).mockResolvedValueOnce('')
+    const context = await resolveTtsProviderContext('hello', {
+      provider: 'tldw'
+    })
+
+    await context.synthesize?.('hello')
+
+    expect(tldwClient.synthesizeSpeechDetailed).toHaveBeenCalledWith(
+      'hello',
+      expect.not.objectContaining({ backend: expect.any(String) })
+    )
+    expect(context.cacheSettings).toMatchObject({ cacheable: true })
+  })
+
+  it('propagates actual backend and fallback metadata from the detailed capability gate', async () => {
+    vi.mocked(tldwClient.synthesizeSpeechDetailed).mockResolvedValueOnce({
+      buffer: new ArrayBuffer(8),
+      actualBackend: 'openrouter',
+      fallbackUsed: true
+    })
+    const context = await resolveTtsProviderContext('hello', {
+      provider: 'tldw',
+      tldwBackend: 'gateway:company-proxy'
+    })
+
+    await expect(context.synthesize?.('hello')).resolves.toMatchObject({
+      actualBackend: 'openrouter',
+      fallbackUsed: true
+    })
   })
 
   it('captures OpenAI model and voice when provider context is resolved', async () => {

@@ -29,6 +29,8 @@ const {
   mockGenerateResearchWorkspaceArtifact,
   mockGetChatModels,
   mockGetModel,
+  mockFetchTtsProviders,
+  mockFetchTldwTtsModels,
   messageOptionStoreState,
   chatModelSettingsStoreState,
   baseAudioSettings,
@@ -56,6 +58,8 @@ const {
   const generateResearchWorkspaceArtifact = vi.fn()
   const getChatModels = vi.fn()
   const getModel = vi.fn()
+  const fetchTtsProviders = vi.fn()
+  const fetchTldwTtsModels = vi.fn()
   const defaultAudioSettings: AudioGenerationSettings = {
     provider: "browser",
     model: "kokoro",
@@ -149,6 +153,8 @@ const {
     mockGenerateResearchWorkspaceArtifact: generateResearchWorkspaceArtifact,
     mockGetChatModels: getChatModels,
     mockGetModel: getModel,
+    mockFetchTtsProviders: fetchTtsProviders,
+    mockFetchTldwTtsModels: fetchTldwTtsModels,
     messageOptionStoreState: messageOptionState,
     chatModelSettingsStoreState: chatModelSettingsState,
     baseAudioSettings: defaultAudioSettings,
@@ -193,6 +199,14 @@ vi.mock("@/services/tldw/audio-voices", () => ({
   fetchTldwVoiceCatalog: vi.fn().mockResolvedValue([])
 }))
 
+vi.mock("@/services/tldw/audio-providers", () => ({
+  fetchTtsProviders: mockFetchTtsProviders
+}))
+
+vi.mock("@/services/tldw/audio-models", () => ({
+  fetchTldwTtsModels: mockFetchTldwTtsModels
+}))
+
 vi.mock("@/services/tts-provider", () => ({
   inferTldwProviderFromModel: vi.fn().mockReturnValue(null)
 }))
@@ -218,7 +232,7 @@ vi.mock("@/services/researchWorkspaceArtifacts", () => ({
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     ragSearch: mockRagSearch,
-    synthesizeSpeech: mockSynthesizeSpeech,
+    synthesizeSpeechDetailed: mockSynthesizeSpeech,
     generateSlidesFromMedia: mockGenerateSlidesFromMedia,
     listVisualStyles: vi.fn().mockResolvedValue([]),
     createChatCompletion: mockCreateChatCompletion,
@@ -441,7 +455,10 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
       data: {},
       claim_verification: createGroundedClaimVerification()
     })
-    mockSynthesizeSpeech.mockResolvedValue(new ArrayBuffer(8))
+    mockSynthesizeSpeech.mockResolvedValue({
+      buffer: new ArrayBuffer(8),
+      fallbackUsed: false
+    })
     mockGenerateSlidesFromMedia.mockResolvedValue({
       id: "presentation-1",
       title: "Generated Slides",
@@ -452,6 +469,8 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     })
     mockGetChatModels.mockResolvedValue([])
     mockGetModel.mockResolvedValue(null)
+    mockFetchTtsProviders.mockResolvedValue(null)
+    mockFetchTldwTtsModels.mockResolvedValue([])
   })
 
   it("starts a workspace agent task from studio context", () => {
@@ -600,6 +619,88 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     expect(within(audioSettings).getByRole("slider", { name: "Speed" })).toBeInTheDocument()
     expect(within(audioSettings).getByLabelText("Output Format")).toBeInTheDocument()
     expect(within(audioSettings).getByLabelText("Flashcard Deck")).toBeInTheDocument()
+  })
+
+  it("shows discovered TTS gateway policy controls only when explicitly supported", async () => {
+    workspaceStoreState.audioSettings = {
+      ...baseAudioSettings,
+      provider: "tldw",
+      model: "voice-model",
+      voice: "alloy",
+      backend: "gateway:Company",
+      allowFallback: false
+    }
+    mockFetchTtsProviders.mockResolvedValue({
+      supports_explicit_backend: true,
+      providers: {
+        "gateway:Company": {
+          display_name: "Company Voice Gateway",
+          models: ["voice-model"],
+          default_model: "voice-model"
+        },
+        "gateway:Backup": {
+          display_name: "Backup Voice Gateway",
+          models: ["backup-model"],
+          default_model: "backup-model",
+          model_capabilities: {
+            "backup-model": { default_voice: "backup-voice" }
+          }
+        }
+      },
+      voices: {}
+    })
+    mockFetchTldwTtsModels.mockResolvedValue([
+      { id: "voice-model", label: "voice-model" }
+    ])
+
+    renderStudioPane()
+    fireEvent.click(screen.getByRole("button", { name: /Audio Settings/i }))
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("TTS Backend")).toBeInTheDocument()
+    })
+    expect(screen.getByText("Company Voice Gateway")).toBeInTheDocument()
+    expect(screen.getByLabelText("Allow configured fallback")).not.toBeChecked()
+    expect(mockFetchTldwTtsModels).toHaveBeenCalledWith("gateway:Company")
+
+    fireEvent.mouseDown(screen.getByLabelText("TTS Backend"))
+    fireEvent.click(
+      await screen.findByText("Backup Voice Gateway", {
+        selector: ".ant-select-item-option-content"
+      })
+    )
+    expect(mockSetAudioSettings).toHaveBeenCalledWith({
+      backend: "gateway:Backup",
+      allowFallback: false,
+      model: "backup-model",
+      voice: "backup-voice"
+    })
+  })
+
+  it("hides TTS gateway policy controls without an explicit support signal", async () => {
+    workspaceStoreState.audioSettings = {
+      ...baseAudioSettings,
+      provider: "tldw",
+      backend: "gateway:Company"
+    }
+    mockFetchTtsProviders.mockResolvedValue({
+      supports_explicit_backend: false,
+      providers: {
+        "gateway:Company": { display_name: "Company Voice Gateway" }
+      },
+      voices: {}
+    })
+
+    renderStudioPane()
+    fireEvent.click(screen.getByRole("button", { name: /Audio Settings/i }))
+
+    await waitFor(() => {
+      expect(mockFetchTtsProviders).toHaveBeenCalled()
+    })
+    expect(screen.queryByLabelText("TTS Backend")).not.toBeInTheDocument()
+    expect(
+      screen.queryByLabelText("Allow configured fallback")
+    ).not.toBeInTheDocument()
   })
 
   it("shows cancel control during generation and aborts active run", async () => {
@@ -1913,6 +2014,44 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     consoleErrorSpy.mockRestore()
   })
 
+  it("passes the persisted gateway policy to audio artifact generation", async () => {
+    workspaceStoreState.audioSettings = {
+      ...baseAudioSettings,
+      provider: "tldw",
+      backend: "gateway:research",
+      allowFallback: false,
+      model: "SpeechModel",
+      voice: "narrator"
+    }
+    mockGetMediaDetails.mockResolvedValue({
+      source: { title: "DSPy Prompting Talk" },
+      content: { text: "Research evidence for a narrated overview." }
+    })
+    mockCreateChatCompletion.mockResolvedValue(
+      createChatCompletionResponse("Audio script")
+    )
+    mockSynthesizeSpeech.mockResolvedValue({
+      buffer: new ArrayBuffer(8),
+      actualBackend: "gateway:research",
+      fallbackUsed: false
+    })
+
+    renderStudioPane()
+    fireEvent.click(screen.getByRole("button", { name: "Audio Summary" }))
+
+    await waitFor(() => {
+      expect(mockSynthesizeSpeech).toHaveBeenCalledWith(
+        "Audio script",
+        expect.objectContaining({
+          backend: "gateway:research",
+          allowFallback: false,
+          model: "SpeechModel",
+          voice: "narrator"
+        })
+      )
+    })
+  })
+
   it("fails non-browser audio overview generation when the script is an error response", async () => {
     workspaceStoreState.audioSettings = {
       ...baseAudioSettings,
@@ -1928,7 +2067,10 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
         metadata: {}
       }
     })
-    mockSynthesizeSpeech.mockResolvedValue(new ArrayBuffer(8))
+    mockSynthesizeSpeech.mockResolvedValue({
+      buffer: new ArrayBuffer(8),
+      fallbackUsed: false
+    })
 
     renderStudioPane()
 

@@ -6,8 +6,8 @@
     <a href="https://github.com/rmusser01/tldw_server">
       <img alt="Made with love" src="https://img.shields.io/badge/made_with-love-red?style=for-the-badge&labelColor=orange" />
     </a>
-    <a href="https://www.gnu.org/licenses/old-licenses/gpl-3.0.en.html">
-      <img alt="License: GPLv3" src="https://img.shields.io/badge/license-GPLv3-blue.svg" />
+    <a href="LICENSE">
+      <img alt="License: multi-license" src="https://img.shields.io/badge/license-multi--license-blue.svg" />
     </a>
     <a href="https://github.com/rmusser01/tldw_server/actions/workflows/e2e-smoke.yml">
       <img alt="E2E Critical Smoke" src="https://github.com/rmusser01/tldw_server/actions/workflows/e2e-smoke.yml/badge.svg" />
@@ -16,7 +16,13 @@
 
   <p>Process media with 16+ LLM providers and OpenAI-compatible APIs for Chat, Embeddings, and Evals.</p>
   <p>Browser extension support is included in-repo; hosted deployment tooling is still evolving.</p>
-  <p><strong>Your local open-source platform for media analysis, knowledge work, and LLM-backed creation.</strong></p>
+  <p><strong>Your local platform for media analysis, knowledge work, and LLM-backed creation.</strong></p>
+  <p>
+    Server: GPL-3.0-only<br />
+    Frontend: source-available under PolyForm Perimeter 1.0.1<br />
+    OpenAPI contract: Apache-2.0<br />
+    <a href="LICENSE">Detailed licensing scope and terms</a>
+  </p>
 </div>
 
 ---
@@ -70,7 +76,7 @@
 </details>
 
 ## Overview
-**tldw_server** is an open-source, API-first platform for ingesting media, transcribing, analyzing, and retrieving knowledge from video, audio, documents, websites, and more.
+**tldw_server** is an API-first platform for ingesting media, transcribing, analyzing, and retrieving knowledge from video, audio, documents, websites, and more.
 It runs a FastAPI server with OpenAI-compatible Chat, Audio, Embeddings, and Evals APIs, a unified RAG pipeline, and integrations with local or hosted LLM providers.
 The primary clients are the Next.js WebUI and Admin UI, with browser-extension support in the repo as well.
 Long-term vision: a personal research assistant inspired by "The Young Lady's Illustrated Primer" that helps people learn, reason about, and retain what they watch or read.
@@ -94,7 +100,7 @@ Good fit for:
 
 For user-facing workflows across setup, the WebUI, browser extension, local models, APIs, and administration, start with the [User Wiki](Docs/Wiki/User_Wiki.md). Contributors should start with the [Developer Wiki](Docs/Wiki/Developer_Wiki.md).
 
-After cloning, you can run the optional Makefile helper checks with `make quickstart-prereqs`, or verify Python 3.10+, ffmpeg, and Docker manually for your chosen profile. On a fresh checkout, the setup targets are still the source of truth because they create the lightweight setup environment they need.
+After cloning, you can run the optional Makefile helper checks with `make quickstart-prereqs`, or verify Python 3.11+, ffmpeg, and Docker manually for your chosen profile. On a fresh checkout, the setup targets are still the source of truth because they create the lightweight setup environment they need.
 
 2. **Follow your profile guide** end-to-end. It covers prepare, start, verify, first value, audio path, troubleshoot, and optional add-ons.
 
@@ -108,10 +114,10 @@ Optional add-ons (apply AFTER your base profile is healthy):
 ## Current Status
 
 Current release line:
-- `0.1.41` Beta status. Expect rough edges and please report issues.
+- `0.1.42` Beta status. Expect rough edges and please report issues.
 - Primary client surfaces are the Next.js WebUI, Admin UI, and browser extension.
 - Package metadata is prepared under the canonical PyPI name `tldw-server`; use a repository checkout until publishing is complete.
-- The `dev` branch carries work beyond `0.1.41`, including post-`0.1.41` branch work, and `main` is prepared for the `0.1.41` release; see [CHANGELOG.md](CHANGELOG.md) for the PR rollup and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for the published release entry point.
+- The `dev` branch carries work beyond `0.1.42`; the release covers the frozen train through PR #2941 plus the trusted license-gate bootstrap on `main`. See [CHANGELOG.md](CHANGELOG.md) for the PR rollup and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for the published release entry point.
 
 <details>
 <summary>Current focus and migration notes from the old Gradio version</summary>
@@ -146,6 +152,29 @@ Current release line:
 ## What's New (in the last few releases)
 
 <details>
+<summary>0.1.42 release</summary>
+
+Included in the `0.1.42` release candidate (frozen through PR #2941):
+- Chat macros and service prompts, notes/personal-context sync, Research Workspace improvements, and standalone HTML presentations.
+- Audio/persona and buddy workflows, MCP HTTP/SSE transports, durable webhooks, administration improvements, and production backup/rollback checks.
+- Provider credential resolution is shared across Chat, RAG, embeddings, and audio, with fail-closed BYOK handling and safer streaming.
+- Inline embeddings workflows, Jobs admission transactions and quotas, and strict Skills live-integration certification were hardened.
+- The protected frontend source-available boundary, trusted license gate, protected-branch prerequisites, and license-first PR sequencing were established.
+- Package, FastAPI, README, release-note, and MkDocs metadata were bumped to `0.1.42`.
+- Protected frontend source remains under PolyForm Perimeter 1.0.1; the `0.1.42` Countdown grant adds `AGPL-3.0-only` on September 10, 2028 at 12:00 UTC. See [the immutable release record](LICENSES/releases/0.1.42/release.json). No protected frontend binary is published.
+
+Still active on `dev`:
+- Treat [CHANGELOG.md](CHANGELOG.md) as the authoritative branch-level history for work after this frozen release.
+
+Currently landing on `dev` (post-`0.1.42` branch work):
+- Continue the license-first CI cutover only after this release is published and
+  synchronized back to `dev`.
+
+See [CHANGELOG.md](CHANGELOG.md) for the full running history and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for published release notes.
+
+</details>
+
+<details>
 <summary>0.1.41 release</summary>
 
 Included in the `0.1.41` release:
@@ -155,6 +184,7 @@ Included in the `0.1.41` release:
 - Package, FastAPI, README, release-note, and MkDocs metadata were bumped to `0.1.41`.
 
 Still active on `dev`:
+- `0.1.41` is superseded by the `0.1.42` release metadata above.
 - Treat [CHANGELOG.md](CHANGELOG.md) as the authoritative branch-level history for what has entered the release train.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full running history and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for published release notes.
@@ -326,7 +356,7 @@ This helper checks your host Python and optional media tooling. If it reports mi
 
 If `make` is unavailable (common on Windows), run equivalent host checks manually:
 ```powershell
-py -3.12 --version  # or py -3.13 / -3.11 / -3.10
+py -3.12 --version  # or py -3.13 / -3.11
 ffmpeg -version
 docker --version    # only if using Docker paths
 ```
@@ -374,8 +404,8 @@ make verify-local-single
 # make quickstart-docker-webui  # same as make quickstart
 # make quickstart-docker        # Docker single-user API only
 # make quickstart-install       # local install only; does not start the server
-# If `python3` is older than 3.10 on your machine:
-# make install-local PYTHON=python3.13  # or python3.12 / python3.11 / python3.10
+# If `python3` is older than 3.11 on your machine:
+# make install-local PYTHON=python3.13  # or python3.12 / python3.11
 
 # Force a full image rebuild when needed:
 # make start-docker-single DOCKER_BUILD=true
@@ -418,8 +448,8 @@ Want a more advanced deployment?
 make install-local
 make setup-local-single
 make start-local-single
-# If `python3` is older than 3.10 on your machine:
-# make install-local PYTHON=python3.13  # or python3.12 / python3.11 / python3.10
+# If `python3` is older than 3.11 on your machine:
+# make install-local PYTHON=python3.13  # or python3.12 / python3.11
 ```
 
 These targets:
@@ -483,7 +513,7 @@ docker compose -f Dockerfiles/docker-compose.multi-user-postgres.yml up -d --bui
 <summary>Manual virtualenv, environment, auth, and startup steps</summary>
 
 Supported Python versions:
-- Minimum: Python 3.10+
+- Minimum: Python 3.11+
 - CI-tested: Python 3.11, 3.12, and 3.13
 - Recommended for local development: Python 3.12
 
@@ -511,11 +541,11 @@ Windows notes:
 1) **Create and activate a virtual environment**
 ```bash
 # macOS/Linux: choose a supported interpreter explicitly (3.12 recommended)
-python3.12 -m venv .venv  # or python3.13 / python3.11 / python3.10
+python3.12 -m venv .venv  # or python3.13 / python3.11
 source .venv/bin/activate
 
 # Windows (PowerShell)
-py -3.12 -m venv .venv  # or -3.13 / -3.11 / -3.10
+py -3.12 -m venv .venv  # or -3.13 / -3.11
 .venv\Scripts\Activate.ps1
 
 # Confirm venv interpreter version
@@ -1831,7 +1861,11 @@ None of these companies exist to provide AI services in 2024. They’re only doi
 
 ## License
 
-GNU General Public License v3.0 - see `LICENSE` for details.
+- Server: GPL-3.0-only
+- Frontend: source-available under PolyForm Perimeter 1.0.1
+- OpenAPI contract: Apache-2.0
+
+See the root [LICENSE](LICENSE) for the authoritative scope map and detailed terms.
 
 ---
 

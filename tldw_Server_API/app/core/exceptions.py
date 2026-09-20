@@ -1,22 +1,474 @@
+"""Central application exceptions and safe API error translation."""
+
 from __future__ import annotations
 
 import email.utils
 import re
 import weakref
 from collections.abc import Mapping
-from typing import Any, Literal
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Any, Literal, NoReturn
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from loguru import logger
 
 from .AuthNZ.exceptions import DatabaseError as AuthNZDatabaseError
-from .exception_types import PromptCatalogError  # noqa: F401 - re-exported for compatibility.
+from .exception_types import (  # noqa: F401 - centralized compatibility exports.
+    PersonaArtworkValidationError,
+    PromptCatalogError,
+)
+
+if TYPE_CHECKING:
+    from .Admin_Webhooks.domain import WebhookErrorCode
 
 if hasattr(status, "HTTP_422_UNPROCESSABLE_CONTENT"):
     DEFAULT_VALIDATION_STATUS = status.HTTP_422_UNPROCESSABLE_CONTENT
 else:
     DEFAULT_VALIDATION_STATUS = status.HTTP_422_UNPROCESSABLE_ENTITY
+
+
+_PROMPT_IMPROVEMENT_DISPATCH_MESSAGES = {
+    "missing_model": "Select an active chat model and try again.",
+    "unsupported_model": "The selected chat model is not available.",
+    "provider_not_configured": "The active provider is not configured for this request.",
+    "provider_rate_limited": "The active provider is temporarily rate limited.",
+    "provider_timeout": "The active provider timed out.",
+    "provider_unavailable": "The active provider is temporarily unavailable.",
+    "model_refusal": "The active model did not provide an improvement candidate.",
+    "invalid_model_output": "The active model returned an unusable response.",
+    "internal_error": "The prompt improvement request could not be completed.",
+}
+_MAX_PROMPT_IMPROVEMENT_RETRY_AFTER_SECONDS = 86_400
+
+
+class BuddyNotFoundError(LookupError):
+    """The authenticated owner cannot access the requested Buddy resource."""
+
+
+class BuddyConflictError(ValueError):
+    """An optimistic Buddy resource version no longer matches stored state."""
+
+
+class BuddyPublicationRevokedError(RuntimeError):
+    """An accepted Buddy turn no longer has permission to publish messages."""
+
+
+class BuddyRuntimeBusyError(RuntimeError):
+    """Another process owns this principal's in-memory Buddy queue."""
+
+
+class BuddyQueueFullError(RuntimeError):
+    """The bounded process queue cannot accept another Buddy turn."""
+
+
+class BuddyConfigurationError(ValueError):
+    """A Buddy conversation has no configured Chat provider or model."""
+
+
+class PersonaConversationError(RuntimeError):
+    """Safe Persona Chat admission/completion failure without provider details."""
+
+
+class PersonaVoiceRecognitionError(RuntimeError):
+    """Expected recognition failure with a safe message and classifiable code.
+
+    Args:
+        code: Whether recognition is unavailable, stopped, or failed during a turn.
+    """
+
+    def __init__(self, code: Literal["unavailable", "stopped", "failed"]) -> None:
+        self.code = code
+        super().__init__(
+            {
+                "unavailable": "Parakeet ONNX speech recognition is unavailable.",
+                "stopped": "Speech recognition is stopped. Prepare voice again.",
+                "failed": "Speech recognition failed. Check the selected speech model and start voice again.",
+            }[code]
+        )
+
+
+class PersonaVoiceInputLimitError(ValueError):
+    """A spoken turn exceeded its bounded audio buffer before transcription."""
+
+
+class SnapshotOperationError(RuntimeError):
+    """Safe machine-readable error at the admin snapshot operation boundary."""
+
+    def __init__(self, code: str, status_code: int = 409) -> None:
+        super().__init__(code)
+        self.code = code
+        self.status_code = status_code
+
+
+class UnstableFingerprintError(RuntimeError):
+    """Raised when a file changes while its identity is being calculated."""
+
+
+class SnapshotStoreError(RuntimeError):
+    """Base error for private snapshot storage."""
+
+
+class SnapshotCorruptError(SnapshotStoreError):
+    """Raised when committed bytes no longer match their manifest."""
+
+
+class SnapshotNotFoundError(SnapshotStoreError):
+    """Raised when no valid committed snapshot or receipt exists."""
+
+
+class SnapshotStorageUnavailableError(SnapshotStoreError):
+    """Raised when storage exists but cannot be read reliably."""
+
+
+class TransactionPassthroughError(Exception):
+    """Sanitized domain failure that may cross a rolled-back DB transaction."""
+
+
+class BuiltinCharacterSeedError(TransactionPassthroughError):
+    """Raised when a bundled character cannot be installed with verified assets."""
+
+
+class BehaviorSnapshotValidationError(ValueError):
+    """Raised when a character behavior snapshot violates its closed schema."""
+
+
+class CharacterBehaviorSourceDrift(RuntimeError):
+    """Raised when character behavior sources change during materialization."""
+
+
+class ConversationSettingsTargetMissing(RuntimeError):
+    """Force rollback when settings outlive their live conversation target."""
+
+
+class WebhookError(TransactionPassthroughError):
+    """Expected webhook domain failure with no caller-controlled message text."""
+
+    def __init__(
+        self,
+        code: WebhookErrorCode,
+        http_status: int | None = None,
+    ) -> None:
+        self.code = code
+        self.http_status = http_status or code.http_status
+        super().__init__(code.value)
+
+
+class PromptImprovementError(RuntimeError):
+    """Stable domain failure suitable for endpoint error mapping."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+class RecurringQuestionRAGError(Exception):
+    """Expected Recurring Question RAG execution failure."""
+
+    def __init__(self, code: str, *, retryable: bool = False, details: dict[str, Any] | None = None) -> None:
+        super().__init__(code)
+        self.code = code
+        self.retryable = retryable
+        self.details = details or {}
+
+
+class RecurringQuestionWorkerRetryableError(Exception):
+    """Raised after durable run state is updated so WorkerSDK can retry the Jobs job."""
+
+
+class ClaimsAnalyticsExportError(RuntimeError):
+    """Safe domain failure surfaced by Claims analytics export operations."""
+
+    def __init__(
+        self,
+        public_message: str,
+        *,
+        code: str,
+        retryable: bool = False,
+        http_status: int = 400,
+    ) -> None:
+        super().__init__(public_message)
+        self.public_message = public_message
+        self.code = code
+        self.retryable = retryable
+        self.http_status = http_status
+
+
+class NotesOrganizationValidationError(ValueError):
+    """Validation failure with a stable Notes organization Sync error code."""
+
+    def __init__(self, error_code: str, message: str) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+
+
+class NotesLinkValidationError(ValueError):
+    """Validation failure for a non-canonical Notes link payload."""
+
+    error_code = "notes_link_payload_invalid"
+
+
+class NoteAttachmentPolicyError(ValueError):
+    """Raised when attachment metadata is outside the canonical Notes policy."""
+
+
+class NotesTaskContractError(ValueError):
+    """Stable fail-closed error for Notes task Sync contract violations."""
+
+
+class LegacyAttachmentSourceError(RuntimeError):
+    """Sanitized failure while reading a legacy Notes attachment source."""
+
+    def __init__(self, error_code: str) -> None:
+        super().__init__(error_code)
+        self.error_code = error_code
+
+
+class NotesAttachmentBootstrapInterrupted(RuntimeError):
+    """Testable interruption that deliberately leaves durable progress resumable."""
+
+
+class NotesTaskBootstrapInterrupted(RuntimeError):
+    """Testable interruption that leaves durable task bootstrap progress resumable."""
+
+
+class NotesTaskActivitySourceInvalid(RuntimeError):
+    """Malformed legacy task activity encountered during trusted bootstrap."""
+
+
+class NotesTaskActivitySourceChanged(RuntimeError):
+    """Previously observed task activity changed during trusted bootstrap."""
+
+
+class NotesAttachmentMutationError(RuntimeError):
+    """Stable failure for a coordinated Notes attachment mutation."""
+
+
+class NotesAttachmentSyncNotReadyError(NotesAttachmentMutationError):
+    """Raised when canonical attachment mutation is not writable."""
+
+
+class ProfileTransactionError(RuntimeError):
+    """Base class for sanitized, transport-neutral profile transaction failures."""
+
+    code = "profile_update_failed"
+    retry_after_seconds: int | None = None
+
+
+class PersonalContextError(RuntimeError):
+    """Base error for canonical Personal Context operations."""
+
+
+class PersonalContextConflictInputError(PersonalContextError, ValueError):
+    """A reviewed conflict command fails canonical choice validation."""
+
+
+class PersonalContextActivationError(PersonalContextError, ValueError):
+    """Base activation failure retaining compatibility with ValueError callers."""
+
+
+class PersonalContextActivationInputError(PersonalContextActivationError):
+    """Activation input or installation receipt fields are invalid."""
+
+
+class PersonalContextActivationPendingError(PersonalContextActivationError):
+    """Existing activation or publication work must finish before preparation."""
+
+
+class PersonalContextActivationMissingError(PersonalContextActivationError):
+    """The requested activation or current device acknowledgment is absent."""
+
+
+class PersonalContextActivationStaleError(PersonalContextActivationError):
+    """Activation lease, generation, digest, receipt or continuity is no longer valid."""
+
+
+class PublicationRelayPoisoned(PersonalContextError):
+    """Content-free durable attention state for the earliest corrupt batch."""
+
+
+class PublicationActivationPending(PersonalContextError):
+    """A live prepared baseline temporarily fences ordinary publication relay."""
+
+
+class PersonalContextAuthoritySourceError(PersonalContextError):
+    """Authenticated source content is malformed and requires durable attention."""
+
+
+class ProfileStorageLockedError(PersonalContextError):
+    """Report unavailable or unauthenticated server profile key material."""
+
+
+class ProfileIntegrityError(PersonalContextError):
+    """Report canonical or encrypted object authentication failure."""
+
+
+class ProfileUnsupportedSchemaError(ProfileIntegrityError):
+    """Report authenticated profile data from an unsupported newer schema."""
+
+
+class ProfileAlreadyExistsError(PersonalContextError):
+    """Report an attempt to create a second profile in one user database."""
+
+
+class ProfileKeyAlreadyExistsError(PersonalContextError):
+    """Report an attempt to replace existing wrapped profile keys."""
+
+
+class ConcurrentProfileUpdateError(PersonalContextError):
+    """Report an optimistic object-head mismatch."""
+
+
+class ProfileSemanticKeyCollisionError(PersonalContextError):
+    """Report an active same-scope canonical semantic-key collision."""
+
+
+class ProfileQuotaExceededError(PersonalContextError):
+    """Report a bounded Personal Context operational quota violation."""
+
+
+class ProfileConflictError(PersonalContextError):
+    """Report a stale canonical or runtime version supplied by a caller."""
+
+
+class ProfileKeyCollisionError(PersonalContextError):
+    """Report an active same-scope semantic key collision."""
+
+
+class ProfileUnsupportedOperationError(PersonalContextError):
+    """Report an operation supported by another owner but not this server."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+
+
+class ProfileNotFoundError(PersonalContextError, KeyError):
+    """Report that the authenticated user has no canonical profile."""
+
+
+class PersonalContextSyncIdentityConflict(PersonalContextError, ValueError):
+    """Report that a Sync envelope conflicts with canonical profile identity."""
+
+
+class PersonalContextSyncDeviceOnlyRecord(PersonalContextError, ValueError):
+    """Report that a device-only profile record was offered to Sync."""
+
+
+class ProfileDatabaseBusy(ProfileTransactionError):
+    """Raised when a profile transaction cannot acquire the database in time."""
+
+    code = "database_busy"
+
+    def __init__(self, *, retry_after_seconds: int) -> None:
+        super().__init__("Database is temporarily busy")
+        self.retry_after_seconds = retry_after_seconds
+
+
+class ProfileUpdateConcurrencyConflict(ProfileTransactionError):
+    """Raised when a profile write loses a serialization or deadlock race."""
+
+    code = "profile_update_concurrency_conflict"
+
+    def __init__(self) -> None:
+        super().__init__("Profile update conflicted")
+
+
+class ProfileTransactionFailed(ProfileTransactionError):
+    """Raised for sanitized non-retryable profile transaction failures."""
+
+    def __init__(self) -> None:
+        super().__init__("Profile update transaction failed")
+
+
+class PromptImprovementDispatchError(RuntimeError):
+    """Sanitized infrastructure failure for endpoint error mapping."""
+
+    def __init__(
+        self,
+        code: str,
+        *,
+        internal_detail: object | None = None,
+        retryable: bool = False,
+        retry_after_seconds: int | None = None,
+    ) -> None:
+        del internal_detail
+        public_message = _PROMPT_IMPROVEMENT_DISPATCH_MESSAGES.get(
+            code,
+            _PROMPT_IMPROVEMENT_DISPATCH_MESSAGES["internal_error"],
+        )
+        super().__init__(public_message)
+        self.code = code if code in _PROMPT_IMPROVEMENT_DISPATCH_MESSAGES else "internal_error"
+        self.retryable = bool(retryable)
+        try:
+            retry_after = int(retry_after_seconds)
+        except (TypeError, ValueError):
+            retry_after = None
+        if retry_after is not None and retry_after < 0:
+            retry_after = None
+        self.retry_after_seconds = (
+            min(retry_after, _MAX_PROMPT_IMPROVEMENT_RETRY_AFTER_SECONDS) if retry_after is not None else None
+        )
+
+
+class PromptsDatabaseError(Exception):
+    """Base exception for Prompts database failures."""
+
+
+class PromptsConflictError(PromptsDatabaseError):
+    """Report a Prompts database concurrent-modification conflict."""
+
+    def __init__(
+        self,
+        message: str = "Conflict detected: Record modified concurrently.",
+        entity: Any = None,
+        identifier: Any = None,
+    ) -> None:
+        super().__init__(message)
+        self.entity = entity
+        self.identifier = identifier
+
+    def __str__(self) -> str:
+        base = super().__str__()
+        details = []
+        if self.entity:
+            details.append(f"Entity: {self.entity}")
+        if self.identifier:
+            details.append(f"ID: {self.identifier}")
+        return f"{base} ({', '.join(details)})" if details else base
+
+
+class UnknownServicePromptDefinition(ValueError):
+    """Raised when a caller requests a definition outside the static registry."""
+
+    def __init__(self, definition_id: str) -> None:
+        self.definition_id = definition_id
+        super().__init__(f"Unknown Service Prompt definition: {definition_id}")
+
+
+class ServicePromptValidationError(ValueError):
+    """Raised with safe, immutable validation errors keyed by registered part."""
+
+    def __init__(self, field_errors: Mapping[str, str]) -> None:
+        safe_errors = dict(field_errors)
+        self.field_errors: Mapping[str, str] = MappingProxyType(safe_errors)
+        super().__init__("Service Prompt validation failed for: " + ", ".join(safe_errors))
+
+
+class ServicePromptCorruptOverride(RuntimeError):
+    """Raised when a saved override cannot be parsed or validated."""
+
+    def __init__(self, revision: str) -> None:
+        self.revision = revision
+        super().__init__(f"Stored Service Prompt override is corrupt at revision {revision}.")
+
+
+class ServicePromptRevisionConflict(PromptsConflictError):
+    """Report the revision observed during a failed conditional write."""
+
+    def __init__(self, current_revision: str | None) -> None:
+        super().__init__("Service Prompt override changed concurrently.")
+        self.current_revision = current_revision
 
 
 class VideoProcessingError(Exception):
@@ -31,8 +483,29 @@ class EgressPolicyError(Exception):
         self.reason_code = reason_code
 
 
+NetworkErrorClassification = Literal["timeout"]
+
+
 class NetworkError(Exception):
-    """Raised for network transport errors (connect/read timeouts, DNS, TLS, etc.)."""
+    """Raised for sanitized transport failures, optionally with an HTTP status."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        classification: NetworkErrorClassification | None = None,
+    ) -> None:
+        if status_code is not None:
+            if type(status_code) is not int:
+                raise TypeError("status_code must be an integer")
+            if not 100 <= status_code <= 599:
+                raise ValueError("status_code must be a valid HTTP status")
+        if classification not in (None, "timeout"):
+            raise ValueError("Unsupported network error classification")
+        self.status_code = status_code
+        self.classification = classification
+        super().__init__(message)
 
 
 HTTPHopErrorCode = Literal[
@@ -273,6 +746,154 @@ class BadRequestError(ValueError):
     """Raised when a caller provides invalid arguments for an operation."""
 
 
+class ChatAPIError(Exception):
+    """Base exception for chat API call errors."""
+
+    def __init__(
+        self,
+        message: str = "An error occurred during the chat API call.",
+        status_code: int = 500,
+        provider: str | None = None,
+    ) -> None:
+        self.message = message
+        self.status_code = status_code
+        self.provider = provider
+        super().__init__(self.message)
+
+
+class ChatAuthenticationError(ChatAPIError):
+    """Raised when a chat provider rejects request credentials."""
+
+    def __init__(
+        self,
+        message: str = "Authentication failed with the chat provider.",
+        provider: str | None = None,
+        status_code: int = 401,
+    ) -> None:
+        preserved_status = 403 if status_code == 403 else 401
+        super().__init__(message, status_code=preserved_status, provider=provider)
+
+
+class ChatConfigurationError(ChatAPIError):
+    """Raised for missing or invalid chat-provider configuration."""
+
+    _ERROR_CODES = frozenset(
+        {
+            "provider_configuration_invalid",
+            "missing_provider_credentials",
+        }
+    )
+
+    def __init__(
+        self,
+        message: str = "Chat provider configuration error.",
+        provider: str | None = None,
+        error_code: str = "provider_configuration_invalid",
+    ) -> None:
+        self.error_code = error_code if error_code in self._ERROR_CODES else "provider_configuration_invalid"
+        super().__init__(message, status_code=500, provider=provider)
+
+
+class ChatBadRequestError(ChatAPIError):
+    """Raised when a chat provider rejects request parameters."""
+
+    def __init__(
+        self,
+        message: str = "Invalid request sent to the chat provider.",
+        provider: str | None = None,
+    ) -> None:
+        super().__init__(message, status_code=400, provider=provider)
+
+
+class ChatRateLimitError(ChatAPIError):
+    """Raised when a chat provider rate-limits a request."""
+
+    def __init__(
+        self,
+        message: str = "Rate limit exceeded with the chat provider.",
+        provider: str | None = None,
+    ) -> None:
+        super().__init__(message, status_code=429, provider=provider)
+
+
+class ChatProviderError(ChatAPIError):
+    """Raised for a general upstream chat-provider error."""
+
+    def __init__(
+        self,
+        message: str = "Error received from the chat provider API.",
+        status_code: int = 502,
+        provider: str | None = None,
+        details: Any = None,
+    ) -> None:
+        self.details = details
+        super().__init__(message, status_code=status_code, provider=provider)
+
+
+class ProviderCredentialTerminalError(RuntimeError):
+    """Carry one bounded credential code through chat execution layers."""
+
+    _ERROR_CODES = frozenset(
+        {
+            "provider_authentication_failed",
+            "invalid_provider_credentials",
+            "missing_provider_credentials",
+            "credential_store_unavailable",
+            "credential_scope_revoked",
+            "provider_configuration_invalid",
+            "provider_unavailable",
+            "provider_disabled",
+            "model_not_allowed",
+        }
+    )
+
+    def __init__(self, code: str) -> None:
+        self.code = code if code in self._ERROR_CODES else "provider_configuration_invalid"
+        super().__init__(self.code)
+
+
+class SanitizedProviderStreamError(ChatAPIError):
+    """Safe provider-stream signal with explicit, fail-closed replay metadata."""
+
+    def __init__(
+        self,
+        *,
+        code: str,
+        message: str,
+        status_code: int,
+        replay_certified: bool = False,
+        credential_refresh_retry_certified: bool = False,
+    ) -> None:
+        self.code = code
+        self.upstream_dispatched = replay_certified is not True
+        self.output_emitted = False
+        self.allow_non_stream_fallback = replay_certified is True
+        self.credential_refresh_retry_safe = credential_refresh_retry_certified is True
+        super().__init__(message=message, status_code=status_code)
+
+
+class TTSPublicHTTPException(HTTPException):
+    """Marker for TTS errors whose traceback must be dropped at serialization."""
+
+
+def raise_detached_error(error: BaseException) -> NoReturn:
+    """Raise a safe replacement without retaining an active private exception.
+
+    ``raise ... from None`` suppresses display of an exception chain but Python
+    still stores the handled exception in ``__context__``.  Public adapter
+    boundaries use this helper so tracing and audit consumers cannot recover a
+    provider response, credential, or endpoint detail from the safe error.
+    """
+
+    try:
+        raise error from None
+    except BaseException as detached:
+        detached.__cause__ = None
+        detached.__context__ = None
+        detached.__suppress_context__ = True
+        raise
+
+
 class InvalidMetadataOrderKeyError(ValueError):
     """Raised when a metadata order key cannot be safely used."""
 
@@ -372,9 +993,7 @@ def sanitize_embedding_public_details(details: list[SafeDetail] | None) -> list[
                 continue
 
             if isinstance(raw_value, str):
-                safe_item[raw_key] = (
-                    _EMBEDDING_REDACTED if _is_embedding_sensitive_string(raw_value) else raw_value
-                )
+                safe_item[raw_key] = _EMBEDDING_REDACTED if _is_embedding_sensitive_string(raw_value) else raw_value
             elif isinstance(raw_value, (int, float, bool)) or raw_value is None:
                 safe_item[raw_key] = raw_value
 
@@ -403,9 +1022,7 @@ def sanitize_embedding_scalar_mapping(values: Mapping[str, object] | None) -> di
             continue
 
         if isinstance(raw_value, str):
-            sanitized[raw_key] = (
-                _EMBEDDING_REDACTED if _is_embedding_sensitive_string(raw_value) else raw_value
-            )
+            sanitized[raw_key] = _EMBEDDING_REDACTED if _is_embedding_sensitive_string(raw_value) else raw_value
         elif isinstance(raw_value, (int, float, bool)) or raw_value is None:
             sanitized[raw_key] = raw_value
 
@@ -469,6 +1086,10 @@ class EmbeddingRateLimitError(EmbeddingProviderError):
 
 class EmbeddingExecutionError(EmbeddingDomainError):
     """Embedding execution failed after request planning."""
+
+
+class EmbeddingWorkflowTraceError(ValueError):
+    """Workflow trace data violated its safety or boundedness contract."""
 
 
 class RecipeEnqueueError(RuntimeError):
@@ -635,6 +1256,10 @@ class IngestionSourceValidationError(ValidationError):
     """Raised when an ingestion source payload fails validation."""
 
 
+class IngestionSourceSchemaError(RuntimeError):
+    """Raised when the ingestion-source schema definition is incomplete."""
+
+
 class ReferenceImportError(RuntimeError):
     """Raised when a reference-manager item cannot be persisted correctly."""
 
@@ -732,6 +1357,14 @@ class STTTranscriptionError(RuntimeError):
     """Raised when an STT backend fails to produce a valid transcription."""
 
 
+class STTExecutionPlanError(BadRequestError):
+    """Raised when a planned STT execution cannot be honored."""
+
+
+class STTExecutionUnsupportedError(STTExecutionPlanError):
+    """Raised when an adapter cannot safely expose the benchmark contract."""
+
+
 class SecurityAlertWebhookError(Exception):
     """Raised when delivery of a security alert to a webhook fails.
 
@@ -801,6 +1434,129 @@ class WorkspaceMembershipServiceError(Exception):
         self.message = message
         self.status_code = status_code
         self.details = dict(details or {})
+
+
+class SharedWorkspaceAccessError(RuntimeError):
+    """Base error for recipient shared-workspace access resolution."""
+
+
+class SharedWorkspaceNotFound(SharedWorkspaceAccessError):
+    """Raised for every missing, inactive, or unauthorized shared target."""
+
+    def __init__(self) -> None:
+        super().__init__("Shared workspace not found")
+
+
+class SharedWorkspaceUnavailable(SharedWorkspaceAccessError):
+    """Raised when an authorized shared target cannot be resolved operationally."""
+
+    def __init__(self) -> None:
+        super().__init__("Shared workspace is temporarily unavailable")
+
+
+class SharedWorkspaceCloneNotAllowed(SharedWorkspaceAccessError):
+    """Raised when the authoritative share policy disables recipient cloning."""
+
+    def __init__(self) -> None:
+        super().__init__("Shared workspace cloning is not allowed")
+
+
+class SharedWorkspaceChatServiceError(RuntimeError):
+    """Base shared-chat error with a stable code and disclosure-safe message."""
+
+    code = "shared_workspace_unavailable"
+    retryable = True
+
+
+class SharedWorkspaceSourceScopeInvalid(SharedWorkspaceChatServiceError):
+    """Raised when a requested shared source scope is invalid."""
+
+    code = "invalid_shared_chat_request"
+    retryable = False
+
+    def __init__(self) -> None:
+        super().__init__("The shared chat request is invalid.")
+
+
+class SharedWorkspaceSourceSubsetRequired(SharedWorkspaceChatServiceError):
+    """Raised when all queryable sources exceed the shared-chat cap."""
+
+    code = "source_subset_required"
+    retryable = False
+
+    def __init__(self) -> None:
+        super().__init__("Select a smaller set of shared sources.")
+
+
+class SharedWorkspaceSourceChanged(SharedWorkspaceChatServiceError):
+    """Raised when a frozen source authorization snapshot no longer matches."""
+
+    code = "shared_source_changed"
+    retryable = False
+
+    def __init__(self) -> None:
+        super().__init__("The selected shared sources changed.")
+
+
+class SharedWorkspaceRetrievalUnavailable(SharedWorkspaceChatServiceError):
+    """Raised when retrieval cannot produce a fully verified result."""
+
+    code = "retrieval_unavailable"
+    retryable = True
+
+    def __init__(self) -> None:
+        super().__init__("Shared workspace retrieval is temporarily unavailable.")
+
+
+class SharedWorkspaceNoRelevantEvidence(SharedWorkspaceChatServiceError):
+    """Raised when retrieval returns no usable verified evidence."""
+
+    code = "no_relevant_evidence"
+    retryable = False
+
+    def __init__(self) -> None:
+        super().__init__("No relevant shared evidence was found.")
+
+
+class SharedWorkspaceChatContextTooLarge(SharedWorkspaceChatServiceError):
+    """Raised before credentials when a grounded prompt cannot fit."""
+
+    code = "shared_chat_context_too_large"
+    retryable = False
+
+    def __init__(self) -> None:
+        super().__init__("The shared chat question is too large for this model.")
+
+
+class SharedWorkspaceNoProviderConfigured(SharedWorkspaceChatServiceError):
+    """Raised when no authorized recipient generation credential is usable."""
+
+    code = "no_provider_configured"
+    retryable = False
+
+    def __init__(self) -> None:
+        super().__init__("No usable generation provider is configured.")
+
+
+class SharedWorkspaceGenerationFailed(SharedWorkspaceChatServiceError):
+    """Raised for every shared-workspace provider or structured-output failure."""
+
+    code = "generation_failed"
+    retryable = True
+
+    def __init__(self) -> None:
+        super().__init__("Shared workspace generation is temporarily unavailable.")
+
+
+class _SharedWorkspaceDataUnavailable(SharedWorkspaceChatServiceError):
+    """Internal marker for unavailable canonical shared-workspace data."""
+
+    def __init__(self) -> None:
+        super().__init__("Shared workspace data is temporarily unavailable.")
+
+
+class _NonQueryableSource(ValueError):
+    """Internal marker for canonical sources that cannot be queried."""
 
 
 class InvalidStorageUserIdError(StoragePathValidationError):
@@ -1124,6 +1880,22 @@ class WorkflowAdapterError(Exception):
 
 class AdapterError(WorkflowAdapterError):
     """Workflow adapter-specific error."""
+
+
+class MacroValidationError(ValueError):
+    """Raised when a chat macro definition or invocation fails validation."""
+
+
+class MacroStorageError(RuntimeError):
+    """Raised when chat macro definition or run storage fails."""
+
+
+class MacroNotFoundError(MacroStorageError):
+    """Raised when a requested chat macro or run record is missing."""
+
+
+class MacroExecutionError(RuntimeError):
+    """Raised when chat macro execution fails."""
 
 
 async def video_processing_exception_handler(

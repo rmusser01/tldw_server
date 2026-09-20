@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { cleanup, render, screen, within } from "@testing-library/react"
+import { act, cleanup, render, screen, within } from "@testing-library/react"
 import { ExecutionPanel } from "../ExecutionPanel"
 import { useWorkflowEditorStore } from "@/store/workflow-editor"
 
@@ -12,6 +12,7 @@ const originalLoadRunInvestigation =
 
 afterEach(() => {
   cleanup()
+  vi.useRealTimers()
   vi.clearAllMocks()
   useWorkflowEditorStore.setState({
     nodes: [],
@@ -31,6 +32,22 @@ afterEach(() => {
 })
 
 describe("ExecutionPanel design-system alerts", () => {
+  it("updates elapsed time during a run and freezes at completion", () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-09-10T12:00:05Z"))
+    const startedAt = Date.parse("2026-09-10T12:00:00Z")
+    useWorkflowEditorStore.setState({ status: "running", startedAt })
+    const { unmount } = render(<ExecutionPanel />)
+    expect(screen.getByText("0:05")).toBeInTheDocument()
+    act(() => vi.advanceTimersByTime(2000))
+    expect(screen.getByText("0:07")).toBeInTheDocument()
+    act(() => useWorkflowEditorStore.setState({ status: "completed", completedAt: startedAt + 8000 }))
+    act(() => vi.advanceTimersByTime(3000))
+    expect(screen.getByText("0:08")).toBeInTheDocument()
+    unmount()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
   it("renders execution errors through the design-system Alert", () => {
     useWorkflowEditorStore.setState({
       status: "failed",

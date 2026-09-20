@@ -251,6 +251,9 @@ class FileSystemStorage(StorageBackend):
             await self._cleanup_empty_dirs(full_path.parent)
 
             return True
+        except FileNotFoundError:
+            # Another cleanup attempt may remove it after the existence check.
+            return False
         except Exception as e:
             logger.error(f"Failed to delete file {path}: {e}")
             raise StorageError(f"Failed to delete file: {e}", path=path) from e

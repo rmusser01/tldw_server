@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 from typing import Any
 
@@ -9,8 +10,11 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError
 from tldw_Server_API.app.core.Notes_Tasks.models import TaskActor
-from tldw_Server_API.app.core.Notes_Tasks.service import NotesTaskService, _parse_checklist_line
-
+from tldw_Server_API.app.core.Notes_Tasks.service import (
+    NotesTaskCaptureMutation,
+    NotesTaskService,
+    _parse_checklist_line,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -35,6 +39,16 @@ def _add_note(db: CharactersRAGDB, *, title: str, content: str) -> dict[str, Any
     return note
 
 
+def test_projected_mutations_lock_task_scope_before_reading_task_or_note_rows() -> None:
+    """Keep direct product writes in the same authority-first order as dataset bind."""
+    for method in (NotesTaskService.update_task, NotesTaskService.delete_task):
+        source = inspect.getsource(method)
+        direct_write_path = source[source.index("coordinator = active_coordinator") :]
+        fence = direct_write_path.index("lock_authorized_write_scope")
+        assert fence < direct_write_path.index("_require_task_version")
+        assert fence < direct_write_path.index("_write_note_content")
+
+
 def test_create_task_for_note_rejects_invalid_status_without_rewriting_note(db: CharactersRAGDB) -> None:
     service = NotesTaskService()
     note = _add_note(db, title="Tasks", content="Intro\n")
@@ -53,7 +67,38 @@ def test_create_task_for_note_rejects_invalid_status_without_rewriting_note(db: 
     saved = db.get_note_by_id(str(note["id"]))
     assert saved is not None
     assert saved["content"] == "Intro\n"
-    assert db.list_tasks(note_id=str(note["id"])) == []
+    assert db.list_tasks(
+        note_id=str(note["id"]),
+        owner_user_id=db.client_id,
+        dataset_id="local-unbound",
+    ) == []
+
+
+def test_optional_capture_callback_receives_one_task_activity_plan(
+    db: CharactersRAGDB,
+) -> None:
+    captured: list[NotesTaskCaptureMutation] = []
+    service = NotesTaskService(
+        task_capture_callback=lambda mutation, *, conn: captured.append(mutation)
+    )
+    note = _add_note(db, title="Tasks", content="Intro\n")
+
+    service.create_task_for_note(
+        db=db,
+        note_id=str(note["id"]),
+        text="Alpha",
+        status="open",
+        metadata={},
+        expected_note_version=int(note["version"]),
+        actor=TaskActor(actor_type="user", actor_id=db.client_id),
+    )
+
+    assert len(captured) == 1
+    assert [step.domain for step in captured[0].steps] == [
+        "notes.task",
+        "notes.task_activity",
+    ]
+    assert captured[0].activity.payload.event_type == "created"
 
 
 @pytest.mark.parametrize(

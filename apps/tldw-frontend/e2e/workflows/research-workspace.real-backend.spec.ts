@@ -777,6 +777,137 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
     await assertNoCriticalErrors(diagnostics)
   })
 
+  test("creates the server workspace before loading source saved views", async ({
+    authedPage,
+    serverInfo,
+    diagnostics
+  }) => {
+    skipIfServerUnavailable(serverInfo)
+
+    const workspacePage = new ResearchWorkspacePage(authedPage)
+    await workspacePage.goto()
+    await workspacePage.waitForReady()
+    await ensureNoServerReachabilityDialog(authedPage)
+
+    const initialWorkspaceId = await workspacePage.getWorkspaceId()
+    const timeline: Array<{
+      kind: "upsert-response" | "source-views-request"
+      workspaceId: string
+      at: number
+      sequence: number
+      status?: number
+    }> = []
+    let sequence = 0
+    const parseWorkspaceRequest = (urlString: string) => {
+      const match = new URL(urlString).pathname.match(
+        /\/api\/v1\/workspaces\/([^/]+)(\/source-views)?$/
+      )
+      return match
+        ? {
+            workspaceId: decodeURIComponent(match[1]!),
+            sourceViews: Boolean(match[2])
+          }
+        : null
+    }
+    const onResponse = (response: Response) => {
+      const parsed = parseWorkspaceRequest(response.url())
+      if (!parsed || parsed.sourceViews) return
+      if (response.request().method().toUpperCase() !== "PUT") return
+      timeline.push({
+        kind: "upsert-response",
+        workspaceId: parsed.workspaceId,
+        at: Date.now(),
+        sequence: ++sequence,
+        status: response.status()
+      })
+    }
+    const onRequest = (request: Request) => {
+      const parsed = parseWorkspaceRequest(request.url())
+      if (!parsed?.sourceViews) return
+      if (request.method().toUpperCase() !== "GET") return
+      timeline.push({
+        kind: "source-views-request",
+        workspaceId: parsed.workspaceId,
+        at: Date.now(),
+        sequence: ++sequence
+      })
+    }
+
+    authedPage.on("response", onResponse)
+    authedPage.on("request", onRequest)
+    let freshWorkspaceId: string | null = null
+    try {
+      await workspacePage.resetWorkspace(
+        generateTestId("source-view-parent-order")
+      )
+      await expect
+        .poll(async () => await workspacePage.getWorkspaceId(), {
+          timeout: 10_000,
+          message: "Expected resetWorkspace to publish a fresh workspace ID"
+        })
+        .not.toBe(initialWorkspaceId)
+      freshWorkspaceId = await workspacePage.getWorkspaceId()
+      expect(freshWorkspaceId).toBeTruthy()
+
+      await expect
+        .poll(
+          () => ({
+            upsert: timeline.some(
+              (entry) =>
+                entry.workspaceId === freshWorkspaceId &&
+                entry.kind === "upsert-response"
+            ),
+            sourceViews: timeline.some(
+              (entry) =>
+                entry.workspaceId === freshWorkspaceId &&
+                entry.kind === "source-views-request"
+            )
+          }),
+          {
+            timeout: 30_000,
+            message:
+              "Expected both workspace upsert and source-view list evidence"
+          }
+        )
+        .toEqual({ upsert: true, sourceViews: true })
+
+      const upsert = timeline.find(
+        (entry) =>
+          entry.workspaceId === freshWorkspaceId &&
+          entry.kind === "upsert-response"
+      )
+      const firstSourceViews = timeline.find(
+        (entry) =>
+          entry.workspaceId === freshWorkspaceId &&
+          entry.kind === "source-views-request"
+      )
+      expect(upsert).toMatchObject({ status: expect.any(Number) })
+      expect(upsert?.status).toBeLessThan(400)
+      expect(firstSourceViews).toBeDefined()
+      expect(upsert?.sequence).toBeLessThan(firstSourceViews!.sequence)
+      expect(upsert?.at).toBeLessThanOrEqual(firstSourceViews!.at)
+
+      await expect(
+        authedPage
+          .getByRole("alert")
+          .filter({ hasText: /Source view not found/i })
+      ).toBeHidden({ timeout: 5_000 })
+      await assertNoCriticalErrors(diagnostics)
+    } finally {
+      authedPage.off("response", onResponse)
+      authedPage.off("request", onRequest)
+      if (freshWorkspaceId) {
+        await fetchWithApiKey(
+          `${TEST_CONFIG.serverUrl}/api/v1/workspaces/${encodeURIComponent(
+            freshWorkspaceId
+          )}`,
+          TEST_CONFIG.apiKey,
+          { method: "DELETE" }
+        )
+      }
+    }
+  })
+
   test("passes active workspace ID into ACP run history requests", async ({
     authedPage,
     serverInfo,

@@ -18,6 +18,9 @@ on:
       - "apps/tldw-frontend/package.json"
       - "apps/bun.lock"
       - ".github/workflows/ui-characters-harness-tests.yml"
+  workflow_run:
+    workflows: [Frontend License Gate Audit]
+    types: [completed]
   push:
     branches:
       - main
@@ -40,12 +43,37 @@ permissions:
   contents: read
 
 concurrency:
-  group: ui-characters-harness-tests-${{ github.event.pull_request.head.sha || github.sha }}
+  group: ui-characters-harness-tests-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || github.ref || github.run_id }}
   cancel-in-progress: true
 
 jobs:
+  admission:
+    if: >-
+      vars.LICENSE_FIRST_CI_ENABLED == 'true' &&
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success'
+    uses: ./.github/workflows/license-first-admission.yml
+    with:
+      workflow_file: ui-characters-harness-tests.yml
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+      statuses: read
+
   characters-harness:
     name: ${{ matrix.label }}
+    needs: admission
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        github.event_name != 'workflow_run'
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
@@ -60,6 +88,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+        with:
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2

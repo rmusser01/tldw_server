@@ -81,6 +81,29 @@ describe("NotificationLifecycleProvider", () => {
     mocks.subscribeNotificationsStream.mockImplementation(() => vi.fn())
   })
 
+  it("does not start and abort a throwaway bootstrap during the Strict Mode probe mount", async () => {
+    const signals: AbortSignal[] = []
+    mocks.getUnreadCount.mockImplementation(
+      async (options?: { signal?: AbortSignal }) => {
+        if (options?.signal) signals.push(options.signal)
+        return { unread_count: 5 }
+      }
+    )
+
+    const view = render(
+      <React.StrictMode>
+        <NotificationLifecycleProvider scopeKey="notifications:server-a:user-a">
+          <output>notifications</output>
+        </NotificationLifecycleProvider>
+      </React.StrictMode>
+    )
+
+    await waitFor(() => expect(mocks.getUnreadCount).toHaveBeenCalledTimes(1))
+    expect(signals).toHaveLength(1)
+    expect(signals[0].aborted).toBe(false)
+    view.unmount()
+  })
+
   it("owns one bootstrap, one stream, and one 30-second unread poll", async () => {
     vi.useFakeTimers()
     let streamOptions: Record<string, unknown> | undefined

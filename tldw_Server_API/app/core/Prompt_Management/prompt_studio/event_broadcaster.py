@@ -4,7 +4,6 @@
 import asyncio
 import contextlib
 import json
-import uuid
 from datetime import datetime
 from enum import Enum
 from typing import Any, Optional
@@ -129,9 +128,6 @@ class EventBroadcaster:
             "timestamp": datetime.utcnow().isoformat(),
             "project_id": project_id
         }
-
-        # Log event to database
-        await self._log_event(event_type, data, project_id)
 
         # Convert to JSON
         message = json.dumps(event)
@@ -516,33 +512,6 @@ class EventBroadcaster:
         except Exception as exc:  # pragma: no cover - defensive
             logger.error(f"Error getting project for job: {exc}")
             return None
-
-    async def _log_event(self, event_type: EventType, data: dict[str, Any],
-                        project_id: Optional[int] = None):
-        """
-        Log event to database for history/audit.
-
-        Args:
-            event_type: Event type
-            data: Event data
-            project_id: Associated project ID
-        """
-        try:
-            # Route through DB helper to keep schema consistent across backends
-            payload = dict(data or {})
-            if project_id is not None:
-                payload.setdefault("project_id", project_id)
-            event_uuid = str(uuid.uuid4())
-            # _log_sync_event(entity, entity_uuid, operation, payload)
-            # The helper handles missing sync_log gracefully.
-            self.db._log_sync_event(
-                entity="prompt_studio_event",
-                entity_uuid=event_uuid,
-                operation=event_type.value,
-                payload=payload,
-            )
-        except Exception as e:
-            logger.debug(f"Failed to log event to sync_log (non-fatal): {e}")
 
 ########################################################################################################################
 # Event Hooks for Integration

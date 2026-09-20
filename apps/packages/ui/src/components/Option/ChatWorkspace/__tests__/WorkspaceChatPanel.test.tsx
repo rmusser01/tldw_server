@@ -1,7 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import type { useMessageOption as useMessageOptionHook } from "@/hooks/useMessageOption"
-import { WorkspaceChatPanel } from "../WorkspaceChatPanel"
 import type { StagedWorkspaceSource } from "../types"
 import type { EffectiveWorkspaceAssistantDefault } from "@/types/workspace"
 
@@ -11,7 +10,9 @@ type SubmitPayload = Parameters<UseMessageOptionState["onSubmit"]>[0]
 
 const chatHookState = vi.hoisted(() => {
   const onSubmit = vi.fn<UseMessageOptionState["onSubmit"]>(
-    async (): Promise<any> => ({ status: "submitted" })
+    async (): Promise<Awaited<ReturnType<UseMessageOptionState["onSubmit"]>>> => ({
+      status: "submitted"
+    })
   )
   const stopStreamingRequest = vi.fn()
   const value = {
@@ -34,9 +35,30 @@ const chatHookState = vi.hoisted(() => {
   return { onSubmit, stopStreamingRequest, useMessageOption, value }
 })
 
+const macroServiceMocks = vi.hoisted(() => ({
+  cancelChatMacroRun: vi.fn(),
+  getChatMacroRun: vi.fn()
+}))
+
 vi.mock("@/hooks/useMessageOption", () => ({
   useMessageOption: (...args: Parameters<UseMessageOptionHook>) =>
     chatHookState.useMessageOption(...args)
+}))
+
+vi.mock("@/hooks/chat/chat-action-utils", () => ({
+  isChatSubmitSuccess: (result: { status: string }) => result.status === "submitted",
+  normalizeChatSubmitResult: (result?: { status: string }) =>
+    result ?? { status: "submitted" }
+}))
+
+vi.mock("@/services/chat-macros", () => ({
+  cancelChatMacroRun: (...args: unknown[]) =>
+    macroServiceMocks.cancelChatMacroRun(...args),
+  getChatMacroRun: (...args: unknown[]) => macroServiceMocks.getChatMacroRun(...args)
+}))
+
+vi.mock("../MacroRunDetailDrawer", () => ({
+  MacroRunDetailDrawer: () => null
 }))
 
 vi.mock("@/components/Common/Playground/Message", () => ({
@@ -49,6 +71,12 @@ vi.mock("@/components/Common/Playground/Message", () => ({
     </article>
   )
 }))
+
+let WorkspaceChatPanel: typeof import("../WorkspaceChatPanel").WorkspaceChatPanel
+
+beforeAll(async () => {
+  WorkspaceChatPanel = (await import("../WorkspaceChatPanel")).WorkspaceChatPanel
+})
 
 const staged: StagedWorkspaceSource[] = [
   {
@@ -131,6 +159,136 @@ describe("WorkspaceChatPanel", () => {
     chatHookState.value.serverChatAssistantId = null
     chatHookState.value.serverChatMetaLoaded = false
     chatHookState.onSubmit.mockResolvedValue({ status: "submitted" })
+    macroServiceMocks.cancelChatMacroRun.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { run_id: "run-1", status: "cancel_requested" }
+    })
+  })
+
+  it("renders an active macro response as a status card", () => {
+    chatHookState.value.messages = [
+      {
+        id: "macro-status-1",
+        role: "assistant",
+        message: "Started /wrapup.",
+        metadataExtra: {
+          chat_macro: {
+            run_id: "run-1",
+            command: "wrapup",
+            status: "pending",
+            detail_url: "/api/v1/chat/macros/runs/run-1",
+            output_profile: "default"
+          }
+        }
+      }
+    ] as unknown as UseMessageOptionState["messages"]
+
+    render(
+      <WorkspaceChatPanel
+        stagedSources={[]}
+        onClearStagedSources={vi.fn()}
+        backendAvailable
+        workspaceId="workspace-1"
+      />
+    )
+
+    expect(screen.getByRole("article", { name: "/wrapup macro run pending" })).toBeVisible()
+    expect(screen.queryByTestId("workspace-panel-message")).not.toBeInTheDocument()
+  })
+
+  it("applies a successful macro cancellation to the status card", async () => {
+    chatHookState.value.messages = [
+      {
+        id: "macro-status-1",
+        role: "assistant",
+        message: "Started /wrapup.",
+        metadataExtra: {
+          chat_macro: { run_id: "run-1", command: "wrapup", status: "running" }
+        }
+      }
+    ] as unknown as UseMessageOptionState["messages"]
+    render(
+      <WorkspaceChatPanel
+        stagedSources={[]}
+        onClearStagedSources={vi.fn()}
+        backendAvailable
+        workspaceId="workspace-1"
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel macro run" }))
+
+    await waitFor(() =>
+      expect(macroServiceMocks.cancelChatMacroRun).toHaveBeenCalledWith("run-1")
+    )
+    expect(
+      screen.getByRole("article", { name: "/wrapup macro run cancel_requested" })
+    ).toBeVisible()
+    expect(screen.queryByRole("button", { name: "Cancel macro run" }))
+      .not.toBeInTheDocument()
+  })
+
+  it("shows an error when macro cancellation fails", async () => {
+    macroServiceMocks.cancelChatMacroRun.mockResolvedValueOnce({
+      ok: false,
+      status: 503,
+      error: "Jobs manager unavailable"
+    })
+    chatHookState.value.messages = [
+      {
+        id: "macro-status-1",
+        role: "assistant",
+        message: "Started /wrapup.",
+        metadataExtra: {
+          chat_macro: { run_id: "run-1", command: "wrapup", status: "running" }
+        }
+      }
+    ] as unknown as UseMessageOptionState["messages"]
+    render(
+      <WorkspaceChatPanel
+        stagedSources={[]}
+        onClearStagedSources={vi.fn()}
+        backendAvailable
+        workspaceId="workspace-1"
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel macro run" }))
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Jobs manager unavailable"
+    )
+    expect(screen.getByRole("button", { name: "Cancel macro run" })).toBeVisible()
+  })
+
+  it("renders completed macro output as a normal assistant message", () => {
+    chatHookState.value.messages = [
+      {
+        id: "macro-result-1",
+        role: "assistant",
+        message: "## Summary\nFinal wrapup.",
+        metadataExtra: {
+          chat_macro: {
+            run_id: "run-1",
+            command: "wrapup",
+            status: "completed"
+          }
+        }
+      }
+    ] as unknown as UseMessageOptionState["messages"]
+
+    render(
+      <WorkspaceChatPanel
+        stagedSources={[]}
+        onClearStagedSources={vi.fn()}
+        backendAvailable
+        workspaceId="workspace-1"
+      />
+    )
+
+    expect(screen.getByTestId("workspace-panel-message")).toHaveTextContent("Final wrapup.")
+    expect(screen.queryByRole("article", { name: /macro run/ })).not.toBeInTheDocument()
   })
 
   it("inserts staged source summary into the composer without sending and clears structured staging", () => {

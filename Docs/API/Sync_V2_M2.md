@@ -1,7 +1,7 @@
 # Sync v2 M2 API Contract
 
-Date: 2026-05-23
-Status: Planned for M2 implementation
+Date: 2026-08-13
+Status: Implemented
 Scope: Server-connected Chatbook personal sync with blob restore completeness
 
 ## Overview
@@ -62,6 +62,19 @@ capabilities response:
 If `blob_transfer.supported` is false, clients must treat the server as M1 for
 binary content and may still restore `attachment.ref` metadata.
 
+Canonical Notes attachment writes require all of the following at once:
+
+- `SYNC_V2_ENABLE_BLOB_TRANSFER=true`;
+- `SYNC_V2_ENABLE_NOTES_ATTACHMENT_SYNC=true`;
+- server-trusted encryption ready for the dataset;
+- `attachment.ref` enrolled; and
+- dataset metadata `notes_attachment_v2.state` equal to `ready`.
+
+The Notes-specific rollout gate defaults off. When an initialized dataset later
+loses write readiness, canonical metadata remains readable, while content and
+mutations fail closed with stable, sanitized error codes. The server does not
+fall back to legacy filename files after canonical authority exists.
+
 Production deployments keep M2 blob transfer disabled unless explicitly enabled.
 The server factory reads these environment variables:
 
@@ -103,6 +116,27 @@ Quota accounting is DB-backed:
 - dedupe by dataset and full payload hash must not double-charge committed
   blobs.
 
+### Canonical Notes attachment APIs
+
+All canonical routes require `dataset_id`, stable UUIDv4 note/attachment IDs,
+and owner authorization:
+
+| Method and path | Contract |
+| --- | --- |
+| `GET /api/v1/notes/{note_id}/attachments/canonical` | Keyset page with `state_filter=live|tombstoned|all`, an opaque cursor of at most 512 visible-ASCII bytes, and `limit` 1–200 (default 50). |
+| `POST /api/v1/notes/{note_id}/attachments/from-upload` | Body `{"upload_id":"..."}`; binds one completed upload whose trusted create/replace intent exactly matches the note and attachment. |
+| `GET /api/v1/notes/{note_id}/attachments/by-id/{attachment_id}` | Returns strict canonical metadata and the strong ETag. |
+| `PATCH /api/v1/notes/{note_id}/attachments/by-id/{attachment_id}` | Rename-only body `{"file_name":"..."}`. |
+| `DELETE /api/v1/notes/{note_id}/attachments/by-id/{attachment_id}` | Tombstones with optional body `{"reason":"..."}` (maximum 256 characters). |
+| `POST /api/v1/notes/{note_id}/attachments/by-id/{attachment_id}/restore` | Restores with the same optional reason schema. |
+
+Every mutation requires a visible-ASCII `Idempotency-Key` of at most 128 bytes.
+Rename, replace, delete, and restore also require the exact strong
+`If-Match: "att-<uuid>-v<revision>-<object-hash-hex>"` validator. Stale bases
+return a stable conflict without mutation; exact replays return the prior
+result; reuse of a key with different content is rejected. Unknown request
+fields are forbidden.
+
 ## Download Flow
 
 Clients restore uploaded blobs through:
@@ -112,8 +146,23 @@ Clients restore uploaded blobs through:
 
 The manifest reports attachment ID, blob ID, size, content type, full hash,
 availability, server chunk size, and chunk hashes. Whole-blob download is
-available for small blobs in M2. Range/chunk download can be layered over the
-same manifest contract as the storage adapter grows.
+available for small blobs in M2.
+
+Canonical Notes content is also available at
+`GET /api/v1/notes/{note_id}/attachments/by-id/{attachment_id}/content`.
+It supports one RFC 7233 byte range at a time:
+
+- bounded (`bytes=2-5`), suffix (`bytes=-3`), and open-ended (`bytes=7-`)
+  satisfiable requests return `206`, exact `Content-Range` and
+  `Content-Length`, plus `Accept-Ranges: bytes`;
+- an unsatisfied range returns `416` and `Content-Range: bytes */<size>`;
+- multiple or malformed ranges return `400`;
+- a mismatched `If-Range` returns the complete `200` representation; and
+- a matching `If-None-Match` returns `304` before range processing.
+
+Reads stream only from an owner-authorized, exact revision binding to an
+available blob. Missing or mismatched bindings return a sanitized not-found or
+not-ready response and never expose storage keys or filesystem paths.
 
 All blob reads are scoped by authenticated user and dataset ownership.
 
@@ -139,6 +188,36 @@ restore, partial restore, and restore into an existing profile.
 Restore preview uses server-derived blob object state when M2 blob transfer is
 enabled. Client-authored `attachment.ref.availability` is not enough to mark a
 blob as server-available.
+
+For version-2 attachments, a restore plan includes the owning `notes.note`
+before its `attachment.ref`. Selecting an attachment without its required note
+dependency fails closed instead of returning an incomplete plan. Completeness
+is derived from exact immutable revision bindings: `content_complete` requires
+server bytes for every selected ref, while `verified_complete` additionally
+requires the restoring client to report exact local verification.
+
+## Notes Attachment Bootstrap And Storage Namespace
+
+An existing dataset moves through `not_started`, `initializing`, `ready`, or
+`failed` attachment bootstrap state. The resumable bootstrap inventories both
+live and soft-deleted Notes and legacy files, imports each verified source
+through the normal blob path, appends canonical version-2 refs, verifies counts,
+and only then publishes `ready`. A crash resumes from an opaque hash cursor;
+failed verification records a safe error code and keeps writes closed.
+
+Bootstrap diagnostics are read-only and bounded: source candidate counts stop
+at 1,000 and are marked as a lower bound when capped; cleanup samples default to
+none and are capped at 100. Samples expose only source-key hashes, stable
+attachment IDs, and blocker codes—not legacy paths or filenames. Legacy source
+files remain rollback evidence and are never automatically removed.
+
+Every dataset receives an opaque physical storage namespace. New blobs are
+written and verified inside that namespace. A legacy global-digest blob is
+relocated lazily under descriptor-anchored, no-follow filesystem checks; the
+source is retained, targets are never overwritten, partial/corrupt targets fail
+closed, and the database storage key changes only after exact size and digest
+verification. This avoids cross-dataset unlink authority while preserving safe
+retry after crashes.
 
 ## Key Recovery Readiness
 
@@ -172,5 +251,5 @@ M2 intentionally defers:
 - workspace/shared-dataset key rules;
 - background/scheduled sync;
 - cloud object-store backends;
-- physical blob garbage collection beyond safe tombstone metadata and abandoned
-  upload cleanup.
+- retention release and physical blob garbage collection; those are documented
+  in the implemented M3 retention contract.

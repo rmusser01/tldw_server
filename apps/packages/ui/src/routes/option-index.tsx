@@ -23,6 +23,8 @@ import {
   requestQuickIngestOpen
 } from "@/utils/quick-ingest-open"
 import { isSetupStatusRequiringWizard } from "./setup-status"
+import { ConnectionPhase } from "@/types/connection"
+import { useNavigate } from "react-router-dom"
 
 const LazyCompanionHomeShell = React.lazy(() =>
   import("@/components/Option/CompanionHome").then((module) => ({
@@ -90,9 +92,11 @@ const discussFirstSource = (payload: {
   )
 }
 
+const SETUP_BANNER_DISMISSED_KEY = "__tldw_setup_banner_dismissed"
+
 const OptionIndex = () => {
   const hostedMode = isHostedTldwDeployment()
-  const { phase } = useConnectionState()
+  const { phase, serverUrl } = useConnectionState()
   const { checkOnce } = useConnectionActions()
   const {
     state: firstRunState,
@@ -104,6 +108,23 @@ const OptionIndex = () => {
   const [firstSourceDismissed, setFirstSourceDismissed] = React.useState(
     readFirstSourceDismissed
   )
+  const navigate = useNavigate()
+  // Dismissal is scoped per server so switching connections in the same
+  // browser profile does not inherit another server's dismissal.
+  const setupBannerDismissKey = `${SETUP_BANNER_DISMISSED_KEY}::${
+    serverUrl || "unconfigured"
+  }`
+  const [sessionDismissedBannerKeys, setSessionDismissedBannerKeys] =
+    React.useState<ReadonlySet<string>>(() => new Set())
+  const setupBannerDismissed = React.useMemo(() => {
+    if (sessionDismissedBannerKeys.has(setupBannerDismissKey)) return true
+    if (typeof window === "undefined") return false
+    try {
+      return window.localStorage.getItem(setupBannerDismissKey) === "1"
+    } catch {
+      return false
+    }
+  }, [setupBannerDismissKey, sessionDismissedBannerKeys])
   const [lastFirstSourceKind, setLastFirstSourceKind] =
     React.useState<FirstSourceKind>("web_url")
   const quickIngestSession = useQuickIngestSessionStore(
@@ -166,7 +187,14 @@ const OptionIndex = () => {
     )
   }
 
-  if (isSetupStatusRequiringWizard(setupStatus)) {
+  // A connected server means the operator already has a working setup even if
+  // the wizard was never finished (e.g. configured via env or the extension).
+  // Demote the wizard to a dismissible banner instead of walling the home
+  // route (#2871); a true first run (no connection) still gets the wizard.
+  const wizardRequired = isSetupStatusRequiringWizard(setupStatus)
+  const connectionReady = phase === ConnectionPhase.CONNECTED
+
+  if (wizardRequired && !connectionReady) {
     return (
       <OptionLayout hideHeader hideSidebar>
         <UnifiedSetupWizard
@@ -232,8 +260,49 @@ const OptionIndex = () => {
     )
   }
 
+  const dismissSetupBanner = () => {
+    if (typeof window !== "undefined") {
+      try {
+        window.localStorage.setItem(setupBannerDismissKey, "1")
+      } catch {
+        // Dismissal is best-effort frontend-only state.
+      }
+    }
+    setSessionDismissedBannerKeys(
+      (prev) => new Set(prev).add(setupBannerDismissKey)
+    )
+  }
+
   return (
     <OptionLayout>
+      {wizardRequired && connectionReady && !setupBannerDismissed ? (
+        <div
+          role="status"
+          data-testid="resume-setup-banner"
+          className="mx-4 mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-surface px-4 py-3"
+        >
+          <p className="m-0 text-sm text-text">
+            Server setup isn&apos;t finished. Everything is connected, so you
+            can keep working — resume setup whenever you like.
+          </p>
+          <span className="flex items-center gap-2">
+            <button
+              type="button"
+              className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-white hover:bg-primaryStrong"
+              onClick={() => navigate("/setup")}
+            >
+              Resume setup
+            </button>
+            <button
+              type="button"
+              className="rounded-md px-3 py-1.5 text-sm text-text-muted hover:bg-surface2"
+              onClick={dismissSetupBanner}
+            >
+              Dismiss
+            </button>
+          </span>
+        </div>
+      ) : null}
       {showFirstSourcePrompt ? (
         <FirstSourceMilestonePrompt
           readinessStatus={firstSourcePromptStatus}

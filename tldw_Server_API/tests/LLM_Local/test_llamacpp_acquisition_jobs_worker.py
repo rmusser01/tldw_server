@@ -54,8 +54,24 @@ class _RecordingJobManager:
     def get_job(self, job_id: int) -> dict[str, Any]:
         return {"id": job_id, "status": self.status}
 
-    def finalize_cancelled(self, job_id: int, *, reason: str | None = None) -> bool:
-        self.cancelled.append({"job_id": job_id, "reason": reason})
+    def finalize_cancelled(
+        self,
+        job_id: int,
+        *,
+        expected_uuid: str,
+        reason: str | None = None,
+        worker_id: str | None = None,
+        lease_id: str | None = None,
+    ) -> bool:
+        self.cancelled.append(
+            {
+                "job_id": job_id,
+                "reason": reason,
+                "expected_uuid": expected_uuid,
+                "worker_id": worker_id,
+                "lease_id": lease_id,
+            }
+        )
         self.status = "cancelled"
         return True
 
@@ -76,6 +92,9 @@ def _job_for(final_path: Path, *, payload_overrides: dict[str, Any] | None = Non
         payload.update(payload_overrides)
     return {
         "id": 41,
+        "uuid": "job-uuid-41",
+        "worker_id": "llamacpp-acquisition-worker",
+        "lease_id": "lease-41",
         "job_type": LLAMACPP_DOWNLOAD_JOB_TYPE,
         "payload": payload,
         "status": "processing",
@@ -252,7 +271,15 @@ async def test_worker_cancellation_deletes_partial_and_skips_registration(
     assert not final_path.exists()
     assert list(final_path.parent.glob("*.partial")) == []
     assert registered == []
-    assert job_manager.cancelled == [{"job_id": 41, "reason": "cancel requested during download"}]
+    assert job_manager.cancelled == [
+        {
+            "job_id": 41,
+            "reason": "cancel requested during download",
+            "expected_uuid": "job-uuid-41",
+            "worker_id": "llamacpp-acquisition-worker",
+            "lease_id": "lease-41",
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -286,7 +313,15 @@ async def test_worker_cancel_check_error_falls_back_to_jobs_status(
     assert result == {}
     assert not final_path.exists()
     assert list(final_path.parent.glob("*.partial")) == []
-    assert job_manager.cancelled == [{"job_id": 41, "reason": "cancel requested before download"}]
+    assert job_manager.cancelled == [
+        {
+            "job_id": 41,
+            "reason": "cancel requested before download",
+            "expected_uuid": "job-uuid-41",
+            "worker_id": "llamacpp-acquisition-worker",
+            "lease_id": "lease-41",
+        }
+    ]
 
 
 @pytest.mark.asyncio

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from fnmatch import fnmatch
-from typing import Iterable
-
 
 BACKEND_GLOBS = [
     "tldw_Server_API/**",
+    "Helper_Scripts/ci/emit_ci_gate_flags.py",
+    "Helper_Scripts/ci/path_classifier.py",
+    "Helper_Scripts/ci/vitest_base_ratchet.py",
     "pyproject.toml",
     "uv.lock",
     ".github/actions/**",
@@ -24,6 +26,9 @@ TLDW_FRONTEND_GLOBS = [
     "apps/extension/**",
     "apps/bun.lock",
     "apps/tldw-frontend/package-lock.json",
+    "Helper_Scripts/ci/vitest_base_ratchet.py",
+    "Helper_Scripts/ci/vitest_deterministic.config.ts",
+    "Helper_Scripts/ci/vitest_execution_order_reporter.mjs",
 ]
 
 FAMILY_GUARDRAILS_GLOBS = [
@@ -35,6 +40,8 @@ FAMILY_GUARDRAILS_GLOBS = [
 
 ADMIN_UI_GLOBS = [
     "admin-ui/**",
+    "Helper_Scripts/ci/vitest_base_ratchet.py",
+    "Helper_Scripts/ci/vitest_execution_order_reporter.mjs",
 ]
 
 FRONTEND_GLOBS = [

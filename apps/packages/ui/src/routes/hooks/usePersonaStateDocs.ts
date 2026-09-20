@@ -517,15 +517,57 @@ export function usePersonaStateDocs(
   const routeNavigationBlocker = useCompatibleRouteBlocker(
     hasUnsavedPersonaStateChanges
   )
+  const routeNavigationBlockerRef = React.useRef(routeNavigationBlocker)
+  const routeProceedTimerRef = React.useRef<number | null>(null)
+  routeNavigationBlockerRef.current = routeNavigationBlocker
+
+  const cancelRouteProceed = React.useCallback(() => {
+    if (routeProceedTimerRef.current !== null) {
+      window.clearTimeout(routeProceedTimerRef.current)
+      routeProceedTimerRef.current = null
+    }
+  }, [])
 
   React.useEffect(() => {
+    cancelRouteProceed()
     if (routeNavigationBlocker.state !== "blocked") return
-    if (confirmDiscardUnsavedStateDrafts("route_transition")) {
-      routeNavigationBlocker.proceed()
-    } else {
-      routeNavigationBlocker.reset()
+    if (!confirmDiscardUnsavedStateDrafts("route_transition")) {
+      try {
+        routeNavigationBlocker.reset?.()
+      } catch {
+        // A stale router blocker is already safely unblocked.
+      }
+      return
     }
-  }, [confirmDiscardUnsavedStateDrafts, routeNavigationBlocker])
+    const ownedBlocker = routeNavigationBlocker
+    const timer = window.setTimeout(() => {
+      if (routeProceedTimerRef.current !== timer) return
+      routeProceedTimerRef.current = null
+      if (
+        routeNavigationBlockerRef.current !== ownedBlocker ||
+        routeNavigationBlockerRef.current.state !== "blocked"
+      ) return
+      try {
+        ownedBlocker.proceed?.()
+      } catch {
+        // Cleanup or a newer navigation already retired this blocker.
+      }
+    }, 0)
+    routeProceedTimerRef.current = timer
+    return cancelRouteProceed
+  }, [cancelRouteProceed, confirmDiscardUnsavedStateDrafts, routeNavigationBlocker])
+
+  React.useEffect(() => () => {
+    cancelRouteProceed()
+    const current = routeNavigationBlockerRef.current
+    if (current.state === "blocked") {
+      try {
+        current.reset?.()
+      } catch {
+        // The owning router may already be disposed.
+      }
+    }
+  }, [cancelRouteProceed])
 
   // ── beforeunload guard ──
 

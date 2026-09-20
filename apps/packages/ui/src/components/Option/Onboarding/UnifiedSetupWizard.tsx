@@ -422,7 +422,9 @@ export function UnifiedSetupWizard({
           role="alert"
           className="mb-4 rounded-md border border-danger/40 bg-danger/10 px-4 py-3 text-sm text-text"
         >
-          Setup readiness could not be loaded.
+          Setup progress could not be loaded. The server may still be
+          starting, or the connection details may be missing - the wizard
+          works once the app can reach your tldw server.
         </div>
       ) : null}
 

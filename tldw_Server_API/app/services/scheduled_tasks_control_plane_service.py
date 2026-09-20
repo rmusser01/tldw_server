@@ -17,14 +17,15 @@ from tldw_Server_API.app.api.v1.schemas.scheduled_tasks_control_plane_schemas im
     ScheduledTaskDeleteResponse,
     ScheduledTaskListResponse,
 )
+from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase, ReminderTaskRow
+from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import DefinitionRow, ScheduledTasksDatabase
+from tldw_Server_API.app.core.DB_Management.schema_once import ensure_once
+from tldw_Server_API.app.core.DB_Management.Watchlists_DB import JobRow, WatchlistsDatabase
 from tldw_Server_API.app.core.Personalization.companion_activity import (
     record_reminder_task_created,
     record_reminder_task_deleted,
     record_reminder_task_updated,
 )
-from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase, ReminderTaskRow
-from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import DefinitionRow, ScheduledTasksDatabase
-from tldw_Server_API.app.core.DB_Management.Watchlists_DB import JobRow, WatchlistsDatabase
 from tldw_Server_API.app.services.reminders_scheduler import get_reminders_scheduler
 
 _NONCRITICAL_SCHEDULER_EXCEPTIONS = (
@@ -157,13 +158,19 @@ class ScheduledTasksControlPlaneService:
     def _watchlists_db(user_id: int) -> WatchlistsDatabase:
         db = WatchlistsDatabase.for_user(user_id=user_id)
         with suppress(Exception):
-            db.ensure_schema()
+            db.ensure_schema_once()
         return db
 
     @staticmethod
     def _scheduled_tasks_db(user_id: int) -> ScheduledTasksDatabase:
         db = ScheduledTasksDatabase.for_user(user_id=user_id)
-        db.ensure_schema()
+        # ensure_schema() issues ~175 DDL statements and this runs per request.
+        ensure_once(
+            "scheduled_tasks",
+            db.db_path,
+            db.ensure_schema,
+            verify=db.schema_present,
+        )
         return db
 
     @staticmethod

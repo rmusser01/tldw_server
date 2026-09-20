@@ -5,6 +5,15 @@ import { render, screen, waitFor } from "@testing-library/react"
 
 import { Playground } from "../Playground"
 import { useChatSurfaceCoordinatorStore } from "@/store/chat-surface-coordinator"
+import { usePlaygroundSessionStore } from "@/store/playground-session"
+import { webUIResumeLastChat } from "@/services/app"
+import { getRecentChatFromWebUI } from "@/db/dexie/helpers"
+import {
+  encodeSidepanelChatWebUiHandoff,
+  SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM
+} from "@/services/tldw/sidepanel-chat-webui-handoff"
+import { SETTINGS_SERVER_CHAT_ID_PARAM } from "@/utils/settings-return"
+import type { PlaygroundSessionRestoreOutcome } from "@/hooks/usePlaygroundSessionPersistence"
 
 const messageOptionState = vi.hoisted(() => ({
   value: {
@@ -36,7 +45,9 @@ const messageOptionState = vi.hoisted(() => ({
 
 const sessionPersistenceState = vi.hoisted(() => ({
   value: {
-    restoreSession: vi.fn(async () => false),
+    restoreSession: vi.fn<() => Promise<PlaygroundSessionRestoreOutcome>>(
+      async () => "not-restored"
+    ),
     clearPersistedSession: vi.fn(async () => undefined),
     sessionScopeReady: true,
     hasPersistedSession: false,
@@ -46,7 +57,7 @@ const sessionPersistenceState = vi.hoisted(() => ({
 }))
 
 const restoreDecisionState = vi.hoisted(() => ({
-  value: false
+  value: false as boolean | null
 }))
 
 const tldwClientState = vi.hoisted(() => ({
@@ -56,6 +67,10 @@ const tldwClientState = vi.hoisted(() => ({
     id,
     name: "Route Character"
   }))
+}))
+
+const loadLocalConversationState = vi.hoisted(() => ({
+  value: vi.fn(async () => undefined)
 }))
 
 vi.mock("react-i18next", () => ({
@@ -84,9 +99,20 @@ vi.mock("@/hooks/usePlaygroundSessionPersistence", () => ({
   usePlaygroundSessionPersistence: () => sessionPersistenceState.value
 }))
 
-vi.mock("@/hooks/playground-session-restore", () => ({
-  shouldRestorePersistedPlaygroundSession: () => restoreDecisionState.value
-}))
+vi.mock("@/hooks/playground-session-restore", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/hooks/playground-session-restore")
+  >("@/hooks/playground-session-restore")
+  return {
+    shouldRestorePersistedPlaygroundSession: (
+      input: Parameters<
+        typeof actual.shouldRestorePersistedPlaygroundSession
+      >[0]
+    ) =>
+      restoreDecisionState.value ??
+      actual.shouldRestorePersistedPlaygroundSession(input)
+  }
+})
 
 vi.mock("@/services/app", () => ({
   webUIResumeLastChat: vi.fn(async () => false)
@@ -96,9 +122,15 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: tldwClientState
 }))
 
-vi.mock("@/services/tldw-server", () => ({
-  fetchChatModels: vi.fn(async () => [])
-}))
+vi.mock("@/services/tldw-server", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/services/tldw-server")
+  >()
+  return {
+    ...actual,
+    fetchChatModels: vi.fn(async () => [])
+  }
+})
 
 vi.mock("@/db/dexie/helpers", () => ({
   formatToChatHistory: vi.fn(),
@@ -188,7 +220,7 @@ vi.mock("@/hooks/useMediaQuery", () => ({
 }))
 
 vi.mock("@/hooks/useLoadLocalConversation", () => ({
-  useLoadLocalConversation: () => vi.fn(async () => {})
+  useLoadLocalConversation: () => loadLocalConversationState.value
 }))
 
 vi.mock("@/hooks/useServerChatHistory", () => ({
@@ -249,7 +281,10 @@ describe("Playground coordinator integration", () => {
       id,
       name: "Route Character"
     }))
-    sessionPersistenceState.value.restoreSession = vi.fn(async () => false)
+    loadLocalConversationState.value.mockClear()
+    sessionPersistenceState.value.restoreSession = vi.fn(
+      async () => "not-restored" as const
+    )
     sessionPersistenceState.value.clearPersistedSession = vi.fn(
       async () => undefined
     )
@@ -258,6 +293,11 @@ describe("Playground coordinator integration", () => {
     sessionPersistenceState.value.persistedHistoryId = null
     sessionPersistenceState.value.persistedServerChatId = null
     restoreDecisionState.value = false
+    usePlaygroundSessionStore.setState({ restoreRevision: 0 })
+    vi.mocked(webUIResumeLastChat).mockReset()
+    vi.mocked(webUIResumeLastChat).mockResolvedValue(false)
+    vi.mocked(getRecentChatFromWebUI).mockReset()
+    vi.mocked(getRecentChatFromWebUI).mockResolvedValue(null)
 
     useChatSurfaceCoordinatorStore.setState({
       routeId: null,
@@ -285,7 +325,7 @@ describe("Playground coordinator integration", () => {
   })
 
   it("waits for session scope readiness before consuming the one-time restore pass", async () => {
-    const restoreSession = vi.fn(async () => true)
+    const restoreSession = vi.fn(async () => "restored" as const)
     sessionPersistenceState.value.restoreSession = restoreSession
     sessionPersistenceState.value.sessionScopeReady = false
     sessionPersistenceState.value.hasPersistedSession = false
@@ -306,8 +346,60 @@ describe("Playground coordinator integration", () => {
     })
   })
 
+  it("falls back to recent chat only when restore reports nothing restored", async () => {
+    sessionPersistenceState.value.restoreSession = vi.fn(
+      async () => "not-restored" as const
+    )
+    sessionPersistenceState.value.hasPersistedSession = true
+    restoreDecisionState.value = true
+    vi.mocked(webUIResumeLastChat).mockResolvedValue(true)
+
+    render(<Playground />)
+
+    await waitFor(() => {
+      expect(getRecentChatFromWebUI).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  it("stops recent-chat initialization when restore reports cancellation", async () => {
+    sessionPersistenceState.value.restoreSession = vi.fn(
+      async () => "cancelled" as const
+    )
+    sessionPersistenceState.value.hasPersistedSession = true
+    restoreDecisionState.value = true
+    vi.mocked(webUIResumeLastChat).mockResolvedValue(true)
+
+    render(<Playground />)
+
+    await waitFor(() => {
+      expect(sessionPersistenceState.value.restoreSession).toHaveBeenCalledTimes(1)
+    })
+    expect(webUIResumeLastChat).not.toHaveBeenCalled()
+    expect(getRecentChatFromWebUI).not.toHaveBeenCalled()
+  })
+
+  it("does not overwrite a server chat selected while session scope initializes", async () => {
+    const restoreSession = vi.fn(async () => "restored" as const)
+    sessionPersistenceState.value.restoreSession = restoreSession
+    sessionPersistenceState.value.sessionScopeReady = false
+    sessionPersistenceState.value.hasPersistedSession = true
+    sessionPersistenceState.value.persistedServerChatId = "persisted-chat"
+    restoreDecisionState.value = null
+
+    const { rerender } = render(<Playground />)
+
+    messageOptionState.value.serverChatId = "selected-chat"
+    sessionPersistenceState.value.sessionScopeReady = true
+    rerender(<Playground />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId("playground-chat")).toBeInTheDocument()
+    })
+    expect(restoreSession).not.toHaveBeenCalled()
+  })
+
   it("applies explicit character chat route ids before persisted session restore", async () => {
-    const restoreSession = vi.fn(async () => true)
+    const restoreSession = vi.fn(async () => "restored" as const)
     sessionPersistenceState.value.restoreSession = restoreSession
     sessionPersistenceState.value.hasPersistedSession = true
     sessionPersistenceState.value.persistedServerChatId = "persisted-chat"
@@ -330,7 +422,7 @@ describe("Playground coordinator integration", () => {
   })
 
   it("applies character route ids before persisted session restore", async () => {
-    const restoreSession = vi.fn(async () => true)
+    const restoreSession = vi.fn(async () => "restored" as const)
     sessionPersistenceState.value.restoreSession = restoreSession
     sessionPersistenceState.value.hasPersistedSession = true
     sessionPersistenceState.value.persistedServerChatId = "persisted-chat"
@@ -349,12 +441,62 @@ describe("Playground coordinator integration", () => {
       )
     })
     expect(restoreSession).not.toHaveBeenCalled()
+    expect(usePlaygroundSessionStore.getState().restoreRevision).toBeGreaterThan(0)
     expect(messageOptionState.value.setSelectedCharacter).toHaveBeenCalledWith(
       expect.objectContaining({
         id: "route-character",
         name: "Route Character"
       })
     )
+  })
+
+  it("applies a settings-return server chat before persisted session restore", async () => {
+    const restoreSession = vi.fn(async () => "restored" as const)
+    sessionPersistenceState.value.restoreSession = restoreSession
+    sessionPersistenceState.value.hasPersistedSession = true
+    sessionPersistenceState.value.persistedServerChatId = "persisted-chat"
+    restoreDecisionState.value = true
+    window.history.pushState(
+      {},
+      "",
+      `/chat?${SETTINGS_SERVER_CHAT_ID_PARAM}=settings-chat`
+    )
+
+    render(<Playground />)
+
+    await waitFor(() => {
+      expect(messageOptionState.value.setServerChatId).toHaveBeenCalledWith(
+        "settings-chat"
+      )
+    })
+    expect(restoreSession).not.toHaveBeenCalled()
+  })
+
+  it("applies a sidepanel handoff before persisted session restore", async () => {
+    const restoreSession = vi.fn(async () => "restored" as const)
+    sessionPersistenceState.value.restoreSession = restoreSession
+    sessionPersistenceState.value.hasPersistedSession = true
+    sessionPersistenceState.value.persistedServerChatId = "persisted-chat"
+    restoreDecisionState.value = true
+    const handoff = encodeSidepanelChatWebUiHandoff({
+      source: "sidepanel-chat",
+      createdAt: Date.now(),
+      serverChatId: "handoff-chat"
+    })
+    window.history.pushState(
+      {},
+      "",
+      `/chat?${SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM}=${encodeURIComponent(handoff)}`
+    )
+
+    render(<Playground />)
+
+    await waitFor(() => {
+      expect(messageOptionState.value.setServerChatId).toHaveBeenCalledWith(
+        "handoff-chat"
+      )
+    })
+    expect(restoreSession).not.toHaveBeenCalled()
   })
 
   it("starts a fresh character route chat over an active server chat", async () => {

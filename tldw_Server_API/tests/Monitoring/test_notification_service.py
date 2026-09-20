@@ -559,6 +559,8 @@ def test_notify_generic_redacts_sensitive_payload_before_storage_and_webhook(mon
     assert "colon-bearer" not in written
     assert written.count("[REDACTED]") >= 5
     assert "ts" not in payload
+    written_payload = json.loads(written)
+    assert written_payload["ts"]
 
     queued = list(svc._delivery_queue.queue)
     assert queued[0][0] == "webhook"
@@ -568,6 +570,54 @@ def test_notify_generic_redacts_sensitive_payload_before_storage_and_webhook(mon
     assert queued_payload["items"][0][refresh_key] == "[REDACTED]"
     assert queued_payload["message"] == "authorization=[REDACTED] token=[REDACTED]"
     assert queued_payload["colon_message"] == "token: [REDACTED] authorization: [REDACTED] keep"
+    assert queued_payload["ts"] == written_payload["ts"]
+
+
+def test_notify_generic_preserves_supplied_timestamp_without_mutating_input(tmp_path):
+    svc = NotificationService()
+    svc.enabled = True
+    svc.min_severity = "info"
+    svc.file_path = str(tmp_path / "notifications.jsonl")
+    svc.webhook_url = ""
+    payload = {
+        "type": "guardian_alert",
+        "severity": "warning",
+        "ts": "2026-07-18T12:00:00+00:00",
+    }
+    original = dict(payload)
+
+    assert svc.notify_generic(payload) == "logged"
+
+    assert payload == original
+    assert json.loads(Path(svc.file_path).read_text())["ts"] == original["ts"]
+
+
+@pytest.mark.parametrize(
+    ("digest_mode", "expected_result"),
+    [("immediate", "logged"), ("hourly", "batched")],
+)
+def test_notify_or_batch_keeps_caller_payload_unchanged(
+    tmp_path,
+    digest_mode,
+    expected_result,
+):
+    svc = NotificationService()
+    svc.enabled = True
+    svc.min_severity = "info"
+    svc.file_path = str(tmp_path / f"{digest_mode}.jsonl")
+    svc.webhook_url = ""
+    svc.digest_mode = digest_mode
+    payload = {
+        "type": "guardian_alert",
+        "severity": "warning",
+        "user_id": "u1",
+        "nested": {"value": "unchanged"},
+    }
+    original = json.loads(json.dumps(payload))
+
+    assert svc.notify_or_batch(payload) == expected_result
+
+    assert payload == original
 
 
 def test_notify_redacts_topic_alert_metadata_before_storage_and_webhook(monkeypatch, tmp_path):

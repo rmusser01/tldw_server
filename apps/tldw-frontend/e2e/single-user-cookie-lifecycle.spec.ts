@@ -311,35 +311,58 @@ type WebSocketResult = {
   url: string
 }
 
-const inspectWebSocket = async (page: Page, url: string): Promise<WebSocketResult> =>
+/** Open one WebSocket and report whether the browser completed the upgrade. */
+const inspectWebSocket = async (
+  page: Page,
+  url: string,
+  timeoutMs = 15_000
+): Promise<WebSocketResult> =>
   page.evaluate(
-    ({ target }) =>
+    ({ target, timeoutMilliseconds }) =>
       new Promise<WebSocketResult>((resolve) => {
         const socket = new WebSocket(target)
         let settled = false
+        let opened = false
+        let openedUrl = socket.url
         const finish = (result: WebSocketResult) => {
           if (settled) return
           settled = true
           resolve(result)
         }
-        const timeout = window.setTimeout(() => {
+        const timeoutHandle = window.setTimeout(() => {
           socket.close()
-          finish({ opened: false, closeCode: -1, url: socket.url })
-        }, 15_000)
+          finish({ opened, closeCode: -1, url: openedUrl })
+        }, timeoutMilliseconds)
         socket.onopen = () => {
-          window.clearTimeout(timeout)
-          const openedUrl = socket.url
+          opened = true
+          openedUrl = socket.url
           socket.close(1000)
-          finish({ opened: true, closeCode: 1000, url: openedUrl })
         }
         socket.onclose = (event) => {
-          window.clearTimeout(timeout)
-          finish({ opened: false, closeCode: event.code, url: socket.url })
+          window.clearTimeout(timeoutHandle)
+          finish({ opened, closeCode: event.code, url: openedUrl })
         }
         socket.onerror = () => undefined
       }),
-    { target: url }
+    { target: url, timeoutMilliseconds: timeoutMs }
   )
+
+/** Retry transient transport failures while preserving auth-policy failures. */
+const inspectAuthenticatedWebSocket = async (
+  page: Page,
+  url: string
+): Promise<WebSocketResult & { attempts: number }> => {
+  let result: WebSocketResult = { opened: false, closeCode: -1, url }
+  // Next's dev proxy can drop a cold upgrade with 1006. Retry only transport
+  // failures; policy/auth close codes remain immediate failures.
+  for (let attempts = 1; attempts <= 3; attempts += 1) {
+    result = await inspectWebSocket(page, url)
+    if (result.opened || ![-1, 1006].includes(result.closeCode)) {
+      return { ...result, attempts }
+    }
+  }
+  return { ...result, attempts: 3 }
+}
 
 const startHostileOrigin = async (): Promise<Server> => {
   const server = createServer((_request, response) => {
@@ -512,18 +535,26 @@ test.describe.serial("single-user HttpOnly cookie lifecycle", () => {
         waitUntil: "load",
       })
 
-      const wsBase = WEB_URL.replace(/^http/, "ws")
+      // Validate the backend's cookie-authenticated WebSockets directly. Next's
+      // development rewrite proxy is HTTP-oriented and can drop WS upgrades.
+      const wsBase = API_URL.replace("127.0.0.1", "localhost").replace(
+        /^http/,
+        "ws"
+      )
+      // Probe audio last because it starts a heavier streaming session before
+      // observing the client close; its teardown must not delay other upgrades.
       const representativeSockets = [
+        `${wsBase}/api/v1/prompt-studio/ws`,
         `${wsBase}/api/v1/persona/stream`,
         `${wsBase}/api/v1/acp/multiplex`,
         `${wsBase}/api/v1/audio/stream/transcribe`,
-        `${wsBase}/api/v1/prompt-studio/ws`,
       ]
       for (const socketUrl of representativeSockets) {
-        const result = await inspectWebSocket(page, socketUrl)
-        expect(result.opened, `${socketUrl} did not authenticate through the cookie`).toBe(
-          true
-        )
+        const result = await inspectAuthenticatedWebSocket(page, socketUrl)
+        expect(
+          result.opened,
+          `${socketUrl} did not authenticate through the cookie: ${JSON.stringify(result)}`
+        ).toBe(true)
         expect(new URL(result.url).searchParams.has("api_key")).toBe(false)
         expect(new URL(result.url).searchParams.has("token")).toBe(false)
         expect(result.url).not.toContain(INITIAL_API_KEY)

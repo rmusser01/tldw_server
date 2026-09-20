@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import importlib
+import json
 import sys
 
 import pytest
-
 
 pytestmark = pytest.mark.unit
 
@@ -92,15 +92,105 @@ def test_initialize_startup_sentry_initializes_sentry_when_dsn_present(
         import_exceptions=(ImportError,),
     )
 
-    assert observed == {
+    expected = {
         "dsn": "https://dsn.example/123",
         "traces_sample_rate": 0.25,
         "environment": "production",
         "release": "2.3.4",
         "send_default_pii": False,
+        "max_request_body_size": "never",
     }
+    assert {key: observed[key] for key in expected} == expected
+    assert callable(observed.get("before_send"))
+    assert callable(observed.get("before_send_transaction"))
     assert logger.info_messages == ["App Startup: Sentry error tracking initialized"]
     assert logger.warning_messages == []
+
+
+def test_startup_sentry_drops_sensitive_source_from_error_and_trace_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sentry = _import_startup_sentry()
+    logger = _FakeLogger()
+    observed: dict[str, object] = {}
+    sentinel = "PRIVATE_HTML_CAPTURE_2bc116"
+
+    monkeypatch.setattr(
+        sentry,
+        "_getenv",
+        lambda name, default="": ("https://dsn.example/123" if name == "SENTRY_DSN" else default),
+    )
+    monkeypatch.setattr(sentry, "_init_sentry", lambda **kwargs: observed.update(kwargs))
+
+    sentry.initialize_startup_sentry(
+        logger=logger,
+        startup_guard_exceptions=(RuntimeError,),
+        import_exceptions=(ImportError,),
+    )
+
+    assert observed.get("max_request_body_size") == "never"
+    for hook_name in ("before_send", "before_send_transaction"):
+        hook = observed.get(hook_name)
+        assert callable(hook), f"missing {hook_name} sensitive-capture policy"
+        event = {
+            "request": {
+                "method": "POST",
+                "url": "https://example.test/api/v1/slides/generations",
+                "data": {"html_document": sentinel},
+            },
+            "exception": {"values": [{"value": sentinel}]},
+            "message": sentinel,
+            "breadcrumbs": {"values": [{"message": sentinel}]},
+            "contexts": {"trace": {"data": {"source": sentinel}}},
+            "tags": {"source_metric_label": sentinel},
+            "spans": [{"description": sentinel}],
+        }
+        if hook_name == "before_send_transaction":
+            event.update(
+                {
+                    "type": "transaction",
+                    "transaction": sentinel,
+                    "start_timestamp": 1.0,
+                    "timestamp": 2.0,
+                }
+            )
+        captured = hook(
+            event,
+            {"exc_info": (RuntimeError, RuntimeError(sentinel), None)},
+        )
+
+        assert sentinel not in json.dumps(captured, default=str)
+        if hook_name == "before_send_transaction":
+            assert captured["type"] == "transaction"
+            assert captured["transaction"] == "standalone_slides_route"
+
+
+def test_startup_sentry_leaves_unrelated_events_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sentry = _import_startup_sentry()
+    logger = _FakeLogger()
+    observed: dict[str, object] = {}
+    event = {
+        "request": {"method": "POST", "url": "https://example.test/api/v1/chat/completions"},
+        "message": "ordinary failure",
+    }
+
+    monkeypatch.setattr(
+        sentry,
+        "_getenv",
+        lambda name, default="": ("https://dsn.example/123" if name == "SENTRY_DSN" else default),
+    )
+    monkeypatch.setattr(sentry, "_init_sentry", lambda **kwargs: observed.update(kwargs))
+    sentry.initialize_startup_sentry(
+        logger=logger,
+        startup_guard_exceptions=(RuntimeError,),
+        import_exceptions=(ImportError,),
+    )
+
+    before_send = observed["before_send"]
+    assert callable(before_send)
+    assert before_send(event, {}) is event
 
 
 def test_initialize_startup_sentry_logs_warning_on_failures(
@@ -128,6 +218,4 @@ def test_initialize_startup_sentry_logs_warning_on_failures(
     )
 
     assert logger.info_messages == []
-    assert logger.warning_messages == [
-        "App Startup: Sentry initialization failed"
-    ]
+    assert logger.warning_messages == ["App Startup: Sentry initialization failed"]

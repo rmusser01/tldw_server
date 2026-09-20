@@ -1,0 +1,32 @@
+{
+  "href": "/persona?persona_id=e0a442a5-3861-4529-a332-a5391626f51f&tab=live&session_id=5850d569-e2b6-41c7-84f4-36910a998b2b",
+  "frames": [
+    {
+      "event": "notice",
+      "session_id": "5f36fc3843ec41a08f301afdfe2df9a9"
+    },
+    {
+      "event": "tool_plan",
+      "session_id": "5850d569-e2b6-41c7-84f4-36910a998b2b",
+      "plan_id": "49c4ddf126c1484ba355086aecd48720",
+      "client_message_id": "persona-buddy-draft:f824e7fb-2cbe-44cf-bf27-8a9ceb7f1d0e"
+    },
+    {
+      "event": "tool_plan",
+      "session_id": "5850d569-e2b6-41c7-84f4-36910a998b2b",
+      "plan_id": "d8af72c8b0614ce4808bed46b422fec8",
+      "client_message_id": "persona-buddy-draft:b06de716-f313-46c8-b9cb-d26dfb593191"
+    }
+  ],
+  "buttons": [
+    "",
+    "",
+    "",
+    "",
+    "",
+    "Reset setup",
+    "Open Buddy builder",
+    "Run dry-run test",
+    "Connect live session"
+  ]
+}

@@ -149,8 +149,21 @@ export class PromptsWorkspacePage extends BasePage {
   async createPrompt(opts: CreatePromptOptions): Promise<void> {
     await this.newPromptButton.click()
 
-    // The full-page editor opens by default; fall back to the drawer
-    const fullEditorVisible = await this.fullPageEditor.isVisible({ timeout: 5_000 }).catch(() => false)
+    // The full-page editor is lazy-loaded. Wait for either supported editor
+    // instead of treating isVisible() as a wait and racing the chunk load.
+    await expect
+      .poll(
+        async () => {
+          const fullEditorVisible = await this.fullPageEditor.isVisible().catch(() => false)
+          const drawerVisible = await this.drawerNameInput.isVisible().catch(() => false)
+          return fullEditorVisible || drawerVisible
+        },
+        { timeout: 10_000 }
+      )
+      .toBe(true)
+
+    // The full-page editor opens by default; fall back to the drawer.
+    const fullEditorVisible = await this.fullPageEditor.isVisible().catch(() => false)
 
     if (fullEditorVisible) {
       // Full-page editor path

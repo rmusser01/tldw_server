@@ -1,4 +1,5 @@
 import os
+
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 
 
@@ -45,7 +46,7 @@ def test_quarantine_and_requeue_updates_counters(monkeypatch, tmp_path):
             conn.execute(
                 (
                     "UPDATE jobs SET status='queued', failure_streak_count=0, failure_streak_code=NULL, quarantined_at=NULL, "
-                    "available_at = DATETIME('now'), leased_until=NULL, worker_id=NULL, lease_id=NULL WHERE domain=? AND queue=? AND job_type=? AND status='quarantined'"
+                    "available_at=NULL, leased_until=NULL, worker_id=NULL, lease_id=NULL WHERE domain=? AND queue=? AND job_type=? AND status='quarantined'"
                 ),
                 ("chatbooks", "default", "export"),
             )

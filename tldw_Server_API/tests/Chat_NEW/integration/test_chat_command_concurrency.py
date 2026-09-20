@@ -21,7 +21,11 @@ def _relax_chat_rate_limits_for_command_tests(monkeypatch, _reset_chat_rate_limi
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_chat_command_concurrency_respects_rate_limit(async_client, auth_headers, monkeypatch):
+async def test_chat_command_concurrency_respects_rate_limit(
+    credentialed_async_client,
+    auth_headers,
+    monkeypatch,
+):
     monkeypatch.setenv("CHAT_COMMANDS_ENABLED", "1")
     monkeypatch.setenv("CHAT_COMMANDS_RATE_LIMIT_USER", "1")
     monkeypatch.setenv("CHAT_COMMANDS_RATE_LIMIT_GLOBAL", "100")
@@ -79,7 +83,11 @@ async def test_chat_command_concurrency_respects_rate_limit(async_client, auth_h
     }
 
     async def call():
-        return await async_client.post("/api/v1/chat/completions", json=payload, headers=auth_headers)
+        return await credentialed_async_client.post(
+            "/api/v1/chat/completions",
+            json=payload,
+            headers=auth_headers,
+        )
 
     responses = await asyncio.gather(*[call() for _ in range(10)])
     assert all(resp.status_code == 200 for resp in responses)

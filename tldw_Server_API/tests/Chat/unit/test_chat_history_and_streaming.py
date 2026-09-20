@@ -1,13 +1,16 @@
 import asyncio
+import json
 from contextlib import asynccontextmanager
 from typing import Any, Dict, Optional, List
 
 import pytest
+from loguru import logger
 from unittest.mock import AsyncMock, MagicMock
 
 pytestmark = pytest.mark.unit
 
 from tldw_Server_API.app.core.Chat import chat_service
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAuthenticationError
 from tldw_Server_API.app.core.Chat.streaming_utils import StreamingResponseHandler
 
 
@@ -454,6 +457,7 @@ async def test_streaming_handler_persists_tool_calls():
 
     async def chunk_stream():
         yield "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\n"
+        yield 'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
         yield "data: [DONE]\n\n"
 
     saver = DummySave()
@@ -595,3 +599,138 @@ def test_document_generator_accepts_string_ids(tmp_path):
 
     job = generator.get_job_status(job_id)
     assert job is not None
+
+
+_STREAM_ERROR_SENTINEL = "sk-stream-secret /private/provider.log https://provider.invalid/raw"
+
+
+def _stream_error_payload(wire_shape: str, *, known: bool) -> object:
+    code = "provider_authentication_failed" if known else "provider_private_failure"
+    nested = {"error": {"code": code, "message": _STREAM_ERROR_SENTINEL}}
+    if wire_shape == "dict":
+        return nested
+    if wire_shape == "bare":
+        return {"code": code, "message": _STREAM_ERROR_SENTINEL}
+    encoded = f"data: {json.dumps(nested)}\n\n"
+    return encoded.encode() if wire_shape == "bytes" else encoded
+
+
+def _error_frames(chunks: list[str]) -> list[dict[str, Any]]:
+    frames: list[dict[str, Any]] = []
+    for chunk in chunks:
+        for line in chunk.splitlines():
+            if not line.startswith("data: ") or line == "data: [DONE]":
+                continue
+            try:
+                payload = json.loads(line.removeprefix("data: "))
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict) and "error" in payload:
+                frames.append(payload)
+    return frames
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream_kind", ["sync", "async"])
+@pytest.mark.parametrize("wire_shape", ["dict", "string", "bytes"])
+@pytest.mark.parametrize("known", [True, False])
+async def test_streaming_handler_sanitizes_every_inband_error_shape(
+    stream_kind,
+    wire_shape,
+    known,
+):
+    payload = _stream_error_payload(wire_shape, known=known)
+    closed = False
+
+    if stream_kind == "async":
+
+        async def source():
+            nonlocal closed
+            try:
+                yield payload
+            finally:
+                closed = True
+
+    else:
+
+        def source():
+            nonlocal closed
+            try:
+                yield payload
+            finally:
+                closed = True
+
+    handler = StreamingResponseHandler("conv", "model", heartbeat_interval=0)
+    logs: list[str] = []
+    sink_id = logger.add(logs.append, format="{message}")
+    try:
+        chunks = [chunk async for chunk in handler.safe_stream_generator(source())]
+    finally:
+        logger.remove(sink_id)
+
+    frames = _error_frames(chunks)
+    expected_code = "provider_authentication_failed" if known else "provider_unavailable"
+    assert len(frames) == 1
+    assert frames[0]["error"] == {
+        "code": expected_code,
+        "type": expected_code,
+        "message": (
+            "The selected provider credentials could not be authenticated."
+            if known
+            else "The chat service provider is currently unavailable."
+        ),
+    }
+    assert sum(chunk.strip().lower() == "data: [done]" for chunk in chunks) == 1
+    assert closed is True
+    assert _STREAM_ERROR_SENTINEL not in "".join(chunks)
+    assert _STREAM_ERROR_SENTINEL not in "".join(logs)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream_kind", ["sync", "async"])
+@pytest.mark.parametrize("known", [True, False])
+async def test_streaming_handler_sanitizes_raised_provider_errors(stream_kind, known):
+    closed = False
+    error = (
+        ChatAuthenticationError(_STREAM_ERROR_SENTINEL, provider="openai")
+        if known
+        else RuntimeError(_STREAM_ERROR_SENTINEL)
+    )
+
+    if stream_kind == "async":
+
+        async def source():
+            nonlocal closed
+            try:
+                if False:
+                    yield ""
+                raise error
+            finally:
+                closed = True
+
+    else:
+
+        def source():
+            nonlocal closed
+            try:
+                if False:
+                    yield ""
+                raise error
+            finally:
+                closed = True
+
+    handler = StreamingResponseHandler("conv", "model", heartbeat_interval=0)
+    logs: list[str] = []
+    sink_id = logger.add(logs.append, format="{message}")
+    try:
+        chunks = [chunk async for chunk in handler.safe_stream_generator(source())]
+    finally:
+        logger.remove(sink_id)
+
+    frames = _error_frames(chunks)
+    expected_code = "provider_authentication_failed" if known else "provider_unavailable"
+    assert len(frames) == 1
+    assert frames[0]["error"]["code"] == expected_code
+    assert closed is True
+    assert _STREAM_ERROR_SENTINEL not in "".join(chunks)
+    assert _STREAM_ERROR_SENTINEL not in "".join(logs)

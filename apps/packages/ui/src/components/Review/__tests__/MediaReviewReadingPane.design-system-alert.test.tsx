@@ -66,8 +66,10 @@ const makeDetail = (): MediaDetail => ({
   content: "Transcript body"
 })
 
-const makeState = (): MediaReviewState => {
-  const detail = makeDetail()
+const makeState = (
+  detail: MediaDetail = makeDetail(),
+  failedIds: Set<string | number> = new Set([detail.id])
+): MediaReviewState => {
   const viewerVirtualizer = makeVirtualizer()
   const stackVirtualizer = makeVirtualizer()
 
@@ -91,7 +93,7 @@ const makeState = (): MediaReviewState => {
     setDetails: vi.fn(),
     detailLoading: {},
     setDetailLoading: vi.fn(),
-    failedIds: new Set([detail.id]),
+    failedIds,
     setFailedIds: vi.fn(),
     viewMode: "spread",
     viewModeState: "spread",
@@ -194,5 +196,26 @@ describe("MediaReviewReadingPane product-state alerts", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Retry" }))
     expect(retryFetch).toHaveBeenCalledWith(42)
+  })
+
+  it("shows analysis persisted under the media detail processing field", () => {
+    const detail = {
+      ...makeDetail(),
+      processing: {
+        analysis: "Persisted analysis from the real backend"
+      }
+    } as MediaDetail
+
+    render(
+      <MediaReviewReadingPane
+        state={makeState(detail, new Set())}
+        actions={makeActions()}
+      />
+    )
+
+    expect(
+      screen.getByText("Persisted analysis from the real backend")
+    ).toBeInTheDocument()
+    expect(screen.queryByText("Analysis not available")).not.toBeInTheDocument()
   })
 })

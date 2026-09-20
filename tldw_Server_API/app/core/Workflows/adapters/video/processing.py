@@ -31,6 +31,7 @@ from tldw_Server_API.app.core.Workflows.adapters.video._config import (
     VideoThumbnailConfig,
     VideoTrimConfig,
 )
+from tldw_Server_API.app.core.Workflows.subprocess_utils import run_checked_async
 
 
 @registry.register(
@@ -84,7 +85,7 @@ async def run_video_trim_adapter(config: dict[str, Any], context: dict[str, Any]
             cmd.extend(["-t", str(duration)])
         cmd.extend(["-c", "copy", str(output_path)])
 
-        subprocess.run(cmd, check=True, capture_output=True, timeout=600)
+        await run_checked_async(cmd, timeout=600)
 
         return {"output_path": output_path, "trimmed": True}
 
@@ -140,7 +141,7 @@ async def run_video_concat_adapter(config: dict[str, Any], context: dict[str, An
             concat_file = f.name
 
         cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", concat_file, "-c", "copy", str(output_path)]
-        subprocess.run(cmd, check=True, capture_output=True, timeout=1200)
+        await run_checked_async(cmd, timeout=1200)
 
         Path(concat_file).unlink(missing_ok=True)
 
@@ -203,7 +204,7 @@ async def run_video_convert_adapter(config: dict[str, Any], context: dict[str, A
             cmd.extend(["-vf", f"scale={resolution.replace('x', ':')}"])
         cmd.append(str(output_path))
 
-        subprocess.run(cmd, check=True, capture_output=True, timeout=1800)
+        await run_checked_async(cmd, timeout=1800)
 
         return {"output_path": output_path, "converted": True, "format": output_format}
 
@@ -266,7 +267,7 @@ async def run_video_thumbnail_adapter(config: dict[str, Any], context: dict[str,
             "-vframes", "1", "-vf", f"scale={width}:{height}",
             str(output_path)
         ]
-        subprocess.run(cmd, check=True, capture_output=True, timeout=60)
+        await run_checked_async(cmd, timeout=60)
 
         if callable(context.get("add_artifact")):
             context["add_artifact"](
@@ -332,7 +333,7 @@ async def run_video_extract_frames_adapter(config: dict[str, Any], context: dict
             "-frames:v", str(max_frames),
             str(output_pattern)
         ]
-        subprocess.run(cmd, check=True, capture_output=True, timeout=600)
+        await run_checked_async(cmd, timeout=600)
 
         frame_paths = sorted([str(p) for p in art_dir.glob(f"frame_*.{img_format}")])
 

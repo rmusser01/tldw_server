@@ -28,6 +28,7 @@ from tldw_Server_API.app.core.Workflows.adapters.video._config import (
     SubtitleGenerateConfig,
     SubtitleTranslateConfig,
 )
+from tldw_Server_API.app.core.Workflows.subprocess_utils import run_checked_async
 
 
 @registry.register(
@@ -253,7 +254,7 @@ async def run_subtitle_burn_adapter(config: dict[str, Any], context: dict[str, A
             "-c:a", "copy",
             str(output_path)
         ]
-        subprocess.run(cmd, check=True, capture_output=True, timeout=1800)
+        await run_checked_async(cmd, timeout=1800)
 
         return {"output_path": output_path, "burned": True}
 

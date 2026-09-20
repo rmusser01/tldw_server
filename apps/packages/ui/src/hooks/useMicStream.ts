@@ -148,6 +148,7 @@ export function useMicStream(
       source.connect(processor)
       processor.connect(ctx.destination)
       processor.onaudioprocess = (e) => {
+        if (startIdRef.current !== startId) return
         const input = e.inputBuffer.getChannelData(0)
         const pcm =
           streamFormat === "float32"
@@ -162,10 +163,10 @@ export function useMicStream(
       activeRef.current = true
       setActive(true)
     } catch (err) {
-      stop()
+      if (startIdRef.current === startId) stop()
       throw err
     } finally {
-      startingRef.current = false
+      if (startIdRef.current === startId) startingRef.current = false
     }
   }, [reserveCaptureOwner, stop, streamFormat])
 

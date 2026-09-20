@@ -8,7 +8,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from enum import Enum
-from typing import Any
+from typing import Any, Final
 
 _IDENTIFIER_RE = re.compile(r"[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*\Z")
 _DIGEST_RE = re.compile(r"[0-9a-f]{64}\Z")
@@ -16,6 +16,7 @@ _QUERY_NAME_RE = re.compile(r"[A-Za-z0-9_.\[\]-]+\Z")
 _BAD_PERCENT_ESCAPE_RE = re.compile(r"%(?![0-9A-Fa-f]{2})")
 _MISSING = object()
 MAX_PAGINATION_CURSOR = 2_147_483_647
+MAX_OPAQUE_CURSOR_CHARS: Final[int] = 1_024
 CREDENTIALED_ROUTE_SKIP_REASON = "credentialed_route_not_authorized_for_foundation"
 QUERY_MODE_NOT_SUPPORTED_SKIP_REASON = "query_mode_not_supported"
 
@@ -142,7 +143,7 @@ class QueryPair:
     """One immutable query or filter name/value pair."""
 
     name: str
-    value: str
+    value: str = field(repr=False)
 
     def __post_init__(self) -> None:
         if not isinstance(self.name, str) or not _QUERY_NAME_RE.fullmatch(self.name):
@@ -386,7 +387,7 @@ class LiteralTermsQueryValuePolicy:
 
     def __post_init__(self) -> None:
         _validate_query_value_policy_common(self.name, self.required)
-        if type(self.fixed_suffix) is not str or not self.fixed_suffix or "\x00" in self.fixed_suffix:
+        if type(self.fixed_suffix) is not str or "\x00" in self.fixed_suffix:
             raise ValueError("invalid_literal_terms_fixed_suffix")
         if type(self.max_terms) is not int or not 1 <= self.max_terms <= _MAX_LITERAL_TERMS:
             raise ValueError("invalid_literal_terms_max_terms")
@@ -408,8 +409,26 @@ class BoundedTextQueryValuePolicy:
             raise ValueError("invalid_bounded_text_max_chars")
 
 
+@dataclass(frozen=True, slots=True)
+class OpaqueCursorQueryValuePolicy:
+    """Allow one bounded opaque cursor value."""
+
+    name: str
+    max_chars: int
+    required: bool = False
+
+    def __post_init__(self) -> None:
+        _validate_query_value_policy_common(self.name, self.required)
+        if type(self.max_chars) is not int or not 1 <= self.max_chars <= MAX_OPAQUE_CURSOR_CHARS:
+            raise ValueError("invalid_opaque_cursor_max_chars")
+
+
 QueryValuePolicy = (
-    ExactQueryValuePolicy | BoundedDecimalQueryValuePolicy | LiteralTermsQueryValuePolicy | BoundedTextQueryValuePolicy
+    ExactQueryValuePolicy
+    | BoundedDecimalQueryValuePolicy
+    | LiteralTermsQueryValuePolicy
+    | BoundedTextQueryValuePolicy
+    | OpaqueCursorQueryValuePolicy
 )
 
 _QUERY_VALUE_POLICY_TYPES = (
@@ -417,6 +436,7 @@ _QUERY_VALUE_POLICY_TYPES = (
     BoundedDecimalQueryValuePolicy,
     LiteralTermsQueryValuePolicy,
     BoundedTextQueryValuePolicy,
+    OpaqueCursorQueryValuePolicy,
 )
 
 

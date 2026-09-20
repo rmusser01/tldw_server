@@ -1,3 +1,4 @@
+import { resolveRequestTimeout } from "@/utils/request-timeout"
 import { formatErrorMessage } from "@/utils/format-error-message"
 import { isPlaceholderApiKey } from "@/utils/api-key"
 import type { PathOrUrl } from "@/services/tldw/openapi-guard"
@@ -17,6 +18,12 @@ import {
   isSameOriginAbsoluteUrlForConfiguredServer as guardIsSameOriginAbsoluteUrlForConfiguredServer,
   type AllowlistWarnHooks
 } from "@/utils/absolute-url-guard"
+import {
+  createServicePromptScopeChangedError,
+  isRequestConfigScopeChangedError,
+  servicePromptTargetsMatch
+} from "@/services/tldw/service-prompt-scope-error"
+import { deriveScopedUserId } from "@/utils/media-navigation-scope"
 
 export type TldwRequestPayload = {
   path: PathOrUrl
@@ -35,6 +42,7 @@ type TldwRequestRuntime = {
   getConfig: () => Promise<TldwConfigLike>
   refreshAuth?: () => Promise<void>
   fetchFn?: typeof fetch
+  useRuntimeAuthOverride?: boolean
 }
 
 export type BrowserRequestTransport = {
@@ -80,16 +88,6 @@ const normalizeKnownPathQuirks = (path: PathOrUrl): PathOrUrl => {
   return path.replace("/api/v1/media/?", "/api/v1/media?") as PathOrUrl
 }
 
-const isMediaApiPath = (path: string): boolean => /\/api\/v1\/media(?:\/|\?|$)/.test(path)
-const isFilesApiPath = (path: string): boolean => /\/api\/v1\/files(?:\/|\?|$)/.test(path)
-const isSlidesApiPath = (path: string): boolean => /\/api\/v1\/slides(?:\/|\?|$)/.test(path)
-const SLIDES_REQUEST_TIMEOUT_FLOOR_MS = 120000
-// LLM generation and RAG endpoints routinely run far longer than the generic
-// 10s request default. Using the short default aborts normal generations
-// mid-response and surfaces as a spurious "Network error". Default these paths
-// to a generation-appropriate timeout instead (still overridable via config).
-const GENERATION_REQUEST_TIMEOUT_DEFAULT_MS = 120000
-
 const getCurrentBrowserSurface = (): BrowserSurface => {
   if (typeof window === "undefined") {
     return "extension"
@@ -117,46 +115,7 @@ export const deriveRequestTimeout = (
   cfg: TldwConfigLike,
   path: PathOrUrl,
   override?: number
-): number => {
-  if (override && override > 0) return override
-  const p = String(normalizeKnownPathQuirks(path) || "")
-  if (p.includes("/api/v1/chat/completions")) {
-    return Number(cfg?.chatRequestTimeoutMs) > 0
-      ? Number(cfg.chatRequestTimeoutMs)
-      : Number(cfg?.requestTimeoutMs) > 0
-        ? Number(cfg.requestTimeoutMs)
-        : GENERATION_REQUEST_TIMEOUT_DEFAULT_MS
-  }
-  if (p.includes("/api/v1/rag/")) {
-    return Number(cfg?.ragRequestTimeoutMs) > 0
-      ? Number(cfg.ragRequestTimeoutMs)
-      : Number(cfg?.requestTimeoutMs) > 0
-        ? Number(cfg.requestTimeoutMs)
-        : GENERATION_REQUEST_TIMEOUT_DEFAULT_MS
-  }
-  if (isMediaApiPath(p)) {
-    return Number(cfg?.mediaRequestTimeoutMs) > 0
-      ? Number(cfg.mediaRequestTimeoutMs)
-      : Number(cfg?.requestTimeoutMs) > 0
-        ? Number(cfg.requestTimeoutMs)
-        : 10000
-  }
-  if (isFilesApiPath(p)) {
-    return Number(cfg?.mediaRequestTimeoutMs) > 0
-      ? Number(cfg.mediaRequestTimeoutMs)
-      : Number(cfg?.requestTimeoutMs) > 0
-        ? Number(cfg.requestTimeoutMs)
-        : 10000
-  }
-  if (isSlidesApiPath(p)) {
-    const configuredTimeout =
-      Number(cfg?.requestTimeoutMs) > 0 ? Number(cfg.requestTimeoutMs) : 0
-    return Math.max(configuredTimeout, SLIDES_REQUEST_TIMEOUT_FLOOR_MS)
-  }
-  return Number(cfg?.requestTimeoutMs) > 0
-    ? Number(cfg.requestTimeoutMs)
-    : 10000
-}
+): number => resolveRequestTimeout(cfg, String(normalizeKnownPathQuirks(path) || ""), override)
 
 export const parseRetryAfter = (headerValue?: string | null): number | null => {
   if (!headerValue) return null
@@ -289,9 +248,16 @@ export const tldwRequest = async (
     abortSignal,
     responseType
   } = payload || {}
+  // Extension IPC payloads are runtime input despite the TypeScript signature.
+  // Coercing an array/object later would bypass the absolute-URL guard.
+  if (typeof path !== "string") {
+    return { ok: false, status: 400, error: "Request path must be a string" }
+  }
   const normalizedPath = normalizeKnownPathQuirks(path)
   const fetchFn = runtime.fetchFn || fetch
-  const cfg = await runtime.getConfig()
+  const loadedConfig = await runtime.getConfig()
+  // Preserve the dispatched scope even if refresh mutates the config in place.
+  const cfg = loadedConfig ? { ...loadedConfig } : loadedConfig
   const isAbsolute = typeof normalizedPath === "string" && /^https?:/i.test(normalizedPath)
   const absolutePath = isAbsolute ? String(normalizedPath) : ""
   const transport =
@@ -352,6 +318,17 @@ export const tldwRequest = async (
   const url = isAbsolute
     ? normalizedPath
     : transport?.url || String(normalizedPath)
+  if (!isAbsolute && transport?.kind === "same-origin" && pageOrigin) {
+    try {
+      // Browsers interpret //host and /\host as cross-origin URLs, even
+      // though neither is classified as an absolute HTTP URL above.
+      if (new URL(url, pageOrigin).origin !== pageOrigin) {
+        return { ok: false, status: 400, error: ABSOLUTE_URL_BLOCK_ERROR }
+      }
+    } catch {
+      return { ok: false, status: 400, error: ABSOLUTE_URL_BLOCK_ERROR }
+    }
+  }
   const shouldSkipAuth = noAuth || (isAbsolute && !sameOriginAbsoluteUrl)
   const h: Record<string, string> = { ...(headers || {}) }
   const hasContentType = Object.keys(h).some(
@@ -397,7 +374,9 @@ export const tldwRequest = async (
       if (kl === "x-api-key" || kl === "authorization") delete h[k]
     }
     if (!hostedMode) {
-      const runtimeApiKey = String(getRuntimeSingleUserApiKeyOverride() || "").trim()
+      const runtimeApiKey = runtime.useRuntimeAuthOverride === false
+        ? ""
+        : String(getRuntimeSingleUserApiKeyOverride() || "").trim()
       if (runtimeApiKey && !isPlaceholderApiKey(runtimeApiKey)) {
         h["X-API-KEY"] = runtimeApiKey
       } else if (cfg?.authMode === "single-user") {
@@ -445,10 +424,12 @@ export const tldwRequest = async (
   }
 
   const controller = new AbortController()
+  let retryController: AbortController | null = null
   const timeoutMs = deriveRequestTimeout(cfg, normalizedPath, Number(overrideTimeoutMs))
   const onAbort = () => {
     try {
       controller.abort()
+      retryController?.abort()
     } catch {}
   }
   let timeoutId: ReturnType<typeof setTimeout> | null = null
@@ -471,8 +452,10 @@ export const tldwRequest = async (
           ? body
           : JSON.stringify(body)
 
-    // lgtm[js/request-forgery]: url is same-origin/configured-server transport or an allowlisted absolute URL checked above.
+    // A redirect would bypass the destination check above and can forward
+    // custom credentials such as X-API-KEY to another origin.
     let resp = await fetchFn(url, {
+      redirect: "error",
       method,
       headers: h,
       body: resolvedBody,
@@ -503,32 +486,54 @@ export const tldwRequest = async (
         await runtime.refreshAuth()
         refreshSucceeded = true
       } catch (refreshError) {
+        if (isRequestConfigScopeChangedError(refreshError)) {
+          throw refreshError
+        }
         console.warn(
           `${REQUEST_LOG_PREFIX} Token refresh failed — retrying with stale token`,
           refreshError
         )
       }
+      if (abortSignal?.aborted) {
+        const abortError = new Error("Request was aborted during token refresh.")
+        abortError.name = "AbortError"
+        throw abortError
+      }
       const updated = await runtime.getConfig()
+      if (
+        !servicePromptTargetsMatch(cfg || {}, updated || {}) ||
+        deriveScopedUserId({ userId: null, authMode: cfg?.authMode, accessToken: cfg?.accessToken }) !==
+          deriveScopedUserId({ userId: null, authMode: updated?.authMode, accessToken: updated?.accessToken })
+      ) {
+        throw createServicePromptScopeChangedError()
+      }
       const retryHeaders = { ...h }
       for (const k of Object.keys(retryHeaders)) {
         const kl = k.toLowerCase()
         if (kl === "authorization" || kl === "x-api-key") delete retryHeaders[k]
       }
       if (updated?.accessToken) retryHeaders["Authorization"] = `Bearer ${updated.accessToken}`
-      const retryController = new AbortController()
-      retryTimeoutId = setTimeout(() => retryController.abort(), timeoutMs)
-      // lgtm[js/request-forgery]: retry reuses the same validated URL from the initial request.
+      retryController = new AbortController()
+      const activeRetryController = retryController
+      if (abortSignal?.aborted) {
+        const abortError = new Error("Request was aborted before retry.")
+        abortError.name = "AbortError"
+        throw abortError
+      }
+      retryTimeoutId = setTimeout(() => activeRetryController.abort(), timeoutMs)
+      // Keep the same destination boundary after refreshing credentials.
       resp = await fetchFn(url, {
+        redirect: "error",
         method,
         headers: retryHeaders,
         // Reuse the binary-aware serialization from the first attempt. A plain
         // JSON.stringify here corrupts FormData/Blob uploads into "{}".
         body: resolvedBody,
-        signal: retryController.signal
+        signal: activeRetryController.signal
       })
       // Re-arm so the retry body read is bounded as well.
       if (retryTimeoutId) clearTimeout(retryTimeoutId)
-      retryTimeoutId = setTimeout(() => retryController.abort(), timeoutMs)
+      retryTimeoutId = setTimeout(() => activeRetryController.abort(), timeoutMs)
       if (!refreshSucceeded && resp.status === 401) {
         return {
           ok: false,
@@ -601,6 +606,7 @@ export const tldwRequest = async (
 
     return { ok: true, status: resp.status, data, headers: headersOut, retryAfterMs }
   } catch (e: any) {
+    if (isRequestConfigScopeChangedError(e)) throw e
     return {
       ok: false,
       status: 0,

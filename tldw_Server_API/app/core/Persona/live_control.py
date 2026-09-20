@@ -5,9 +5,11 @@ from __future__ import annotations
 import time
 from datetime import datetime, timezone
 from threading import RLock
-from typing import Any
+from typing import Any, Callable
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError
+from tldw_Server_API.app.core.Persona.live_conversation import persona_live_turn_registry
+from tldw_Server_API.app.core.Persona.live_voice_runtime import persona_live_voice_registry
 from tldw_Server_API.app.core.Persona.session_manager import SessionManager
 from tldw_Server_API.app.core.Persona.session_materialization import (
     DEFAULT_PERSONA_ID,
@@ -33,9 +35,11 @@ class PersonaLiveStreamRegistry:
 
     def __init__(self) -> None:
         self._connected: dict[tuple[str, str], int] = {}
+        self._stop_callbacks: dict[tuple[str, str, str], Callable[[], None]] = {}
         self._lock = RLock()
 
-    def mark_connected(self, *, user_id: str, session_id: str) -> None:
+    def mark_connected(self, *, user_id: str, session_id: str,
+                       connection_id: str = "", on_stop: Callable[[], None] | None = None) -> None:
         uid = str(user_id or "").strip()
         sid = str(session_id or "").strip()
         if not uid or not sid:
@@ -43,13 +47,16 @@ class PersonaLiveStreamRegistry:
         with self._lock:
             key = (uid, sid)
             self._connected[key] = self._connected.get(key, 0) + 1
+            if on_stop is not None and connection_id:
+                self._stop_callbacks[(uid, sid, connection_id)] = on_stop
 
-    def mark_disconnected(self, *, user_id: str, session_id: str) -> None:
+    def mark_disconnected(self, *, user_id: str, session_id: str, connection_id: str = "") -> None:
         uid = str(user_id or "").strip()
         sid = str(session_id or "").strip()
         if not uid or not sid:
             return
         with self._lock:
+            self._stop_callbacks.pop((uid, sid, connection_id), None)
             key = (uid, sid)
             count = self._connected.get(key, 0) - 1
             if count > 0:
@@ -68,6 +75,19 @@ class PersonaLiveStreamRegistry:
     def clear(self) -> None:
         with self._lock:
             self._connected.clear()
+            self._stop_callbacks.clear()
+
+    def stop(self, *, user_id: str, session_id: str) -> None:
+        """Notify only connections bound to this owned session."""
+        with self._lock:
+            callbacks = [callback for (uid, sid, _), callback in self._stop_callbacks.items()
+                         if (uid, sid) == (str(user_id), str(session_id))]
+        for callback in callbacks:
+            try:
+                callback()
+            except RuntimeError:
+                # A disconnect may close the owning loop after this snapshot.
+                continue
 
 
 persona_live_stream_registry = PersonaLiveStreamRegistry()
@@ -341,7 +361,11 @@ def build_live_session_summary(
         "recovery_hint": None,
         "suggested_visual_state": "idle" if not terminal else "offline",
         "allowed_actions": [] if terminal else ["focus", "stop", "send_text_ws"],
-        "capabilities": dict(_CAPABILITIES),
+        "capabilities": {
+            **_CAPABILITIES,
+            "voice": not terminal and persona_live_voice_registry.is_ready(user_id=user_id, session_id=session_id),
+            "browser_microphone_required": not terminal and persona_live_voice_registry.is_ready(user_id=user_id, session_id=session_id),
+        },
     }
 
 
@@ -686,6 +710,9 @@ def stop_live_session(
     """Stop a Persona Live session and remove live-control focus/idempotency metadata."""
     row = _load_owned_session_or_raise(db, user_id=user_id, session_id=session_id)
     if _is_terminal(row):
+        persona_live_turn_registry.cancel(user_id=user_id, session_id=session_id)
+        persona_live_voice_registry.clear(user_id=user_id, session_id=session_id)
+        stream_registry.stop(user_id=user_id, session_id=session_id)
         return build_live_session_summary(
             db,
             user_id=user_id,
@@ -700,6 +727,9 @@ def stop_live_session(
         user_id=user_id,
         update_data={"status": "closed", "preferences_json": preferences},
     )
+    persona_live_turn_registry.cancel(user_id=user_id, session_id=session_id)
+    persona_live_voice_registry.clear(user_id=user_id, session_id=session_id)
+    stream_registry.stop(user_id=user_id, session_id=session_id)
     row = db.get_persona_session(session_id, user_id=user_id, include_deleted=False) or row
     return build_live_session_summary(
         db,

@@ -8,6 +8,7 @@ import asyncio
 import json
 import time
 import uuid
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -29,7 +30,8 @@ from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.Metrics import get_metrics_registry
 from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
-from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import ContentMetadataHandler, is_content_page
+from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import is_content_page
+from tldw_Server_API.app.core.Web_Scraping.content import ContentMetadataHandler
 
 # Import the enhanced scraper
 from tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping import (
@@ -158,6 +160,7 @@ class WebScrapingService:
         chunking_mode: Optional[str] = None,
         auto_chunking_goal: str = "balanced",
         auto_chunking_use_llm: bool = False,
+        summary_prompt_overrides: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
         """
         Process web scraping task with enhanced features.
@@ -267,6 +270,7 @@ class WebScrapingService:
                     user_agent,
                     custom_headers,
                     user_id=user_id,
+                    summary_prompt_overrides=summary_prompt_overrides,
                 )
 
             elif scrape_method == "Sitemap":
@@ -286,6 +290,7 @@ class WebScrapingService:
                     custom_headers,
                     user_id=user_id,
                     task_id=task_id,
+                    summary_prompt_overrides=summary_prompt_overrides,
                 )
 
             elif scrape_method == "URL Level":
@@ -311,6 +316,7 @@ class WebScrapingService:
                     score_threshold=eff_score_threshold,
                     crawl_strategy=eff_strategy,
                     task_id=task_id,
+                    summary_prompt_overrides=summary_prompt_overrides,
                 )
 
             elif scrape_method == "Recursive Scraping":
@@ -334,6 +340,7 @@ class WebScrapingService:
                     score_threshold=eff_score_threshold,
                     crawl_strategy=eff_strategy,
                     task_id=task_id,
+                    summary_prompt_overrides=summary_prompt_overrides,
                 )
 
             else:
@@ -398,6 +405,7 @@ class WebScrapingService:
         custom_headers: Optional[dict[str, str]],
         *,
         user_id: Optional[int] = None,
+        summary_prompt_overrides: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
         """Scrape individual URLs with enhanced features"""
         # Parse URLs and titles
@@ -423,6 +431,7 @@ class WebScrapingService:
             api_name=api_name,
             api_key=api_key,
             system_prompt=system_prompt,
+            summary_prompt_overrides=summary_prompt_overrides,
             temperature=temperature,
             custom_cookies=custom_cookies,
             user_agent=user_agent,
@@ -464,6 +473,7 @@ class WebScrapingService:
         *,
         user_id: Optional[int] = None,
         task_id: Optional[str] = None,
+        summary_prompt_overrides: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
         """Scrape from sitemap with filtering"""
         # Check if scraper is available
@@ -489,7 +499,8 @@ class WebScrapingService:
             for result in results:
                 if result.get("extraction_successful") and result.get("content"):
                     summary = await self._summarize_content(
-                        result["content"], custom_prompt, api_name, api_key, system_prompt, temperature
+                        result["content"], custom_prompt, api_name, api_key, system_prompt, temperature,
+                        summary_prompt_overrides=summary_prompt_overrides,
                     )
                     result["summary"] = summary
 
@@ -523,6 +534,7 @@ class WebScrapingService:
         score_threshold: Optional[float] = None,
         crawl_strategy: Optional[str] = None,
         task_id: Optional[str] = None,
+        summary_prompt_overrides: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
         """Scrape by URL level"""
 
@@ -555,7 +567,8 @@ class WebScrapingService:
             for result in results:
                 if result.get("extraction_successful") and result.get("content"):
                     summary = await self._summarize_content(
-                        result["content"], custom_prompt, api_name, api_key, system_prompt, temperature
+                        result["content"], custom_prompt, api_name, api_key, system_prompt, temperature,
+                        summary_prompt_overrides=summary_prompt_overrides,
                     )
                     result["summary"] = summary
 
@@ -589,6 +602,7 @@ class WebScrapingService:
         score_threshold: Optional[float] = None,
         crawl_strategy: Optional[str] = None,
         task_id: Optional[str] = None,
+        summary_prompt_overrides: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
         """Recursive scraping with progress tracking"""
         # Create progress file for resumability
@@ -618,7 +632,8 @@ class WebScrapingService:
                 for result in results:
                     if result.get("extraction_successful") and result.get("content"):
                         summary = await self._summarize_content(
-                            result["content"], custom_prompt, api_name, api_key, system_prompt, temperature
+                            result["content"], custom_prompt, api_name, api_key, system_prompt, temperature,
+                            summary_prompt_overrides=summary_prompt_overrides,
                         )
                         result["summary"] = summary
 
@@ -647,18 +662,19 @@ class WebScrapingService:
         api_key: Optional[str],
         system_prompt: Optional[str],
         temperature: float,
+        *,
+        summary_prompt_overrides: Mapping[str, str] | None = None,
     ) -> str:
         """Summarize content using LLM"""
         try:
             # Provide default prompts from Prompts/webscraping if not supplied
-            custom_prompt = (
-                custom_prompt
-                or load_prompt("webscraping", "article_summary_user")
+            overrides = summary_prompt_overrides or {}
+            custom_prompt = overrides["user"] if "user" in overrides else (
+                custom_prompt or load_prompt("webscraping", "article_summary_user")
                 or "Summarize this article concisely."
             )
-            system_prompt = (
-                system_prompt
-                or load_prompt("webscraping", "article_summary_system")
+            system_prompt = overrides["system"] if "system" in overrides else (
+                system_prompt or load_prompt("webscraping", "article_summary_system")
                 or "You are a professional summarizer."
             )
             summary = analyze(

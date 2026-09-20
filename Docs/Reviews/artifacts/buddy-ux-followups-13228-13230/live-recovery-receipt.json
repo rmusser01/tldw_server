@@ -1,0 +1,158 @@
+{
+  "attachment": {
+    "client_slot": "default",
+    "version": 4,
+    "attachment": {
+      "buddy_id": "386eee6c4e2c4192bd3fe72f838ce5f2",
+      "scope_type": "workspace",
+      "scope_id": "ab81561f-fb8d-40ba-a726-58ab4085a2b1"
+    },
+    "target": {
+      "title": "New Research",
+      "workspace_id": "ab81561f-fb8d-40ba-a726-58ab4085a2b1"
+    },
+    "unavailable_reason": null
+  },
+  "conversations": {
+    "conversations": [
+      {
+        "id": "c71cc7fc-7cd6-4463-b801-7acc6391f4a0",
+        "title": "Workspace qualification: use the saved Research Assistant default for this new c",
+        "scope_type": "workspace",
+        "workspace_id": "ab81561f-fb8d-40ba-a726-58ab4085a2b1",
+        "version": 1,
+        "assistant_kind": "persona",
+        "assistant_id": "research_assistant",
+        "assistant_name": "Research Assistant"
+      },
+      {
+        "id": "5c26dc31-e2b9-4438-9d28-e772ca385622",
+        "title": "Workspace qualification: use the saved Research Assistant default for this new c",
+        "scope_type": "workspace",
+        "workspace_id": "ab81561f-fb8d-40ba-a726-58ab4085a2b1",
+        "version": 1,
+        "assistant_kind": "persona",
+        "assistant_id": "research_assistant",
+        "assistant_name": "Research Assistant"
+      }
+    ],
+    "limit": 50,
+    "offset": 0
+  },
+  "turns": {
+    "turns": [
+      {
+        "id": "156c528764bb46ffaa23d5a7f4e7c1cf",
+        "client_slot": "default",
+        "client_request_id": "b04c1f52-ddf7-4d52-9cfe-bb97ac718be3",
+        "conversation_id": "c71cc7fc-7cd6-4463-b801-7acc6391f4a0",
+        "conversation_title": "Workspace qualification: use the saved Research Assistant default for this new c",
+        "workspace_id": "ab81561f-fb8d-40ba-a726-58ab4085a2b1",
+        "attachment_version": 4,
+        "status": "completed",
+        "result_message_id": "6e9b39eb-650b-4b52-8a21-483b47be98c1",
+        "error_code": null,
+        "created_at": "2026-09-09T06:18:29.407184+00:00",
+        "updated_at": "2026-09-09 06:18:29"
+      },
+      {
+        "id": "ac394802ca3d4666a2901718165ee34c",
+        "client_slot": "default",
+        "client_request_id": "e779a6e4-bf5e-42b3-99ca-2358f9dd3347",
+        "conversation_id": "c71cc7fc-7cd6-4463-b801-7acc6391f4a0",
+        "conversation_title": "Workspace qualification: use the saved Research Assistant default for this new c",
+        "workspace_id": "ab81561f-fb8d-40ba-a726-58ab4085a2b1",
+        "attachment_version": 4,
+        "status": "completed",
+        "result_message_id": "86872ab6-42ee-4598-93d1-2c9ec225f8ae",
+        "error_code": null,
+        "created_at": "2026-09-09T05:17:27.135076+00:00",
+        "updated_at": "2026-09-09 05:17:27"
+      },
+      {
+        "id": "7de5e300e402420eac350595de6a9ea2",
+        "client_slot": "default",
+        "client_request_id": "99e9d536-6fce-4829-8b20-8090a42b8e90",
+        "conversation_id": "84d83245-a607-4883-ac51-2aff63cc0931",
+        "conversation_title": "Buddy v1 qualification: confirm this conversation stays available from the at\u2026",
+        "workspace_id": null,
+        "attachment_version": 3,
+        "status": "completed",
+        "result_message_id": "84cee81f-5df6-4b3a-a306-bff88322fc01",
+        "error_code": null,
+        "created_at": "2026-09-09T05:09:37.536295+00:00",
+        "updated_at": "2026-09-09 05:09:57"
+      }
+    ],
+    "limit": 50,
+    "offset": 0
+  },
+  "workspaces": {
+    "items": [
+      {
+        "id": "ab81561f-fb8d-40ba-a726-58ab4085a2b1",
+        "name": "New Research",
+        "archived": false,
+        "study_materials_policy": "workspace",
+        "workspace_profile": "research",
+        "deleted": false,
+        "banner_title": null,
+        "banner_subtitle": null,
+        "banner_color": null,
+        "audio_provider": null,
+        "audio_model": null,
+        "audio_voice": null,
+        "audio_speed": 1.0,
+        "assistant_defaults": {
+          "assistant_kind": "persona",
+          "assistant_id": "research_assistant",
+          "persona_memory_mode": "read_only",
+          "voice": null,
+          "style": null,
+          "tool_policy_profile_id": null
+        },
+        "effective_assistant_default": {
+          "status": "available",
+          "source": "workspace",
+          "assistant_kind": "persona",
+          "assistant_id": "research_assistant",
+          "label": "Research Assistant",
+          "persona_memory_mode": "read_only",
+          "degraded_reason": null
+        },
+        "created_at": "2026-09-09T04:52:42.453Z",
+        "last_modified": "2026-09-09T04:55:19.899Z",
+        "version": 2
+      },
+      {
+        "id": "46fe7a83-cfef-4a1e-9040-375501442bd6",
+        "name": "New Research",
+        "archived": false,
+        "study_materials_policy": "workspace",
+        "workspace_profile": "research",
+        "deleted": false,
+        "banner_title": null,
+        "banner_subtitle": null,
+        "banner_color": null,
+        "audio_provider": null,
+        "audio_model": null,
+        "audio_voice": null,
+        "audio_speed": 1.0,
+        "assistant_defaults": null,
+        "effective_assistant_default": {
+          "status": "none",
+          "source": "none",
+          "assistant_kind": null,
+          "assistant_id": null,
+          "label": null,
+          "persona_memory_mode": null,
+          "degraded_reason": null
+        },
+        "created_at": "2026-09-09T06:19:45.661Z",
+        "last_modified": "2026-09-09T06:19:45.661Z",
+        "version": 1
+      }
+    ],
+    "total": 2
+  }
+}

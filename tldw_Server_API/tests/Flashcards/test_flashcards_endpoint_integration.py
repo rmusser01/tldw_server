@@ -3282,7 +3282,16 @@ def test_flashcard_assistant_respond_persists_user_and_assistant_messages(
     assert created.status_code == 200
     card_uuid = created.json()["uuid"]
 
-    async def fake_generate_reply(*, action, context, message=None, provider=None, model=None):
+    async def fake_generate_reply(
+        *,
+        action: str,
+        context: dict[str, Any],
+        message: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+        guidance: str | None = None,
+    ) -> dict[str, Any]:
+        """Supply a controlled reply while preserving the generation call contract."""
         assert action == "explain"
         assert context["flashcard"]["uuid"] == card_uuid
         return {
@@ -3342,7 +3351,16 @@ def test_flashcard_assistant_respond_returns_409_for_stale_thread_version(
 
     call_count = 0
 
-    async def fake_generate_reply(*, action, context, message=None, provider=None, model=None):
+    async def fake_generate_reply(
+        *,
+        action: str,
+        context: dict[str, Any],
+        message: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+        guidance: str | None = None,
+    ) -> dict[str, Any]:
+        """Supply a controlled reply while preserving the generation call contract."""
         nonlocal call_count
         call_count += 1
         return {
@@ -3380,7 +3398,16 @@ def test_flashcard_assistant_respond_returns_400_for_input_error(
     assert created.status_code == 200
     card_uuid = created.json()["uuid"]
 
-    async def fake_generate_reply(*, action, context, message=None, provider=None, model=None):
+    async def fake_generate_reply(
+        *,
+        action: str,
+        context: dict[str, Any],
+        message: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+        guidance: str | None = None,
+    ) -> dict[str, Any]:
+        """Supply a controlled reply while preserving the generation call contract."""
         raise InputError("invalid study assistant action")
 
     monkeypatch.setattr(
@@ -3410,7 +3437,16 @@ def test_flashcard_assistant_respond_returns_500_for_db_error(
     assert created.status_code == 200
     card_uuid = created.json()["uuid"]
 
-    async def fake_generate_reply(*, action, context, message=None, provider=None, model=None):
+    async def fake_generate_reply(
+        *,
+        action: str,
+        context: dict[str, Any],
+        message: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+        guidance: str | None = None,
+    ) -> dict[str, Any]:
+        """Supply a controlled reply while preserving the generation call contract."""
         raise CharactersRAGDBError("flashcard assistant reply backend unavailable")
 
     monkeypatch.setattr(
@@ -3441,7 +3477,16 @@ def test_flashcard_assistant_respond_returns_409_for_db_conflict(
     assert created.status_code == 200
     card_uuid = created.json()["uuid"]
 
-    async def fake_generate_reply(*, action, context, message=None, provider=None, model=None):
+    async def fake_generate_reply(
+        *,
+        action: str,
+        context: dict[str, Any],
+        message: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+        guidance: str | None = None,
+    ) -> dict[str, Any]:
+        """Supply a controlled reply while preserving the generation call contract."""
         return {
             "assistant_text": "The glomerulus is the filtration tuft in the nephron.",
             "structured_payload": {},
@@ -3513,7 +3558,16 @@ def test_flashcard_assistant_fact_check_returns_required_payload_keys(
     assert created.status_code == 200
     card_uuid = created.json()["uuid"]
 
-    async def fake_generate_reply(*, action, context, message=None, provider=None, model=None):
+    async def fake_generate_reply(
+        *,
+        action: str,
+        context: dict[str, Any],
+        message: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+        guidance: str | None = None,
+    ) -> dict[str, Any]:
+        """Supply a controlled reply while preserving the generation call contract."""
         assert action == "fact_check"
         return {
             "assistant_text": "Filtration occurs in the glomerulus.",

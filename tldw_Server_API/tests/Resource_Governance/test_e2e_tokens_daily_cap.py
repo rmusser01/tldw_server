@@ -134,6 +134,8 @@ async def test_e2e_chat_tokens_daily_cap_denies(monkeypatch, tmp_path, rg_backen
 
     # Enable stable mock chat calls.
     monkeypatch.setenv("TEST_MODE", "true")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+    monkeypatch.setenv("CHAT_FORCE_MOCK", "false")
 
     body = {
         "model": "openai/gpt-3.5-turbo",
@@ -258,6 +260,8 @@ async def test_e2e_embeddings_tokens_daily_cap_denies(monkeypatch, tmp_path, rg_
     # Patch embeddings execution to avoid external dependencies.
     import tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced as _emb_ep
 
+    cache_scope_sensitive_values: list[bool] = []
+
     async def _fake_create_embeddings_batch_async(
         *,
         texts,
@@ -267,8 +271,10 @@ async def test_e2e_embeddings_tokens_daily_cap_denies(monkeypatch, tmp_path, rg_
         api_key=None,
         api_url=None,
         metadata=None,
+        cache_scope_sensitive: bool = False,
     ):
         _ = (provider, model_id, dimensions, api_key, api_url, metadata)
+        cache_scope_sensitive_values.append(cache_scope_sensitive)
         return [[0.0, 0.0, 0.0] for _t in (texts or [])]
 
     monkeypatch.setattr(_emb_ep, "EMBEDDINGS_AVAILABLE", True, raising=False)
@@ -289,6 +295,7 @@ async def test_e2e_embeddings_tokens_daily_cap_denies(monkeypatch, tmp_path, rg_
                 json=body,
             )
             assert r1.status_code == 200, r1.text
+            assert cache_scope_sensitive_values == [False]
 
             r2 = c.post(
                 "/api/v1/embeddings",

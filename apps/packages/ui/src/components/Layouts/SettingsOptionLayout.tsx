@@ -12,7 +12,10 @@ import { isChromeTarget } from "@/config/platform";
 import { isSidepanelSupported, openSidepanel } from "@/utils/sidepanel";
 import { setSetting } from "@/services/settings/registry";
 import { UI_MODE_SETTING } from "@/services/settings/ui-settings";
-import { getSettingsReturnTo } from "@/utils/settings-return";
+import {
+  getSettingsReturnTo,
+  requestSettingsNavigation,
+} from "@/utils/settings-return";
 import {
   ACTION_ICON_CLICK_SETTING,
   CONTEXT_MENU_CLICK_SETTING,
@@ -59,6 +62,7 @@ export const navigateFromSettingsExit = (
 ) => {
   const isNextWebApp = environment?.isNextWebApp ?? isNextWebAppRuntime();
   const normalizedTarget = normalizeSettingsExitTarget(target);
+  if (!requestSettingsNavigation(normalizedTarget)) return;
 
   if (isNextWebApp) {
     const assignLocation =
@@ -216,8 +220,9 @@ export const SettingsLayout = ({ children }: { children: React.ReactNode }) => {
                     id="settings-nav-select"
                     value={mobileCurrentNavItem?.to ?? ""}
                     onChange={(event) => {
-                      if (event.currentTarget.value) {
-                        navigate(event.currentTarget.value);
+                      const destination = event.currentTarget.value;
+                      if (destination && requestSettingsNavigation(destination)) {
+                        navigate(destination);
                       }
                     }}
                     className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text"

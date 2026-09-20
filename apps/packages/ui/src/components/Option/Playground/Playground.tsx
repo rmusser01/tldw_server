@@ -61,6 +61,7 @@ import {
   type ChatModelSettings,
   useStoreChatModelSettings,
 } from "@/store/model";
+import { usePlaygroundSessionStore } from "@/store/playground-session";
 import { getDesignSystemState } from "@/design-system";
 import { useSmartScroll } from "@/hooks/useSmartScroll";
 import {
@@ -689,6 +690,9 @@ export const Playground = () => {
     typeof setTimeout
   > | null>(null);
   const initializePlaygroundRef = React.useRef(false);
+  const initializePlaygroundCallbackRef = React.useRef<
+    () => Promise<void>
+  >(async () => {});
   const sidepanelHandoffAppliedRef = React.useRef(false);
   const routeCharacterIntentAppliedRef = React.useRef<string | null>(null);
   const routeCharacterIntentInFlightRef = React.useRef<string | null>(null);
@@ -696,6 +700,12 @@ export const Playground = () => {
   const routeCharacterIntentSignatureRef = React.useRef<string | null>(null);
   const translationRef = React.useRef(t);
   const previousThreadRef = React.useRef<string | null>(null);
+  const initialConversationRef = React.useRef({
+    historyId: historyId ?? null,
+    serverChatId: serverChatId ?? null,
+    messagesLength: messages.length,
+    historyLength: history.length,
+  });
   const stableHistoryId = historyId && historyId !== "temp" ? historyId : null;
   const showStarterDeck =
     messages.length === 0 &&
@@ -732,11 +742,43 @@ export const Playground = () => {
     persistedHistoryId,
     persistedServerChatId,
   } = usePlaygroundSessionPersistence();
+  const settingsReturnContext = React.useMemo(() => {
+    if (typeof window === "undefined") {
+      return {
+        historyId: null as string | null,
+        serverChatId: null as string | null,
+        researchReturnRunId: null as string | null,
+        sidepanelHandoff: null,
+      };
+    }
+    const params = new URLSearchParams(window.location.search);
+    const historyId = params.get(SETTINGS_HISTORY_ID_PARAM)?.trim() || null;
+    const returnServerChatId =
+      params.get(SETTINGS_SERVER_CHAT_ID_PARAM)?.trim() || null;
+    const researchReturnRunId =
+      params.get(RESEARCH_RETURN_RUN_ID_PARAM)?.trim() || null;
+    const sidepanelHandoff = readSidepanelChatWebUiHandoffFromLocation();
+    return {
+      historyId,
+      serverChatId: returnServerChatId,
+      researchReturnRunId,
+      sidepanelHandoff,
+    };
+  }, []);
+  const returnHistoryIdFromSettings = settingsReturnContext.historyId;
+  const returnServerChatIdFromSettings = settingsReturnContext.serverChatId;
+  const returnResearchRunIdFromSettings =
+    settingsReturnContext.researchReturnRunId;
+  const sidepanelChatHandoff = settingsReturnContext.sidepanelHandoff;
   const shouldRestorePersistedSessionOnInit =
     shouldRestorePersistedPlaygroundSession({
       hasPersistedSession,
       persistedHistoryId,
       persistedServerChatId,
+      initialHistoryId: initialConversationRef.current.historyId,
+      initialServerChatId: initialConversationRef.current.serverChatId,
+      initialMessagesLength: initialConversationRef.current.messagesLength,
+      initialHistoryLength: initialConversationRef.current.historyLength,
       currentHistoryId: historyId ?? null,
       currentServerChatId: serverChatId ?? null,
       currentMessagesLength: messages.length,
@@ -945,6 +987,7 @@ export const Playground = () => {
   React.useEffect(() => {
     if (!routeCharacterIntentChatId) return;
     if (serverChatId === routeCharacterIntentChatId) return;
+    usePlaygroundSessionStore.getState().cancelPendingRestore();
     setServerChatId(routeCharacterIntentChatId);
     routeCharacterIntentAppliedRef.current = null;
     routeCharacterIntentInFlightRef.current = null;
@@ -961,6 +1004,7 @@ export const Playground = () => {
       return;
     }
 
+    usePlaygroundSessionStore.getState().cancelPendingRestore();
     setHistoryId(null, { preserveServerChatId: false });
     setHistory([]);
     setMessages([]);
@@ -1650,11 +1694,29 @@ export const Playground = () => {
     if (routeCharacterIntentId) {
       return;
     }
+    if (
+      returnHistoryIdFromSettings ||
+      returnServerChatIdFromSettings ||
+      returnResearchRunIdFromSettings
+    ) {
+      usePlaygroundSessionStore.getState().cancelPendingRestore();
+      if (
+        returnServerChatIdFromSettings &&
+        returnServerChatIdFromSettings !== serverChatId
+      ) {
+        setServerChatId(returnServerChatIdFromSettings);
+      }
+      return;
+    }
+    if (sidepanelChatHandoff) {
+      usePlaygroundSessionStore.getState().cancelPendingRestore();
+      return;
+    }
 
     // 1. Try session persistence first (restores exact state from nav-away)
     if (shouldRestorePersistedSessionOnInit) {
-      const restored = await restoreSession();
-      if (restored) return;
+      const restoreOutcome = await restoreSession();
+      if (restoreOutcome !== "not-restored") return;
     }
     if (routeCharacterIntentId) {
       return;
@@ -1697,7 +1759,11 @@ export const Playground = () => {
     restoreSession,
     routeCharacterIntentChatId,
     routeCharacterIntentId,
+    returnHistoryIdFromSettings,
+    returnResearchRunIdFromSettings,
+    returnServerChatIdFromSettings,
     serverChatId,
+    sidepanelChatHandoff,
     setHistory,
     setHistoryId,
     setMessages,
@@ -1706,6 +1772,10 @@ export const Playground = () => {
     setSystemPrompt,
     shouldRestorePersistedSessionOnInit,
   ]);
+
+  React.useEffect(() => {
+    initializePlaygroundCallbackRef.current = initializePlayground;
+  }, [initializePlayground]);
 
   React.useEffect(() => {
     if (!sessionScopeReady) {
@@ -1717,7 +1787,10 @@ export const Playground = () => {
     initializePlaygroundRef.current = true;
     let cancelled = false;
     const run = async () => {
-      await initializePlayground();
+      // Invoke through a ref so identity churn of the initialization
+      // callback (caused by state updates during startup) cannot re-run
+      // this one-shot effect and cancel readiness before init resolves.
+      await initializePlaygroundCallbackRef.current();
       if (!cancelled) {
         setPlaygroundReady(true);
       }
@@ -1725,8 +1798,13 @@ export const Playground = () => {
     void run();
     return () => {
       cancelled = true;
+      // Unlatch on teardown: a StrictMode replay or a session-scope change
+      // cancels this run's readiness update, so the replacement effect must
+      // be allowed to initialize again - otherwise playgroundReady can stay
+      // false forever.
+      initializePlaygroundRef.current = false;
     };
-  }, [initializePlayground, sessionScopeReady]);
+  }, [sessionScopeReady]);
 
   useCharacterGreeting({
     playgroundReady,
@@ -1768,31 +1846,6 @@ export const Playground = () => {
     },
   );
 
-  const settingsReturnContext = React.useMemo(() => {
-    if (typeof window === "undefined") {
-      return {
-        historyId: null as string | null,
-        serverChatId: null as string | null,
-        researchReturnRunId: null as string | null,
-        sidepanelHandoff: null,
-      };
-    }
-    const params = new URLSearchParams(window.location.search);
-    const historyId = params.get(SETTINGS_HISTORY_ID_PARAM)?.trim() || null;
-    const serverChatId =
-      params.get(SETTINGS_SERVER_CHAT_ID_PARAM)?.trim() || null;
-    const researchReturnRunId =
-      params.get(RESEARCH_RETURN_RUN_ID_PARAM)?.trim() || null;
-    const sidepanelHandoff = readSidepanelChatWebUiHandoffFromLocation();
-    return { historyId, serverChatId, researchReturnRunId, sidepanelHandoff };
-  }, []);
-
-  const returnHistoryIdFromSettings = settingsReturnContext.historyId;
-  const returnServerChatIdFromSettings = settingsReturnContext.serverChatId;
-  const returnResearchRunIdFromSettings =
-    settingsReturnContext.researchReturnRunId;
-  const sidepanelChatHandoff = settingsReturnContext.sidepanelHandoff;
-
   React.useEffect(() => {
     if (!playgroundReady) return;
     if (
@@ -1803,6 +1856,7 @@ export const Playground = () => {
       return;
     }
 
+    usePlaygroundSessionStore.getState().cancelPendingRestore();
     let cancelled = false;
 
     const restoreFromSettingsReturnTarget = async () => {
@@ -1880,6 +1934,7 @@ export const Playground = () => {
       return;
     }
     sidepanelHandoffAppliedRef.current = true;
+    usePlaygroundSessionStore.getState().cancelPendingRestore();
 
     let cancelled = false;
     const applySidepanelHandoff = async () => {

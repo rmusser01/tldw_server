@@ -89,7 +89,9 @@ describe("sidepanel queued request contract", () => {
   })
 
   it("clears persisted drafts after send/queue success and resets file inputs with the DOM-event handler", () => {
-    expect(sidepanelFormSource).toContain("const { form, draftSaved, clearDraft } = useComposerText")
+    expect(sidepanelFormSource).toMatch(
+      /const\s*\{[\s\S]*?form,[\s\S]*?messageRevision,[\s\S]*?draftSaved,[\s\S]*?clearDraft[\s\S]*?\}\s*=\s*useComposerText/
+    )
     expect(sidepanelFormSource).toContain("clearDraft()")
     expect(sidepanelFormSource).toContain("onChange={attachmentHandler.onFileInputChange}")
   })
