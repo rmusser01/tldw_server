@@ -57,7 +57,7 @@ from tldw_Server_API.tests.Admin_Webhooks.test_test_delivery import (
     exercise_test_service_success_and_terminal_replay,
 )
 
-pytest_plugins = ("tldw_Server_API.tests.AuthNZ.conftest",)
+pytest_plugins = ("tldw_Server_API.tests._plugins.authnz_full_fixtures",)
 pytestmark = pytest.mark.postgres
 
 

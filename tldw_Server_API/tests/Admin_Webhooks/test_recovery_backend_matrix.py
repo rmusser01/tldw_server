@@ -81,7 +81,7 @@ from tldw_Server_API.tests.Admin_Webhooks.test_event_expansion import (
     seed_registration,
 )
 
-pytest_plugins = ("tldw_Server_API.tests.AuthNZ.conftest",)
+pytest_plugins = ("tldw_Server_API.tests._plugins.authnz_full_fixtures",)
 
 BACKEND_PAIRS = (
     ("sqlite", "sqlite"),
