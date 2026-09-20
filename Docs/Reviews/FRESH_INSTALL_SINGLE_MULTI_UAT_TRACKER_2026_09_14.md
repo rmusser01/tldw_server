@@ -6,7 +6,7 @@
 
 - **Qodo review:** All 14 review findings have verified fixes or an accepted disposition in the [review disposition ledger](PR2967_QODO_REVIEW_2026_09_18.md), under TASK13260.219.11–13. All 14 review threads are resolved and Qodo reports zero open findings. Final hosted CI passed before the verified merge. This review does not replace the pending fresh UAT matrix.
 
-- **Current repair gate:** 326 UAT findings: 317 verified; 9 open (261, 283–287, 290, 300, 306). The frozen post-merge four-cell matrix completed with failures. Checkpoint [PR2969](https://github.com/rmusser01/tldw_server/pull/2969) merged normally into dev at `1dfdd819b6` after all seven required gates passed, all 12 Qodo threads were resolved, and the requester supplied the Change summary. Follow-up branch `codex/uat295-postgres-notes-20260919` starts from that merge. UAT299 and UAT319/321–323 now pass targeted SQLite/PostgreSQL acceptance, including owner/Bob isolation and controlled source-failure disclosure. Remaining repairs precede another full matrix. Generated Playwright evidence remains local and excluded. See the [checkpoint review](PR2969_CHECKPOINT_REVIEW_2026_09_19.md) and [post-merge matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_18.md).
+- **Current repair gate:** 326 UAT findings: 319 verified; 7 open (261, 284, 286–287, 290, 300, 306). The frozen post-merge four-cell matrix completed with failures. Checkpoint [PR2969](https://github.com/rmusser01/tldw_server/pull/2969) merged normally into dev at `1dfdd819b6` after all seven required gates passed, all 12 Qodo threads were resolved, and the requester supplied the Change summary. Follow-up branch `codex/uat295-postgres-notes-20260919` starts from that merge. UAT299 and UAT319/321–323 now pass targeted SQLite/PostgreSQL acceptance, including owner/Bob isolation and controlled source-failure disclosure. Remaining repairs precede another full matrix. Generated Playwright evidence remains local and excluded. See the [checkpoint review](PR2969_CHECKPOINT_REVIEW_2026_09_19.md) and [post-merge matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_18.md).
 
 - **Historical frozen-run findings:246 total —230 previously verified,16 new unresolved (231–246).** The frozen48-row execution is complete with product source unchanged;16new findings await repair/disposition. SQLite multi-user natural session expiry passes; new241 loses source content in Media-to-Chat,242 uses plural wording for one Due review, and243 leaves Character setup visible after an ordinary Chat completion. Existing PostgreSQL RLS failure238 and generation timeout234 remain open.
 
@@ -3138,7 +3138,7 @@ One `Hello, who are you?` submission at21:19:25.943UTC created conversation `473
 The requester explicitly answered **“Continue the matrix; keep UAT261 open.”** This releases fresh SQLite/PostgreSQL × single/multi-user execution with the existing12 named journeys and actual image coverage. It does not close261 or relax its criterion. Private native evidence remains under `.tmp/pr2967-merge-20260918/testbot/`; generated captures remain excluded from Git. Two pre-send helper environment errors (URL global unavailable and mixed Node module syntax) were corrected before any model request; neither is a product failure.
 
 
-## UAT283 — P3: setup-selected llama.cpp appears as Custom with an internal model ID
+## UAT283 — P3, verified: setup-selected llama.cpp appears as Custom with an internal model ID
 
 - Source: frozen post-merge `3cff7962721a60b768464221c1f7fe2a8b25e4d5`, fresh PostgreSQL single-user profile, row1/3.
 - Reproduction: configure llama.cpp through the first-run wizard, choose its discovered model, finish setup, enter ordinary Chat and reload after two successful turns.
@@ -3156,7 +3156,7 @@ The requester explicitly answered **“Continue the matrix; keep UAT261 open.”
 - Status: open. To continue actual image coverage, the operator configures the already running known vision service through the isolated profile’s llama.cpp settings and restarts only that API, preserving the original config and failed turn. No product source edit or finding closure. Evidence: `.tmp/pr2967-merge-20260918/full-matrix/pg-single/07-validate-providers.txt`, `23-model-picker.txt`, `26-vision-search-scoped.txt`, `32-image-uploaded.txt`, `34-image-guard-retained.txt`, `vision-config-safe.json`.
 
 
-## UAT285 — P2: current-model tooltip blocks a model-menu option
+## UAT285 — P2, verified: current-model tooltip blocks a model-menu option
 
 - Source: frozen post-merge3cff, fresh PostgreSQL single-user Chat,1200×960 viewport. Tracking: TASK13260.222.
 - Reproduction: with the failed image turn visible, open the lower-left current-model menu and normally click the Gemma option.
@@ -3679,3 +3679,11 @@ Retained harness corrections: the first Character navigation observer omitted th
 ### UAT283 / UAT285 repair checkpoint — 2026-09-20 01:33 UTC
 
 The model selector now resolves setup-qualified IDs through existing parsing and symmetric provider alias normalization, preserving exact model IDs and canonical menu identity. Four original label failures and four review-discovered llama/local alias controls precede fixes. The current-model Ant tooltip and native title are disabled while the menu is open, retaining closed-menu hover help and the accessible label. Real Ant causal controls include the native-title gap; initial jsdom animation and extra-click harness corrections are retained in .tmp/uat283285-repair. Final146affected tests pass. No added ESLint findings (36 unchanged warnings); TypeScript93 unchanged baseline errors. TypeScript-only scope, Bandit not applicable. Independent review clear; committed fresh native acceptance remains pending and both issues stay open.
+
+### UAT283 / UAT285 native acceptance — 2026-09-20 01:44 UTC
+
+Fresh immutable04a5f706f0 PostgreSQL single-user setup discovers the real9099 llama.cpp model, completes first-chat ready200, and reaches normal Chat through the manual API-key form. The settled button and post-reload state show LLaMa.cpp plus the real model. Ordinary Chat sends api_provider llama.cpp and the exact model, returns READY., and retains that reply in canonical PostgreSQL rows. The first reload capture records transient readiness/loading UI; subsequent settled receipt verifies the correct label. This closes283.
+
+At1200x960, an actual PNG submission reproduces the still-open286 image-capability guard without provider dispatch. Closed-menu model hover help appears; opening the menu removes both Ant tooltip and native title. Ordinary pointer click selects the second configured model without force or event injection, with139ms for the selection/hover receipt; the image stays visible and closed-menu help returns. Visually inspected screenshot confirms the original warning/menu layout is unobstructed. This closes285. Explicitly choosing each discovered model in setup also provides a positive284 control; its unselected non-default/template behavior remains open.
+
+The24964-entry source audit passes unchanged. Final post-reload console has0errors/0warnings. Both owned apps, browser and listeners are stopped; frontend exits0, requested backend SIGTERM maps to wrapper1, official PostgreSQL holder exits0. Setup modified only this fresh profile configuration; shared services/host configuration remain untouched. Retained harness observations: cold frontend readiness request exceeded12s before successful browser startup; provider-save observer used an incorrect /save suffix, so subsequent saved UI/catalogue and request evidence establish the saved selections; standalone props projection initially used status() instead of status and was corrected. Evidence remains ignored in .tmp/uat283285-native. Seven findings remain open; no full-matrix pass claimed.
