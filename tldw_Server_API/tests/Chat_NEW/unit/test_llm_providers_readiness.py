@@ -50,7 +50,8 @@ def _client_for_config(monkeypatch: pytest.MonkeyPatch, parser: ConfigParser) ->
     monkeypatch.setattr(llm_providers, "discover_models_from_endpoint", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(llm_providers, "apply_llm_provider_overrides_to_listing", lambda result: result)
     monkeypatch.setattr(llm_providers, "_LLAMACPP_VISION_CACHE", {}, raising=False)
-    monkeypatch.setattr(llm_providers, "_http_fetch", lambda **_kwargs: httpx.Response(404))
+    unavailable_props = Mock(return_value=httpx.Response(404))
+    monkeypatch.setattr(llm_providers, "_http_fetch", unavailable_props)
 
     app = FastAPI()
     app.include_router(llm_providers.router, prefix="/api/v1")
@@ -115,7 +116,8 @@ def test_unconfirmed_external_llamacpp_remains_text_only(monkeypatch, status, pa
         "llama_api_IP": "http://127.0.0.1:9099/v1", "llama_model": "vision.gguf",
     }})
     with _client_for_config(monkeypatch, parser) as client:
-        monkeypatch.setattr(llm_providers, "_http_fetch", lambda **_: httpx.Response(status, json=payload))
+        probe = Mock(return_value=httpx.Response(status, json=payload))
+        monkeypatch.setattr(llm_providers, "_http_fetch", probe)
         result = client.get("/api/v1/llm/models/metadata")
     model = _model(result.json(), "llama", "vision.gguf")
     assert model["capabilities"]["vision"] is False

@@ -1805,6 +1805,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_main_claims_rebuild_startup.py
               tldw_Server_API/tests/Services/test_main_lifecycle_contract.py
+              tldw_Server_API/tests/Services/test_main_lifespan_cancellation.py
               tldw_Server_API/tests/Services/test_main_readiness_shutdown.py
               tldw_Server_API/tests/Services/test_main_router_contract.py
               tldw_Server_API/tests/Services/test_openapi_contracts.py
@@ -3304,6 +3305,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_main_claims_rebuild_startup.py
               tldw_Server_API/tests/Services/test_main_lifecycle_contract.py
+              tldw_Server_API/tests/Services/test_main_lifespan_cancellation.py
               tldw_Server_API/tests/Services/test_main_readiness_shutdown.py
               tldw_Server_API/tests/Services/test_main_router_contract.py
               tldw_Server_API/tests/Services/test_openapi_contracts.py
@@ -4674,6 +4676,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_main_claims_rebuild_startup.py
               tldw_Server_API/tests/Services/test_main_lifecycle_contract.py
+              tldw_Server_API/tests/Services/test_main_lifespan_cancellation.py
               tldw_Server_API/tests/Services/test_main_readiness_shutdown.py
               tldw_Server_API/tests/Services/test_main_router_contract.py
               tldw_Server_API/tests/Services/test_openapi_contracts.py
@@ -5967,6 +5970,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_main_claims_rebuild_startup.py
               tldw_Server_API/tests/Services/test_main_lifecycle_contract.py
+              tldw_Server_API/tests/Services/test_main_lifespan_cancellation.py
               tldw_Server_API/tests/Services/test_main_readiness_shutdown.py
               tldw_Server_API/tests/Services/test_main_router_contract.py
               tldw_Server_API/tests/Services/test_openapi_contracts.py
@@ -7266,6 +7270,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_main_claims_rebuild_startup.py
               tldw_Server_API/tests/Services/test_main_lifecycle_contract.py
+              tldw_Server_API/tests/Services/test_main_lifespan_cancellation.py
               tldw_Server_API/tests/Services/test_main_readiness_shutdown.py
               tldw_Server_API/tests/Services/test_main_router_contract.py
               tldw_Server_API/tests/Services/test_openapi_contracts.py
