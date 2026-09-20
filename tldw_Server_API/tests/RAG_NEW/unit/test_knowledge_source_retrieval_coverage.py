@@ -164,6 +164,7 @@ def _create_chacha_source_db(path: Path) -> None:
             CREATE TABLE conversations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 character_id INTEGER,
+                title TEXT,
                 source TEXT DEFAULT '',
                 deleted BOOLEAN DEFAULT 0
             )
@@ -245,7 +246,7 @@ def _create_chacha_source_db(path: Path) -> None:
                 "tester",
             ),
         )
-        conn.execute("INSERT INTO conversations (character_id) VALUES (1)")
+        conn.execute("INSERT INTO conversations (character_id, title) VALUES (?, ?)", (1, "Retrieval conversation"))
         conn.execute(
             "INSERT INTO messages (conversation_id, content, sender, timestamp) VALUES (?, ?, ?, ?)",
             (1, "The experiment showed better retrieval coverage.", "user", "2026-05-12T01:00:00Z"),

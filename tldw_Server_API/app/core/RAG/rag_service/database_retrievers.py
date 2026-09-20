@@ -4215,6 +4215,21 @@ class ChatDictionariesRetriever(BaseRetriever):
         return dict(rows[0]) if rows else {}
 
 
+def _format_character_evidence(row: dict[str, Any]) -> str:
+    """Keep Character evidence readable in the plain-text source preview."""
+    sections = [row.get("name") or "(Unnamed)"]
+    for field, label in (
+        ("description", "Description"),
+        ("personality", "Personality"),
+        ("scenario", "Scenario"),
+        ("first_message", "First Message"),
+    ):
+        value = row.get(field)
+        if value and value.strip():
+            sections.append(f"{label}: {value}")
+    return "\n\n".join(sections)
+
+
 class CharacterCardsRetriever(BaseRetriever):
     """Retriever for character cards and chats."""
 
@@ -4268,21 +4283,11 @@ class CharacterCardsRetriever(BaseRetriever):
                 min_score = float(self.config.min_score or 0.0)
                 for idx, row in enumerate(card_rows):
                     name = row.get("name") or "(Unnamed)"
-                    description = row.get("description") or ""
-                    personality = row.get("personality") or ""
-                    scenario = row.get("scenario") or ""
-                    first_message = row.get("first_message") or ""
                     score_val = norm_map.get(idx, 0.75)
                     if score_val < min_score:
                         continue
 
-                    content = (
-                        f"# {name}\n\n"
-                        f"**Description:** {description}\n\n"
-                        f"**Personality:** {personality}\n\n"
-                        f"**Scenario:** {scenario}\n\n"
-                        f"**First Message:** {first_message}"
-                    )
+                    content = _format_character_evidence(row)
                     doc = Document(
                         id=f"character_{row['id']}",
                         content=content,
@@ -4382,7 +4387,7 @@ class CharacterCardsRetriever(BaseRetriever):
         params = [f"%{query}%"] * 5 + [self.config.max_results // 2]
         card_results = self._execute_query(card_sql, tuple(params))
         for row in card_results:
-            content = f"""# {row['name']}\n\n**Description:** {row['description']}\n\n**Personality:** {row['personality']}\n\n**Scenario:** {row['scenario']}\n\n**First Message:** {row['first_message']}"""
+            content = _format_character_evidence(row)
             matches = sum(
                 [
                     query.lower() in (row[field] or "").lower()

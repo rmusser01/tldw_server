@@ -254,3 +254,51 @@ async def test_chat_evidence_projects_visible_text_without_rewriting_messages(se
     assert all("scratchpad" not in doc.content for doc in documents)
     assert "Rowan Observatory opens Fridays." in next(doc.content for doc in documents if doc.id == f"chat_{answer}")
     assert search_db.get_message_by_id(answer)["content"] == raw
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fields, expected", [
+    (
+        {"description": "Rowan tours start at 18:00.", "personality": "  ", "scenario": None},
+        "Rowan guide\n\nDescription: Rowan tours start at 18:00.",
+    ),
+    (
+        {"description": "Authored **Markdown** stays literal.", "personality": "Curious",
+         "scenario": "Cedar Ridge", "first_message": "Welcome to Rowan."},
+        "Rowan guide\n\nDescription: Authored **Markdown** stays literal.\n\n"
+        "Personality: Curious\n\nScenario: Cedar Ridge\n\nFirst Message: Welcome to Rowan.",
+    ),
+])
+async def test_character_evidence_uses_readable_populated_sections(search_db, fields, expected):
+    from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import CharacterCardsRetriever
+
+    character = search_db.add_character_card({"name": "Rowan guide", **fields})
+    before = search_db.get_character_card_by_id(character)
+    retriever = CharacterCardsRetriever(search_db.db_path_str, chacha_db=search_db)
+    documents = await retriever.retrieve("Rowan", include_chats=False)
+    assert len(documents) == 1
+    assert documents[0].content == expected
+    assert documents[0].metadata["title"] == "Rowan guide"
+    assert documents[0].metadata["source_type"] == "characters"
+    assert documents[0].metadata["source_id"] == str(character)
+    assert search_db.get_character_card_by_id(character) == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("description", [None, "Rowan <img src=x onerror=alert(1)> **source**"])
+async def test_legacy_character_evidence_keeps_authored_text_and_omits_blank_sections(tmp_path, description):
+    from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import CharacterCardsRetriever
+
+    db = CharactersRAGDB(tmp_path / "legacy-character-preview.db", client_id="325")
+    retriever = CharacterCardsRetriever(db.db_path_str)
+    try:
+        character = db.add_character_card({"name": "Rowan guide", "description": description})
+        before = db.get_character_card_by_id(character)
+        documents = await retriever.retrieve("Rowan", include_chats=False)
+        assert documents[0].content == (
+            "Rowan guide" + (f"\n\nDescription: {description}" if description else "")
+        )
+        assert documents[0].metadata["source_id"] == str(character)
+        assert db.get_character_card_by_id(character) == before
+    finally:
+        db.close_all_connections()
