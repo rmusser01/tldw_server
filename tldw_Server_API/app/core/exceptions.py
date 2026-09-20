@@ -20,6 +20,7 @@ from .exception_types import (  # noqa: F401 - centralized compatibility exports
 )
 
 if TYPE_CHECKING:
+    from .Admin_Webhooks.crypto import WebhookKeyErrorCode
     from .Admin_Webhooks.domain import WebhookErrorCode
 
 if hasattr(status, "HTTP_422_UNPROCESSABLE_CONTENT"):
@@ -40,6 +41,14 @@ _PROMPT_IMPROVEMENT_DISPATCH_MESSAGES = {
     "internal_error": "The prompt improvement request could not be completed.",
 }
 _MAX_PROMPT_IMPROVEMENT_RETRY_AFTER_SECONDS = 86_400
+
+
+class WebhookKeyError(Exception):
+    """Expected key-ring failure that exposes only a stable code."""
+
+    def __init__(self, code: WebhookKeyErrorCode) -> None:
+        self.code = code
+        super().__init__(code.value)
 
 
 class BuddyNotFoundError(LookupError):
