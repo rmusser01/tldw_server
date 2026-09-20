@@ -68,7 +68,7 @@ const reindexBlocks = (blocks: StructuredPromptBlock[]): StructuredPromptBlock[]
 
 const normalizeDefinition = (
   value: StructuredPromptDefinition | null | undefined
-): StructuredPromptDefinition => {
+): Omit<StructuredPromptDefinition, "blocks"> & { blocks: StructuredPromptBlock[] } => {
   const candidate = value && typeof value === "object" ? value : {}
   const assemblyConfigCandidate =
     candidate.assembly_config &&
