@@ -14,19 +14,19 @@ Published 0.1.42 source and grants remain immutable. Server repairs land in the 
 **Goal**: Reproduce and repair valid findings; verify disputed claims against implementation and approved specifications.
 **Success Criteria**: Each ledger row has evidence.
 **Tests**: Focused regressions for affected behavior; scoped Bandit.
-**Status**: In Progress
+**Status**: Complete
 
 ## Stage 3: Integration and release records
 **Goal**: Review combined repairs and regenerate the candidate protected-source manifest.
 **Success Criteria**: Tests, type checking and source verification pass; release plan and PRs reference final commits.
 **Tests**: Release contracts, targeted suites, TypeScript, package build, Bandit.
-**Status**: Not Started
+**Status**: Complete
 
 ## Stage 4: Review closeout
 **Goal**: Reply to Qodo threads and check new PR review feedback.
 **Success Criteria**: Every thread has an accurate disposition and link; remaining external release gates are explicit.
 **Tests**: Fresh GitHub review and CI inventory.
-**Status**: Not Started
+**Status**: In Progress
 
 ## Findings
 
@@ -41,9 +41,9 @@ Published 0.1.42 source and grants remain immutable. Server repairs land in the 
 | 7 | [Malformed values can authorize purges](https://github.com/rmusser01/tldw_server/pull/2761#discussion_r4001308630) | Fixed: strict request booleans and purge generation reject malformed primitives before invoking services, while preserving JSON timestamp/array contracts. |
 | 8 | [Health checks reject connected clients](https://github.com/rmusser01/tldw_server/pull/2761#discussion_r4001308636) | Rejected security-weakening recommendation. The cited unauthenticated client is a mocked unit test; production TLDWAPIClient supports API keys/bearer tokens. Public /health is minimal liveness; diagnostics require system.logs. Added connected-client guidance to Long_Term_Admin_Guide. All 37 permission tests pass. |
 | 9 | [Readiness becomes unknown to clients](https://github.com/rmusser01/tldw_server/pull/2761#discussion_r4001308641) | Fixed: /api/v1/health/ready retains ready, engine, db and timezone-aware time alongside sanitized operator fields. Both ready/not-ready regressions pass without weakening authorization. |
-| 10 | [Workspace cloning rejects client requests](https://github.com/rmusser01/tldw_server/pull/2761#discussion_r4001308644) | Under verification; `tldw_Server_API/app/api/v1/endpoints/sharing.py`. |
-| 11 | [Shared sources cannot be parsed](https://github.com/rmusser01/tldw_server/pull/2761#discussion_r4001308645) | Under verification; `tldw_Server_API/app/api/v1/endpoints/sharing.py`. |
-| 12 | [Connected clients cannot delete links](https://github.com/rmusser01/tldw_server/pull/2761#discussion_r4001308646) | Under verification; `tldw_Server_API/app/api/v1/endpoints/notes_graph.py`. |
+| 10 | [Workspace cloning rejects client requests](https://github.com/rmusser01/tldw_server/pull/2761#discussion_r4001308644) | Fixed in [Chatbook PR2763](https://github.com/rmusser01/tldw_chatbook/pull/2763), commit3cbf5effab: canonical request/header, complete operation receipts, scoped polling and stable authenticated-account retry identity survive response loss and panel remount. Explicit new-copy action retires only selected intent; quota never evicts uncertain keys. |
+| 11 | [Shared sources cannot be parsed](https://github.com/rmusser01/tldw_server/pull/2761#discussion_r4001308645) | Fixed in Chatbook PR2763: source-page metadata and canonical source_id/origin_url survive parsing; legacy aliases remain; list convenience traverses pages and rejects stalled pagination. |
+| 12 | [Connected clients cannot delete links](https://github.com/rmusser01/tldw_server/pull/2761#discussion_r4001308646) | Fixed in Chatbook PR2763: selected dataset/version/idempotency/reason pass through Notes scope, service and HTTP client. Stale409/missing428 stay visible; no fetch-latest bypass. |
 | 13 | [One websocket test lacks its marker](https://github.com/rmusser01/tldw_server/pull/2761#discussion_r4001308600) | Fixed in 7da1f8e67e: integration category marker retained alongside asyncio; category collection selects the websocket case. |
 | 14 | [A shutdown test depends on internals](https://github.com/rmusser01/tldw_server/pull/2761#discussion_r4001308605) | Fixed in 7da1f8e67e: public protocol write and server.shutdown prove execution-before-module-teardown ordering; all 137 extraction contract tests pass. |
 | 15 | [Draft recovery text cannot localize](https://github.com/rmusser01/tldw_server/pull/2761#discussion_r4001308610) | Fixed: presentation recovery, conflict, status and action text uses playground locale keys; pending messages update with locale changes. Included in 222 passing focused frontend tests. |
@@ -67,14 +67,14 @@ Published 0.1.42 source and grants remain immutable. Server repairs land in the 
 
 PR2973 cannot merge or dispatch PyPI until the requester supplies the required human Change summary or explicitly waives it for that PR. Automatic approval rejected the ambiguous earlier reply. PR2972 legal dates remain proposed, and its final CI/review remain open. These gates do not prevent Qodo repairs.
 
-## Verification evidence (in progress)
+## Verification evidence
 
 - 82 backend tests passed across clone endpoints/worker, Notes authority/links, and readiness; added disposition canaries: 5 passed. Parent final link-store/readiness run: 25 passed.
 - Health control-plane/sanitizer tests: 13 passed after fixing test log capture to attach after application logging startup. The initial failure was a removed test log sink, not leaked diagnostic data.
 - Health authorization matrix: 37 passed, including anonymous denial, unprivileged denial, and SYSTEM_LOGS/admin access.
 - Frontend: 222 tests passed; full TypeScript check passed. Presentation test hook naming was corrected to satisfy React Hooks lint; its 111 tests passed again.
 - Parent touched production Python Bandit: no findings. Test-only scan excludes B101 assertions; three unchanged B106 synthetic token/password fixtures remain (access/hash), with no new secret finding.
-- Cross-repository findings 10–12 tracked in Chatbook TASK-32881 at isolated `/private/tmp/tldw-chatbook-release-compat`; implementation ongoing.
+- Cross-repository findings 10–12 tracked in Chatbook TASK-32881 at isolated `/private/tmp/tldw-chatbook-release-compat`; 143 focused tests pass; two mounted panel tests independently rerun. Companion PR2763 is reviewable; no client release is claimed.
 
 ## Integration verification
 
@@ -83,5 +83,15 @@ PR2973 cannot merge or dispatch PyPI until the requester supplies the required h
 - Scheduled/macro/Jobs/Personal Context: 115 unaffected targeted tests plus the final 69 scheduled consumer/database tests passed. All seven touched production modules have zero Bandit findings. Independent review reproduced and closed both lease-replacement and repeated-cancellation overlap cases. Detailed report: [Jobs](../reviews/2026-09-20-release-qodo-jobs.md).
 - Release verification found an omitted existing Whisper path-resolution test in all five explicit CI media shards. Added that path and updated the shard contract; all 133 release/docs/workflow tests pass afterward.
 - Refreshed protected source: `89cf5448b1888ceefb1ea68bdc6fe18700e81808`, 7,321 files; manifest SHA-256 `ce4bd9dc1854b5550fa4de12b3eca5b8998d3b0bd33e4b459e11b5d528efabd7`. Explicit checkout verification: 12 passed. Published 0.1.42 grant/tag unchanged.
-- Strict MkDocs build passes after curated documentation refresh. Candidate wheel/sdist, Twine and backend-only package checks are rerun after repairs.
+- Strict MkDocs build passes after curated documentation refresh. Candidate wheel/sdist, Twine and backend-only package checks passed after repairs.
 - Recovery PR2973 exact-head CI is now entirely green/CLEAN. Explicit requester waiver is pending; no merge or PyPI dispatch has occurred.
+
+## Fresh candidate review
+
+Qodo review on candidate head8edcb4fae9 raised two Notes focus areas. The existing selected-owner helper emits the same required-owner predicate, so no broader shared/legacy access is introduced. PostgreSQL search now follows that helper consistently. The duplicate-ID concern is a real error-classification bug: only the notes identifier collision should map to that conflict; graph projection uniqueness failures must remain database errors. Fixed in2241ea23e8: 47 focused tests pass, source Ruff/Bandit pass; the additional live PostgreSQL test skips through the official unavailable fixture. See [Notes report](../reviews/2026-09-20-release-qodo-notes.md).
+
+Chatbook PR2763 closes the three cross-repository findings with 143 focused tests, zero Bandit findings across ten production files, and zero new Ruff diagnostics relative to its baseline. Full ToolsSettings tests still encounter an existing pre-panel configuration-bootstrap failure; the scoped mounted panel tests pass. App restart recovery requires a caller-persisted request/receipt lifecycle; panel memory is app-lifetime only. Detailed [client report](../reviews/2026-09-20-release-qodo-chatbook.md) and [independent review](../reviews/2026-09-20-release-qodo-chatbook-independent.md).
+
+The license gate passed, but its completed workflow event cancelled parallel PR jobs through their shared concurrency groups while LICENSE_FIRST_CI_ENABLED was unset. Replacement workflow-run jobs were skipped. Final-head PR jobs must be rerun after all license-gate metadata events finish; cancelled jobs are not passing tests.
+
+All 23 original Qodo threads now have published dispositions and are resolved. Candidate review findings are implemented; fresh final review and CI are being checked. Additional CodeQL alert2693 is repaired in7bd99f427d: buffered character streams use a constant error with 129 owning-module tests passing and independent security review complete. See [stream report](../reviews/2026-09-20-release-buffered-stream-error.md).
