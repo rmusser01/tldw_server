@@ -13,6 +13,29 @@ const createMemoryStorage = (): StateStorage => ({
   removeItem: () => {}
 })
 
+const createBrowserStorage = (): StateStorage => {
+  const tabStorage = sessionStorage
+  const durableStorage = localStorage
+  return {
+    getItem: (key) => {
+      const current = tabStorage.getItem(key)
+      if (current !== null) return current
+      // New tabs keep last-session recovery, then own their restore target.
+      const previous = durableStorage.getItem(key)
+      if (previous !== null) tabStorage.setItem(key, previous)
+      return previous
+    },
+    setItem: (key, value) => {
+      tabStorage.setItem(key, value)
+      durableStorage.setItem(key, value)
+    },
+    removeItem: (key) => {
+      tabStorage.removeItem(key)
+      durableStorage.removeItem(key)
+    }
+  }
+}
+
 export interface PlaygroundSessionData {
   // Core identifier (used to restore messages from Dexie)
   historyId: string | null
@@ -143,7 +166,7 @@ export const usePlaygroundSessionStore = createWithEqualityFn<PlaygroundSessionS
       version: 1,
       migrate: (persisted) => persisted as any,
       storage: createJSONStorage(() =>
-        typeof window !== "undefined" ? localStorage : createMemoryStorage()
+        typeof window !== "undefined" ? createBrowserStorage() : createMemoryStorage()
       ),
       partialize: (state) => ({
         historyId: state.historyId,
