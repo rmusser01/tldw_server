@@ -1938,6 +1938,14 @@ class AdapterError(WorkflowAdapterError):
     """Workflow adapter-specific error."""
 
 
+class ScheduledTaskPersistenceError(RuntimeError):
+    """A terminal run write failed and the enclosing Jobs attempt must retry."""
+
+
+class ScheduledTaskClaimBusy(RuntimeError):
+    """Execution may still be active; Jobs must not acknowledge this delivery."""
+
+
 class MacroValidationError(ValueError):
     """Raised when a chat macro definition or invocation fails validation."""
 
