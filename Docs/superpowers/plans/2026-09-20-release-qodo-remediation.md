@@ -6,7 +6,7 @@ Published 0.1.42 source and grants remain immutable. Server repairs land in the 
 
 ## Original-review stages (historical completion)
 
-These stages describe the original review batch. The additional18-finding agentic batch has verified fixes/dispositions in the linked agentic ledger; final thread publication and remote CI are tracked with the current candidate.
+These stages describe the original review batch. The additional18-finding agentic batch has verified fixes/dispositions in the linked agentic ledger. All18 threads are answered/resolved; fresh complete inventories show no unresolved threads on original2761, candidate2972, recovery2973 or companion2763. Remote CI remains tracked under the parent release task.
 
 ## Stage 1: Inventory
 **Goal**: Capture every Qodo finding.
