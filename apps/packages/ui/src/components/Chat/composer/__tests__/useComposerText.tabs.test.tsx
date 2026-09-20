@@ -51,6 +51,88 @@ describe("Playground drafts in distinct native tab storage areas", () => {
   beforeEach(() => { vi.useFakeTimers(); localStorage.clear(); authority.user = "alice" })
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.useRealTimers() })
 
+  it.each(["pagehide", "hidden"])("restores the latest edit after %s before the save delay elapses", async event => {
+    const tab = makeTabStorage()
+    const view = mount(tab)
+    await settle(); await enter(view, "PREVIOUSLY SAVED")
+    act(() => view.result.current.setMessageValue("LATEST UNSENT EDIT"))
+    const visibility = event === "hidden"
+      ? vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden")
+      : null
+    act(() => {
+      if (event === "hidden") document.dispatchEvent(new Event("visibilitychange"))
+      else window.dispatchEvent(new Event("pagehide"))
+    })
+    // A reload can terminate async durable writes; only the pin already written
+    // before the lifecycle handler returns is guaranteed to survive this reload.
+    const reloadedTab = makeTabStorage(tab)
+    visibility?.mockRestore()
+    view.unmount()
+    const restored = mount(reloadedTab)
+    await settle()
+    expect(restored.result.current.form.values.message).toBe("LATEST UNSENT EDIT")
+  })
+
+  it("preserves a first draft when pagehide precedes the first debounce", async () => {
+    const tab = makeTabStorage()
+    const view = mount(tab)
+    await settle()
+    act(() => view.result.current.setMessageValue("FIRST UNSENT EDIT"))
+    act(() => window.dispatchEvent(new Event("pagehide")))
+    const reloadedTab = makeTabStorage(tab)
+    view.unmount()
+    const restored = mount(reloadedTab)
+    await settle()
+    expect(restored.result.current.form.values.message).toBe("FIRST UNSENT EDIT")
+  })
+
+  it("does not resurrect an explicitly cleared pending edit on pagehide", async () => {
+    const tab = makeTabStorage()
+    const view = mount(tab)
+    await settle(); await enter(view, "PREVIOUSLY SAVED")
+    act(() => view.result.current.setMessageValue("PENDING EDIT"))
+    act(() => { view.result.current.clearDraft(); window.dispatchEvent(new Event("pagehide")) })
+    const reloadedTab = makeTabStorage(tab)
+    view.unmount()
+    const restored = mount(reloadedTab)
+    await settle()
+    expect(restored.result.current.form.values.message).toBe("")
+  })
+
+  it("does not flush invalidated owner text during a synchronous account change", async () => {
+    const tab = makeTabStorage()
+    const view = mount(tab)
+    await settle(); await enter(view, "ALICE SAVED")
+    act(() => view.result.current.setMessageValue("ALICE PENDING"))
+    act(() => {
+      authority.user = "bob"
+      window.dispatchEvent(new CustomEvent("tldw:config-updated", { detail: { authorityChanged: true } }))
+      window.dispatchEvent(new Event("pagehide"))
+    })
+    await settle()
+    expect(view.result.current.form.values.message).toBe("")
+    act(() => {
+      authority.user = "alice"
+      window.dispatchEvent(new CustomEvent("tldw:config-updated", { detail: { authorityChanged: true } }))
+    })
+    await settle()
+    expect(view.result.current.form.values.message).toBe("ALICE SAVED")
+  })
+
+  it("reports draft readiness only after current-owner hydration", async () => {
+    const view = mount(makeTabStorage())
+    expect(view.result.current.draftReady).toBe(false)
+    await settle()
+    expect(view.result.current.draftReady).toBe(true)
+    act(() => {
+      authority.user = "bob"
+      window.dispatchEvent(new CustomEvent("tldw:config-updated", { detail: { authorityChanged: true } }))
+    })
+    expect(view.result.current.draftReady).toBe(false)
+    await settle()
+    expect(view.result.current.draftReady).toBe(true)
+  })
+
   it("restores each active tab's draft after the other tab saves", async () => {
     const a = makeTabStorage(), b = makeTabStorage()
     let normal = mount(a)

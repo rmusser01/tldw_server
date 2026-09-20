@@ -77,6 +77,8 @@ export interface UseComposerTextResult {
   textAreaFocus: () => void
   /** Whether the draft was recently persisted — for the "Draft saved" indicator. */
   draftSaved: boolean
+  /** Whether this owner's saved draft has finished restoring. */
+  draftReady: boolean
   /** Imperative draft clear (call after a successful send). */
   clearDraft: () => void
   /** Computed max height actually applied to the textarea. Surfaced for tests. */
@@ -173,7 +175,7 @@ export function useComposerText(
     restoreWithMetadata?.("", undefined)
   })
 
-  const { draftSaved, clearDraft } = useDraftPersistence({
+  const { draftSaved, draftReady, clearDraft } = useDraftPersistence({
     storageKey: `${draftKey}:owner:${ownerKey ?? "unresolved"}`,
     tabScoped: tabScopedDraft,
     legacyStorageKey: draftKey,
@@ -216,6 +218,7 @@ export function useComposerText(
     setMessageValue,
     textAreaFocus,
     draftSaved,
+    draftReady,
     clearDraft,
     textareaMaxHeight
   }
