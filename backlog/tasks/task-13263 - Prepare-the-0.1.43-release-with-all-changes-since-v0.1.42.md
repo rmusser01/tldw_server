@@ -4,7 +4,7 @@ title: Prepare the 0.1.43 release with all changes since v0.1.42
 status: In Progress
 assignee: []
 created_date: '2026-09-20 19:56'
-updated_date: '2026-09-20 21:56'
+updated_date: '2026-09-20 22:05'
 labels: []
 dependencies: []
 priority: high
@@ -40,6 +40,8 @@ Draft release PR2972 contains all616commits/19integrationPRs, consistent metadat
 Fresh candidate CodeQL review includes alert2693: buffered character-chat SSE fallback returns raw exception text, unlike existing safe lazy-stream handlers. Investigating and repairing under this release task with error-injection regression; five frontend test-fixture alerts require evidence-backed disposition. No release publication performed.
 
 Requester explicitly approved2973 human-summary waiver/merge/PyPI retry. Recovery merged cd2dbc792b8888555abac5c5c9eafa7a43d9b0e4; package inputs unchanged vs immutablev0.1.42,PyPI404 verified. Publication dispatched. Candidate currentCI exposed backend mypy targeting3.11 while runner NumPy stubs require3.12; frontend shard5 fails separately. Fixing under existing release task; freshQodo Notes boolean/endpoint-owner findings under13263.1.
+
+Recovery2973 approved/merged cd2dbc792b; publication35540174556 testgate running; candidate mergedrecovery eb4ec4817d. Backend actualfailureOpenAPIdescriptiondrift fixed222a6833b1,exactCIhashreproducedandtypesgenerated,fulltscpass. Frontendfixture b0585d63de,82pass. Protectedsource222a6833b14bd847cf6783adc0fe4f829a1ba386,7321files,manifest419a2b8f8dd81f23da35360a6ec5771c2d396ae6fc6f6ba5678faa21edac1ba5. Explicitcheck12pass. AdvisorymypyNumPystubs mismatch isnotjobfailure.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

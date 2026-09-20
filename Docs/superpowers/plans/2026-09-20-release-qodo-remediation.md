@@ -65,7 +65,7 @@ Published 0.1.42 source and grants remain immutable. Server repairs land in the 
 
 ## Release gates retained
 
-PR2973 cannot merge or dispatch PyPI until the requester supplies the required human Change summary or explicitly waives it for that PR. Automatic approval rejected the ambiguous earlier reply. PR2972 legal dates remain proposed, and its final CI/review remain open. These gates do not prevent Qodo repairs.
+PR2973 waiver was explicitly approved by the requester after the earlier automatic rejection. It merged at cd2dbc792b and publication retry35540174556 is running. PR2972 legal dates remain proposed, and its final CI/review remain open. These gates do not prevent Qodo repairs.
 
 ## Verification evidence
 
@@ -95,3 +95,5 @@ Chatbook PR2763 closes the three cross-repository findings with 143 focused test
 The license gate passed, but its completed workflow event cancelled parallel PR jobs through their shared concurrency groups while LICENSE_FIRST_CI_ENABLED was unset. Replacement workflow-run jobs were skipped. Final-head PR jobs must be rerun after all license-gate metadata events finish; cancelled jobs are not passing tests.
 
 All 23 original Qodo threads now have published dispositions and are resolved. Candidate review findings are implemented; fresh final review and CI are being checked. Additional CodeQL alert2693 is repaired in7bd99f427d: buffered character streams use a constant error with 129 owning-module tests passing and independent security review complete. See [stream report](../reviews/2026-09-20-release-buffered-stream-error.md).
+
+Latest Qodo review at10b11f6acb raised keyword and lifecycle PostgreSQL boolean literals plus relationship endpoint ownership. All three are already enforced by the shared PostgreSQL SQL transformer and dual endpoint EXISTS owner predicates. Added executable driver-boundary and malformed-link canaries:46 passed; live PostgreSQL11 skipped through official unavailable fixtures. See [second Notes report](../reviews/2026-09-20-release-qodo-notes-second.md). CodeQL test-fixture dispositions2688–2692 are published at https://github.com/rmusser01/tldw_server/pull/2972#issuecomment-5752715588 and dismissed as used in tests.

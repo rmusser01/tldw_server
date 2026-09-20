@@ -5588,7 +5588,7 @@ ab47bfebce6fcfa65fcee1bb66b68d774b81fec928cfe8557499e9650f4e36d5  apps/packages/
 3c435dcdd82f119fe5a68b48ce5f2a1f9dca3d0372b9281bebafac9769b60e9b  apps/packages/ui/src/services/__tests__/recipe-persistence-authority.test.ts
 2dcde906ce3c416671fc00ed4d9d4323f02892bb2317e29919a4f40739f90508  apps/packages/ui/src/services/__tests__/recipe-persistence-owner-contract.test.ts
 cbfa512fa9db13a437bb19e841a1f3f3c1abcddc98cf51bbe029906625a94047  apps/packages/ui/src/services/__tests__/recipe-persistence-owner.contract.test.ts
-5f34edc49e0434e7762eda54977df38c40c4f41169a33b3ec069493ee05f6298  apps/packages/ui/src/services/__tests__/recipe-persistence-owner.surface-bridge.test.tsx
+b184664534ba13bb2acc5ce7fd627f621817e3ecb12e6a275de7bb6f6dd6fa41  apps/packages/ui/src/services/__tests__/recipe-persistence-owner.surface-bridge.test.tsx
 77efe1d2cea48f992ec5857cd0971a37b5310a639c28d4294353eb830654665c  apps/packages/ui/src/services/__tests__/recipe-persistence-registry.test.ts
 fcebcb7c9f237efa1ad708187b18685636fa5f7e9b08c39496c72408d47e8d7c  apps/packages/ui/src/services/__tests__/recipe-persistence-uncertainty.test.ts
 4b4a26a8fb670c4df1894ef077eb5de8bbb3a73d21987f863ada58f527cdcba1  apps/packages/ui/src/services/__tests__/recipe-request-snapshot.test.ts
@@ -7024,7 +7024,7 @@ f194274a333fd9381986439b8e9303bfe988e5c52172be763085c342bb04e75d  apps/tldw-fron
 4ce83dcf6c50536cfd6f280d14e0b280744fe9afc6b87f944e608b939a012a88  apps/tldw-frontend/lib/api/README.md
 ab4c9fc139e4c0d6e97a37565aeed9fe4bac655a9d458360d6cf84eb020bda7d  apps/tldw-frontend/lib/api/characters.ts
 087188969437f69c558fac0c75c5c21daf2393364334e6087c4e0af07d45527d  apps/tldw-frontend/lib/api/notifications.ts
-f25d52facd31df379852b7a0c4c65bbcc4da78a343543c77be251d3300123d94  apps/tldw-frontend/lib/api/openapi.fingerprint.json
+1a7bc3c9a35d660c6c0bfb41daa8a8259ddde1aa885fec643dd299cdf4f0e5e9  apps/tldw-frontend/lib/api/openapi.fingerprint.json
 52620f100952dc8ec9b5fef01cb794f34818b09a27257577daf8ad3b461621ab  apps/tldw-frontend/lib/api/researchRuns.ts
 6f20822b507ac022e664de32e203c6390e80e9881eaa3b750f4c2754f7ab596c  apps/tldw-frontend/lib/api/vnAssets.ts
 0468c7d330672d41ecb32438702ec86198c6c042cd409b323186d0150c748e5e  apps/tldw-frontend/lib/api/vnPlay.ts

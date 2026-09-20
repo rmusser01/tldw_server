@@ -105,11 +105,15 @@
   ],
   "verification_command": "gh attestation verify oci://<subject.name>@sha256:<subject.digest.sha256> --repo rmusser01/tldw_server --format json",
   "pypi": {
-    "status": "blocked",
+    "status": "recovery_running",
     "version_endpoint_http_status": 404,
     "failed_run": "https://github.com/rmusser01/tldw_server/actions/runs/35533776321",
     "cause": "Duplicate AuthNZ conftest registration during collection",
-    "recovery_pr": "https://github.com/rmusser01/tldw_server/pull/2973"
+    "recovery_pr": "https://github.com/rmusser01/tldw_server/pull/2973",
+    "recovery_commit": "cd2dbc792b8888555abac5c5c9eafa7a43d9b0e4",
+    "recovery_run": "https://github.com/rmusser01/tldw_server/actions/runs/35540174556",
+    "approval": "Requester explicitly approved summary waiver, merge and retry.",
+    "checked_at": "2026-09-20T22:04:40.266741+00:00"
   },
   "sync_pr": "https://github.com/rmusser01/tldw_server/pull/2971",
   "next_release_pr": "https://github.com/rmusser01/tldw_server/pull/2972"
