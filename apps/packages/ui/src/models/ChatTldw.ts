@@ -52,6 +52,7 @@ export interface ChatTldwOptions {
   requestScope?: ServicePromptRequestScope
   retryFailedTurn?: boolean
   clientMessageId?: string
+  regenerateFromMessageId?: string
 }
 
 export class ChatTldw {
@@ -83,6 +84,7 @@ export class ChatTldw {
   requestScope?: ServicePromptRequestScope
   retryFailedTurn?: boolean
   clientMessageId?: string
+  regenerateFromMessageId?: string
 
   constructor(options: ChatTldwOptions) {
     // Normalize model id: drop internal prefix like "tldw:" so server receives provider/model
@@ -112,6 +114,7 @@ export class ChatTldw {
     this.requestScope = options.requestScope
     this.retryFailedTurn = options.retryFailedTurn
     this.clientMessageId = options.clientMessageId
+    this.regenerateFromMessageId = options.regenerateFromMessageId
   }
 
   /**
@@ -236,6 +239,7 @@ export class ChatTldw {
         saveToDb: this.saveToDb,
         retryFailedTurn: this.retryFailedTurn,
         clientMessageId: this.clientMessageId,
+        regenerateFromMessageId: this.regenerateFromMessageId,
         conversationId: this.conversationId,
         historyMessageLimit: this.historyMessageLimit,
         historyMessageOrder: this.historyMessageOrder,
@@ -317,6 +321,7 @@ export class ChatTldw {
       saveToDb: this.saveToDb,
       retryFailedTurn: this.retryFailedTurn,
       clientMessageId: this.clientMessageId,
+      regenerateFromMessageId: this.regenerateFromMessageId,
       conversationId: this.conversationId,
       historyMessageLimit: this.historyMessageLimit,
       historyMessageOrder: this.historyMessageOrder,

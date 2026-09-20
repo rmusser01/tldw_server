@@ -1464,6 +1464,7 @@ describe("saved normal Chat pipeline with autosave", () => {
       saveToDb: true,
       conversationId,
       userServerMessageId: `server-user-${++calls}`,
+      serverMessageId: `server-answer-${calls}`,
       stream: async function* () { yield "Ordinary final answer" }
     }))
     const { result } = renderWorkspace()
@@ -1472,6 +1473,7 @@ describe("saved normal Chat pipeline with autosave", () => {
     expect(original).toBe("server-user-1")
     await act(async () => { await result.current.actions.regenerateLastMessage() })
     expect(mocks.pageAssistModel.mock.calls.map(([options]) => options.retryFailedTurn)).toEqual([false, false])
+    expect(mocks.pageAssistModel.mock.calls.map(([options]) => options.regenerateFromMessageId)).toEqual([undefined, "server-answer-1"])
     expect(result.current.state.messages.find(row => !row.isBot)?.serverMessageId).toBe(original)
     expect(mocks.rows.filter(row => row.role === "user").map(row => row.serverMessageId)).toEqual([original])
   })
@@ -2086,8 +2088,10 @@ describe("saved normal Chat pipeline with autosave", () => {
         ).toBeNull()
       )
       expect(mocks.addChatMessage).toHaveBeenCalledTimes(1)
-      if (boundary !== "unmount")
-        expect(result.current.state.serverChatId).not.toBeNull()
+      if (boundary === "A to B to A")
+        expect(result.current.state.serverChatId).toBeNull()
+      else if (boundary === "new history")
+        expect(result.current.state.serverChatId).toBe("other-chat")
     }
   )
 

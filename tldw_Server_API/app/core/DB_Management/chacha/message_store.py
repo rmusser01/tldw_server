@@ -400,8 +400,8 @@ class MessageStore:
             return _append_with_retries(self._db.get_connection())
         return _append_with_retries()
 
-    def get_message_images(self, message_id: str) -> list[dict[str, Any]]:
-        """Fetch all images associated with a message, ordered by position."""
+    def get_message_images(self, message_id: str, *, strict: bool = False) -> list[dict[str, Any]]:
+        """Fetch ordered images; strict reads propagate errors and reject gaps."""
         try:
             cursor = self._db.execute_query(
                 "SELECT message_id, position, image_data, image_mime_type FROM message_images "
@@ -416,9 +416,13 @@ class MessageStore:
                 img_bytes = record.get("image_data")
                 if isinstance(img_bytes, memoryview):
                     record["image_data"] = img_bytes.tobytes()
+                if strict and (record["position"] != len(images) or not record.get("image_data")):
+                    raise CharactersRAGDBError("Saved chat attachment positions or data are incomplete")
                 images.append(record)
             return images  # noqa: TRY300
         except CharactersRAGDBError as e:
+            if strict:
+                raise
             logger.error(f"Failed to fetch images for message {message_id}: {e}")
             return []
 
@@ -658,7 +662,7 @@ class MessageStore:
             logger.error(f"Database error fetching conversation_id for message {message_id}: {e}")
             raise
 
-    def get_message_by_id(self, message_id: str, include_deleted: bool = False) -> dict[str, Any] | None:
+    def get_message_by_id(self, message_id: str, include_deleted: bool = False, *, strict_images: bool = False) -> dict[str, Any] | None:
         """
         Retrieves a specific message by its UUID.
 
@@ -667,6 +671,9 @@ class MessageStore:
 
         Args:
             message_id: The string UUID of the message.
+            include_deleted: Include soft-deleted messages and conversations.
+            strict_images: Propagate attachment read failures and reject missing
+                attachment positions or bytes instead of returning partial data.
 
         Returns:
             A dictionary with message data if found and not deleted, else None.
@@ -696,7 +703,7 @@ class MessageStore:
             img_blob = record.get("image_data")
             if isinstance(img_blob, memoryview):
                 record["image_data"] = img_blob.tobytes()
-            record["images"] = self.get_message_images(message_id)
+            record["images"] = self.get_message_images(message_id, **({"strict": True} if strict_images else {}))
             return record  # noqa: TRY300
         except CharactersRAGDBError as e:
             logger.error(f"Database error fetching message ID {message_id}: {e}")

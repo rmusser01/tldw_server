@@ -690,6 +690,9 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       researchContext: context.researchContext,
       clientMessageId: resolvedUserMessageId,
       retryFailedTurn: serverRetryRequired,
+      regenerateFromMessageId: isRegenerate && !retryFailedTurn
+        ? regenerateFromMessage?.serverMessageId
+        : undefined,
       requestScope: params.servicePromptSnapshot?.requestScope
     })
 

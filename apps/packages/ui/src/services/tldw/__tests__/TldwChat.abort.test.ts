@@ -29,6 +29,25 @@ describe("TldwChatService abort lifecycle", () => {
     mocks.getConfig.mockResolvedValue(null)
   })
 
+  it("identifies successful saved regeneration in both request transports", async () => {
+    mocks.createChatCompletion.mockResolvedValue({ json: async () => ({ choices: [{ message: { content: "answer" } }] }) })
+    mocks.streamChatCompletion.mockImplementation(async function* () { yield chunk("answer") })
+    const service = new TldwChatService()
+    const messages = [
+      { role: "system" as const, content: "Current instructions" },
+      { role: "user" as const, content: "Earlier question" },
+      { role: "assistant" as const, content: "Earlier answer" },
+      { role: "user" as const, content: "Repeated prompt" }
+    ]
+    const options = { model: "m", regenerateFromMessageId: "saved-reply" }
+    await service.sendMessage(messages, options)
+    for await (const _token of service.streamMessage(messages, options)) { /* consume */ }
+    for (const [request] of [mocks.createChatCompletion.mock.calls[0], mocks.streamChatCompletion.mock.calls[0]]) {
+      expect(request.metadata).toEqual({ tldw_regenerate_from_message_id: "saved-reply" })
+      expect(request.messages).toEqual([messages[0], messages[3]])
+    }
+  })
+
   it("passes the caller signal to non-streaming chat completion", async () => {
     mocks.createChatCompletion.mockResolvedValue({
       json: async () => ({ choices: [{ message: { content: "answer" } }] })
