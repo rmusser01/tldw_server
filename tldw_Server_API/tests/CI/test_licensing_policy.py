@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+
 from hashlib import sha256
 from pathlib import Path
 
@@ -65,7 +66,73 @@ def test_countdown_template_is_not_misrepresented_as_an_active_grant() -> None:
     readme = _read("LICENSES/releases/README.md")
     assert "No protected frontend release may be published" in readme
     assert "completed release-specific Countdown grant" in readme
-    assert not any(child.is_dir() for child in Path("LICENSES/releases").iterdir())
+    template = _read("LICENSES/PolyForm-Countdown-1.0.0-template.txt")
+    assert "{start date}" in template
+    assert "{Copy the scheduled license terms here.}" in template
+
+
+def test_release_0_1_42_has_completed_source_record() -> None:
+    release_dir = Path("LICENSES/releases/0.1.42")
+    record = json.loads((release_dir / "release.json").read_text(encoding="utf-8"))
+
+    assert record["schema_version"] == 1
+    assert record["release_id"] == "0.1.42"
+    assert record["product_version"] == "0.1.42"
+    assert record["repository"] == "https://github.com/rmusser01/tldw_server"
+    assert record["protected_source_revision"] == "bba4b8c8a8baf02ce2b6a5f2a544052aa0ed2c5f"
+    assert record["release_date"] == "2026-09-10"
+    assert record["countdown_start"] == "2028-09-10T12:00:00Z"
+    assert record["protected_paths"] == PROTECTED_PATHS
+    assert record["initial_license"] == {
+        "name": "PolyForm Perimeter License 1.0.1",
+        "path": "LICENSES/PolyForm-Perimeter-1.0.1.txt",
+    }
+    assert record["countdown_grant"] == {
+        "additional_license": "AGPL-3.0-only",
+        "path": "LICENSES/releases/0.1.42/PolyForm-Countdown-1.0.0.txt",
+    }
+    assert record["artifact_verification"]["protected_source_snapshot"] == {
+        "manifest": "LICENSES/releases/0.1.42/protected-files.sha256",
+        "result": "verified",
+        "source_revision": "bba4b8c8a8baf02ce2b6a5f2a544052aa0ed2c5f",
+    }
+    assert record["artifact_verification"]["protected_binaries"] == {
+        "published": False,
+        "artifacts": [],
+    }
+    assert record["human_review_required"] is True
+
+    grant = (release_dir / "PolyForm-Countdown-1.0.0.txt").read_text(encoding="utf-8")
+    expected_grant = (
+        _read("LICENSES/PolyForm-Countdown-1.0.0-template.txt")
+        .replace(
+            "{start date}",
+            "2028-09-10",
+        )
+        .replace(
+            "{Copy the scheduled license terms here.}",
+            _read("LICENSES/AGPL-3.0-only.txt").rstrip(),
+        )
+    )
+    assert grant == expected_grant
+
+    manifest_path = release_dir / "protected-files.sha256"
+    manifest_bytes = manifest_path.read_bytes()
+    assert sha256(manifest_bytes).hexdigest() == record["protected_file_manifest"]["sha256"]
+    assert record["protected_file_manifest"]["path"] == str(manifest_path)
+
+    entries = {}
+    for line in manifest_bytes.decode("utf-8").splitlines():
+        digest, path = line.split("  ", 1)
+        assert len(digest) == 64
+        assert path not in entries
+        entries[path] = digest
+
+    # Published grants describe immutable source, not every future checkout.
+    # Pin the reviewed manifest bytes so later development cannot rewrite 0.1.42.
+    assert sha256(manifest_bytes).hexdigest() == ("e38f39788bdbf6ee691a27cc91357e0d92a6b21a47355d745409938ea6e66f76")
+    assert len(entries) == 7117
+    assert all(any(path.startswith(package + "/") for package in PROTECTED_PACKAGES) for path in entries)
 
 
 def test_protected_packages_use_local_license_notices() -> None:

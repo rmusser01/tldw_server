@@ -47,7 +47,6 @@ const SplashOverlay: React.FC<SplashOverlayProps> = ({ card, message, onDismiss 
   }, [handleDismiss]);
 
   return (
-    // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions
     <div
       onClick={handleDismiss}
       style={{

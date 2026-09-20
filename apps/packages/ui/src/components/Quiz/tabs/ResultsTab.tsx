@@ -167,6 +167,13 @@ export const ResultsTab: React.FC<ResultsTabProps> = ({ onRetakeQuiz }) => {
   const [dateRangeFilter, setDateRangeFilter] = React.useState<DateRangeFilterKey>(
     () => readStoredResultsFilterPrefs().dateRangeFilter
   )
+  const [filterNow, setFilterNow] = React.useState(Date.now)
+  React.useEffect(() => {
+    if (dateRangeFilter === "all") return
+    setFilterNow(Date.now())
+    const timer = setInterval(() => setFilterNow(Date.now()), 60_000)
+    return () => clearInterval(timer)
+  }, [dateRangeFilter])
   const [selectedAttemptId, setSelectedAttemptId] = React.useState<number | null>(null)
   const [flashcardModalOpen, setFlashcardModalOpen] = React.useState(false)
   const [selectedMissedQuestions, setSelectedMissedQuestions] = React.useState<Record<number, boolean>>({})
@@ -390,7 +397,7 @@ export const ResultsTab: React.FC<ResultsTabProps> = ({ onRetakeQuiz }) => {
   ]), [attemptedQuizIds, quizMap, t])
 
   const filteredAttempts = React.useMemo(() => {
-    const nowMs = Date.now()
+    const nowMs = filterNow
     const dateRangeDays = dateRangeFilter === "7d"
       ? 7
       : dateRangeFilter === "30d"
@@ -425,7 +432,7 @@ export const ResultsTab: React.FC<ResultsTabProps> = ({ onRetakeQuiz }) => {
 
       return true
     })
-  }, [attempts, dateRangeFilter, getPassingScoreForQuiz, passFilter, quizFilterId])
+  }, [attempts, dateRangeFilter, filterNow, getPassingScoreForQuiz, passFilter, quizFilterId])
 
   const totalFilteredAttempts = filteredAttempts.length
   const paginatedAttempts = React.useMemo(() => {

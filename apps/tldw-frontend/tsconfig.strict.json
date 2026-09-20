@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "strict": true,
+    "allowJs": false,
+    "incremental": false,
+    "types": []
+  },
+  "include": [
+    "../packages/ui/src/utils/absolute-url-guard.ts",
+    "../packages/ui/src/utils/safe-external-url.ts",
+    "../packages/ui/src/utils/request-timeout.ts",
+    "../packages/ui/src/utils/api-key.ts",
+    "../packages/ui/src/services/web-clipper/extension-storage.ts"
+  ],
+  "exclude": ["node_modules"]
+}

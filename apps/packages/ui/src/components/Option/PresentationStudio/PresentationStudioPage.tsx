@@ -44,7 +44,12 @@ type InFlightProjectRequest = {
 }
 
 type DetailLoadResult =
-  | { kind: "structured"; detail: PresentationDetailResult }
+  | {
+      kind: "structured"
+      detail: Omit<PresentationDetailResult, "record"> & {
+        record: Extract<PresentationDetailResult["record"], { content_kind: "structured_slides" }>
+      }
+    }
   | { kind: "standalone_html" }
   | { kind: "unsupported"; contentKind: string | null }
   | { kind: "metadata_unavailable" }
@@ -458,7 +463,7 @@ export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
               ) {
                 throw new Error("Structured presentation could not be verified.")
               }
-              return { kind: "structured", detail }
+              return { kind: "structured", detail: { ...detail, record: detail.record } }
             }
             if (metadata.record.content_kind === "standalone_html") {
               return { kind: "standalone_html" }
@@ -494,7 +499,7 @@ export const PresentationStudioPage: React.FC<PresentationStudioPageProps> = ({
               ) {
                 return { kind: "metadata_unavailable" }
               }
-              return { kind: "structured", detail }
+              return { kind: "structured", detail: { ...detail, record: detail.record } }
             }
           }
         })()

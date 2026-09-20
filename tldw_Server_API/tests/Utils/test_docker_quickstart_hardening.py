@@ -124,6 +124,7 @@ def test_api_dockerfile_excludes_protected_frontend_and_bundles_legal_files():
             "COPY LICENSES /app/LICENSES",
             "COPY tldw_Server_API /app/tldw_Server_API",
             "COPY apps/mcp-unified/src /app/apps/mcp-unified/src",
+            "COPY packages/tldw_profile_core/src /app/packages/tldw_profile_core/src",
             "COPY --from=builder /install /usr/local",
             "COPY --chown=appuser:appuser tldw_Server_API /app/tldw_Server_API",
             "COPY --chown=appuser:appuser Docs /app/Docs",

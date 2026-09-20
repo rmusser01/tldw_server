@@ -4,6 +4,7 @@
  * Each section is fault-isolated: a missing control records FAIL for that
  * section and the sweep continues; browser cleanup always runs. */
 import { chromium } from "@playwright/test"
+import { seedManualUatBrowser } from "./browser-uat-seed.mjs"
 
 const WEB = process.env.WEB_URL || "http://localhost:8080"
 const SERVER = process.env.SERVER_URL || "http://127.0.0.1:8000"
@@ -25,17 +26,10 @@ const section = async (id, fn) => {
   }
 }
 
-const seed = ({ serverUrl, apiKey }) => {
-  localStorage.setItem(
-    "tldwConfig",
-    JSON.stringify({ serverUrl, authMode: "single-user", apiKey })
-  )
-  localStorage.setItem("isMigrated", "true")
-}
 
 try {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } })
-  await ctx.addInitScript(seed, { serverUrl: SERVER, apiKey: API_KEY })
+  await ctx.addInitScript(seedManualUatBrowser, { webUrl: WEB, serverUrl: SERVER, apiKey: API_KEY })
   const page = await ctx.newPage()
   const consoleCounts = { error: 0, warning: 0 }
   page.on("console", (msg) => {
