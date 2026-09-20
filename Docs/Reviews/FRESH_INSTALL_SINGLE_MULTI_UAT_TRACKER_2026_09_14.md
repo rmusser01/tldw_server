@@ -6,7 +6,7 @@
 
 - **Qodo review:** All 14 review findings have verified fixes or an accepted disposition in the [review disposition ledger](PR2967_QODO_REVIEW_2026_09_18.md), under TASK13260.219.11–13. All 14 review threads are resolved and Qodo reports zero open findings. Final hosted CI passed before the verified merge. This review does not replace the pending fresh UAT matrix.
 
-- **Current repair gate:** 335 UAT findings: 331 verified; 4 open (261, 290, 332, 334). The frozen post-merge four-cell matrix completed with failures. Checkpoint [PR2969](https://github.com/rmusser01/tldw_server/pull/2969) merged normally into dev at `1dfdd819b6` after all seven required gates passed, all 12 Qodo threads were resolved, and the requester supplied the Change summary. Follow-up branch `codex/uat295-postgres-notes-20260919` starts from that merge. UAT299 and UAT319/321–323 now pass targeted SQLite/PostgreSQL acceptance, including owner/Bob isolation and controlled source-failure disclosure. Remaining repairs precede another full matrix. Generated Playwright evidence remains local and excluded. See the [checkpoint review](PR2969_CHECKPOINT_REVIEW_2026_09_19.md) and [post-merge matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_18.md).
+- **Current repair gate:** 337 UAT findings: 334 verified; 3 open (261, 334, 336). The frozen post-merge four-cell matrix completed with failures. Checkpoint [PR2969](https://github.com/rmusser01/tldw_server/pull/2969) merged normally into dev at `1dfdd819b6` after all seven required gates passed, all 12 Qodo threads were resolved, and the requester supplied the Change summary. Follow-up branch `codex/uat295-postgres-notes-20260919` starts from that merge. UAT299 and UAT319/321–323 now pass targeted SQLite/PostgreSQL acceptance, including owner/Bob isolation and controlled source-failure disclosure. Remaining repairs precede another full matrix. Generated Playwright evidence remains local and excluded. See the [checkpoint review](PR2969_CHECKPOINT_REVIEW_2026_09_19.md) and [post-merge matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_18.md).
 
 - **Historical frozen-run findings:246 total —230 previously verified,16 new unresolved (231–246).** The frozen48-row execution is complete with product source unchanged;16new findings await repair/disposition. SQLite multi-user natural session expiry passes; new241 loses source content in Media-to-Chat,242 uses plural wording for one Due review, and243 leaves Character setup visible after an ordinary Chat completion. Existing PostgreSQL RLS failure238 and generation timeout234 remain open.
 
@@ -3842,7 +3842,7 @@ All24976source entries unchanged, config restored byte-for-byte, owned browser/a
 
 ## UAT332 — P2: private Character selection survives account change
 
-- Status: open; TASK13260.271. During the frozen9dcb PostgreSQL account control, Bob sub3/org3 opens empty Chat with Alice's TestBot UAT290 card4 still selected in the header/composer (native48/53). Alice messages and drafts are absent.
+- Status: verified on frozen2282895f23; TASK13260.271 Done. During the frozen9dcb PostgreSQL account control, Bob sub3/org3 opens empty Chat with Alice's TestBot UAT290 card4 still selected in the header/composer (native48/53). Alice messages and drafts are absent.
 - Read-only review confirms CharacterStore owner filtering rejects another user's private card, while useSelectedAssistant restores unowned global assistant/legacy Character snapshots including name, greeting and system prompt. No successful foreign dispatch is established.
 - Repair scope: bind selection storage, hydration and delayed writers to the existing verified Chat account owner; preserve same-owner selection behavior and reject unowned legacy snapshots. Focused causal tests and fresh native PostgreSQL account verification precede the checkpoint.
 
@@ -3873,3 +3873,38 @@ All15 baseline failures are repaired. Store mocks now expose the real getState/a
 Expanded49files pass801 assertions (including99 Manager tests), with three unhandled errors isolated to an incomplete service-prompts mock in Manager.crossFeatureStage1. That mock now retains original exports; the affected75tests pass without unhandled errors. Final picker/default42tests also pass. The initial ESLint invocation ignored files outside its base path; corrected repository-root invocation evaluates all30changed files with0errors/1018warnings versus1error/1020warnings on HEAD. No additional warning type remains. TypeScript remains93baseline diagnostics with0added. Bandit is inapplicable to these TypeScript-only changes; the earlier26production-Python scope remains0findings/0errors. All diagnostic and browser evidence stays local/ignored.
 
 Final closure gate:48files702tests pass with exit0 and no skips or unhandled errors; the unchanged Manager first-use file separately passes99tests. The exact lint finding multiset has0added findings. Evidence .tmp/uat332-repair/adjacent-closure.log remains local/ignored.
+
+
+### UAT334 — native server-default transport failure identified
+
+Frozen2282895f23 native PostgreSQL run uat332-native-20260920 creates Alice/Bob through the administrator UI and saves an owned local-only default for Alice. Native26 displays the actual warning: the Service Prompt config is restricted to permitted requests. The exact self-profile GET/PATCH routes were missing from the shared transport allowlist, so the default server write never dispatched. UAT334 remains open. Four causal failures through actual TldwApiClient → bgRequest reproduce this boundary; eleven malformed/other-account/unsupported-method controls already reject. The minimal exact-path GET/PATCH allowance passes97transport/privacy/adjacent checks. Review and committed native server-default verification remain required. The current frozen browser source has not been edited.
+
+Follow-up review confirms self-profile GET/PATCH also lack the expected-user dependency required by hosted/cookie requests. TASK13260.273 adds real HTTP stale-owner and matching/legacy controls against the official PostgreSQL fixture. Those controls first expose UAT336 while seeding preferences; their account-guard assertion has not yet run.
+
+## UAT336 — P1: PostgreSQL profile preference writes wait on their own schema locks
+
+- Status: open; TASK13260.275.
+- Reproduction: authenticated PATCH /api/v1/users/me/profile setting preferences.chat.default_character_id fails after about sixty seconds on each fresh official isolated PostgreSQL database. All four attempted account-scope cases fail in preference setup, not their scope assertions.
+- Cause: ProfileCommandService reads the profile version on its active write transaction; UserProfileOverridesRepo.ensure_tables then opens another transaction and reruns AuthNZ bootstrap DDL, including unconditional ALTER TABLE users operations. That DDL waits for the first transaction, which is awaiting readiness.
+- Repair in progress: reuse the existing read-only PostgreSQL candidate-schema validator for runtime readiness, retaining bootstrap ownership of migrations and sanitized fail-closed errors. Real PostgreSQL set/clear, account guard controls, SQLite compatibility and independent review remain required.
+- Evidence: local .tmp/fresh-uat-recovery-20260916/uat334-profile-guard-red.redacted.log (4 setup errors; 266.61 seconds; zero skipped).
+
+Harness notes retained locally: native10 attempted to open the model chooser after automatic model discovery had already selected llama.cpp; native11 confirms the healthy selected model. Native20 awaited the missing server PATCH and native25 expected a server-clear notification despite the scoped transport rejection. These timeouts do not count as passing acceptance.
+
+### UAT290/332 — final committed native acceptance complete
+
+Frozen2282895f23, official PostgreSQL multi-user fixture, real llama.cpp9099: ordinary conversation88a16a38 and Character72c750cd retain independent settled transcripts, modes and unsent drafts across reload. Clearing ordinary remains empty; Character survives and recovers in a new tab. Alice sub2/org2 private TestBot4/default/draft are absent for settled Bob sub3/org3. Bob creates private BobBot6/default/draft; Alice re-login restores only her TestBot and draft. Ordinary cleared draft remains empty; original Character tab restores its own draft. Logout deliberately invalidates selected conversation sessions; the saved Character route still reloads its persisted transcript. Native53 incorrectly expected automatic conversation selection after logout and timed out;54/56/57 distinguish expected session clearing from retained owner drafts and persisted data.
+
+Evidence .tmp/uat332-native/31–58: no injected browser application state. Current page console0errors. Operator config restored byte-for-byte, all24985tracked source entries unchanged, owned browser/API/frontend stopped, officialPGholder exit0. UAT290/TASK13260.227 and UAT332/TASK13260.271 are closed. UAT334 server-default writes and UAT336 remain under separate acceptance. UAT261 stays open for extra model emote text by user direction.
+
+### UAT334/336 — causal PostgreSQL and hosted transport checks
+
+Read-only canonical schema validation replaces runtime bootstrap DDL. Review additionally reproduced exhausted-pool timeout in a5-second bounded test; passing the caller transaction connection to readiness removes the extra checkout. Combined real PostgreSQL suite now5passed/0skipped32.28s, including matching/legacy set-clear and stale-account GET/PATCH412 with both preferences unchanged. Hosted cookie-session transport carries the expected-user header;17actual proxy tests pass. TypeScript93baseline/current byte-identical diagnostics, ESLint0errors/0warnings on the transport change. Native committed server-default acceptance remains pending.
+
+## UAT337 — P2: offline profile migration inventory omits existing UUID backfills
+
+- Status: verified; TASK13260.276 Done.
+- Expanded UserProfile suite:334passed/1failed. The exact offline write inventory omitted existing migration093 and097 users.uuid backfills; both migration source and inventory test were unchanged from dev.
+- Repair adds only those two established call sites to EXPECTED_EXCLUDED_WRITES. No exclusion category, runtime write gateway or migration behavior changes. Final full335-case suite passes232.00s with zero skips; independent review clear. Ruff passes; pre-existing Black formatting differences reproduce on HEAD. No runtime enforcement was relaxed.
+
+Final checkpoint follow-up verification:99transport tests plus10default privacy tests pass; complete335UserProfile suite passes; PostgreSQL5passes0skips. Production Bandit on users/overrides/update services reports0findings0errors. Test Bandit retains deliberate pytestassertB101 and two unchanged fake-secret fixtures at test_user_profile_updates.py77/142; no new non-assert findings. Fresh origin/dev remains1dfdd819b6 and is already the branch base.

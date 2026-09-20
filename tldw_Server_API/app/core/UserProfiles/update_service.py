@@ -146,7 +146,7 @@ class UserProfileUpdateService:
                         repo = repo_holder.get("repo")
                         if repo is None:
                             repo = UserProfileOverridesRepo(self._db_pool)
-                            await repo.ensure_tables()
+                            await repo.ensure_tables(db_conn=db_conn)
                             repo_holder["repo"] = repo
                         await anchor.capture()
                         await repo.delete_override(user_id=user_id, key=key, db_conn=db_conn)
@@ -313,7 +313,7 @@ class UserProfileUpdateService:
                 repo = repo_holder.get("repo")
                 if repo is None:
                     repo = UserProfileOverridesRepo(self._db_pool)
-                    await repo.ensure_tables()
+                    await repo.ensure_tables(db_conn=db_conn)
                     repo_holder["repo"] = repo
                 await anchor.capture()
                 await repo.upsert_override(
@@ -331,7 +331,7 @@ class UserProfileUpdateService:
                 repo = repo_holder.get("repo")
                 if repo is None:
                     repo = UserProfileOverridesRepo(self._db_pool)
-                    await repo.ensure_tables()
+                    await repo.ensure_tables(db_conn=db_conn)
                     repo_holder["repo"] = repo
                 await anchor.capture()
                 await repo.upsert_override(
@@ -382,7 +382,7 @@ class UserProfileUpdateService:
                 repo = repo_holder.get("repo")
                 if repo is None:
                     repo = UserProfileOverridesRepo(self._db_pool)
-                    await repo.ensure_tables()
+                    await repo.ensure_tables(db_conn=db_conn)
                     repo_holder["repo"] = repo
                 await anchor.capture()
                 await repo.upsert_override(

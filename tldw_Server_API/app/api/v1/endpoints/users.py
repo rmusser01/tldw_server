@@ -23,6 +23,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     get_session_manager_dep,
     get_storage_service_dep,
     require_api_key_scope,
+    require_expected_user,
 )
 from tldw_Server_API.app.api.v1.schemas.api_key_schemas import (
     APIKeyCreateRequest,
@@ -432,7 +433,12 @@ async def get_user_profile_catalog(
     return response
 
 
-@router.get("/me/profile", response_model=UserProfileResponse, response_model_exclude_none=True)
+@router.get(
+    "/me/profile",
+    response_model=UserProfileResponse,
+    response_model_exclude_none=True,
+    dependencies=[Depends(require_expected_user)],
+)
 async def get_current_user_profile_view(
     sections: Optional[str] = Query(None, description="Comma-separated list of sections to include"),
     include_sources: bool = Query(False, description="Include per-field source attribution"),
@@ -479,7 +485,11 @@ async def get_current_user_profile_view(
     return UserProfileResponse(**profile)
 
 
-@router.patch("/me/profile", response_model=UserProfileUpdateResponse)
+@router.patch(
+    "/me/profile",
+    response_model=UserProfileUpdateResponse,
+    dependencies=[Depends(require_expected_user)],
+)
 async def update_current_user_profile(
     payload: UserProfileUpdateRequest,
     http_request: Request,
