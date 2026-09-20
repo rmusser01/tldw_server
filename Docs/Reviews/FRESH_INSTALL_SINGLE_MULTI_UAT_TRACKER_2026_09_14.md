@@ -6,7 +6,7 @@
 
 - **Qodo review:** All 14 review findings have verified fixes or an accepted disposition in the [review disposition ledger](PR2967_QODO_REVIEW_2026_09_18.md), under TASK13260.219.11–13. All 14 review threads are resolved and Qodo reports zero open findings. Final hosted CI passed before the verified merge. This review does not replace the pending fresh UAT matrix.
 
-- **Current repair gate:** 323 UAT findings: 309 verified; 14 open (261, 283–287, 290, 299–300, 306, 319, 321–323). The frozen post-merge four-cell matrix completed with failures. Checkpoint [PR2969](https://github.com/rmusser01/tldw_server/pull/2969) merged normally into dev at `1dfdd819b6` after all seven required gates passed, all 12 Qodo threads were resolved, and the requester supplied the Change summary. Follow-up branch `codex/uat295-postgres-notes-20260919` starts from that merge. UAT289 and UAT302 now pass targeted fresh SQLite/PostgreSQL acceptance, and UAT309 passes controlled sanitizer regressions. UAT310/311/313–316 now pass targeted fresh SQLite/PostgreSQL Suggestions acceptance. Remaining repairs precede another full matrix. Generated Playwright evidence remains local and excluded. See the [checkpoint review](PR2969_CHECKPOINT_REVIEW_2026_09_19.md) and [post-merge matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_18.md).
+- **Current repair gate:** 325 UAT findings: 314 verified; 11 open (261, 283–287, 290, 300, 306, 324–325). The frozen post-merge four-cell matrix completed with failures. Checkpoint [PR2969](https://github.com/rmusser01/tldw_server/pull/2969) merged normally into dev at `1dfdd819b6` after all seven required gates passed, all 12 Qodo threads were resolved, and the requester supplied the Change summary. Follow-up branch `codex/uat295-postgres-notes-20260919` starts from that merge. UAT299 and UAT319/321–323 now pass targeted SQLite/PostgreSQL acceptance, including owner/Bob isolation and controlled source-failure disclosure. Remaining repairs precede another full matrix. Generated Playwright evidence remains local and excluded. See the [checkpoint review](PR2969_CHECKPOINT_REVIEW_2026_09_19.md) and [post-merge matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_18.md).
 
 - **Historical frozen-run findings:246 total —230 previously verified,16 new unresolved (231–246).** The frozen48-row execution is complete with product source unchanged;16new findings await repair/disposition. SQLite multi-user natural session expiry passes; new241 loses source content in Media-to-Chat,242 uses plural wording for one Due review, and243 leaves Character setup visible after an ordinary Chat completion. Existing PostgreSQL RLS failure238 and generation timeout234 remain open.
 
@@ -3294,7 +3294,7 @@ UAT293 reciprocal control: Bob's own generator text and unsent BOB-PRIVATE-DRAFT
 
 Frozen3cff SQLite single actual PNG attachment reproduces **UAT286**, despite current llama.cpp `/props` vision=true. The browser retains the image and error after reload; canonical conversation `219955da-548f-4763-9a0a-80ea712c3c49` stays empty and no inference request is sent. **UAT283** misleading Custom/raw-provider model label also recurs. These remain open, with no new ID for the same defects. Two ordinary turns and canonical5-row reload pass. File ingestion truthfully reports a truncated-analysis warning while storing Rowan media1; later QA/analysis acceptance remains pending. Evidence `.tmp/pr2967-merge-20260918/full-matrix/sqlite-single/17–38`; details in the matrix. No production source edits during this run.
 
-### UAT299 — P1, open — SQLite natural-language QA fails Character and Chat source searches
+### UAT299 — P1, verified — SQLite natural-language QA fails Character and Chat source searches
 
 - TASK13260.236. Frozen3cff SQLite single native QA at01:40:09UTC asks “Who directs Rowan Observatory, where is it located, and when do public tours begin? Cite the source.” CharacterStore.search_character_cards and MessageStore.search_messages_by_content both raise `fts5: syntax error near comma` (actual log quotes the comma) at18:40:09.641/.757 Pacific. Their SQLite MATCH paths pass ordinary punctuation through unless a double quote is present.
 - The completed UI reports Characters/Chats searched and “Selected sources look ready”, while all five returned chunks are Media. Its Media answer correctly gives Dr. Mira Vale, Cedar Ridge and18:00 Friday with citation1. That success does not establish either failed source worked. No positive Character/Chat match is claimed; causal regressions and repaired native checks remain required.
@@ -3558,7 +3558,7 @@ Independent review reports no actionable findings. Bandit reports0production fin
 
 Fresh immutable63d4581613 SQLite/PostgreSQL multi-user profiles both save a matching Character and real llama.cpp conversation and restore the messages after reload. The PostgreSQL native Fast QA request includes all four intended sources, but returns empty contexts twice. Streaming source inspection also confirms aggregate source_status metadata is discarded by _PrefetchedEvidence before NDJSON dispatch; source-level failure disclosure is therefore not accepted. UAT299 remains open. Native evidence and screenshots stay ignored in .tmp/uat299-native. First observer instrumentation could not retain network state across CLI invocations; the later single-call capture retains the actual POST and NDJSON.
 
-## UAT319 — P2, open: PostgreSQL QA omits saved Character and Chat evidence
+## UAT319 — P2, verified: PostgreSQL QA omits saved Character and Chat evidence
 
 TASK13260.257. Native Fast query Rowan Observatory, returns zero contexts at22:23 and22:26UTC despite owned Character3 and saved Chat c0ed44d0-ea45-46f1-b324-514b860c5bae. Preflight calls Characters/Chats empty: its current non-file backend handling covers only Media, while ChaCha readiness checks local file presence. The retrieval cause remains under investigation; ownership/security filtering must remain intact.
 
@@ -3591,16 +3591,16 @@ Immutable f746 SQLite/PostgreSQL native Character saves201 and real local-model 
 
 The first Chat observer waited for /chat/completions, but Character Chat uses complete-v2; its30-second timeout is a harness error. Actual network receipt, visible completed message and normal reload independently establish success, without resubmission. Recurrent bootstrap-admin profile403 is attributed to Email verification required and remains a tracked observation pending UX/policy assessment.
 
-## UAT321 — P2, open: saved model reasoning contaminates Chat retrieval evidence
+## UAT321 — P2, verified: saved model reasoning contaminates Chat retrieval evidence
 
 TASK13260.259. Both fresh native QA streams include optional model reasoning in the assistant Chat excerpt, while the visible Chat answer is separately collapsed from that reasoning. Preserve raw source messages but project the visible answer into evidence and downstream generation context. Evidence stays local in .tmp/uat319-native; no provider reasoning is copied into this tracker.
 
-## UAT322 — P2, open: Character and Chat evidence loses source identity
+## UAT322 — P2, verified: Character and Chat evidence loses source identity
 
 TASK13260.260. Both native QA pages label each retrieved Character/Chat as Source N and Document. Stream title is null, source uses character_cards/chat_history, and source identity fields are missing. Native View opens the excerpt with the same generic Document label and no original-record link. Keep provenance truthful and allowlist only public metadata. Screenshots inspected; source type/title and supported owner-page navigation require repair.
 
 
-## UAT323 — P1, open: PostgreSQL Knowledge QA returns another account’s Chat evidence
+## UAT323 — P1, verified: PostgreSQL Knowledge QA returns another account’s Chat evidence
 
 TASK13260.261. Fresh immutable f746 PostgreSQL multi-user Bob query at23:23UTC returns administrator assistant chat_pa_f840-e8ee-1cc-c25e; the corresponding SQLite Bob query returns zero sources. The shared-backend substring query omits conversation ownership, and the full-text fallback also lacks an explicit owner condition. Repair both paths and metadata lookup with real cross-user/deleted-parent regressions before resuming the matrix. UAT319 stays open because its isolation acceptance failed. Local evidence .tmp/uat323-repair and .tmp/uat319-native remains excluded from the PR.
 
@@ -3639,3 +3639,21 @@ Additional observations retained for triage: SQLite's built-in Default Assistant
 Native Media extraction/chunking succeeds on both backends. Labeled diagnostic wrappers inject only a Chat retrieval exception; successful Media and Character evidence remains real. Both streams correctly report Chats error/retrieval_failed, but neither no-answer results nor Details displays that failure.299 remains open. Removing the fault and using native Retry clears the error on both backends; no stale failure-cache defect is established.
 
 Three causal frontend tests fail for missing no-answer disclosure. The bounded repair reuses source-failure wording in AnswerWorkspace for completed searches with evidence and no visible answer, using completed diagnostics rather than the next-search source selection. It preserves existing generated-answer and zero-result panels.107affected transport/persistence/panel tests and50final layout/no-results/summary tests pass, including single-source partial-success and recovery controls. Independent review found a misleading other-sources phrase; corrected to Retrieved sources are still available, with coverage. No remaining actionable review findings. ESLint0filefindings; TypeScript93identical baseline errors. This increment changes TypeScript only; earlier backend Bandit remains valid, and the ignored diagnostic Python wrapper has0Bandit findings/errors. Controlled committed-frontend acceptance remains pending. The original APIs finish shutdown normally after roughly one minute of draining and exit without a second signal; this does not close287's earlier interrupted-shutdown case.
+
+## UAT324 — P2, open: fresh Character activity age is incorrect
+
+TASK13260.262. Fresh SQLite's built-in Default Assistant shows7h ago shortly after initialization. Its database is the new owned profile, and seed creation is confirmed. The list parses raw dates with new Date and formats absolute age; verify raw serialized timestamps and non-UTC controls before attributing the repair. Preserve stored dates and correct offset-bearing records.
+
+## UAT325 — P3, open: Character evidence previews show literal markup and empty sections
+
+Native Character source previews display generated Markdown syntax and empty Personality/Scenario/First Message sections. Correct source identity and authorized navigation are accepted separately under322. Triage readability using existing safe rendering conventions and preserve raw records. Screenshots remain local in .tmp/uat323-native; source-detail behavior is not a full matrix pass.
+
+### UAT299 / UAT319 / UAT321–323 accepted — 2026-09-20 00:48 UTC
+
+Fresh4ac SQLite and actual PostgreSQL owner QA retrieves saved Character/Chat evidence with correct titles, source kinds and IDs; source actions reopen the correct Character or persisted two-message Chat. Excerpts contain visible answers and useful facts without reasoning, while supplemental storage reads retain the original reasoning. Bob's native and cache-disabled queries return zero foreign evidence; direct Chat access is denied and native foreign Character links show unavailable. These controls close319/321–323.
+
+Controlled535 frontend acceptance reuses the4ac diagnostic APIs; backend source is identical across those commits. A task-owned Chat retriever fault retains real Media/Character results and is visibly disclosed when SQLite generation returns no answer and when PostgreSQL generation is disabled through Settings. PostgreSQL's generated-answer failure disclosure also passes. Removing the fault and using native Retry search/Ask clears the warning; PostgreSQL returns searched Chat evidence and SQLite reports an ordinary empty Chat result. This closes299's final partial-failure criterion. This targeted acceptance does not recertify the full fresh matrix.
+
+Final audits check24962 entries in each of four source archives with zero mismatches. Initial audit calls used abbreviated missing filenames; corrected existing manifests pass. Both browser sessions, all owned APIs/frontends and their four listeners are stopped. Original provider configurations are restored byte-for-byte; the official PostgreSQL fixture holder exits0 after release. Shared PostgreSQL and llama.cpp services remain running. Completed task plans are removed under the repository workflow; detailed task verification and ignored evidence remain available. Eleven findings remain open, including newly tracked324/325.
+
+UAT324 native response confirms Default Assistant timestamps omit a timezone while same-install siblings carry Z; the list interprets this as local time and converts the resulting future offset into6h ago. TASK13260.262 owns the bounded repair. TASK13260.263 owns UAT325 preview readability.
