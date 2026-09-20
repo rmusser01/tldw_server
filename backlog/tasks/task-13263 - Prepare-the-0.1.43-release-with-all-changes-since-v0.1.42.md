@@ -4,7 +4,7 @@ title: Prepare the 0.1.43 release with all changes since v0.1.42
 status: In Progress
 assignee: []
 created_date: '2026-09-20 19:56'
-updated_date: '2026-09-20 23:11'
+updated_date: '2026-09-20 23:47'
 labels: []
 dependencies: []
 priority: high
@@ -55,6 +55,10 @@ New CI follow-up after Qodo closure: c5453d4385 frontend shards4/8 and8/8 fail i
 c545 CI follow-up verified: media page mock regressions reproduce41failed/1pass, then both files plus real-query outage/hydration58pass/4files. Added stable useQueryClient/removeQueries fixture contracts; stale-deletion security test now asserts selection cleared before and after late404, preserving no-warning/no-refetch assertions. Full nonincremental WebUI tsc exits0. ScopedESLint baseline10/current10/new0; diffcheckclean; Bandit N/A TS-only. Two testfiles+this tracking only; no production edits/skip/timeout changes. Evidence /tmp/candidate-c545-frontend-ci-results.md. Parent owns review/sourcecommit/protectedmanifest/push.
 
 Required-CI test-only repaircca220627a verified independently58tests, nonincrementaltsc, no new ESLint. Refreshed7322-file protected manifest and all current source authorities; explicit licensing13pass. Separate0.1.42 PyPI timeout/failure triage now in release plans; publication remains blocked, no gate weakened.
+
+Carry reviewed main-recovery test-isolation commit3b96a3cb04/PR2974 into0.1.43 so collection fixes are retained. Main repair:161 Prompt Studio passes,403 Chat/Macro/Skills passes with9 existing live-provider skips,4 collection regressions,independent review and no new lint/Bandit findings. PyPI still blocked by separate Media fixture FTS failure and one-hour full-gate scope decision; no publication approved. Candidate12c6 frontend unit shards all now pass; aggregate/coverage finishing. Protected frontend files unchanged by backend test-only carry.
+
+Verified candidate carry of PR2974 test-only fixes:180 Prompt Studio/isolation/artifact/Media-route/licensing tests pass; separately43Media FTS tests pass; final combinedBandit1073-to1073 and Ruff65-to35 no new findings. Independent reviews of both repairs found no issues. Protected frontend bytes and0.1.42legal record unchanged; existingcca220627a/7,322-file manifest remains valid. Recovery fullcollection with publication-matching pytest plugins91pass/13skip,not fullsuite. Existing publisher gate unchanged,scope answer pending. Main recovery plan and current candidate status now record these facts prominently.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
