@@ -187,7 +187,8 @@ export function usePromptEditor(deps: UsePromptEditorDeps) {
         setDrawerInitialValues(null)
         notification.success({
           message: t("managePrompts.notification.addSuccess"),
-          description: t("managePrompts.notification.addSuccessDesc")
+          description: t("managePrompts.notification.addSuccessDesc"),
+          placement: "bottomRight"
         })
         void syncState
       },
@@ -241,7 +242,8 @@ export function usePromptEditor(deps: UsePromptEditorDeps) {
         setDrawerInitialValues(null)
         notification.success({
           message: t("managePrompts.notification.updatedSuccess"),
-          description: t("managePrompts.notification.updatedSuccessDesc")
+          description: t("managePrompts.notification.updatedSuccessDesc"),
+          placement: "bottomRight"
         })
         void syncState
       },
