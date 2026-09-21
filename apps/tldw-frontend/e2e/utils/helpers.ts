@@ -237,6 +237,10 @@ export async function seedAuth(
     const authConfig = {
       serverUrl: cfg.serverUrl,
       authMode: 'single-user',
+      authSource: 'manual',
+      credentialSource: 'manual',
+      apiKeyPersistence: 'device',
+      apiKeyServerOrigin: new URL(cfg.serverUrl).origin,
       apiKey: cfg.apiKey,
     };
 
