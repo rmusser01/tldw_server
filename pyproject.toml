@@ -93,7 +93,7 @@ dependencies = [
   "toml>=0.10.0",
   "tomli>=2.0.0",
   "tqdm>=4.65.0",
-  "uvicorn[standard]==0.35.0",
+  "uvicorn[standard]==0.53.0",
   "websockets==15.0.1",
 
 
