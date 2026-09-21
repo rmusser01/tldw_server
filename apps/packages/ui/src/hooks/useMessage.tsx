@@ -89,15 +89,13 @@ import {
   collectGreetings,
   isGreetingMessageType,
 } from "@/utils/character-greetings";
-import { resolveServerChatAssistantIdentity } from "@/hooks/chat/useServerChatLoader";
+import { useSidepanelChatMetadata, type QueuedDispatchGuard } from "@/hooks/chat/useSidepanelChatMetadata";
 import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state";
 import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord";
 import {
   assistantSelectionToCharacter,
-  characterToAssistantSelection,
   getAssistantSelectionMode,
   isPersonaAssistantSelection,
-  personaToAssistantSelection,
   type AssistantSelection,
 } from "@/types/assistant-selection";
 import { ensurePersonaServerChat } from "@/hooks/chat/personaServerChat";
@@ -346,85 +344,7 @@ export const useMessage = () => {
     [notification, t],
   );
 
-  React.useEffect(() => {
-    if (!serverChatId || serverChatMetaLoaded) return;
-    const loadChatMeta = async () => {
-      try {
-        await tldwClient.initialize().catch(() => null);
-        const chat = await tldwClient.getChat(serverChatId);
-        const { assistantKind, assistantId, characterId, personaMemoryMode } =
-          resolveServerChatAssistantIdentity(
-            (chat as unknown as Record<string, unknown> | null) ?? null,
-          );
-        setServerChatTitle(String((chat as any)?.title || ""));
-        setServerChatCharacterId(characterId);
-        setServerChatAssistantKind(assistantKind);
-        setServerChatAssistantId(assistantId);
-        setServerChatPersonaMemoryMode(personaMemoryMode);
-        setServerChatState(
-          (chat as any)?.state ??
-            (chat as any)?.conversation_state ??
-            "in-progress",
-        );
-        setServerChatVersion((chat as any)?.version ?? null);
-        setServerChatTopic((chat as any)?.topic_label ?? null);
-        setServerChatClusterId((chat as any)?.cluster_id ?? null);
-        setServerChatSource((chat as any)?.source ?? null);
-        setServerChatExternalRef((chat as any)?.external_ref ?? null);
-        if (assistantKind === "persona" && assistantId) {
-          const profile = await tldwClient
-            .getPersonaProfile(assistantId)
-            .catch(() => null);
-          await setSelectedAssistant(
-            personaToAssistantSelection(
-              (profile as Record<string, unknown> | null) ?? {
-                id: assistantId,
-                name:
-                  (chat as any)?.assistant_name ??
-                  (chat as any)?.title ??
-                  "Persona",
-              },
-            ),
-          );
-        } else if (assistantKind === "character" && assistantId) {
-          const character = await tldwClient
-            .getCharacter(assistantId)
-            .catch(() => null);
-          await setSelectedAssistant(
-            characterToAssistantSelection(
-              (character as Record<string, unknown> | null) ?? {
-                id: assistantId,
-                name:
-                  (chat as any)?.assistant_name ??
-                  (chat as any)?.title ??
-                  "Assistant",
-              },
-            ),
-          );
-        }
-        setServerChatMetaLoaded(true);
-      } catch {
-        // ignore metadata hydration failures
-      }
-    };
-    void loadChatMeta();
-  }, [
-    serverChatId,
-    serverChatMetaLoaded,
-    setSelectedAssistant,
-    setServerChatAssistantId,
-    setServerChatAssistantKind,
-    setServerChatCharacterId,
-    setServerChatClusterId,
-    setServerChatExternalRef,
-    setServerChatPersonaMemoryMode,
-    setServerChatMetaLoaded,
-    setServerChatSource,
-    setServerChatState,
-    setServerChatTitle,
-    setServerChatTopic,
-    setServerChatVersion,
-  ]);
+  const conversationMetadata = useSidepanelChatMetadata(setSelectedAssistant);
 
   // Local embedding store removed; rely on tldw_server RAG
 
@@ -452,17 +372,23 @@ export const useMessage = () => {
     clearReplyTarget();
   };
 
-  const saveMessageOnSuccess = createSaveMessageOnSuccess(
+  const historySetterForQueuedTurn = (guard?: QueuedDispatchGuard) =>
+    (id: string, options?: { preserveServerChatId?: boolean }) => {
+      if (guard) guard.publishHistoryId(id, () => setHistoryId(id, options));
+      else setHistoryId(id, options);
+    };
+  const saveSuccessForQueuedTurn = (guard?: QueuedDispatchGuard) => createSaveMessageOnSuccess(
     temporaryChat,
-    setHistoryId as (
-      id: string,
-      options?: { preserveServerChatId?: boolean },
-    ) => void,
+    historySetterForQueuedTurn(guard),
     {
       onServerConversationLinked: (conversationId) => {
-        setServerChatId(conversationId);
-        setServerChatMetaLoaded(false);
-        invalidateServerChatHistory();
+        const publish = () => {
+          setServerChatId(conversationId);
+          setServerChatMetaLoaded(false);
+          invalidateServerChatHistory();
+        };
+        if (guard) guard.publishServerChatId(conversationId, publish);
+        else publish();
         if (!serverChatId) {
           void syncChatSettingsForServerChat({
             historyId,
@@ -475,16 +401,6 @@ export const useMessage = () => {
       },
     }
   );
-  const saveMessageOnError = createSaveMessageOnError(
-    temporaryChat,
-    history,
-    setHistory,
-    setHistoryId as (
-      id: string,
-      options?: { preserveServerChatId?: boolean },
-    ) => void,
-  );
-
   const chatWithWebsiteMode = async (
     message: string,
     image: string,
@@ -495,7 +411,11 @@ export const useMessage = () => {
     embeddingSignal: AbortSignal,
     servicePromptSnapshot: ServicePromptSnapshot,
     regenerateFromMessage?: Message,
+    queuedGuard?: QueuedDispatchGuard,
   ) => {
+    const setTurnHistoryId = historySetterForQueuedTurn(queuedGuard);
+    const saveMessageOnSuccess = saveSuccessForQueuedTurn(queuedGuard);
+    const saveMessageOnError = createSaveMessageOnError(temporaryChat, history, setHistory, setTurnHistoryId);
     const executionSignal = servicePromptSnapshot.scopeSignal;
     const scopeInvalidatedSignal = servicePromptSnapshot.scopeInvalidatedSignal;
     const shouldAbortForScopeChange = () =>
@@ -813,7 +733,7 @@ export const useMessage = () => {
 
       await saveMessageOnSuccess({
         historyId,
-        setHistoryId,
+        setHistoryId: setTurnHistoryId,
         isRegenerate,
         selectedModel: model,
         message,
@@ -885,7 +805,7 @@ export const useMessage = () => {
           image,
           selectedModel: model,
           setHistory,
-          setHistoryId,
+          setHistoryId: setTurnHistoryId,
           userMessage: message,
           isRegenerating: isRegenerate,
           message_source: "copilot",
@@ -945,7 +865,11 @@ export const useMessage = () => {
     history: ChatHistory,
     signal: AbortSignal,
     regenerateFromMessage?: Message,
+    queuedGuard?: QueuedDispatchGuard,
   ) => {
+    const setTurnHistoryId = historySetterForQueuedTurn(queuedGuard);
+    const saveMessageOnSuccess = saveSuccessForQueuedTurn(queuedGuard);
+    const saveMessageOnError = createSaveMessageOnError(temporaryChat, history, setHistory, setTurnHistoryId);
     if (!selectedModel || selectedModel.trim().length === 0) {
       notification.error({
         message: t("error"),
@@ -1185,7 +1109,7 @@ export const useMessage = () => {
 
       await saveMessageOnSuccess({
         historyId,
-        setHistoryId,
+        setHistoryId: setTurnHistoryId,
         isRegenerate,
         selectedModel: model,
         message,
@@ -1235,7 +1159,7 @@ export const useMessage = () => {
         image,
         selectedModel: model,
         setHistory,
-        setHistoryId,
+        setHistoryId: setTurnHistoryId,
         userMessage: message,
         isRegenerating: isRegenerate,
         message_source: "copilot",
@@ -1272,7 +1196,12 @@ export const useMessage = () => {
     regenerateFromMessage?: Message,
     serverChatIdOverride?: string | null,
     controller?: AbortController,
+    queuedGuard?: QueuedDispatchGuard,
+    historyIdOverride?: string | null,
   ) => {
+    const setTurnHistoryId = historySetterForQueuedTurn(queuedGuard);
+    const saveMessageOnSuccess = saveSuccessForQueuedTurn(queuedGuard);
+    const saveMessageOnError = createSaveMessageOnError(temporaryChat, history, setHistory, setTurnHistoryId);
     setStreaming(true);
     const activeCharacter = characterOverride ?? selectedCharacter;
     const resolveGreetingText = (): string => {
@@ -1469,7 +1398,7 @@ export const useMessage = () => {
               name: "You",
               message,
               sources: [],
-              images: [],
+              images: image ? [image] : [],
               createdAt,
               id: resolvedUserMessageId,
               parentMessageId: null,
@@ -1514,6 +1443,7 @@ export const useMessage = () => {
           external_ref: serverChatExternalRef || undefined,
         })) as TldwChatMeta;
 
+        queuedGuard?.();
         let rawId: string | number | undefined;
         if (created && typeof created === "object") {
           const {
@@ -1557,7 +1487,8 @@ export const useMessage = () => {
         }
         chatId = normalizedId;
         createdNewChat = true;
-        setServerChatId(normalizedId);
+        if (queuedGuard) queuedGuard.publishServerChatId(normalizedId, setServerChatId);
+        else setServerChatId(normalizedId);
         setServerChatTitle(String((created as any)?.title || ""));
         setServerChatCharacterId(
           (created as any)?.character_id ?? activeCharacter?.id ?? null,
@@ -1995,8 +1926,8 @@ export const useMessage = () => {
       }
 
       await saveMessageOnSuccess({
-        historyId,
-        setHistoryId,
+        historyId: historyIdOverride ?? historyId,
+        setHistoryId: setTurnHistoryId,
         isRegenerate,
         selectedModel: model,
         modelId: model,
@@ -2064,12 +1995,12 @@ export const useMessage = () => {
         e,
         botMessage: assistantContent,
         history: historyBase,
-        historyId,
+        historyId: historyIdOverride ?? historyId,
         image,
         selectedModel: model,
         modelId: model,
         setHistory,
-        setHistoryId,
+        setHistoryId: setTurnHistoryId,
         userMessage: message,
         isRegenerating: isRegenerate,
         message_source: "copilot",
@@ -2116,7 +2047,11 @@ export const useMessage = () => {
       selectedModel?: string | null;
       useOCR?: boolean;
     },
+    queuedGuard?: QueuedDispatchGuard,
   ) => {
+    const setTurnHistoryId = historySetterForQueuedTurn(queuedGuard);
+    const saveMessageOnSuccess = saveSuccessForQueuedTurn(queuedGuard);
+    const saveMessageOnError = createSaveMessageOnError(temporaryChat, history, setHistory, setTurnHistoryId);
     const resolvedPresetModel = (
       typeof options?.selectedModel === "string"
         ? options.selectedModel
@@ -2347,7 +2282,7 @@ export const useMessage = () => {
 
       await saveMessageOnSuccess({
         historyId,
-        setHistoryId,
+        setHistoryId: setTurnHistoryId,
         isRegenerate,
         selectedModel: model,
         message,
@@ -2397,7 +2332,7 @@ export const useMessage = () => {
         image,
         selectedModel: model,
         setHistory,
-        setHistoryId,
+        setHistoryId: setTurnHistoryId,
         userMessage: message,
         isRegenerating: isRegenerate,
         message_source: "copilot",
@@ -2435,6 +2370,8 @@ export const useMessage = () => {
     imageBackendOverride,
     requestOverrides,
     serverChatIdOverride,
+    historyIdOverride,
+    assertQueuedDispatchCurrent,
   }: {
     message: string;
     image: string;
@@ -2458,7 +2395,13 @@ export const useMessage = () => {
       messageForModel?: string;
     };
     serverChatIdOverride?: string | null;
+    historyIdOverride?: string | null;
+    assertQueuedDispatchCurrent?: QueuedDispatchGuard;
   }) => {
+    assertQueuedDispatchCurrent?.();
+    const setTurnHistoryId = historySetterForQueuedTurn(assertQueuedDispatchCurrent);
+    const saveMessageOnSuccess = saveSuccessForQueuedTurn(assertQueuedDispatchCurrent);
+    const saveMessageOnError = createSaveMessageOnError(temporaryChat, history, setHistory, setTurnHistoryId);
     const trimmedImageBackendOverride =
       typeof imageBackendOverride === "string"
         ? imageBackendOverride.trim()
@@ -2558,6 +2501,7 @@ export const useMessage = () => {
 
     let replyActive = false;
     try {
+      assertQueuedDispatchCurrent?.();
       resetChatLoopState();
     const resolvedSelectedSystemPrompt =
       requestOverrides &&
@@ -2598,6 +2542,7 @@ export const useMessage = () => {
       modelAvailable = await ensureSelectedChatModelIsAvailable(
         resolvedSelectedModel,
       );
+      assertQueuedDispatchCurrent?.();
       if (!modelAvailable) {
         return;
       }
@@ -2644,7 +2589,7 @@ export const useMessage = () => {
             setStreaming,
             setAbortController,
             historyId,
-            setHistoryId: setHistoryId as (
+            setHistoryId: setTurnHistoryId as (
               id: string,
               options?: { preserveServerChatId?: boolean },
             ) => void,
@@ -2683,7 +2628,7 @@ export const useMessage = () => {
             setStreaming,
             setAbortController,
             historyId: historyId ?? null,
-            setHistoryId,
+            setHistoryId: setTurnHistoryId,
             fileRetrievalEnabled,
             setActionInfo,
             regenerateFromMessage,
@@ -2714,7 +2659,7 @@ export const useMessage = () => {
             setStreaming,
             setAbortController,
             historyId: historyId ?? null,
-            setHistoryId,
+            setHistoryId: setTurnHistoryId,
             regenerateFromMessage,
             ...replyOverrides,
           },
@@ -2736,6 +2681,7 @@ export const useMessage = () => {
             selectedModel: resolvedSelectedModel,
             useOCR: resolvedUseOCR,
           },
+          assertQueuedDispatchCurrent,
         );
       } else {
         if (resolvedChatMode === "normal") {
@@ -2766,6 +2712,7 @@ export const useMessage = () => {
                 trackedCharacterForSend,
                 (characterId) => tldwClient.getCharacter(characterId),
               );
+            assertQueuedDispatchCurrent?.();
             await characterChatMode(
               message,
               image,
@@ -2778,6 +2725,8 @@ export const useMessage = () => {
               regenerateFromMessage,
               serverChatIdOverride,
               activeController,
+              assertQueuedDispatchCurrent,
+              historyIdOverride,
             );
           } else if (sendMode === "tracked_persona" && isPersonaAssistantSelection(effectiveSelectedAssistant)) {
             const personaServerChat = await ensurePersonaServerChat({
@@ -2799,7 +2748,9 @@ export const useMessage = () => {
               createChat: (payload) => tldwClient.createChat(payload),
               ensureServerChatHistoryId: async () => historyId,
               invalidateServerChatHistory,
-              setServerChatId,
+              setServerChatId: assertQueuedDispatchCurrent
+                ? (id) => assertQueuedDispatchCurrent.publishServerChatId(id, setServerChatId)
+                : setServerChatId,
               setServerChatTitle,
               setServerChatCharacterId,
               setServerChatAssistantKind,
@@ -2813,6 +2764,7 @@ export const useMessage = () => {
               setServerChatSource,
               setServerChatExternalRef,
             });
+            assertQueuedDispatchCurrent?.();
             await normalChatMode(
               message,
               image,
@@ -2832,7 +2784,7 @@ export const useMessage = () => {
                 setStreaming,
                 setAbortController,
                 historyId: personaServerChat.historyId,
-                setHistoryId: setHistoryId as (
+                setHistoryId: setTurnHistoryId as (
                   id: string,
                   options?: { preserveServerChatId?: boolean },
                 ) => void,
@@ -2877,7 +2829,7 @@ export const useMessage = () => {
                 setStreaming,
                 setAbortController,
                 historyId,
-                setHistoryId: setHistoryId as (
+                setHistoryId: setTurnHistoryId as (
                   id: string,
                   options?: { preserveServerChatId?: boolean },
                 ) => void,
@@ -2918,7 +2870,7 @@ export const useMessage = () => {
                 setStreaming,
                 setAbortController,
                 historyId,
-                setHistoryId: setHistoryId as (
+                setHistoryId: setTurnHistoryId as (
                   id: string,
                   options?: { preserveServerChatId?: boolean },
                 ) => void,
@@ -2939,6 +2891,7 @@ export const useMessage = () => {
             memory || history,
             signal,
             regenerateFromMessage,
+            assertQueuedDispatchCurrent,
           );
         } else {
           const newEmbeddingController = new AbortController();
@@ -2954,6 +2907,7 @@ export const useMessage = () => {
             embeddingSignal,
             servicePromptSnapshot!,
             regenerateFromMessage,
+            assertQueuedDispatchCurrent,
           );
         }
       }
@@ -3281,13 +3235,23 @@ export const useMessage = () => {
       const branchIndex = nextMessages.length - 1;
       if (branchIndex < 0) return;
 
-      const branchedChatId = await createServerOnlyChatBranch(branchIndex);
+      let branchSnapshot:
+        | import("@/hooks/handlers/messageHandlers").ServerChatBranchSnapshot
+        | undefined;
+      const branchedChatId = await createServerOnlyChatBranch(
+        branchIndex,
+        (snapshot) => {
+          branchSnapshot = snapshot;
+        },
+      );
       if (!branchedChatId) {
         throw new Error("Failed to create branch for regeneration");
       }
 
       return {
+        messages: branchSnapshot?.messages,
         submitExtras: {
+          historyIdOverride: branchSnapshot?.historyId,
           serverChatIdOverride: branchedChatId,
         },
       };
@@ -3295,6 +3259,7 @@ export const useMessage = () => {
   });
 
   return {
+    conversationMetadata,
     messages,
     setMessages,
     editMessage,

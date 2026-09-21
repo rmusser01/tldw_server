@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
 import React from "react"
+import { createInstance } from "i18next"
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import * as mediaHandoff from "@/services/tldw/media-chat-handoff"
+import type { MediaChatHandoffPayload } from "@/services/tldw/media-chat-handoff"
 import { useMilestoneStore } from "@/store/milestones"
 import { DISCUSS_MEDIA_PROMPT_SETTING } from "@/services/settings/ui-settings"
 import { useChatActions } from "@/hooks/chat/useChatActions"
@@ -14,7 +17,7 @@ import { chatRagMethods } from "@/services/tldw/domains/chat-rag"
 import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
 import type { ServicePromptSnapshot } from "@/services/service-prompts"
 import type { TldwApiClientCore } from "@/services/tldw/TldwApiClient"
-const handoff = vi.hoisted(() => ({ scope: "server-a:alice" as string | null, get: vi.fn(), clear: vi.fn(), setRagMediaIds: vi.fn() }))
+const handoff = vi.hoisted(() => ({ scope: "server-a:alice" as string | null, search: "", draftReady: true, get: vi.fn(), clear: vi.fn(), setRagMediaIds: vi.fn() }))
 vi.mock("@/hooks/useHomeMilestoneScope", () => ({ useHomeMilestoneScope: () => handoff.scope }))
 
 // These cases keep the Form, submit hook, action router, session restore, RAG
@@ -547,8 +550,14 @@ vi.mock("react-router-dom", () => ({
       {children}
     </a>
   ),
-  useLocation: () => ({ pathname: "/chat", search: "", hash: "" }),
-  useNavigate: () => vi.fn()
+  useLocation: () => ({ pathname: "/chat", search: React.useSyncExternalStore(
+    callback => { window.addEventListener("popstate", callback); return () => window.removeEventListener("popstate", callback) },
+    () => handoff.search
+  ), hash: "" }),
+  useNavigate: () => (route: string | { search?: string }) => {
+    handoff.search = typeof route === "string" ? route.slice(route.indexOf("?")) : route.search || ""
+    window.dispatchEvent(new PopStateEvent("popstate"))
+  }
 }))
 
 vi.mock("@/services/settings/registry", async () => {
@@ -885,6 +894,7 @@ vi.mock("../hooks", async () => {
         onComposerRenderProfile: vi.fn(),
         wrapComposerProfile: (_label: string, node: React.ReactNode) => node,
         draftSaved: false,
+        draftReady: handoff.draftReady,
         selectedQuickPrompt: null,
         setSelectedQuickPrompt: vi.fn()
       }
@@ -1114,6 +1124,9 @@ vi.mock("@/utils/onboarding-ingestion-telemetry", () => ({
 
 import { PlaygroundForm } from "../PlaygroundForm"
 
+const sourceFlowI18n = createInstance()
+void sourceFlowI18n.init({ lng: "en", resources: {}, initImmediate: false })
+
 function useSourceFlowActions() {
   const state = useStoreMessageOption((value) => value)
   const [abortController, setAbortController] = React.useState<AbortController | null>(null)
@@ -1121,12 +1134,15 @@ function useSourceFlowActions() {
     ...state,
     abortController,
     setAbortController,
-    t: (_key: string, fallback?: string) => fallback || _key,
-    notification: { error: vi.fn(), warning: vi.fn(), info: vi.fn(), success: vi.fn() },
+    t: sourceFlowI18n.t,
+    notification: { error: vi.fn(), warning: vi.fn(), info: vi.fn(), success: vi.fn(), open: vi.fn(), destroy: vi.fn() },
     currentChatModelSettings: { apiProvider: "openai", setSystemPrompt: vi.fn() },
     ensureServerChatHistoryId: async () => "cedar-local",
     compareModeActive: false,
     compareFeatureEnabled: false,
+    compareMaxModels: 3,
+    messageSteeringPrompts: null,
+    invalidateServerChatHistory: vi.fn(),
     markCompareHistoryCreated: vi.fn(),
     selectedAssistant: null,
     selectedCharacter: null,
@@ -1157,9 +1173,21 @@ const cedarRows = [
   { id: "cedar-question", history_id: "cedar-local", role: "user", content: "Tell me about the old Cedar garden.", images: [], sources: [], createdAt: 1 },
   { id: "cedar-answer", history_id: "cedar-local", role: "assistant", content: "Cedar has a green gate.", images: [], sources: [], createdAt: 2 }
 ]
-const cedarData = { historyInfo: { id: "cedar-local", title: "Cedar saved chat", server_chat_id: "cedar-server" }, messages: cedarRows }
-const rowanPayload = { ownerScope: "server-a:alice", mediaId: "42", title: "Rowan.md", content: "Summarize this source.", mode: "rag_media" }
+const cedarData = { historyInfo: { id: "cedar-local", title: "Cedar saved chat", server_chat_id: "cedar-server", server_scope_key: '["https://handoff.test","single-user","manual",null,"1",null]' }, messages: cedarRows }
+const rowanPayload: MediaChatHandoffPayload = { ownerScope: "server-a:alice", mediaId: "42", title: "Rowan.md", content: "Summarize this source.", mode: "rag_media" }
 const rowanText = "The Rowan archive keeps violet maps in the east room."
+
+const openMediaHandoff = async (payload: MediaChatHandoffPayload) => {
+  const token = await mediaHandoff.createMediaChatHandoff({ ownerScope: "server-a:alice", ...payload })
+  handoff.search = new URL(mediaHandoff.buildMediaChatHandoffRoute(token), "http://localhost").search
+  window.dispatchEvent(new PopStateEvent("popstate"))
+  return token
+}
+const deliverMediaHandoff = async (payload: MediaChatHandoffPayload) => {
+  await act(async () => { await openMediaHandoff(payload) })
+  const replace = screen.queryByRole("button", { name: "Replace current draft" })
+  if (replace) await userEvent.setup().click(replace)
+}
 
 describe("Home source handoff through the real Chat and RAG send boundary", () => {
   beforeEach(() => {
@@ -1188,6 +1216,9 @@ describe("Home source handoff through the real Chat and RAG send boundary", () =
       }]))
     }
     handoff.scope = "server-a:alice"
+    handoff.search = ""
+    handoff.draftReady = true
+    sessionStorage.clear()
     handoff.get.mockReset().mockResolvedValue(undefined)
     handoff.clear.mockReset().mockResolvedValue(undefined)
     sourceFlow.getFullChatData.mockReset().mockResolvedValue(cedarData)
@@ -1198,8 +1229,8 @@ describe("Home source handoff through the real Chat and RAG send boundary", () =
 
   afterEach(() => { cleanup(); sourceFlow.enabled = false })
 
-  const consume = async (payload: unknown = rowanPayload) => {
-    await act(async () => window.dispatchEvent(new CustomEvent("tldw:discuss-media", { detail: payload })))
+  const consume = async (payload: MediaChatHandoffPayload = rowanPayload) => {
+    await deliverMediaHandoff(payload)
     await waitFor(() => expect(screen.getByTestId("composer-textarea")).toHaveValue("Chat with this media: Rowan.md\n\nSummarize this source."))
   }
   const restore = async () => {
@@ -1319,9 +1350,6 @@ describe("Home source handoff through the real Chat and RAG send boundary", () =
     { order: "handoff-before-restore", priorSource: true }
   ])("retrieves Rowan before generation with old Cedar history ($order, prior source=$priorSource)", async ({ order, priorSource }) => {
     if (priorSource) usePlaygroundSessionStore.getState().saveSession({ chatMode: "rag", ragMediaIds: [7] })
-    const payload = defer<unknown>()
-    handoff.get.mockImplementation((key) => key === DISCUSS_MEDIA_PROMPT_SETTING ? payload.promise : Promise.resolve(undefined))
-    handoff.clear.mockImplementation(async () => { handoff.get.mockResolvedValue(undefined) })
     const historyRead = defer<typeof cedarData>()
     if (order === "handoff-first") sourceFlow.getFullChatData.mockReturnValue(historyRead.promise)
     render(<SourceFlowHarness />)
@@ -1329,7 +1357,7 @@ describe("Home source handoff through the real Chat and RAG send boundary", () =
     let restoring: Promise<unknown> | undefined
     if (order === "restore-first") await restore()
     else if (order === "handoff-first") await act(async () => { restoring = sourceFlow.restore!() })
-    await act(async () => { payload.resolve(rowanPayload) })
+    await deliverMediaHandoff(rowanPayload)
     await waitFor(() => expect(screen.getByTestId("composer-textarea")).toHaveValue("Chat with this media: Rowan.md\n\nSummarize this source."))
     if (order === "handoff-first") await act(async () => { historyRead.resolve(cedarData); await restoring })
     if (order === "handoff-before-restore") await restore()
@@ -1363,7 +1391,7 @@ describe("Home source handoff through the real Chat and RAG send boundary", () =
     render(<SourceFlowHarness />)
     await restore()
     await act(async () => useStoreMessageOption.setState({ fileRetrievalEnabled: true, ragMediaIds: [7], chatMode: "rag" }))
-    await act(async () => window.dispatchEvent(new CustomEvent("tldw:discuss-media", { detail: { mediaId: "42", title: "Rowan.md", content: rowanText, mode: "chat" } })))
+    await deliverMediaHandoff({ mediaId: "42", title: "Rowan.md", content: rowanText, mode: "normal" })
     await send()
     expect(sourceFlow.request).not.toHaveBeenCalled()
     expect(sourceFlow.stream).toHaveBeenCalledTimes(1)
@@ -1374,7 +1402,7 @@ describe("Home source handoff through the real Chat and RAG send boundary", () =
     render(<SourceFlowHarness />)
     await restore()
     const intentRevision = usePlaygroundSessionStore.getState().sourceSelectionRevision
-    await act(async () => window.dispatchEvent(new CustomEvent("tldw:discuss-media", { detail: { ...rowanPayload, ownerScope: "server-a:bob" } })))
+    await deliverMediaHandoff({ ...rowanPayload, ownerScope: "server-a:bob" })
     expect(screen.getByTestId("composer-textarea")).toHaveValue("")
     expect(useStoreMessageOption.getState().fileRetrievalEnabled).toBe(false)
     expect(useStoreMessageOption.getState().ragMediaIds).toBeNull()
@@ -1384,15 +1412,15 @@ describe("Home source handoff through the real Chat and RAG send boundary", () =
 
   it("discards an earlier owner's storage read through A to B to A", async () => {
     const intentRevision = usePlaygroundSessionStore.getState().sourceSelectionRevision
-    const oldRead = defer<unknown>()
+    const oldRead = defer<void>()
+    const consumeOriginal = mediaHandoff.consumeMediaChatHandoff
     let readStarted = false
-    handoff.get.mockImplementation((key) => {
-      if (key === DISCUSS_MEDIA_PROMPT_SETTING && !readStarted) {
-        readStarted = true
-        return oldRead.promise
-      }
-      return Promise.resolve(undefined)
+    vi.spyOn(mediaHandoff, "consumeMediaChatHandoff").mockImplementationOnce(async (...args) => {
+      readStarted = true
+      await oldRead.promise
+      return consumeOriginal(...args)
     })
+    await openMediaHandoff(rowanPayload)
     const view = render(<SourceFlowHarness />)
     await waitFor(() => expect(readStarted).toBe(true))
     handoff.scope = "server-a:bob"
@@ -1400,7 +1428,7 @@ describe("Home source handoff through the real Chat and RAG send boundary", () =
     await act(async () => {})
     handoff.scope = "server-a:alice"
     view.rerender(<SourceFlowHarness />)
-    await act(async () => { oldRead.resolve(rowanPayload) })
+    await act(async () => { oldRead.resolve() })
     expect(screen.getByTestId("composer-textarea")).toHaveValue("")
     expect(useStoreMessageOption.getState().fileRetrievalEnabled).toBe(false)
     expect(sourceFlow.request).not.toHaveBeenCalled()
@@ -1423,12 +1451,14 @@ describe("Home source handoff through the real Chat and RAG send boundary", () =
     await waitFor(() => expect(sourceFlow.request).toHaveBeenCalledTimes(1))
     await act(async () => {
       authority.abort()
+      window.dispatchEvent(new Event("tldw:auth-principal-changed"))
+      useStoreMessageOption.setState({ historyId: "bob-local", messages: [{ id: "bob-message", message: "Current account draft", isBot: false, name: "Bob", sources: [] }] })
       retrieval.resolve({ results: [{ content: rowanText, metadata: { media_id: 42 } }] })
     })
     await waitFor(() => expect(useStoreMessageOption.getState().streaming).toBe(false))
     for (const [, options] of sourceFlow.stream.mock.calls) expect(options.signal.aborted).toBe(true)
-    expect(useStoreMessageOption.getState().messages.map((message) => message.id)).toEqual(["cedar-question", "cedar-answer"])
-    expect(useStoreMessageOption.getState().historyId).toBe("cedar-local")
+    expect(useStoreMessageOption.getState().messages.map((message) => message.id)).toEqual(["bob-message"])
+    expect(useStoreMessageOption.getState().historyId).toBe("bob-local")
   })
 
   it.each(["before-restore", "during-restore"])("preserves an accepted same-value Rowan handoff %s", async (order) => {
@@ -1457,7 +1487,7 @@ describe("Home source handoff through the real Chat and RAG send boundary", () =
     await waitFor(() => expect(sourceFlow.sessionReady).toBe(true))
     let restoring: Promise<unknown> | undefined
     if (order === "during-restore") await act(async () => { restoring = sourceFlow.restore!() })
-    await act(async () => window.dispatchEvent(new CustomEvent("tldw:discuss-media", { detail: { mediaId: "42", title: "Rowan.md", content: rowanText, mode: "chat" } })))
+    await deliverMediaHandoff({ mediaId: "42", title: "Rowan.md", content: rowanText, mode: "normal" })
     if (order === "during-restore") await act(async () => { historyRead.resolve(cedarData); await restoring })
     else await restore()
     await send()
@@ -1477,7 +1507,7 @@ describe("Home source handoff through the real Chat and RAG send boundary", () =
     let restoring!: Promise<unknown>
     await act(async () => { restoring = sourceFlow.restore!() })
     await consume()
-    await act(async () => window.dispatchEvent(new CustomEvent("tldw:discuss-media", { detail: { ...rowanPayload, title: "Cedar.md", mediaId: "7" } })))
+    await deliverMediaHandoff({ ...rowanPayload, title: "Cedar.md", mediaId: "7" })
     await consume()
     await act(async () => { historyRead.resolve(cedarData); await restoring })
     await send()
@@ -1532,6 +1562,9 @@ describe("PlaygroundForm OpenUI mode", () => {
   beforeEach(() => {
     onSubmitMock.mockReset().mockResolvedValue({ status: "submitted" })
     handoff.scope = "server-a:alice"
+    handoff.search = ""
+    handoff.draftReady = true
+    sessionStorage.clear()
     handoff.get.mockReset().mockResolvedValue(undefined)
     handoff.clear.mockReset().mockResolvedValue(undefined)
     handoff.setRagMediaIds.mockReset()
@@ -1539,52 +1572,122 @@ describe("PlaygroundForm OpenUI mode", () => {
     messageOptionState.value = createMessageOptionState()
   })
 
-  it("consumes legacy unowned handoffs when token-derived identity is unavailable", async () => {
+  it("ignores legacy unowned shared handoffs instead of assigning them to the current tab", async () => {
     handoff.scope = null
-    handoff.get.mockImplementation(async (setting) => setting === DISCUSS_MEDIA_PROMPT_SETTING ? { mediaId: "42", title: "Legacy review", content: "Discuss", mode: "rag_media" } : undefined)
+    handoff.get.mockResolvedValue({ mediaId: "42", content: "Private legacy source" })
     render(<PlaygroundForm droppedFiles={[]} />)
-    await waitFor(() => expect(screen.getByTestId("composer-textarea")).toHaveValue("Chat with this media: Legacy review\n\nDiscuss"))
-    expect(handoff.setRagMediaIds).toHaveBeenCalledWith([42])
-    expect(handoff.clear).toHaveBeenCalledWith(DISCUSS_MEDIA_PROMPT_SETTING)
-  })
-
-  it("waits for a resolved identity before applying or clearing an owned handoff", async () => {
-    handoff.scope = null
-    handoff.get.mockImplementation(async (setting) => setting === DISCUSS_MEDIA_PROMPT_SETTING ? { ownerScope: "server-a:alice", mediaId: "42", title: "Owned source", content: "Discuss", mode: "rag_media" } : undefined)
-    const view = render(<PlaygroundForm droppedFiles={[]} />)
     await act(async () => {})
     expect(screen.getByTestId("composer-textarea")).toHaveValue("")
     expect(handoff.setRagMediaIds).not.toHaveBeenCalled()
     expect(handoff.clear).not.toHaveBeenCalledWith(DISCUSS_MEDIA_PROMPT_SETTING)
+  })
+
+  it("does not let an unrelated mounted Character tab consume a shared media payload or replace its draft", async () => {
+    const user = userEvent.setup()
+    messageOptionState.value.serverChatId = "testbot-chat"
+    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    await user.type(screen.getByTestId("composer-textarea"), "PRIVATE TESTBOT DRAFT")
+    handoff.clear.mockClear()
+    let pending = { ownerScope: "server-a:alice", mediaId: "1", title: "Media source", content: "All source lines", mode: "normal" } as unknown
+    handoff.clear.mockImplementation(async () => { pending = undefined })
+    handoff.get.mockImplementation(async setting => setting === DISCUSS_MEDIA_PROMPT_SETTING
+      ? pending
+      : undefined)
+    // The real useMessageOption recreates this setter on every render.
+    messageOptionState.value.setFileRetrievalEnabled = vi.fn()
+    view.rerender(<PlaygroundForm droppedFiles={[]} />)
+    await act(async () => {})
+    expect(screen.getByTestId("composer-textarea")).toHaveValue("PRIVATE TESTBOT DRAFT")
+    expect(handoff.clear).not.toHaveBeenCalledWith(DISCUSS_MEDIA_PROMPT_SETTING)
+  })
+
+  it("leaves an explicitly addressed source untouched in an unrelated mounted Character tab", async () => {
+    const user = userEvent.setup()
+    messageOptionState.value.serverChatId = "testbot-chat"
+    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    await user.type(screen.getByTestId("composer-textarea"), "ALICE-CHARACTER-DRAFT-742")
+    const source = { ...rowanPayload, content: Array.from({ length: 13 }, (_, i) => 'Source line ' + i).join('\n') }
+    const token = await mediaHandoff.createMediaChatHandoff(source)
+    messageOptionState.value.setFileRetrievalEnabled = vi.fn()
+    view.rerender(<PlaygroundForm droppedFiles={[]} />)
+    await act(async () => {})
+    expect(screen.getByTestId("composer-textarea")).toHaveValue("ALICE-CHARACTER-DRAFT-742")
+    expect(await mediaHandoff.readMediaChatHandoff(token, "server-a:alice")).toEqual(source)
+    expect(handoff.setRagMediaIds).not.toHaveBeenCalled()
+  })
+
+  it("cannot replay a consumed token after the composer remounts", async () => {
+    const token = await openMediaHandoff(rowanPayload)
+    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    await waitFor(() => expect(handoff.search).toBe(""))
+    view.unmount()
+    handoff.search = new URL(mediaHandoff.buildMediaChatHandoffRoute(token), "http://localhost").search
+    render(<PlaygroundForm droppedFiles={[]} />)
+    await userEvent.setup().type(screen.getByTestId("composer-textarea"), "NEW PRIVATE DRAFT")
+    expect(screen.getByTestId("composer-textarea")).toHaveValue("NEW PRIVATE DRAFT")
+    expect(await mediaHandoff.readMediaChatHandoff(token, "server-a:alice")).toBeNull()
+  })
+
+  it("waits for owner and draft hydration before applying the addressed source", async () => {
+    handoff.scope = null
+    handoff.draftReady = false
+    const token = await openMediaHandoff(rowanPayload)
+    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    await act(async () => {})
     handoff.scope = "server-a:alice"
     view.rerender(<PlaygroundForm droppedFiles={[]} />)
-    await waitFor(() => expect(screen.getByTestId("composer-textarea")).toHaveValue("Chat with this media: Owned source\n\nDiscuss"))
-    expect(handoff.clear).toHaveBeenCalledWith(DISCUSS_MEDIA_PROMPT_SETTING)
-  })
-
-  it.each(["server-a:alice", "server-a:bob"])("only applies a saved source owned by %s when identity matches", async (ownerScope) => {
-    handoff.get.mockImplementation(async (setting) => setting === DISCUSS_MEDIA_PROMPT_SETTING ? { ownerScope, mediaId: "42", title: "Private source", content: "Summarize", mode: "rag_media" } : undefined)
-    render(<PlaygroundForm droppedFiles={[]} />)
-    await waitFor(() => expect(handoff.clear).toHaveBeenCalledWith(DISCUSS_MEDIA_PROMPT_SETTING))
-    if (ownerScope === handoff.scope) {
-      expect(screen.getByTestId("composer-textarea")).toHaveValue("Chat with this media: Private source\n\nSummarize")
-      expect(handoff.setRagMediaIds).toHaveBeenCalledWith([42])
-    } else {
-      expect(screen.getByTestId("composer-textarea")).toHaveValue("")
-      expect(handoff.setRagMediaIds).not.toHaveBeenCalled()
-    }
-  })
-
-  it("does not apply a saved source after identity changes while storage resolves", async () => {
-    let resolve!: (value: unknown) => void
-    handoff.get.mockImplementation((setting) => setting === DISCUSS_MEDIA_PROMPT_SETTING ? new Promise(done => { resolve = done }) : Promise.resolve(undefined))
-    const view = render(<PlaygroundForm droppedFiles={[]} />)
-    await waitFor(() => expect(resolve).toBeTypeOf("function"))
-    const firstResolve = resolve
-    handoff.scope = "server-a:bob"
-    view.rerender(<PlaygroundForm droppedFiles={[]} />)
-    await act(async () => { firstResolve({ ownerScope: "server-a:alice", mediaId: "42", title: "Private source", content: "Summarize" }) })
+    await act(async () => {})
     expect(screen.getByTestId("composer-textarea")).toHaveValue("")
+    expect(await mediaHandoff.readMediaChatHandoff(token, "server-a:alice")).not.toBeNull()
+    handoff.draftReady = true
+    view.rerender(<PlaygroundForm droppedFiles={[]} />)
+    await waitFor(() => expect(screen.getByTestId("composer-textarea")).toHaveValue("Chat with this media: Rowan.md\n\nSummarize this source."))
+    expect(await mediaHandoff.readMediaChatHandoff(token, "server-a:alice")).toBeNull()
+  })
+
+  it.each(["insert", "replace", "cancel"])("preserves a destination draft until the user chooses %s", async action => {
+    const user = userEvent.setup()
+    render(<PlaygroundForm droppedFiles={[]} />)
+    await user.type(screen.getByTestId("composer-textarea"), "MY EXISTING DRAFT")
+    let token!: string
+    await act(async () => { token = await openMediaHandoff(rowanPayload) })
+    expect(screen.getByTestId("composer-textarea")).toHaveValue("MY EXISTING DRAFT")
+    expect(await mediaHandoff.readMediaChatHandoff(token, "server-a:alice")).not.toBeNull()
+    await user.click(screen.getByRole("button", { name: action === "insert" ? "Insert media source" : action === "replace" ? "Replace current draft" : "Cancel import" }))
+    const source = "Chat with this media: Rowan.md\n\nSummarize this source."
+    expect(screen.getByTestId("composer-textarea")).toHaveValue(action === "cancel" ? "MY EXISTING DRAFT" : action === "insert" ? "MY EXISTING DRAFT\n\n" + source : source)
+    await waitFor(async () => expect(await mediaHandoff.readMediaChatHandoff(token, "server-a:alice")).toBeNull())
+    expect(handoff.search).toBe("")
+  })
+
+  it.each(["Insert media source", "Replace current draft"])("does not consume or apply a delayed %s after the destination unmounts", async action => {
+    const user = userEvent.setup()
+    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    await user.type(screen.getByTestId("composer-textarea"), "PRIVATE DESTINATION DRAFT")
+    let token!: string
+    await act(async () => { token = await openMediaHandoff(rowanPayload) })
+    const read = defer<void>()
+    const consume = mediaHandoff.consumeMediaChatHandoff
+    let started = false
+    vi.spyOn(mediaHandoff, "consumeMediaChatHandoff").mockImplementationOnce(async (...args) => {
+      started = true
+      await read.promise
+      return consume(...args)
+    })
+    await user.click(screen.getByRole("button", { name: action }))
+    expect(started).toBe(true)
+    view.unmount()
+    await act(async () => { read.resolve() })
+    expect(await mediaHandoff.readMediaChatHandoff(token, "server-a:alice")).toEqual(rowanPayload)
+    expect(handoff.setRagMediaIds).not.toHaveBeenCalled()
+  })
+
+  it("does not expose or consume a source addressed to a different account", async () => {
+    const token = await openMediaHandoff({ ...rowanPayload, ownerScope: "server-a:bob" })
+    render(<PlaygroundForm droppedFiles={[]} />)
+    await act(async () => {})
+    expect(screen.getByTestId("composer-textarea")).toHaveValue("")
+    expect(await mediaHandoff.readMediaChatHandoff(token, "server-a:bob")).not.toBeNull()
   })
 
   it.each(["submitted", "failed", "skipped"])("records normal Chat milestone only for %s and its original owner", async (status) => {

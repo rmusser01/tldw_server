@@ -1,3 +1,4 @@
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import React from 'react'
 import type { MessageInstance } from 'antd/es/message/interface'
 import { useNavigate } from "react-router-dom"
@@ -12,9 +13,11 @@ import {
 import type { ContentDraft, DraftBatch } from "@/db/dexie/types"
 import { setSetting } from "@/services/settings/registry"
 import {
-  DISCUSS_MEDIA_PROMPT_SETTING,
   LAST_MEDIA_ID_SETTING
 } from "@/services/settings/ui-settings"
+import { useHomeMilestoneScope } from "@/hooks/useHomeMilestoneScope"
+import { isExtensionRuntime } from "@/utils/browser-runtime"
+import { createMediaChatHandoff, buildMediaChatHandoffRoute, removeMediaChatHandoff } from "@/services/tldw/media-chat-handoff"
 import { resolvePerformChunking } from "@/services/tldw/ingest-defaults"
 import { useQuickIngestStore } from "@/store/quick-ingest"
 import { detectSections } from "@/utils/content-review"
@@ -357,6 +360,17 @@ export interface UseIngestResultsDeps {
 // ---------------------------------------------------------------------------
 
 export function useIngestResults(deps: UseIngestResultsDeps) {
+  const ownerScope = useHomeMilestoneScope()
+  const handoffBoundaryRevision = React.useRef(0)
+  React.useLayoutEffect(() => watchChatAccountChanges(invalidated => {
+    if (invalidated) handoffBoundaryRevision.current += 1
+  }), [])
+  const handoffLifetime = React.useRef<AbortController | null>(null)
+  React.useLayoutEffect(() => {
+    const lifetime = new AbortController()
+    handoffLifetime.current = lifetime
+    return () => lifetime.abort()
+  }, [ownerScope])
   const {
     open,
     running: runningProp,
@@ -853,7 +867,11 @@ export function useIngestResults(deps: UseIngestResultsDeps) {
     } catch {}
   }, [openOptionsRoute])
 
-  const discussInChat = React.useCallback((item: ResultItem) => {
+  const discussInChat = React.useCallback(async (item: ResultItem) => {
+    const boundaryRevision = handoffBoundaryRevision.current
+    const lifetime = handoffLifetime.current
+    if (!ownerScope || !lifetime || lifetime.signal.aborted) return
+    let token: string | undefined
     try {
       const id = mediaIdFromPayload(item.data)
       if (id == null) return
@@ -862,12 +880,18 @@ export function useIngestResults(deps: UseIngestResultsDeps) {
         const payload = item.data as Record<string, unknown>
         sourceUrl = typeof payload.url === "string" ? payload.url : typeof payload.source_url === "string" ? payload.source_url : undefined
       }
-      const payload = { mediaId: String(id), url: item.url || sourceUrl, mode: "rag_media" as const }
-      void setSetting(DISCUSS_MEDIA_PROMPT_SETTING, payload)
-      try { window.dispatchEvent(new CustomEvent("tldw:discuss-media", { detail: payload })) } catch {}
-      openOptionsRoute("#/")
-    } catch {}
-  }, [openOptionsRoute])
+      const payload = { mediaId: String(id), url: item.url || sourceUrl, mode: "rag_media" as const, ownerScope }
+      const newTab = isExtensionRuntime() && !window.location.pathname.includes("options.html")
+      token = await createMediaChatHandoff(payload, { newTab })
+      if (boundaryRevision !== handoffBoundaryRevision.current || lifetime.signal.aborted) { await removeMediaChatHandoff(token); return }
+      const route = buildMediaChatHandoffRoute(token)
+      if (newTab) await browser.tabs.create({ url: browser.runtime.getURL(`/options.html#${route}`) })
+      else navigate(route)
+    } catch {
+      if (token) await removeMediaChatHandoff(token).catch(() => undefined)
+      messageApi.error(qi("chatPrepareFailed", "Could not prepare this source for Chat. Please try again."))
+    }
+  }, [ownerScope, navigate, messageApi, qi])
 
   // ---- retry / requeue ----
   const retryFailedUrls = React.useCallback(

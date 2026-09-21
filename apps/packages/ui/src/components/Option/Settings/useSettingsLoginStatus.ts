@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
+import { authConnectionTargetsMatch, type AuthConnectionTarget } from "@/services/tldw/auth-connection-target"
 import type { FormInstance } from "antd"
 import { createSafeStorage } from "@/utils/safe-storage"
 import { resolveDirectBrowserConfig } from "@/services/tldw/direct-browser-config"
@@ -12,6 +13,8 @@ import {
 /** Keep authentication presentation current without replacing the Settings draft. */
 export const useSettingsLoginStatus = (form: FormInstance, enabled: boolean) => {
   const [isLoggedIn, setIsLoggedIn] = useState(false)
+  const [signInTargetSaved, setSignInTargetSaved] = useState(false)
+  const savedTarget = useRef<AuthConnectionTarget | null>(null)
   const refreshRef = useRef<() => Promise<void>>(async () => {})
   const refreshLoginStatus = useCallback(() => refreshRef.current(), [])
 
@@ -23,6 +26,7 @@ export const useSettingsLoginStatus = (form: FormInstance, enabled: boolean) => 
     let markerKey: string | null = null
     let markerWatch: Record<string, () => void> | undefined
     const refresh = async () => {
+      setSignInTargetSaved(authConnectionTargetsMatch(savedTarget.current, form.getFieldsValue()))
       const currentGeneration = ++generation
       try {
         const config = await resolveDirectBrowserConfig(storage)
@@ -39,7 +43,9 @@ export const useSettingsLoginStatus = (form: FormInstance, enabled: boolean) => 
             return
           }
         }
+        savedTarget.current = config
         const displayed = form.getFieldsValue()
+        setSignInTargetSaved(authConnectionTargetsMatch(config, displayed))
         const normalizeUrl = (value: unknown) => String(value || "").trim().replace(/\/+$/, "")
         setIsLoggedIn(Boolean(
           config?.authMode === "multi-user" && config.accessToken &&
@@ -47,7 +53,11 @@ export const useSettingsLoginStatus = (form: FormInstance, enabled: boolean) => 
           normalizeUrl(config.serverUrl) === normalizeUrl(displayed.serverUrl)
         ))
       } catch {
-        if (!disposed && generation === currentGeneration) setIsLoggedIn(false)
+        if (!disposed && generation === currentGeneration) {
+          savedTarget.current = null
+          setSignInTargetSaved(false)
+          setIsLoggedIn(false)
+        }
       }
     }
     const revalidate = () => { void refresh() }
@@ -77,5 +87,5 @@ export const useSettingsLoginStatus = (form: FormInstance, enabled: boolean) => 
     }
   }, [enabled, form])
 
-  return { isLoggedIn, setIsLoggedIn, refreshLoginStatus }
+  return { isLoggedIn, setIsLoggedIn, signInTargetSaved, refreshLoginStatus }
 }

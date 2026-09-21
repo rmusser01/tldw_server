@@ -758,7 +758,13 @@ export const useServerChatLoader = ({
       const applyOwnedAssistantSelection = async (selection: Parameters<typeof setSelectedAssistant>[0]) => {
         const before = ownedSelectionRevision
         if (!canCommitCurrentLoad() || getSelectedAssistantOperationRevision() !== before) return false
-        await setSelectedAssistant(selection, { isCurrent: () => {
+        // Loaded metadata is presentation for this canonical conversation,
+        // not a new tracked selection for other tabs sharing the preference.
+        const mirroredSelection = selection
+          ? { ...selection, metadata: { ...selection.metadata } }
+          : null
+        if (mirroredSelection) delete mirroredSelection.metadata.selectionMode
+        await setSelectedAssistant(mirroredSelection, { isCurrent: () => {
           const revision = getSelectedAssistantOperationRevision()
           // This operation increments the existing revision synchronously. A
           // later picker operation must win even before React rerenders.

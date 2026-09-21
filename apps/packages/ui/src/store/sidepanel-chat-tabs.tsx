@@ -2,6 +2,7 @@ import { createWithEqualityFn } from "zustand/traditional"
 import type { ChatHistory, Message as ChatMessage, ToolChoice } from "@/store/option"
 import type { ConversationState } from "@/services/tldw/TldwApiClient"
 import type { QueuedRequest } from "@/utils/chat-request-queue"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 
 export type ChatModelSettingsSnapshot = {
   f16KV?: boolean
@@ -93,6 +94,9 @@ export type SidepanelChatTab = {
 }
 
 type State = {
+  ownerKey: string | null
+  revision: number
+  bindOwner: (ownerKey: string, revision: number) => boolean
   tabs: SidepanelChatTab[]
   activeTabId: string | null
   snapshotsById: Record<string, SidepanelChatSnapshot>
@@ -114,6 +118,15 @@ type State = {
 }
 
 export const useSidepanelChatTabsStore = createWithEqualityFn<State>((set, get) => ({
+  ownerKey: null,
+  revision: 0,
+  bindOwner: (ownerKey, revision) => {
+    if (get().revision !== revision) return false
+    if (get().ownerKey !== ownerKey) {
+      set({ ownerKey, tabs: [], activeTabId: null, snapshotsById: {} })
+    }
+    return true
+  },
   tabs: [],
   activeTabId: null,
   snapshotsById: {},
@@ -177,3 +190,13 @@ export const useSidepanelChatTabsStore = createWithEqualityFn<State>((set, get) 
     })),
   clear: () => set({ tabs: [], activeTabId: null, snapshotsById: {} })
 }))
+
+const stopWatchingAccount = watchChatAccountChanges((invalidated) => {
+  if (!invalidated) return
+  useSidepanelChatTabsStore.setState(state => ({
+    ownerKey: null, revision: state.revision + 1,
+    tabs: [], activeTabId: null, snapshotsById: {}
+  }))
+})
+const hot = (import.meta as { hot?: { dispose: (callback: () => void) => void } }).hot
+hot?.dispose(stopWatchingAccount)

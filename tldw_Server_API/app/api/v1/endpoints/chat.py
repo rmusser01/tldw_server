@@ -3142,6 +3142,12 @@ async def _save_message_turn_to_db(
             serialized_extra = {}
         serialized_extra["client_message_id"] = client_message_id
 
+    system_block_id = message_obj.get("system_instruction_block_id")
+    if role == "system" and isinstance(system_block_id, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", system_block_id):
+        if serialized_extra is None:
+            serialized_extra = {}
+        serialized_extra["system_instruction_block_id"] = system_block_id
+
     if sender_meta:
         if serialized_extra is None:
             serialized_extra = {}

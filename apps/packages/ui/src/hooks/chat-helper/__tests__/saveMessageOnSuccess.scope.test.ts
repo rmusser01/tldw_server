@@ -104,6 +104,21 @@ describe("saveMessageOnSuccess request scope", () => {
     mocks.events.length = 0
   })
 
+  it.each(["success", "failure"])("keeps the verified owner when creating local history after %s", async outcome => {
+    const signal = new AbortController().signal
+    if (outcome === "success") {
+      await saveMessageOnSuccess(payload({ historyId: null, requestScope, scopeSignal: signal }))
+    } else {
+      await saveMessageOnError({
+        e: new Error("Provider unavailable"), history: [], setHistory: vi.fn(),
+        historyId: null, setHistoryId: vi.fn(), image: "", userMessage: "question",
+        botMessage: "", selectedModel: "model-1", isRegenerating: false,
+        requestScope, scopeSignal: signal
+      })
+    }
+    expect(mocks.saveHistory).toHaveBeenCalledWith("Generated title", false, "web-ui", undefined, undefined, requestScope)
+  })
+
   it("retains the server acknowledgement on each matching locally persisted row", async () => {
     await saveMessageOnSuccess(payload({ assistantServerMessageId: "server-assistant-1", userServerMessageId: "server-user-1" }))
     expect(mocks.saveMessage).toHaveBeenCalledWith(expect.objectContaining({

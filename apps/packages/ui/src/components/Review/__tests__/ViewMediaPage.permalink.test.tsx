@@ -7,6 +7,7 @@ import { useMediaNavigationState } from '../hooks/useMediaNavigationState'
 import { useConnectionStore } from '@/store/connection'
 import type { MediaResultItem } from '@/components/Media/types'
 import { DISCUSS_MEDIA_PROMPT_SETTING } from '@/services/settings/ui-settings'
+import * as mediaHandoff from '@/services/tldw/media-chat-handoff'
 import { getFlashcardSourceMeta } from '@/components/Flashcards/utils/source-reference'
 import { useReadingProgress, type UseReadingProgressDeps } from '@/components/Media/hooks/useReadingProgress'
 
@@ -375,7 +376,7 @@ const renderMediaPage = (initialEntry: string) => {
     <MemoryRouter initialEntries={[initialEntry]}>
       <Routes>
         <Route path="/" element={<div data-testid="root-route" />} />
-        <Route path="/chat" element={<div data-testid="chat-route">Chat composer</div>} />
+        <Route path="/chat" element={<div data-testid="chat-route">Chat composer<LocationProbe /></div>} />
         <Route path="/media-trash" element={<div>Media Trash destination</div>} />
         <Route
           path="/media"
@@ -515,7 +516,7 @@ describe('ViewMediaPage Stage 3 permalinks', () => {
     await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent(/^$/))
     await waitFor(() => expect(screen.queryByTestId('mock-content-viewer')).not.toBeInTheDocument())
     expect(screen.getByTestId('results-list')).toBeEmptyDOMElement()
-    fireEvent.click(screen.getByRole('button', { name: 'Trash', exact: true }))
+    fireEvent.click(screen.getByRole('button', { name: /^Trash$/ }))
     expect(await screen.findByText('Media Trash destination')).toBeInTheDocument()
   })
 
@@ -1010,7 +1011,14 @@ describe('ViewMediaPage Stage 1 trash undo flow', () => {
 })
 
 describe('ViewMediaPage Stage 1 chat action semantics', () => {
+  const readDestination = async () => {
+    const token = new URLSearchParams(screen.getByTestId('location-search').textContent || '').get(mediaHandoff.MEDIA_CHAT_HANDOFF_PARAM)!
+    expect(token).toMatch(/^tab-/)
+    return mediaHandoff.readMediaChatHandoff(token, 'alice-scope')
+  }
+
   beforeEach(() => {
+    sessionStorage.clear()
     mocks.ownerScope = 'alice-scope'
     mocks.queryData = [
       {
@@ -1070,7 +1078,13 @@ describe('ViewMediaPage Stage 1 chat action semantics', () => {
 
   it.each(['Chat with media action', 'Chat about media action'])('does not expose a pending %s handoff after account replacement', async action => {
     let finishWrite!: () => void
-    mocks.setSetting.mockImplementation(() => new Promise<void>(resolve => { finishWrite = resolve }))
+    const create = mediaHandoff.createMediaChatHandoff
+    let savedToken = ''
+    vi.spyOn(mediaHandoff, 'createMediaChatHandoff').mockImplementationOnce(async payload => {
+      savedToken = await create(payload)
+      await new Promise<void>(resolve => { finishWrite = resolve })
+      return savedToken
+    })
     const events: CustomEvent[] = []
     const observe = (event: Event) => events.push(event as CustomEvent)
     window.addEventListener('tldw:discuss-media', observe)
@@ -1078,13 +1092,14 @@ describe('ViewMediaPage Stage 1 chat action semantics', () => {
     await waitFor(() => expect(screen.getByTestId('selected-media-id')).toHaveTextContent('100'))
     fireEvent.click(screen.getByRole('button', { name: action }))
     await waitFor(() => expect(finishWrite).toBeDefined())
-    expect(mocks.setSetting).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ ownerScope: 'alice-scope' }))
+    expect(await mediaHandoff.readMediaChatHandoff(savedToken, 'alice-scope')).toEqual(expect.objectContaining({ ownerScope: 'alice-scope' }))
     expect(screen.queryByText('Chat composer')).not.toBeInTheDocument()
     mocks.ownerScope = 'bob-scope'
     view.unmount()
     renderMediaPage('/media?id=100')
     await act(async () => { finishWrite() })
     expect(events).toHaveLength(0)
+    expect(await mediaHandoff.readMediaChatHandoff(savedToken, 'alice-scope')).toBeNull()
     expect(mocks.setChatMode).not.toHaveBeenCalled()
     expect(screen.queryByText('Chat composer')).not.toBeInTheDocument()
     window.removeEventListener('tldw:discuss-media', observe)
@@ -1115,7 +1130,7 @@ describe('ViewMediaPage Stage 1 chat action semantics', () => {
     await act(async () => { resolveDetail({ id: 100, title: 'Pending source', content: { text: content } }) })
     fireEvent.click(screen.getByRole('button', { name: 'Chat with media action' }))
     expect(await screen.findByText('Chat composer')).toBeInTheDocument()
-    expect(mocks.setSetting).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ mediaId: '100', mode: 'normal', content }))
+    expect(await readDestination()).toEqual(expect.objectContaining({ mediaId: '100', mode: 'normal', content }))
   })
 
   it.each(['empty', 'failure'])('does not hand off %s selected detail', async state => {
@@ -1145,83 +1160,27 @@ describe('ViewMediaPage Stage 1 chat action semantics', () => {
     await waitFor(() => expect(screen.getByTestId('selected-media-id')).toHaveTextContent('101'))
     await act(async () => { resolveA({ id: 100, content: { text: 'Wrong old source A' } }) })
     fireEvent.click(screen.getByRole('button', { name: 'Chat with media action' }))
-    expect(mocks.setSetting).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ mediaId: '101', content: 'Content for 101' }))
+    expect(await screen.findByText('Chat composer')).toBeInTheDocument()
+    expect(await readDestination()).toEqual(expect.objectContaining({ mediaId: '101', content: 'Content for 101' }))
     expect(mocks.bgRequest.mock.calls.filter(([input]) => input.path === '/api/v1/media/101')).toHaveLength(1)
   })
 
-  it('keeps "chat with media" flow on normal mode with discuss-media payload', async () => {
+  it.each([
+    ['Chat with media action', 'normal'],
+    ['Chat about media action', 'rag_media']
+  ])('addresses %s to the initiating tab with %s mode', async (action, mode) => {
     const dispatchSpy = vi.spyOn(window, 'dispatchEvent')
     renderMediaPage('/media?id=100')
-
-    await waitFor(() => {
-      expect(screen.getByTestId('selected-media-id')).toHaveTextContent('100')
-    })
-
-    fireEvent.click(screen.getByRole('button', { name: 'Chat with media action' }))
-
-    await waitFor(() => {
-      expect(mocks.setChatMode).toHaveBeenCalledWith('normal')
-      expect(mocks.setRagMediaIds).toHaveBeenCalledWith(null)
-    })
-
-    const discussEvent = dispatchSpy.mock.calls
-      .map((call) => call[0])
-      .find((event) => event.type === 'tldw:discuss-media') as CustomEvent | undefined
-    expect(discussEvent).toBeDefined()
-    expect(discussEvent?.detail).toEqual(
-      expect.objectContaining({
-        mediaId: '100',
-        mode: 'normal'
-      })
-    )
-    expect(
-      mocks.setSetting.mock.calls.some(
-        (call) =>
-          typeof call?.[1] === 'object' &&
-          call?.[1] !== null &&
-          (call[1] as Record<string, unknown>).mode === 'normal' &&
-          (call[1] as Record<string, unknown>).mediaId === '100'
-      )
-    ).toBe(true)
-    dispatchSpy.mockRestore()
+    await waitFor(() => expect(screen.getByTestId('selected-media-id')).toHaveTextContent('100'))
+    fireEvent.click(screen.getByRole('button', { name: action }))
+    expect(await screen.findByText('Chat composer')).toBeInTheDocument()
+    expect(await readDestination()).toEqual(expect.objectContaining({ ownerScope: 'alice-scope', mediaId: '100', mode }))
+    expect(mocks.setChatMode).not.toHaveBeenCalled()
+    expect(mocks.setRagMediaIds).not.toHaveBeenCalled()
+    expect(dispatchSpy.mock.calls.some(([event]) => event.type === 'tldw:discuss-media')).toBe(false)
+    expect(mocks.setSetting.mock.calls.some(([setting]) => setting === DISCUSS_MEDIA_PROMPT_SETTING)).toBe(false)
   })
 
-  it('keeps "chat about media" flow on rag mode with media-scoped payload', async () => {
-    const dispatchSpy = vi.spyOn(window, 'dispatchEvent')
-    renderMediaPage('/media?id=100')
-
-    await waitFor(() => {
-      expect(screen.getByTestId('selected-media-id')).toHaveTextContent('100')
-    })
-
-    fireEvent.click(screen.getByRole('button', { name: 'Chat about media action' }))
-
-    await waitFor(() => {
-      expect(mocks.setChatMode).toHaveBeenCalledWith('rag')
-      expect(mocks.setRagMediaIds).toHaveBeenCalledWith([100])
-    })
-
-    const discussEvent = dispatchSpy.mock.calls
-      .map((call) => call[0])
-      .find((event) => event.type === 'tldw:discuss-media') as CustomEvent | undefined
-    expect(discussEvent).toBeDefined()
-    expect(discussEvent?.detail).toEqual(
-      expect.objectContaining({
-        mediaId: '100',
-        mode: 'rag_media'
-      })
-    )
-    expect(
-      mocks.setSetting.mock.calls.some(
-        (call) =>
-          typeof call?.[1] === 'object' &&
-          call?.[1] !== null &&
-          (call[1] as Record<string, unknown>).mode === 'rag_media' &&
-          (call[1] as Record<string, unknown>).mediaId === '100'
-      )
-    ).toBe(true)
-    dispatchSpy.mockRestore()
-  })
 })
 
 
@@ -1241,7 +1200,7 @@ describe('Media stale-selection callback lifetime', () => {
     const timer = vi.spyOn(window, 'setInterval').mockImplementation((handler, delay, ...args) => {
       if (delay === MEDIA_STALE_CHECK_INTERVAL_MS) {
         tick = handler as () => void
-        return 123 as ReturnType<typeof window.setInterval>
+        return 123 as unknown as ReturnType<typeof window.setInterval>
       }
       return original(handler, delay, ...args)
     })

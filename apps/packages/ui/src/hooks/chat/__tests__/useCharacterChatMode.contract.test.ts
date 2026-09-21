@@ -147,7 +147,7 @@ describe("createCharacterChatMode contract", () => {
     })
   })
 
-  it("creates a character chat and streams complete-v2 with character context", async () => {
+  it.each(["", "data:image/png;base64,aW1hZ2U="])("creates a character chat and preserves attachment %s", async image => {
     const setters = createSetterBundle()
     let messagesState: unknown[] = []
     setters.setMessages.mockImplementation((next) => {
@@ -193,7 +193,7 @@ describe("createCharacterChatMode contract", () => {
 
     await mode({
       message: "Hello Mira",
-      image: "",
+      image,
       isRegenerate: false,
       messages: [],
       history: [],
@@ -206,6 +206,8 @@ describe("createCharacterChatMode contract", () => {
         forceNarrate: false
       }
     })
+
+    expect((messagesState as Array<{ isBot: boolean; images?: string[] }>).find(row => !row.isBot)?.images).toEqual(image ? [image] : [])
 
     expect(mocks.createChatMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -221,7 +223,8 @@ describe("createCharacterChatMode contract", () => {
       "chat-77",
       {
         role: "user",
-        content: "Hello Mira"
+        content: "Hello Mira",
+        ...(image ? { image_base64: "aW1hZ2U=" } : {})
       },
       { scope }
     )

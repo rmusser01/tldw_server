@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import React from "react"
+import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state"
 import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -8,6 +9,7 @@ import { AssistantSelect } from "@/components/Common/AssistantSelect"
 import { PlaygroundEmpty } from "../PlaygroundEmpty"
 import { PlaygroundForm } from "../PlaygroundForm"
 import type { Character } from "@/types/character"
+import type { AssistantSelection } from "@/types/assistant-selection"
 import { resolveServerChatAssistantIdentity } from "@/hooks/chat/useServerChatLoader"
 import { createStartupTemplateBundle } from "../startup-template-bundles"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
@@ -67,6 +69,8 @@ const selectedAssistantMock = vi.hoisted(() => ({
   defaultCharacter: null as Character | null,
   ownedDefaultCharacter: null as Character | null,
   initialSelection: null as any,
+  currentSelection: undefined as AssistantSelection | null | undefined,
+  externalMirror: null as null | ((value: AssistantSelection | null) => void),
   setSelectedAssistant: vi.fn(async (_next: unknown) => undefined)
 }))
 const selectedCharacterState = vi.hoisted(() => ({
@@ -472,7 +476,20 @@ vi.mock("~/hooks/useDynamicTextareaSize", () => ({
 }))
 
 vi.mock("~/hooks/useMessageOption", () => ({
-  useMessageOption: () => playgroundFormMessageOptionState.value
+  useMessageOption: () => {
+    const state = playgroundFormMessageOptionState.value
+    const selection = selectedAssistantMock.currentSelection === undefined
+      ? selectedAssistantMock.initialSelection
+      : selectedAssistantMock.currentSelection
+    return {
+      ...state,
+      selectedAssistant: state.selectedAssistant ?? selection,
+      effectiveAssistantState: state.effectiveAssistantState ?? resolveEffectiveAssistantState({
+        tracked: { assistantKind: state.serverChatAssistantKind, assistantId: state.serverChatAssistantId, characterId: state.serverChatCharacterId },
+        draftSelection: selection
+      })
+    }
+  }
 }))
 
 vi.mock("@/store/option", () => ({
@@ -637,14 +654,19 @@ vi.mock("@/hooks/useSelectedCharacter", () => ({
 vi.mock("@/hooks/useSelectedAssistant", () => ({
   useSelectedAssistant: (initialValue: any = null) => {
     const [selectedAssistant, setSelectedAssistant] = React.useState(selectedAssistantMock.initialSelection ?? initialValue)
+    const publishSelection = (next: AssistantSelection | null) => {
+      selectedAssistantMock.currentSelection = next
+      setSelectedAssistant(next)
+    }
+    selectedAssistantMock.externalMirror = publishSelection
     const setSelectedAssistantWithBroadcast = async (next: any) => {
       await selectedAssistantMock.setSelectedAssistant(next)
-      setSelectedAssistant(next)
+      publishSelection(next)
     }
     return [
       selectedAssistant,
       setSelectedAssistantWithBroadcast,
-      { isLoading: selectedAssistantMock.isLoading, setRenderValue: setSelectedAssistant }
+      { isLoading: selectedAssistantMock.isLoading, setRenderValue: publishSelection }
     ] as const
   }
 }))
@@ -711,16 +733,19 @@ vi.mock("../ComposerToolbar", () => ({
     toolsButton,
     sendControl,
     rolePlayActions,
+    contextItems,
     setSelectedSystemPrompt
   }: {
     modelSelectButton?: React.ReactNode
     researchLaunchButton?: React.ReactNode
     toolsButton?: React.ReactNode
     sendControl?: React.ReactNode
+    contextItems?: { label?: React.ReactNode; value?: React.ReactNode }[]
     rolePlayActions?: { onOpenRolePlaySetup: () => void }
     setSelectedSystemPrompt?: (id: string | undefined) => void
   }) => (
     <div data-testid="composer-toolbar">
+      <span data-testid="composer-context-items">{JSON.stringify(contextItems?.map(item => ({label: item.label, value: item.value})))}</span>
       {modelSelectButton}
       {researchLaunchButton}
       {toolsButton}
@@ -1067,6 +1092,8 @@ beforeEach(() => {
   onSubmitMock.mockClear()
   createChatCompletionMock.mockClear()
   selectedAssistantMock.initialSelection = null
+  selectedAssistantMock.currentSelection = undefined
+  selectedAssistantMock.externalMirror = null
   selectedAssistantMock.setSelectedAssistant.mockReset().mockResolvedValue(undefined)
   selectedCharacterState.value = null
   selectedCharacterState.setSelectedCharacter.mockClear()
@@ -1487,3 +1514,91 @@ describe("PlaygroundForm role-play starter", () => {
     expect(selector).not.toHaveTextContent("Ready")
   })
 })
+
+it("UAT355: a plain composer ignores an untracked cross-tab Character mirror", async () => {
+  Object.assign(playgroundFormMessageOptionState.value, {
+    historyId: null,
+    serverChatId: null,
+    serverChatAssistantKind: null,
+    serverChatAssistantId: null,
+    serverChatCharacterId: null,
+    serverChatMetaLoaded: false,
+    selectedAssistant: null,
+    selectedCharacter: null,
+    effectiveAssistantState: {
+      mode: "plain",
+      kind: null,
+      id: null,
+      displayName: null,
+      avatarUrl: null,
+      systemPromptSnapshot: null,
+      source: "none"
+    }
+  })
+  const view = render(<PlaygroundForm droppedFiles={[]} />)
+  try {
+    await act(async () => {
+      selectedAssistantMock.externalMirror!({
+        kind: "character",
+        id: "foreign-robot",
+        name: "Foreign Robot",
+        greeting: "Foreign greeting",
+        system_prompt: "Foreign persona prompt"
+      })
+    })
+    expect
+      .soft(screen.getByTestId("composer-context-items").textContent)
+      .not.toContain("Foreign Robot")
+    expect
+      .soft(screen.getByTestId("composer-context-items").textContent)
+      .not.toContain("Character context")
+    expect
+      .soft(screen.queryByText("Add expression images for Foreign Robot."))
+      .toBeNull()
+  } finally {
+    view.unmount()
+  }
+})
+it.each(["tracked_character", "overlay"])(
+  "UAT355: preserves owned composer %s context",
+  async (mode) => {
+    const selection = {
+      kind: "character",
+      id: "owned",
+      name: "Owned Character",
+      greeting: "Owned greeting",
+      metadata: { selectionMode: mode === "overlay" ? "overlay" : "tracked" }
+    }
+    selectedAssistantMock.initialSelection = selection
+    Object.assign(playgroundFormMessageOptionState.value, {
+      historyId: null,
+      serverChatId: mode === "overlay" ? null : "owned-chat",
+      serverChatAssistantKind: mode === "overlay" ? null : "character",
+      serverChatAssistantId: mode === "overlay" ? null : "owned",
+      serverChatCharacterId: mode === "overlay" ? null : "owned",
+      serverChatMetaLoaded: true,
+      selectedAssistant: selection,
+      selectedCharacter: selection,
+      effectiveAssistantState: {
+        mode,
+        kind: "character",
+        id: "owned",
+        displayName: "Owned Character",
+        avatarUrl: null,
+        systemPromptSnapshot: null,
+        source: mode === "overlay" ? "overlay" : "tracked"
+      }
+    })
+    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    try {
+      expect(screen.getByTestId("composer-context-items")).toHaveTextContent(
+        "Owned Character"
+      )
+      expect(screen.getByTestId("composer-context-items")).toHaveTextContent(
+        "Character context"
+      )
+    } finally {
+      view.unmount()
+    }
+  }
+)

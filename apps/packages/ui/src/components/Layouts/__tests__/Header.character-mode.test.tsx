@@ -77,7 +77,12 @@ vi.mock("@/hooks/useSelectedCharacter", () => ({
 }))
 
 vi.mock("~/hooks/useMessageOption", () => ({
-  useMessageOption: () => messageOptionState
+  useMessageOption: () => ({
+    ...messageOptionState,
+    effectiveAssistantState: selectedCharacter
+      ? { mode: "tracked_character", kind: "character", displayName: selectedCharacter.name }
+      : { mode: "plain", kind: null, displayName: null }
+  })
 }))
 
 vi.mock("@/db", () => ({

@@ -1,7 +1,7 @@
 import type { ServerChatMessage } from "@/services/tldw/TldwApiClient"
 // @vitest-environment jsdom
 import { act, renderHook } from "@testing-library/react"
-import type { TFunction } from "i18next"
+import { t as translate, type TFunction } from "i18next"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => {
@@ -254,7 +254,7 @@ describe("useServerChatLoader scoped local history", () => {
     mocks.streaming = true
     mocks.listChatMessages.mockResolvedValue([{ id: "old", role: "assistant", content: "Server snapshot", version: 1 }])
     const ensureServerChatHistoryId = vi.fn()
-    renderHook(() => useServerChatLoader({ ensureServerChatHistoryId, notification: { error: vi.fn() }, t: vi.fn() as TFunction }))
+    renderHook(() => useServerChatLoader({ ensureServerChatHistoryId, notification: { error: vi.fn() }, t: translate }))
     await act(async () => { await vi.advanceTimersByTimeAsync(200) })
     expect(mocks.setMessages).not.toHaveBeenCalled()
     expect(ensureServerChatHistoryId).not.toHaveBeenCalled()
@@ -268,7 +268,7 @@ describe("useServerChatLoader scoped local history", () => {
     mocks.getCharacter.mockReturnValueOnce(profile.promise).mockResolvedValue({ id: 5, name: "Robot" })
     mocks.listChatMessages.mockReturnValueOnce(rows.promise).mockResolvedValue([])
     const ensureServerChatHistoryId = vi.fn().mockResolvedValue("history")
-    const { rerender } = renderHook(() => useServerChatLoader({ ensureServerChatHistoryId, notification: { error: vi.fn() }, t: vi.fn() as TFunction }))
+    const { rerender } = renderHook(() => useServerChatLoader({ ensureServerChatHistoryId, notification: { error: vi.fn() }, t: translate }))
     await act(async () => { await vi.advanceTimersByTimeAsync(200) })
     expect(mocks.getCharacter.mock.calls[0][1]).toMatchObject({ requestScope: { userId: "A" } })
     const oldSignal = mocks.getCharacter.mock.calls[0][1].signal as AbortSignal
@@ -338,4 +338,116 @@ describe("useServerChatLoader scoped local history", () => {
     )
     expect(notification.error).not.toHaveBeenCalled()
   })
+  it.each(["found", "missing", "rejected"] as const)(
+    "canonical loader %s catalog leaves another plain draft plain",
+    async (outcome) => {
+      const { resolveEffectiveAssistantState } =
+        await import("@/hooks/chat/effective-assistant-state")
+      const { preserveAssistantSelectionMode } =
+        await import("@/types/assistant-selection")
+      let sharedSelection: Parameters<
+        typeof resolveEffectiveAssistantState
+      >[0]["draftSelection"] = null
+      mocks.setSelectedAssistant.mockImplementation(async (next) => {
+        sharedSelection = preserveAssistantSelectionMode(next, sharedSelection)
+      })
+      mocks.store.serverChatCharacterId = 42
+      mocks.store.serverChatAssistantId = "42"
+      if (outcome === "found")
+        mocks.getCharacter.mockResolvedValue({ id: 42, name: "Saved card" })
+      if (outcome === "missing") mocks.getCharacter.mockResolvedValue(null)
+      if (outcome === "rejected")
+        mocks.getCharacter.mockRejectedValue(new Error("catalog unavailable"))
+      const view = renderHook(() =>
+        useServerChatLoader({
+          ensureServerChatHistoryId: vi.fn().mockResolvedValue("history-a"),
+          notification: { error: vi.fn() },
+          t: translate
+        })
+      )
+      try {
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(200)
+        })
+        expect(mocks.getCharacter).toHaveBeenCalled()
+        expect(mocks.setSelectedAssistant).toHaveBeenCalled()
+        expect(
+          resolveEffectiveAssistantState({
+            tracked: {
+              assistantKind: "character",
+              assistantId: "42",
+              characterId: 42
+            },
+            draftSelection: sharedSelection
+          }).mode
+        ).toBe("tracked_character")
+        expect(
+          resolveEffectiveAssistantState({
+            tracked: {
+              assistantKind: null,
+              assistantId: null,
+              characterId: null
+            },
+            draftSelection: sharedSelection
+          }).mode
+        ).toBe("plain")
+      } finally {
+        view.unmount()
+      }
+    }
+  )
+
+  it.each(["tracked", "overlay"] as const)(
+    "successful same-ID catalog refresh preserves primary explicit %s draft intent",
+    async (mode) => {
+      const { resolveEffectiveAssistantState } =
+        await import("@/hooks/chat/effective-assistant-state")
+      const { preserveAssistantSelectionMode } =
+        await import("@/types/assistant-selection")
+      let sharedSelection: Parameters<
+        typeof resolveEffectiveAssistantState
+      >[0]["draftSelection"] = {
+        kind: "character",
+        id: "42",
+        name: "Explicitly picked card",
+        metadata: { selectionMode: mode }
+      }
+      mocks.setSelectedAssistant.mockImplementation(async (next) => {
+        sharedSelection = preserveAssistantSelectionMode(next, sharedSelection)
+      })
+      mocks.store.serverChatCharacterId = 42
+      mocks.store.serverChatAssistantId = "42"
+      mocks.getCharacter.mockResolvedValue({
+        id: 42,
+        name: "Latest card metadata"
+      })
+      const view = renderHook(() =>
+        useServerChatLoader({
+          ensureServerChatHistoryId: vi.fn().mockResolvedValue("history-a"),
+          notification: { error: vi.fn() },
+          t: translate
+        })
+      )
+      try {
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(200)
+        })
+        expect(mocks.getCharacter).toHaveBeenCalled()
+        expect(mocks.setSelectedAssistant).toHaveBeenCalled()
+        expect(
+          resolveEffectiveAssistantState({
+            tracked: {
+              assistantKind: null,
+              assistantId: null,
+              characterId: null
+            },
+            draftSelection: sharedSelection
+          }).mode
+        ).toBe(mode === "tracked" ? "tracked_character" : "overlay")
+      } finally {
+        view.unmount()
+      }
+    }
+  )
+
 })

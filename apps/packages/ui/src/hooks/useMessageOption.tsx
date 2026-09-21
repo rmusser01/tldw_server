@@ -323,6 +323,54 @@ export const useMessageOption = (
 
   const assistantDraftSelection =
     selectedAssistant ?? inheritedAssistantSnapshot ?? inheritedAssistantCandidate;
+  const canonicalAssistantId =
+    serverChatAssistantKind === "character"
+      ? serverChatCharacterId
+      : serverChatAssistantKind === "persona"
+        ? serverChatAssistantId
+        : null;
+  const canonicalAssistantKey =
+    serverChatId && canonicalAssistantId != null
+      ? JSON.stringify([
+          serverChatId,
+          serverChatAssistantKind,
+          String(canonicalAssistantId),
+        ])
+      : null;
+  const retainedAssistant = React.useRef<{
+    key: string;
+    selection: AssistantSelection;
+    isCurrent: () => boolean;
+  } | null>(null);
+  // A saved conversation keeps its own card when another tab changes the
+  // shared picker. The captured lease also rejects logout-and-back transitions.
+  if (
+    !canonicalAssistantKey ||
+    !assistantSelectionMeta?.isCurrent?.() ||
+    (retainedAssistant.current &&
+      (retainedAssistant.current.key !== canonicalAssistantKey ||
+        !retainedAssistant.current.isCurrent()))
+  ) {
+    retainedAssistant.current = null;
+  }
+  const isPlaceholderCard = selectedAssistant?.kind === "character" &&
+    selectedAssistant.name.trim().toLowerCase() === "assistant" &&
+    !selectedAssistant.avatar_url && !selectedAssistant.system_prompt &&
+    !selectedAssistant.greeting && !Object.keys(selectedAssistant.extensions ?? {}).length;
+  if (
+    canonicalAssistantKey &&
+    assistantSelectionMeta?.isCurrent?.() &&
+    selectedAssistant?.kind === serverChatAssistantKind &&
+    String(selectedAssistant.id) === String(canonicalAssistantId) &&
+    (!isPlaceholderCard || !retainedAssistant.current)
+  ) {
+    retainedAssistant.current = {
+      key: canonicalAssistantKey,
+      selection: selectedAssistant,
+      isCurrent: assistantSelectionMeta.isCurrent,
+    };
+  }
+  const canonicalAssistant = retainedAssistant.current?.selection ?? null;
   const effectiveAssistantState = React.useMemo(
     () =>
       resolveEffectiveAssistantState({
@@ -330,6 +378,9 @@ export const useMessageOption = (
           assistantKind: serverChatAssistantKind,
           assistantId: serverChatAssistantId,
           characterId: serverChatCharacterId,
+          displayName: canonicalAssistant?.name,
+          avatarUrl: canonicalAssistant?.avatar_url,
+          systemPromptSnapshot: canonicalAssistant?.system_prompt,
         },
         settings: chatSettings ?? null,
         draftSelection: assistantDraftSelection,
@@ -337,6 +388,7 @@ export const useMessageOption = (
     [
       assistantDraftSelection,
       chatSettings,
+      canonicalAssistant,
       serverChatAssistantId,
       serverChatAssistantKind,
       serverChatCharacterId,
@@ -367,7 +419,7 @@ export const useMessageOption = (
     const matchesDraftSelection =
       selectedAssistant?.kind === effectiveAssistantState.kind &&
       selectedAssistant.id === effectiveAssistantState.id;
-    const draftMetadata = matchesDraftSelection ? selectedAssistant : null;
+    const draftMetadata = canonicalAssistant ?? (matchesDraftSelection ? selectedAssistant : null);
 
     return {
       ...draftMetadata,
@@ -383,7 +435,7 @@ export const useMessageOption = (
         draftMetadata?.system_prompt ??
         null,
     };
-  }, [effectiveAssistantState, inheritedAssistant, selectedAssistant]);
+  }, [effectiveAssistantState, inheritedAssistant, selectedAssistant, canonicalAssistant]);
   const selectedAssistantSource =
     inheritedAssistant &&
     effectiveSelectedAssistant?.kind === inheritedAssistant.kind &&
@@ -678,6 +730,7 @@ export const useMessageOption = (
     selectedCharacter,
     setSelectedCharacter,
     assistantSelectionMeta,
+    effectiveAssistantState,
     selectedAssistant: effectiveSelectedAssistant,
     selectedAssistantSource,
     setSelectedAssistant,

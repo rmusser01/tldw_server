@@ -137,6 +137,7 @@ export const isServicePromptRequestPath = (
       pathname === "/api/v1/scheduled-tasks" ||
       pathname === "/api/v1/scheduled-tasks/results" ||
       pathname === "/api/v1/notifications" ||
+      pathname === "/api/v1/chats/" || pathname === "/api/v1/chats/conversations" ||
       /^\/api\/v1\/chats\/[^/]+\/messages$/.test(pathname) ||
       /^\/api\/v1\/writing\/manuscripts\/(?:scenes\/[^/]+|projects\/[^/]+\/(?:characters|world-info))$/.test(pathname)
   }

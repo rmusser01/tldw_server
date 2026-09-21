@@ -7,7 +7,7 @@ import { runChatPersistenceTransaction } from "./chat-persistence-transaction"
 import type { Message } from "./types"
 
 /** Full verified target/owner identity; never stores bearer tokens or API keys. */
-export const serverChatMirrorOwnerKey = (snapshot: ServicePromptSnapshot): string => {
+export const serverChatMirrorOwnerKey = (snapshot: Pick<ServicePromptSnapshot, "requestScope">): string => {
   const { config, userId } = snapshot.requestScope
   return JSON.stringify([
     config.serverUrl.trim().replace(/\/+$/, ""), config.authMode,

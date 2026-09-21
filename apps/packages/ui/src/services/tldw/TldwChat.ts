@@ -15,6 +15,7 @@ import {
 import { normalizeChatToolsForRequest } from "@/utils/chat-tools"
 import type { ServicePromptRequestScope } from "./domains/service-prompts"
 import { isRequestConfigScopeChangedError } from "./service-prompt-scope-error"
+import { CHAT_STARTUP_TIMEOUT_DEFAULT_MS, ChatStreamTimeoutError } from "./chat-timeouts"
 
 const normalizeProvider = (value?: string): string =>
   String(value || "").trim().toLowerCase()
@@ -129,13 +130,15 @@ const createAbortError = (message = "Aborted"): Error => {
 
 const resolveStreamTimeoutError = (
   reason: "startup" | "idle" | null,
-  sawVisibleProgress: boolean
+  sawVisibleProgress: boolean,
+  startupTimeoutMs: number,
+  idleTimeoutMs: number
 ): Error | null => {
   if (reason === "startup" && !sawVisibleProgress) {
-    return new Error("Chat response timed out before any visible output arrived.")
+    return new ChatStreamTimeoutError("startup", startupTimeoutMs)
   }
   if (reason === "idle") {
-    return new Error("Chat response stalled after visible output began.")
+    return new ChatStreamTimeoutError("idle", idleTimeoutMs)
   }
   return null
 }
@@ -553,7 +556,7 @@ export class TldwChatService {
 
       const startupTimeoutMs = coercePositiveTimeout(
         cfg?.chatStartupTimeoutMs,
-        10_000
+        CHAT_STARTUP_TIMEOUT_DEFAULT_MS
       )
       const streamIdleTimeoutMs = coercePositiveTimeout(
         cfg?.chatStreamIdleTimeoutMs,
@@ -632,7 +635,9 @@ export class TldwChatService {
         } catch (error) {
           const timeoutError = resolveStreamTimeoutError(
             timeoutReason,
-            sawVisibleProgress
+            sawVisibleProgress,
+            startupTimeoutMs,
+            streamIdleTimeoutMs
           )
           if (timeoutError) {
             throw timeoutError
@@ -644,7 +649,9 @@ export class TldwChatService {
         }
         const timeoutError = resolveStreamTimeoutError(
           timeoutReason,
-          sawVisibleProgress
+          sawVisibleProgress,
+          startupTimeoutMs,
+          streamIdleTimeoutMs
         )
         if (timeoutError) {
           throw timeoutError
@@ -659,6 +666,7 @@ export class TldwChatService {
     } catch (error) {
       console.warn('Stream completion failed:', readErrorMessage(error))
       if (isRequestConfigScopeChangedError(error)) throw error
+      if (error instanceof ChatStreamTimeoutError) throw error
       if (isAbortLikeError(error)) {
         throw createAbortError(readErrorMessage(error))
       }
