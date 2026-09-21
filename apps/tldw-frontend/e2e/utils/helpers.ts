@@ -207,11 +207,7 @@ export async function seedAuth(
         globalWindow.chrome = {};
       }
       const chromeLike = globalWindow.chrome as Record<string, unknown>;
-      if (!chromeLike.runtime) {
-        chromeLike.runtime = { id: "mock-runtime-id" };
-      } else if (typeof (chromeLike.runtime as { id?: unknown }).id === "undefined") {
-        (chromeLike.runtime as { id?: string }).id = "mock-runtime-id";
-      }
+      // Seed storage without manufacturing extension identity in WebUI tests.
 
       const storageShim = {
         sync: areaApi,

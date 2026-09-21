@@ -1,241 +1,211 @@
 /**
- * Content Review E2E Tests (Tier 2)
- *
- * Tests the Content Review page lifecycle:
- * - Page loads with heading or empty state
- * - AI fix button fires POST /api/v1/chat/completions (requires server + drafts)
- * - Commit button fires POST /api/v1/media/add (requires server + drafts)
- * - Diff view button opens modal
- *
- * Run: npx playwright test e2e/workflows/tier-2-features/content-review.spec.ts
+ * UAT389 / B-09 bounded draft acceptance against an explicitly owned runtime.
+ * Auth is seeded by WorkflowFixtures; this is not fresh-login certification.
+ * Requires TLDW_LIVE_TIER_UAT=1 (no shared API stubs), real ingestion and text model.
+ * Does not cover B-09 saved-source reanalysis/fallback or partial batch recovery.
  */
+import { test, expect, assertNoCriticalErrors } from '../../utils/fixtures';
+import { ContentReviewPage } from '../../utils/page-objects/ContentReviewPage';
 import {
-  test,
-  expect,
-  skipIfServerUnavailable,
-  assertNoCriticalErrors,
-} from "../../utils/fixtures"
-import { expectApiCall } from "../../utils/api-assertions"
-import { ContentReviewPage } from "../../utils/page-objects"
-import { seedAuth } from "../../utils/helpers"
+  ingestReviewDrafts,
+  openReviewDraft,
+  readReviewDrafts,
+  assertSavedDraft,
+  assertReviewDiff,
+  successfulReviewResponse,
+  assertCommittedMedia,
+} from '../../utils/content-review-uat389';
 
-test.describe("Content Review", () => {
-  let contentReview: ContentReviewPage
+const original = 'Speaker 1: The sample contains ORBIT-742.';
+const edited = 'Speaker 1: The reviewed sample contains ORBIT-742.';
 
-  test.beforeEach(async ({ page }) => {
-    await seedAuth(page)
-    contentReview = new ContentReviewPage(page)
-  })
+test.describe('Content Review — owned draft acceptance', () => {
+  test.setTimeout(180_000);
 
-  // =========================================================================
-  // Page Load
-  // =========================================================================
+  test.beforeEach(async ({ serverInfo }) => {
+    expect(
+      process.env.TLDW_LIVE_TIER_UAT,
+      'UAT389 requires TLDW_LIVE_TIER_UAT=1 so auth setup does not stub app APIs'
+    ).toBe('1');
+    expect(serverInfo.available, 'UAT389 prerequisite: owned API is unavailable').toBe(true);
+  });
 
-  test.describe("Page Load", () => {
-    test("should render the Content Review page with heading or empty state", async ({
+  test('empty draft workspace opens the ingestion entry action', async ({
+    authedPage,
+    diagnostics,
+  }) => {
+    const review = new ContentReviewPage(authedPage);
+    await review.goto();
+    await review.assertPageReady();
+    await expect(review.emptyState).toBeVisible();
+    await expect(review.titleInput).toHaveCount(0);
+    await review.openQuickIngestButton.click();
+    await expect(authedPage.getByRole('dialog', { name: /quick ingest/i })).toBeVisible();
+    await assertNoCriticalErrors(diagnostics);
+  });
+
+  test('saves exact edits and revisions, reopens Diff, and resets original content', async ({
+    authedPage,
+    diagnostics,
+  }) => {
+    const [draft] = await ingestReviewDrafts(authedPage, [original]);
+    const review = new ContentReviewPage(authedPage);
+    const changed = { ...draft, title: `${draft.title} reviewed`, content: edited };
+    await review.titleInput.fill(changed.title);
+    await review.contentTextarea.fill(changed.content);
+    await review.saveDraftButton.click();
+    const saved = await assertSavedDraft(authedPage, changed, 'Manual save');
+    await authedPage.reload();
+    await openReviewDraft(authedPage, saved);
+    expect(
+      (await readReviewDrafts(authedPage)).find((item) => item.id === draft.id)?.revisions
+    ).toEqual(saved.revisions);
+    await assertReviewDiff(review, original, edited);
+    await review.resetButton.click();
+    await authedPage
+      .getByRole('dialog', { name: 'Reset draft?' })
+      .getByRole('button', { name: 'Reset', exact: true })
+      .click();
+    await expect(review.contentTextarea).toHaveValue(original);
+    await review.saveDraftButton.click();
+    await expect
+      .poll(
+        async () =>
+          (await readReviewDrafts(authedPage)).find((item) => item.id === draft.id)?.content
+      )
+      .toBe(original);
+    await authedPage.reload();
+    await openReviewDraft(authedPage, { ...saved, content: original });
+    await assertNoCriticalErrors(diagnostics);
+  });
+
+  test('AI fix persists an inspectable proposal without changing another draft', async ({
+    authedPage,
+    serverInfo,
+    diagnostics,
+  }) => {
+    expect(
+      serverInfo.models?.length,
+      'UAT389 prerequisite: a runnable text model is required'
+    ).toBeGreaterThan(0);
+    const [draft, other] = await ingestReviewDrafts(authedPage, [
+      'Speaker 1: teh sample contains ORBIT-742.',
+      'Speaker 2: Keep SATURN-518 unchanged.',
+    ]);
+    const review = new ContentReviewPage(authedPage);
+    await expect(review.aiFixButton).toBeEnabled();
+    const responsePromise = authedPage.waitForResponse(
+      (response) =>
+        response.request().method() === 'POST' &&
+        new URL(response.url()).pathname === '/api/v1/chat/completions'
+    );
+    await review.aiFixButton.click();
+    await authedPage
+      .getByRole('dialog', { name: 'Send draft to server?' })
+      .getByRole('button', { name: 'Continue', exact: true })
+      .click();
+    const response = await responsePromise;
+    const body = await successfulReviewResponse(response);
+    expect(response.request().postDataJSON()).toMatchObject({
+      stream: false,
+      messages: expect.arrayContaining([
+        {
+          role: 'user',
+          content: `Correct the transcript below.\n\n<<<CONTENT>>>\n${draft.content}\n<<<END>>>`,
+        },
+      ]),
+    });
+    expect(body.choices[0].message.content.trim()).not.toBe('');
+    await expect(review.contentTextarea).toHaveValue(body.choices[0].message.content.trim());
+    await expect(review.contentTextarea).not.toHaveValue(draft.content);
+    const proposal = await review.contentTextarea.inputValue();
+    expect(proposal).toContain('ORBIT-742');
+    expect(proposal).not.toMatch(/\bteh\b/i);
+    const saved = await assertSavedDraft(
       authedPage,
-      diagnostics,
-    }) => {
-      contentReview = new ContentReviewPage(authedPage)
-      await contentReview.goto()
-      await contentReview.assertPageReady()
+      { ...draft, content: proposal },
+      'AI corrections'
+    );
+    await assertReviewDiff(review, draft.content, proposal);
+    await authedPage.reload();
+    await openReviewDraft(authedPage, saved);
+    expect((await readReviewDrafts(authedPage)).find((item) => item.id === other.id)).toEqual(
+      other
+    );
+    await assertNoCriticalErrors(diagnostics);
+  });
 
-      // Either the heading is visible (with or without drafts) or the empty state
-      const headingVisible = await contentReview.heading.isVisible().catch(() => false)
-      const emptyVisible = await contentReview.emptyState.isVisible().catch(() => false)
-
-      expect(headingVisible || emptyVisible).toBe(true)
-
-      // If in empty state, the "Open Quick Ingest" button should be present
-      if (emptyVisible) {
-        await expect(contentReview.openQuickIngestButton).toBeVisible()
-      }
-
-      await assertNoCriticalErrors(diagnostics)
-    })
-
-    test("should show draft selection prompt or empty state when no draft is active", async ({
-      authedPage,
-      diagnostics,
-    }) => {
-      contentReview = new ContentReviewPage(authedPage)
-      await contentReview.goto()
-      await contentReview.assertPageReady()
-
-      const isEmpty = await contentReview.isEmptyState()
-
-      if (!isEmpty) {
-        // If drafts exist but none selected, the "Select a draft" message may appear
-        // or the first draft may auto-select. Either way, the heading should be visible.
-        const headingVisible = await contentReview.heading.isVisible().catch(() => false)
-        expect(headingVisible).toBe(true)
-      }
-
-      await assertNoCriticalErrors(diagnostics)
-    })
-
-    test("should display batch selector and drafts list when drafts exist", async ({
-      authedPage,
-      diagnostics,
-    }) => {
-      contentReview = new ContentReviewPage(authedPage)
-      await contentReview.goto()
-      await contentReview.assertPageReady()
-
-      const isEmpty = await contentReview.isEmptyState()
-      if (isEmpty) return
-
-      // Batch selector and drafts list should be visible
-      await expect(contentReview.batchSelect).toBeVisible()
-      await expect(contentReview.draftsList).toBeVisible()
-
-      // Header action buttons should be visible
-      await expect(contentReview.commitAllButton).toBeVisible()
-      await expect(contentReview.clearDraftsButton).toBeVisible()
-
-      await assertNoCriticalErrors(diagnostics)
-    })
-  })
-
-  // =========================================================================
-  // Draft Editor
-  // =========================================================================
-
-  test.describe("Draft Editor", () => {
-    test("should show editor panels when a draft is loaded", async ({
-      authedPage,
-      diagnostics,
-    }) => {
-      contentReview = new ContentReviewPage(authedPage)
-      await contentReview.goto()
-      await contentReview.assertPageReady()
-
-      const draftLoaded = await contentReview.isDraftLoaded()
-      if (!draftLoaded) return
-
-      // Title input, action buttons, and panels should be visible
-      await expect(contentReview.titleInput).toBeVisible()
-      await expect(contentReview.resetButton).toBeVisible()
-      await expect(contentReview.diffViewButton).toBeVisible()
-      await expect(contentReview.saveDraftButton).toBeVisible()
-      await expect(contentReview.contentTextarea).toBeVisible()
-      await expect(contentReview.actionsLabel).toBeVisible()
-
-      await assertNoCriticalErrors(diagnostics)
-    })
-
-    test("should open diff view modal when Diff view button is clicked", async ({
-      authedPage,
-      diagnostics,
-    }) => {
-      contentReview = new ContentReviewPage(authedPage)
-      await contentReview.goto()
-      await contentReview.assertPageReady()
-
-      const draftLoaded = await contentReview.isDraftLoaded()
-      if (!draftLoaded) return
-
-      const diffBtnVisible = await contentReview.diffViewButton.isVisible().catch(() => false)
-      if (!diffBtnVisible) return
-
-      await contentReview.diffViewButton.click()
-
-      await expect(contentReview.diffModal).toBeVisible({ timeout: 5_000 })
-
-      // Close the modal
-      await authedPage.keyboard.press("Escape")
-      await expect(contentReview.diffModal).toBeHidden({ timeout: 3_000 }).catch(() => {})
-
-      await assertNoCriticalErrors(diagnostics)
-    })
-  })
-
-  // =========================================================================
-  // AI Integration (requires server)
-  // =========================================================================
-
-  test.describe("AI Integration", () => {
-    test("should fire POST /api/v1/chat/completions when AI fix is clicked", async ({
-      authedPage,
-      serverInfo,
-      diagnostics,
-    }) => {
-      skipIfServerUnavailable(serverInfo)
-
-      contentReview = new ContentReviewPage(authedPage)
-      await contentReview.goto()
-      await contentReview.assertPageReady()
-
-      const draftLoaded = await contentReview.isDraftLoaded()
-      if (!draftLoaded) return
-
-      const aiFixVisible = await contentReview.aiFixButton.isVisible().catch(() => false)
-      const aiFixEnabled = await contentReview.aiFixButton.isEnabled().catch(() => false)
-      if (!aiFixVisible || !aiFixEnabled) return
-
-      const apiCall = expectApiCall(authedPage, {
-        url: /\/api\/v1\/chat\/completions/,
-        method: "POST",
-      }, 15_000)
-
-      await contentReview.aiFixButton.click()
-
-      // Consent dialog may appear; accept it if so
-      const consentOk = authedPage.getByRole("button", { name: /continue/i })
-      const consentVisible = await consentOk.isVisible({ timeout: 2_000 }).catch(() => false)
-      if (consentVisible) {
-        await consentOk.click()
-      }
-
-      try {
-        const { response } = await apiCall
-        expect(response.status()).toBeLessThan(500)
-      } catch {
-        // AI fix may not fire if content is empty or chat is unavailable
-      }
-
-      await assertNoCriticalErrors(diagnostics)
-    })
-  })
-
-  // =========================================================================
-  // Commit (requires server)
-  // =========================================================================
-
-  test.describe("Commit", () => {
-    test("should fire POST /api/v1/media/add when Commit is clicked", async ({
-      authedPage,
-      serverInfo,
-      diagnostics,
-    }) => {
-      skipIfServerUnavailable(serverInfo)
-
-      contentReview = new ContentReviewPage(authedPage)
-      await contentReview.goto()
-      await contentReview.assertPageReady()
-
-      const draftLoaded = await contentReview.isDraftLoaded()
-      if (!draftLoaded) return
-
-      const commitVisible = await contentReview.commitButton.isVisible().catch(() => false)
-      const commitEnabled = await contentReview.commitButton.isEnabled().catch(() => false)
-      if (!commitVisible || !commitEnabled) return
-
-      const apiCall = expectApiCall(authedPage, {
-        url: /\/api\/v1\/media\/add/,
-        method: "POST",
-      }, 15_000)
-
-      await contentReview.commitButton.click()
-
-      try {
-        const { response } = await apiCall
-        expect(response.status()).toBeLessThan(500)
-      } catch {
-        // Commit may fail if draft requires a source file or other preconditions
-      }
-
-      await assertNoCriticalErrors(diagnostics)
-    })
-  })
-})
+  test('commits reviewed content to one canonical source and reloads its version', async ({
+    authedPage,
+    diagnostics,
+  }, testInfo) => {
+    const [draft] = await ingestReviewDrafts(authedPage, [original]);
+    const review = new ContentReviewPage(authedPage);
+    const changed = { ...draft, title: `${draft.title} committed`, content: edited };
+    await review.titleInput.fill(changed.title);
+    await review.contentTextarea.fill(edited);
+    await review.saveDraftButton.click();
+    await assertSavedDraft(authedPage, changed, 'Manual save');
+    await assertReviewDiff(review, original, edited);
+    const adds: string[] = [];
+    authedPage.on('request', (request) => {
+      if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/v1/media/add')
+        adds.push(request.url());
+    });
+    const addedPromise = authedPage.waitForResponse(
+      (response) =>
+        response.request().method() === 'POST' &&
+        new URL(response.url()).pathname === '/api/v1/media/add'
+    );
+    const updatedPromise = authedPage.waitForResponse(
+      (response) =>
+        response.request().method() === 'PUT' &&
+        /\/api\/v1\/media\/\d+$/.test(new URL(response.url()).pathname)
+    );
+    // Attach both waiters before clicking so a missing request always fails.
+    const commitResponses = Promise.all([addedPromise, updatedPromise]);
+    await expect(review.commitButton).toBeEnabled();
+    await review.commitButton.click();
+    const [addResponse, updateResponse] = await commitResponses;
+    const added = await successfulReviewResponse(addResponse);
+    expect(added.results).toHaveLength(1);
+    expect(added.results[0].status).toBe('Success');
+    const mediaId = added.results[0].db_id;
+    expect(Number.isInteger(mediaId) && mediaId > 0).toBe(true);
+    expect(new URL(updateResponse.url()).pathname).toBe(`/api/v1/media/${mediaId}`);
+    expect(updateResponse.request().postDataJSON()).toMatchObject({
+      title: changed.title,
+      content: edited,
+    });
+    const updated = await successfulReviewResponse(updateResponse);
+    expect(updated.media_id).toBe(mediaId);
+    expect(Number.isInteger(updated.new_version) && updated.new_version > 1).toBe(true);
+    await expect(review.committedTag.first()).toHaveText('1 committed');
+    await expect(review.commitButton).toBeDisabled();
+    const canonical = await assertCommittedMedia(mediaId, updated.new_version, changed);
+    await authedPage.reload();
+    await openReviewDraft(authedPage, changed);
+    await expect(review.commitButton).toBeDisabled();
+    expect(await assertCommittedMedia(mediaId, updated.new_version, changed)).toEqual(canonical);
+    expect(adds).toHaveLength(1);
+    await review.clearDraftsButton.click();
+    await authedPage
+      .getByRole('dialog', { name: 'Clear all drafts?' })
+      .getByRole('button', { name: 'Clear drafts', exact: true })
+      .click();
+    await expect(review.emptyState).toBeVisible();
+    expect(await assertCommittedMedia(mediaId, updated.new_version, changed)).toEqual(canonical);
+    await testInfo.attach('uat389-committed-identity.json', {
+      body: JSON.stringify({
+        draftId: draft.id,
+        batchId: draft.batchId,
+        mediaId,
+        version: updated.new_version,
+        title: changed.title,
+        content: changed.content,
+      }),
+      contentType: 'application/json',
+    });
+    await assertNoCriticalErrors(diagnostics);
+  });
+});

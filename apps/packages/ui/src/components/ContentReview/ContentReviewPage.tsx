@@ -73,6 +73,7 @@ const extractMediaId = (
 
   const direct =
     (data as any).media_id ??
+    (data as Record<string, unknown>).db_id ??
     (data as any).id ??
     (data as any).pk ??
     (data as any).uuid

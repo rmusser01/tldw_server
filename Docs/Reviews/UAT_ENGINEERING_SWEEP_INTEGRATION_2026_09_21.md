@@ -52,3 +52,11 @@ Private logs and JSON/XML receipts remain outside the PR. The initial187-test JU
 ## Outstanding gates
 
 UAT393 source verification/review and UAT394 frontend diagnostic repair are complete. UAT393 remains open for native acceptance. Existing UAT261/351/352/354/356/359–361/365/375/388–392 retain their original obligations. No new candidate is frozen. Exact executable variants/case accounting, all43-family source review, recovery qualification, four-cell UAT, installation and upgrades remain in the [approved plan](../../IMPLEMENTATION_PLAN_uat_engineering_sweep_20260921.md). Native evidence from earlier candidates cannot certify this changed source or dependency set.
+
+## Workflow repair checkpoint after c2b7ab1fe8
+
+UAT389–392 strengthen Content Review, source-grounded Chat, five-card study and release discovery/accounting. The review exposed minimal product repairs UAT395 (batch db_id extraction) and UAT396 (WebUI route), plus verified auth fixture correction UAT397 (no invented extension runtime ID). Combined126 tests/9files pass; frontend app TypeScript and final scoped lint are clean. The seven selected existing primary-save controls pass under their owning UI configuration after an initial wrong-config import failure. Full collection lists1525 registrations/671 workflow instances across9projects with0errors; no browser execution. Stable identity uses project/file/full describe-title path, validated against all13 Firefox cases in two selections.
+
+Root reviewed the agent-written harness/product changes. Three delegated follow-up reviews were interrupted by account usage limits and are not recorded as completed. UAT395/396 and the strengthened journeys still require owned native execution. UAT392 retains the full manifest and verified production-runtime binding gate. Builds recorded above precede395/396 and must be rebuilt before using those changes natively. The original shared checkout is preserved.
+
+2026-09-21 post395/396 production rebuild: WebUI and Chrome extension both exit0. WebUI token-sync passes, shared-app580.8KB gzip below600KB budget. Logs /tmp/uat-sweep-web-build-r2.log and /tmp/uat-sweep-extension-build-r2.log. These worktree compile checks precede owned archive builds; no native or release qualification is claimed.

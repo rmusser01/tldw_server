@@ -43,7 +43,7 @@ Files: this plan, `Docs/Reviews/UAT_ENGINEERING_SWEEP_COVERAGE_2026_09_21.md`, `
 **Goal:** Review every live caller along UI → shared state → request → persistence → reload across the whole agreed catalog.
 **Success Criteria:** Each required workflow/variant has a reviewed call path and linked regression/native obligations. Findings are deduplicated and assigned to repair tasks.
 **Tests:** Exact owner/actor, object ID, content/version/count and reload oracles; controlled timing for stale responses and queue/cancellation races. Structural source checks remain structural evidence only.
-**Status:** Not Started
+**Status:** In Progress
 
 - [ ] Start with privacy/data loss/startup: auth target/scope changes, drafts, account/tab restoration, queued dispatch and duplicated writes/history.
 - [ ] Review ordinary Chat and Character Chat through all live WebUI/extension callers, including image send/Retry, temporary/saved conversations, metadata errors, cancellation and late saves.
@@ -56,7 +56,7 @@ Files: this plan, `Docs/Reviews/UAT_ENGINEERING_SWEEP_COVERAGE_2026_09_21.md`, `
 **Goal:** Repair every confirmed issue with the smallest change at its real owner and durable positive/negative controls.
 **Success Criteria:** Meaningful regressions fail before the repair and pass after it; affected SQLite and official PostgreSQL checks pass without hidden skips; independent review and touched-scope lint/type/Bandit are complete.
 **Tests:** Versioned deterministic downstream responses for application semantics; separate live llama.cpp/mmproj and real PNG delivery checks. Fault only owned requests/proxies, never shared services.
-**Status:** Not Started
+**Status:** In Progress
 
 - [ ] UAT389: prepare owned Content Review drafts; make absent required actions and failed AI/commit requests explicit; verify edited content, diff, commit ID/version and reload.
 - [ ] UAT390: use F-SOURCE/F-DISTRACTOR, require the exact ingested result and supported citations in the saved/reloaded grounded answer.
