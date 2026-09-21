@@ -1,4 +1,8 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render as renderComponent, screen, waitFor } from "@testing-library/react"
+import { createInstance } from "i18next"
+import { I18nextProvider } from "react-i18next"
+import knowledgeEn from "@/assets/locale/en/knowledge.json"
+import ICUWithInterpolation from "@/i18n/icu-format"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { AnswerPanel } from "../AnswerPanel"
 import type { RagSource } from "@/services/rag/unified-rag"
@@ -6,6 +10,7 @@ import type {
   EvidenceOrigin,
   KnowledgeAnswerTrustState,
   KnowledgeSourceHealthState,
+  KnowledgeSourceStatus,
   KnowledgeTrustReasonCode,
   RagResult,
 } from "../types"
@@ -14,8 +19,14 @@ const submitExplicitFeedbackMock = vi.fn()
 const messageOpenMock = vi.fn()
 const navigateMock = vi.fn()
 const trackMetricMock = vi.fn()
+const testI18n = createInstance().use(ICUWithInterpolation)
+const render: typeof renderComponent = (ui, options) => renderComponent(ui, {
+  ...options,
+  wrapper: ({ children }) => <I18nextProvider i18n={testI18n}>{children}</I18nextProvider>,
+})
 
 type AnswerPanelTestSettings = {
+  enable_generation?: boolean
   max_generation_tokens: number
   strip_min_relevance: number
   enable_web_fallback: boolean
@@ -113,6 +124,8 @@ const state = {
   answerTrustReasonCodes: [] as KnowledgeTrustReasonCode[],
   answerEvidenceOrigin: null as EvidenceOrigin | null,
   citations: [] as Array<{ index: number }>,
+  completedGenerationEnabled: false as boolean | null,
+  search: vi.fn(),
   isSearching: false,
   error: null as string | null,
   results: [] as RagResult[],
@@ -133,6 +146,7 @@ const state = {
         verificationRate?: number | null
         verificationReportAvailable?: boolean
         verificationTotalClaims?: number | null
+        sourceStatus?: Record<string, KnowledgeSourceStatus>
       }
     | null,
   query: "What does this source say?",
@@ -179,6 +193,8 @@ vi.mock("../KnowledgeQAProvider", () => ({
     answerTrustReasonCodes: state.answerTrustReasonCodes,
     answerEvidenceOrigin: state.answerEvidenceOrigin,
     citations: state.citations,
+    completedGenerationEnabled: state.completedGenerationEnabled,
+    search: state.search,
     isSearching: state.isSearching,
     error: state.error,
     results: state.results,
@@ -200,13 +216,20 @@ vi.mock("../KnowledgeQAProvider", () => ({
 }))
 
 describe("AnswerPanel state guardrails", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await testI18n.init({
+      lng: "en", fallbackLng: "en", defaultNS: "knowledge",
+      resources: { en: { knowledge: knowledgeEn } },
+      interpolation: { escapeValue: false },
+    })
     vi.clearAllMocks()
     state.answer = null
     state.answerTrustState = "cited_answer"
     state.answerTrustReasonCodes = []
     state.answerEvidenceOrigin = null
     state.citations = []
+    state.completedGenerationEnabled = false
+    state.search = vi.fn().mockResolvedValue(undefined)
     state.isSearching = false
     state.error = null
     state.results = []
@@ -236,6 +259,41 @@ describe("AnswerPanel state guardrails", () => {
     expect(container.firstChild).toBeNull()
   })
 
+  it("renders translated loading and model-readiness guidance", async () => {
+    testI18n.addResourceBundle("fr", "knowledge", { answerPanel: {
+      loading: "Traitement de votre question...",
+      modelReadiness: "Le délai dépend des sources et de la disponibilité du modèle.",
+    } })
+    await testI18n.changeLanguage("fr")
+    state.isSearching = true
+
+    render(<AnswerPanel />)
+
+    expect(screen.getByText("Traitement de votre question...")).toBeInTheDocument()
+    expect(screen.getByText("Le délai dépend des sources et de la disponibilité du modèle.")).toBeInTheDocument()
+    expect(screen.queryByText(/Working on your question/)).not.toBeInTheDocument()
+  })
+
+  it("renders translated source-summary templates with result and citation counts", async () => {
+    testI18n.addResourceBundle("fr", "knowledge", { trustSummary: {
+      searched: "Recherche : {{sources}}. {count, plural, one {# résultat} other {# résultats}}, {{citationCount}} citations.",
+      sourcePair: "{{first}} et {{last}}",
+    } })
+    testI18n.addResourceBundle("fr", "sidepanel", { rag: { sources: {
+      media: "Documents", notes: "Notes personnelles",
+    } } })
+    await testI18n.changeLanguage("fr")
+    state.answer = "Une réponse [1]."
+    state.results = [{ id: "r1" }, { id: "r2" }]
+    state.citations = [{ index: 1 }]
+
+    render(<AnswerPanel />)
+
+    expect(screen.getByLabelText("Answer trust summary")).toHaveTextContent(
+      "Recherche : Documents et Notes personnelles. 2 résultats, 1 citations."
+    )
+  })
+
   it("renders no-answer guidance when results exist but answer generation is off", () => {
     state.results = [{ id: "r1", metadata: { title: "Doc 1" } }]
 
@@ -247,6 +305,35 @@ describe("AnswerPanel state guardrails", () => {
     ).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Enable in Settings" }))
     expect(state.setSettingsPanelOpen).toHaveBeenCalledWith(true)
+  })
+
+  it("offers retry when the completed request enabled generation, preserving the sources", () => {
+    state.completedGenerationEnabled = true
+    state.settings.enable_generation = false
+    state.results = [{ id: "cedar", content: "Cedar opens in January." }]
+    render(<AnswerPanel />)
+    expect(screen.getByText(/requested an answer, but no answer was returned/i)).toBeInTheDocument()
+    expect(screen.queryByText(/Enable answer generation in settings/)).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Retry search" }))
+    expect(state.search).toHaveBeenCalledTimes(1)
+    expect(state.results[0].content).toBe("Cedar opens in January.")
+  })
+
+  it("uses disabled-generation guidance from the completed request rather than edited controls", () => {
+    state.completedGenerationEnabled = false
+    state.settings.enable_generation = true
+    state.results = [{ id: "cedar" }]
+    render(<AnswerPanel />)
+    expect(screen.getByRole("button", { name: "Enable in Settings" })).toBeInTheDocument()
+  })
+
+  it("does not invent disabled-generation state for older results without a request snapshot", () => {
+    state.completedGenerationEnabled = null
+    state.settings.enable_generation = false
+    state.results = [{ id: "cedar" }]
+    render(<AnswerPanel />)
+    expect(screen.queryByText(/Enable answer generation in settings/)).not.toBeInTheDocument()
+    expect(screen.getByText(/No generated answer is available/)).toBeInTheDocument()
   })
 
   it("treats whitespace-only answers as missing generated content", () => {
@@ -326,6 +413,27 @@ describe("AnswerPanel state guardrails", () => {
 
     expect(screen.getByText("Source support: Strong")).toBeInTheDocument()
     expect(screen.getByText("Claim check (3 claims)")).toBeInTheDocument()
+  })
+
+  it("names failed sources in the answer summary after a healthy preflight", () => {
+    state.answer = "Media answer [1]."
+    state.citations = [{ index: 1 }]
+    state.results = [{ id: "r1", metadata: { title: "Rowan media" } }]
+    state.settings.sources = ["media_db", "characters", "chats"]
+    state.searchDetails = {
+      sourceStatus: {
+        media_db: { status: "searched", count: 1 },
+        characters: { status: "error", count: 0, reason: "retrieval_failed" },
+        chats: { status: "error", count: 0, reason: "retrieval_failed" },
+      },
+    }
+
+    render(<AnswerPanel />)
+
+    const summary = screen.getByLabelText("Answer trust summary")
+    expect(summary).toHaveTextContent("Could not search Characters and Chats.")
+    expect(summary).toHaveTextContent("Searched Documents & Media.")
+    expect(summary).not.toHaveTextContent("Selected sources look ready.")
   })
 
   it("renders a compact answer trust summary outside the markdown answer body", () => {
@@ -525,6 +633,27 @@ describe("AnswerPanel state guardrails", () => {
     expect(feedbackRow).not.toHaveTextContent("Need a different answer length?")
   })
 
+  it.each([undefined, "ranking"] as const)("does not call an RRF rank low confidence (%s)", (scoreKind) => {
+    state.answerTrustState = "cited_answer"
+    state.answer = "Project Cedar launches on 22 November 2026; Mira Chen leads it [1]."
+    state.citations = [{ index: 1 }]
+    state.results = [{ id: "late_chunk:2:0", score: 0.004838709677419355, score_kind: scoreKind, metadata: { title: "Cedar public launch brief" } }]
+
+    render(<AnswerPanel />)
+
+    expect(screen.queryByText("Low answer confidence")).not.toBeInTheDocument()
+    expect(screen.queryByText(/scored below your current relevance threshold/)).not.toBeInTheDocument()
+  })
+
+  it("retains the warning for explicitly measured low relevance", () => {
+    state.answerTrustState = "cited_answer"
+    state.answer = "Cedar launches in November [1]."
+    state.citations = [{ index: 1 }]
+    state.results = [{ id: "r1", score: 0.1, score_kind: "relevance_probability" }]
+    render(<AnswerPanel />)
+    expect(screen.getByText(/scored below your current relevance threshold/)).toBeInTheDocument()
+  })
+
   it("surfaces integrated recovery actions when answer confidence is weak", () => {
     state.answerTrustState = "uncited_degraded_answer"
     state.answer = "This answer is not grounded."
@@ -717,22 +846,62 @@ describe("AnswerPanel state guardrails", () => {
     expect(state.scrollToSource).toHaveBeenCalledWith(0)
   })
 
-  it("shows staged loading text with elapsed seconds", () => {
+  it.each(["fast", "balanced", "thorough", "custom"] as const)(
+    "keeps %s waiting neutral while elapsed time passes stage thresholds",
+    (preset) => {
+      vi.useFakeTimers()
+      state.isSearching = true
+      state.preset = preset
+
+      const { container } = render(<AnswerPanel />)
+      for (const [seconds, advance] of [[0, 0], [5, 5], [10, 5], [20, 10], [120, 100]]) {
+        if (seconds > 0) {
+          act(() => { vi.advanceTimersByTime(advance * 1000) })
+          expect(screen.getByText(`(${seconds}s)`)).toBeInTheDocument()
+        }
+        expect(container).not.toHaveTextContent(
+          /Searching documents|Reranking results|Generating answer|Verifying citations/
+        )
+        expect(screen.getByText(/Working on your question/)).toBeInTheDocument()
+        expect(container).not.toHaveTextContent(/completes|up to \d+ seconds/)
+      }
+    }
+  )
+
+  it("clears waiting after cancellation and restarts elapsed time for a new search", () => {
     vi.useFakeTimers()
     state.isSearching = true
-    state.preset = "thorough"
-
-    render(<AnswerPanel />)
-    expect(screen.getByText(/Searching documents/i)).toBeInTheDocument()
-    expect(
-      screen.getByText(/Deep preset may take up to 30 seconds/i)
-    ).toBeInTheDocument()
-
+    const { container, rerender } = render(<AnswerPanel />)
     act(() => {
-      vi.advanceTimersByTime(6000)
+      vi.advanceTimersByTime(120_000)
     })
-    expect(screen.getByText(/Reranking results/i)).toBeInTheDocument()
-    expect(screen.getByText(/\(6s\)/)).toBeInTheDocument()
+    expect(screen.getByText("(120s)")).toBeInTheDocument()
+
+    state.isSearching = false
+    rerender(<AnswerPanel />)
+    expect(container).toBeEmptyDOMElement()
+
+    state.isSearching = true
+    rerender(<AnswerPanel />)
+    expect(screen.getByText(/Working on your question/)).toBeInTheDocument()
+    expect(screen.queryByText("(120s)")).not.toBeInTheDocument()
+    act(() => { vi.advanceTimersByTime(1000) })
+    expect(screen.getByText("(1s)")).toBeInTheDocument()
+  })
+
+  it("replaces waiting with the completed answer after a long search", () => {
+    vi.useFakeTimers()
+    state.isSearching = true
+    const { rerender } = render(<AnswerPanel />)
+    act(() => { vi.advanceTimersByTime(120_000) })
+
+    state.isSearching = false
+    state.answer = "The observatory director is Dr. Mira Vale."
+    rerender(<AnswerPanel />)
+
+    expect(screen.getByText(state.answer)).toBeInTheDocument()
+    expect(screen.queryByText("(120s)")).not.toBeInTheDocument()
+    expect(screen.queryByText(/Working on your question/)).not.toBeInTheDocument()
   })
 
   it("classifies timeout errors with targeted guidance", () => {

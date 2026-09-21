@@ -40,6 +40,7 @@ def test_local_api_and_custom_openai2_config_keys(monkeypatch):
     fake = FakeConfig(
         {
             ("Local-API", "aphrodite_api_timeout"): "123",
+            ("Local-API", "llama_model"): "../../Language_Models/local-fixture.gguf",
             ("API", "custom_openai2_api_top_p"): "0.42",
         }
     )
@@ -47,4 +48,5 @@ def test_local_api_and_custom_openai2_config_keys(monkeypatch):
 
     data = cfg.load_and_log_configs()
     assert data["aphrodite_api"]["api_timeout"] == "123"
+    assert data["llama_api"]["model"] == "../../Language_Models/local-fixture.gguf"
     assert data["custom_openai_api_2"]["top_p"] == "0.42"

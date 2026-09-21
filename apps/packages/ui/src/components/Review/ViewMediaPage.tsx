@@ -1,6 +1,11 @@
+import { watchChatAccountChanges } from '@/services/chat-account-boundary'
+import { useHomeMilestoneScope } from '@/hooks/useHomeMilestoneScope'
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useConnectionStore } from '@/store/connection'
 import { useLocation, useNavigate } from 'react-router-dom'
+import { getMediaPermalinkIdFromSearch } from './mediaPermalink'
+import { useMediaCapabilities } from '@/hooks/useMediaCapabilities'
 import {
   ChevronDown,
   ChevronLeft,
@@ -48,8 +53,7 @@ import {
   buildMediaFilterSearch,
   hasMediaFilterParams
 } from '@/components/Review/mediaFilterParams'
-import { buildFlashcardsGenerateRoute } from "@/services/tldw/flashcards-generate-handoff"
-import { buildStudyPackRoute } from "@/services/tldw/study-pack-handoff"
+import { useFlashcardsGenerateTransfer, useStudyPackTransfer } from "@/hooks/useFlashcardsGenerateTransfer"
 import {
   getMediaNavigationResumeEntry,
   resolveMediaNavigationResumeSelection,
@@ -113,11 +117,29 @@ const ViewMediaPage: React.FC = () => {
   const { demoEnabled } = useDemoMode()
   const { uxState } = useConnectionUxState()
   const { checkOnce } = useConnectionActions()
+  const [mediaAuthorityGeneration, setMediaAuthorityGeneration] = useState(0)
+  useEffect(() => {
+    const retire = () => setMediaAuthorityGeneration(value => value + 1)
+    const stopWatchingAccount = watchChatAccountChanges(invalidated => {
+      if (invalidated) retire()
+    })
+    const unsubscribe = useConnectionStore.subscribe((next, previous) => {
+      if ((previous.state.isConnected && !next.state.isConnected) ||
+        next.state.serverUrl !== previous.state.serverUrl) retire()
+    })
+    return () => { unsubscribe(); stopWatchingAccount() }
+  }, [])
 
   // Check media support
   const mediaUnsupported = !capsLoading && capabilities && !capabilities.hasMedia
 
-  if (!isOnline && uxState !== 'testing') {
+  if (!isOnline && uxState === 'testing') {
+    return <div role="status" className="flex h-full items-center justify-center">
+      {t('review:mediaEmpty.checkingConnection', { defaultValue: 'Checking connection…' })}
+    </div>
+  }
+
+  if (!isOnline) {
     if (uxState === 'error_auth' || uxState === 'configuring_auth') {
       return (
         <div className="flex h-full items-center justify-center">
@@ -287,13 +309,22 @@ const ViewMediaPage: React.FC = () => {
     )
   }
 
-  return <MediaPageContent />
+  return <MediaPageContent key={mediaAuthorityGeneration} />
 }
 
 const MediaPageContent: React.FC = () => {
+  const ownerScope = useHomeMilestoneScope()
+  const handoffOwnerRef = useRef(ownerScope)
+  handoffOwnerRef.current = ownerScope
+  const transferFlashcards = useFlashcardsGenerateTransfer()
+  const transferStudyPack = useStudyPackTransfer()
   const { t } = useTranslation(['review', 'common'])
   const navigate = useNavigate()
   const location = useLocation()
+  const mediaCapabilities = useMediaCapabilities()
+  const deleteDisabledReason = mediaCapabilities.canDelete ? undefined : mediaCapabilities.loading
+    ? 'Checking delete permission…'
+    : 'Your account does not have permission to delete media.'
   const message = useAntdMessage()
   const {
     setChatMode,
@@ -303,29 +334,8 @@ const MediaPageContent: React.FC = () => {
 
   // --- Hooks ---
   const search = useMediaSearch({ t, message })
-  const { refetch: searchRefetch } = search
-
+  const { isCurrent: isMediaCurrent } = search
   const viewPrefs = useMediaViewPreferences()
-
-  // Auto-refresh media results when Quick Ingest completes
-  const searchRefetchRef = useRef(searchRefetch)
-  const ingestRefreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  useEffect(() => { searchRefetchRef.current = searchRefetch }, [searchRefetch])
-  useEffect(() => {
-    const handleIngestComplete = () => {
-      if (ingestRefreshTimeoutRef.current !== null) {
-        clearTimeout(ingestRefreshTimeoutRef.current)
-      }
-      ingestRefreshTimeoutRef.current = setTimeout(() => { searchRefetchRef.current() }, 1500)
-    }
-    window.addEventListener("tldw:quick-ingest-complete", handleIngestComplete)
-    return () => {
-      if (ingestRefreshTimeoutRef.current !== null) {
-        clearTimeout(ingestRefreshTimeoutRef.current)
-      }
-      window.removeEventListener("tldw:quick-ingest-complete", handleIngestComplete)
-    }
-  }, [])
 
   // Compute display results (filtered by favorites/collections)
   // Need selection hook first for favorites/collections, but selection needs displayResults.
@@ -337,7 +347,7 @@ const MediaPageContent: React.FC = () => {
   })
 
   const selection = useMediaSelection({
-    t, message,
+    t, message, ownerScope,
     displayResults: search.results,
     selected: nav.selected,
     setSelected: nav.setSelected,
@@ -449,7 +459,9 @@ const MediaPageContent: React.FC = () => {
 
   const effectiveContentFormat: null = null
   const selectedNavigationTarget = useMemo(() => {
-    if (!showNavigationPanel || !selectedNavigationNodeId) return null
+    // Passive section highlighting must not seek over precise saved progress.
+    // Only an explicit chapter action in this view requests a navigation target.
+    if (!showNavigationPanel || !selectedNavigationNodeId || navigationSelectionNonce === 0) return null
     if (!selectedNavigationNode) return null
     return {
       target_type: selectedNavigationNode.target_type,
@@ -457,7 +469,7 @@ const MediaPageContent: React.FC = () => {
       target_end: selectedNavigationNode.target_end,
       target_href: selectedNavigationNode.target_href
     }
-  }, [selectedNavigationNode, selectedNavigationNodeId, showNavigationPanel])
+  }, [navigationSelectionNonce, selectedNavigationNode, selectedNavigationNodeId, showNavigationPanel])
 
   const navigationPageCountHint = useMemo(() => {
     const toPositiveInt = (value: unknown): number | null => {
@@ -756,7 +768,6 @@ const MediaPageContent: React.FC = () => {
       if (!nextNode) return
 
       setSelectedNavigationNodeId(nextNode.id)
-      setNavigationSelectionNonce((prev) => prev + 1)
       void persistNavigationSelection(nextNode)
 
       if (resumeEntry && resolvedSelection) {
@@ -881,9 +892,18 @@ const MediaPageContent: React.FC = () => {
     }
   }
 
+  const handoffSelectionRef = useRef(nav.selected)
+  handoffSelectionRef.current = nav.selected
+  const fullContentReady = Boolean(ownerScope && nav.selected && !nav.detailLoading && !nav.detailFetchError &&
+    String(nav.lastFetchedId) === String(nav.selected.id) && nav.selectedContent.trim())
+  const chatWithMediaDisabledReason = fullContentReady ? undefined : !ownerScope
+    ? t('review:mediaPage.fullContentOwnerLoading', { defaultValue: 'Checking account…' }) : nav.detailLoading
+    ? t('review:mediaPage.fullContentLoading', { defaultValue: 'Loading full content…' })
+    : t('review:mediaPage.fullContentUnavailable', { defaultValue: 'Full content is not available for this item.' })
+
   // Chat/action handlers
-  const handleChatWithMedia = useCallback(() => {
-    if (!nav.selected) return
+  const handleChatWithMedia = useCallback(async () => {
+    if (!nav.selected || !ownerScope || !fullContentReady || !isMediaCurrent()) return
 
     const title = nav.selected.title || String(nav.selected.id)
     const content = nav.selectedContent || ''
@@ -893,9 +913,11 @@ const MediaPageContent: React.FC = () => {
         mediaId: String(nav.selected.id),
         title,
         content,
-        mode: 'normal' as const
+        mode: 'normal' as const,
+        ownerScope
       }
-      void setSetting(DISCUSS_MEDIA_PROMPT_SETTING, payload)
+      await setSetting(DISCUSS_MEDIA_PROMPT_SETTING, payload)
+      if (!isMediaCurrent() || handoffOwnerRef.current !== ownerScope || handoffSelectionRef.current !== nav.selected) return
       try {
         window.dispatchEvent(
           new CustomEvent('tldw:discuss-media', {
@@ -908,10 +930,11 @@ const MediaPageContent: React.FC = () => {
     } catch {
       // ignore storage errors
     }
+    if (!isMediaCurrent() || handoffOwnerRef.current !== ownerScope || handoffSelectionRef.current !== nav.selected) return
     setChatMode('normal')
     setSelectedKnowledge(null as any)
     setRagMediaIds(null)
-    navigate('/')
+    navigate('/chat')
     message.success(
       t(
         'review:reviewPage.chatPrepared',
@@ -919,6 +942,9 @@ const MediaPageContent: React.FC = () => {
       )
     )
   }, [
+    fullContentReady,
+    ownerScope,
+    isMediaCurrent,
     nav.selectedContent,
     message,
     navigate,
@@ -929,8 +955,8 @@ const MediaPageContent: React.FC = () => {
     t
   ])
 
-  const handleChatAboutMedia = useCallback(() => {
-    if (!nav.selected) return
+  const handleChatAboutMedia = useCallback(async () => {
+    if (!nav.selected || !ownerScope || !isMediaCurrent()) return
 
     const idNum = Number(nav.selected.id)
     if (!Number.isFinite(idNum)) {
@@ -942,22 +968,25 @@ const MediaPageContent: React.FC = () => {
       )
       return
     }
-    setSelectedKnowledge(null as any)
-    setRagMediaIds([idNum])
-    setChatMode('rag')
     try {
       const payload = {
         mediaId: String(nav.selected.id),
-        mode: 'rag_media' as const
+        mode: 'rag_media' as const,
+        ownerScope
       }
-      void setSetting(DISCUSS_MEDIA_PROMPT_SETTING, payload)
+      await setSetting(DISCUSS_MEDIA_PROMPT_SETTING, payload)
+      if (!isMediaCurrent() || handoffOwnerRef.current !== ownerScope || handoffSelectionRef.current !== nav.selected) return
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('tldw:discuss-media', { detail: payload }))
       }
     } catch {
       // ignore storage/event errors
     }
-    navigate('/')
+    if (!isMediaCurrent() || handoffOwnerRef.current !== ownerScope || handoffSelectionRef.current !== nav.selected) return
+    setSelectedKnowledge(null as any)
+    setRagMediaIds([idNum])
+    setChatMode('rag')
+    navigate('/chat')
     try {
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('tldw:focus-composer'))
@@ -971,16 +1000,16 @@ const MediaPageContent: React.FC = () => {
         'Opened media-scoped RAG chat.'
       )
     )
-  }, [nav.selected, setSelectedKnowledge, setRagMediaIds, setChatMode, navigate, message, t])
+  }, [nav.selected, ownerScope, isMediaCurrent, setSelectedKnowledge, setRagMediaIds, setChatMode, navigate, message, t])
 
   const handleGenerateFlashcardsFromMedia = useCallback(
-    (payload: {
+    async (payload: {
       text: string
       sourceId?: string
       sourceTitle?: string
     }) => {
-      const sourceText = String(payload.text || "").trim()
-      if (!sourceText) {
+      const sourceText = String(payload.text || "")
+      if (!sourceText.trim()) {
         message.warning(
           t("review:mediaPage.generateFlashcardsEmpty", {
             defaultValue: "No content available to generate flashcards."
@@ -989,21 +1018,24 @@ const MediaPageContent: React.FC = () => {
         return
       }
 
-      navigate(
-        buildFlashcardsGenerateRoute({
+      try {
+        await transferFlashcards(() => ({
           text: sourceText,
           sourceType: "media",
           sourceId:
             payload.sourceId ||
             (nav.selected?.id != null ? String(nav.selected.id) : undefined),
           sourceTitle: payload.sourceTitle || nav.selected?.title || undefined
-        })
-      )
+        }), { navigate })
+      } catch (error) {
+        if (!(error instanceof Error && error.name === "AbortError")) message.error(error instanceof Error ? error.message : "The transfer could not be opened. Reopen it from this source.")
+      }
     },
-    [message, navigate, nav.selected, t]
+    [message, navigate, nav.selected, t, transferFlashcards]
   )
 
-  const handleCreateStudyPackFromMedia = useCallback(() => {
+  const handleCreateStudyPackFromMedia = useCallback(async () => {
+    if (!ownerScope || !isMediaCurrent()) return
     const selectedMedia = nav.selected?.kind === "media" ? nav.selected : null
     const mediaTitle = selectedMedia?.title?.trim() || ""
     const mediaId = selectedMedia?.id
@@ -1017,19 +1049,22 @@ const MediaPageContent: React.FC = () => {
       return
     }
 
-    navigate(
-      buildStudyPackRoute({
-        title: mediaTitle,
-        sourceItems: [
-          {
-            sourceType: "media",
-            sourceId: String(mediaId),
-            sourceTitle: mediaTitle
-          }
-        ]
-      })
-    )
-  }, [message, nav.selected, navigate, t])
+    try {
+      await transferStudyPack(() => {
+        const currentSelection = handoffSelectionRef.current
+        if (!isMediaCurrent() || handoffOwnerRef.current !== ownerScope ||
+          currentSelection?.kind !== 'media' || String(currentSelection.id) !== String(mediaId)) {
+          throw new Error("The source account or selection changed. Reopen this media before transferring.")
+        }
+        return {
+          title: mediaTitle,
+          sourceItems: [{ sourceType: "media", sourceId: String(mediaId), sourceTitle: mediaTitle }]
+        }
+      }, { navigate })
+    } catch (error) {
+      if (!(error instanceof Error && error.name === "AbortError")) message.error(error instanceof Error ? error.message : "The study pack transfer could not be opened. Your source is unchanged.")
+    }
+  }, [isMediaCurrent, message, nav.selected, navigate, ownerScope, t, transferStudyPack])
 
   const handleCreateNoteWithContent = useCallback(async (noteContent: string, title: string) => {
     try {
@@ -1077,7 +1112,7 @@ const MediaPageContent: React.FC = () => {
     setChatMode('normal')
     setSelectedKnowledge(null as any)
     setRagMediaIds(null)
-    navigate('/')
+    navigate('/chat')
     message.success(t('review:reviewPage.sentToChat', 'Sent to chat'))
   }, [nav.selected, setChatMode, setSelectedKnowledge, setRagMediaIds, navigate, message, t])
 
@@ -1091,22 +1126,49 @@ const MediaPageContent: React.FC = () => {
   // render a single-column centered onboarding view instead of the two-column split.
   const isEmptyLibrary =
     search.activeTotalCount === 0 &&
+    displayResults.length === 0 &&
+    !nav.selected &&
+    !nav.pendingInitialMediaId &&
+    !getMediaPermalinkIdFromSearch(location.search) &&
     !hasActiveFilters &&
     !search.query?.trim() &&
     !search.isLoading &&
     !search.isFetching
 
+  const trashNavigation = (
+    <button
+      type="button"
+      onClick={() => navigate('/media-trash')}
+      className="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[11px] text-text-muted hover:bg-surface2 hover:text-text"
+      aria-label={t('review:mediaPage.openTrash', { defaultValue: 'Trash' })}
+      title={t('review:mediaPage.openTrash', { defaultValue: 'Trash' })}
+    >
+      <Trash2 className="h-3.5 w-3.5" />
+      {t('review:mediaPage.openTrash', { defaultValue: 'Trash' })}
+    </button>
+  )
+
+  const staleSelectionNotice = nav.staleSelectionNotice ? (
+    <div
+      className="mx-3 mt-3 rounded-md border border-border bg-surface2 px-3 py-2 text-sm text-text"
+      data-testid="media-stale-selection-notice"
+    >
+      {nav.staleSelectionNotice}
+    </div>
+  ) : null
+
   if (isEmptyLibrary) {
     return (
       <div
-        className="relative flex min-h-full bg-bg"
-        style={{ minHeight: `${sidebarDimensions.mediaPageMinHeightPx}px` }}
+        className="relative flex min-h-0 flex-1 overflow-auto bg-bg"
       >
         <div className="flex flex-1 items-center justify-center p-8">
           <div className="max-w-lg w-full">
             <h1 className="mb-3 px-4 text-center text-base font-semibold text-text">
               {t('review:mediaPage.mediaInspector', { defaultValue: 'Media Inspector' })}
             </h1>
+            <div className="mb-3 flex justify-center">{trashNavigation}</div>
+            {staleSelectionNotice}
             <ResultsList
               results={displayResults}
               selectedId={null}
@@ -1138,13 +1200,12 @@ const MediaPageContent: React.FC = () => {
 
   return (
     <div
-      className="relative flex min-h-full bg-bg"
-      style={{ minHeight: `${sidebarDimensions.mediaPageMinHeightPx}px` }}
+      className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-bg"
     >
       {/* Left Sidebar */}
       <div
-        className={`bg-surface border-r border-border flex h-full min-h-0 flex-col transition-[width] duration-300 ease-in-out ${
-          viewPrefs.sidebarCollapsedValue ? 'w-0' : 'w-full md:w-[22rem] lg:w-[25rem]'
+        className={`absolute inset-y-0 left-0 z-10 bg-surface border-r border-border flex h-full min-h-0 min-w-0 flex-col transition-[width] duration-300 ease-in-out md:relative md:inset-auto md:z-auto ${
+          viewPrefs.sidebarCollapsedValue ? 'w-0' : 'w-[calc(100%-1.5rem)] md:w-[22rem] lg:w-[25rem]'
         }`}
         style={{
           overflowX: 'hidden',
@@ -1166,16 +1227,7 @@ const MediaPageContent: React.FC = () => {
                 <span className="text-[11px] font-medium tabular-nums text-text-muted">
                   {displayResults.length} / {search.activeTotalCount}
                 </span>
-                <button
-                  type="button"
-                  onClick={() => navigate('/media-trash')}
-                  className="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[11px] text-text-muted hover:bg-surface2 hover:text-text"
-                  aria-label={t('review:mediaPage.openTrash', { defaultValue: 'Trash' })}
-                  title={t('review:mediaPage.openTrash', { defaultValue: 'Trash' })}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  {t('review:mediaPage.openTrash', { defaultValue: 'Trash' })}
-                </button>
+                {trashNavigation}
                 <button
                   type="button"
                   onClick={selection.handleToggleBulkSelectionMode}
@@ -1463,6 +1515,7 @@ const MediaPageContent: React.FC = () => {
           {selection.bulkSelectionMode ? (
             <React.Suspense fallback={null}>
               <LazyMediaBulkToolbar
+                deleteDisabledReason={selection.bulkSelectedMediaItems.length > 0 ? deleteDisabledReason : undefined}
                 selection={{
                   ...selection,
                   handleSelectAllVisibleItems
@@ -1638,7 +1691,9 @@ const MediaPageContent: React.FC = () => {
       {/* Collapse Button */}
       <button
         onClick={() => viewPrefs.setSidebarCollapsed(!viewPrefs.sidebarCollapsedValue)}
-        className="relative w-6 self-stretch bg-surface border-r border-border hover:bg-surface2 flex items-center justify-center group transition-colors"
+        className={`absolute inset-y-0 z-20 w-6 shrink-0 self-stretch bg-surface border-r border-border hover:bg-surface2 flex items-center justify-center group transition-colors md:relative md:inset-auto md:z-auto ${
+          viewPrefs.sidebarCollapsedValue ? 'left-0' : 'left-[calc(100%-1.5rem)]'
+        } md:left-auto`}
         aria-label={viewPrefs.sidebarCollapsedValue ? 'Expand sidebar' : 'Collapse sidebar'}
       >
         <div className="flex items-center justify-center w-full h-full">
@@ -1651,7 +1706,7 @@ const MediaPageContent: React.FC = () => {
       </button>
 
       {/* Main Content Area */}
-      <div className="flex-1 flex min-h-0 flex-col">
+      <div className="ml-6 flex-1 flex min-h-0 min-w-0 flex-col md:ml-0">
         {navigationEnabled ? (
           <div className="border-b border-border bg-surface px-3 py-2">
             <div className="flex flex-wrap items-center gap-3 text-xs text-text-muted">
@@ -1694,7 +1749,7 @@ const MediaPageContent: React.FC = () => {
           </div>
         ) : null}
 
-        <div className="flex-1 flex min-h-0 flex-col md:flex-row">
+        <div className="flex-1 flex min-h-0 min-w-0 flex-col md:flex-row">
           {showNavigationPanel ? (
             <React.Suspense fallback={null}>
               <LazyMediaSectionNavigator
@@ -1719,7 +1774,7 @@ const MediaPageContent: React.FC = () => {
             </React.Suspense>
           ) : null}
 
-          <div className="flex-1 flex flex-col min-h-0">
+          <div className="flex-1 flex flex-col min-h-0 min-w-0">
             <div className="flex items-center justify-end gap-2 border-b border-border bg-surface px-3 py-2">
               <button
                 type="button"
@@ -1732,14 +1787,7 @@ const MediaPageContent: React.FC = () => {
                 })}
               </button>
             </div>
-            {nav.staleSelectionNotice ? (
-              <div
-                className="mx-3 mt-3 rounded-md border border-border bg-surface2 px-3 py-2 text-sm text-text"
-                data-testid="media-stale-selection-notice"
-              >
-                {nav.staleSelectionNotice}
-              </div>
-            ) : null}
+            {staleSelectionNotice}
             {nav.selected &&
             nav.detailFetchError &&
             String(nav.detailFetchError.mediaId) === String(nav.selected.id) ? (
@@ -1783,6 +1831,7 @@ const MediaPageContent: React.FC = () => {
               totalResults={displayResults.length}
               isLibraryEmpty={isEmptyLibrary}
               onChatWithMedia={handleChatWithMedia}
+              chatWithMediaDisabledReason={chatWithMediaDisabledReason}
               onChatAboutMedia={handleChatAboutMedia}
               onGenerateFlashcardsFromContent={handleGenerateFlashcardsFromMedia}
               onRefreshMedia={handleRefreshMedia}
@@ -1792,7 +1841,8 @@ const MediaPageContent: React.FC = () => {
                 }
                 search.refetch()
               }}
-              onDeleteItem={selection.handleDeleteItem}
+              onDeleteItem={nav.selected?.kind === 'note' || mediaCapabilities.canDelete ? selection.handleDeleteItem : undefined}
+              deleteDisabledReason={nav.selected?.kind === 'media' ? deleteDisabledReason : undefined}
               onCreateNoteWithContent={handleCreateNoteWithContent}
               onOpenInMultiReview={handleOpenInMultiReview}
               onSendAnalysisToChat={handleSendAnalysisToChat}

@@ -1,4 +1,33 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+
+const browserStorage = vi.hoisted(() => {
+  const listeners = new Set<
+    (changes: Record<string, { newValue?: unknown }>, area: string) => void
+  >()
+  const set = vi.fn(async (values: Record<string, unknown>) => {
+    const changes = Object.fromEntries(
+      Object.entries(values).map(([key, newValue]) => [key, { newValue }])
+    )
+    listeners.forEach((listener) => listener(changes, "local"))
+  })
+  return { listeners, set }
+})
+
+vi.mock("wxt/browser", () => ({
+  browser: {
+    storage: {
+      local: { set: browserStorage.set },
+      onChanged: {
+        addListener: (listener: (changes: Record<string, { newValue?: unknown }>, area: string) => void) =>
+          browserStorage.listeners.add(listener),
+        removeListener: (listener: (changes: Record<string, { newValue?: unknown }>, area: string) => void) =>
+          browserStorage.listeners.delete(listener)
+      }
+    }
+  }
+}))
+
+import { browser } from "wxt/browser"
 import {
   ConnectionPhase,
   deriveConnectionUxState,
@@ -30,7 +59,7 @@ vi.mock("@/services/tldw/runtime-auth-override", () => ({
 }))
 
 import { apiSend } from "@/services/api-send"
-import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { tldwClient, type TldwConfig } from "@/services/tldw/TldwApiClient"
 import { getRuntimeSingleUserApiKeyOverride, isCookieSessionConfigInvalidated } from "@/services/tldw/runtime-auth-override"
 import { CONNECTION_TIMEOUT_MS, useConnectionStore } from "../connection"
 
@@ -215,6 +244,7 @@ describe("connection store stability", () => {
       apiKey: "test-key"
     } as any)
     mockedClient.initialize.mockResolvedValue(undefined)
+    mockedClient.updateConfig.mockReset()
     mockedClient.ragHealth.mockResolvedValue({ status: "healthy" } as any)
     mockedRuntimeApiKey.mockReturnValue(null)
     vi.mocked(isCookieSessionConfigInvalidated).mockReturnValue(false)
@@ -313,6 +343,21 @@ describe("connection store stability", () => {
     expect(state.hasCompletedFirstRun).toBe(true)
   })
 
+  it("connects unverified multi-user sessions without profile or operator health permissions", async () => {
+    mockedClient.getConfig.mockResolvedValue({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "multi-user",
+      accessToken: "ordinary-user-token"
+    })
+    mockedApiSend.mockImplementation(async ({ path }) => path === "/api/v1/auth/sessions"
+      ? { ok: true, status: 200, data: [] }
+      : { ok: false, status: 403, error: "Email not verified or missing system.logs" })
+    await useConnectionStore.getState().checkOnce()
+    expect(useConnectionStore.getState().state.isConnected).toBe(true)
+    expect(mockedApiSend).toHaveBeenCalledWith(expect.objectContaining({ path: "/api/v1/auth/sessions", noAuth: false }), expect.objectContaining({ readiness: { config: expect.any(Object), isCurrent: expect.any(Function) } }))
+    expect(mockedApiSend).not.toHaveBeenCalledWith(expect.objectContaining({ path: "/api/v1/health/live" }), expect.anything())
+  })
+
   it("uses lightweight health liveness endpoint and resets failure streak on success", async () => {
     setConnectionState({
       consecutiveFailures: 2,
@@ -337,7 +382,7 @@ describe("connection store stability", () => {
         path: "/api/v1/health/live",
         method: "GET",
         timeoutMs: CONNECTION_TIMEOUT_MS
-      })
+      }), expect.anything()
     )
   })
 
@@ -353,7 +398,7 @@ describe("connection store stability", () => {
     mockedApiSend.mockResolvedValue({ ok: true, status: 200, data: { status: "alive" } })
     await useConnectionStore.getState().checkOnce()
     expect(useConnectionStore.getState().state.isConnected).toBe(expected)
-    if (expected) expect(mockedApiSend).toHaveBeenCalledWith(expect.objectContaining({ path: "/api/v1/users/me", noAuth: false }))
+    if (expected) expect(mockedApiSend).toHaveBeenCalledWith(expect.objectContaining({ path: "/api/v1/auth/sessions", noAuth: false }), expect.objectContaining({ readiness: { config: expect.any(Object), isCurrent: expect.any(Function) } }))
     else expect(useConnectionStore.getState().state.configStep).toBe("auth")
   })
 
@@ -367,7 +412,7 @@ describe("connection store stability", () => {
         authSource: "cookie-session"
       })
       mockedApiSend.mockImplementation(async ({ path }) =>
-        path === "/api/v1/users/me"
+        path === "/api/v1/auth/sessions"
           ? { ok: false, status: 401, error: `Session ${reason}` }
           : { ok: true, status: 200, data: { status: "alive" } }
       )
@@ -406,7 +451,7 @@ describe("connection store stability", () => {
         path: "/api/v1/health/live",
         method: "GET",
         noAuth: false
-      })
+      }), expect.anything()
     )
   })
 
@@ -452,7 +497,7 @@ describe("connection store stability", () => {
       expect.objectContaining({
         path: "/api/v1/health/live",
         method: "GET"
-      })
+      }), expect.anything()
     )
     expect(state.phase).toBe(ConnectionPhase.CONNECTED)
     expect(state.isConnected).toBe(true)
@@ -460,7 +505,7 @@ describe("connection store stability", () => {
     expect(state.lastError).toBeNull()
   })
 
-  it("surfaces a CORS hint for cross-origin network-blocked health checks", async () => {
+  it("preserves an opaque cross-origin network failure without inferring a CORS denial", async () => {
     setConnectionState({
       phase: ConnectionPhase.SEARCHING,
       serverUrl: "http://192.168.5.186:8000",
@@ -485,11 +530,10 @@ describe("connection store stability", () => {
     const state = useConnectionStore.getState().state
     expect(state.phase).toBe(ConnectionPhase.ERROR)
     expect(state.errorKind).toBe("unreachable")
-    expect(state.lastError).toContain("Likely CORS mismatch")
-    expect(state.lastError).toContain("ALLOWED_ORIGINS")
+    expect(state.lastError).toBe("NetworkError when attempting to fetch resource.")
   })
 
-  it("surfaces a CORS/network hint for aborted cross-origin health checks", async () => {
+  it("preserves an aborted cross-origin health check without inferring a CORS denial", async () => {
     setConnectionState({
       phase: ConnectionPhase.SEARCHING,
       serverUrl: "http://192.168.5.186:8000",
@@ -514,8 +558,7 @@ describe("connection store stability", () => {
     const state = useConnectionStore.getState().state
     expect(state.phase).toBe(ConnectionPhase.ERROR)
     expect(state.errorKind).toBe("unreachable")
-    expect(state.lastError).toContain("Likely CORS mismatch")
-    expect(state.lastError).toContain("ALLOWED_ORIGINS")
+    expect(state.lastError).toBe("The operation was aborted.")
   })
 
   it("recovers from stale LAN host by switching to current browser host when probe succeeds", async () => {
@@ -875,6 +918,28 @@ describe("connection store stability", () => {
     expect(mockedClient.clearManualSingleUserCredentials).toHaveBeenCalledOnce()
   })
 
+  it("revokes readiness immediately on onboarding restart and discards its pending health check", async () => {
+    setConnectionState({
+      phase: ConnectionPhase.CONNECTED, isConnected: true, isChecking: false,
+      lastCheckedAt: 0, knowledgeStatus: "ready", knowledgeLastCheckedAt: Date.now()
+    })
+    let finishHealth: (value: unknown) => void = () => {}
+    mockedApiSend.mockImplementationOnce(() => new Promise((resolve) => { finishHealth = resolve }))
+    const oldCheck = useConnectionStore.getState().checkOnce({ force: true })
+    await vi.waitFor(() => expect(mockedApiSend).toHaveBeenCalledOnce())
+    let finishClear: () => void = () => {}
+    mockedClient.clearManualSingleUserCredentials.mockImplementationOnce(() => new Promise<void>((resolve) => { finishClear = resolve }))
+    const restart = useConnectionStore.getState().restartOnboarding()
+    await vi.waitFor(() => expect(mockedClient.clearManualSingleUserCredentials).toHaveBeenCalledOnce())
+    const connectedWhileClearing = useConnectionStore.getState().state.isConnected
+    finishClear()
+    await restart
+    finishHealth({ ok: true, status: 200, data: {} })
+    await oldCheck
+    expect(connectedWhileClearing).toBe(false)
+    expect(useConnectionStore.getState().state.isConnected).toBe(false)
+  })
+
   it("exits demo mode when entering onboarding so setup does not look connected", async () => {
     setConnectionState({
       mode: "demo",
@@ -897,7 +962,7 @@ describe("connection store stability", () => {
     expect(state.configStep).toBe("url")
   })
 
-  it("does not revert a concurrent config edit when a slow health check finishes (H7)", async () => {
+  it("keeps concurrent onboarding edits but discards readiness for a replaced server (H7)", async () => {
     setConnectionState({
       phase: ConnectionPhase.SEARCHING,
       isConnected: false,
@@ -944,8 +1009,164 @@ describe("connection store stability", () => {
     const final = useConnectionStore.getState().state
     expect(final.configStep).toBe("auth")
     expect(final.hasCompletedFirstRun).toBe(true)
-    expect(final.phase).toBe(ConnectionPhase.CONNECTED)
-    expect(final.isConnected).toBe(true)
+    expect(final.phase).toBe(ConnectionPhase.UNCONFIGURED)
+    expect(final.isConnected).toBe(false)
+    expect(final.serverUrl).toBe("http://concurrent.test:9999")
+  })
+
+  it.each([
+    { serverUrl: "https://server-b.test" },
+    { apiKey: "replacement-key" },
+    { orgId: 2 },
+    { authSource: "cookie-session" as const }
+  ])("discards pending readiness after a settings authority replacement: %j", async (change) => {
+    let current: TldwConfig = { serverUrl: "https://server-a.test", authMode: "single-user", apiKey: "old-key", orgId: 1 }
+    mockedClient.getConfig.mockImplementation(async () => current)
+    mockedClient.updateConfig.mockImplementation(async (update) => { current = { ...current, ...update } })
+    let resolveProbe: (value: unknown) => void = () => {}
+    mockedApiSend.mockImplementationOnce(() => new Promise((resolve) => { resolveProbe = resolve }) as never)
+    const previousCheck = useConnectionStore.getState().checkOnce({ force: true })
+    await vi.waitFor(() => expect(mockedApiSend).toHaveBeenCalledTimes(1))
+    await useConnectionStore.getState().setConfigPartial(change)
+    const connectedAfterChange = useConnectionStore.getState().state.isConnected
+    resolveProbe({ ok: true, status: 200, data: {} })
+    await previousCheck
+    expect(connectedAfterChange).toBe(false)
+    expect(useConnectionStore.getState().state).toMatchObject({ phase: ConnectionPhase.UNCONFIGURED, isConnected: false })
+    expect(mockedClient.ragHealth).not.toHaveBeenCalled()
+  })
+
+  it("setServerUrl requires the replacement server's own successful probe", async () => {
+    let current: TldwConfig = { serverUrl: "https://server-a.test", authMode: "single-user", apiKey: "old-key" }
+    mockedClient.getConfig.mockImplementation(async () => current)
+    mockedClient.updateConfig.mockImplementation(async (update) => { current = { ...current, ...update } })
+    const probes: Array<(value: unknown) => void> = []
+    mockedApiSend.mockImplementation(() => new Promise((resolve) => { probes.push(resolve) }) as never)
+    const oldCheck = useConnectionStore.getState().checkOnce({ force: true })
+    await vi.waitFor(() => expect(probes).toHaveLength(1))
+    const changed = useConnectionStore.getState().setServerUrl("https://server-b.test")
+    try {
+      await vi.waitFor(() => expect(probes).toHaveLength(2))
+    } catch (error) {
+      probes[0]({ ok: true, status: 200, data: {} })
+      await oldCheck
+      throw error
+    }
+    probes[0]({ ok: true, status: 200, data: {} })
+    await oldCheck
+    expect(useConnectionStore.getState().state).toMatchObject({ serverUrl: "https://server-b.test", isConnected: false, isChecking: true })
+    probes[1]({ ok: true, status: 200, data: {} })
+    await changed
+    expect(useConnectionStore.getState().state).toMatchObject({ serverUrl: "https://server-b.test", isConnected: true })
+  })
+
+  it("invalidates a same-tab authority event synchronously but ignores benign updates", () => {
+    window.dispatchEvent(new CustomEvent("tldw:config-updated", { detail: { authorityChanged: false } }))
+    expect(useConnectionStore.getState().state.isConnected).toBe(true)
+    window.dispatchEvent(new CustomEvent("tldw:config-updated", { detail: { authorityChanged: true } }))
+    expect(useConnectionStore.getState().state.isConnected).toBe(false)
+  })
+
+  it("continues verifying hosted cookie authentication without browser bearer tokens", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "hosted"
+    mockedClient.getConfig.mockResolvedValue({ serverUrl: "https://server.test", authMode: "multi-user" })
+    mockedApiSend.mockResolvedValue({ ok: true, status: 200, data: {} })
+    await useConnectionStore.getState().checkOnce({ force: true })
+    expect(useConnectionStore.getState().state.isConnected).toBe(true)
+    expect(mockedApiSend).toHaveBeenCalled()
+  })
+
+  it.each(["same-tab", "other-tab"])("discards a delayed expired-session check after a %s login", async (source) => {
+    let finishRead: (config: TldwConfig) => void = () => {}
+    mockedClient.getConfig.mockImplementationOnce(() => new Promise(resolve => { finishRead = resolve }))
+    window.dispatchEvent(new StorageEvent("storage", { key: "tldwInvalidRefreshSession:old-session", newValue: "true" }))
+    await vi.waitFor(() => expect(mockedClient.getConfig).toHaveBeenCalled())
+    const current = { serverUrl: "https://server.test", authMode: "multi-user", accessToken: "new-access", refreshToken: "new-refresh" }
+    mockedClient.getConfig.mockResolvedValue(current as TldwConfig)
+    if (source === "same-tab") {
+      // Same-principal login still supersedes the old credential check.
+      window.dispatchEvent(new CustomEvent("tldw:config-updated", { detail: { authorityChanged: false } }))
+    } else {
+      window.dispatchEvent(new StorageEvent("storage", { key: "tldwConfig", newValue: JSON.stringify(current) }))
+    }
+    setConnectionState({ isConnected: true, phase: ConnectionPhase.CONNECTED })
+    finishRead({ serverUrl: "https://server.test", authMode: "multi-user" })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(useConnectionStore.getState().state.isConnected).toBe(true)
+  })
+
+  it.each(["storage", "same-tab", "browser-storage"])("rechecks an expiry marker from %s against current effective credentials", async (source) => {
+    mockedClient.getConfig.mockResolvedValue({ serverUrl: "https://server.test", authMode: "multi-user" })
+    if (source === "storage") {
+      window.dispatchEvent(new StorageEvent("storage", { key: "tldwInvalidRefreshSession:expired", newValue: "true" }))
+    } else if (source === "browser-storage") {
+      await browser.storage.local.set({ "tldwInvalidRefreshSession:expired-browser-session": true })
+    } else {
+      window.dispatchEvent(new CustomEvent("tldw:config-updated", { detail: { refreshSessionInvalidated: true } }))
+    }
+    await vi.waitFor(() => expect(useConnectionStore.getState().state.isConnected).toBe(false))
+  })
+
+  it("discards pending readiness when another tab removes configured credentials", async () => {
+    const current = { serverUrl: "https://server-a.test", authMode: "single-user" as const, apiKey: "old-key" }
+    mockedClient.getConfig.mockResolvedValue(current)
+    let resolveProbe: (value: unknown) => void = () => {}
+    mockedApiSend.mockImplementationOnce(() => new Promise((resolve) => { resolveProbe = resolve }) as never)
+    const oldCheck = useConnectionStore.getState().checkOnce({ force: true })
+    await vi.waitFor(() => expect(mockedApiSend).toHaveBeenCalledTimes(1))
+    const cleared = { ...current, apiKey: undefined }
+    mockedClient.getConfig.mockResolvedValue(cleared)
+    window.dispatchEvent(new StorageEvent("storage", { key: "tldwConfig", oldValue: JSON.stringify(current), newValue: JSON.stringify(cleared) }))
+    const connectedAfterRemoval = useConnectionStore.getState().state.isConnected
+    resolveProbe({ ok: true, status: 200, data: {} })
+    await oldCheck
+    expect(connectedAfterRemoval).toBe(false)
+    await useConnectionStore.getState().checkOnce()
+    expect(useConnectionStore.getState().state.isConnected).toBe(false)
+    expect(mockedApiSend).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not invalidate readiness for cross-tab rotation of the same known principal", () => {
+    const current = { serverUrl: "https://server.test", authMode: "multi-user", accessToken: "e30.eyJzdWIiOiJhbGljZSJ9.sig" }
+    window.dispatchEvent(new StorageEvent("storage", { key: "tldwConfig", oldValue: JSON.stringify(current), newValue: JSON.stringify({ ...current, accessToken: "e30.eyJzdWIiOiJhbGljZSIsImlhdCI6Mn0.sig" }) }))
+    expect(useConnectionStore.getState().state.isConnected).toBe(true)
+  })
+
+  it("rechecks normalized quickstart config after its own authority update without looping", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    let current: TldwConfig = { serverUrl: "https://old-server.test", authMode: "single-user", apiKey: "configured-key" }
+    mockedClient.getConfig.mockImplementation(async () => current)
+    mockedClient.updateConfig.mockImplementation(async (update) => {
+      current = { ...current, ...update }
+      window.dispatchEvent(new CustomEvent("tldw:config-updated", { detail: { authorityChanged: true } }))
+    })
+    mockedApiSend.mockResolvedValue({ ok: true, status: 200, data: {} })
+    await useConnectionStore.getState().checkOnce({ force: true })
+    expect(useConnectionStore.getState().state).toMatchObject({ serverUrl: window.location.origin, isConnected: true })
+    expect(mockedClient.updateConfig).toHaveBeenCalledTimes(1)
+    expect(mockedApiSend).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not normalize foreign cookie metadata into local authority during revalidation", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    let current: TldwConfig = { serverUrl: "https://foreign.test", authMode: "single-user", authSource: "cookie-session" }
+    mockedClient.getConfig.mockImplementation(async () => current)
+    mockedClient.updateConfig.mockImplementation(async (update) => {
+      current = { ...current, ...update }
+      window.dispatchEvent(new CustomEvent("tldw:config-updated", { detail: { authorityChanged: true } }))
+    })
+    mockedApiSend.mockResolvedValue({ ok: true, status: 200, data: {} })
+    await useConnectionStore.getState().checkOnce({ force: true })
+    expect(useConnectionStore.getState().state.isConnected).toBe(false)
+    expect(mockedClient.updateConfig).not.toHaveBeenCalled()
+    expect(mockedApiSend).not.toHaveBeenCalled()
+  })
+
+  it.each(["tldwConfig", "tldwCookieSessionConfig"])("invalidates removed %s transport metadata in another tab", (key) => {
+    window.dispatchEvent(new StorageEvent("storage", {
+      key, oldValue: JSON.stringify({ serverUrl: window.location.origin, authMode: "single-user", authSource: "cookie-session" }), newValue: null
+    }))
+    expect(useConnectionStore.getState().state.isConnected).toBe(false)
   })
 
   it("ignores a concurrent checkOnce while one is already in flight (H7 guard)", async () => {
@@ -981,6 +1202,79 @@ describe("connection store stability", () => {
     await Promise.all([first, second])
 
     expect(mockedApiSend).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(["manual-key", "cookie-session"])("invalidates logout authority until %s reconnect verifies", async (kind) => {
+    if (kind === "cookie-session") {
+      process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+      mockedClient.getConfig.mockResolvedValue({
+        serverUrl: window.location.origin,
+        authMode: "single-user",
+        authSource: "cookie-session"
+      })
+      vi.mocked(isCookieSessionConfigInvalidated).mockReturnValue(true)
+    } else {
+      mockedClient.getConfig.mockResolvedValue({ serverUrl: "http://127.0.0.1:8000", authMode: "single-user" })
+    }
+    window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed", { detail: { kind: "logout" } }))
+    expect(useConnectionStore.getState().state).toMatchObject({
+      phase: ConnectionPhase.UNCONFIGURED, configStep: "auth", isConnected: false,
+      isChecking: false, knowledgeStatus: "unknown", lastCheckedAt: null
+    })
+    await useConnectionStore.getState().checkOnce()
+    expect(mockedApiSend).not.toHaveBeenCalled()
+
+    if (kind === "cookie-session") {
+      vi.mocked(isCookieSessionConfigInvalidated).mockReturnValue(false)
+    } else {
+      mockedClient.getConfig.mockResolvedValue({ serverUrl: "http://127.0.0.1:8000", authMode: "single-user", apiKey: "reentered-key" })
+    }
+    let resolveProbe: (value: unknown) => void = () => {}
+    mockedApiSend.mockImplementation(() => new Promise((resolve) => { resolveProbe = resolve }) as never)
+    const reconnect = useConnectionStore.getState().checkOnce()
+    await vi.waitFor(() => expect(mockedApiSend).toHaveBeenCalledTimes(1))
+    expect(useConnectionStore.getState().state.isConnected).toBe(false)
+    resolveProbe({ ok: true, status: 200, data: {} })
+    await reconnect
+    expect(useConnectionStore.getState().state.isConnected).toBe(true)
+    expect(mockedApiSend).toHaveBeenCalledWith(expect.objectContaining({
+      path: kind === "cookie-session" ? "/api/v1/auth/sessions" : "/api/v1/health/live",
+      noAuth: false
+    }), expect.anything())
+  })
+
+  it("discards a pre-logout health result without releasing the reconnect check guard", async () => {
+    const resolvers: Array<(value: unknown) => void> = []
+    mockedApiSend.mockImplementation(() => new Promise((resolve) => { resolvers.push(resolve) }) as never)
+    const oldCheck = useConnectionStore.getState().checkOnce({ force: true })
+    await vi.waitFor(() => expect(resolvers).toHaveLength(1))
+    window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed", { detail: { kind: "logout" } }))
+    const reconnect = useConnectionStore.getState().checkOnce({ force: true })
+    await vi.waitFor(() => expect(resolvers).toHaveLength(2))
+
+    resolvers[0]({ ok: true, status: 200, data: {} })
+    await oldCheck
+    expect(useConnectionStore.getState().state).toMatchObject({ isConnected: false, isChecking: true })
+    await useConnectionStore.getState().checkOnce({ force: true })
+    expect(resolvers).toHaveLength(2)
+    expect(mockedClient.ragHealth).not.toHaveBeenCalled()
+
+    resolvers[1]({ ok: true, status: 200, data: {} })
+    await reconnect
+    expect(useConnectionStore.getState().state.isConnected).toBe(true)
+  })
+
+  it("discards a pre-logout knowledge result without restoring private readiness", async () => {
+    setConnectionState({ knowledgeStatus: "unknown", knowledgeLastCheckedAt: null })
+    mockedApiSend.mockResolvedValue({ ok: true, status: 200, data: {} })
+    let resolveRag: (value: unknown) => void = () => {}
+    mockedClient.ragHealth.mockImplementationOnce(() => new Promise((resolve) => { resolveRag = resolve }) as never)
+    const oldCheck = useConnectionStore.getState().checkOnce({ force: true })
+    await vi.waitFor(() => expect(mockedClient.ragHealth).toHaveBeenCalledTimes(1))
+    window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed", { detail: { kind: "logout" } }))
+    resolveRag({ status: "healthy" })
+    await oldCheck
+    expect(useConnectionStore.getState().state).toMatchObject({ isConnected: false, knowledgeStatus: "unknown" })
   })
 
   it("releases the in-flight guard when a step before the health check throws (H7 deadlock)", async () => {

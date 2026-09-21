@@ -5,7 +5,6 @@ This module provides a unified interface for all metric operations,
 supporting both OpenTelemetry and fallback implementations.
 """
 
-import hashlib
 import hmac
 import os
 import re
@@ -21,8 +20,8 @@ from typing import Any, Callable, Optional
 
 from loguru import logger
 
-from .telemetry import OTEL_AVAILABLE, get_telemetry_manager
 from .stt_metrics import iter_stt_metric_definitions
+from .telemetry import OTEL_AVAILABLE, get_telemetry_manager
 
 if OTEL_AVAILABLE:
     from opentelemetry.metrics import CallbackOptions, Observation
@@ -1424,6 +1423,34 @@ class MetricsRegistry:
                 unit="s",
                 labels=["provider", "model"],
                 buckets=[0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1]
+            )
+        )
+
+        # Quiz generation: bounded profile/source labels shared by every client.
+        self.register_metric(
+            MetricDefinition(
+                name="quiz_generation_requests_total",
+                type=MetricType.COUNTER,
+                description="Quiz generation attempts entering the shared generation service",
+                labels=["profile", "source_type"],
+            )
+        )
+        self.register_metric(
+            MetricDefinition(
+                name="quiz_generation_outcomes_total",
+                type=MetricType.COUNTER,
+                description="Completed quiz generation attempts by outcome",
+                labels=["profile", "source_type", "outcome"],
+            )
+        )
+        self.register_metric(
+            MetricDefinition(
+                name="quiz_generation_duration_seconds",
+                type=MetricType.HISTOGRAM,
+                description="End-to-end quiz generation duration including failed and cancelled attempts",
+                unit="s",
+                labels=["profile", "source_type", "outcome"],
+                buckets=[0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 600],
             )
         )
 

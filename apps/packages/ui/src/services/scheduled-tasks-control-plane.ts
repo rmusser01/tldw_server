@@ -2,7 +2,7 @@
  * Scheduled tasks control-plane API client.
  */
 
-import { bgRequest } from "@/services/background-proxy"
+import { bgRequest, type BgRequestInit } from "@/services/background-proxy"
 import { toAllowedPath } from "@/services/tldw/path-utils"
 
 export type ScheduledTaskPrimitive =
@@ -467,8 +467,12 @@ const assertReminderUpdatePayload = (payload: Record<string, unknown>): void => 
   }
 }
 
-export async function listScheduledTasks(): Promise<ScheduledTaskListResponse> {
+export type ScheduledTaskReadOptions = Pick<BgRequestInit,
+  "abortSignal" | "servicePromptConfig" | "headers" | "suppressBackendUnavailableEvent" | "expectedStatuses">
+
+export async function listScheduledTasks(options?: ScheduledTaskReadOptions): Promise<ScheduledTaskListResponse> {
   return await bgRequest<ScheduledTaskListResponse>({
+    ...options,
     path: "/api/v1/scheduled-tasks",
     method: "GET"
   })
@@ -712,9 +716,11 @@ export async function getScheduledTaskRun(
 }
 
 export async function listScheduledTaskResults(
-  params?: ScheduledTaskResultListParams
+  params?: ScheduledTaskResultListParams,
+  options?: ScheduledTaskReadOptions
 ): Promise<ScheduledTaskResultListResponse> {
   return await bgRequest<ScheduledTaskResultListResponse>({
+    ...options,
     path: toAllowedPath(`/api/v1/scheduled-tasks/results${buildQuery(params)}`),
     method: "GET"
   })

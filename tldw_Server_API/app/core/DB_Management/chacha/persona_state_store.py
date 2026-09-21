@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Iterable
+from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
@@ -109,7 +110,7 @@ class PersonaStateStore:
             )  # noqa: TRY003
         return status
 
-    def _ensure_persona_live_voice_session_summaries_table(self) -> None:
+    def _ensure_persona_live_voice_session_summaries_table(self, *, connection: Any | None = None) -> None:
         if self.backend_type == BackendType.SQLITE:
             self.execute_query(
                 """
@@ -178,13 +179,15 @@ class PersonaStateStore:
                   thinking_recovery_count INTEGER NOT NULL DEFAULT 0,
                   UNIQUE(user_id, persona_id, session_id)
                 )
-                """
+                """,
+                connection=connection,
             )
             self.backend.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_persona_live_voice_session_summaries_persona_time
                 ON persona_live_voice_session_summaries(persona_id, started_at, updated_at)
-                """
+                """,
+                connection=connection,
             )
             return
 
@@ -1253,7 +1256,7 @@ class PersonaStateStore:
         if require_missing_session_id:
             clauses.append("(session_id IS NULL OR session_id = '')")
         if not include_archived:
-            clauses.append("archived = 0")
+            clauses.append("archived = FALSE" if self.backend_type == BackendType.POSTGRESQL else "archived = 0")
         if not include_deleted:
             clauses.append("deleted = 0")
         return " AND ".join(clauses), params
@@ -1743,7 +1746,23 @@ class PersonaStateStore:
         )
 
         try:
-            self.execute_query(query, params, commit=True)
+            if self.backend_type == BackendType.POSTGRESQL:
+                conn = self.get_connection()
+                operation_state = conn._operation_state
+                with operation_state.use() if operation_state is not None else nullcontext():
+                    raw_conn = conn._connection
+                    if raw_conn.info.transaction_status.name == "IDLE" and (
+                        getattr(self._connection_state(), "tx_depth", 0)
+                        or conn._backend._tx_depth(raw_conn)
+                    ):
+                        # An empty caller-owned transaction still owns the commit.
+                        conn.execute("BEGIN")
+                    # Psycopg rolls back only this insert's savepoint when the
+                    # caller already has a transaction, including pending writes.
+                    with raw_conn.transaction():
+                        conn.execute(query, params)
+            else:
+                self.execute_query(query, params, commit=True)
             return persona_id  # noqa: TRY300
         except sqlite3.IntegrityError as exc:
             msg = str(exc).lower()
@@ -1780,7 +1799,7 @@ class PersonaStateStore:
         params: list[Any] = [persona_id, user_id]
         if not include_deleted:
             query += " AND deleted = 0"
-        cursor = self.execute_query(query, tuple(params))
+        cursor = self.execute_query(query, tuple(params), read_only=True)
         return self._persona_profile_row_to_dict(cursor.fetchone())
 
     def list_persona_profiles(
@@ -1805,7 +1824,7 @@ class PersonaStateStore:
             "ORDER BY last_modified DESC, name ASC LIMIT ? OFFSET ?"
         )
         params.extend([max(1, int(limit)), max(0, int(offset))])
-        cursor = self.execute_query(query, tuple(params))
+        cursor = self.execute_query(query, tuple(params), read_only=True)
         return [self._persona_profile_row_to_dict(row) for row in cursor.fetchall() if row]
 
     def get_persona_profiles_by_ids(
@@ -2068,7 +2087,7 @@ class PersonaStateStore:
             bool(include_deleted_personas),
             deleted_false,
         ]
-        cursor = self.execute_query(query, tuple(params))
+        cursor = self.execute_query(query, tuple(params), read_only=True)
         buddies: dict[str, dict[str, Any] | None] = {
             persona_id: None for persona_id in normalized_persona_ids
         }
@@ -4089,7 +4108,7 @@ class PersonaStateStore:
             "ORDER BY last_modified DESC, id ASC LIMIT ? OFFSET ?"
         )
         params.extend([max(1, int(limit)), max(0, int(offset))])
-        cursor = self.execute_query(query, tuple(params))
+        cursor = self.execute_query(query, tuple(params), read_only=True)
         return [self._persona_memory_row_to_dict(row) for row in cursor.fetchall() if row]
 
     def get_persona_memory_entry_by_id(
@@ -4130,7 +4149,7 @@ class PersonaStateStore:
         query = f"SELECT COUNT(*) FROM persona_memory_entries WHERE {where_sql}"  # nosec B608
         cursor = self.execute_query(query, tuple(params))
         row = cursor.fetchone()
-        return row[0] if row else 0
+        return (row["count"] if self.backend_type == BackendType.POSTGRESQL else row[0]) if row else 0
 
     def set_persona_memory_archived(
         self,

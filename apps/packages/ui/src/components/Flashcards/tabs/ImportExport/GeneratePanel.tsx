@@ -1,4 +1,5 @@
 import React from "react"
+import { extractFlashcardsErrorStatus, mapFlashcardsUiError } from "../../utils/error-taxonomy"
 import { Link } from "react-router-dom"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Button, Card, Form, Input, Select, Space, Switch, Tooltip, Typography } from "antd"
@@ -7,7 +8,7 @@ import { useTranslation } from "react-i18next"
 import { Alert, type AlertVariant } from "@/components/ui/primitives"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
 import { getLlmProviders } from "@/services/prompt-studio"
-import type { DeckReviewPromptSide, FlashcardPlanItem } from "@/services/flashcards"
+import type { Deck, DeckReviewPromptSide, FlashcardPlanItem } from "@/services/flashcards"
 
 import { NewDeckConfigurationFields } from "../../components/NewDeckConfigurationFields"
 import {
@@ -67,6 +68,7 @@ const ADVANCED_MIX_ERROR_ID = "flashcards-generate-plan-error"
  * Generate panel for LLM-assisted card generation from free text.
  */
 export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporterProps> = ({
+  generationScope,
   initialIntent,
   sourceReviewIntent,
   onTransferAction
@@ -74,11 +76,40 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
   const { t } = useTranslation(["option", "common"])
   const message = useAntdMessage()
   const qc = useQueryClient()
-  const decksQuery = useDecksQuery()
+  const decksQuery = useDecksQuery(generationScope === undefined ? undefined : { scope: generationScope })
+  const { isError: deckListFailed, refetch: refetchDecks } = decksQuery
   const generateMutation = useGenerateFlashcardsMutation()
   const createMutation = useCreateFlashcardMutation()
   const createDeckMutation = useCreateDeckMutation()
-  const decks = decksQuery.data || []
+  const [createdDeck, setCreatedDeck] = React.useState<{ scope: typeof generationScope; deck: Deck; listUpdatedAt: number } | null>(null)
+  const decks = React.useMemo(() => {
+    const listed = decksQuery.data || []
+    const created = createdDeck && createdDeck.scope === generationScope && createdDeck.listUpdatedAt === decksQuery.dataUpdatedAt ? createdDeck.deck : null
+    return created && !listed.some(deck => deck.id === created.id) ? [...listed, created] : listed
+  }, [decksQuery.data, decksQuery.dataUpdatedAt, createdDeck, generationScope])
+  const deckListReady = generationScope === undefined
+    ? !decksQuery.isLoading && !decksQuery.isError
+    : decksQuery.isSuccess
+  // The create acknowledgment bridges only the current list revision. A later
+  // successful catalogue is authoritative, including an empty one.
+  const latestListUpdatedAt = React.useRef(decksQuery.dataUpdatedAt)
+  latestListUpdatedAt.current = decksQuery.dataUpdatedAt
+  const mounted = React.useRef(false)
+  const currentScope = React.useRef(generationScope)
+  currentScope.current = generationScope
+  React.useEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
+  const assertCurrentScope = React.useCallback(() => {
+    if (!mounted.current || currentScope.current !== generationScope || generationScope === null || generationScope?.scopeSignal.aborted) {
+      throw new DOMException("The source account changed.", "AbortError")
+    }
+  }, [generationScope])
+  const requestOptions = React.useMemo(() => generationScope ? {
+    signal: generationScope.scopeSignal,
+    requestScope: generationScope.requestScope
+  } : undefined, [generationScope])
 
   const llmProvidersQuery = useQuery({
     queryKey: ["flashcards", "llm-providers"],
@@ -191,6 +222,7 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
   )
   const advancedPlanInvalid = advancedMixEnabled && (plannedCardTotal < 1 || plannedCardTotal > 100)
   const generationDisabled =
+    generationScope === null || Boolean(generationScope?.scopeSignal.aborted) ||
     !sourceText.trim() ||
     !hasLlmProviders ||
     advancedPlanInvalid
@@ -206,13 +238,14 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
   }, [sourceReviewIntent])
 
   React.useEffect(() => {
-    if (targetDeckId != null) return
+    if (!deckListReady || targetDeckId === NEW_DECK_OPTION_VALUE) return
+    if (typeof targetDeckId === "number" && decks.some(deck => deck.id === targetDeckId)) return
     if (decks.length > 0) {
       setTargetDeckId(decks[0].id)
       return
     }
     setTargetDeckId(NEW_DECK_OPTION_VALUE)
-  }, [decks, targetDeckId])
+  }, [deckListReady, decks, targetDeckId])
 
   const clearRetryableSaveStatus = React.useCallback(() => {
     setSaveStatus((current) => (current?.retryable ? null : current))
@@ -247,9 +280,11 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
 
   const handleGenerate = React.useCallback(async () => {
     try {
+      assertCurrentScope()
       setGenerationError(null)
       setSaveStatus(null)
       const result = await generateMutation.mutateAsync({
+        requestOptions,
         text: sourceText,
         ...(advancedMixEnabled
           ? {
@@ -268,6 +303,7 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
         provider: provider.trim() || undefined,
         model: model.trim() || undefined
       })
+      assertCurrentScope()
       const drafts = normalizeGeneratedCards(result.flashcards)
       setGeneratedCards(drafts)
       if (drafts.length === 0) {
@@ -284,7 +320,7 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
         return
       }
       const successCopy = t("option:flashcards.generateSuccess", {
-        defaultValue: "Generated {{count}} cards.",
+        defaultValue: "Generated {count, plural, one {# card} other {# cards}}.",
         count: drafts.length
       })
       message.success(successCopy)
@@ -294,12 +330,11 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
         message: successCopy
       })
     } catch (e: unknown) {
-      const baseMessage = e instanceof Error ? e.message : "Generation failed"
-      const errorCopy = t("option:flashcards.generateErrorWithHelp", {
-        defaultValue:
-          "{{message}}. Check provider/model settings, then retry with shorter text or fewer cards.",
-        message: baseMessage
-      })
+      if (!mounted.current || currentScope.current !== generationScope || generationScope?.scopeSignal.aborted) return
+      const errorCopy = mapFlashcardsUiError(e, {
+        operation: "generating cards",
+        fallback: "Generation failed. Check provider/model settings and try shorter source text."
+      }).message
       setGenerationError(errorCopy)
       onTransferAction?.({
         area: "generate",
@@ -308,6 +343,9 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
       })
     }
   }, [
+    assertCurrentScope,
+    generationScope,
+    requestOptions,
     activeCardPlan,
     advancedMixEnabled,
     cardType,
@@ -325,9 +363,21 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
   ])
 
   const resolveTargetDeckId = React.useCallback(async (): Promise<number> => {
-    if (typeof targetDeckId === "number") return targetDeckId
-    if (targetDeckId === undefined && decks.length > 0) return decks[0].id
-    if (targetDeckId === NEW_DECK_OPTION_VALUE || (targetDeckId == null && decks.length === 0)) {
+    assertCurrentScope()
+    let availableDecks = decks
+    if (!deckListReady) {
+      if (!deckListFailed) throw new Error("Wait for the current account's decks to load before saving.")
+      const refreshed = await refetchDecks({ throwOnError: true })
+      assertCurrentScope()
+      if (!refreshed.isSuccess) throw new Error("Wait for the current account's decks to load before saving.")
+      availableDecks = refreshed.data
+    }
+    if (typeof targetDeckId === "number") {
+      if (availableDecks.some(deck => deck.id === targetDeckId)) return targetDeckId
+      throw new Error("Choose a deck from the current account before saving.")
+    }
+    if (targetDeckId === undefined && availableDecks.length > 0) return availableDecks[0].id
+    if (targetDeckId === NEW_DECK_OPTION_VALUE || (targetDeckId == null && availableDecks.length === 0)) {
       const name = newDeckName.trim()
       if (!name) {
         throw new Error(
@@ -345,34 +395,48 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
         )
       }
       const createdDeck = await createDeckMutation.mutateAsync({
+        requestOptions,
         name,
         review_prompt_side: reviewPromptSide,
         scheduler_type: schedulerSettings.scheduler_type,
         scheduler_settings: schedulerSettings.scheduler_settings
+      }).catch((error: unknown) => {
+        if (extractFlashcardsErrorStatus(error) === 409) {
+          throw new Error(t("option:flashcards.generateDeckNameConflict", {
+            defaultValue: "A deck with this name already exists. Choose a different name or select the existing deck."
+          }), { cause: error })
+        }
+        throw error
       })
+      assertCurrentScope()
+      setCreatedDeck({ scope: generationScope, deck: createdDeck, listUpdatedAt: latestListUpdatedAt.current })
       setTargetDeckId(createdDeck.id)
       return createdDeck.id
     }
-    if (targetDeckId == null && decks.length > 0) return decks[0].id
+    if (targetDeckId == null && availableDecks.length > 0) return availableDecks[0].id
     throw new Error(
       t("option:flashcards.newDeckNameRequired", {
         defaultValue: "Enter a deck name."
       })
     )
-  }, [createDeckMutation, decks, generatedDeckSchedulerDraft, newDeckName, reviewPromptSide, t, targetDeckId])
+  }, [assertCurrentScope, generationScope, deckListReady, deckListFailed, refetchDecks, requestOptions, createDeckMutation, decks, generatedDeckSchedulerDraft, newDeckName, reviewPromptSide, t, targetDeckId])
 
   const handleSaveGeneratedCards = React.useCallback(async () => {
     if (generatedCards.length === 0) return
     setIsSaving(true)
     setSaveStatus(null)
     try {
+      assertCurrentScope()
       const deckId = await resolveTargetDeckId()
+      assertCurrentScope()
       let created = 0
       let failed = 0
       const successfulDraftIds = new Set<string>()
       for (const card of generatedCards) {
         try {
+          assertCurrentScope()
           await createMutation.mutateAsync({
+            requestOptions,
             deck_id: deckId,
             front: card.front,
             back: card.back,
@@ -389,9 +453,11 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
                 }
               : {})
           })
+          assertCurrentScope()
           created += 1
           successfulDraftIds.add(card.id)
         } catch {
+          assertCurrentScope()
           failed += 1
         }
       }
@@ -402,10 +468,11 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
           typeof query.queryKey[0] === "string" &&
           query.queryKey[0].startsWith("flashcards:")
       })
+      assertCurrentScope()
 
       if (created > 0 && failed === 0) {
         const successCopy = t("option:flashcards.generateSaveSuccess", {
-          defaultValue: "Saved {{count}} generated cards.",
+          defaultValue: "Saved {count, plural, one {# generated card} other {# generated cards}}.",
           count: created
         })
         message.success(successCopy)
@@ -428,7 +495,7 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
 
       if (created > 0 && failed > 0) {
         const warningCopy = t("option:flashcards.generateSavePartial", {
-          defaultValue: "Saved {{created}} cards; {{failed}} failed.",
+          defaultValue: "Saved {created, plural, one {# card} other {# cards}}; {failed} failed.",
           created,
           failed
         })
@@ -472,6 +539,7 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
         message: errorCopy
       })
     } catch (e: unknown) {
+      if (!mounted.current || currentScope.current !== generationScope || generationScope?.scopeSignal.aborted) return
       const errorCopy =
         e instanceof Error && e.message
           ? e.message
@@ -494,9 +562,12 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
         message: errorCopy
       })
     } finally {
-      setIsSaving(false)
+      if (mounted.current && currentScope.current === generationScope && !generationScope?.scopeSignal.aborted) setIsSaving(false)
     }
   }, [
+    assertCurrentScope,
+    generationScope,
+    requestOptions,
     createMutation,
     generatedCards,
     message,
@@ -511,6 +582,7 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
 
   return (
     <div className="flex flex-col gap-3">
+      {initialIntent?.truncated && <Alert variant="warning" title="Source text was limited to the first 12,000 characters. Review it before generating cards." />}
       <Typography.Text type="secondary">
         {t("option:flashcards.generateHelp", {
           defaultValue:
@@ -676,7 +748,6 @@ export const GeneratePanel: React.FC<GeneratePanelProps & TransferActionReporter
           className="!mb-2"
         >
           <Select
-            allowClear
             value={targetDeckId ?? undefined}
             onChange={(value) => setTargetDeckId((value as DeckSelectionValue) ?? null)}
             data-testid="flashcards-generate-deck"

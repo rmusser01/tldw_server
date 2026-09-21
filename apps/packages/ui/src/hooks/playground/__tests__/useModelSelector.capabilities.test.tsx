@@ -3,6 +3,7 @@ import { act, render, renderHook, screen } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useModelSelector } from "../useModelSelector"
+import { normalizeTldwModels } from "@/services/tldw/model-normalization"
 
 const chatModelSettingsState = vi.hoisted(() => ({
   apiProvider: null as string | null,
@@ -249,6 +250,92 @@ describe("useModelSelector capability rendering", () => {
     expect(setSelectedModel).toHaveBeenCalledWith("openai:gpt-4o-mini")
   })
 
+  it.each(["tldw:llama.cpp:", "llama.cpp:", "llamacpp:"])(
+    "resolves setup identity %s without changing the selected model",
+    (prefix) => {
+      chatModelSettingsState.apiProvider = "openai"
+      const setSelectedModel = vi.fn()
+      const modelId = "Gemma-4:Q4_K_M"
+      const configured = {
+        id: modelId,
+        model: `tldw:${modelId}`,
+        nickname: "Gemma local",
+        provider: "llama.cpp",
+        is_configured: true,
+        details: { capabilities: ["vision"] }
+      }
+      const { result } = renderHook(() => useModelSelector({
+        composerModels: [{ ...configured, provider: "openai", nickname: "Other provider" }, configured],
+        selectedModel: `${prefix}${modelId}`,
+        setSelectedModel,
+        navigate: vi.fn()
+      }))
+      expect(result.current.selectedModelMeta).toBe(configured)
+      expect(result.current.apiModelLabel).toBe("LLAMACPP / Gemma local")
+      expect(result.current.selectedModelKey).toBe(`llamacpp:${modelId}`)
+      expect(setSelectedModel).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each(["tldw:llama.cpp:", "llama:"])("matches actual llama catalogue metadata for %s", (prefix) => {
+    const [serverModel] = normalizeTldwModels({ models: [{
+      provider: "llama", name: "Gemma-4:Q4_K_M",
+      capabilities: { vision: true }, context_window: 8192
+    }] })
+    const model = {
+      ...serverModel,
+      model: `tldw:${serverModel.id}`,
+      nickname: "Gemma local",
+      details: { capabilities: ["vision"] }
+    }
+    const { result } = renderHook(() => useModelSelector({
+      composerModels: [model],
+      selectedModel: `${prefix}${serverModel.id}`,
+      setSelectedModel: vi.fn(), navigate: vi.fn()
+    }))
+    expect(result.current.selectedModelMeta).toBe(model)
+    expect(result.current.apiModelLabel).toBe("LLAMA / Gemma local")
+    expect(result.current.modelCapabilities).toContain("vision")
+    expect(result.current.modelContextLength).toBe(8192)
+    expect(result.current.selectedModelKey).toBe("llama:Gemma-4:Q4_K_M")
+  })
+
+  it.each(["local-llm", "local"])("matches the existing %s catalogue provider alias", (provider) => {
+    const model = { model: "Gemma:Q4", provider, nickname: "Local Gemma" }
+    const { result } = renderHook(() => useModelSelector({
+      composerModels: [model], selectedModel: "local-llm:Gemma:Q4",
+      setSelectedModel: vi.fn(), navigate: vi.fn()
+    }))
+    expect(result.current.selectedModelMeta).toBe(model)
+    expect(result.current.selectedModelKey).toBe("local:Gemma:Q4")
+  })
+
+  it("keeps the explicit setup provider while its catalogue is loading", () => {
+    const { result } = renderHook(() => useModelSelector({
+      composerModels: [],
+      modelsLoading: true,
+      selectedModel: "tldw:llama.cpp:Gemma-4:Q4_K_M",
+      setSelectedModel: vi.fn(),
+      navigate: vi.fn()
+    }))
+    expect(result.current.apiModelLabel).toBe("LLAMACPP / Gemma-4:Q4_K_M")
+    expect(result.current.selectedModelKey).toBe("llamacpp:Gemma-4:Q4_K_M")
+  })
+
+  it("does not match a qualified model to a different-case ID or another provider", () => {
+    const { result } = renderHook(() => useModelSelector({
+      composerModels: [
+        { model: "gemma-4", provider: "llama.cpp" },
+        { model: "Gemma-4", provider: "openai" }
+      ],
+      selectedModel: "tldw:llama.cpp:Gemma-4",
+      setSelectedModel: vi.fn(),
+      navigate: vi.fn()
+    }))
+    expect(result.current.selectedModelMeta).toBeNull()
+    expect(result.current.apiModelLabel).toBe("LLAMACPP / Gemma-4")
+  })
+
   it("shows a loading affordance (not the connect-server error) while models load", () => {
     const { result } = renderHook(() =>
       useModelSelector({
@@ -292,6 +379,26 @@ describe("useModelSelector capability rendering", () => {
     expect(
       screen.getByText(/No models available\. Connect your server in Settings\./i)
     ).toBeInTheDocument()
+  })
+
+  it.each(["provider", "localFirst"])("names known local providers in %s menu groups", (sortMode) => {
+    storageSeed.values.set("modelSelectSortMode", sortMode)
+    const { result } = renderHook(() => useModelSelector({
+      composerModels: [
+        { id: "shared", provider: "llama", is_configured: true },
+        { id: "shared", provider: "custom_openai_api", is_configured: true },
+        { id: "hosted", provider: "anthropic", is_configured: true }
+      ],
+      selectedModel: "custom_openai_api:shared",
+      setSelectedModel: vi.fn(), navigate: vi.fn()
+    }))
+    const groups = result.current.modelDropdownMenuItems.filter(item => item?.type === "group")
+    const local = groups.find(group => group.children.some((item: { key: string }) => item.key === "llama:shared"))
+    render(<>{local?.label}</>)
+    expect(screen.getByText("LLAMA")).toBeInTheDocument()
+    if (sortMode === "localFirst") {
+      expect(groups.indexOf(local)).toBeLessThan(groups.findIndex(group => group.key === "group-anthropic"))
+    }
   })
 
   it("promotes current and recent configured models ahead of provider groups", () => {

@@ -43,7 +43,7 @@ const upsertSessionBadge = (patch: {
     return
   }
   const current = sessionStore.session ?? sessionStore.createDraftSession()
-  sessionStore.upsertSession({
+  useQuickIngestSessionStore.getState().upsertSession({
     badge: {
       queueCount: patch.queueCount ?? current.badge.queueCount,
       hasRecentFailure:
@@ -343,17 +343,27 @@ export const useQuickIngestStore = createWithEqualityFn<QuickIngestStore>((set) 
   clearRecentlyIngestedDocs: () => set({ recentlyIngestedDocs: [] }),
 }))
 
-if (typeof window !== "undefined") {
+// Rebind action closures for every session generation. A callback retained by a
+// previous run cannot publish private metadata into a replacement session.
+const rawActions = Object.fromEntries(Object.entries(useQuickIngestStore.getState()).filter(([, value]) => typeof value === "function"))
+const bindActions = (generation: number) => Object.fromEntries(Object.entries(rawActions).map(([key, action]) => [key, (...args: unknown[]) => {
+  const current = useQuickIngestSessionStore.getState()
+  if (current.generation !== generation || !current.authorityKey) return
+  return (action as (...values: unknown[]) => unknown)(...args)
+}])) as Partial<QuickIngestStore>
+useQuickIngestStore.setState(bindActions(useQuickIngestSessionStore.getState().generation))
+useQuickIngestSessionStore.subscribe((state, previous) => {
+  if (state.generation !== previous.generation) {
+    useQuickIngestStore.setState({
+      ...bindActions(state.generation),
+      ...(state.authorityKey !== previous.authorityKey ? {
+        lastRunSummary: createInitialQuickIngestLastRunSummary(), recentlyIngestedDocs: [],
+      } : {})
+    })
+  }
   syncBadgeStateFromSession()
-  const unsubscribeQuickIngestSessionSync = useQuickIngestSessionStore.subscribe(
-    () => {
-      syncBadgeStateFromSession()
-    }
-  )
-
-  // Keep the sync subscription alive for the lifetime of the module.
-  void unsubscribeQuickIngestSessionSync
-}
+})
+syncBadgeStateFromSession()
 
 if (typeof window !== "undefined") {
   // Expose for Playwright tests and debugging only.

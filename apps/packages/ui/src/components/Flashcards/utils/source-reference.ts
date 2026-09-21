@@ -1,4 +1,5 @@
 import type { Flashcard } from "@/services/flashcards"
+import { buildChatThreadPath } from "@/routes/route-paths"
 
 type SourceType = "media" | "message" | "note"
 
@@ -23,7 +24,7 @@ export const getFlashcardSourceMeta = (
 
   if (type === "media") {
     const sourceId = asCleanString(card.source_ref_id)
-    if (!sourceId) {
+    if (!sourceId || !/^[1-9][0-9]*$/.test(sourceId)) {
       return {
         type,
         label: "Media source unavailable",
@@ -34,7 +35,7 @@ export const getFlashcardSourceMeta = (
     return {
       type,
       label: `Media #${sourceId}`,
-      href: `/media-multi?source_ref_id=${encodeURIComponent(sourceId)}`,
+      href: `/media?id=${encodeURIComponent(sourceId)}`,
       unavailable: false
     }
   }
@@ -59,7 +60,7 @@ export const getFlashcardSourceMeta = (
 
   const sourceId = asCleanString(card.source_ref_id) ?? asCleanString(card.message_id)
   const conversationId = asCleanString(card.conversation_id)
-  if (!sourceId) {
+  if (!sourceId || !conversationId) {
     return {
       type: "message",
       label: "Message source unavailable",
@@ -67,15 +68,10 @@ export const getFlashcardSourceMeta = (
       unavailable: true
     }
   }
-  const params = new URLSearchParams()
-  params.set("source_ref_id", sourceId)
-  if (conversationId) {
-    params.set("conversation_id", conversationId)
-  }
   return {
     type: "message",
-    label: `Message #${sourceId}`,
-    href: `/chat?${params.toString()}`,
+    label: `Conversation for message #${sourceId}`,
+    href: buildChatThreadPath({ serverChatId: conversationId }),
     unavailable: false
   }
 }

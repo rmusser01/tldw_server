@@ -265,7 +265,8 @@ def test_flashcard_snapshot_audit_cases_classify_grounding_from_rollups(
     topics = payload["topics"][:3]
     grounded_types = {topic["type"] for topic in topics if isinstance(topic, dict)}
     expected_source_bundle = case.get("source_bundle_json") or []
-    correct_count = sum(1 for review_spec in (case.get("reviews") or []) if int(review_spec["rating"]) >= 3)
+    # Every fresh-card review in these fixtures is non-Again and not a lapse.
+    correct_count = case["expected_correct_count"]
 
     assert payload["summary"]["correct_count"] == correct_count  # nosec B101
     assert payload["summary"]["total_count"] == review_count  # nosec B101

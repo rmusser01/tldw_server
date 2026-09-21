@@ -980,6 +980,8 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_note_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_order_by_validation.py
               tldw_Server_API/tests/ChaChaNotesDB/test_persona_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_osce_attempts.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_osce_stations.py
               tldw_Server_API/tests/ChaChaNotesDB/test_quiz_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_quizzes_basic.py
               tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans*.py
@@ -1355,6 +1357,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_utils_time_conversion.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_video_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_visual_ingestion.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_whisper_model_path_resolution.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_xml_ingestion.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_yt_dlp_support.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_youtube_audio_downloads.py
@@ -1380,6 +1383,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_export_includes_tools_and_metadata.py
               tldw_Server_API/tests/Character_Chat/test_legacy_complete_deprecation.py
               tldw_Server_API/tests/Character_Chat/test_messages_tool_calls_exposure.py
+              tldw_Server_API/tests/Character_Chat/test_message_listing_raw_content.py
               tldw_Server_API/tests/Character_Chat/test_persona_dialogue_tree_character_eval.py
           - name: chat-character-legacy-files
             paths: >-
@@ -1762,6 +1766,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_startup_*.py
+              tldw_Server_API/tests/Services/test_study_pack_startup_default.py
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
           - name: platform-services-shutdown-lifespan
             paths: >-
@@ -1801,6 +1806,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_main_claims_rebuild_startup.py
               tldw_Server_API/tests/Services/test_main_lifecycle_contract.py
+              tldw_Server_API/tests/Services/test_main_lifespan_cancellation.py
               tldw_Server_API/tests/Services/test_main_readiness_shutdown.py
               tldw_Server_API/tests/Services/test_main_router_contract.py
               tldw_Server_API/tests/Services/test_openapi_contracts.py
@@ -2478,6 +2484,8 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_note_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_order_by_validation.py
               tldw_Server_API/tests/ChaChaNotesDB/test_persona_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_osce_attempts.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_osce_stations.py
               tldw_Server_API/tests/ChaChaNotesDB/test_quiz_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_quizzes_basic.py
               tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans*.py
@@ -2853,6 +2861,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_utils_time_conversion.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_video_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_visual_ingestion.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_whisper_model_path_resolution.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_xml_ingestion.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_yt_dlp_support.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_youtube_audio_downloads.py
@@ -2878,6 +2887,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_export_includes_tools_and_metadata.py
               tldw_Server_API/tests/Character_Chat/test_legacy_complete_deprecation.py
               tldw_Server_API/tests/Character_Chat/test_messages_tool_calls_exposure.py
+              tldw_Server_API/tests/Character_Chat/test_message_listing_raw_content.py
               tldw_Server_API/tests/Character_Chat/test_persona_dialogue_tree_character_eval.py
           - name: chat-character-legacy-files
             paths: >-
@@ -2909,6 +2919,7 @@ jobs:
               tldw_Server_API/tests/Visual_Identities
           - name: chat-character-unit-core
             paths: >-
+              tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_behavior_snapshot.py
               tldw_Server_API/tests/Character_Chat_NEW/test_utils.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_cards_fts_bootstrap.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_chat_default_provider.py
@@ -3260,6 +3271,7 @@ jobs:
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_startup_*.py
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
+              tldw_Server_API/tests/Services/test_study_pack_startup_default.py
           - name: platform-services-shutdown-lifespan
             paths: >-
               tldw_Server_API/tests/Services/test_shutdown_*.py
@@ -3298,6 +3310,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_main_claims_rebuild_startup.py
               tldw_Server_API/tests/Services/test_main_lifecycle_contract.py
+              tldw_Server_API/tests/Services/test_main_lifespan_cancellation.py
               tldw_Server_API/tests/Services/test_main_readiness_shutdown.py
               tldw_Server_API/tests/Services/test_main_router_contract.py
               tldw_Server_API/tests/Services/test_openapi_contracts.py
@@ -3846,6 +3859,8 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_note_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_order_by_validation.py
               tldw_Server_API/tests/ChaChaNotesDB/test_persona_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_osce_attempts.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_osce_stations.py
               tldw_Server_API/tests/ChaChaNotesDB/test_quiz_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_quizzes_basic.py
               tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans*.py
@@ -4221,6 +4236,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_utils_time_conversion.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_video_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_visual_ingestion.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_whisper_model_path_resolution.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_xml_ingestion.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_yt_dlp_support.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_youtube_audio_downloads.py
@@ -4246,6 +4262,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_export_includes_tools_and_metadata.py
               tldw_Server_API/tests/Character_Chat/test_legacy_complete_deprecation.py
               tldw_Server_API/tests/Character_Chat/test_messages_tool_calls_exposure.py
+              tldw_Server_API/tests/Character_Chat/test_message_listing_raw_content.py
               tldw_Server_API/tests/Character_Chat/test_persona_dialogue_tree_character_eval.py
           - name: chat-character-legacy-files
             paths: >-
@@ -4277,6 +4294,7 @@ jobs:
               tldw_Server_API/tests/Visual_Identities
           - name: chat-character-unit-core
             paths: >-
+              tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_behavior_snapshot.py
               tldw_Server_API/tests/Character_Chat_NEW/test_utils.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_cards_fts_bootstrap.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_chat_default_provider.py
@@ -4628,6 +4646,7 @@ jobs:
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_startup_*.py
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
+              tldw_Server_API/tests/Services/test_study_pack_startup_default.py
           - name: platform-services-shutdown-lifespan
             paths: >-
               tldw_Server_API/tests/Services/test_shutdown_*.py
@@ -4666,6 +4685,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_main_claims_rebuild_startup.py
               tldw_Server_API/tests/Services/test_main_lifecycle_contract.py
+              tldw_Server_API/tests/Services/test_main_lifespan_cancellation.py
               tldw_Server_API/tests/Services/test_main_readiness_shutdown.py
               tldw_Server_API/tests/Services/test_main_router_contract.py
               tldw_Server_API/tests/Services/test_openapi_contracts.py
@@ -5137,6 +5157,8 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_note_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_order_by_validation.py
               tldw_Server_API/tests/ChaChaNotesDB/test_persona_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_osce_attempts.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_osce_stations.py
               tldw_Server_API/tests/ChaChaNotesDB/test_quiz_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_quizzes_basic.py
               tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans*.py
@@ -5512,6 +5534,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_utils_time_conversion.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_video_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_visual_ingestion.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_whisper_model_path_resolution.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_xml_ingestion.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_yt_dlp_support.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_youtube_audio_downloads.py
@@ -5537,6 +5560,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_export_includes_tools_and_metadata.py
               tldw_Server_API/tests/Character_Chat/test_legacy_complete_deprecation.py
               tldw_Server_API/tests/Character_Chat/test_messages_tool_calls_exposure.py
+              tldw_Server_API/tests/Character_Chat/test_message_listing_raw_content.py
               tldw_Server_API/tests/Character_Chat/test_persona_dialogue_tree_character_eval.py
           - name: chat-character-legacy-files
             paths: >-
@@ -5568,6 +5592,7 @@ jobs:
               tldw_Server_API/tests/Visual_Identities
           - name: chat-character-unit-core
             paths: >-
+              tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_behavior_snapshot.py
               tldw_Server_API/tests/Character_Chat_NEW/test_utils.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_cards_fts_bootstrap.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_chat_default_provider.py
@@ -5919,6 +5944,7 @@ jobs:
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_startup_*.py
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
+              tldw_Server_API/tests/Services/test_study_pack_startup_default.py
           - name: platform-services-shutdown-lifespan
             paths: >-
               tldw_Server_API/tests/Services/test_shutdown_*.py
@@ -5957,6 +5983,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_main_claims_rebuild_startup.py
               tldw_Server_API/tests/Services/test_main_lifecycle_contract.py
+              tldw_Server_API/tests/Services/test_main_lifespan_cancellation.py
               tldw_Server_API/tests/Services/test_main_readiness_shutdown.py
               tldw_Server_API/tests/Services/test_main_router_contract.py
               tldw_Server_API/tests/Services/test_openapi_contracts.py
@@ -6434,6 +6461,8 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_note_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_order_by_validation.py
               tldw_Server_API/tests/ChaChaNotesDB/test_persona_*.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_osce_attempts.py
+              tldw_Server_API/tests/ChaChaNotesDB/test_osce_stations.py
               tldw_Server_API/tests/ChaChaNotesDB/test_quiz_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_quizzes_basic.py
               tldw_Server_API/tests/ChaChaNotesDB/test_source_review_plans*.py
@@ -6809,6 +6838,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_utils_time_conversion.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_video_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_visual_ingestion.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_whisper_model_path_resolution.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_xml_ingestion.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_yt_dlp_support.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_youtube_audio_downloads.py
@@ -6834,6 +6864,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_export_includes_tools_and_metadata.py
               tldw_Server_API/tests/Character_Chat/test_legacy_complete_deprecation.py
               tldw_Server_API/tests/Character_Chat/test_messages_tool_calls_exposure.py
+              tldw_Server_API/tests/Character_Chat/test_message_listing_raw_content.py
               tldw_Server_API/tests/Character_Chat/test_persona_dialogue_tree_character_eval.py
           - name: chat-character-legacy-files
             paths: >-
@@ -6865,6 +6896,7 @@ jobs:
               tldw_Server_API/tests/Visual_Identities
           - name: chat-character-unit-core
             paths: >-
+              tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_behavior_snapshot.py
               tldw_Server_API/tests/Character_Chat_NEW/test_utils.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_cards_fts_bootstrap.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_chat_default_provider.py
@@ -7216,6 +7248,7 @@ jobs:
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_startup_*.py
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
+              tldw_Server_API/tests/Services/test_study_pack_startup_default.py
           - name: platform-services-shutdown-lifespan
             paths: >-
               tldw_Server_API/tests/Services/test_shutdown_*.py
@@ -7254,6 +7287,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_main_claims_rebuild_startup.py
               tldw_Server_API/tests/Services/test_main_lifecycle_contract.py
+              tldw_Server_API/tests/Services/test_main_lifespan_cancellation.py
               tldw_Server_API/tests/Services/test_main_readiness_shutdown.py
               tldw_Server_API/tests/Services/test_main_router_contract.py
               tldw_Server_API/tests/Services/test_openapi_contracts.py

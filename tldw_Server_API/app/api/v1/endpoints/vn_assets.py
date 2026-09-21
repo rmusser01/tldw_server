@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import inspect
 import hashlib
+import inspect
 import json
 import os
 import uuid
@@ -22,6 +22,7 @@ from tldw_Server_API.app.api.v1.schemas.vn_asset_schemas import (
     VNAssetBulkReviewRequest,
     VNAssetCleanupRequest,
     VNAssetCleanupResponse,
+    VNAssetGenerationPreflightResponse,
     VNAssetGenerationRequest,
     VNAssetGenerationStatusResponse,
     VNAssetItemResponse,
@@ -49,19 +50,20 @@ from tldw_Server_API.app.api.v1.schemas.vn_asset_schemas import (
 from tldw_Server_API.app.core.AuthNZ.repos.generated_files_repo import AuthnzGeneratedFilesRepo
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-from tldw_Server_API.app.core.Utils.path_utils import safe_join
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Utils.path_utils import safe_join
+from tldw_Server_API.app.core.VN_Assets.cleanup_blockers import VNAssetCleanupBlockerProvider
+from tldw_Server_API.app.core.VN_Assets.constants import DEFAULT_VN_ASSET_UPLOAD_MAX_BYTES
 from tldw_Server_API.app.core.VN_Assets.jobs import (
     create_pack_export_job,
     create_pack_import_commit_job,
     create_pack_import_preview_job,
 )
-from tldw_Server_API.app.core.VN_Assets.constants import DEFAULT_VN_ASSET_UPLOAD_MAX_BYTES
 from tldw_Server_API.app.core.VN_Assets.matrix import expand_starter_matrix
 from tldw_Server_API.app.core.VN_Assets.portability.archive import DEFAULT_MAX_ARCHIVE_SIZE_BYTES
 from tldw_Server_API.app.core.VN_Assets.portability.constants import VNPACK_EXTENSION
+from tldw_Server_API.app.core.VN_Assets.preflight import generation_preflight
 from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
-from tldw_Server_API.app.core.VN_Assets.cleanup_blockers import VNAssetCleanupBlockerProvider
 from tldw_Server_API.app.core.VN_Assets.storage import (
     VN_ASSET_CONTENT_NOT_FOUND,
     generated_file_matches_vn_asset,
@@ -1788,6 +1790,24 @@ async def get_manifest(
 ) -> VNAssetManifestResponse:
     try:
         return service.build_manifest(pack_id)
+    except ValueError as exc:
+        raise _handle_value_error(exc) from exc
+
+
+@router.get(
+    "/packs/{pack_id}/generation/preflight",
+    response_model=VNAssetGenerationPreflightResponse,
+    dependencies=[Depends(get_request_user), Depends(rbac_rate_limit("vn_assets.preflight", per_user=True))],
+)
+def get_generation_preflight(
+    pack_id: int,
+    service: VNAssetPackService = Depends(_service),
+) -> VNAssetGenerationPreflightResponse:
+    """Return owner-scoped configuration diagnostics without starting generation."""
+    try:
+        pack = service.get_pack(pack_id)
+        slots = service.list_slots(pack_id)
+        return generation_preflight(pack, slots)
     except ValueError as exc:
         raise _handle_value_error(exc) from exc
 

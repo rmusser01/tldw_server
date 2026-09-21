@@ -26,6 +26,18 @@ const translate = (
   return typeof name === "string" ? value.replace("{{name}}", name) : value
 }
 
+vi.mock("@/services/service-prompts", () => ({
+  loadServicePromptSnapshot: async () => {
+    await mocks.initialize()
+    return {
+      scopeSignal: new AbortController().signal,
+      scopeInvalidatedSignal: new AbortController().signal,
+      requestScope: { config: await mocks.getConfig(), userId: null },
+      release: vi.fn()
+    }
+  }
+}))
+
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: mocks.initialize,
@@ -109,7 +121,7 @@ describe("usePlaygroundPersistence", () => {
     mocks.listCharacters.mockRejectedValue(new Error("list failed"))
     mocks.createCharacter.mockRejectedValue(new Error("create failed"))
     mocks.createChat.mockResolvedValue({ id: "chat-1" })
-    mocks.addChatMessage.mockResolvedValue(undefined)
+    mocks.addChatMessage.mockResolvedValue({ id: "saved-message", version: 1 })
     mocks.getConfig.mockResolvedValue({
       serverUrl: "http://127.0.0.1:8000",
       authMode: "single-user",
@@ -179,22 +191,28 @@ describe("usePlaygroundPersistence", () => {
       expect(mocks.createChat).toHaveBeenCalledWith(
         expect.objectContaining({
           source: "webui-chat"
+        }),
+        expect.objectContaining({
+          requestScope: expect.anything(),
+          signal: expect.anything()
         })
       )
       expect(mocks.createChat).toHaveBeenCalledWith(
         expect.not.objectContaining({
           character_id: expect.anything()
+        }),
+        expect.objectContaining({
+          requestScope: expect.anything(),
+          signal: expect.anything()
         })
       )
     })
     expect(notificationApi.error).not.toHaveBeenCalled()
 
-    rerender(
-      {
-        ...stableDeps,
-        history: [{ role: "user", content: "Hello world" }],
-      }
-    )
+    rerender({
+      ...stableDeps,
+      history: [{ role: "user", content: "Hello world" }]
+    })
 
     await waitFor(() => {
       expect(mocks.initialize).toHaveBeenCalledTimes(1)
@@ -266,6 +284,10 @@ describe("usePlaygroundPersistence", () => {
       expect(mocks.createChat).toHaveBeenCalledWith(
         expect.objectContaining({
           source: "webui-chat"
+        }),
+        expect.objectContaining({
+          requestScope: expect.anything(),
+          signal: expect.anything()
         })
       )
     })
@@ -325,11 +347,19 @@ describe("usePlaygroundPersistence", () => {
       expect(mocks.createChat).toHaveBeenCalledWith(
         expect.objectContaining({
           source: "webui-chat"
+        }),
+        expect.objectContaining({
+          requestScope: expect.anything(),
+          signal: expect.anything()
         })
       )
       expect(mocks.createChat).toHaveBeenCalledWith(
         expect.not.objectContaining({
           character_id: "stale-character"
+        }),
+        expect.objectContaining({
+          requestScope: expect.anything(),
+          signal: expect.anything()
         })
       )
     })
@@ -388,12 +418,20 @@ describe("usePlaygroundPersistence", () => {
       expect(mocks.createChat).toHaveBeenCalledWith(
         expect.not.objectContaining({
           character_id: "overlay-char"
+        }),
+        expect.objectContaining({
+          requestScope: expect.anything(),
+          signal: expect.anything()
         })
       )
     })
     expect(mocks.createChat).toHaveBeenCalledWith(
       expect.objectContaining({
         source: "webui-chat"
+      }),
+      expect.objectContaining({
+        requestScope: expect.anything(),
+        signal: expect.anything()
       })
     )
   })
@@ -420,12 +458,20 @@ describe("usePlaygroundPersistence", () => {
       expect(mocks.createChat).toHaveBeenCalledWith(
         expect.not.objectContaining({
           character_id: "overlay-char"
+        }),
+        expect.objectContaining({
+          requestScope: expect.anything(),
+          signal: expect.anything()
         })
       )
     })
     expect(mocks.createChat).toHaveBeenCalledWith(
       expect.objectContaining({
         source: "webui-chat"
+      }),
+      expect.objectContaining({
+        requestScope: expect.anything(),
+        signal: expect.anything()
       })
     )
   })

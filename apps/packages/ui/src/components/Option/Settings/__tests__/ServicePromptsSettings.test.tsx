@@ -317,6 +317,13 @@ const catalog: ServicePromptCatalogItem[] = [
     parts: [{ key: "system", label: "System instructions", mode: "literal" as const, required_variables: [] }],
     affected_workflows: [{ id: "writing.agent", label: "Server writing workflow" }],
   })),
+  ...["predict", "fill"].map((mode) => ({
+    id: `writing.continuation.${mode}`,
+    label: `Server continuation ${mode}`,
+    description: "Server continuation instruction",
+    parts: [{ key: "system", label: "System instructions", mode: "literal" as const, required_variables: [] }],
+    affected_workflows: [{ id: "writing.continuation", label: "Server continuation workflow" }],
+  })),
   ...["explain", "mnemonic", "followup", "freeform"].map((action) => ({
     id: `study.assistant.${action}`,
     label: `Server ${action} prompt`,
@@ -409,6 +416,10 @@ const detailFor = (
     ? Object.fromEntries(definition.parts.map((part) => [part.key, "Default " + part.key]))
     : definition.id.startsWith("writing.agent.")
     ? { system: "Assist the writer." }
+    : definition.id === "writing.continuation.predict"
+    ? { system: "Continue the text from the prompt. Respond with only the continuation." }
+    : definition.id === "writing.continuation.fill"
+    ? { system: "Fill in the missing text between the prefix and suffix. Respond with only the missing text." }
     : definition.id.startsWith("study.assistant.")
     ? { guidance: "Help the learner." }
     : definition.id === "media.document.insights"
@@ -684,7 +695,7 @@ describe("ServicePromptsSettings", () => {
     renderSettings()
 
     expect(await screen.findAllByTestId("service-prompt-list-item"))
-      .toHaveLength(24)
+      .toHaveLength(26)
     expect(await screen.findByRole("heading", { name: "Text translation" }))
       .toBeInTheDocument()
     expect(screen.getByText("Server default")).toBeInTheDocument()
@@ -814,6 +825,70 @@ describe("ServicePromptsSettings", () => {
       id, "saved-writing", { signal: expect.any(AbortSignal), requestScope: scopeOne }
     ))
     await waitFor(() => expect(screen.getByLabelText("System instructions")).toHaveValue("Assist the writer."))
+  })
+
+  it.each([
+    [
+      "Predict",
+      "predict",
+      "Continue the text from the prompt. Respond with only the continuation."
+    ],
+    [
+      "Fill",
+      "fill",
+      "Fill in the missing text between the prefix and suffix. Respond with only the missing text."
+    ]
+  ])("edits the Writing continuation: %s prompt", async (label, mode, defaultSystem) => {
+    renderSettings()
+    await openPrompt(`Writing continuation: ${label}`)
+    expect(screen.getByText("Writing Playground continuation")).toBeVisible()
+    expect(screen.getByLabelText("System instructions")).toHaveValue(defaultSystem)
+    fireEvent.change(screen.getByLabelText("System instructions"), {
+      target: { value: "Continue around {literal} braces." }
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledWith(
+      `writing.continuation.${mode}`,
+      {
+        parts: { system: "Continue around {literal} braces." },
+        expected_revision: null
+      },
+      { signal: expect.any(AbortSignal), requestScope: scopeOne }
+    ))
+  })
+
+  it.each([
+    [
+      "Predict",
+      "predict",
+      "Continue the text from the prompt. Respond with only the continuation."
+    ],
+    [
+      "Fill",
+      "fill",
+      "Fill in the missing text between the prefix and suffix. Respond with only the missing text."
+    ]
+  ])("resets the Writing continuation: %s prompt", async (label, mode, defaultSystem) => {
+    const id = `writing.continuation.${mode}`
+    mocks.get.mockImplementation(async (key: string) => detailFor(
+      catalog.find((item) => item.id === key)!,
+      {
+        source: "user",
+        revision: "saved-continuation",
+        parts: { system: "Custom continuation." }
+      }
+    ))
+    renderSettings()
+    await openPrompt(`Writing continuation: ${label}`)
+    fireEvent.click(screen.getByRole("button", { name: "Reset to default" }))
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Reset" }))
+    await waitFor(() => expect(mocks.reset).toHaveBeenCalledWith(
+      id,
+      "saved-continuation",
+      { signal: expect.any(AbortSignal), requestScope: scopeOne }
+    ))
+    await waitFor(() => expect(screen.getByLabelText("System instructions"))
+      .toHaveValue(defaultSystem))
   })
 
   it("edits document insights guidance without exposing its JSON contract", async () => {

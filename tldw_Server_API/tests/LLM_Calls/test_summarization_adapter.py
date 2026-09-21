@@ -70,6 +70,17 @@ class _Registry:
         return self.adapter
 
 
+@pytest.mark.unit
+def test_analysis_uses_current_provider_model_after_setup_changes(monkeypatch):
+    adapter = _Adapter(response={"choices": [{"message": {"content": "Cedar summary"}}]})
+    monkeypatch.setattr(sgl, "get_registry", lambda: _Registry(adapter))
+    monkeypatch.setattr(sgl, "loaded_config_data", {"llama_api": {"model": "old-model"}})
+    monkeypatch.setattr(sgl, "load_and_log_configs", lambda: {"llama_api": {"model": "configured-model"}})
+    result = sgl.analyze(api_name="llama", input_data="Cedar source", custom_prompt_arg="Summarize", api_key="test-key")
+    assert result == "Cedar summary"
+    assert adapter.requests[0][0]["model"] == "configured-model"
+
+
 def _disable_server_resolution(monkeypatch):
     monkeypatch.setattr(
         sgl,
@@ -601,3 +612,124 @@ def test_explicit_missing_summary_model_does_not_use_default_model_environment(m
         )
 
     assert exc_info.value.code == "missing_model"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("typed", [False, True], ids=["legacy", "typed"])
+@pytest.mark.parametrize(
+    "response",
+    [
+        None,
+        "",
+        "   ",
+        {"metadata": SECRET},
+        {"choices": []},
+        {"choices": [{"message": {"content": None, "reasoning_content": SECRET}}]},
+        {"choices": [{"message": {"content": "", "reasoning_content": SECRET}}]},
+        {"choices": [{"message": {"content": " \n "}}]},
+        {"choices": [{"message": {"content": [{"text": SECRET}]}}]},
+        {"choices": [{"message": {"content": {"unexpected": SECRET}}}]},
+        {"choices": [{"message": None}]},
+        {"choices": [None]},
+        f"<think>{SECRET}</think>",
+        f"<think>{SECRET}",
+        {"choices": [{"message": {"content": f"<think>{SECRET}</think>"}}]},
+        {"choices": [{"message": {"content": ""}, "finish_reason": "length"}]},
+        {"choices": [{"message": {"content": "Partial answer"}, "finish_reason": "length"}]},
+        f"<think>outer<think>inner</think>{SECRET}</think>",
+        f"<think>outer<think>inner</think>{SECRET}",
+        f"Cedar opens in January.<think>{SECRET}",
+        f"Cedar opens in January.<think>{SECRET}</reason>",
+        f"{SECRET}</think>Cedar opens in January.",
+        f"<think detail='private'>{SECRET}</think>",
+        f"<think {SECRET}",
+        f"<think>{SECRET}</ think>",
+        f"<think><reason>{SECRET}</think></reason>",
+    ],
+    ids=[
+        "null",
+        "empty",
+        "blank",
+        "malformed",
+        "no-choices",
+        "null-content",
+        "reasoning-field",
+        "blank-content",
+        "blocks",
+        "object-content",
+        "null-message",
+        "null-choice",
+        "think-only",
+        "unclosed-think",
+        "wrapped-think",
+        "empty-length",
+        "partial-length",
+        "nested-think",
+        "unclosed-outer-think",
+        "answer-before-unclosed-think",
+        "mismatched-close",
+        "stray-close",
+        "malformed-open-attributes",
+        "incomplete-open",
+        "malformed-close-whitespace",
+        "crossed-tags",
+    ],
+)
+def test_analysis_rejects_unusable_provider_output_without_leaking_envelope(monkeypatch, typed, response):
+    adapter = _Adapter(response=response)
+    monkeypatch.setattr(sgl, "get_registry", lambda: _Registry(adapter))
+    logs = []
+    sink = sgl.logging.add(lambda message: logs.append(str(message)))
+    try:
+        kwargs = {
+            "api_name": "openai",
+            "input_data": "Public Cedar source",
+            "custom_prompt_arg": "Summarize",
+            "api_key": "test-key",
+            "model_override": "test-model",
+            "raise_on_error": typed,
+        }
+        if typed:
+            with pytest.raises(sgl.SummaryProviderError) as error:
+                sgl.analyze(**kwargs)
+            output = str(error.value)
+            assert error.value.code == "provider_failure"
+        else:
+            output = sgl.analyze(**kwargs)
+            assert output.startswith("Error:")
+        assert SECRET not in output
+        assert "choices" not in output
+        assert SECRET not in "".join(logs)
+    finally:
+        sgl.logging.remove(sink)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "response",
+    [
+        "Cedar opens in January.",
+        {
+            "choices": [
+                {
+                    "message": {"content": "Cedar opens in January.", "reasoning_content": SECRET},
+                    "finish_reason": "stop",
+                }
+            ],
+            "metadata": SECRET,
+        },
+        f"<think>{SECRET}</think>Cedar opens in January.",
+        f"<THINK>{SECRET}</THINK>Cedar opens in January.",
+        f"<reason>{SECRET}</reason>Cedar opens in January.<thought>{SECRET}</thought>",
+    ],
+)
+def test_analysis_retains_only_supported_final_answer(monkeypatch, response):
+    monkeypatch.setattr(sgl, "get_registry", lambda: _Registry(_Adapter(response=response)))
+    result = sgl.analyze(
+        api_name="openai",
+        input_data="Public Cedar source",
+        custom_prompt_arg="Summarize",
+        api_key="test-key",
+        model_override="test-model",
+    )
+    assert result == "Cedar opens in January."

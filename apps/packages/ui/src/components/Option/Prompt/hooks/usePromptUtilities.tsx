@@ -3,6 +3,7 @@ import { notification } from "antd"
 import type { TFunction } from "i18next"
 import { useConfirmDanger } from "@/components/Common/confirm-danger"
 import { isFireFoxPrivateMode } from "@/utils/is-private-mode"
+import { classifyPromptRecipe } from "../prompt-recipe-library"
 
 export interface UsePromptUtilitiesDeps {
   t: TFunction
@@ -45,6 +46,9 @@ export function usePromptUtilities(deps: UsePromptUtilitiesDeps) {
   }, [])
 
   const getPromptType = React.useCallback((prompt: any) => {
+    const recipe = classifyPromptRecipe(prompt)
+    if (recipe.kind === "recipe") return `recipe_${recipe.target}`
+    if (recipe.kind === "quarantined_recipe") return recipe.kind
     const { systemText, userText } = getPromptTexts(prompt)
     const hasSystem = typeof systemText === "string" && systemText.trim().length > 0
     const hasUser = typeof userText === "string" && userText.trim().length > 0

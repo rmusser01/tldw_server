@@ -260,7 +260,7 @@ describe("NotesManagerPage stage 46 list reliability", () => {
     })
 
     const latestRecentWrite = mockSetSetting.mock.calls
-      .filter(([setting]) => setting?.key === "tldw:notesRecentOpened")
+      .filter(([setting]) => setting?.key === "tldw:notesRecentOpened:test-notes-authority")
       .at(-1)
 
     expect(latestRecentWrite?.[1]).toEqual([])
@@ -352,7 +352,7 @@ describe("NotesManagerPage stage 46 list reliability", () => {
     })
 
     const latestRecentWrite = mockSetSetting.mock.calls
-      .filter(([setting]) => setting?.key === "tldw:notesRecentOpened")
+      .filter(([setting]) => setting?.key === "tldw:notesRecentOpened:test-notes-authority")
       .at(-1)
 
     expect(latestRecentWrite?.[1]).toEqual([])

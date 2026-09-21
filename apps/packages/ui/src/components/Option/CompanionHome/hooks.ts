@@ -1,4 +1,10 @@
 import React from "react"
+import { useCallerCapabilities } from "@/hooks/useCallerCapabilities"
+import { callerCapabilityErrorStatus } from "@/services/caller-capabilities"
+import { isServicePromptScopeUnresolvedError, loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts"
+import { createSafeStorage } from "@/utils/safe-storage"
+import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
 
 import {
   fetchPersonalizationProfile,
@@ -14,6 +20,7 @@ import { listNotifications } from "@/services/notifications"
 import {
   listScheduledTaskResults,
   listScheduledTasks,
+  type ScheduledTaskReadOptions,
   type ScheduledTaskResultResponse
 } from "@/services/scheduled-tasks-control-plane"
 import {
@@ -179,7 +186,23 @@ type UseScheduledTaskHomeSignalsResult = {
   loading: boolean
   partial: boolean
   error: string | null
+  sourceStates: AutomationHomeSourceStates
   refresh: () => void
+}
+
+export type AutomationHomeSourceState = "ready" | "denied" | "unsupported" | "unknown" | "error"
+export type AutomationHomeSourceStates = Record<"tasks" | "results" | "notifications", AutomationHomeSourceState>
+
+const unknownAutomationSources: AutomationHomeSourceStates = {
+  tasks: "unknown", results: "unknown", notifications: "unknown"
+}
+
+const automationFailureState = (error: unknown): AutomationHomeSourceState => {
+  const status = callerCapabilityErrorStatus(error)
+  if (status === 403) return "denied"
+  if (status === 404 || status === 405 || status === 501) return "unsupported"
+  if (status === 401 || status === 410 || status === 412) return "unknown"
+  return "error"
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -196,32 +219,111 @@ const isHomeVisibleScheduledTaskResult = (
 export const useScheduledTaskHomeSignals = ({
   enabled
 }: UseScheduledTaskHomeSignalsArgs): UseScheduledTaskHomeSignalsResult => {
-  const [items, setItems] = React.useState<ScheduledTaskAutomationHomeItem[]>([])
-  const [loading, setLoading] = React.useState(true)
-  const [partial, setPartial] = React.useState(false)
-  const [error, setError] = React.useState<string | null>(null)
+  const caller = useCallerCapabilities()
+  // The callback carries discovery's authority generation, including A→B→A.
+  const owner = caller.refreshAfterForbidden
+  const refreshCaller = caller.refresh
+  const [result, setResult] = React.useState<{
+    owner: typeof owner
+    items: ScheduledTaskAutomationHomeItem[]
+    sourceStates: AutomationHomeSourceStates
+    partial: boolean
+    error: string | null
+  } | null>(null)
+  const controllerRef = React.useRef<AbortController | null>(null)
   const [refreshToken, setRefreshToken] = React.useState(0)
 
   React.useEffect(() => {
-    if (!enabled) return
+    const invalidate = () => {
+      controllerRef.current?.abort()
+      setResult(null)
+    }
+    const configChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{ authorityChanged?: boolean; refreshSessionInvalidated?: boolean }>).detail
+      if (detail?.authorityChanged !== false || detail.refreshSessionInvalidated) invalidate()
+    }
+    const storage = createSafeStorage({ area: "local" })
+    const watchers = { tldwConfig: invalidate, tldwCookieSessionConfig: invalidate, tldwRefreshRotation: invalidate }
+    storage.watch(watchers)
+    window.addEventListener("tldw:auth-credentials-changed", invalidate)
+    window.addEventListener("tldw:auth-principal-changed", invalidate)
+    window.addEventListener("tldw:config-updated", configChanged)
+    return () => {
+      controllerRef.current?.abort()
+      storage.unwatch(watchers)
+      window.removeEventListener("tldw:auth-credentials-changed", invalidate)
+      window.removeEventListener("tldw:auth-principal-changed", invalidate)
+      window.removeEventListener("tldw:config-updated", configChanged)
+    }
+  }, [])
 
-    let cancelled = false
-    setLoading(true)
-    setError(null)
+  React.useEffect(() => {
+    setResult(null)
+    if (!enabled || caller.loading) return
+    const controller = new AbortController()
+    controllerRef.current = controller
+    let lease: ServicePromptSnapshot | undefined
+    const sourceStates: AutomationHomeSourceStates = {
+      tasks: caller.scheduledTasks === "denied" ? "denied" : "unknown",
+      results: caller.scheduledTasks === "denied" ? "denied" : "unknown",
+      notifications: caller.notifications === "denied" ? "denied" : "unknown"
+    }
 
     const load = async () => {
+      let options: ScheduledTaskReadOptions
+      try {
+        if (Object.values(sourceStates).every(state => state === "denied")) {
+          setResult({ owner, items: [], sourceStates, partial: true, error: null })
+          return
+        }
+        lease = await loadServicePromptSnapshot([], { signal: controller.signal })
+        controller.signal.throwIfAborted()
+        const scope = lease.requestScope
+        const currentConfig = await tldwClient.ensureConfigForRequest(true)
+        controller.signal.throwIfAborted()
+        const currentScopeKey = `${buildChatSurfaceScopeKeyFromConfig(currentConfig, { userId: caller.userId })}:${currentConfig.authSource ?? "manual"}`
+        if ((caller.scopeKey !== null && caller.scopeKey !== currentScopeKey) ||
+          (scope.userId !== null && caller.userId !== null && String(scope.userId) !== String(caller.userId))) {
+          throw Object.assign(new Error("Automation account changed"), { status: 412 })
+        }
+        const expectedUserId = scope.userId ?? caller.userId
+        options = {
+          abortSignal: lease.scopeSignal,
+          servicePromptConfig: { ...scope.config, expectedUserId },
+          ...(expectedUserId !== null ? { headers: { "X-TLDW-Expected-User-ID": String(expectedUserId) } } : {}),
+          suppressBackendUnavailableEvent: true,
+          expectedStatuses: [401, 403, 404, 405, 410, 501]
+        }
+      } catch (error) {
+        if (controller.signal.aborted) return
+        // Failure to verify the owner says nothing about that owner's entitlement.
+        const state = !isServicePromptScopeUnresolvedError(error) && automationFailureState(error) === "error" ? "error" : "unknown"
+        for (const key of ["tasks", "results", "notifications"] as const) {
+          if (sourceStates[key] !== "denied") sourceStates[key] = state
+        }
+        setResult({ owner, items: [], sourceStates, partial: true,
+          error: state === "error" ? "Automation signals unavailable" : null })
+        return
+      }
       const [tasksResult, notificationsResult, resultsResult] = await Promise.allSettled([
-        listScheduledTasks(),
-        listNotifications({ limit: 50 }),
-        listScheduledTaskResults({ limit: 50 })
+        caller.scheduledTasks === "denied" ? Promise.resolve(null) : listScheduledTasks(options),
+        caller.notifications === "denied" ? Promise.resolve(null) : listNotifications({ limit: 50 }, options),
+        caller.scheduledTasks === "denied" ? Promise.resolve(null) : listScheduledTaskResults({ limit: 50 }, options)
       ])
 
-      if (cancelled) {
+      if (controller.signal.aborted || lease.scopeSignal.aborted) {
         return
+      }
+      const outcomes = { tasks: tasksResult, results: resultsResult, notifications: notificationsResult }
+      for (const key of ["tasks", "results", "notifications"] as const) {
+        const outcome = outcomes[key]
+        if (sourceStates[key] !== "denied") {
+          sourceStates[key] = outcome.status === "fulfilled" ? "ready" : automationFailureState(outcome.reason)
+        }
       }
 
       const normalizedResultItems =
-        resultsResult.status === "fulfilled"
+        resultsResult.status === "fulfilled" && resultsResult.value
           ? buildScheduledTaskAutomationHomeItems(
               mapScheduledTaskApiResults(
                 resultsResult.value.items.filter(isHomeVisibleScheduledTaskResult),
@@ -230,71 +332,73 @@ export const useScheduledTaskHomeSignals = ({
             )
           : []
       const projectedResults =
-        tasksResult.status === "fulfilled"
+        tasksResult.status === "fulfilled" && tasksResult.value
           ? projectScheduledTaskResults(tasksResult.value?.items ?? [])
           : []
       const projectedItems =
-        tasksResult.status === "fulfilled"
+        tasksResult.status === "fulfilled" && tasksResult.value
           ? buildScheduledTaskAutomationHomeItems(
-              resultsResult.status === "fulfilled"
+              resultsResult.status === "fulfilled" && resultsResult.value
                 ? projectedResults.filter((result) => result.owner !== "scheduled_tasks")
                 : projectedResults
             )
           : []
       const notificationItems =
-        notificationsResult.status === "fulfilled"
+        notificationsResult.status === "fulfilled" && notificationsResult.value
           ? buildScheduledTaskAutomationHomeItemsFromNotifications(
               notificationsResult.value.items
             )
           : []
       const nextPartial =
-        tasksResult.status === "rejected" ||
-        notificationsResult.status === "rejected" ||
-        resultsResult.status === "rejected" ||
+        Object.values(sourceStates).some(state => state !== "ready") ||
         (tasksResult.status === "fulfilled" && Boolean(tasksResult.value?.partial))
 
       let nextError: string | null = null
-      if (tasksResult.status === "rejected") {
+      if (sourceStates.tasks === "error") {
         nextError =
           normalizedResultItems.length > 0 || notificationItems.length > 0
             ? "Some scheduled-task signals could not be loaded."
             : "Automation signals unavailable"
-      } else if (notificationsResult.status === "rejected") {
+      } else if (sourceStates.notifications === "error") {
         nextError = "Recent automation notifications could not be loaded."
-      } else if (resultsResult.status === "rejected") {
+      } else if (sourceStates.results === "error") {
         nextError = "Scheduled-task results could not be loaded."
-      } else if (tasksResult.value?.partial) {
+      } else if (tasksResult.status === "fulfilled" && tasksResult.value?.partial) {
         nextError = "Some scheduled-task sources are temporarily unavailable."
       }
 
-      setItems(
-        mergeScheduledTaskAutomationHomeItems([
+      setResult({ owner, sourceStates, partial: nextPartial, error: nextError,
+        items: mergeScheduledTaskAutomationHomeItems([
           normalizedResultItems,
           projectedItems,
           notificationItems
         ])
-      )
-      setPartial(nextPartial)
-      setError(nextError)
-      setLoading(false)
+      })
     }
 
-    void load()
+    void load().finally(() => {
+      if (controller.signal.aborted) lease?.release()
+    })
 
     return () => {
-      cancelled = true
+      controller.abort()
+      lease?.release()
+      if (controllerRef.current === controller) controllerRef.current = null
     }
-  }, [enabled, refreshToken])
+  }, [enabled, refreshToken, caller.loading, caller.scheduledTasks, caller.notifications, caller.userId, caller.scopeKey, owner])
 
   const refresh = React.useCallback(() => {
+    void refreshCaller()
     setRefreshToken((value) => value + 1)
-  }, [])
+  }, [refreshCaller])
 
+  const current = enabled && !caller.loading && result?.owner === owner ? result : null
   return {
-    items,
-    loading,
-    partial,
-    error,
+    items: current?.items ?? [],
+    loading: enabled && !current,
+    partial: current?.partial ?? false,
+    error: current?.error ?? null,
+    sourceStates: current?.sourceStates ?? unknownAutomationSources,
     refresh
   }
 }

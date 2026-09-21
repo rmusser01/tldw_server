@@ -7,13 +7,14 @@ import {
   Space
 } from "antd"
 import { Link, useNavigate } from "react-router-dom"
-import React, { useEffect, useState } from "react"
+import React, { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { tldwClient, TldwConfig } from "@/services/tldw/TldwApiClient"
+import { isQuickstartWebUiSameOriginServerUrl, tldwClient, TldwConfig } from "@/services/tldw/TldwApiClient"
 import { tldwAuth } from "@/services/tldw/TldwAuth"
 import { SettingsSkeleton } from "@/components/Common/Settings/SettingsSkeleton"
 import { DEFAULT_TLDW_API_KEY } from "@/services/tldw-server"
 import { apiSend } from "@/services/api-send"
+import { bgRequest } from "@/services/background-proxy"
 import type { PathOrUrl } from "@/services/tldw/openapi-guard"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
 import { useConnectionStore } from "@/store/connection"
@@ -22,8 +23,10 @@ import { commitManualServerTransition } from "@/components/Option/Onboarding/val
 import { emitSplashAfterSingleUserAuthSuccess } from "@/services/splash-auth"
 import { ServerOverviewHint } from "@/components/Common/ServerOverviewHint"
 import { requestOptionalHostPermission } from "@/utils/extension-permissions"
+import { isExtensionRuntime } from "@/utils/browser-runtime"
 import type { CoreStatus, RagStatus } from "./tldw-connection-status"
 import { TldwSettingsTabs } from "./tldw-settings-tabs"
+import { useSettingsLoginStatus } from "./useSettingsLoginStatus"
 import { probeServerHealth } from "./server-health-probe"
 import { TldwConnectionSettings, type LoginMethod } from "./TldwConnectionSettings"
 import {
@@ -54,6 +57,8 @@ export const TldwSettings = () => {
   const [loading, setLoading] = useState(false)
   const [initializing, setInitializing] = useState(true)
   const [initializingError, setInitializingError] = useState<string | null>(null)
+  const [loadedFormValues, setLoadedFormValues] = useState<Record<string, unknown> | null>(null)
+  const configLoadGeneration = useRef(0)
   const [testingConnection, setTestingConnection] = useState(false)
   const [connectionStatus, setConnectionStatus] = useState<'success' | 'error' | null>(null)
   const [connectionDetail, setConnectionDetail] = useState<string>("")
@@ -62,21 +67,21 @@ export const TldwSettings = () => {
   const [authMode, setAuthMode] = useState<'single-user' | 'multi-user'>('single-user')
   const [authSource, setAuthSource] = useState<TldwConfig['authSource']>()
   const [rememberApiKey, setRememberApiKey] = useState(true)
-  const [isLoggedIn, setIsLoggedIn] = useState(false)
-  const [loginMethod, setLoginMethod] = useState<LoginMethod>('magic-link')
+  const { isLoggedIn, setIsLoggedIn, refreshLoginStatus } = useSettingsLoginStatus(form, !initializing)
+  const [loginMethod, setLoginMethod] = useState<LoginMethod>('password')
   const [magicEmail, setMagicEmail] = useState("")
   const [magicToken, setMagicToken] = useState("")
   const [magicSent, setMagicSent] = useState(false)
   const [magicSending, setMagicSending] = useState(false)
   const [serverUrl, setServerUrl] = useState("")
-  const [requestTimeoutSec, setRequestTimeoutSec] = useState<number>(10)
-  const [streamIdleTimeoutSec, setStreamIdleTimeoutSec] = useState<number>(15)
-  const [chatRequestTimeoutSec, setChatRequestTimeoutSec] = useState<number>(10)
-  const [chatStartupTimeoutSec, setChatStartupTimeoutSec] = useState<number>(10)
-  const [chatStreamIdleTimeoutSec, setChatStreamIdleTimeoutSec] = useState<number>(15)
-  const [ragRequestTimeoutSec, setRagRequestTimeoutSec] = useState<number>(10)
-  const [mediaRequestTimeoutSec, setMediaRequestTimeoutSec] = useState<number>(60)
-  const [uploadRequestTimeoutSec, setUploadRequestTimeoutSec] = useState<number>(60)
+  const [requestTimeoutSec, setRequestTimeoutSec] = useState<number>(TIMEOUT_PRESETS.balanced.request)
+  const [streamIdleTimeoutSec, setStreamIdleTimeoutSec] = useState<number>(TIMEOUT_PRESETS.balanced.stream)
+  const [chatRequestTimeoutSec, setChatRequestTimeoutSec] = useState<number>(TIMEOUT_PRESETS.balanced.chatRequest)
+  const [chatStartupTimeoutSec, setChatStartupTimeoutSec] = useState<number>(TIMEOUT_PRESETS.balanced.chatStartup)
+  const [chatStreamIdleTimeoutSec, setChatStreamIdleTimeoutSec] = useState<number>(TIMEOUT_PRESETS.balanced.chatStream)
+  const [ragRequestTimeoutSec, setRagRequestTimeoutSec] = useState<number>(TIMEOUT_PRESETS.balanced.ragRequest)
+  const [mediaRequestTimeoutSec, setMediaRequestTimeoutSec] = useState<number>(TIMEOUT_PRESETS.balanced.media)
+  const [uploadRequestTimeoutSec, setUploadRequestTimeoutSec] = useState<number>(TIMEOUT_PRESETS.balanced.upload)
   const [timeoutPreset, setTimeoutPreset] = useState<TimeoutPresetKey | 'custom'>('balanced')
   const [showDefaultKeyWarning, setShowDefaultKeyWarning] = useState(false)
   const [billingLoading, setBillingLoading] = useState(false)
@@ -94,18 +99,54 @@ export const TldwSettings = () => {
   const [billingActionLoading, setBillingActionLoading] = useState(false)
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null)
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly')
+  const [billingServerUrl, setBillingServerUrl] = useState<string | null>(null)
+  const billingAvailable = Boolean(serverUrl && billingServerUrl === serverUrl)
+
+  useEffect(() => {
+    setBillingServerUrl(null)
+    if (authMode !== 'multi-user' || !isLoggedIn || !serverUrl || isQuickstartWebUiSameOriginServerUrl(serverUrl)) return
+    const controller = new AbortController()
+    let cancelled = false
+    void (async () => {
+      try {
+        const spec = await bgRequest<{ paths?: Record<string, { get?: unknown }> }, PathOrUrl>({
+          path: `${serverUrl.replace(/\/$/, '')}/openapi.json` as PathOrUrl,
+          method: "GET",
+          noAuth: true,
+          timeoutMs: 5000,
+          abortSignal: controller.signal,
+          suppressBackendUnavailableEvent: true
+        })
+        const supported = ['plans', 'subscription', 'usage', 'invoices'].every(
+          (route) => spec?.paths?.[`/api/v1/billing/${route}`]?.get
+        )
+        if (!cancelled && supported) setBillingServerUrl(serverUrl)
+      } catch {
+        // Optional billing remains hidden until the server advertises it.
+      }
+    })()
+    return () => { cancelled = true; controller.abort() }
+  }, [authMode, isLoggedIn, serverUrl])
 
   // ── Config load ──────────────────────────────────────────────────
 
   useEffect(() => {
-    loadConfig()
+    // The initial skeleton has no Form; apply values only after it is mounted.
+    if (!initializing && loadedFormValues) form.setFieldsValue(loadedFormValues)
+  }, [form, initializing, loadedFormValues])
+
+  useEffect(() => {
+    void loadConfig()
+    return () => { configLoadGeneration.current += 1 }
   }, [])
 
   const loadConfig = async () => {
+    const generation = ++configLoadGeneration.current
     setLoading(true)
     setInitializingError(null)
     try {
       const config = await tldwClient.getConfig()
+      if (generation !== configLoadGeneration.current) return
       if (config) {
         setAuthMode(config.authMode)
         setAuthSource(config.authSource)
@@ -130,16 +171,12 @@ export const TldwSettings = () => {
         setMediaRequestTimeoutSec(nextTimeouts.media)
         setUploadRequestTimeoutSec(nextTimeouts.upload)
         setTimeoutPreset(determinePreset(nextTimeouts))
-        form.setFieldsValue({
+        setLoadedFormValues({
           serverUrl: config.serverUrl,
           apiKey: config.apiKey,
           authMode: config.authMode,
           rememberApiKey: config.apiKeyPersistence !== 'session'
         })
-
-        if (config.authMode === 'multi-user' && config.accessToken) {
-          setIsLoggedIn(true)
-        }
       } else {
         setAuthMode('single-user')
         setAuthSource(undefined)
@@ -154,7 +191,7 @@ export const TldwSettings = () => {
         setCoreStatus("unknown")
         setRagStatus("unknown")
         setTimeoutPreset('balanced')
-        form.setFieldsValue({
+        setLoadedFormValues({
           serverUrl: '',
           apiKey: '',
           authMode: 'single-user',
@@ -167,14 +204,17 @@ export const TldwSettings = () => {
       }
       setInitializingError(null)
     } catch (error) {
+      if (generation !== configLoadGeneration.current) return
       console.error('Failed to load config:', error)
       setInitializingError(
         (error as Error)?.message ||
           t('settings:tldw.loadError', 'Unable to load tldw server settings. Check your connection and try again.')
       )
     } finally {
-      setLoading(false)
-      setInitializing(false)
+      if (generation === configLoadGeneration.current) {
+        setLoading(false)
+        setInitializing(false)
+      }
     }
   }
 
@@ -198,10 +238,10 @@ export const TldwSettings = () => {
         authMode: values.authMode,
         requestTimeoutMs: Math.min(2147483000, Math.max(1, Math.round(Number(requestTimeoutSec) || 10)) * 1000),
         streamIdleTimeoutMs: Math.min(2147483000, Math.max(1, Math.round(Number(streamIdleTimeoutSec) || 15)) * 1000),
-        chatRequestTimeoutMs: Math.min(2147483000, Math.max(1, Math.round(Number(chatRequestTimeoutSec) || requestTimeoutSec || 10)) * 1000),
+        chatRequestTimeoutMs: Math.min(2147483000, Math.max(1, Math.round(Number(chatRequestTimeoutSec) || TIMEOUT_PRESETS.balanced.chatRequest)) * 1000),
         chatStartupTimeoutMs: Math.min(2147483000, Math.max(1, Math.round(Number(chatStartupTimeoutSec) || TIMEOUT_PRESETS.balanced.chatStartup)) * 1000),
         chatStreamIdleTimeoutMs: Math.min(2147483000, Math.max(1, Math.round(Number(chatStreamIdleTimeoutSec) || streamIdleTimeoutSec || 15)) * 1000),
-        ragRequestTimeoutMs: Math.min(2147483000, Math.max(1, Math.round(Number(ragRequestTimeoutSec) || requestTimeoutSec || 10)) * 1000),
+        ragRequestTimeoutMs: Math.min(2147483000, Math.max(1, Math.round(Number(ragRequestTimeoutSec) || TIMEOUT_PRESETS.balanced.ragRequest)) * 1000),
         mediaRequestTimeoutMs: Math.min(2147483000, Math.max(1, Math.round(Number(mediaRequestTimeoutSec) || requestTimeoutSec || 10)) * 1000),
         uploadRequestTimeoutMs: Math.min(2147483000, Math.max(1, Math.round(Number(uploadRequestTimeoutSec) || mediaRequestTimeoutSec || 60)) * 1000)
       }
@@ -288,7 +328,7 @@ export const TldwSettings = () => {
   // ── Billing loaders ──────────────────────────────────────────────
 
   const loadBilling = async () => {
-    if (authMode !== 'multi-user' || !isLoggedIn) return
+    if (authMode !== 'multi-user' || !isLoggedIn || !billingAvailable) return
     setBillingLoading(true)
     setBillingError(null)
     setBillingPlansError(null)
@@ -371,7 +411,7 @@ export const TldwSettings = () => {
   }
 
   const loadInvoices = async () => {
-    if (authMode !== 'multi-user' || !isLoggedIn) return
+    if (authMode !== 'multi-user' || !isLoggedIn || !billingAvailable) return
     setBillingInvoicesLoading(true)
     setBillingInvoicesError(null)
     try {
@@ -397,11 +437,11 @@ export const TldwSettings = () => {
   }
 
   useEffect(() => {
-    if (authMode === 'multi-user' && isLoggedIn) {
+    if (authMode === 'multi-user' && isLoggedIn && billingAvailable) {
       void loadBilling()
       void loadInvoices()
     }
-  }, [authMode, isLoggedIn])
+  }, [authMode, isLoggedIn, billingAvailable])
 
   // ── Connection test ──────────────────────────────────────────────
 
@@ -426,7 +466,13 @@ export const TldwSettings = () => {
       const hasApiKey =
         singleUser && typeof values.apiKey === "string" && values.apiKey.trim().length > 0
 
-      const resp = baseUrl
+      const configured = await tldwClient.getConfig()
+      const useSession = baseUrl === configured?.serverUrl?.replace(/\/$/, '') &&
+        values.authMode === configured?.authMode &&
+        (configured?.authMode === 'multi-user' || (configured?.authSource === 'cookie-session' && !hasApiKey))
+      const resp = useSession
+        ? await apiSend({ path: "/api/v1/auth/sessions", method: "GET" })
+        : baseUrl
         ? await probeServerHealth({
             serverUrl: baseUrl,
             authMode: values.authMode,
@@ -443,7 +489,7 @@ export const TldwSettings = () => {
       setCoreStatus(success ? "connected" : "failed")
 
       if (!success) {
-        if (resp?.status === 0) {
+        if (resp?.status === 0 && isExtensionRuntime()) {
           requestOptionalHostPermission(values.serverUrl, (granted, origin) => {
             if (!granted) {
               message.warning(
@@ -463,8 +509,8 @@ export const TldwSettings = () => {
           const hint =
             code === 401
               ? t(
-                  "settings:tldw.errors.invalidApiKey",
-                  "Invalid API key"
+                  singleUser ? "settings:tldw.errors.invalidApiKey" : "settings:tldw.errors.sessionExpired",
+                  singleUser ? "Invalid API key" : "Your session is invalid or expired. Sign in again."
                 )
               : t(
                   "settings:tldw.errors.forbidden",
@@ -606,7 +652,7 @@ export const TldwSettings = () => {
         password: values.password
       })
 
-      setIsLoggedIn(true)
+      await refreshLoginStatus()
       message.success(t('settings:tldw.login.success', 'Login successful!'))
 
       form.setFieldValue('password', '')
@@ -658,7 +704,7 @@ export const TldwSettings = () => {
     setLoading(true)
     try {
       await tldwAuth.verifyMagicLink(magicToken.trim())
-      setIsLoggedIn(true)
+      await refreshLoginStatus()
       message.success(t('settings:tldw.login.success', 'Login successful!'))
       setMagicToken('')
       await testConnection()
@@ -877,8 +923,8 @@ export const TldwSettings = () => {
           </h3>
           <p className="text-sm text-text-muted">
             {t(
-              "settings:tldw.about.description",
-              "tldw server turns this extension into a full workspace for chat, knowledge search, and media."
+              "settings:tldw.about.workspaceDescription",
+              "Connect to tldw server for chat, knowledge search, and media."
             )}
           </p>
           <ServerOverviewHint />
@@ -895,7 +941,7 @@ export const TldwSettings = () => {
             <Button type="primary" onClick={() => { void testConnection() }} loading={testingConnection}>{t('settings:tldw.buttons.recheck', 'Recheck')}</Button>
           </Space>
         </div>
-        <TldwSettingsTabs authMode={authMode} isLoggedIn={isLoggedIn} />
+        <TldwSettingsTabs authMode={authMode} isLoggedIn={isLoggedIn} billingAvailable={billingAvailable} />
         <h2
           id="tldw-settings-connection"
           className="mb-4 scroll-mt-24 text-base font-semibold text-text">
@@ -904,6 +950,7 @@ export const TldwSettings = () => {
         <Form
           form={form}
           onFinish={handleSave}
+          onValuesChange={() => { void refreshLoginStatus() }}
           layout="vertical"
           initialValues={{
             authMode: 'single-user',
@@ -926,6 +973,7 @@ export const TldwSettings = () => {
             }}
             isLoggedIn={isLoggedIn}
             setIsLoggedIn={setIsLoggedIn}
+            refreshLoginStatus={refreshLoginStatus}
             loginMethod={loginMethod}
             setLoginMethod={setLoginMethod}
             magicEmail={magicEmail}
@@ -973,7 +1021,7 @@ export const TldwSettings = () => {
           />
         </Form>
 
-        {authMode === 'multi-user' && isLoggedIn && (
+        {authMode === 'multi-user' && isLoggedIn && billingAvailable && (
           <TldwBillingSettings
             t={t}
             billingLoading={billingLoading}

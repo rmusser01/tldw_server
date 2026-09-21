@@ -9,9 +9,12 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
+from tldw_Server_API.app.core.DB_Management.chacha.note_graph_suggestion_store import NotesGraphDatasetScopeError
+
 from .suggestion_jobs import (
     PublicationReceiptError,
     SuggestionCancellationCoordinator,
+    _payload,
     validate_publication_receipt,
 )
 from .suggestion_observability import (
@@ -145,6 +148,64 @@ class SuggestionMaintenance:
             maintenance_lease_token=run.maintenance_lease_token,
             now=now,
         )
+
+    @staticmethod
+    def _retired(scope: MaintenanceScope) -> bool:
+        check = getattr(scope.store, "is_local_scope_retired", None)
+        return bool(check is not None and check(dataset_id=scope.dataset_id))
+
+    def _retire_run(self, scope: MaintenanceScope, run: Any, now: datetime) -> bool:
+        """Cancel an exact old Job, including enqueue-before-bind, without publishing."""
+
+        if run.job_id:
+            job = self._jobs.get_job_or_archived_by_uuid(
+                run.job_id,
+                domain="notes",
+                owner_user_id=run.owner_user_id,
+            )
+        else:
+            job = self._jobs.get_job_or_archived_by_idempotency_key(
+                idempotency_key=run.id,
+                domain="notes",
+                queue="graph-suggestions",
+                job_type="note_graph_suggestions",
+                owner_user_id=run.owner_user_id,
+            )
+        if job is not None:
+            if (
+                str(job.get("owner_user_id") or "") != run.owner_user_id
+                or job.get("domain") != "notes"
+                or job.get("queue") != "graph-suggestions"
+                or job.get("job_type") != "note_graph_suggestions"
+                or (run.job_id and str(job.get("uuid") or "") != run.job_id)
+                or job.get("payload") != _payload(run, scope.dataset_id)
+            ):
+                raise RuntimeError("notes_graph_admission_job_contract_invalid")
+            if job.get("status") not in _TERMINAL_JOB_STATUSES:
+                accepted = self._jobs.cancel_job(
+                    int(job["id"]),
+                    reason="requested",
+                    expected_uuid=str(job["uuid"]),
+                    expected_domain="notes",
+                    expected_job_type="note_graph_suggestions",
+                    cascade_dependents=False,
+                )
+                if not accepted:
+                    self._release(scope, run, now)
+                    return False
+        elif run.state.value == "failed" or classify_job_observation(run=run, job=None, now=now) is None:
+            # An admitted producer may still enqueue. Keep its immutable run ID
+            # discoverable during the existing missing-Job recovery window.
+            self._release(scope, run, now)
+            return False
+        scope.store.retire_claimed_local_run(
+            dataset_id=scope.dataset_id,
+            run_id=run.id,
+            expected_revision=run.revision,
+            maintenance_lease_token=run.maintenance_lease_token,
+            now=now,
+        )
+        return True
 
     def _reconcile(
         self,
@@ -309,6 +370,12 @@ class SuggestionMaintenance:
             for run in runs:
                 cancellation_context = None
                 try:
+                    if self._retired(scope):
+                        if self._retire_run(scope, run, now):
+                            reconciled += 1
+                        else:
+                            released += 1
+                        continue
                     if run.state.value == "cancelling":
                         cancellation_context = scope.store.get_run_cancellation_maintenance_context(
                             dataset_id=scope.dataset_id,
@@ -352,13 +419,22 @@ class SuggestionMaintenance:
                     self._release(scope, run, now)
                     released += 1
                     continue
-                reconciled_run = self._reconcile(
-                    scope=scope,
-                    run=run,
-                    job=job,
-                    observation=observation,
-                    now=now,
-                )
+                try:
+                    reconciled_run = self._reconcile(
+                        scope=scope,
+                        run=run,
+                        job=job,
+                        observation=observation,
+                        now=now,
+                    )
+                except NotesGraphDatasetScopeError:
+                    # Enrollment may win after the Jobs read. Its store fence
+                    # denies publication; a later pass performs closed cleanup.
+                    if not self._retired(scope):
+                        raise
+                    self._release(scope, run, now)
+                    released += 1
+                    continue
                 reconciled += 1
                 self._record_reconciliation(run, reconciled_run)
 
@@ -366,6 +442,18 @@ class SuggestionMaintenance:
         for scope in self._scopes:
             if acceptance_remaining == 0:
                 break
+            if self._retired(scope):
+                count = scope.store.retire_local_suggestions(
+                    dataset_id=scope.dataset_id,
+                    now=now,
+                    limit=acceptance_remaining,
+                )
+                claimed += count
+                reconciled += count
+                acceptance_remaining -= count
+                if count and on_claimed is not None:
+                    on_claimed(count)
+                continue
             if scope.decision_service is None:
                 continue
             reconciliation_kwargs = {
@@ -375,7 +463,14 @@ class SuggestionMaintenance:
             }
             if on_claimed is not None:
                 reconciliation_kwargs["on_claimed"] = on_claimed
-            decisions = scope.decision_service.reconcile_expired(**reconciliation_kwargs)
+            try:
+                decisions = scope.decision_service.reconcile_expired(**reconciliation_kwargs)
+            except NotesGraphDatasetScopeError:
+                # Enrollment may win between the readiness check and the
+                # acceptance claim. The next pass uses closed retirement.
+                if not self._retired(scope):
+                    raise
+                continue
             claimed += len(decisions)
             reconciled += len(decisions)
             acceptance_remaining -= min(acceptance_remaining, len(decisions))

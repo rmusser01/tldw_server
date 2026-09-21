@@ -4,9 +4,17 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { useStoreMessageOption } from "@/store/option";
 import type { FirstRunState } from "@/types/setup-onboarding";
 
+vi.mock("@plasmohq/storage", () => import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage"));
+vi.mock("@plasmohq/storage/hook", () => import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage-hook"));
+vi.mock("@/services/tldw/TldwApiClient", () => ({ tldwClient: { getConfig: async () => ({ serverUrl: "http://setup.test", authMode: "single-user", apiKey: "synthetic-key" }) } }));
+
 const setupHookMocks = vi.hoisted(() => ({
+  authMode: "single_user",
+  navigate: vi.fn(),
+  setConfigPartial: vi.fn(),
   saveStep: vi.fn(),
   skip: vi.fn(),
   loadProviderCatalog: vi.fn(),
@@ -26,6 +34,15 @@ const setupHookMocks = vi.hoisted(() => ({
 
 const readinessHookMocks = vi.hoisted(() => ({
   refresh: vi.fn(),
+}));
+
+vi.mock("react-router-dom", async () => ({
+  ...await vi.importActual<typeof import("react-router-dom")>("react-router-dom"),
+  useNavigate: () => setupHookMocks.navigate,
+}));
+
+vi.mock("@/hooks/useConnectionState", () => ({
+  useConnectionActions: () => ({ setConfigPartial: setupHookMocks.setConfigPartial }),
 }));
 
 const createDeferred = <T,>() => {
@@ -123,7 +140,7 @@ vi.mock("@/hooks/useSetupOnboarding", () => ({
       first_chat: { completed: false },
     },
     metadata: {
-      auth_mode: "single_user",
+      auth_mode: setupHookMocks.authMode,
       bundled_single_user_auth_available: true,
       manual_auth_required: false,
       setup_required: true,
@@ -192,6 +209,11 @@ vi.mock("@/hooks/useSetupReadinessSummary", () => ({
 
 describe("UnifiedSetupWizard", () => {
   beforeEach(() => {
+    window.localStorage.clear();
+    useStoreMessageOption.setState({ selectedModel: "tldw:existing-choice" });
+    setupHookMocks.authMode = "single_user";
+    setupHookMocks.navigate.mockReset();
+    setupHookMocks.setConfigPartial.mockReset().mockResolvedValue(undefined);
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     setupHookMocks.saveStep.mockReset();
     setupHookMocks.skip.mockReset();
@@ -343,6 +365,21 @@ describe("UnifiedSetupWizard", () => {
     fireEvent.click(screen.getByRole("button", { name: /multi-user/i }));
 
     expect(screen.getByText(/multi-user setup guide/i)).toBeInTheDocument();
+  });
+
+  it("routes an already multi-user server to login without a solo skip mutation", async () => {
+    setupHookMocks.authMode = "multi_user";
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+    render(<UnifiedSetupWizard />);
+
+    expect(screen.queryByText("Solo onboarding")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Skip for now" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+    await waitFor(() => expect(setupHookMocks.navigate).toHaveBeenCalledWith("/settings/tldw"));
+    expect(setupHookMocks.setConfigPartial).toHaveBeenCalledWith({ authMode: "multi-user" });
+    expect(setupHookMocks.skip).not.toHaveBeenCalled();
+    expect(setupHookMocks.saveStep).not.toHaveBeenCalled();
   });
 
   it("requires privacy and security acknowledgement before provider setup", async () => {

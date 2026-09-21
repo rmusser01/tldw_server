@@ -555,5 +555,11 @@
     "minutesAgoShort": "há {{count}}m",
     "hoursAgoShort": "há {{count}}h",
     "daysAgoShort": "há {{count}}d"
+  },
+  "help": {
+    "loadFailed": "Não foi possível carregar a ajuda. Reconecte-se, salve as alterações e recarregue a página.",
+    "loading": "Carregando ajuda…",
+    "confirmReload": "Recarregar esta página? Alterações não salvas podem ser perdidas.",
+    "reload": "Recarregar página"
   }
 }

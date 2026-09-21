@@ -7,11 +7,12 @@ import {
 } from "@/services/model-settings"
 import { getDefaultApiProvider } from "@/services/tldw-server"
 import { tldwModels } from "@/services/tldw"
+import { normalizeProviderAvailabilityKey } from "@/services/tldw/model-provider-availability"
 import { useStoreChatModelSettings } from "@/store/model"
 import { useStoreMessageOption, type ToolChoice } from "@/store/option"
 import { useMcpToolsStore } from "@/store/mcp-tools"
 import { resolveChatToolRequest } from "@/utils/chat-tools"
-import { resolveApiProviderForModel } from "@/utils/resolve-api-provider"
+import { parseProviderQualifiedModelSelection, resolveApiProviderForModel } from "@/utils/resolve-api-provider"
 
 const isValidReasoningEffort = (
   value: unknown
@@ -33,6 +34,9 @@ type PageAssistModelOptions = {
   extraBody?: string
   researchContext?: ChatResearchContext
   requestScope?: ServicePromptRequestScope
+  retryFailedTurn?: boolean
+  clientMessageId?: string
+  regenerateFromMessageId?: string
 }
 
 const parseJsonObject = (value?: string) => {
@@ -63,7 +67,10 @@ export const pageAssistModel = async ({
   extraHeaders,
   extraBody,
   researchContext,
-  requestScope
+  requestScope,
+  retryFailedTurn,
+  clientMessageId,
+  regenerateFromMessageId
 }: PageAssistModelOptions): Promise<ChatTldw> => {
   const currentChatModelSettings = useStoreChatModelSettings.getState()
   const {
@@ -78,11 +85,19 @@ export const pageAssistModel = async ({
     healthState: mcpHealthState
   } = useMcpToolsStore.getState()
   const resolvedToolChoice = toolChoice ?? storedToolChoice
-  const normalizedModelId = String(model || "").replace(/^tldw:/, "")
+  const selectedModel = parseProviderQualifiedModelSelection(model)
+  const normalizedModelId = selectedModel.modelId.replace(/^tldw:/, "")
   let modelSupportsTools = false
   let modelSupportsMultimodal = false
   try {
-    const modelInfo = await tldwModels.getModel(normalizedModelId)
+    const modelInfo = selectedModel.provider
+      ? (await tldwModels.getModels()).find(
+          (info) =>
+            normalizeProviderAvailabilityKey(info.provider) ===
+              normalizeProviderAvailabilityKey(selectedModel.provider) &&
+            info.id === normalizedModelId
+        )
+      : await tldwModels.getModel(normalizedModelId)
     modelSupportsTools = Boolean(modelInfo?.capabilities?.includes("tools"))
     modelSupportsMultimodal = Boolean(
       modelInfo?.capabilities?.includes("vision")
@@ -110,7 +125,7 @@ export const pageAssistModel = async ({
   const resolvedSaveToDb =
     typeof saveToDb === "boolean"
       ? saveToDb
-      : Boolean(resolvedConversationId) && !temporaryChat
+      : !temporaryChat
   const finalConversationId = resolvedSaveToDb
     ? resolvedConversationId
     : undefined
@@ -221,7 +236,11 @@ export const pageAssistModel = async ({
       userDefaultModelSettings?.reasoningEffort
   }
 
-  const modelSettings = await getModelSettings(model)
+  let modelSettings = await getModelSettings(model)
+  if (selectedModel.provider && Object.keys(modelSettings).length === 0) {
+    // Normal Chat previously stored these settings under the unqualified ID.
+    modelSettings = await getModelSettings(selectedModel.modelId)
+  }
 
   const _keepAlive = modelSettings?.keepAlive || keepAlive || ""
   const payload = {
@@ -244,7 +263,7 @@ export const pageAssistModel = async ({
 
   // Default to tldw_server chat model
   return new ChatTldw({
-    model,
+    model: normalizedModelId,
     temperature: payload.temperature,
     topP: payload.topP,
     maxTokens: payload.numPredict,
@@ -267,6 +286,9 @@ export const pageAssistModel = async ({
     extraBody: resolvedExtraBody,
     researchContext,
     requestScope,
+    retryFailedTurn,
+    clientMessageId,
+    regenerateFromMessageId,
     chatDebugMetadata: {
       toolChoice: toolRequest.toolChoice,
       toolOmissionReason: toolRequest.omittedReason,

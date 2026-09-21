@@ -25,7 +25,7 @@ describe("ReviewProgress responsive layout", () => {
   it("wraps review metrics and keeps long deck names contained", () => {
     render(
       <ReviewProgress
-        dueCount={12}
+        remainingCount={12}
         reviewedCount={3}
         availableNowCount={9}
         scheduledDueCount={4}

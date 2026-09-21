@@ -199,7 +199,7 @@ class PasswordService:
 
         # If there are any errors, raise exception
         if errors:
-            raise WeakPasswordError("; ".join(errors))
+            raise WeakPasswordError("; ".join(errors), public_requirements=tuple(errors))
 
     def _has_sequential_chars(self, password: str, max_sequence: int = 3) -> bool:
         """Check if password has sequential characters (e.g., 'abc', '123')"""

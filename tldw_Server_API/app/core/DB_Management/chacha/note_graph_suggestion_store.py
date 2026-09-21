@@ -247,32 +247,136 @@ class NoteGraphSuggestionStore:
             parsed = parsed.replace(tzinfo=timezone.utc)
         return parsed.astimezone(timezone.utc).isoformat()
 
-    def _set_dataset_scope(self, conn: SuggestionConnection, dataset_id: str) -> None:
+    def _set_dataset_scope(
+        self, conn: SuggestionConnection, dataset_id: str, *, allow_unbound_legacy_read: bool = False
+    ) -> None:
         if self.is_postgres:
             conn.execute("SELECT set_config('app.current_dataset_id', ?, true)", (dataset_id,))
-        self._require_dataset_scope(conn, dataset_id)
+        self._require_dataset_scope(conn, dataset_id, allow_unbound_legacy_read=allow_unbound_legacy_read)
 
     def _with_dataset_scope(
         self,
         dataset_id: str,
         fn: Callable[[SuggestionConnection], SuggestionReadT],
+        *,
+        allow_unbound_legacy_read: bool = False,
     ) -> SuggestionReadT:
         if not self.is_postgres:
             with self._db.transaction() as conn:
-                self._set_dataset_scope(conn, dataset_id)
+                self._set_dataset_scope(conn, dataset_id, allow_unbound_legacy_read=allow_unbound_legacy_read)
                 return fn(conn)
         with self._db.transaction() as conn:
-            self._set_dataset_scope(conn, dataset_id)
+            self._set_dataset_scope(conn, dataset_id, allow_unbound_legacy_read=allow_unbound_legacy_read)
             return fn(conn)
 
-    def _require_dataset_scope(self, conn: SuggestionConnection, dataset_id: str) -> None:
+    def _require_dataset_scope(
+        self, conn: SuggestionConnection, dataset_id: str, *, allow_unbound_legacy_read: bool = False
+    ) -> None:
+        if dataset_id == f"legacy:{self.owner_user_id}" and self.is_postgres:
+            # Serialize local work with the existing canonical authority binder.
+            # Take this before run, suggestion, note, or keyword row locks.
+            conn.execute("LOCK TABLE note_task_scope_authority IN SHARE MODE")
         row = conn.execute(
             "SELECT 1 FROM note_task_scope_authority "
             "WHERE owner_user_id = ? AND dataset_id = ?",
             (self.owner_user_id, dataset_id),
         ).fetchone()
-        if row is None:
+        if row is not None:
+            return
+        if dataset_id == f"legacy:{self.owner_user_id}":
+            # Local authority is absence of a canonical binding, never a legacy
+            # row inserted into the shared immutable authority table.
+            owner_scope = conn.execute(
+                "SELECT 1 FROM note_task_scope_authority WHERE owner_user_id = ?",
+                (self.owner_user_id,),
+            ).fetchone()
+            if owner_scope is None:
+                return
+        raise NotesGraphDatasetScopeError("notes_graph_dataset_scope_invalid")
+
+    def is_local_scope_available(self, *, dataset_id: str) -> bool:
+        """Validate exact owner-local authority without creating a binding."""
+
+        dataset = self._scope(dataset_id)
+        if dataset != f"legacy:{self.owner_user_id}":
+            return False
+        try:
+            return self._with_dataset_scope(dataset, lambda _conn: True)
+        except NotesGraphDatasetScopeError:
+            return False
+
+    def is_local_scope_retired(self, *, dataset_id: str) -> bool:
+        """Identify only this owner's obsolete local review namespace."""
+
+        dataset = self._scope(dataset_id)
+        with self._db.transaction() as conn:
+            return self._is_local_scope_retired(conn, dataset)
+
+    def _is_local_scope_retired(self, conn: SuggestionConnection, dataset: str) -> bool:
+        if dataset != f"legacy:{self.owner_user_id}":
+            return False
+        row = conn.execute(
+            "SELECT dataset_id FROM note_task_scope_authority WHERE owner_user_id=?",
+            (self.owner_user_id,),
+        ).fetchone()
+        return row is not None and str(row["dataset_id"]) != dataset
+
+    def _with_maintenance_scope(
+        self,
+        dataset: str,
+        fn: Callable[[SuggestionConnection], SuggestionReadT],
+        *,
+        retired_only: bool = False,
+    ) -> SuggestionReadT:
+        """Authorize closed cleanup only; never admission, publication or products."""
+
+        with self._db.transaction() as conn:
+            if self.is_postgres:
+                conn.execute("SELECT set_config('app.current_dataset_id', ?, true)", (dataset,))
+                if dataset == f"legacy:{self.owner_user_id}":
+                    conn.execute("LOCK TABLE note_task_scope_authority IN SHARE MODE")
+            if not self._is_local_scope_retired(conn, dataset):
+                if retired_only:
+                    raise NotesGraphDatasetScopeError("notes_graph_dataset_scope_invalid")
+                self._require_dataset_scope(conn, dataset)
+            return fn(conn)
+
+    def reserve_canonical_scope(self, *, dataset_id: str) -> None:
+        """Fence local suggestions with the actual validated canonical dataset."""
+
+        dataset = self._scope(dataset_id)
+        if dataset == "local-unbound" or dataset.startswith("legacy:"):
             raise NotesGraphDatasetScopeError("notes_graph_dataset_scope_invalid")
+        with self._db.transaction() as conn:
+            if self.is_postgres:
+                conn.execute("LOCK TABLE note_task_scope_authority IN SHARE ROW EXCLUSIVE MODE")
+            current = conn.execute(
+                "SELECT dataset_id FROM note_task_scope_authority WHERE owner_user_id=?",
+                (self.owner_user_id,),
+            ).fetchone()
+            if current is not None:
+                if current["dataset_id"] != dataset:
+                    raise NotesGraphDatasetScopeError("notes_graph_dataset_scope_invalid")
+                return
+            conn.execute(
+                "INSERT INTO note_task_scope_authority("
+                "owner_user_id,dataset_id,task_graph_bound,moodboard_graph_bound,studio_graph_bound) "
+                "VALUES (?,?,?,?,?)",
+                (self.owner_user_id, dataset, False, False, False),
+            )
+
+    def is_dataset_scope_registered(self, *, dataset_id: str) -> bool:
+        """Check cancellation authority without registering an unbound read scope."""
+
+        dataset = self._scope(dataset_id)
+
+        def read(conn: SuggestionConnection) -> bool:
+            return conn.execute(
+                "SELECT 1 FROM note_task_scope_authority WHERE owner_user_id = ? AND dataset_id = ?",
+                (self.owner_user_id, dataset),
+            ).fetchone() is not None
+
+        return self._with_dataset_scope(dataset, read, allow_unbound_legacy_read=True)
 
     def _source_byte_expression(self, alias: str = "n") -> str:
         if alias not in {"n", "note"}:
@@ -669,15 +773,18 @@ class NoteGraphSuggestionStore:
                 "SELECT 1 FROM note_graph_suggestions WHERE owner_user_id=? AND dataset_id=? LIMIT 1",
                 "SELECT 1 FROM note_graph_suggestion_rejection_sets WHERE owner_user_id=? AND dataset_id=? LIMIT 1",
             )
-            for row in rows:
-                dataset = str(row["dataset_id"])
-                self._set_dataset_scope(conn, dataset)
+            candidates = dict.fromkeys([f"legacy:{self.owner_user_id}", *(str(row["dataset_id"]) for row in rows)])
+            for dataset in candidates:
+                # Discovery reads only exact owner-local keys. Retired local
+                # cleanup must remain discoverable without reviving authority.
+                if self.is_postgres:
+                    conn.execute("SELECT set_config('app.current_dataset_id', ?, true)", (dataset,))
                 if any(
                     conn.execute(query, (self.owner_user_id, dataset)).fetchone() is not None
                     for query in authority_queries
                 ):
                     datasets.append(dataset)
-            return tuple(datasets)
+            return tuple(datasets[:limit])
 
     @classmethod
     def _require_run_transition(cls, expected_state: str, new_state: str) -> None:
@@ -1551,6 +1658,12 @@ class NoteGraphSuggestionStore:
         sync_id = row["keyword_sync_id"]
         if sync_id is None:
             return str(row["normalized_tag"]), str(row["display_tag"])
+        if row["dataset_id"] == f"legacy:{self.owner_user_id}":
+            keyword = self._db.keyword_store.resolve_merge_survivor(str(sync_id), conn=conn)
+            if keyword is None:
+                return None
+            display = str(keyword["keyword"]).strip()
+            return display.casefold(), display
         keyword_table = self._db._map_table_for_backend("keywords")
         keyword = conn.execute(
             f"SELECT keyword FROM {keyword_table} WHERE client_id=? AND sync_id=? AND deleted=?",  # nosec B608
@@ -1565,15 +1678,19 @@ class NoteGraphSuggestionStore:
         self,
         conn: SuggestionConnection,
         *,
+        dataset_id: str,
         source_note_id: str,
         normalized_tag: str,
     ) -> bool:
         keyword_table = self._db._map_table_for_backend("keywords")
+        local_sqlite = self._db.backend_type == BackendType.SQLITE and dataset_id == f"legacy:{self.owner_user_id}"
+        owner_clause = "" if local_sqlite else " AND keyword.client_id=?"
+        owner_params = () if local_sqlite else (self.owner_user_id,)
         rows = conn.execute(
             f"SELECT keyword.keyword FROM {keyword_table} keyword "  # nosec B608
             "JOIN note_keywords membership ON membership.keyword_id=keyword.id "
-            "WHERE membership.note_id=? AND keyword.client_id=? AND keyword.deleted=?",
-            (source_note_id, self.owner_user_id, self._deleted_value()),
+            f"WHERE membership.note_id=?{owner_clause} AND keyword.deleted=?",
+            (source_note_id, *owner_params, self._deleted_value()),
         ).fetchall()
         return any(str(row["keyword"]).strip().casefold() == normalized_tag for row in rows)
 
@@ -1859,6 +1976,7 @@ class NoteGraphSuggestionStore:
                 else:
                     filtered = filtered or self._source_has_tag(
                         conn,
+                        dataset_id=dataset,
                         source_note_id=str(row["source_note_id"]),
                         normalized_tag=str(row["normalized_tag"]),
                     )
@@ -1982,7 +2100,7 @@ class NoteGraphSuggestionStore:
                 next_position=next_position,
             )
 
-        return self._with_dataset_scope(dataset, read)
+        return self._with_dataset_scope(dataset, read, allow_unbound_legacy_read=True)
 
     def list_suggestion_evidence(
         self,
@@ -2081,7 +2199,7 @@ class NoteGraphSuggestionStore:
                 )
             return tuple(current)
 
-        return self._with_dataset_scope(dataset, read)
+        return self._with_dataset_scope(dataset, read, allow_unbound_legacy_read=True)
 
     def _find_receipt(
         self,
@@ -2237,6 +2355,7 @@ class NoteGraphSuggestionStore:
                 source_note_id,
                 source_fingerprint,
             ),
+            allow_unbound_legacy_read=True,
         )
 
     @staticmethod
@@ -3186,13 +3305,18 @@ class NoteGraphSuggestionStore:
         if not secrets.compare_digest(accepted_resource_identity, expected_identity):
             return None
         keyword_table = self._db._map_table_for_backend("keywords")
+        local_sqlite = (
+            self._db.backend_type == BackendType.SQLITE and suggestion.dataset_id == f"legacy:{self.owner_user_id}"
+        )
+        owner_clause = "" if local_sqlite else "keyword.client_id=? AND "
+        owner_params = () if local_sqlite else (self.owner_user_id,)
         row = conn.execute(
             f"SELECT 1 FROM {keyword_table} keyword "  # nosec B608
             "JOIN note_keywords membership ON membership.keyword_id=keyword.id "
-            "WHERE keyword.client_id=? AND keyword.sync_id=? AND keyword.deleted=? "
+            f"WHERE {owner_clause}keyword.sync_id=? AND keyword.deleted=? "
             "AND membership.note_id=?",
             (
-                self.owner_user_id,
+                *owner_params,
                 resolved_keyword_sync_id,
                 self._deleted_value(),
                 suggestion.source_note_id,
@@ -4001,12 +4125,24 @@ class NoteGraphSuggestionStore:
                 "AND (maintenance_lease_token IS NULL OR maintenance_lease_expires_at<=?) "
                 "ORDER BY created_at,id LIMIT ?"
             )
+            params = (self.owner_user_id, dataset, now_value, limit)
+            if self._is_local_scope_retired(conn, dataset):
+                # A producer can enqueue after missing-Job grace. Retain that
+                # lookup obligation for the original run retention, rotating
+                # already-checked missing records behind untouched work.
+                query = (
+                    "SELECT id,state,revision FROM note_graph_suggestion_runs "
+                    "WHERE owner_user_id=? AND dataset_id=? AND ("
+                    "(state IN ('admitting','queued','running','cancelling','publishing') "
+                    "AND (maintenance_lease_token IS NULL OR maintenance_lease_expires_at<=?)) OR "
+                    "(state='failed' AND job_id IS NULL AND error_code='notes_graph_capabilities_changed_before_queue' "
+                    "AND expires_at>? AND (maintenance_lease_expires_at IS NULL OR maintenance_lease_expires_at<=?))) "
+                    "ORDER BY COALESCE(maintenance_lease_expires_at,created_at),created_at,id LIMIT ?"
+                )
+                params = (self.owner_user_id, dataset, now_value, now_value, now_value, limit)
             if self.is_postgres:
                 query += " FOR UPDATE SKIP LOCKED"
-            candidates = conn.execute(
-                query,
-                (self.owner_user_id, dataset, now_value, limit),
-            ).fetchall()
+            candidates = conn.execute(query, params).fetchall()
             claimed: list[NoteGraphSuggestionRun] = []
             for candidate in candidates:
                 token = f"ml_{secrets.token_urlsafe(32)}"
@@ -4030,7 +4166,7 @@ class NoteGraphSuggestionStore:
                     claimed.append(self._load_run(conn, dataset, str(candidate["id"])))
             return tuple(claimed)
 
-        return self._with_dataset_scope(dataset, mutate)
+        return self._with_maintenance_scope(dataset, mutate)
 
     def release_run_maintenance_lease(
         self,
@@ -4045,7 +4181,7 @@ class NoteGraphSuggestionStore:
         """Release one live exact maintenance lease without changing run state."""
 
         if (
-            expected_state not in self._ACTIVE_RUN_STATES
+            expected_state not in self._ACTIVE_RUN_STATES | {"failed"}
             or not isinstance(maintenance_lease_token, str)
             or not self._SAFE_ID_PATTERN.fullmatch(maintenance_lease_token)
         ):
@@ -4054,12 +4190,22 @@ class NoteGraphSuggestionStore:
         now_utc = self._aware_utc(now)
 
         def mutate(conn: SuggestionConnection) -> NoteGraphSuggestionRun:
+            next_lookup = None
+            if expected_state == "failed":
+                if not self._is_local_scope_retired(conn, dataset):
+                    raise NotesGraphDatasetScopeError("notes_graph_dataset_scope_invalid")
+                run = self._load_run(conn, dataset, run_id)
+                if run.job_id is not None or run.error_code != "notes_graph_capabilities_changed_before_queue":
+                    raise RuntimeError("notes_graph_maintenance_lease_conflict")
+                next_lookup = self._db_datetime(now_utc + self._MAINTENANCE_LEASE_DURATION)
             updated = conn.execute(
-                "UPDATE note_graph_suggestion_runs SET maintenance_lease_token=NULL,"
-                "maintenance_lease_expires_at=NULL,revision=revision+1 "
+                "UPDATE note_graph_suggestion_runs SET maintenance_lease_token=?,"
+                "maintenance_lease_expires_at=?,revision=revision+1 "
                 "WHERE owner_user_id=? AND dataset_id=? AND id=? AND state=? AND revision=? "
                 "AND maintenance_lease_token=? AND maintenance_lease_expires_at>?",
                 (
+                    maintenance_lease_token if next_lookup is not None else None,
+                    next_lookup,
                     self.owner_user_id,
                     dataset,
                     run_id,
@@ -4073,7 +4219,135 @@ class NoteGraphSuggestionStore:
                 raise RuntimeError("notes_graph_maintenance_lease_conflict")
             return self._load_run(conn, dataset, run_id)
 
-        return self._with_dataset_scope(dataset, mutate)
+        return self._with_maintenance_scope(dataset, mutate)
+
+    def retire_claimed_local_run(
+        self,
+        *,
+        dataset_id: str,
+        run_id: str,
+        expected_revision: int,
+        maintenance_lease_token: str,
+        now: datetime,
+    ) -> NoteGraphSuggestionRun:
+        """Retire one fenced run after Jobs cancellation or definitive absence."""
+
+        dataset = self._scope(dataset_id)
+        now_utc = self._aware_utc(now)
+
+        def mutate(conn: SuggestionConnection) -> NoteGraphSuggestionRun:
+            row = conn.execute(
+                "SELECT * FROM note_graph_suggestion_runs WHERE owner_user_id=? AND dataset_id=? "
+                "AND id=? AND revision=? AND maintenance_lease_token=? AND maintenance_lease_expires_at>?",
+                (
+                    self.owner_user_id,
+                    dataset,
+                    run_id,
+                    expected_revision,
+                    maintenance_lease_token,
+                    self._db_datetime(now_utc),
+                ),
+            ).fetchone()
+            if row is None:
+                raise RuntimeError("notes_graph_maintenance_lease_conflict")
+            run = self._run_from_row(row)
+            if (
+                run.state.value == "failed"
+                and run.job_id is None
+                and run.error_code == "notes_graph_capabilities_changed_before_queue"
+            ):
+                # Exact late Job cancellation succeeded. Do not mutate the
+                # terminal receipt or extend the original retention deadline.
+                conn.execute(
+                    "UPDATE note_graph_suggestion_runs SET "
+                    "maintenance_lease_expires_at=expires_at,revision=revision+1 "
+                    "WHERE owner_user_id=? AND dataset_id=? AND id=? AND revision=? AND maintenance_lease_token=?",
+                    (self.owner_user_id, dataset, run.id, run.revision, maintenance_lease_token),
+                )
+                return self._load_run(conn, dataset, run.id)
+            if run.state.value not in self._ACTIVE_RUN_STATES:
+                raise RuntimeError("notes_graph_maintenance_lease_conflict")
+            # Admission envelopes already have a closed failed-result contract;
+            # keep it rather than introducing a new replay shape for retirement.
+            admission = run.state.value == "admitting"
+            state = "failed" if admission else "stale"
+            error = "notes_graph_capabilities_changed_before_queue" if admission else "notes_graph_source_changed"
+            self._require_run_transition(run.state.value, state)
+            self._delete_staged_for_run(conn, dataset_id=dataset, run_id=run.id)
+            conn.execute(
+                "UPDATE note_graph_suggestion_runs SET state=?,revision=revision+1,error_code=?,guidance_key=?,"
+                "completed_at=?,expires_at=?,maintenance_lease_token=NULL,maintenance_lease_expires_at=NULL "
+                "WHERE owner_user_id=? AND dataset_id=? AND id=? AND revision=? AND maintenance_lease_token=?",
+                (
+                    state,
+                    error,
+                    "retry_generation" if admission else None,
+                    self._db_datetime(now_utc),
+                    self._db_datetime(now_utc + timedelta(days=30)),
+                    self.owner_user_id,
+                    dataset,
+                    run.id,
+                    run.revision,
+                    maintenance_lease_token,
+                ),
+            )
+            retired = self._load_run(conn, dataset, run.id)
+            receipts = conn.execute(
+                "SELECT * FROM note_graph_suggestion_operation_receipts WHERE owner_user_id=? AND dataset_id=? "
+                "AND state='in_progress' AND ((operation_kind='run_cancel' AND resource_identity=?) "
+                "OR (operation_kind='run_admit' AND id=?)) ORDER BY id",
+                (self.owner_user_id, dataset, run.id, run.admission_receipt_id),
+            ).fetchall()
+            for receipt in receipts:
+                if receipt["operation_kind"] == "run_admit":
+                    envelope = self._run_replay_envelope(retired)
+                else:
+                    envelope = {"run_id": retired.id, "state": retired.state.value, "revision": retired.revision}
+                self._complete_receipt(
+                    conn,
+                    dataset_id=dataset,
+                    receipt=receipt,
+                    envelope=envelope,
+                    http_status=503 if receipt["operation_kind"] == "run_admit" else 200,
+                    now_utc=now_utc,
+                )
+                if receipt["operation_kind"] == "run_admit":
+                    conn.execute(
+                        "UPDATE note_graph_suggestion_operation_receipts SET state='failed' "
+                        "WHERE owner_user_id=? AND dataset_id=? AND id=? AND state='completed'",
+                        (self.owner_user_id, dataset, receipt["id"]),
+                    )
+            return retired
+
+        return self._with_maintenance_scope(dataset, mutate, retired_only=True)
+
+    def retire_local_suggestions(self, *, dataset_id: str, now: datetime, limit: int) -> int:
+        """Stale a bounded obsolete review batch, preserving accepted products."""
+
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+            raise ValueError("notes_graph_maintenance_limit_invalid")
+        dataset = self._scope(dataset_id)
+        now_utc = self._aware_utc(now)
+
+        def mutate(conn: SuggestionConnection) -> int:
+            query = (
+                "SELECT * FROM note_graph_suggestions WHERE owner_user_id=? AND dataset_id=? "
+                "AND state IN ('pending','accepting') ORDER BY id LIMIT ?"
+            )
+            if self.is_postgres:
+                query += " FOR UPDATE SKIP LOCKED"
+            rows = conn.execute(query, (self.owner_user_id, dataset, limit)).fetchall()
+            for row in rows:
+                self._invalidate_suggestion_row(
+                    conn,
+                    dataset_id=dataset,
+                    suggestion=self._suggestion_from_row(row),
+                    reason="source_changed",
+                    now_utc=now_utc,
+                )
+            return len(rows)
+
+        return self._with_maintenance_scope(dataset, mutate, retired_only=True)
 
     def reconcile_run_after_job_lookup(
         self,
@@ -4371,9 +4645,16 @@ class NoteGraphSuggestionStore:
             "SELECT dataset_id FROM note_task_scope_authority WHERE owner_user_id=? ORDER BY dataset_id",
             (self.owner_user_id,),
         ).fetchall()
-        for dataset_row in datasets:
-            dataset = str(dataset_row["dataset_id"])
-            self._set_dataset_scope(conn, dataset)
+        scope_ids = dict.fromkeys([f"legacy:{self.owner_user_id}", *(str(row["dataset_id"]) for row in datasets)])
+        for dataset in scope_ids:
+            if dataset == f"legacy:{self.owner_user_id}":
+                # Invalidation only retires review work. It never authorizes new
+                # work, including after canonical enrollment. The caller already
+                # holds the note lock, so do not invert the authority lock order.
+                if self.is_postgres:
+                    conn.execute("SELECT set_config('app.current_dataset_id', ?, true)", (dataset,))
+            else:
+                self._set_dataset_scope(conn, dataset)
             run_rows = conn.execute(
                 "SELECT * FROM note_graph_suggestion_runs WHERE owner_user_id=? AND dataset_id=? "
                 "AND source_note_id=? AND state IN ('admitting','queued','running','publishing') "
@@ -4638,7 +4919,7 @@ class NoteGraphSuggestionStore:
                     counts["rejection_sets"] += int(deleted or 0)
             return counts
 
-        return self._with_dataset_scope(dataset, mutate)
+        return self._with_maintenance_scope(dataset, mutate)
 
     @staticmethod
     def _normalized_sql(value: str) -> str:
@@ -4761,13 +5042,13 @@ class NoteGraphSuggestionStore:
                 raise NotesGraphSourceTooLargeError("notes_graph_source_too_large")
             raise ValueError("Notes graph source is unavailable")
 
-        return self._with_dataset_scope(dataset, read)
+        return self._with_dataset_scope(dataset, read, allow_unbound_legacy_read=True)
 
     def ensure_fts_ready(self, *, dataset_id: str) -> None:
         """Validate owner-dataset Notes FTS structure without running retrieval."""
 
         dataset = self._scope(dataset_id)
-        self._with_dataset_scope(dataset, self._ensure_fts_ready)
+        self._with_dataset_scope(dataset, self._ensure_fts_ready, allow_unbound_legacy_read=True)
 
     def fetch_ranked_candidates(
         self,

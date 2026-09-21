@@ -789,7 +789,8 @@
     "collapseSidebar": "サイドバーを折りたたむ",
     "titlePlaceholder": "タイトル",
     "keywordsEditorPlaceholder": "キーワード（タグ）",
-    "tagsHelp": "左側のキーワードフィルターでこのノートを見つけるのに役立ちます。"
+    "tagsHelp": "左側のキーワードフィルターでこのノートを見つけるのに役立ちます。",
+    "offlineSaveUnavailable": "アカウントとローカル ストレージが確認されるまで、オフライン保存は利用できません。変更は未保存のままです。"
   },
   "tts": {
     "playground": "TTS プレイグラウンド"

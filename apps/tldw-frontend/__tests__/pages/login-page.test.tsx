@@ -14,7 +14,7 @@ vi.mock("@/services/tldw/deployment-mode", () => ({
   isHostedTldwDeployment: () => deploymentMock.hosted
 }))
 
-const clientMock = vi.hoisted(() => ({ getConfig: vi.fn() }))
+const clientMock = vi.hoisted(() => ({ getConfig: vi.fn(), getFirstRunMetadata: vi.fn(), updateConfig: vi.fn() }))
 vi.mock("@/services/tldw/TldwApiClient", () => ({ tldwClient: clientMock }))
 
 const authMock = vi.hoisted(() => ({ login: vi.fn() }))
@@ -36,6 +36,7 @@ describe("LoginPage (#2919)", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     deploymentMock.hosted = false
+    clientMock.getFirstRunMetadata.mockReset().mockRejectedValue(new Error("Discovery unavailable"))
     clientMock.getConfig.mockResolvedValue({
       serverUrl: "http://127.0.0.1:8001",
       authMode: "multi-user"
@@ -109,5 +110,13 @@ describe("LoginPage (#2919)", () => {
     expect(await screen.findByTestId("route-redirect")).toHaveTextContent(
       "Connect a server first"
     )
+  })
+
+  it("discovers a fresh multi-user server before rendering sign-in", async () => {
+    clientMock.getConfig.mockResolvedValue({ serverUrl: "http://127.0.0.1:8001", authMode: "single-user" })
+    clientMock.getFirstRunMetadata.mockResolvedValue({ auth_mode: "multi_user" })
+    render(<LoginPage />)
+    expect(await screen.findByRole("heading", { name: "Sign in to tldw" })).toBeInTheDocument()
+    expect(clientMock.updateConfig).toHaveBeenCalledWith({ authMode: "multi-user" })
   })
 })

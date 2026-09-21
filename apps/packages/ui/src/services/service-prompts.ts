@@ -257,7 +257,7 @@ const unresolvedServicePromptScopeError = () => Object.assign(
 export type ServicePromptSnapshot = Readonly<{
   scopeKey: string
   requestScope: ServicePromptRequestScope
-  capability: "supported" | "legacy-404"
+  capability: "supported" | "legacy-404" | "unchecked"
   definitions: Readonly<
     Partial<Record<KnownServicePromptId, Readonly<{
       definition: ServicePromptRenderDefinition
@@ -319,6 +319,14 @@ const LEGACY_RENDER_DEFINITIONS = Object.freeze({
     id: "writing.agent.brainstorm",
     parts: [{ key: "system", mode: "literal", required_variables: [] }]
   }),
+  "writing.continuation.predict": freezeRenderDefinition({
+    id: "writing.continuation.predict",
+    parts: [{ key: "system", mode: "literal", required_variables: [] }]
+  }),
+  "writing.continuation.fill": freezeRenderDefinition({
+    id: "writing.continuation.fill",
+    parts: [{ key: "system", mode: "literal", required_variables: [] }]
+  }),
   "chat.rag.answer": freezeRenderDefinition({
     id: "chat.rag.answer",
     parts: [{
@@ -375,7 +383,9 @@ const PACKAGED_FALLBACK_IDS = [
   "image.prompt.refinement",
   "writing.agent.quick",
   "writing.agent.planning",
-  "writing.agent.brainstorm"
+  "writing.agent.brainstorm",
+  "writing.continuation.predict",
+  "writing.continuation.fill"
 ] as const
 type PackagedFallbackId = typeof PACKAGED_FALLBACK_IDS[number]
 const hasPackagedFallback = (id: KnownServicePromptId): id is PackagedFallbackId =>
@@ -523,7 +533,7 @@ export const resolveServicePromptScope = async (
       throw new Error("tldw server is not configured.")
     }
     if (!servicePromptTargetsMatch(initialConfig, refreshedConfig)) {
-      throw new Error("Authenticated Service Prompt scope changed while resolving.")
+      throw createServicePromptScopeChangedError()
     }
     resolvedConfig = refreshedConfig
     userId = user.id
@@ -791,6 +801,9 @@ export const loadServicePromptSnapshot = async (
     }
     lease.bind(scope)
     throwIfAborted(lease.signal)
+    if (requested.length === 0) {
+      return freezeSnapshot(scope, "unchecked", {}, lease)
+    }
     let catalog: ServicePromptCatalogItem[]
     try {
       catalog = await tldwClient.listServicePrompts({

@@ -193,6 +193,10 @@ export function getSourceTypeLabel(
   return options.plural ? labels.plural : labels.singular
 }
 
+export function getResultSourceType(result: RagResult): string {
+  return result.sourceType || result.metadata?.source_type || "media_db"
+}
+
 export function buildSourceTypeCounts(results: RagResult[]): Record<string, number> {
   return results.reduce<Record<string, number>>((acc, result) => {
     const sourceType = normalizeSourceType(result.sourceType ?? result.metadata?.source_type)
@@ -365,6 +369,22 @@ export function getFreshnessDescriptor(
     label: `From ${year}`,
     className: "border-warn/30 bg-warn/10 text-warn",
   }
+}
+
+/** Only explicitly identified, bounded probabilities support relevance claims. */
+export function getMeasuredRelevance(result: RagResult): number | undefined {
+  const score = result.score
+  return result.score_kind === "relevance_probability" &&
+    typeof score === "number" && Number.isFinite(score) && score >= 0 && score <= 1
+    ? score
+    : undefined
+}
+
+export function hasLowMeasuredRelevance(results: RagResult[], threshold = 0.3): boolean {
+  return results.length > 0 && results.every((result) => {
+    const relevance = getMeasuredRelevance(result)
+    return relevance !== undefined && relevance < threshold
+  })
 }
 
 export function getRelevanceDescriptor(

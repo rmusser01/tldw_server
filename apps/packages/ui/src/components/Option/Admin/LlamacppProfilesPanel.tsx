@@ -5,7 +5,6 @@ import {
   Empty,
   Input,
   InputNumber,
-  List,
   Modal,
   Select,
   Space,
@@ -319,49 +318,17 @@ export const LlamacppProfilesPanel: React.FC<LlamacppProfilesPanelProps> = ({
             description="No saved llama.cpp profiles are available."
           />
         ) : (
-          <List
-            size="small"
-            bordered
-            rowKey="profile_id"
-            dataSource={profiles}
-            renderItem={(profile) => (
-              <List.Item
-                actions={[
-                  <Button
-                    key="edit"
-                    size="small"
-                    icon={<Edit3 size={14} />}
-                    onClick={() => openForm("edit", profile)}
-                    loading={savingProfileId === profile.profile_id}
-                    aria-label={`Edit ${profile.name}`}
-                  >
-                    Edit
-                  </Button>,
-                  <Button
-                    key="duplicate"
-                    size="small"
-                    icon={<Copy size={14} />}
-                    onClick={() => openForm("duplicate", profile)}
-                    aria-label={`Duplicate ${profile.name}`}
-                  >
-                    Duplicate
-                  </Button>,
-                  <Button
-                    key="delete"
-                    size="small"
-                    danger
-                    icon={<Trash2 size={14} />}
-                    onClick={() => {
-                      void handleDelete(profile)
-                    }}
-                    loading={savingProfileId === profile.profile_id}
-                    aria-label={`Delete ${profile.name}`}
-                  >
-                    Delete
-                  </Button>
-                ]}
+          <ul
+            role="list"
+            aria-label="Saved profiles"
+            className="m-0 list-none divide-y divide-border rounded-lg border border-border p-0"
+          >
+            {profiles.map((profile) => (
+              <li
+                key={profile.profile_id}
+                className="flex flex-col gap-3 px-4 py-2 sm:flex-row sm:items-center sm:justify-between"
               >
-                <Space orientation="vertical" size={4} className="w-full">
+                <Space orientation="vertical" size={4} className="min-w-0 flex-1">
                   <Space wrap size="small">
                     <Text strong>{profile.name}</Text>
                     <Tag>{profile.mode}</Tag>
@@ -387,9 +354,40 @@ export const LlamacppProfilesPanel: React.FC<LlamacppProfilesPanelProps> = ({
                     </Space>
                   )}
                 </Space>
-              </List.Item>
-            )}
-          />
+                <div className="flex shrink-0 flex-wrap gap-2">
+                  <Button
+                    size="small"
+                    icon={<Edit3 size={14} />}
+                    onClick={() => openForm("edit", profile)}
+                    loading={savingProfileId === profile.profile_id}
+                    aria-label={`Edit ${profile.name}`}
+                  >
+                    Edit
+                  </Button>
+                  <Button
+                    size="small"
+                    icon={<Copy size={14} />}
+                    onClick={() => openForm("duplicate", profile)}
+                    aria-label={`Duplicate ${profile.name}`}
+                  >
+                    Duplicate
+                  </Button>
+                  <Button
+                    size="small"
+                    danger
+                    icon={<Trash2 size={14} />}
+                    onClick={() => {
+                      void handleDelete(profile)
+                    }}
+                    loading={savingProfileId === profile.profile_id}
+                    aria-label={`Delete ${profile.name}`}
+                  >
+                    Delete
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
         )}
       </Space>
 

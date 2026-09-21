@@ -28,28 +28,35 @@ import {
   useNextDueQuery
 } from "../../hooks"
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (
-      key: string,
-      defaultValueOrOptions?:
-        | string
-        | {
-            defaultValue?: string
-          }
-    ) => {
-      if (typeof defaultValueOrOptions === "string") return defaultValueOrOptions
-      if (defaultValueOrOptions?.defaultValue) {
-        return defaultValueOrOptions.defaultValue.replace(
-          /\{\{(\w+)\}\}/g,
-          (_match, token: string) =>
-            String((defaultValueOrOptions as Record<string, unknown>)[token] ?? `{{${token}}}`)
-        )
-      }
-      return key
-    }
-  })
+vi.mock("@/services/service-prompts", async importOriginal => ({
+  ...await importOriginal<typeof import("@/services/service-prompts")>(),
+  ...await import("./review-scope-fixture")
 }))
+
+vi.mock("react-i18next", async () => {
+  const { createInstance } = await import("i18next")
+  const { default: ICU } = await import("@/i18n/icu-format")
+  const formatter = createInstance().use(ICU)
+  await formatter.init({ lng: "en", fallbackLng: false, resources: {} })
+  return {
+    useTranslation: () => ({
+      t: (
+        key: string,
+        defaultValueOrOptions?:
+          | string
+          | {
+              defaultValue?: string
+            }
+      ) => {
+        if (typeof defaultValueOrOptions === "string") return defaultValueOrOptions
+        if (defaultValueOrOptions?.defaultValue) {
+          return formatter.t(key, defaultValueOrOptions)
+        }
+        return key
+      }
+    })
+  }
+})
 
 vi.mock("react-router-dom", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react-router-dom")>()
@@ -95,7 +102,7 @@ vi.mock("../../hooks", () => ({
   useCramQueueQuery: vi.fn(),
   useReviewQuery: vi.fn(),
   useReviewFlashcardMutation: vi.fn(),
-  useEndFlashcardReviewSessionMutation: vi.fn(),
+  useEndFlashcardReviewSessionMutation: vi.fn(() => ({ mutateAsync: vi.fn().mockResolvedValue({ id: 77 }), isPending: false })),
   useRecentFlashcardReviewSessionsQuery: vi.fn(() => ({
     data: [],
     isLoading: false,

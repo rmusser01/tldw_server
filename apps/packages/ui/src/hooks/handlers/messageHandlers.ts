@@ -1,3 +1,4 @@
+import { excludeLocalRagDiagnostics, getLocalRagDiagnosticUser } from "@/utils/local-rag-diagnostic"
 import { type ChatHistory, type Message } from "~/store/option"
 import {
   deleteChatForEdit,
@@ -13,6 +14,7 @@ import { tldwClient, type ConversationState } from "@/services/tldw/TldwApiClien
 import { normalizeConversationState } from "@/utils/conversation-state"
 import type { NotificationInstance } from "antd/es/notification/interface"
 import type { ChatScope } from "@/types/chat-scope"
+import type { ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
 
 export const createRegenerateLastMessage = ({
   validateBeforeSubmitFn,
@@ -28,7 +30,7 @@ export const createRegenerateLastMessage = ({
   messages: Message[]
   setHistory: (history: ChatHistory) => void
   setMessages: (messages: Message[]) => void
-  onSubmit: (params: any) => Promise<unknown>
+  onSubmit: (params: any) => Promise<ChatSubmitResult | void>
   beforeSubmit?: (params: {
     lastAssistant: Message
     lastAssistantIndex: number
@@ -69,6 +71,7 @@ export const createRegenerateLastMessage = ({
     }
 
     const lastAssistant = messages[lastAssistantIndex]
+    const diagnosticUser = getLocalRagDiagnosticUser(messages, lastAssistant)
     const historyUser = (() => {
       for (let i = history.length - 1; i >= 0; i--) {
         if (history[i]?.role === "user") {
@@ -85,17 +88,18 @@ export const createRegenerateLastMessage = ({
     })()
 
     const userContent =
-      (historyUser?.entry?.content ?? messageUser?.message ?? "").trim()
-    if (!userContent) {
+      diagnosticUser?.message ?? historyUser?.entry?.content ?? messageUser?.message ?? ""
+    const userImage = diagnosticUser
+      ? diagnosticUser.images?.[0] || ""
+      : historyUser?.entry?.image || messageUser?.images?.[0] || ""
+    if (!userContent.trim() && !userImage) {
       return
     }
+    const userMessageType = diagnosticUser
+      ? diagnosticUser.messageType
+      : historyUser?.entry?.messageType || messageUser?.messageType
 
-    const userImage =
-      historyUser?.entry?.image || messageUser?.images?.[0] || ""
-    const userMessageType =
-      historyUser?.entry?.messageType || messageUser?.messageType
-
-    const newHistory = historyUser
+    const newHistory = diagnosticUser ? history : historyUser
       ? history.slice(0, historyUser.index)
       : history.slice(0, Math.max(history.length - 2, 0))
     const nextMessages = messages.filter((_, idx) => idx !== lastAssistantIndex)
@@ -118,7 +122,7 @@ export const createRegenerateLastMessage = ({
     setMessages(submitMessages)
 
     const newController = new AbortController()
-    await onSubmit({
+    return await onSubmit({
       message: userContent,
       image: userImage,
       isRegenerate: true,
@@ -156,6 +160,9 @@ export const createEditMessage = ({
     isSend: boolean
   ) => {
     const newHistory = history
+    const eligibleMessages = excludeLocalRagDiagnostics(messages)
+    const historyIndex = eligibleMessages.indexOf(messages[index])
+    const prefixLength = messages.slice(0, index).filter(row => eligibleMessages.includes(row)).length
 
     // if human message and send then only trigger the submit
     if (isHuman && isSend) {
@@ -171,7 +178,7 @@ export const createEditMessage = ({
       )
       const previousMessages = updatedMessages.slice(0, index + 1)
       setMessages(previousMessages)
-      const previousHistory = newHistory.slice(0, index)
+      const previousHistory = newHistory.slice(0, prefixLength)
       setHistory(previousHistory)
       await updateMessageByIndex(historyId, index, message)
       await deleteChatForEdit(historyId, index)
@@ -191,7 +198,7 @@ export const createEditMessage = ({
     )
     setMessages(updatedMessages)
     const updatedHistory = newHistory.map((item, idx) =>
-      idx === index ? { ...item, content: message } : item
+      idx === historyIndex ? { ...item, content: message } : item
     )
     setHistory(updatedHistory)
     await updateMessageByIndex(historyId, index, message)
@@ -229,6 +236,7 @@ export const createBranchMessage = ({
   messages,
   history,
   onServerChatMutated,
+  onServerChatBranchAccepted,
   serverOnly = false
 }: {
   setMessages: (messages: Message[]) => void
@@ -260,6 +268,10 @@ export const createBranchMessage = ({
   messages?: Message[]
   history?: ChatHistory
   onServerChatMutated?: () => void
+  onServerChatBranchAccepted?: (
+    chatId: string,
+    characterId: string | number
+  ) => void
   serverOnly?: boolean
   notification: NotificationInstance
 }) => {
@@ -457,6 +469,7 @@ export const createBranchMessage = ({
           )
         }
 
+        onServerChatBranchAccepted?.(newChatId, resolvedCharacterId)
         if (setServerChatId) {
           setServerChatId(newChatId)
         }

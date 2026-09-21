@@ -22,6 +22,9 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_u
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management import sqlite_policy
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError as BackendDatabaseError
+from tldw_Server_API.app.core.DB_Management.chacha.health import probe_chacha_connection
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
 from tldw_Server_API.app.core.DB_Management.chacha.runtime import (
     ChaChaRuntimeManager,
     ChaChaRuntimeUnavailableError,
@@ -441,24 +444,17 @@ def _apply_sqlite_tuning(db_instance: CharactersRAGDB) -> None:
         logger.debug("ChaChaNotes tuning skipped ({})", type(e).__name__)
 
 
+@chacha_operation(independent=True)
 def _health_check_instance(db_instance: CharactersRAGDB) -> bool:
     try:
-        conn = db_instance.get_connection()
-        sqlite_policy.configure_sqlite_connection(
-            conn,
-            use_wal=False,
-            synchronous=None,
-            foreign_keys=True,
-            busy_timeout_ms=1000,
-            temp_store=None,
-        )
-        conn.execute("SELECT 1")
+        probe_chacha_connection(db_instance)
         return True
-    except (CharactersRAGDBError, sqlite3.Error, OSError, RuntimeError, ValueError) as e:
+    except (BackendDatabaseError, CharactersRAGDBError, sqlite3.Error, OSError, RuntimeError, ValueError) as e:
         logger.warning("ChaChaNotes health probe failed ({})", type(e).__name__)
         return False
 
 
+@chacha_operation(independent=True)
 def _create_and_prepare_db(user_id: int, client_id: str) -> CharactersRAGDB:
     """Prepare an owner database and seed its bundled content before publication."""
     db_path: Optional[Path] = None
@@ -498,7 +494,7 @@ def _create_and_prepare_db(user_id: int, client_id: str) -> CharactersRAGDB:
 async def _ensure_default_character_async(db_instance: CharactersRAGDB, user_id: int) -> None:
     loop = asyncio.get_running_loop()
     try:
-        future = loop.run_in_executor(_get_chacha_executor(), _ensure_default_character, db_instance)
+        future = loop.run_in_executor(_get_chacha_executor(), _ensure_default_character_owned, db_instance)
         _track_default_character_future(future)
         await asyncio.wait_for(
             asyncio.shield(future),
@@ -523,6 +519,12 @@ async def _ensure_default_character_async(db_instance: CharactersRAGDB, user_id:
             "Error ensuring default character ({}); continuing; will retry on next access.",
             type(e).__name__,
         )
+
+
+@chacha_operation(independent=True)
+def _ensure_default_character_owned(db_instance: CharactersRAGDB) -> Optional[int]:
+    """Keep executor maintenance independent of the request that scheduled it."""
+    return _ensure_default_character(db_instance)
 
 
 def _ensure_default_character(db_instance: CharactersRAGDB) -> Optional[int]:

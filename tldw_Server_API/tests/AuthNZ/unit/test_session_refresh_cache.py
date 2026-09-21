@@ -567,7 +567,7 @@ async def test_is_token_blacklisted_checks_refresh_hash_fallback(monkeypatch):
     manager._ensure_db_pool = types.MethodType(_ensure_db_pool_stub, manager)
 
     class DummyBlacklist:
-        async def is_blacklisted(self, _jti: str) -> bool:
+        async def is_blacklisted(self, _jti: str, *, strict: bool = False) -> bool:
             return False
 
     monkeypatch.setattr(

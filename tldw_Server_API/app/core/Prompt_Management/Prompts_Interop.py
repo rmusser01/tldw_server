@@ -50,6 +50,11 @@ from tldw_Server_API.app.core.DB_Management.Prompts_DB import (
 from tldw_Server_API.app.core.DB_Management.Prompts_DB import (
     view_prompt_keywords_markdown as db_view_prompt_keywords_markdown,
 )
+from tldw_Server_API.app.core.DB_Management.prompts_db_helpers import (
+    parse_stored_prompt_definition,
+    reject_recipe_runtime_values,
+)
+from tldw_Server_API.app.core.Prompt_Management.structured_prompts import SingleTextRecipeDefinitionV2
 
 #
 #######################################################################################################################
@@ -324,10 +329,20 @@ def export_prompts_formatted_interop(export_format: str = 'csv',
     This wraps the standalone export_prompts_formatted function from Prompts_DB_v2.
     """
     db = get_db_instance()
-    return db_export_prompts_formatted(db, export_format, filter_keywords,
-                                       include_system, include_user, include_details,
-                                       include_author, include_associated_keywords,
-                                       markdown_template_name)
+    status_message, output = db_export_prompts_formatted(
+        db,
+        export_format,
+        filter_keywords,
+        include_system,
+        include_user,
+        include_details,
+        include_author,
+        include_associated_keywords,
+        markdown_template_name,
+    )
+    if output == "None" and "single_text_recipe_export_requires_json" in status_message:
+        raise InputError("single_text_recipe_export_requires_json")  # noqa: TRY003
+    return status_message, output
 
 
 #######################################################################################################################
@@ -369,6 +384,57 @@ class PromptsInteropService:
         # Drop the default tag from presentation; if it's the only tag, present as empty
         filtered = [k for k in items if k.strip().lower() != 'no_keyword']
         return filtered
+
+    @staticmethod
+    def _structured_fields(record: dict[str, Any]) -> dict[str, Any]:
+        """Validate and copy optional structured identity without runtime values."""
+        try:
+            reject_recipe_runtime_values(record)
+            prompt_format = record.get("prompt_format") or "legacy"
+            if prompt_format != "structured":
+                if (
+                    record.get("prompt_definition") is not None
+                    or record.get("prompt_schema_version") is not None
+                ):
+                    raise ValueError("invalid_recipe_prompt_format")
+                return {}
+            schema_version = record.get("prompt_schema_version")
+            definition = parse_stored_prompt_definition(
+                record.get("prompt_definition"),
+                schema_version=schema_version,
+            )
+            if isinstance(definition, SingleTextRecipeDefinitionV2) and (
+                record.get("prompt_format") != "structured"
+                or type(schema_version) is not int
+                or schema_version != 2
+            ):
+                raise ValueError("invalid_prompt_definition")
+        except ValueError as error:
+            raise InputError(str(error)) from None
+        return {
+            "prompt_format": "structured",
+            "prompt_schema_version": int(definition.schema_version),
+            "prompt_definition": definition.model_dump(),
+            "system_prompt": record.get("system_prompt"),
+            "user_prompt": record.get("user_prompt"),
+        }
+
+    def _export_prompt_record(self, prompt: dict[str, Any]) -> dict[str, Any]:
+        """Build a JSON export record, preserving validated structured identity.
+
+        Raise InputError for malformed stored definitions instead of flattening
+        them into legacy text. The source record is not mutated.
+        """
+        exported = {
+            "name": prompt.get("name"),
+            "content": prompt.get("content") if "content" in prompt else prompt.get("details"),
+            "author": prompt.get("author"),
+            "keywords": list(prompt.get("keywords") or []),
+        }
+        structured = self._structured_fields(prompt)
+        if structured:
+            exported.update(structured)
+        return exported
 
     # CRUD
     def create_prompt(self, name: str, content: Optional[str] = None, author: Optional[str] = None,
@@ -417,6 +483,9 @@ class PromptsInteropService:
                 details=content,
                 system_prompt=kwargs.get("system_prompt"),
                 user_prompt=kwargs.get("user_prompt"),
+                prompt_format=kwargs.get("prompt_format", "legacy"),
+                prompt_schema_version=kwargs.get("prompt_schema_version"),
+                prompt_definition=kwargs.get("prompt_definition"),
                 keywords=keywords or [],
                 overwrite=False,
             )
@@ -441,6 +510,9 @@ class PromptsInteropService:
                     details=content,
                     system_prompt=kwargs.get("system_prompt"),
                     user_prompt=kwargs.get("user_prompt"),
+                    prompt_format=kwargs.get("prompt_format", "legacy"),
+                    prompt_schema_version=kwargs.get("prompt_schema_version"),
+                    prompt_definition=kwargs.get("prompt_definition"),
                     keywords=keywords or [],
                     overwrite=False,
                 )
@@ -459,6 +531,9 @@ class PromptsInteropService:
                 details=content,
                 system_prompt=kwargs.get("system_prompt"),
                 user_prompt=kwargs.get("user_prompt"),
+                prompt_format=kwargs.get("prompt_format", "legacy"),
+                prompt_schema_version=kwargs.get("prompt_schema_version"),
+                prompt_definition=kwargs.get("prompt_definition"),
                 keywords=keywords or [],
                 overwrite=False,
             )
@@ -731,12 +806,7 @@ class PromptsInteropService:
                 if not p:
                     p = indexed.get(pid_int)
                 if p:
-                    export_list.append({
-                        'name': p.get('name'),
-                        'content': p.get('content') if 'content' in p else p.get('details'),
-                        'author': p.get('author'),
-                        'keywords': list(p.get('keywords') or []),
-                    })
+                    export_list.append(self._export_prompt_record(p))
         else:
             # Merge explicit filter_criteria with supported kwargs (excluding prompt_ids)
             merged_criteria: dict[str, Any] = {}
@@ -755,12 +825,7 @@ class PromptsInteropService:
             else:
                 items = self.list_prompts() or []
             for it in items:
-                export_list.append({
-                    'name': it.get('name'),
-                    'content': it.get('content') if 'content' in it else it.get('details'),
-                    'author': it.get('author'),
-                    'keywords': list(it.get('keywords') or []),
-                })
+                export_list.append(self._export_prompt_record(it))
         return {
             "version": "1.0",
             "exported_at": __import__("datetime").datetime.utcnow().isoformat(),
@@ -778,6 +843,9 @@ class PromptsInteropService:
         if not isinstance(data, dict):
             raise TypeError("import data must be a dict")
         prompts = data.get("prompts") or []
+        # Validate every structured record before the first write so an unsafe
+        # batch cannot partially overwrite good local data.
+        structured_fields = [self._structured_fields(prompt) for prompt in prompts]
         def _looks_like_duplicate_error(exc: Exception) -> bool:
             text = str(exc).lower()
             return (
@@ -804,7 +872,7 @@ class PromptsInteropService:
         failed = 0
         skipped = 0
 
-        for p in prompts:
+        for index, p in enumerate(prompts):
             try:
                 base_name = p.get("name")
                 if not isinstance(base_name, str) or not base_name.strip():
@@ -833,6 +901,7 @@ class PromptsInteropService:
                     content=p.get("content"),
                     author=p.get("author"),
                     keywords=p.get("keywords") or [],
+                    **structured_fields[index],
                 )
                 # Ensure reads present the original exported name (not the unique storage variant)
                 try:
@@ -873,6 +942,10 @@ class PromptsInteropService:
             if not isinstance(p.get("content"), str):
                 return False
             if "keywords" in p and not isinstance(p["keywords"], list):
+                return False
+            try:
+                self._structured_fields(p)
+            except (TypeError, ValueError):
                 return False
         return True
 

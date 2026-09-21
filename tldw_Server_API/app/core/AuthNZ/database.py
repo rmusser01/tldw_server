@@ -375,10 +375,9 @@ def build_postgres_in_clause(values: list, start_param: int = 1) -> tuple[str, l
 def _apply_single_user_fallback(url: str, auth_mode: str | None = None) -> str:
     """Apply single-user non-sqlite DATABASE_URL fallback to default SQLite path.
 
-    When running in single-user mode and the provided URL uses a non-sqlite/file
-    scheme, ignore it and return the default SQLite users DB path instead. This
-    guards against leaking a Postgres DSN from tests/CI into local single-user
-    runs.
+    Ignore incidental non-sqlite/file URLs in single-user mode, while honoring
+    an explicitly selected PostgreSQL backend. This guards against leaking a
+    Postgres DSN from tests/CI into local single-user runs.
     """
     try:
         if auth_mode is None:
@@ -401,6 +400,8 @@ def _apply_single_user_fallback(url: str, auth_mode: str | None = None) -> str:
         scheme = ""
 
     if mode == "single_user" and scheme and not scheme.startswith("sqlite") and not scheme.startswith("file"):
+        if scheme.startswith("postgres") and os.getenv("TLDW_USER_DB_BACKEND", "").lower() in {"postgres", "postgresql"}:
+            return url
         # Keep integration tests free to exercise Postgres-backed single-user bootstrap
         # behavior. Production/runtime safety still applies outside explicit tests.
         if is_test_mode() or is_explicit_pytest_runtime():
@@ -967,12 +968,10 @@ class DatabasePool:
     def _should_use_postgres(self) -> bool:
         """Return True if the configured DATABASE_URL resolves to PostgreSQL.
 
-        In production, PostgreSQL is only used when AUTH_MODE is ``multi_user``.
-        For test contexts (``TEST_MODE=1``) we allow exercising single-user
-        bootstrap and RBAC seed paths against a Postgres backend when a
-        Postgres DSN is configured. This keeps local single-user deployments
-        safely on SQLite by default while enabling the User-Unification
-        Postgres test coverage.
+        Multi-user deployments use the configured PostgreSQL URL. Single-user
+        deployments also honor an explicit TLDW_USER_DB_BACKEND selection;
+        otherwise incidental DSNs retain the SQLite fallback. Test contexts
+        continue to allow PostgreSQL bootstrap and RBAC coverage.
         """
         parsed = urlparse(self.settings.DATABASE_URL)
         scheme = (parsed.scheme or "").lower()
@@ -983,8 +982,11 @@ class DatabasePool:
         if mode == "multi_user":
             return True
 
-        # Allow Postgres in single-user mode only in explicit test contexts,
-        # so production single-user profiles continue to fall back to SQLite.
+        if mode == "single_user" and os.getenv("TLDW_USER_DB_BACKEND", "").lower() in {"postgres", "postgresql"}:
+            return True
+
+        # Retain the existing test exemption without treating an incidental
+        # runtime DATABASE_URL alone as an explicit backend selection.
         try:
             test_mode = is_test_mode()
         except _AUTHNZ_DB_NONCRITICAL_EXCEPTIONS:

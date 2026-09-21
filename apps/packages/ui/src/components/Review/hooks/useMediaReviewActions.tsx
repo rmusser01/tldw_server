@@ -607,7 +607,7 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
       // ignore storage/event errors
     }
 
-    navigate('/')
+    navigate('/chat')
     try {
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('tldw:focus-composer'))

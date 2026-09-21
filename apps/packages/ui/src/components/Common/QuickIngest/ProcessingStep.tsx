@@ -2,7 +2,6 @@ import React, { useCallback, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 import {
   Check,
-  Circle,
   Loader2,
   X,
   Minimize2,
@@ -23,12 +22,6 @@ import { useQuickIngestSessionStore } from "@/store/quick-ingest-session"
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-
-/**
- * Ordered stages for per-item multi-stage progress indicator.
- */
-const PROCESSING_STAGES = ["uploading", "processing", "analyzing", "storing"] as const
-type ProcessingStage = (typeof PROCESSING_STAGES)[number]
 
 /**
  * Map of detected media types to lucide icon components.
@@ -85,81 +78,6 @@ const formatEstimated = (seconds: number): string => {
   return `~${m} min remaining`
 }
 
-/**
- * Determine the visual state of each stage dot relative to the item's current status.
- */
-const getStageState = (
-  stage: ProcessingStage,
-  itemStatus: ItemProgressStatus
-): "done" | "active" | "pending" | "failed" => {
-  const stageIndex = PROCESSING_STAGES.indexOf(stage)
-  const activeIndex = PROCESSING_STAGES.indexOf(itemStatus as ProcessingStage)
-
-  if (itemStatus === "complete") return "done"
-  if (itemStatus === "failed") {
-    // Stages before the failure point are done; the failure point is failed; rest pending
-    if (activeIndex >= 0) {
-      if (stageIndex < activeIndex) return "done"
-      if (stageIndex === activeIndex) return "failed"
-      return "pending"
-    }
-    // If status doesn't map to a stage (e.g. failed during queued), mark first as failed
-    return stageIndex === 0 ? "failed" : "pending"
-  }
-  if (itemStatus === "cancelled" || itemStatus === "queued") return "pending"
-
-  // Active processing: check relative position
-  if (activeIndex < 0) return "pending"
-  if (stageIndex < activeIndex) return "done"
-  if (stageIndex === activeIndex) return "active"
-  return "pending"
-}
-
-// ---------------------------------------------------------------------------
-// Sub-components
-// ---------------------------------------------------------------------------
-
-type StageIndicatorProps = {
-  stage: ProcessingStage
-  visualState: "done" | "active" | "pending" | "failed"
-  label: string
-}
-
-const StageIndicator: React.FC<StageIndicatorProps> = ({
-  stage: _stage,
-  visualState,
-  label,
-}) => {
-  return (
-    <div className="flex flex-col items-center gap-0.5" title={label}>
-      <span className="flex h-4 w-4 items-center justify-center">
-        {visualState === "done" ? (
-          <Check className="h-3.5 w-3.5 text-primary" strokeWidth={2.5} aria-hidden="true" />
-        ) : visualState === "active" ? (
-          <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" aria-hidden="true" />
-        ) : visualState === "failed" ? (
-          <X className="h-3.5 w-3.5 text-danger" strokeWidth={2.5} aria-hidden="true" />
-        ) : (
-          <Circle className="h-2.5 w-2.5 text-text-muted" aria-hidden="true" />
-        )}
-      </span>
-      <span
-        className={`text-[9px] leading-none ${
-          visualState === "active"
-            ? "font-medium text-primary"
-            : visualState === "done"
-              ? "text-text-muted"
-              : visualState === "failed"
-                ? "text-danger"
-                : "text-text-muted opacity-50"
-        }`}
-      >
-        {label}
-      </span>
-    </div>
-  )
-}
-
 // ---------------------------------------------------------------------------
 // ItemRow
 // ---------------------------------------------------------------------------
@@ -180,16 +98,6 @@ const ItemRow: React.FC<ItemRowProps> = ({ item, progress, qi, onCancel }) => {
     progress.status !== "complete" &&
     progress.status !== "failed" &&
     progress.status !== "cancelled"
-
-  const stageLabels: Record<ProcessingStage, string> = useMemo(
-    () => ({
-      uploading: qi("processing.stage.upload", "Upload"),
-      processing: qi("processing.stage.process", "Process"),
-      analyzing: qi("processing.stage.analyze", "Analyze"),
-      storing: qi("processing.stage.store", "Store"),
-    }),
-    [qi]
-  )
 
   const statusLabel = useMemo(() => {
     switch (progress.status) {
@@ -279,46 +187,29 @@ const ItemRow: React.FC<ItemRowProps> = ({ item, progress, qi, onCancel }) => {
           </div>
         </div>
 
-        {/* Multi-stage progress indicator */}
-        {progress.status !== "queued" && (
-          <div className="flex items-center gap-1">
-            {/* Stage dots with connectors */}
-            <div className="flex items-center gap-0">
-              {PROCESSING_STAGES.map((stage, idx) => {
-                const state = getStageState(stage, progress.status)
-                return (
-                  <React.Fragment key={stage}>
-                    {idx > 0 && (
-                      <div
-                        className={`mx-0.5 h-px w-3 sm:w-5 ${
-                          state === "done" || state === "active"
-                            ? "bg-primary"
-                            : state === "failed"
-                              ? "bg-danger"
-                              : "bg-border"
-                        }`}
-                        aria-hidden="true"
-                      />
-                    )}
-                    <StageIndicator
-                      stage={stage}
-                      visualState={state}
-                      label={stageLabels[stage]}
-                    />
-                  </React.Fragment>
-                )
-              })}
-            </div>
-
-            {/* Progress bar for active items */}
-            {isActive && (
-              <div className="ml-2 hidden h-1.5 flex-1 overflow-hidden rounded-full bg-surface2 sm:block">
-                <div
-                  className="h-full rounded-full bg-primary transition-all duration-300"
-                  style={{ width: `${progress.progressPercent}%` }}
-                />
-              </div>
-            )}
+        {isActive && (
+          <div
+            role="progressbar"
+            aria-label={qi("processing.itemProgress", "Processing {{name}}", {
+              name: displayName,
+            })}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={progress.progressPercent > 0 ? progress.progressPercent : undefined}
+            className="h-1.5 overflow-hidden rounded-full bg-surface2"
+          >
+            <div
+              className={
+                progress.progressPercent > 0
+                  ? "h-full rounded-full bg-primary transition-all duration-300"
+                  : "h-full animate-pulse rounded-full bg-primary/30 motion-reduce:animate-none"
+              }
+              style={
+                progress.progressPercent > 0
+                  ? { width: `${progress.progressPercent}%` }
+                  : undefined
+              }
+            />
           </div>
         )}
 
@@ -351,9 +242,10 @@ const ItemRow: React.FC<ItemRowProps> = ({ item, progress, qi, onCancel }) => {
 
 type ProcessingStepProps = {
   onCancelAll?: () => void
+  onMinimize?: () => void
 }
 
-export const ProcessingStep: React.FC<ProcessingStepProps> = ({ onCancelAll }) => {
+export const ProcessingStep: React.FC<ProcessingStepProps> = ({ onCancelAll, onMinimize }) => {
   const { t } = useTranslation(["option"])
   const { state, cancelProcessing, cancelItem, minimize } = useIngestWizard()
   const { processingState, queueItems } = state
@@ -478,13 +370,10 @@ export const ProcessingStep: React.FC<ProcessingStepProps> = ({ onCancelAll }) =
     return result
   }, [processingState.perItemProgress])
 
-  // Overall progress
-  const overallPercent = useMemo(() => {
-    const items = processingState.perItemProgress
-    if (items.length === 0) return 0
-    const total = items.reduce((sum, p) => sum + p.progressPercent, 0)
-    return Math.round(total / items.length)
-  }, [processingState.perItemProgress])
+  const finishedCount = counts.completed + counts.failed + counts.cancelled
+  const totalCount = processingState.perItemProgress.length
+  const finishedPercent =
+    totalCount > 0 ? Math.round((finishedCount / totalCount) * 100) : 0
 
   const handleCancelAll = useCallback(() => {
     if (onCancelAll) {
@@ -496,7 +385,8 @@ export const ProcessingStep: React.FC<ProcessingStepProps> = ({ onCancelAll }) =
 
   const handleMinimize = useCallback(() => {
     minimize()
-  }, [minimize])
+    onMinimize?.()
+  }, [minimize, onMinimize])
 
   const handleCancelItem = useCallback(
     (id: string) => {
@@ -569,13 +459,23 @@ export const ProcessingStep: React.FC<ProcessingStepProps> = ({ onCancelAll }) =
         {processingState.status === "running" && (
           <span className="flex items-center gap-1.5 text-xs text-primary">
             <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-            {overallPercent}%
+            {qi("processing.finishedCount", "{{done}}/{{total}} finished", {
+              done: finishedCount,
+              total: totalCount,
+            })}
           </span>
         )}
       </div>
 
-      {/* Overall progress bar */}
-      <div className="h-2 w-full overflow-hidden rounded-full bg-surface2">
+      {/* Confirmed finished-item count */}
+      <div
+        role="progressbar"
+        aria-label={qi("processing.finishedItems", "Finished items")}
+        aria-valuemin={0}
+        aria-valuemax={totalCount || 1}
+        aria-valuenow={finishedCount}
+        className="h-2 w-full overflow-hidden rounded-full bg-surface2"
+      >
         <div
           className={`h-full rounded-full transition-all duration-300 ${
             processingState.status === "cancelled"
@@ -584,7 +484,7 @@ export const ProcessingStep: React.FC<ProcessingStepProps> = ({ onCancelAll }) =
                 ? "bg-danger"
                 : "bg-primary"
           }`}
-          style={{ width: `${overallPercent}%` }}
+          style={{ width: `${finishedPercent}%` }}
         />
       </div>
 
@@ -626,14 +526,14 @@ export const ProcessingStep: React.FC<ProcessingStepProps> = ({ onCancelAll }) =
           <div className="min-w-0 flex-1">
             <p className="text-sm font-medium text-text">
               {qi(
-                "processing.banner.title",
-                "Processing content... This may take a few minutes for large files."
+                "processing.banner.waitingTitle",
+                "Waiting for server results"
               )}
             </p>
             <p className="mt-0.5 text-xs text-text-muted">
               {qi(
-                "processing.banner.subtitle",
-                "Processing and indexing content"
+                "processing.banner.waitingDescription",
+                "Elapsed time is shown below. Completion time depends on the content and server."
               )}
             </p>
           </div>
@@ -654,8 +554,8 @@ export const ProcessingStep: React.FC<ProcessingStepProps> = ({ onCancelAll }) =
             />
             <p className="text-xs text-text-muted">
               {qi(
-                "processing.banner.timeout",
-                "Processing is taking longer than usual. Your file will appear when ready."
+                "processing.banner.stillWaiting",
+                "Still waiting for server results. You can leave this running and check later."
               )}
             </p>
           </div>

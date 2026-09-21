@@ -548,7 +548,7 @@ class MediaLookupRepository:
             if total_items > 0:
                 items_cursor = db.execute_query(
                     """
-                    SELECT id, title, type, uuid
+                    SELECT id, title, type, uuid, trash_date
                     FROM Media
                     WHERE deleted = 0
                       AND is_trash = 1

@@ -1,0 +1,676 @@
+[
+  {
+    "name": "json-integral-numbers-have-no-lexical-type",
+    "definition": {
+      "schema_version": 2.0, "format": "structured", "definition_kind": "single_text_recipe",
+      "assembly_config": {"assembly_mode": "single_text", "target_role": "system", "render_format": "freeform", "block_separator": "|"},
+      "blocks": [
+        {"id": "max", "name": "Max", "role": "system", "content": "max", "order": 9007199254740991.0},
+        {"id": "one", "name": "One", "role": "system", "content": "one", "order": 1.0},
+        {"id": "zero", "name": "Zero", "role": "system", "content": "zero", "order": -0.0}
+      ]
+    },
+    "expected_text": "zero|one|max",
+    "expected_legacy": {"system_prompt": "zero|one|max", "user_prompt": ""}
+  },
+  {
+    "name": "safe-order-boundaries-and-adjacent-integers",
+    "definition": {
+      "schema_version": 2,
+      "format": "structured",
+      "definition_kind": "single_text_recipe",
+      "assembly_config": {"assembly_mode": "single_text", "target_role": "system", "render_format": "freeform", "block_separator": "|"},
+      "blocks": [
+        {"id": "max", "name": "Max", "role": "system", "content": "max", "order": 9007199254740991},
+        {"id": "min_next", "name": "Min next", "role": "system", "content": "min+1", "order": -9007199254740990},
+        {"id": "max_prev", "name": "Max previous", "role": "system", "content": "max-1", "order": 9007199254740990},
+        {"id": "min", "name": "Min", "role": "system", "content": "min", "order": -9007199254740991}
+      ]
+    },
+    "expected_text": "min|min+1|max-1|max",
+    "expected_legacy": {"system_prompt": "min|min+1|max-1|max", "user_prompt": ""}
+  },
+  {
+    "name": "stable-order-ties-disabled-and-whitespace",
+    "definition": {
+      "schema_version": 2,
+      "format": "structured",
+      "definition_kind": "single_text_recipe",
+      "assembly_config": {
+        "assembly_mode": "single_text",
+        "target_role": "system",
+        "render_format": "freeform",
+        "block_separator": "|"
+      },
+      "variables": [],
+      "blocks": [
+        {
+          "id": "late",
+          "name": "late",
+          "role": "system",
+          "content": " L ",
+          "order": 30
+        },
+        {
+          "id": "tie-first",
+          "name": "tie-first",
+          "role": "system",
+          "content": "A\r\n",
+          "order": 10
+        },
+        {
+          "id": "disabled",
+          "name": "disabled",
+          "role": "system",
+          "content": "DROP",
+          "order": 0,
+          "enabled": false
+        },
+        {
+          "id": "tie-second",
+          "name": "tie-second",
+          "role": "system",
+          "content": "\tB",
+          "order": 10
+        },
+        {
+          "id": "first",
+          "name": "first",
+          "role": "system",
+          "content": "F",
+          "order": -10
+        }
+      ]
+    },
+    "runtimeValues": {},
+    "expected_text": "F|A\r\n|\tB| L ",
+    "expected_legacy": {
+      "system_prompt": "F|A\r\n|\tB| L ",
+      "user_prompt": ""
+    }
+  },
+  {
+    "name": "xml-style-preserves-content-and-unicode",
+    "definition": {
+      "schema_version": 2,
+      "format": "structured",
+      "definition_kind": "single_text_recipe",
+      "assembly_config": {
+        "assembly_mode": "single_text",
+        "target_role": "system",
+        "render_format": "xml",
+        "block_separator": "\r\n"
+      },
+      "variables": [],
+      "blocks": [
+        {
+          "id": "one",
+          "name": "one",
+          "role": "system",
+          "content": " \n<raw>& café 😀\t",
+          "order": 10,
+          "section_key": "_one.x-1"
+        },
+        {
+          "id": "two",
+          "name": "two",
+          "role": "system",
+          "content": "",
+          "order": 20,
+          "section_key": "Two"
+        }
+      ]
+    },
+    "runtimeValues": {},
+    "expected_text": "<_one.x-1> \n<raw>& café 😀\t</_one.x-1>\r\n<Two></Two>",
+    "expected_legacy": {
+      "system_prompt": "<_one.x-1> \n<raw>& café 😀\t</_one.x-1>\r\n<Two></Two>",
+      "user_prompt": ""
+    }
+  },
+  {
+    "name": "xml-only-exact-own-closing-tag-collides",
+    "definition": {
+      "schema_version": 2,
+      "format": "structured",
+      "definition_kind": "single_text_recipe",
+      "assembly_config": {
+        "assembly_mode": "single_text",
+        "target_role": "system",
+        "render_format": "xml",
+        "block_separator": "\n\n"
+      },
+      "variables": [],
+      "blocks": [
+        {
+          "id": "one",
+          "name": "one",
+          "role": "system",
+          "content": "</Other> </One> </one > <one>",
+          "order": 10,
+          "section_key": "one"
+        }
+      ]
+    },
+    "runtimeValues": {},
+    "expected_text": "<one></Other> </One> </one > <one></one>",
+    "expected_legacy": {
+      "system_prompt": "<one></Other> </One> </one > <one></one>",
+      "user_prompt": ""
+    }
+  },
+  {
+    "name": "markdown-user-headings-are-not-templates",
+    "definition": {
+      "schema_version": 2,
+      "format": "structured",
+      "definition_kind": "single_text_recipe",
+      "assembly_config": {
+        "assembly_mode": "single_text",
+        "target_role": "user",
+        "render_format": "markdown",
+        "block_separator": "\n--\n"
+      },
+      "variables": [],
+      "blocks": [
+        {
+          "id": "one",
+          "name": "Résumé {{x}}",
+          "role": "user",
+          "content": " \n### Inner\n尾  ",
+          "order": 10
+        },
+        {
+          "id": "two",
+          "name": "Empty",
+          "role": "user",
+          "content": "",
+          "order": 20
+        }
+      ]
+    },
+    "runtimeValues": {},
+    "expected_text": "## Résumé {{x}}\n\n \n### Inner\n尾  \n--\n## Empty\n\n",
+    "expected_legacy": {
+      "system_prompt": "",
+      "user_prompt": "## Résumé {{x}}\n\n \n### Inner\n尾  \n--\n## Empty\n\n"
+    }
+  },
+  {
+    "name": "freeform-includes-empty-blocks-and-exact-separator",
+    "definition": {
+      "schema_version": 2,
+      "format": "structured",
+      "definition_kind": "single_text_recipe",
+      "assembly_config": {
+        "assembly_mode": "single_text",
+        "target_role": "system",
+        "render_format": "freeform",
+        "block_separator": "\t\n"
+      },
+      "variables": [],
+      "blocks": [
+        {
+          "id": "a",
+          "name": "a",
+          "role": "system",
+          "content": "",
+          "order": 10
+        },
+        {
+          "id": "b",
+          "name": "b",
+          "role": "system",
+          "content": " B ",
+          "order": 20
+        },
+        {
+          "id": "c",
+          "name": "c",
+          "role": "system",
+          "content": "",
+          "order": 30
+        }
+      ]
+    },
+    "runtimeValues": {},
+    "expected_text": "\t\n B \t\n",
+    "expected_legacy": {
+      "system_prompt": "\t\n B \t\n",
+      "user_prompt": ""
+    }
+  },
+  {
+    "name": "empty-separator",
+    "definition": {
+      "schema_version": 2,
+      "format": "structured",
+      "definition_kind": "single_text_recipe",
+      "assembly_config": {
+        "assembly_mode": "single_text",
+        "target_role": "system",
+        "render_format": "freeform",
+        "block_separator": ""
+      },
+      "variables": [],
+      "blocks": [
+        {
+          "id": "a",
+          "name": "a",
+          "role": "system",
+          "content": "A",
+          "order": 10
+        },
+        {
+          "id": "b",
+          "name": "b",
+          "role": "system",
+          "content": "B",
+          "order": 20
+        }
+      ]
+    },
+    "runtimeValues": {},
+    "expected_text": "AB",
+    "expected_legacy": {
+      "system_prompt": "AB",
+      "user_prompt": ""
+    }
+  },
+  {
+    "name": "blank-recipe",
+    "definition": {
+      "schema_version": 2,
+      "format": "structured",
+      "definition_kind": "single_text_recipe",
+      "assembly_config": {
+        "assembly_mode": "single_text",
+        "target_role": "system",
+        "render_format": "freeform",
+        "block_separator": "\n\n"
+      },
+      "variables": [],
+      "blocks": []
+    },
+    "runtimeValues": {},
+    "expected_text": "",
+    "expected_legacy": {
+      "system_prompt": "",
+      "user_prompt": ""
+    }
+  },
+  {
+    "name": "disabled-xml-has-no-wrapper-or-collision",
+    "definition": {
+      "schema_version": 2,
+      "format": "structured",
+      "definition_kind": "single_text_recipe",
+      "assembly_config": {
+        "assembly_mode": "single_text",
+        "target_role": "system",
+        "render_format": "xml",
+        "block_separator": "\n\n"
+      },
+      "variables": [],
+      "blocks": [
+        {
+          "id": "a",
+          "name": "a",
+          "role": "system",
+          "content": "</a>",
+          "order": 10,
+          "enabled": false,
+          "section_key": "a"
+        }
+      ]
+    },
+    "runtimeValues": {},
+    "expected_text": "",
+    "expected_legacy": {
+      "system_prompt": "",
+      "user_prompt": ""
+    }
+  },
+  {
+    "name": "starter-defaults-and-optional-absence",
+    "definition": {
+      "schema_version": 2,
+      "format": "structured",
+      "definition_kind": "single_text_recipe",
+      "assembly_config": {
+        "assembly_mode": "single_text",
+        "target_role": "system",
+        "render_format": "freeform",
+        "block_separator": "\n\n"
+      },
+      "variables": [
+        {
+          "name": "required",
+          "required": true,
+          "default_value": "Starter"
+        },
+        {
+          "name": "optional"
+        },
+        {
+          "name": "null_default",
+          "default_value": null
+        },
+        {
+          "name": "empty",
+          "required": true,
+          "default_value": ""
+        }
+      ],
+      "blocks": [
+        {
+          "id": "a",
+          "name": "a",
+          "role": "system",
+          "content": "{{required}}|{{optional}}|{{null_default}}|{{empty}}",
+          "order": 10,
+          "is_template": true
+        }
+      ]
+    },
+    "runtimeValues": {},
+    "expected_text": "Starter|||",
+    "expected_legacy": {
+      "system_prompt": "Starter|||",
+      "user_prompt": ""
+    }
+  },
+  {
+    "name": "runtime-overrides-default-including-empty",
+    "definition": {
+      "schema_version": 2,
+      "format": "structured",
+      "definition_kind": "single_text_recipe",
+      "assembly_config": {
+        "assembly_mode": "single_text",
+        "target_role": "system",
+        "render_format": "freeform",
+        "block_separator": "\n\n"
+      },
+      "variables": [
+        {
+          "name": "x",
+          "required": true,
+          "default_value": "Starter"
+        },
+        {
+          "name": "y",
+          "default_value": "Other"
+        }
+      ],
+      "blocks": [
+        {
+          "id": "a",
+          "name": "a",
+          "role": "system",
+          "content": "{{x}}|{{y}}",
+          "order": 10,
+          "is_template": true
+        }
+      ]
+    },
+    "runtimeValues": {
+      "x": "Live",
+      "y": "",
+      "unused": {
+        "secret": "ignored"
+      }
+    },
+    "expected_text": "Live|",
+    "expected_legacy": {
+      "system_prompt": "Live|",
+      "user_prompt": ""
+    }
+  },
+  {
+    "name": "only-template-double-braces-substitute-once",
+    "definition": {
+      "schema_version": 2,
+      "format": "structured",
+      "definition_kind": "single_text_recipe",
+      "assembly_config": {
+        "assembly_mode": "single_text",
+        "target_role": "system",
+        "render_format": "freeform",
+        "block_separator": "\n\n"
+      },
+      "variables": [
+        {
+          "name": "x"
+        }
+      ],
+      "blocks": [
+        {
+          "id": "a",
+          "name": "a",
+          "role": "system",
+          "content": "{{x}} {x} $x <x> {{bad-name}} {{é}}",
+          "order": 10,
+          "is_template": true
+        },
+        {
+          "id": "literal",
+          "name": "literal",
+          "role": "system",
+          "content": "{{x}} {{unknown}}",
+          "order": 20
+        }
+      ]
+    },
+    "runtimeValues": {
+      "x": "{{unknown}}",
+      "unknown": "never used"
+    },
+    "expected_text": "{{unknown}} {x} $x <x> {{bad-name}} {{é}}\n\n{{x}} {{unknown}}",
+    "expected_legacy": {
+      "system_prompt": "{{unknown}} {x} $x <x> {{bad-name}} {{é}}\n\n{{x}} {{unknown}}",
+      "user_prompt": ""
+    }
+  },
+  {
+    "name": "python-template-whitespace-grammar",
+    "definition": {
+      "schema_version": 2,
+      "format": "structured",
+      "definition_kind": "single_text_recipe",
+      "assembly_config": {
+        "assembly_mode": "single_text",
+        "target_role": "system",
+        "render_format": "freeform",
+        "block_separator": "\n\n"
+      },
+      "variables": [
+        {
+          "name": "x"
+        }
+      ],
+      "blocks": [
+        {
+          "id": "a",
+          "name": "a",
+          "role": "system",
+          "content": "{{\u001cx}}/{{ x　}}/{{﻿x﻿}}",
+          "order": 10,
+          "is_template": true
+        }
+      ]
+    },
+    "runtimeValues": {
+      "x": "值"
+    },
+    "expected_text": "值/值/{{﻿x﻿}}",
+    "expected_legacy": {
+      "system_prompt": "值/值/{{﻿x﻿}}",
+      "user_prompt": ""
+    }
+  },
+  {
+    "name": "prototype-shaped-variable-is-ordinary-declaration",
+    "definition": {
+      "schema_version": 2,
+      "format": "structured",
+      "definition_kind": "single_text_recipe",
+      "assembly_config": {
+        "assembly_mode": "single_text",
+        "target_role": "system",
+        "render_format": "freeform",
+        "block_separator": "\n\n"
+      },
+      "variables": [
+        {
+          "name": "__proto__"
+        },
+        {
+          "name": "constructor"
+        }
+      ],
+      "blocks": [
+        {
+          "id": "a",
+          "name": "a",
+          "role": "system",
+          "content": "{{__proto__}}/{{constructor}}",
+          "order": 10,
+          "is_template": true
+        }
+      ]
+    },
+    "runtimeValues": {
+      "__proto__": "P",
+      "constructor": "C"
+    },
+    "expected_text": "P/C",
+    "expected_legacy": {
+      "system_prompt": "P/C",
+      "user_prompt": ""
+    }
+  },
+  {
+    "name": "unused-nonstring-default-is-overridden",
+    "definition": {
+      "schema_version": 2,
+      "format": "structured",
+      "definition_kind": "single_text_recipe",
+      "assembly_config": {
+        "assembly_mode": "single_text",
+        "target_role": "system",
+        "render_format": "freeform",
+        "block_separator": "\n\n"
+      },
+      "variables": [
+        {
+          "name": "x",
+          "default_value": 42
+        }
+      ],
+      "blocks": [
+        {
+          "id": "a",
+          "name": "a",
+          "role": "system",
+          "content": "{{x}}",
+          "order": 10,
+          "is_template": true
+        }
+      ]
+    },
+    "runtimeValues": {
+      "x": "safe"
+    },
+    "expected_text": "safe",
+    "expected_legacy": {
+      "system_prompt": "safe",
+      "user_prompt": ""
+    }
+  },
+  {
+    "name": "output-limit-exact-codepoints",
+    "definition": {
+      "schema_version": 2,
+      "format": "structured",
+      "definition_kind": "single_text_recipe",
+      "assembly_config": {
+        "assembly_mode": "single_text",
+        "target_role": "system",
+        "render_format": "freeform",
+        "block_separator": "\n\n"
+      },
+      "variables": [
+        {
+          "name": "x"
+        }
+      ],
+      "blocks": [
+        {
+          "id": "a",
+          "name": "a",
+          "role": "system",
+          "content": "{{x}}",
+          "order": 10,
+          "is_template": true
+        }
+      ]
+    },
+    "runtimeValues": {},
+    "runtime_repeats": {
+      "x": {
+        "text": "😀",
+        "count": 100000
+      }
+    },
+    "expected_repeat": {
+      "text": "😀",
+      "count": 100000,
+      "prefix": "",
+      "suffix": ""
+    }
+  },
+  {
+    "name": "xml-output-limit-includes-wrapper",
+    "definition": {
+      "schema_version": 2,
+      "format": "structured",
+      "definition_kind": "single_text_recipe",
+      "assembly_config": {
+        "assembly_mode": "single_text",
+        "target_role": "system",
+        "render_format": "xml",
+        "block_separator": "\n\n"
+      },
+      "variables": [
+        {
+          "name": "x"
+        }
+      ],
+      "blocks": [
+        {
+          "id": "a",
+          "name": "a",
+          "role": "system",
+          "content": "{{x}}",
+          "order": 10,
+          "is_template": true,
+          "section_key": "a"
+        }
+      ]
+    },
+    "runtimeValues": {},
+    "runtime_repeats": {
+      "x": {
+        "text": "x",
+        "count": 99993
+      }
+    },
+    "expected_repeat": {
+      "text": "x",
+      "count": 99993,
+      "prefix": "<a>",
+      "suffix": "</a>"
+    }
+  }
+]

@@ -24,6 +24,8 @@ if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
+MAX_CHAT_ATTACHMENT_READ_BYTES = 32 * 1024 * 1024
+
 class MessageStore:
     """Focused persistence seam for message CRUD operations."""
 
@@ -398,8 +400,8 @@ class MessageStore:
             return _append_with_retries(self._db.get_connection())
         return _append_with_retries()
 
-    def get_message_images(self, message_id: str) -> list[dict[str, Any]]:
-        """Fetch all images associated with a message, ordered by position."""
+    def get_message_images(self, message_id: str, *, strict: bool = False) -> list[dict[str, Any]]:
+        """Fetch ordered images; strict reads propagate errors and reject gaps."""
         try:
             cursor = self._db.execute_query(
                 "SELECT message_id, position, image_data, image_mime_type FROM message_images "
@@ -414,9 +416,13 @@ class MessageStore:
                 img_bytes = record.get("image_data")
                 if isinstance(img_bytes, memoryview):
                     record["image_data"] = img_bytes.tobytes()
+                if strict and (record["position"] != len(images) or not record.get("image_data")):
+                    raise CharactersRAGDBError("Saved chat attachment positions or data are incomplete")
                 images.append(record)
             return images  # noqa: TRY300
         except CharactersRAGDBError as e:
+            if strict:
+                raise
             logger.error(f"Failed to fetch images for message {message_id}: {e}")
             return []
 
@@ -656,7 +662,7 @@ class MessageStore:
             logger.error(f"Database error fetching conversation_id for message {message_id}: {e}")
             raise
 
-    def get_message_by_id(self, message_id: str, include_deleted: bool = False) -> dict[str, Any] | None:
+    def get_message_by_id(self, message_id: str, include_deleted: bool = False, *, strict_images: bool = False) -> dict[str, Any] | None:
         """
         Retrieves a specific message by its UUID.
 
@@ -665,6 +671,9 @@ class MessageStore:
 
         Args:
             message_id: The string UUID of the message.
+            include_deleted: Include soft-deleted messages and conversations.
+            strict_images: Propagate attachment read failures and reject missing
+                attachment positions or bytes instead of returning partial data.
 
         Returns:
             A dictionary with message data if found and not deleted, else None.
@@ -694,7 +703,7 @@ class MessageStore:
             img_blob = record.get("image_data")
             if isinstance(img_blob, memoryview):
                 record["image_data"] = img_blob.tobytes()
-            record["images"] = self.get_message_images(message_id)
+            record["images"] = self.get_message_images(message_id, **({"strict": True} if strict_images else {}))
             return record  # noqa: TRY300
         except CharactersRAGDBError as e:
             logger.error(f"Database error fetching message ID {message_id}: {e}")
@@ -1033,7 +1042,9 @@ class MessageStore:
     # ------------------------------------------------------------------
 
     def get_messages_for_conversation(self, conversation_id: str, limit: int = 100, offset: int = 0,
-                                      order_by_timestamp: str = "ASC", include_deleted: bool = False) -> list[dict[str, Any]]:
+                                      order_by_timestamp: str = "ASC", include_deleted: bool = False, *,
+                                      strict_images: bool = False,
+                                      image_byte_limit: int = MAX_CHAT_ATTACHMENT_READ_BYTES) -> list[dict[str, Any]]:
         """
         Lists messages for a specific conversation.
         Returns non-deleted messages, ordered by `timestamp` according to `order_by_timestamp`.
@@ -1059,6 +1070,64 @@ class MessageStore:
             LIMIT ? OFFSET ?
         """.format_map(locals())  # nosec B608
         try:
+            if strict_images:
+                # A single statement gives SQLite and PostgreSQL one snapshot.
+                # Over-budget pages expose their size but no attachment blobs.
+                strict_query = """
+                    WITH page AS (
+                        SELECT m.id, m.conversation_id, m.parent_message_id, m.sender, m.content,
+                               m.timestamp, m.ranking, m.last_modified, m.version, m.client_id, m.deleted,
+                               LENGTH(m.image_data) AS primary_bytes
+                        FROM messages m JOIN conversations c ON m.conversation_id = c.id
+                        WHERE m.conversation_id = ? {delete_clause} AND c.deleted = FALSE
+                        ORDER BY m.timestamp {order_direction}, m.last_modified {order_direction}, m.id {order_direction}
+                        LIMIT ? OFFSET ?
+                    ), sizes AS (
+                        SELECT COALESCE(SUM(CASE WHEN EXISTS (
+                            SELECT 1 FROM message_images mi WHERE mi.message_id = page.id
+                        ) THEN (SELECT COALESCE(SUM(LENGTH(mi.image_data)), 0)
+                                FROM message_images mi WHERE mi.message_id = page.id)
+                        ELSE COALESCE(page.primary_bytes, 0) END), 0) AS image_bytes FROM page
+                    ), bounds AS (SELECT ? AS max_bytes)
+                    SELECT page.*,
+                           CASE WHEN sizes.image_bytes <= bounds.max_bytes AND mi.position IS NULL
+                                THEN m.image_data ELSE NULL END AS image_data,
+                           m.image_mime_type,
+                           sizes.image_bytes AS page_image_bytes,
+                           mi.position AS image_position,
+                           CASE WHEN sizes.image_bytes <= bounds.max_bytes
+                                THEN mi.image_data ELSE NULL END AS ordered_image_data,
+                           mi.image_mime_type AS ordered_image_mime_type
+                    FROM page JOIN messages m ON m.id = page.id CROSS JOIN sizes CROSS JOIN bounds
+                    LEFT JOIN message_images mi ON mi.message_id = page.id AND sizes.image_bytes <= bounds.max_bytes
+                    ORDER BY page.timestamp {order_direction}, page.last_modified {order_direction},
+                             page.id {order_direction}, mi.position ASC
+                """.format_map(locals())  # nosec B608
+                cursor = self._db.execute_query(strict_query, (conversation_id, limit, offset, image_byte_limit))
+                columns = [column[0] for column in cursor.description] if cursor.description else []
+                by_id: dict[str, dict[str, Any]] = {}
+                for row in cursor.fetchall():
+                    record = dict(row) if isinstance(row, dict) else dict(zip(columns, row))
+                    if record.pop("page_image_bytes") > image_byte_limit:
+                        raise InputError("Chat attachment page exceeds the image read limit")
+                    position = record.pop("image_position")
+                    image_data = record.pop("ordered_image_data")
+                    image_mime = record.pop("ordered_image_mime_type")
+                    record.pop("primary_bytes")
+                    if isinstance(record.get("image_data"), memoryview):
+                        record["image_data"] = record["image_data"].tobytes()
+                    message = by_id.setdefault(record["id"], {**record, "images": []})
+                    if position is not None:
+                        if position != len(message["images"]):
+                            raise CharactersRAGDBError("Saved chat attachment positions are incomplete or invalid")
+                        if isinstance(image_data, memoryview):
+                            image_data = image_data.tobytes()
+                        message["images"].append({"message_id": record["id"], "position": position,
+                                                  "image_data": image_data, "image_mime_type": image_mime})
+                        if position == 0:
+                            message["image_data"] = image_data
+                            message["image_mime_type"] = image_mime
+                return list(by_id.values())
             cursor = self._db.execute_query(query, (conversation_id, limit, offset))
             raw_rows = cursor.fetchall()
             columns = [col[0] for col in cursor.description] if cursor.description else []
@@ -1497,12 +1566,14 @@ class MessageStore:
                 return []
 
             base_query = [
-                "SELECT m.*, ts_rank(m.messages_fts_tsv, to_tsquery('english', ?)) AS rank",
+                "SELECT m.*, c.title AS conversation_title, ts_rank(m.messages_fts_tsv, to_tsquery('english', ?)) AS rank",
                 "FROM messages m",
+                "JOIN conversations c ON c.id = m.conversation_id",
                 "WHERE m.deleted = FALSE",
+                "AND c.deleted = FALSE AND c.client_id = ?",
                 "AND m.messages_fts_tsv @@ to_tsquery('english', ?)",
             ]
-            params_list: list[Any] = [tsquery, tsquery]
+            params_list: list[Any] = [tsquery, self._db.client_id, tsquery]
 
             if conversation_id:
                 base_query.append("AND m.conversation_id = ?")
@@ -1521,12 +1592,16 @@ class MessageStore:
 
         safe_literal = content_query.replace('"', '""')
         safe_search_term = f'"{safe_literal}"' if '"' in content_query else safe_literal
+        if not safe_search_term.strip():
+            return []
         base_query = """
-                     SELECT m.*
+                     SELECT m.*, c.title AS conversation_title
                      FROM messages_fts, messages m
+                     JOIN conversations c ON c.id = m.conversation_id
                      WHERE messages_fts.rowid = m.rowid \
                        AND messages_fts MATCH ? \
                        AND m.deleted = FALSE \
+                       AND c.deleted = FALSE \
                      """
         params_list = [safe_search_term]
         if conversation_id:
@@ -1537,8 +1612,20 @@ class MessageStore:
         params_list.extend([limit, offset])
 
         try:
-            cursor = self._db.execute_query(base_query, tuple(params_list))
-            return [dict(row) for row in cursor.fetchall()]
+            try:
+                # Retain valid FTS syntax; normalize only prose parse failures.
+                rows = self._db.get_connection().execute(base_query, tuple(params_list)).fetchall()
+            except sqlite3.OperationalError as exc:
+                if not any(marker in str(exc).lower() for marker in ("fts5: syntax error", "no such column:")):
+                    raise
+                normalized = FTSQueryTranslator.normalize_query(content_query, "sqlite")
+                if normalized == safe_search_term:
+                    raise
+                params_list[0] = normalized
+                rows = self._db.get_connection().execute(base_query, tuple(params_list)).fetchall()
+            return [dict(row) for row in rows]
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Message search failed: {exc}") from exc  # noqa: TRY003
         except CharactersRAGDBError as e:
             logger.error("Error searching messages for content '{}': {}", safe_search_term, e)
             raise

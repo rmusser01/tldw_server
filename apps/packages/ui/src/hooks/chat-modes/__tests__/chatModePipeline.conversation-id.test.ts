@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import type { SaveMessageData } from "@/types/chat-modes"
 
 const mocks = vi.hoisted(() => ({
   pageAssistModel: vi.fn(),
   getModelNicknameByID: vi.fn(async (_modelId?: unknown) => null),
-  saveMessageOnSuccess: vi.fn(async () => "history-1"),
+  saveMessageOnSuccess: vi.fn<(data: SaveMessageData) => Promise<string | null>>(async () => "history-1"),
   saveMessageOnError: vi.fn(async () => "history-1"),
   setMessages: vi.fn(),
   setHistory: vi.fn(),
@@ -39,12 +40,14 @@ vi.mock("@/store/option", () => ({
   }
 }))
 
-import { runChatPipeline, type ChatModeDefinition } from "../chatModePipeline"
+import { runChatPipeline, type ChatModeDefinition, type ChatModeParamsBase } from "../chatModePipeline"
 import { decodeChatErrorPayload } from "@/utils/chat-error-message"
+import type { Message } from "@/store/option"
 
 describe("runChatPipeline conversation id handoff", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.setMessages.mockReset()
     mocks.pageAssistModel.mockResolvedValue({
       conversationId: "server-chat-1",
       saveToDb: true,
@@ -52,6 +55,104 @@ describe("runChatPipeline conversation id handoff", () => {
         yield "Search-backed answer"
       }
     })
+  })
+
+  it.each([
+    ["closed", "<think>Only reasoning</think>", "<think>Only reasoning</think>"],
+    ["unclosed", "<think>Only reasoning", "<think>Only reasoning"],
+    ["structured", { choices: [{ delta: { reasoning_content: "Only reasoning" } }] }, "<think>Only reasoning"]
+  ])("keeps %s reasoning and canonical acknowledgements in recoverable error persistence", async (_label, chunk, expectedText) => {
+    mocks.pageAssistModel.mockResolvedValue({
+      conversationId: "server-chat-1", saveToDb: true,
+      userServerMessageId: "server-user", serverMessageId: "server-assistant",
+      stream: async function* () { yield chunk }
+    })
+    let rows: Message[] = [
+      { id: "local-user", isBot: false, name: "You", message: "Hello" },
+      { id: "generated-assistant-id", isBot: true, name: "Assistant", message: "" }
+    ]
+    mocks.setMessages.mockImplementation(next => { rows = typeof next === "function" ? next(rows) : next })
+    await runChatPipeline({
+      id: "normal", setupMessages: () => ({ targetMessageId: "generated-assistant-id" }),
+      preparePrompt: async () => ({ chatHistory: [], humanMessage: { role: "user", content: "Hello" }, sources: [] })
+    }, "Hello", "", false, rows, [], new AbortController().signal, {
+      selectedModel: "test", useOCR: false, userMessageId: "local-user",
+      setMessages: mocks.setMessages, saveMessageOnSuccess: mocks.saveMessageOnSuccess,
+      saveMessageOnError: mocks.saveMessageOnError, setHistory: mocks.setHistory,
+      setIsProcessing: mocks.setIsProcessing, setStreaming: mocks.setStreaming,
+      setAbortController: mocks.setAbortController, historyId: "history-1", setHistoryId: mocks.setHistoryId
+    })
+    expect(mocks.saveMessageOnSuccess).not.toHaveBeenCalled()
+    expect(mocks.saveMessageOnError).toHaveBeenCalledWith(expect.objectContaining({
+      botMessage: expectedText, userServerMessageId: "server-user", assistantServerMessageId: "server-assistant"
+    }))
+    expect(rows[1]).toMatchObject({ message: expectedText, generationInfo: { interrupted: true, interruptionReason: expect.stringContaining("final answer") } })
+  })
+
+  it.each([
+    { acknowledgement: "server-assistant-1", expected: "server-assistant-1" },
+    { acknowledgement: undefined, expected: undefined }
+  ])("exposes the saved assistant identity only when acknowledged ($acknowledgement)", async ({ acknowledgement, expected }) => {
+    mocks.pageAssistModel.mockResolvedValue({
+      conversationId: "server-chat-1",
+      saveToDb: true,
+      serverMessageId: acknowledgement,
+      stream: async function* () { yield "Saved reply" }
+    })
+    let localMessages: Message[] = [{
+      id: "generated-assistant-id", isBot: true, name: "Assistant", message: "", sources: []
+    }]
+    mocks.setMessages.mockImplementation((next: Message[] | ((prev: Message[]) => Message[])) => {
+      localMessages = typeof next === "function" ? next(localMessages) : next
+    })
+    const mode: ChatModeDefinition<ChatModeParamsBase> = {
+      id: "normal",
+      setupMessages: () => ({ targetMessageId: "generated-assistant-id" }),
+      preparePrompt: async () => ({
+        chatHistory: [], humanMessage: { role: "user", content: "Hello" }, sources: []
+      })
+    }
+
+    await runChatPipeline(mode, "Hello", "", false, localMessages, [], new AbortController().signal, {
+      selectedModel: "openai/gpt-4.1-mini", useOCR: false,
+      setMessages: mocks.setMessages, saveMessageOnSuccess: mocks.saveMessageOnSuccess,
+      saveMessageOnError: mocks.saveMessageOnError, setHistory: mocks.setHistory,
+      setIsProcessing: mocks.setIsProcessing, setStreaming: mocks.setStreaming,
+      setAbortController: mocks.setAbortController, historyId: "history-1",
+      setHistoryId: mocks.setHistoryId, conversationId: "server-chat-1"
+    })
+
+    expect(localMessages[0].message).toBe("Saved reply")
+    expect(localMessages[0].serverMessageId).toBe(expected)
+    expect(mocks.saveMessageOnSuccess.mock.calls[0]?.[0]?.assistantServerMessageId).toBe(expected)
+  })
+
+  it("retains the acknowledged user when a saved stream fails after persistence", async () => {
+    mocks.pageAssistModel.mockResolvedValue({
+      conversationId: "server-chat-1", saveToDb: true, userServerMessageId: "server-user",
+      stream: async function* () { yield "Partial"; throw new Error("provider failed") }
+    })
+    let localMessages: Message[] = [
+      { id: "local-user", isBot: false, name: "You", message: "Hello" },
+      { id: "generated-assistant-id", isBot: true, name: "Assistant", message: "" }
+    ]
+    mocks.setMessages.mockImplementation(next => {
+      localMessages = typeof next === "function" ? next(localMessages) : next
+    })
+    const mode: ChatModeDefinition<ChatModeParamsBase> = {
+      id: "normal", setupMessages: () => ({ targetMessageId: "generated-assistant-id" }),
+      preparePrompt: async () => ({ chatHistory: [], humanMessage: { role: "user", content: "Hello" }, sources: [] })
+    }
+    await runChatPipeline(mode, "Hello", "", false, localMessages, [], new AbortController().signal, {
+      selectedModel: "test", useOCR: false, userMessageId: "local-user",
+      setMessages: mocks.setMessages, saveMessageOnSuccess: mocks.saveMessageOnSuccess,
+      saveMessageOnError: mocks.saveMessageOnError, setHistory: mocks.setHistory,
+      setIsProcessing: mocks.setIsProcessing, setStreaming: mocks.setStreaming,
+      setAbortController: mocks.setAbortController, historyId: "history-1", setHistoryId: mocks.setHistoryId
+    })
+    expect(localMessages[0]).toMatchObject({ id: "local-user", serverMessageId: "server-user" })
+    expect(mocks.saveMessageOnError).toHaveBeenCalledWith(expect.objectContaining({ userMessageId: "local-user", userServerMessageId: "server-user" }))
+    expect(mocks.saveMessageOnSuccess).not.toHaveBeenCalled()
   })
 
   it("passes explicit conversation ids into pageAssistModel instead of relying on store fallback", async () => {

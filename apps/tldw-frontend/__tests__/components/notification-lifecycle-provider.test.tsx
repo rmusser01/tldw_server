@@ -1,11 +1,16 @@
 import React, { useEffect } from "react"
 import { act, render, waitFor } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
+  connection: { phase: "connected", isConnected: true, mode: "normal", offlineBypass: false },
   getUnreadCount: vi.fn(),
   listNotifications: vi.fn(),
   subscribeNotificationsStream: vi.fn()
+}))
+
+vi.mock("@/hooks/useConnectionState", () => ({
+  useConnectionState: () => mocks.connection
 }))
 
 vi.mock("@web/lib/api/notifications", () => ({
@@ -21,7 +26,9 @@ vi.mock("@web/lib/api", () => ({
 
 vi.mock("@web/lib/authStorage", () => ({
   getApiBearer: () => null,
-  getApiKey: () => "test-api-key"
+  getApiKey: () => "test-api-key",
+  getEffectiveStoredTldwConfig: () => null,
+  getSessionAccessToken: () => window.localStorage.getItem("access_token")
 }))
 
 import {
@@ -72,6 +79,7 @@ describe("NotificationLifecycleProvider", () => {
   beforeEach(() => {
     vi.useRealTimers()
     vi.clearAllMocks()
+    mocks.connection = { phase: "connected", isConnected: true, mode: "normal", offlineBypass: false }
     window.localStorage.clear()
     mocks.getUnreadCount.mockResolvedValue({ unread_count: 5 })
     mocks.listNotifications.mockResolvedValue({
@@ -79,6 +87,104 @@ describe("NotificationLifecycleProvider", () => {
       total: 1
     })
     mocks.subscribeNotificationsStream.mockImplementation(() => vi.fn())
+  })
+
+  describe("tab visibility", () => {
+    let visibility: ReturnType<typeof vi.spyOn>
+    beforeEach(() => {
+      visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible")
+    })
+    afterEach(() => {
+      visibility.mockRestore()
+      vi.useRealTimers()
+    })
+    const setVisibility = async (state: DocumentVisibilityState) => {
+      visibility.mockReturnValue(state)
+      await act(async () => { document.dispatchEvent(new Event("visibilitychange")) })
+    }
+
+    it("does not open streams or poll while initially hidden, including explicit refresh", async () => {
+      visibility.mockReturnValue("hidden")
+      const view = renderProvider()
+      await act(async () => { await Promise.resolve() })
+      await act(async () => view.latest().tryAgain())
+      expect(mocks.getUnreadCount).not.toHaveBeenCalled()
+      expect(mocks.listNotifications).not.toHaveBeenCalled()
+      expect(mocks.subscribeNotificationsStream).not.toHaveBeenCalled()
+      await setVisibility("visible")
+      expect(mocks.subscribeNotificationsStream).toHaveBeenCalledTimes(1)
+      expect(view.latest().unreadCount).toBe(5)
+    })
+
+    it("releases a hidden stream and polls, then catches up using a fresh cursor", async () => {
+      vi.useFakeTimers()
+      const unsubscribe = vi.fn()
+      mocks.subscribeNotificationsStream.mockReturnValue(unsubscribe)
+      const view = renderProvider()
+      await act(async () => vi.advanceTimersByTimeAsync(0))
+      const priorStream = mocks.subscribeNotificationsStream.mock.calls[0][0]
+      act(() => priorStream.onOpen())
+      await setVisibility("hidden")
+      expect(unsubscribe).toHaveBeenCalledOnce()
+      await act(async () => vi.advanceTimersByTimeAsync(120_000))
+      expect(mocks.getUnreadCount).toHaveBeenCalledTimes(1)
+      mocks.getUnreadCount.mockResolvedValue({ unread_count: 8 })
+      mocks.listNotifications.mockResolvedValue({ items: [{ id: 13 }], total: 1 })
+      await setVisibility("visible")
+      expect(mocks.subscribeNotificationsStream).toHaveBeenCalledTimes(2)
+      expect(mocks.subscribeNotificationsStream).toHaveBeenLastCalledWith(expect.objectContaining({ after: 13 }))
+      expect(view.latest().unreadCount).toBe(8)
+      act(() => priorStream.onEvent({ event: "notification", payload: { id: 11 } }))
+      expect(view.latest().unreadCount).toBe(8)
+      expect(view.latest().events).toHaveLength(0)
+      view.unmount()
+    })
+
+    it("aborts pending bootstrap on hiding and rejects its delayed result", async () => {
+      let resolveOld!: (value: { unread_count: number }) => void
+      let signal: AbortSignal | undefined
+      mocks.getUnreadCount.mockImplementationOnce((options: { signal: AbortSignal }) => {
+        signal = options.signal
+        return new Promise(resolve => { resolveOld = resolve })
+      })
+      const view = renderProvider()
+      await waitFor(() => expect(mocks.getUnreadCount).toHaveBeenCalledTimes(1))
+      await setVisibility("hidden")
+      expect(signal?.aborted).toBe(true)
+      await act(async () => resolveOld({ unread_count: 99 }))
+      expect(mocks.listNotifications).not.toHaveBeenCalled()
+      expect(view.latest().unreadCount).toBe(0)
+      await setVisibility("visible")
+      expect(view.latest().unreadCount).toBe(5)
+      expect(mocks.subscribeNotificationsStream).toHaveBeenCalledTimes(1)
+    })
+
+    it.each([401, 403])("does not retry terminal HTTP %s merely because the tab becomes visible", async (status) => {
+      mocks.getUnreadCount.mockRejectedValueOnce(Object.assign(new Error("denied"), { status }))
+      const view = renderProvider()
+      await waitFor(() => expect(view.latest().state).toBe(status === 401 ? "auth-required" : "unavailable"))
+      await setVisibility("hidden")
+      await setVisibility("visible")
+      expect(mocks.getUnreadCount).toHaveBeenCalledTimes(1)
+      await act(async () => view.latest().tryAgain())
+      expect(mocks.getUnreadCount).toHaveBeenCalledTimes(2)
+      expect(view.latest().unreadCount).toBe(5)
+    })
+
+    it("clears the prior account while hidden and starts only the new account on activation", async () => {
+      const view = renderProvider("notifications:server-a:user-a")
+      await waitFor(() => expect(view.latest().unreadCount).toBe(5))
+      await setVisibility("hidden")
+      view.rerenderScope("notifications:server-a:user-b")
+      await act(async () => { await Promise.resolve() })
+      expect(view.latest().scopeKey).toBe("notifications:server-a:user-b")
+      expect(view.latest().unreadCount).toBe(0)
+      expect(mocks.getUnreadCount).toHaveBeenCalledTimes(1)
+      mocks.getUnreadCount.mockResolvedValue({ unread_count: 2 })
+      await setVisibility("visible")
+      expect(view.latest().unreadCount).toBe(2)
+      expect(mocks.getUnreadCount).toHaveBeenCalledTimes(2)
+    })
   })
 
   it("does not start and abort a throwaway bootstrap during the Strict Mode probe mount", async () => {
@@ -605,5 +711,94 @@ describe("NotificationLifecycleProvider", () => {
     expect(mocks.getUnreadCount).not.toHaveBeenCalled()
     expect(mocks.listNotifications).not.toHaveBeenCalled()
     expect(mocks.subscribeNotificationsStream).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { phase: "unconfigured", isConnected: false },
+    { phase: "searching", isConnected: false },
+    { phase: "error", isConnected: false },
+    { offlineBypass: true },
+    { mode: "demo" }
+  ])("does not request private notifications without a verified connection: %j", async (state) => {
+    mocks.connection = { ...mocks.connection, ...state }
+    const view = renderProvider()
+    await act(async () => Promise.resolve())
+
+    await act(async () => view.latest().tryAgain())
+    expect(mocks.getUnreadCount).not.toHaveBeenCalled()
+    expect(mocks.listNotifications).not.toHaveBeenCalled()
+    expect(mocks.subscribeNotificationsStream).not.toHaveBeenCalled()
+  })
+
+  it("exposes terminal state before an unverified consumer can start its inbox effect", async () => {
+    mocks.connection = { ...mocks.connection, isConnected: false, phase: "unconfigured" }
+    const requestInbox = vi.fn()
+    function InboxConsumer() {
+      const { state, connectionVerified } = useNotificationLifecycle()
+      useEffect(() => {
+        if (connectionVerified && state !== "auth-required" && state !== "unavailable") requestInbox()
+      }, [connectionVerified, state])
+      return null
+    }
+    render(<NotificationLifecycleProvider><InboxConsumer /></NotificationLifecycleProvider>)
+    await act(async () => Promise.resolve())
+    expect(requestInbox).not.toHaveBeenCalled()
+  })
+
+  it("projects empty terminal data in the first disconnected render before cleanup effects", async () => {
+    const renders: Array<NotificationLifecycleContextValue> = []
+    function RenderConsumer() {
+      renders.push(useNotificationLifecycle())
+      return null
+    }
+    const view = render(<NotificationLifecycleProvider><RenderConsumer /></NotificationLifecycleProvider>)
+    await waitFor(() => expect(renders.at(-1)?.unreadCount).toBe(5))
+    const epoch = renders.at(-1)!.lifecycleEpoch
+    renders.length = 0
+    mocks.connection = { ...mocks.connection, isConnected: false, phase: "unconfigured" }
+    view.rerender(<NotificationLifecycleProvider><RenderConsumer /></NotificationLifecycleProvider>)
+    expect(renders[0]).toMatchObject({
+      state: "auth-required", unreadCount: 0, events: [], latestEvent: null,
+      eventSequence: 0, mutationError: null, lifecycleEpoch: epoch
+    })
+  })
+
+  it("stops and clears disconnected work, ignores late results, and resumes only after verification", async () => {
+    vi.useFakeTimers()
+    let resolvePoll: ((value: { unread_count: number }) => void) | undefined
+    const unsubscribe = vi.fn()
+    mocks.subscribeNotificationsStream.mockReturnValue(unsubscribe)
+    mocks.getUnreadCount.mockResolvedValueOnce({ unread_count: 5 }).mockImplementationOnce(
+      () => new Promise((resolve) => { resolvePoll = resolve })
+    ).mockResolvedValue({ unread_count: 2 })
+    const view = renderProvider()
+    await act(async () => vi.advanceTimersByTimeAsync(30_000))
+    const pendingSignal = mocks.getUnreadCount.mock.calls[1][0].signal as AbortSignal
+
+    mocks.connection = { ...mocks.connection, phase: "unconfigured", isConnected: false }
+    view.rerenderScope("notifications:server-a:user-a")
+    expect(pendingSignal.aborted).toBe(true)
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
+    expect(view.latest().unreadCount).toBe(0)
+    expect(view.latest().state).toBe("auth-required")
+    await act(async () => resolvePoll?.({ unread_count: 99 }))
+    expect(view.latest().unreadCount).toBe(0)
+
+    act(() => window.dispatchEvent(new CustomEvent(AUTH_CREDENTIALS_CHANGED_EVENT, {
+      detail: { authenticated: true }
+    })))
+    view.rerenderScope("notifications:server-a:reentered-key")
+    await act(async () => vi.advanceTimersByTimeAsync(60_000))
+    expect(mocks.getUnreadCount).toHaveBeenCalledTimes(2)
+
+    mocks.connection = { ...mocks.connection, phase: "connected", isConnected: true }
+    view.rerenderScope("notifications:server-a:reentered-key")
+    await act(async () => vi.advanceTimersByTimeAsync(0))
+    expect(view.latest().unreadCount).toBe(2)
+    expect(mocks.subscribeNotificationsStream).toHaveBeenCalledTimes(2)
+    await act(async () => vi.advanceTimersByTimeAsync(30_000))
+    expect(mocks.getUnreadCount).toHaveBeenCalledTimes(4)
+    view.unmount()
+    vi.useRealTimers()
   })
 })

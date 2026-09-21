@@ -1790,6 +1790,7 @@ def test_postgres_v65_contract_has_matching_constraints_indexes_and_initializer_
     monkeypatch.setattr(db, "_verify_note_task_schema_postgres", lambda conn: None)
     monkeypatch.setattr(db, "_verify_notes_moodboard_studio_schema_postgres", lambda conn: None)
     monkeypatch.setattr(db, "_ensure_postgres_fts", lambda conn: None)
+    monkeypatch.setattr(db, "_ensure_study_pack_schema_postgres", lambda conn: None)
     applied: list[str] = []
 
     def _record_migration(conn: object) -> None:

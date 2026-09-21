@@ -20,6 +20,7 @@ from .exception_types import (  # noqa: F401 - centralized compatibility exports
 )
 
 if TYPE_CHECKING:
+    from .Admin_Webhooks.crypto import WebhookKeyErrorCode
     from .Admin_Webhooks.domain import WebhookErrorCode
 
 if hasattr(status, "HTTP_422_UNPROCESSABLE_CONTENT"):
@@ -40,6 +41,14 @@ _PROMPT_IMPROVEMENT_DISPATCH_MESSAGES = {
     "internal_error": "The prompt improvement request could not be completed.",
 }
 _MAX_PROMPT_IMPROVEMENT_RETRY_AFTER_SECONDS = 86_400
+
+
+class WebhookKeyError(Exception):
+    """Expected key-ring failure that exposes only a stable code."""
+
+    def __init__(self, code: WebhookKeyErrorCode) -> None:
+        self.code = code
+        super().__init__(code.value)
 
 
 class BuddyNotFoundError(LookupError):
@@ -192,6 +201,53 @@ class ClaimsAnalyticsExportError(RuntimeError):
         self.code = code
         self.retryable = retryable
         self.http_status = http_status
+
+
+class QuizMalformedOutputError(ValueError):
+    """Generated quiz content violates a required output contract."""
+
+
+class OsceGenerationError(ValueError):
+    """Base class for bounded OSCE generation failures."""
+
+    code = "osce_malformed_output"
+
+    def __init__(self, private_detail: object | None = None) -> None:
+        super().__init__(str(private_detail) if private_detail else self.code)
+
+
+class OsceProviderError(OsceGenerationError):
+    """An OSCE generation provider call failed."""
+
+    code = "osce_provider_failure"
+
+
+class OsceMalformedOutputError(OsceGenerationError):
+    """An OSCE generation provider returned malformed output."""
+
+    code = "osce_malformed_output"
+
+
+class OsceUnsupportedContractError(OsceGenerationError):
+    """An OSCE generation request or response uses an unsupported contract."""
+
+    code = "osce_unsupported_contract"
+
+
+class OsceCitationError(OsceGenerationError):
+    """Generated OSCE evidence citations are missing or inconsistent."""
+
+    code = "osce_citation_failure"
+
+
+class OsceVerificationError(OsceGenerationError):
+    """Generated OSCE evidence could not be verified safely."""
+
+    code = "osce_verification_failure"
+
+
+class OsceStationIdentityError(ValueError):
+    """A nested OSCE station identity violates reconciliation rules."""
 
 
 class NotesOrganizationValidationError(ValueError):
@@ -1880,6 +1936,14 @@ class WorkflowAdapterError(Exception):
 
 class AdapterError(WorkflowAdapterError):
     """Workflow adapter-specific error."""
+
+
+class ScheduledTaskPersistenceError(RuntimeError):
+    """A terminal run write failed and the enclosing Jobs attempt must retry."""
+
+
+class ScheduledTaskClaimBusy(RuntimeError):
+    """Execution may still be active; Jobs must not acknowledge this delivery."""
 
 
 class MacroValidationError(ValueError):

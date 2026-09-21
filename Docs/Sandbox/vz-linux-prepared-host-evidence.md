@@ -3,6 +3,7 @@
 **Status:** Active tracker for prepared Apple silicon `vz_linux` acceptance evidence.
 **Scope:** Real `vz_linux` execution evidence from manual operator runs or the host-gated workflow on trusted refs.
 **Policy:** `Docs/Sandbox/vz-linux-host-gated-ci-acceptance-policy.md`.
+**Drill contract:** `Docs/superpowers/specs/2026-05-18-vz-linux-lifecycle-drill-gaps-design.md`.
 **Operator entrypoint:** `tools/macos-vz-helper/scripts/vz-helperctl.py smoke` or `tools/vz-linux-image/scripts/run-host-e2e-smoke.sh`.
 
 ## Purpose
@@ -72,7 +73,7 @@ Use this checklist for a complete prepared-host acceptance entry.
 | Artifact upload or retention | Helper logs, serial logs, and pytest/workflow logs were retained or an early setup skip explains why none exist. | Yes |
 | Failure drills | Drill-owned stale VM replacement and helper restart drill results recorded. | Manual opt-in only |
 | Launchd drill | LaunchAgent bootstrap/kickstart/status/bootout drill results recorded. | Manual opt-in only |
-| Stuck boot/readiness drills | Host-independent helper/runner tests prove registry/session cleanup; any manual prepared-host drill records stable reason codes and artifact pointers without exposing raw serial logs. | Portable coverage only |
+| Stuck boot/readiness drills | Host-independent helper/runner tests prove registry/session cleanup; manual prepared-host readiness withholding also records a real handshake, stable timeout, recovery, and artifact pointers without exposing raw serial logs. | Portable boot coverage; manual readiness evidence |
 | Host reboot drill | Post-reboot helper/session recovery evidence recorded. | Manual operator procedure only |
 
 ## Expected Skip Taxonomy
@@ -101,6 +102,610 @@ artifact retention, record it as a potential blocking regression and link the
 triage issue.
 
 ## Latest Evidence
+
+### 2026-09-14: Real advertised workspace mismatch and recovery (TASK-13243.7)
+
+- Local operator run on the same Apple Silicon host: macOS `26.5.2` (`25F84`),
+  `arm64`. Checkout `codex/vz-workspace-mismatch-drill` at `c18b1e06eb` plus
+  the uncommitted workspace-drill changes. Receipt input hashes identify the
+  exact sources and were rechecked against the checkout after acceptance.
+- Ran the existing `vz-failure-drill.py --allow-fault-injection` with
+  `--source-bundle ~/Library/Logs/tldw/vz-launchd-recovery/20260913-1905/source-bundle-final`,
+  `--helper /private/tmp/task-13243-6-swift-diagnostic/debug/macos-vz-helper`,
+  and `--evidence-dir ~/Library/Logs/tldw/vz-workspace-workflow-20260914-r1`.
+  The helper was rebuilt and ad-hoc signed with the checked-in entitlements;
+  signature and `com.apple.security.virtualization=true` preflight passed.
+  Canonical Debian arm64 images, shared helpers and launchd were untouched.
+- All eight cases accepted: four positive tests passed without skips/errors;
+  four negative controls reached their intended assertion failures after real,
+  completed, exit-zero execution with exact stdout. Capability, readiness and
+  protocol cases were rerun rather than inferred from older evidence.
+- Workspace-positive VM `1c36b7eb-f7f6-4436-9f3a-d68009b2edf6` advertised
+  `/workspace-mismatch/88c2fc7cf92740c69dcd5a9fc2a5d85e`, with supported
+  protocol and both `exec` and `output_cap_v1` intact. The runner rejected with
+  only `vz_linux_guest_agent_workspace_mismatch`; no exec reached that VM.
+  Recovery printed `workspace-drill-first` and `workspace-drill-reuse`, both
+  exit zero in replacement VM `087b5173-e345-44a5-93ab-554abd2c5dd0`.
+- Workspace-negative VM `071cd606-8c7b-4269-b2b6-515b59e36b5f` advertised
+  `/workspace` and executed `workspace-drill-first` successfully. Only the
+  advertised root was restored; real admission remained enabled. Both controls
+  retain returned helper metadata and dispatch evidence in `guest-workspace.json`.
+- Final receipt: `ok=true`, `errors=[]`, canonical and all four fault-source
+  hashes unchanged, empty VM inventory, closed disposable disks, helper stopped,
+  socket/PID absent, private runtime removed. Public reconciliation was empty
+  after workspace rejection and final cleanup. Evidence/clones are retained.
+  `receipt.json` SHA-256:
+  `9a87be75caab1a23f4d7b057719e50e5adcd59d31625d8520e181e45e09b4261`;
+  exact signed `helper-used` SHA-256:
+  `049ab407cf4e0cb9b858f1b877d9f1df5bdb2c90c048230c2ff16eee9f486638`.
+- Verification: **419 portable Python tests passed, 3 live drills deselected**;
+  **95 Swift tests** and the normal Go agent suite passed. Workspace overlay
+  compiled; workflow/receipt regressions were observed RED then GREEN. Ruff,
+  touched-scope Black and diff checks passed. Bandit found no new issues;
+  five existing B108 literals remain in untouched runner tests (B101 test
+  assertions excluded). Independent review found no actionable issues.
+- This proves advertised-metadata admission, not mount isolation or path-escape
+  resistance. Full server tests, reboot, missing-agent and early boot hangs were
+  not run. These and broader residual gaps remain tracked by #1442.
+
+### 2026-09-14: PR #2964 review-fix real workflow verification
+
+- Repeated all six cases with the rebuilt, ad-hoc-signed helper after mapping
+  bridge-detected exec-response version errors to `guest_protocol_mismatch`.
+  The protocol drill now uses public reconciliation instead of a redundant
+  private orchestrator assertion; its platform gates reference tracker #1442.
+- Accepted packet: `~/Library/Logs/tldw/vz-protocol-workflow-20260914-qodo-r1/`.
+  `receipt.json` SHA-256:
+  `c8b02771cf643b1dcbd42ca35d58c32a8ba8864067c46be34217759658b1e3a3`.
+  The exact signed executable is retained as `helper-used`, SHA-256:
+  `049ab407cf4e0cb9b858f1b877d9f1df5bdb2c90c048230c2ff16eee9f486638`.
+- All three positive cases passed, without skips/errors; all three negative
+  controls produced their intended failure after real exit-zero execution.
+  The protocol-positive guest sent version `999`, rejected in 2.184 seconds
+  before exec. Both healthy commands completed in replacement VM
+  `f49e3d89-78b0-450f-8d5c-94de325690ec`. The protocol-negative guest sent
+  version `1` and completed `protocol-drill-first` with validation still enabled.
+- Public reconciliation reported zero persisted controls and live VMs after
+  rejection and final cleanup. The final receipt reports `ok=true`, no errors,
+  empty VM inventory, closed allocated disks, stopped helper, absent socket/PID,
+  removed runtime directory, and unchanged canonical/all fault-source hashes.
+- Verification: **358 focused Python tests passed, 3 explicit host-gated skips**,
+  **95 Swift tests passed**, and the normal Go agent suite passed. The new
+  exec-response regression failed before the fix and passed afterward, with
+  request-ID/malformed-response controls. Ruff, Black, scoped Bandit (excluding
+  test assertions), and diff checks passed; independent review found no issues.
+  Later exec-response mismatch classification is covered by Swift server/bridge
+  tests, not live fault injection. The full server suite and reboot drill were
+  not run; the existing broader residual gaps remain unchanged.
+
+### 2026-09-14: Real guest protocol mismatch and recovery (TASK-13243.6)
+
+- Ran the checked-in `vz-failure-drill.py` on the same Apple Silicon host and
+  canonical Debian arm64 bundle, with a rebuilt, ad-hoc-signed Swift helper.
+  The helper now reports `guest_protocol_mismatch` for a rejected guest wire
+  version; no production fault flags, shared-helper changes or host reboot.
+- Accepted packet: `~/Library/Logs/tldw/vz-protocol-workflow-20260914-r1/`.
+  `receipt.json` SHA-256:
+  `e2bf4d6feda62bc6c10d088411df3e68b67ee4d20d4181dfe855b87779f56486`.
+  Receipt input hashes identify the exact scripts, fixtures and agent sources.
+  `helper-used` retains the exact signed executable after the run, matching
+  receipt helper SHA-256
+  `9842e41ac810fa4e72bc6246f9e31c0c455246c9f2d260258d63304e1dcd75e8`.
+- All six cases accepted: three positive tests passed without skips/errors;
+  three negative controls produced their intended assertion failures backed
+  by completed, exit-zero, exact-output guest execution. Existing capability
+  and readiness drills were rerun, not inferred from earlier packets.
+- The protocol-positive guest proved nonce-correlated version `999` in VM
+  `eca2b3d2-e137-48c5-8689-8c5deb7e836b`. Create rejected it in 4.068 seconds
+  with `guest_protocol_mismatch: protocolMismatch`; no exec reached that VM
+  and no reusable control/VM state remained. Healthy recovery printed
+  `protocol-drill-first` and `protocol-drill-reuse`, both exit zero, in the
+  same replacement VM `a84cc8e2-16f8-4a0a-9ec7-43f655245fa0`.
+- The protocol-negative guest sent supported version `1`, with the real helper
+  gate still enabled. VM `04815412-7310-4827-b6fe-4c52432ee5c5` executed
+  `protocol-drill-first` successfully before the intended rejection assertion
+  failed. `guest-protocol.json` and per-case `result.json` retain that proof.
+- Final cleanup: VM inventory empty, all allocated disk handles closed,
+  helper stopped, socket/PID absent, short runtime directory removed.
+  Canonical and all three fault-source hashes unchanged; receipt `ok=true`
+  and `errors=[]`. Evidence and image-store clones are deliberately retained.
+- Verification: **358 focused Python tests passed, 3 explicit host-gated skips**;
+  all **94 Swift tests** and the normal Go agent suite passed. New workflow,
+  diagnostic and proof-validation regressions were observed RED then GREEN.
+  Ruff/Black, diff checks and scoped Bandit passed (test assertions excluded).
+  An initial restricted test run could not invoke `ps`; the authorized rerun
+  passed without weakening cleanup tests. Independent review found no
+  actionable issues. The full server suite was not run. Host reboot,
+  missing-agent, early boot hangs and other deferred fault classes remain open.
+
+### 2026-09-14: PR #2962 review-fix real workflow verification
+
+- Repeated the checked-in operator command on the same Apple Silicon host,
+  using the same canonical Debian arm64 bundle and signed helper as below.
+  Includes process-group cancellation, dependency provenance, and contextual
+  readiness-overlay errors; no production runtime changes or host reboot.
+- Final packet: `~/Library/Logs/tldw/vz-failure-workflow-20260914-final/`.
+  `receipt.json` SHA-256:
+  `2b8a4d8d5a10642354bb8ff9de0a1d3fb5b77e7c57f034f9df59a54282766456`.
+  The receipt includes the exact workflow, helperctl, materializer, guest-source,
+  fixture, and helper hashes used for this run. The earlier passing
+  `vz-failure-workflow-20260914-review` packet is retained, but final acceptance
+  uses the rerun after the independently identified spawn-cancellation fix.
+- Both positive cases passed with no skips/errors. Both negative controls
+  produced their exact expected assertion failures and verified completed,
+  exit-zero guest execution with exact stdout in the fault VM. Healthy-session
+  recovery and same-session reuse passed in both positive cases.
+- Cleanup: empty VM inventory, no allocated disk handles, helper stopped,
+  socket/PID absent, private runtime removed. Canonical and both prepared
+  fault-source hashes remained unchanged; `errors` was empty and `ok` true.
+- Separate real-process regressions reproduced orphaned descendants on timeout
+  and parent-only SIGTERM before the fix; both passed after process-group
+  termination and direct-child reaping were added. This is process cancellation
+  evidence, not a claim of live-VM SIGTERM or host-reboot acceptance.
+- A deterministic signal during process creation also reproduced a child leak.
+  Deferring handled termination signals until ownership registration fixed it;
+  independent SIGINT/SIGTERM probes confirmed reaping and handler restoration.
+- Final focused suite: **295 passed, 2 expected host-gated skips**, four existing
+  warnings. Go agent suite, Ruff (including annotations/docstrings), Black,
+  diff checks, and scoped Bandit scans passed (test assertions excluded).
+  Independent re-review found no remaining issues. Full server/Swift suites
+  and additional failure classes remain outside this Python/test-only change.
+- Subsequent reviewer-guide follow-up: **298 passed, 2 expected host-gated
+  skips**, four existing warnings. Added combined installation/termination
+  failure regressions and a startup signal-burst test; documented first-signal
+  coalescing and the boot-artifact/metadata fingerprint boundary. This later
+  change preserves the primary exception with a cleanup note; it does not
+  alter Go overlays or normal VM behavior. No additional real VM run was
+  performed for this exception-reporting/test/documentation-only follow-up;
+  the packet above records the exact earlier workflow bytes it exercised.
+
+### 2026-09-13: Checked-in real guest-failure workflow (TASK-13243.5)
+
+- Source: `codex/vz-failure-drill-workflow`, based on merged PR #2960
+  (`ebdeeac384c58559fa90fd3a5f79f5262ae190d5`), same Apple Silicon host.
+  No reboot or changes to the canonical Debian arm64 image.
+- Command: `python tools/macos-vz-helper/scripts/vz-failure-drill.py
+  --allow-fault-injection --source-bundle "$SOURCE_BUNDLE"
+  --helper "$HELPER_BINARY" --evidence-dir "$EVIDENCE_DIR"`, from the project
+  environment. The exact operator recipe and prerequisites are in the helper
+  README. No local-only driver or fault overlay was needed.
+- Final packet: `~/Library/Logs/tldw/vz-failure-workflow-20260913-r2/`.
+  `receipt.json` SHA-256:
+  `b961d96340c5779de938734737f085e16bfa518b2ff2c2eb146a8e87a442963e`.
+  The earlier `vz-failure-workflow-20260913-r1` packet is also retained;
+  final acceptance uses r2 after the negative-control review fix.
+- Both overlays were built from the checkout and installed through separate
+  healthy preparer VMs into offline image-store clones. Installed bytes matched
+  the built binaries, and ext4 filesystem checks passed before/after patching.
+- Positive capability-mismatch test: **1 passed, 0 skipped/errors**; real missing
+  `exec` metadata was rejected without dispatch, then two healthy commands reused
+  VM `5845c56e-678c-4780-9d29-0741ad3f811d`.
+- Positive readiness test: **1 passed, 0 skipped/errors**; a fresh acknowledged
+  handshake proof preceded `guest_transport_timeout` at **15.071 seconds**.
+  Two healthy commands then reused VM `d5f5a6c3-075f-4c46-a594-2531bd1a5c42`.
+- Both negative controls: exactly **1 expected assertion failure, 0 skips/errors**
+  per case. The final wrapper also verified the guest receipts: completed run,
+  exit zero, exact expected stdout, and execution in the fault VM. A cancelled
+  run or unrelated boot failure cannot count as successful negative evidence.
+- Final cleanup: empty VM inventory, no disposable disk handles before helper
+  stop, managed helper stopped, socket/PID absent, private runtime removed.
+  Canonical and both prepared fault-source hashes remained identical. Canonical
+  rootfs SHA-256 remained
+  `5367aca9725b75bb3fce1465fdc3c3d841a9970126e1e17f4608fb611beb3cc2`.
+- Portable verification: **255 passed, 8 explicitly gated skips** across workflow,
+  helperctl, materializer, mismatch, and readiness tests; normal Go agent suite
+  passed. Ruff/Black and scoped Bandit validation passed. The eight portable-run
+  skips are not substituted for live acceptance: all four explicit live cases
+  ran without skips. Full server and Swift suites were not run for this
+  Python/test-fixture-only slice.
+- Remaining gaps unchanged: host reboot, kernel boot hang, missing agent,
+  protocol-version/workspace mismatch injection, and broader crash classes.
+  This closes reproducible preparation for the two existing guest drills, not
+  every lifecycle failure mode. Follow-up remains tracked by #1442.
+
+### 2026-09-13: PR #2960 review follow-up (portable verification)
+
+- Both drills now share the readiness drill's resilient ownership-scoped cleanup.
+  A mismatch session or VM deletion error no longer skips later cleanup attempts;
+  accumulated errors and remaining owned VMs are retained before failure.
+- Separate session-error and VM-error regressions failed against the old cleanup
+  and passed after the fix. The focused suite passed **71 tests**, with two
+  intentional host-gated skips; the two drill modules passed **18 unit cases**.
+  Unit markers and missing docstrings were added; Black and Bandit were clean.
+- No live VM was rerun for this review patch. The accepted runs and source hashes
+  below describe their retained historical test versions, not the modified test
+  files. No production runtime, helper, or guest-agent source changed.
+
+### 2026-09-13: Real acknowledged-guest readiness timeout and recovery
+
+- TASK-13243.4, branch `codex/vz-readiness-timeout-host-validation`, stacked on
+  capability-mismatch checkpoint `f4bab1a456`. No production code changed.
+  The test observes the existing service/helper create and exec paths unchanged.
+- Evidence root: `$HOME/Library/Logs/tldw/vz-readiness-timeout/20260913-r2`.
+  Each of `red`, `green`, and `review` retains `receipt.json`, `host.xml`,
+  `host.log`, helper/serial logs, LaunchAgent plist, and
+  `pytest/test_vz_linux_readiness_timeou0/guest-readiness.json`.
+  Retained source/overlay/binary/driver artifacts describe the test-only guest.
+- The offline preparation VM installed a guest that writes a fresh nonce proof
+  only after validating the real VSock handshake acknowledgement, then withholds
+  readiness with a two-minute watchdog. The host uses a 15-second startup limit.
+  Proof reads reject non-regular files and are bounded; missing or stale proof
+  cannot turn a failed boot into a passing timeout test.
+- First accepted run: **1 passed, 0 skipped/errors**, 19.408 seconds total;
+  create returned `guest_transport_timeout` after 15.184 seconds. Final repeat
+  after cleanup-review fixes: **1 passed, 0 skipped/errors**, 18.955 seconds
+  total; timeout after 15.168 seconds.
+- Final helper generation: `C763A2E3-FCB9-4138-9BAB-9FEED7BF3938`.
+  Fault VM `da368a46-e204-4e2e-b517-a99ce767cc53` acknowledged the fresh nonce,
+  but received no exec. Public reconciliation then showed zero persisted
+  controls and zero live VMs. Healthy VM
+  `67baf3ba-4c61-4f35-b120-1305f6558776` executed both exact-output commands in
+  one new session on the same helper, then session/control cleanup completed.
+- Negative control: the same test-only guest was allowed to send `ready`.
+  It really executed and returned `readiness-drill-first\n`, exit 0. Pytest
+  failed specifically at "Readiness withholding did not fail" (7.240 seconds,
+  one failure, no skips/errors). No helper response or guest proof was mocked.
+- Both accepted runs verified no open handles on their disposable rootfs disks
+  before helper shutdown, in addition to empty registries and control state.
+  All r2 attempts ended with absent owned LaunchAgents, unavailable sockets,
+  removed runtime directories, and unchanged canonical and fault-source hashes.
+  Canonical rootfs: `5367aca9725b75bb3fce1465fdc3c3d841a9970126e1e17f4608fb611beb3cc2`.
+  Fault-source rootfs: `87bf764f9e10bc14c605f5fbc83a7c2fca6fe615b8922f67498bbb8900f21432`.
+- Initial attempt retained separately in `vz-readiness-timeout/20260913`:
+  its test-only nil-channel wait caused an early transport close after 2.894
+  seconds, so the test correctly failed rather than accepting it as a timeout.
+  The nil-channel pattern reproduced Go's fatal deadlock on the host. A fresh
+  timer-backed test image fixed the injection, not production code. A copied
+  artifact-kind label was corrected before that first live attempt; the original
+  preparation receipt keeps the prior metadata hash.
+- Review regressions cover FIFO proof blocking, cleanup continuing after session
+  and VM exceptions, and session deletion returning false while the row remains.
+  All were observed failing before their test-harness fixes. Final-repeat test
+  SHA-256: `464968624f50de905245f12c9ac636ffd35309b0da98cd610b4e3e217f6a463a`.
+- Final focused Python/workflow-contract verification: **69 passed, 2 intentional
+  host skips**, 1.64 seconds. Black and diff checks passed; Bandit reported zero
+  findings. Independent review confirmed the final source hash and evidence.
+  A missing lifecycle-spec link exposed by the doc-contract test was restored.
+  The repository-wide suite was not run for this test-only slice.
+- Scope: acknowledged-handshake readiness withholding only. This does not prove
+  kernel boot hangs, a missing guest agent, protocol-version mismatch, host reboot,
+  arbitrary stop-error recovery, or escaped guest-process containment. The two
+  healthy commands use a new session, not in-place repair of the failed session.
+
+### 2026-09-13: Real missing-exec guest rejection and healthy recovery
+
+- TASK-13243.3, branch `codex/vz-guest-mismatch-host-validation` at `dae1f00974`,
+  based on merged PR #2955 (`beac8e9449`). No production runtime or policy code
+  changed. The test observes the real helper's VSock-derived metadata and
+  delegates create/exec calls unchanged.
+- Corrected the earlier storage interpretation: Apple's volume-capacity API
+  reported 114,785,116,224 bytes available for important usage while the plain
+  available-capacity value was 467,423,232 bytes. A bounded write succeeded.
+  `df` alone was not sufficient to declare the test blocked or request manual
+  deletion. The earlier `ENOSPC` attempt remains recorded below; the following
+  retries succeeded without further storage deletion.
+- Evidence root:
+  `$HOME/Library/Logs/tldw/vz-guest-mismatch/20260913`.
+  `green`, `red`, and `review` each contain `host.xml`, `host.log`,
+  `receipt.json`, the generated LaunchAgent plist, helper/serial logs, and
+  `pytest/test_vz_linux_rejects_real_gue0/guest-mismatch.json`.
+- Normal guard: **1 passed, 0 skipped, 0 errors**, 8.942 seconds. A separate
+  fresh-clone repeat after the negative control also passed with **0 skips and
+  errors**, 11.232 seconds. The operator-owned LaunchAgent wrapper bootstrapped,
+  checked, and stopped a unique helper for each attempt. No default helper or
+  host reboot was involved.
+- Final-repeat helper generation:
+  `235162A9-B6E7-4409-9B23-70D5A80E6B66`. Fault VM
+  `9b764241-d778-4e3a-9b2f-47021a13b27e` reported known capabilities containing
+  only `output_cap_v1`. Its run failed with
+  `vz_linux_guest_agent_required_capability_missing`, no stdout, and no exec
+  dispatch. Public reconciliation then reported zero persisted controls and
+  zero live VMs.
+- A new healthy session on the same helper ran both exact-output commands in VM
+  `e8a0f98c-f716-425b-885d-5872a54b785d`, proving same-session reuse after the
+  failed session. This is not an in-place repair of the incompatible guest or
+  reuse of the failed session.
+- Negative control: a test-process-only fixture bypassed the runner's
+  create-time compatibility classification. The independent test observer
+  still saw the missing `exec` capability. VM
+  `1eba8794-237d-45a3-80dd-49175e7e70bf` actually executed the command and
+  returned `mismatch-drill-first\n`, exit 0. The test failed specifically at
+  "Mismatched guest was not rejected" (5.140 seconds), not on a boot error.
+  No production file was edited for the negative control.
+- All three attempts finished with empty helper registries, absent LaunchAgents,
+  unavailable sockets, and removed private runtime directories. Both accepted
+  runs also verified session removal and zero persisted controls. The negative
+  control's failure cleanup reported no remaining owned VMs.
+- Canonical rootfs stayed
+  `5367aca9725b75bb3fce1465fdc3c3d841a9970126e1e17f4608fb611beb3cc2`;
+  kernel, initrd, manifest, and build-info hashes matched before/after every
+  attempt. The unbooted fault-source rootfs also stayed
+  `3406ae92718845dfbf52f8c89628ae237f853d3dd527536dfdc2c9611ab5405c`.
+  Source provenance and retained helper signature/hash are recorded below.
+- Final focused portable checks: **35 passed, 1 intentional host skip**, 2.06
+  seconds. Black and diff checks passed; Bandit reported zero findings.
+  Independent review of the green/red evidence found no material issues.
+  The repository-wide test suite was not run for this test-only slice.
+- Scope: this proves rejection of a known missing required capability and
+  subsequent healthy execution/reuse. It does not prove protocol-version
+  mismatch, a missing agent, stuck boot/readiness, host reboot, or containment
+  of escaped guest descendants. Those remain distinct evidence items.
+
+### 2026-09-13: Post-merge cleanup and guest-mismatch preparation (not acceptance)
+
+- PR #2955 merged as `beac8e9449`. Its clean worktree and local/remote branch
+  were removed after ancestry and active-process checks. The main checkout and
+  divergent local `dev` were left untouched.
+- The exact signed helper and local database artifacts were retained under
+  `$HOME/Library/Logs/tldw/vz-launchd-recovery/20260913-pr2955-review/worktree-retained`.
+  The helper SHA-256 is
+  `a4e988165f18c296dc88e7e80eaddaa0f935bbfb9812463ec0988d2cfa2bff85`;
+  the copied signature verified successfully.
+- TASK-13243.3 continues the existing guest-agent mismatch contract. The runner
+  already rejects explicit mismatches at create time and before session reuse;
+  this slice adds a manual real-host test, not another production policy layer.
+- Prepared a test-only guest using a Go build overlay that changes advertised
+  capabilities from `["exec", "output_cap_v1"]` to `["output_cap_v1"]` while
+  leaving the exec handler intact. A separate real VM installed it into an
+  offline image-store disposable clone. `e2fsck -fn` and installed-binary `cmp`
+  passed; the preparation VM/helper were stopped and their socket removed.
+- Preparation receipt and logs:
+  `$HOME/Library/Logs/tldw/vz-guest-mismatch/20260913/prepare`.
+  The unbooted test-only fault source is
+  `../image-store/runs/fault-source/bundle`; its build-info explicitly records
+  the overlay and parent hashes. Rootfs SHA-256:
+  `3406ae92718845dfbf52f8c89628ae237f853d3dd527536dfdc2c9611ab5405c`.
+- Canonical `source-bundle-final` rootfs stayed
+  `5367aca9725b75bb3fce1465fdc3c3d841a9970126e1e17f4608fb611beb3cc2`;
+  kernel, initrd, manifest, and build-info hashes also stayed unchanged.
+- At this preparation checkpoint, live mismatch acceptance and its negative
+  control had not run. The host reported `ENOSPC` while creating the next
+  evidence directory, before starting a test helper. Subsequent capacity checks
+  and successful retries are recorded above; the offline installation alone
+  was not counted as a rejection test.
+- Space cleanup removed only the inactive `preparer-boot` clone and PR #2955's
+  `public-diagnostics` / `linux-regressions` disposable run disks. Their source
+  bundles, logs, test binaries, and acceptance receipts remain. The PR #2955
+  disk hashes/manifests are retained in its evidence root under `postmerge-gc`;
+  the preparer manifest is retained as `prepare/preparer-run-manifest.json`.
+- Portable verification: 35 passed, 1 intentional host skip; Bandit zero
+  findings. Review added ownership-based cleanup for a lost create reply, with
+  a verified failing regression before the fix. Protocol-version mismatch,
+  missing-agent, stuck boot/readiness, and reboot remain separate live gaps.
+
+### 2026-09-13: PR #2955 review verification
+
+- Rebased onto `dev` at `b6cf7fd1d5`; the rebase introduced no changes to the
+  helper, guest, or sandbox runtime sources. Review fixes change test fixtures
+  and documentation, not the production cancellation/drain implementation.
+- The revised host test uses public `SandboxService.macos_diagnostics()`
+  reconciliation to observe healthy, stale, and removed session controls,
+  rather than reading the private orchestrator. Generation persistence remains
+  covered by the focused runner tests; the host drill checks helper generation
+  change, VM replacement, and replacement reuse through supported observations.
+- Fresh disposable clone from the preceding `source-bundle-final`: **1 passed,
+  0 skipped, 0 errors**, 14.05 seconds. The first VM was
+  `40c207d3-19ef-472d-8bbf-ba8bbc668c47`; replacement and third-command reuse used
+  `4c05cb1b-cd1c-416c-8cf7-681ad0d87a2a`. All three commands returned exact stdout
+  and exit 0. Cleanup reported zero persisted controls/live VMs, destroyed
+  session, absent LaunchAgent, unavailable socket, and removed runtime.
+- Evidence root: `$HOME/Library/Logs/tldw/vz-launchd-recovery/20260913-pr2955-review`.
+  `host.xml`, `host.log`, and
+  `host-pytest/test_vz_linux_session_recovers0/launchd-recovery.json` contain the
+  acceptance results. Source rootfs SHA256 remains
+  `5367aca9725b75bb3fce1465fdc3c3d841a9970126e1e17f4608fb611beb3cc2`.
+- Linux tests now use test-owned release files instead of signaling saved
+  numeric PIDs. A fresh liveness acknowledgement proves the escaped child
+  still holds the pipes after `Exec` returns; cleanup then releases it.
+  Completion and acknowledgements replace five-second elapsed assertions;
+  a one-minute watchdog only detects deadlocks. Both waiting-parent and
+  exited-parent timeout cases are covered. No production timer injection was
+  needed. Ten repetitions of `TestGuestServerExec*` passed in the disposable
+  Linux VM (`linux-final/guest-review.test.stdout.log`), including 1,000 fast
+  output commands. Test-binary SHA256:
+  `85e9162e67d841ae51430753cc54a1fa2ab1da2ab1bc37e594c2311973e8164a`.
+- A temporary Go overlay removed only the cancellation pipe-close callback,
+  leaving repository production code unchanged. Its escaped-output-limit test
+  failed as intended at the deadlock watchdog (60.06 seconds, exit 1), then
+  cooperatively released the child. This confirms natural child expiry cannot
+  mask a missing drain bound. `linux-final/guest-no-drain.test.stdout.log` and
+  `linux-final/linux-review.json` retain the negative result and cleanup receipt.
+  Negative-binary SHA256:
+  `e44af3a1d601770a5276faa4f332f232e70b221d3456107d51bb20c7b0088d27`.
+- Native Go suite/race checks and native/Linux guest vet passed. Focused Python
+  suites passed 224 tests with the one manual drill intentionally opted out.
+  Bandit passed with the documented B108 exception; no additional suppression
+  was added. No host reboot or broader descendant-containment claim is made.
+
+### 2026-09-13: live-session recovery after a launchd restart
+
+- Scope: `TASK-13243.1` and `TASK-13243.2`, on
+  `codex/vz-launchd-vm-validation` based on local dev `c70387f496d8`.
+  Same Apple Silicon host as the launchd smoke below, macOS 26.5.2 (25F84),
+  helper version `0.1.0`, protocol `1`. No host reboot was performed.
+- Durable private artifacts:
+  `$HOME/Library/Logs/tldw/vz-launchd-recovery/20260913-1905`.
+  The final accepted packet is `final.xml`, `final.log`, `final.exit`, and
+  `final-pytest/test_vz_linux_session_recovers0/launchd-recovery.json`, with the
+  generated plist and helper/serial logs beside the receipt.
+- The new manual test is
+  `tldw_Server_API/tests/sandbox/test_vz_linux_launchd_recovery_host_gated.py`.
+  It uses `TLDW_SANDBOX_VZ_LINUX_E2E=1` and
+  `TLDW_SANDBOX_VZ_LINUX_LAUNCHD_RESTART_DRILL=1`, an explicitly selected signed
+  helper binary, and a disposable bundle from `prepare-smoke-bundle.py`.
+  The repeatable command is in the helper README's
+  **Live-Session Launchd Restart** section. Default/scheduled smoke selection
+  and helper startup behavior are unchanged.
+- Accepted result: **1 passed, 0 skipped, 0 errors**, pytest exit `0`, in
+  15.56 seconds. All three `/bin/echo` commands returned their exact stdout
+  tokens and exit `0`. Launchd restarted the helper only after the first
+  successful session command, not merely before VM creation.
+- Helper generation changed from `96271C27-C7AA-48A1-A743-B312E70CC1B7` to
+  `AF1778A8-FCFE-454E-8152-A384E3DF9A1B`. The stale session control was still
+  present immediately after restart. Normal service execution replaced VM
+  `130792b5-7cfd-41fc-8851-fea97b98602b` with
+  `ddfbd394-58db-4a5c-b450-79a3c2367f01`; the third command reused the latter.
+- Cleanup: session destruction succeeded, session control was removed, the
+  helper's VM registry was empty, the unique LaunchAgent was absent, its socket
+  was unavailable, and the private runtime directory was removed. Evidence and
+  disposable image-store disks were deliberately retained.
+- Negative control: temporarily replacing the live-session `kickstart` with
+  `status` produced the expected `helper_generation_unchanged` failure after
+  successful guest output. `review-negative.xml` records one failure and no
+  skips or errors; `review-negative-pytest/` records the original failure,
+  bootstrap/kickstart/bootout results, and cleanup. The callback preserves
+  exceptions until lifecycle results are returned, then re-raises them. The
+  checked-in test restores the real restart operation. The earlier
+  `diagnostic*` packet exposed missing lifecycle results on callback failure.
+- A real defect was found before acceptance: two attempts completed an echo
+  with exit `0` but empty output. Instrumentation showed the guest itself
+  reported zero observed stdout bytes, excluding Python stream loss. A
+  Linux-arm64 regression against the old code failed in all ten repetitions;
+  native macOS repetitions alone had not reproduced it. Those failed runs
+  remain in `negative*`, `accepted*`, and `linux-output-red*`; none is counted
+  as restart acceptance.
+- Fix: `runExecWithOutputLimit` now drains both output-pipe readers before
+  `cmd.Wait()` can close their pipes. On timeout or output-limit cancellation,
+  a one-second drain grace bounds readers retained by escaped descendants;
+  process-group cancellation remains active until draining finishes. The
+  corrected Linux regression passed
+  1,000 fast commands; ten repetitions also passed output-cap/UTF-8 checks and
+  both descendant-pipe timeout cases (parent waiting and parent already exited),
+  plus escaped-descendant timeout/output-limit cases. The latter completed in
+  approximately three seconds and one second, respectively, rather than the
+  eight-second failures recorded in `review-red/` against the ordering-only
+  fix. `final-build/linux-regressions.stdout.log` and
+  `final-build/offline-refresh.json` contain the final proof. An independent
+  second review found no remaining actionable findings after these fixes.
+  `linux-output-green*` is an earlier diagnostic run with passing guest tests
+  but a Python fixture teardown error, not the final acceptance packet.
+- Bundle provenance: a private offline APFS clone was refreshed with the new
+  agent, then checked with `e2fsck -fn` and an extracted-binary `cmp`. Kernel,
+  initrd, and manifest were unchanged. Original source rootfs SHA-256 remained
+  `1083decfb5089e904440d2506e40be78645bdb687e8ce1d220f1b57ba27f7cca`;
+  refreshed rootfs SHA-256 is
+  `5367aca9725b75bb3fce1465fdc3c3d841a9970126e1e17f4608fb611beb3cc2`.
+  Installed agent SHA-256 is
+  `4e4d1186f0e4830769999951ba5566815f6d4733f9c7e688474b21086c226a3f`.
+  `source-bundle-final/build-info.json` records the dirty worktree build
+  provenance; only `final-image-store/runs/launchd-recovery-final/bundle` was
+  booted for final acceptance. The source bundle was not booted or mutated.
+  The earlier `source-bundle` and `fixed*` packet retain the ordering-only
+  build and its ordinary restart pass, not the final bounded-drain build.
+  Go 1.26.2 embedded the outer checkout's revision `1600d9b8c8`, while the
+  module and Git worktree were verified at `d9d936b612` plus the retained
+  `final-build/guest-source.patch`. Use this explicit worktree provenance,
+  binary hash, and `final-build/guest-build-info.txt`, not the embedded revision
+  alone, to identify the tested build.
+- Supporting verification: focused helperctl/runner suites passed 224 tests,
+  with only the explicitly disabled real restart test skipped. Native Go
+  `go test ./...` and guest race checks passed. Correction during PR preparation:
+  the retained Bandit report contains one B108 warning for the short `/tmp`
+  parent, not zero findings. `mkdtemp` atomically creates a random, owner-only
+  directory (mode `0700`); the test now documents a line-specific B108 exception
+  for that reviewed false positive. This evidence does not prove host reboot recovery,
+  arbitrary helper/guest crash classes, escaped-descendant containment, or
+  broader network policy enforcement.
+
+### 2026-09-13: real VM smoke through a launchd-managed helper
+
+- Evidence source: local operator run, authorized for launchd-managed real VM
+  validation after PR `#2628`. Branch `codex/vz-launchd-vm-validation` started
+  from local `dev` at `c70387f496d82fcee92926bf3715bf5cd240ba88`;
+  this slice changes evidence documentation and Backlog only.
+- Host: Apple silicon `arm64`, macOS `26.5.2` build `25F84`, Darwin `25.5.0`;
+  shared developer host. Capture time was approximately 11:29 PDT.
+- Durable artifact root:
+  `$HOME/Library/Logs/tldw/vz-launchd-vm-validation/20260913-1817`.
+  The evidence root, helper log directory, serial directory, image store, and
+  short runtime directory were private to the operator (`0700`). No raw logs
+  or disk images are committed to the repository.
+- Helper: freshly built from the worktree with `swift build`; signed using
+  `tools/macos-vz-helper/macos-vz-helper.entitlements`. `codesign --verify
+  --strict` passed and the signed binary contained
+  `com.apple.security.virtualization=true`. Live ping reported helper
+  `0.1.0`, protocol `1`.
+- Guest provenance: the durable June Debian bookworm arm64 bundle was preserved.
+  A separate copy of its rootfs received the current Linux arm64 guest built
+  with `CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath`; the guest
+  includes buffered-reader fix `dfa67a49927cef63e80bf0903d55109ec283254b`.
+  The kernel and initrd were unchanged. This was an offline guest refresh,
+  not a fresh Debian distribution build. The copied image's pending ext4
+  journal was recovered, its final `e2fsck -fn` passed, and extraction plus
+  `cmp` verified the installed executable exactly matched the new binary.
+  `source-bundle/build-info.json` records this provenance.
+- Image-store preparation: `prepare-smoke-bundle.py` registered the refreshed
+  source and materialized run `launchd-13243` beneath
+  `<artifact-root>/image-store/runs/launchd-13243/bundle`. Only that disposable
+  bundle was passed to VM execution. Relevant SHA-256 values:
+
+  | Artifact | SHA-256 |
+  | --- | --- |
+  | Original source rootfs, unchanged | `e52c82e96667f6daa8f7e1d40be8a655aad110cd2c5acedb0a9fb5fa01118cbf` |
+  | Refreshed source rootfs, unchanged during smoke | `1083decfb5089e904440d2506e40be78645bdb687e8ce1d220f1b57ba27f7cca` |
+  | Disposable rootfs after smoke | `1e31e380439d702b580314eac8da68f23dd917551dc8f795cc08ee8dc5188427` |
+  | Installed guest executable | `56e21f6ece89ec94832277bf309dd64d9b21d6dec674a1aa765317117eb61012` |
+
+- Main command, from the isolated worktree, after clone preparation:
+
+  ```bash
+  evidence_dir="$HOME/Library/Logs/tldw/vz-launchd-vm-validation/20260913-1817"
+  runtime_dir="/private/tmp/tvz-13243.bwB1Gg"
+  repo_python="/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python"
+  export PYTEST_ADDOPTS="--junitxml=$evidence_dir/pytest.xml --basetemp=$evidence_dir/pytest-data -o junit_logging=all"
+
+  "$repo_python" tools/macos-vz-helper/scripts/vz-helperctl.py launchd-drill \
+    --bundle "$evidence_dir/image-store/runs/launchd-13243/bundle" \
+    --helper "$PWD/tools/macos-vz-helper/.build/debug/macos-vz-helper" \
+    --socket "$runtime_dir/helper.sock" \
+    --log-dir "$evidence_dir/helper-logs" \
+    --plist-output "$runtime_dir/launchd.plist" \
+    --label org.tldw.macos-vz-helper.drill.task13243 \
+    --python "$repo_python" \
+    --entitlements tools/macos-vz-helper/macos-vz-helper.entitlements \
+    --write-plist --create-dirs
+  ```
+
+  This is the recorded invocation, not a rerun recipe: the temporary runtime
+  directory has been removed. A repeat must allocate a new private runtime,
+  image-store run ID, pytest output directory, and unused LaunchAgent label.
+- Results: drill exit `0`; launchd preflight, signing, bootstrap, status,
+  kickstart, helper readiness, VM smoke, and bootout passed. Real pytest
+  results were **3 passed, 11 deselected, 0 skipped**, in 5.83 seconds:
+  ephemeral command stdout/exit assertions, two successful same-session
+  commands with identical VM IDs, and recovery diagnostics/dry-run repair.
+  The reuse test also asserted session destruction and removal of session
+  control. The managed-socket smoke did not start a second direct helper.
+- Cleanup: post-drill `launchctl print` returned `113` (service absent);
+  no process held the drill helper executable open. Helper status reported
+  `helper_not_running` and failed ping, as expected after shutdown. Bootout
+  left an inactive socket (`0755` beneath its `0700` parent); the operator
+  explicitly removed it and the temporary runtime directory. Automatic
+  socket unlink on launchd termination is not claimed. Generic helper status
+  additionally reported the pre-existing default `launchd_plist_mismatch`;
+  that default plist was outside this isolated drill and was not changed.
+- Preparation incident: the existing Fusion builder had an inactive disk lock
+  dated June 15. After checking that no VM process or open disk handle existed,
+  the lock was moved into the evidence directory. A persistent launcher
+  session kept the builder alive; its verified address was `192.168.241.128`.
+  After image preparation, task-owned guest staging files were removed and
+  the builder was shut down with `vmrun stop ... soft`; `vmrun list` reported
+  zero running VMs.
+- Artifacts: `helper-build.log`, `guest-inspection.log`, `guest-refresh.log`,
+  `guest-filesystem-recovery.log`, source/run checksums, bundle provenance,
+  `prepare-clone.log`, `launchd-drill.log`, `launchd-drill.exit`, `pytest.xml`,
+  `pytest-data/`, retained `launchd.plist`, `path-permissions.log`,
+  `launchd-after.log`, `helper-after.json`, and helper/serial logs. The private
+  artifact root also retains the tested helper and guest binaries, refreshed
+  source and disposable run bundle, and verified `artifact-checksums.sha256`.
+- Supporting portable verification: 22 launchd/helper-smoke contract tests
+  passed, and `go test ./internal/guest` passed. No runtime source changed.
+- Residual scope: kickstart preceded VM creation; this packet does not prove
+  recovery of a live VM across helper restart. Host reboot, live mismatch
+  injection, stuck boot/readiness injection, and scheduled CI remain separate
+  evidence items. No new runtime regression was observed in this drill.
+- Follow-up owner: `TASK-13243`, under issue `#1442`. Repeat this acceptance
+  slice when the helper lifecycle, guest transport, or image preparation changes.
 
 ### 2026-07-03: local-operator launchd drill on `codex/vz-launchd-drill-evidence`
 
@@ -712,10 +1317,10 @@ triage issue.
 | --- | --- | --- |
 | Prepared-host default smoke evidence | Recorded locally on 2026-06-16 with helper daemon smoke, real ephemeral execution, same-session reuse, and recovery diagnostics/dry-run repair smoke passing. | Repeat periodically through a trusted local or host-gated run and add newer evidence packets as needed. |
 | Failure-drill evidence | Recorded locally on 2026-06-16 with drill-owned stale VM replacement and smoke-owned helper restart drill passing. | Repeat when runtime/helper recovery behavior changes; keep manual opt-in only. |
-| Launchd-drill evidence | Manual launchd lifecycle evidence was recorded locally on 2026-07-03 with isolated LaunchAgent bootstrap, kickstart, helper readiness, protocol/version check, and drill-owned bootout passing under `--skip-smoke`. | Repeat when launchd scaffolding, helper signing, or plist generation behavior changes. Run launchd-managed real VM smoke only when explicitly requested. |
+| Launchd-drill evidence | Recorded real VM smoke on 2026-09-13 (3 tests, no skips), plus a separate live-session restart test (1 passed, no skips/errors) proving changed helper generation, stale-VM replacement, replacement reuse, and cleanup. The latter exposed and fixed guest capped-output loss before acceptance. Durable artifacts and failed attempts are recorded above. | Repeat both bounded drills when helper lifecycle, signing, guest transport, or image preparation changes. Keep launchd validation explicitly operator-requested; host reboot remains separate. |
 | Host reboot recovery | Manual `host-reboot-drill pre/post` procedure only and out of scheduled CI. | Record results when a maintainer explicitly runs the reboot drill on a prepared host that can tolerate disruptive reboot testing and preserve logs. |
-| Stuck boot/readiness | Host-independent helper and runner coverage verifies boot-driver failure cleanup, guest-readiness failure cleanup, and no reusable session state after create failure. The default prepared-host smoke still does not inject real boot faults. | Record manual prepared-host evidence only after a separate reviewed fault-injection plan; diagnostics/evidence should report stable reason codes and artifact pointers, not raw serial log contents. |
-| Guest-agent mismatch | Not covered by the default smoke. | Use `Docs/superpowers/specs/2026-05-18-vz-linux-lifecycle-drill-gaps-design.md` to guide narrow tests or diagnostics checks before considering automated coverage. |
+| Stuck boot/readiness | Host-independent helper and runner coverage verifies boot-driver and guest-readiness failure cleanup. Manual real acknowledged-handshake readiness withholding, timeout cleanup, and healthy session reuse passed twice on 2026-09-13 with a normal-ready negative control. The default smoke still does not inject faults. | Repeat the opt-in readiness drill when the handshake or lifecycle changes. Kernel boot hangs and missing-agent live injection remain separate; preserve stable reasons and artifact pointers rather than exposing raw serial logs. |
+| Guest-agent mismatch | The checked-in eight-case workflow on 2026-09-14 proved missing-`exec`, guest wire protocol and advertised workspace mismatch rejection, cleanup, healthy recovery and session reuse. Protocol/workspace negative controls retained real admission and changed only the injected field. Not part of default smoke. | Repeat the opted-in workflow when handshake or admission changes. Missing-agent live injection and actual mount/path-escape isolation remain separate evidence cases under the lifecycle-drill contract. |
 | Stale socket handling | Manual stale-socket prepared-host evidence was recorded locally on 2026-07-03 with controlled inactive socket recovery, helper start/status verification, and explicit stop cleanup passing. | Repeat when helper socket-safety behavior or the operator drill command changes; keep it manual-only and out of PR/push/scheduled destructive triggers. |
 | Direct-bundle smoke mutability | Closed for the default smoke path by the 2026-06-16 disposable-clone evidence and repeated on 2026-06-20 after host reboot: source bundle hashes stayed identical before/after while the disposable run bundle rootfs hash changed after execution. | Repeat periodically when the smoke wrapper, image-store materializer, or helper VM write path changes. |
 

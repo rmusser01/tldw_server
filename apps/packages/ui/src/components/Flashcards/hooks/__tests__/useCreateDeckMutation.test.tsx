@@ -124,6 +124,6 @@ describe("useCreateDeckMutation", () => {
       parent_deck_id: 4,
       review_prompt_side: "back",
       scheduler_settings: schedulerEnvelope
-    })
+    }, undefined)
   })
 })

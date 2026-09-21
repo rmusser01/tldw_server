@@ -4,6 +4,7 @@ import React from "react"
 
 import type { TldwConfig } from "@/services/tldw/TldwApiClient"
 import { tldwAuth } from "@/services/tldw/TldwAuth"
+import { connectionAuthoritiesMatch } from "@/services/chat-surface-scope"
 
 type NotesGraphAuthorityConfig = Pick<
   TldwConfig,
@@ -44,6 +45,7 @@ const buildBoundaryKey = (
     key: JSON.stringify([
       origin,
       String(config.authMode || "unknown"),
+      config.authSource ?? "manual",
       config.orgId ?? null,
       credentialBoundary
     ]),
@@ -71,7 +73,15 @@ export const useNotesGraphAuthorityScope = ({
   config: NotesGraphAuthorityConfig | null
   loading: boolean
 }): string | null => {
-  const boundary = React.useMemo(() => buildBoundaryKey(config), [config])
+  // Keep the verified owner during a same-principal token refresh.
+  const authorityConfigRef = React.useRef<NotesGraphAuthorityConfig | null>(null)
+  if (!connectionAuthoritiesMatch(config, authorityConfigRef.current)) {
+    authorityConfigRef.current = config ? { ...config } : null
+  }
+  const authorityConfig = authorityConfigRef.current
+  const boundary = React.useMemo(() => buildBoundaryKey(authorityConfig), [authorityConfig])
+  const boundaryKey = boundary?.key ?? null
+  const boundaryOrigin = boundary?.origin ?? null
   const [resolution, setResolution] =
     React.useState<NotesGraphAuthorityResolution | null>(null)
   const [revision, setRevision] = React.useState(0)
@@ -80,7 +90,7 @@ export const useNotesGraphAuthorityScope = ({
   React.useEffect(() => {
     const epoch = ++epochRef.current
     setResolution(null)
-    if (loading || !boundary) return
+    if (loading || !boundaryKey || !boundaryOrigin) return
 
     void tldwAuth
       .getCurrentUser()
@@ -89,8 +99,8 @@ export const useNotesGraphAuthorityScope = ({
         const principalId = String(user?.id ?? "").trim()
         if (!principalId || user?.is_active !== true) return
         setResolution({
-          boundaryKey: boundary.key,
-          scope: createNotesGraphAuthorityScope(boundary.origin, principalId)
+          boundaryKey,
+          scope: createNotesGraphAuthorityScope(boundaryOrigin, principalId)
         })
       })
       .catch(() => {
@@ -100,7 +110,7 @@ export const useNotesGraphAuthorityScope = ({
     return () => {
       epochRef.current += 1
     }
-  }, [boundary, loading, revision])
+  }, [boundaryKey, boundaryOrigin, loading, revision])
 
   React.useEffect(() => {
     const invalidate = () => {
@@ -115,7 +125,14 @@ export const useNotesGraphAuthorityScope = ({
     const revalidateVisibleCookieSession = () => {
       if (document.visibilityState === "visible") revalidateCookieSession()
     }
-    window.addEventListener("tldw:config-updated", invalidate)
+    const configChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        authorityChanged?: boolean
+        refreshSessionInvalidated?: boolean
+      }>).detail
+      if (detail?.authorityChanged !== false || detail.refreshSessionInvalidated) invalidate()
+    }
+    window.addEventListener("tldw:config-updated", configChanged)
     window.addEventListener("tldw:auth-principal-changed", invalidate)
     window.addEventListener("focus", revalidateCookieSession)
     window.addEventListener("pageshow", revalidateCookieSession)
@@ -124,7 +141,7 @@ export const useNotesGraphAuthorityScope = ({
       revalidateVisibleCookieSession
     )
     return () => {
-      window.removeEventListener("tldw:config-updated", invalidate)
+      window.removeEventListener("tldw:config-updated", configChanged)
       window.removeEventListener("tldw:auth-principal-changed", invalidate)
       window.removeEventListener("focus", revalidateCookieSession)
       window.removeEventListener("pageshow", revalidateCookieSession)

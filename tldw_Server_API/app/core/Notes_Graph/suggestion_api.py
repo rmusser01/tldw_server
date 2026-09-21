@@ -142,6 +142,7 @@ class NotesGraphSuggestionsAPI:
         worker_ready: Callable[[], bool],
         feature_ready: Callable[[], bool],
         cursor_codec: Any,
+        decision_ready: bool = True,
         resolve_capability: Callable[..., Any] = resolve_generation_capability,
         clock: Callable[[], datetime] = _default_clock,
     ) -> None:
@@ -151,6 +152,7 @@ class NotesGraphSuggestionsAPI:
         self._admission = admission_service
         self._cancellation = cancellation_coordinator
         self._decisions = decision_service
+        self._decision_ready = decision_ready
         self._worker_ready = worker_ready
         self._feature_ready = feature_ready
         self._cursor = cursor_codec
@@ -240,6 +242,32 @@ class NotesGraphSuggestionsAPI:
             unavailable_reason = "notes_graph_suggestions_worker_unavailable"
         elif not capabilities.generation_available:
             unavailable_reason = capabilities.unavailable_reason or "notes_graph_provider_unavailable"
+        if not self._decision_ready:
+            try:
+                registered = self._store.is_dataset_scope_registered(dataset_id=self._dataset_id)
+            except Exception as exc:
+                raise self._translate(exc) from exc
+            unavailable_reason = unavailable_reason or "notes_graph_sync_not_ready"
+            allowed_actions = tuple(
+                action for action in capabilities.allowed_actions if action == "cancel" and registered
+            )
+            # Bind this additional authority restriction to preflight's existing ETag.
+            revision_facts = {
+                "provider_revision": capabilities.revision,
+                "generation_available": False,
+                "unavailable_reason": unavailable_reason,
+                "allowed_actions": allowed_actions,
+            }
+            revision = "sha256:" + hashlib.sha256(
+                json.dumps(revision_facts, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest()
+            return replace(
+                capabilities,
+                generation_available=False,
+                unavailable_reason=unavailable_reason,
+                allowed_actions=allowed_actions,
+                revision=revision,
+            )
         if unavailable_reason is None:
             return capabilities
         return replace(
@@ -665,6 +693,7 @@ def build_notes_graph_suggestions_api(
             owner_user_id=owner_user_id,
         ),
         decision_service=decisions or _UnavailableDecisionService(),
+        decision_ready=decisions is not None,
         worker_ready=lambda: jobs is not None
         and env_flag_enabled("NOTES_GRAPH_SUGGESTIONS_WORKER_ENABLED"),
         feature_ready=NOTES_GRAPH_ENABLED,

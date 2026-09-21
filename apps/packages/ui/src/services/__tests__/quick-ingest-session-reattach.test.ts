@@ -8,9 +8,29 @@ vi.mock("@/services/background-proxy", () => ({
   bgRequest: (...args: unknown[]) => mocks.bgRequest(...args),
 }))
 
-import { reattachQuickIngestSession } from "@/services/tldw/quick-ingest-session-reattach"
+import { reattachQuickIngestSession as reattach } from "@/services/tldw/quick-ingest-session-reattach"
+
+const context = { requestScope: { config: { serverUrl: "https://server-a.test", authMode: "single-user" as const, expectedSingleUserApiKeyScope: "synthetic-scope" }, userId: null } }
+const reattachQuickIngestSession = (tracking: Parameters<typeof reattach>[0]) => reattach(tracking, context)
 
 describe("reattachQuickIngestSession", () => {
+  it.each(["cancelled", "canceled", "unknown"])("does not recover nested %s results as clean success", async (status) => {
+    mocks.bgRequest.mockResolvedValue({ ok: true, data: { status: "completed", result: { status, media_id: 1, warnings: ["Analysis warning"] } } })
+    const snapshot = await reattachQuickIngestSession({ mode: "webui-direct", jobIds: [77], startedAt: Date.now() })
+    expect(snapshot.lifecycle).toBe("partial_failure")
+    expect(snapshot.jobs[0].error).toBeTruthy()
+  })
+
+  it.each([false, true])("retains a saved Warning on reattach with mixed failures=%s", async (mixed) => {
+    const result = { status: "Warning", media_id: 1, error: null, warnings: ["Analysis failed for chunk 1"] }
+    mocks.bgRequest.mockResolvedValueOnce({ ok: true, data: { status: "completed", result } })
+    if (mixed) mocks.bgRequest.mockResolvedValueOnce({ ok: true, data: { status: "failed", error_message: "Failed to save" } })
+    const snapshot = await reattachQuickIngestSession({ mode: "webui-direct", jobIds: mixed ? [77, 78] : [77], startedAt: Date.now() })
+    expect(snapshot.lifecycle).toBe(mixed ? "partial_failure" : "completed")
+    expect(snapshot.jobs[0]).toMatchObject({ jobId: 77, status: "completed", result })
+    expect(snapshot.jobs[0].error).toBeUndefined()
+  })
+
   beforeEach(() => {
     mocks.bgRequest.mockReset()
   })

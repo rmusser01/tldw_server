@@ -49,7 +49,12 @@ import { READY_STATE_LABEL } from "@/design-system"
 import { formatRelativeTime } from "@/utils/dateFormatters"
 import { MarkdownPreview } from "@/components/Common/MarkdownPreview"
 import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
-import { TldwChatService } from "@/services/tldw/TldwChat"
+import { TldwChatService, type TldwChatOptions } from "@/services/tldw/TldwChat"
+import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
+import {
+  loadServicePromptSnapshot,
+  type ServicePromptSnapshot
+} from "@/services/service-prompts"
 import {
   getWritingCapabilities,
   type ManuscriptAnnotationResponse,
@@ -176,14 +181,12 @@ import {
   DEFAULT_TOP_LOGPROBS,
   escapeRegex,
   FILL_PLACEHOLDER,
-  FILL_SYSTEM_PROMPT,
   isAbortError,
   isRecord,
   MAX_CHUNKS,
   MAX_MATCHES,
   normalizeStopStrings,
   PREDICT_PLACEHOLDER,
-  PREDICT_SYSTEM_PROMPT,
   resolveGenerationPlan,
   applyFimTemplate,
   getPromptRichFromPayload,
@@ -402,8 +405,10 @@ export const WritingPlayground = () => {
   const generationUndoRef = React.useRef<GenerationHistoryEntry[]>([])
   const generationRedoRef = React.useRef<GenerationHistoryEntry[]>([])
   const lastGenerationContextRef = React.useRef<LastGenerationContext | null>(null)
-  const generationSessionIdRef = React.useRef<string | null>(null)
-  const generationCancelledRef = React.useRef(false)
+  const generationOperationRef = React.useRef<{
+    cancel: (manualStop: boolean) => void
+  } | null>(null)
+  const generationMountedRef = React.useRef(true)
   const speechUtteranceRef = React.useRef<SpeechSynthesisUtterance | null>(null)
   const editorRef = React.useRef<TextAreaRef | null>(null)
   const activeEditorAdapterRef = React.useRef<WritingEditorAdapter | null>(null)
@@ -498,6 +503,26 @@ export const WritingPlayground = () => {
     activeNodeType === "scene" && Boolean(activeNodeId)
   const isSceneEditorPending = isSceneNodeSelected && !isSceneBound
   const isEditorLocked = isGenerating || isSceneEditorPending
+  const generationBinding = JSON.stringify([
+    activeSessionId, activeProjectId, activeNodeType, activeNodeId, activeSceneId,
+    activeSceneVersion
+  ])
+  const generationBindingRef = React.useRef(generationBinding)
+  generationBindingRef.current = generationBinding
+  const generationEditorTextRef = React.useRef(editorText)
+  generationEditorTextRef.current = editorText
+
+  React.useEffect(() => {
+    generationMountedRef.current = true
+    return () => {
+      generationMountedRef.current = false
+      generationOperationRef.current?.cancel(false)
+    }
+  }, [])
+
+  React.useEffect(() => {
+    return () => generationOperationRef.current?.cancel(false)
+  }, [generationBinding])
 
   const applyEditorValue = React.useCallback(
     (nextValue: string, options?: EditorValueUpdateOptions) => {
@@ -947,7 +972,7 @@ export const WritingPlayground = () => {
   // =====================================================================
   const handleGenerate = React.useCallback(
     async (overrideText?: string) => {
-    if (isGenerating || isRevisionGenerating) return
+    if (generationOperationRef.current || isGenerating || isRevisionGenerating) return
     if (isSceneEditorPending) {
       message.info(
         t(
@@ -1030,7 +1055,7 @@ export const WritingPlayground = () => {
     const requestedTopLogprobs = enableLogprobs
       ? settings.top_logprobs ?? undefined
       : undefined
-    const generationRequestOptions = {
+    const generationRequestOptions: TldwChatOptions = {
       model: selectedModel,
       temperature: settings.temperature,
       maxTokens: settings.max_tokens,
@@ -1039,16 +1064,67 @@ export const WritingPlayground = () => {
       presencePenalty: settings.presence_penalty,
       logprobs: enableLogprobs,
       topLogprobs: requestedTopLogprobs,
-      systemPrompt: chatMode
-        ? undefined
-        : plan.mode === "fill"
-          ? FILL_SYSTEM_PROMPT
-          : PREDICT_SYSTEM_PROMPT,
       extraBody
     }
 
-    generationSessionIdRef.current = activeSessionDetail.id
-    generationCancelledRef.current = false
+    const controller = new AbortController()
+    const binding = generationBindingRef.current
+    let snapshot: ServicePromptSnapshot | null = null
+    let dispatched = false
+    // A token reroll supplies a synthetic prompt; invalidation restores the
+    // actual manuscript, while successful generation retains its undo contract.
+    const originalEditorText = editorText
+    let lastEmittedText = originalEditorText
+    let generated = ""
+    let generatedTokenCount = 0
+    const streamedLogprobs: WritingLogprobEntry[] = []
+    const generationStartMs = performance.now()
+    const ownsRequest = () => generationOperationRef.current === operation
+    const ownsBinding = () =>
+      generationMountedRef.current && generationBindingRef.current === binding
+    const canAccept = () =>
+      ownsRequest() && ownsBinding() && !controller.signal.aborted &&
+      !snapshot?.scopeSignal.aborted
+    const emitText = (text: string) => {
+      lastEmittedText = text
+      generationEditorTextRef.current = text
+      setEditorText(text)
+    }
+    const finish = (commit: boolean) => {
+      if (!ownsRequest()) return
+      snapshot?.scopeInvalidatedSignal.removeEventListener("abort", invalidateScope)
+      if (ownsBinding()) {
+        if (commit && dispatched) {
+          const finalText = generated.length > 0
+            ? plan.prefix + generated + plan.suffix : beforeText
+          applyHistoryText(finalText)
+          pushGenerationHistory(beforeText, finalText)
+          setResponseLogprobs(streamedLogprobs)
+          lastGenerationContextRef.current = streamedLogprobs.length > 0
+            ? { prefix: plan.prefix, suffix: plan.suffix } : null
+        } else if (generationEditorTextRef.current === lastEmittedText) {
+          emitText(originalEditorText)
+          if (!isSceneBound) setIsDirty(isDirty)
+        }
+      }
+      snapshot?.release()
+      snapshot = null
+      generationOperationRef.current = null
+      if (generationMountedRef.current) setIsGenerating(false)
+    }
+    const operation = {
+      cancel: (manualStop: boolean) => {
+        if (!ownsRequest()) return
+        const preservePartial = manualStop && canAccept()
+        controller.abort()
+        // This service is shared with revision actions: cancel only while this
+        // operation still owns it, never from a late async cleanup.
+        if (dispatched) generationServiceRef.current.cancelStream()
+        finish(preservePartial)
+      }
+    }
+    const invalidateScope = () => operation.cancel(false)
+    generationOperationRef.current = operation
     setIsGenerating(true)
     if (!isSceneBound) {
       setIsDirty(true)
@@ -1059,95 +1135,85 @@ export const WritingPlayground = () => {
     setResponseInspectorHideWhitespace(false)
     setGenerationTokenCount(0)
     setGenerationTokensPerSec(0)
-    if (plan.placeholder) {
-      setEditorText(plan.prefix + plan.suffix)
-    }
-
-    let generated = ""
-    let generatedTokenCount = 0
-    let streamError: unknown = null
-    const streamedLogprobs: WritingLogprobEntry[] = []
-    const generationStartMs = performance.now()
 
     try {
+      if (!chatMode) {
+        const id = plan.mode === "fill"
+          ? "writing.continuation.fill" : "writing.continuation.predict"
+        const loaded = await loadServicePromptSnapshot([id], { signal: controller.signal })
+        if (!canAccept()) {
+          loaded.release()
+          return
+        }
+        snapshot = loaded
+        const systemPrompt = snapshot.definitions[id]?.parts.system
+        if (typeof systemPrompt !== "string" || !systemPrompt.trim()) {
+          throw new Error("Writing continuation instructions are unavailable.")
+        }
+        snapshot.scopeInvalidatedSignal.addEventListener("abort", invalidateScope)
+        if (!canAccept()) return
+        generationRequestOptions.systemPrompt = systemPrompt
+        generationRequestOptions.signal = snapshot.scopeSignal
+        generationRequestOptions.requestScope = snapshot.requestScope
+      } else {
+        generationRequestOptions.signal = controller.signal
+      }
+      if (!canAccept()) return
+      dispatched = true
+      if (plan.placeholder) emitText(plan.prefix + plan.suffix)
       if (settings.token_streaming) {
         for await (const token of generationServiceRef.current.streamMessage(
           messages,
           generationRequestOptions,
           (chunk) => {
-            if (!enableLogprobs) return
+            if (!canAccept() || !enableLogprobs) return
             const entries = extractLogprobEntriesFromChunk(chunk)
             if (entries.length === 0) return
             streamedLogprobs.push(...entries)
           }
         )) {
-          if (generationCancelledRef.current) break
+          if (!canAccept()) break
           generated += token
           generatedTokenCount += 1
           setGenerationTokenCount(generatedTokenCount)
           setGenerationTokensPerSec(
             computeTokensPerSecond(generatedTokenCount, performance.now() - generationStartMs)
           )
-          setEditorText(plan.prefix + generated + plan.suffix)
+          emitText(plan.prefix + generated + plan.suffix)
         }
       } else {
-        generated = await generationServiceRef.current.sendMessage(
+        const responseText = await generationServiceRef.current.sendMessage(
           messages,
           generationRequestOptions,
           (response) => {
-            if (!enableLogprobs) return
+            if (!canAccept() || !enableLogprobs) return
             const entries = extractLogprobEntriesFromChunk(response)
             if (entries.length === 0) return
             streamedLogprobs.push(...entries)
           }
         )
+        if (!canAccept()) return
+        generated = responseText
         generatedTokenCount = estimateTokenCountFromText(generated)
         setGenerationTokenCount(generatedTokenCount)
         setGenerationTokensPerSec(
           computeTokensPerSecond(generatedTokenCount, performance.now() - generationStartMs)
         )
-        if (!generationCancelledRef.current) {
-          setEditorText(plan.prefix + generated + plan.suffix)
-        }
+        emitText(plan.prefix + generated + plan.suffix)
       }
     } catch (error) {
-      streamError = error
-    }
-
-    const aborted = generationCancelledRef.current || isAbortError(streamError)
-    const finalText =
-      generated.length > 0 ? plan.prefix + generated + plan.suffix : beforeText
-    if (generatedTokenCount > 0) {
-      setGenerationTokensPerSec(
-        computeTokensPerSecond(generatedTokenCount, performance.now() - generationStartMs)
-      )
-    }
-    if (activeSessionDetail.id === generationSessionIdRef.current) {
-      applyHistoryText(finalText)
-      pushGenerationHistory(beforeText, finalText)
-      setResponseLogprobs(streamedLogprobs)
-      if (streamedLogprobs.length > 0) {
-        lastGenerationContextRef.current = {
-          prefix: plan.prefix,
-          suffix: plan.suffix
-        }
-      } else {
-        lastGenerationContextRef.current = null
+      if (isRequestConfigScopeChangedError(error)) {
+        operation.cancel(false)
+        return
       }
-    }
-
-    generationSessionIdRef.current = null
-    generationCancelledRef.current = false
-    setIsGenerating(false)
-
-    if (streamError && !aborted) {
-      const detail =
-        streamError instanceof Error
-          ? streamError.message
-          : t("option:error", "Error")
-      message.error(
-        t("option:writingPlayground.generateError", "Generation failed: {{detail}}", { detail })
-      )
+      if (canAccept() && !isAbortError(error)) {
+        const detail = error instanceof Error ? error.message : t("option:error", "Error")
+        message.error(
+          t("option:writingPlayground.generateError", "Generation failed: {{detail}}", { detail })
+        )
+      }
+    } finally {
+      finish(canAccept())
     }
     },
     [
@@ -1158,6 +1224,7 @@ export const WritingPlayground = () => {
       effectiveTemplate,
       hasChat,
       isGenerating,
+      isDirty,
       isRevisionGenerating,
       isSceneEditorPending,
       isSceneBound,
@@ -1167,6 +1234,14 @@ export const WritingPlayground = () => {
       settings,
       requestedLogprobsExplicitlyUnsupported,
       supportsAdvancedCompat,
+      setEditorText,
+      setGenerationTokenCount,
+      setGenerationTokensPerSec,
+      setIsDirty,
+      setResponseInspectorHideWhitespace,
+      setResponseInspectorQuery,
+      setResponseInspectorSort,
+      setResponseLogprobs,
       t
     ]
   )
@@ -1311,8 +1386,6 @@ export const WritingPlayground = () => {
     stopSpeech()
     generationUndoRef.current = []
     generationRedoRef.current = []
-    generationSessionIdRef.current = null
-    generationCancelledRef.current = false
     setCanUndoGeneration(false)
     setCanRedoGeneration(false)
   }, [activeSessionId, stopSpeech])
@@ -1590,7 +1663,7 @@ export const WritingPlayground = () => {
 
   const persistRevisionPreset = React.useCallback(
     (presetId: WritingRevisionPresetId | null | undefined) => {
-      if (!presetId) return
+      if (!presetId || generationOperationRef.current) return
       setSelectedRevisionPresetId(presetId)
       applySessionPayloadPatch((payload) => ({
         ...payload,
@@ -1718,7 +1791,7 @@ export const WritingPlayground = () => {
 
   const handleRevisionRequest = React.useCallback(
     async (request: WritingActionBarRequest) => {
-      if (isGenerating || isRevisionGenerating || isSceneEditorPending) return
+      if (generationOperationRef.current || isGenerating || isRevisionGenerating || isSceneEditorPending) return
       const target = resolveFreshRevisionTarget(request)
       if (!target) return
 
@@ -1762,7 +1835,7 @@ export const WritingPlayground = () => {
 
   const handleRegenerateRevision = React.useCallback(
     async (proposal: WritingRevisionProposal) => {
-      if (isGenerating || isRevisionGenerating || isSceneEditorPending) return
+      if (generationOperationRef.current || isGenerating || isRevisionGenerating || isSceneEditorPending) return
       setIsRevisionGenerating(true)
       try {
         await revisionState.regenerateRevision(proposal.id, async (source) => {
@@ -1981,10 +2054,8 @@ export const WritingPlayground = () => {
   }, [applyHistoryText, isGenerating, syncGenerationHistory])
 
   const handleCancelGeneration = React.useCallback(() => {
-    if (!isGenerating) return
-    generationCancelledRef.current = true
-    generationServiceRef.current.cancelStream()
-  }, [isGenerating])
+    generationOperationRef.current?.cancel(true)
+  }, [])
 
   // --- Keyboard shortcut ---
   React.useEffect(() => {
@@ -3365,6 +3436,7 @@ export const WritingPlayground = () => {
                       target={displayedRevisionTarget}
                       selectedPresetId={selectedRevisionPresetId}
                       isGenerating={isRevisionGenerating}
+                      presetDisabled={isGenerating}
                       onPresetChange={persistRevisionPreset}
                       onRequest={(request) => {
                         void handleRevisionRequest(request)
@@ -3465,13 +3537,13 @@ export const WritingPlayground = () => {
                     )}
                     <WritingRevisionQueue
                       proposals={revisionState.revisions}
-                      actionsDisabled={isSceneEditorPending}
+                      actionsDisabled={isSceneEditorPending || isGenerating}
                       onApply={(proposal) => {
-                        if (isSceneEditorPending) return
+                        if (generationOperationRef.current || isSceneEditorPending) return
                         revisionState.applyRevision(proposal.id)
                       }}
                       onReject={(proposal) => {
-                        if (isSceneEditorPending) return
+                        if (generationOperationRef.current || isSceneEditorPending) return
                         revisionState.rejectRevision(proposal.id)
                       }}
                       onCopy={(proposal) => {

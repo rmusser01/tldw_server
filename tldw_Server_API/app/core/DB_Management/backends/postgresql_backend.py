@@ -33,6 +33,7 @@ from .base import (
     DatabaseError,
     FTSQuery,
     QueryResult,
+    UniqueConstraintError,
 )
 from .fts_translator import FTSQueryTranslator
 from .query_utils import (
@@ -1009,6 +1010,7 @@ class PostgreSQLBackend(DatabaseBackend):
         start_time = time.time()
         query, params = self._prepare_query(query, params)
         redacted_failure = False
+        unique_failure = False
         if connection:
             conn = connection
             external_conn = True
@@ -1076,6 +1078,7 @@ class PostgreSQLBackend(DatabaseBackend):
             )
 
         except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as e:
+            unique_failure = isinstance(e, _PSYCOPG_DRIVER_EXCEPTIONS) and getattr(e, "sqlstate", None) == "23505"
             if not external_conn:
                 try:
                     conn.rollback()
@@ -1092,6 +1095,8 @@ class PostgreSQLBackend(DatabaseBackend):
                 self.get_pool().return_connection(conn)
 
         if redacted_failure:
+            if unique_failure:
+                raise UniqueConstraintError("PostgreSQL query execution failed")
             raise DatabaseError("PostgreSQL query execution failed")
 
     def execute_many(
@@ -1324,11 +1329,7 @@ class PostgreSQLBackend(DatabaseBackend):
             """)
 
             # Record the mapping for fts_search when table_name != source_table.
-            with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
-                self._fts_table_map[table_name] = {
-                    "source_table": source_table,
-                    "fts_column": fts_column,
-                }
+            self.register_fts_table(table_name, source_table)
 
             if not external_conn:
                 conn.commit()
@@ -1341,6 +1342,13 @@ class PostgreSQLBackend(DatabaseBackend):
         finally:
             if not external_conn:
                 self.get_pool().return_connection(conn)
+
+    def register_fts_table(self, table_name: str, source_table: str) -> None:
+        """Bind an existing FTS alias on this backend without rebuilding its schema."""
+        self._fts_table_map[table_name] = {
+            "source_table": source_table,
+            "fts_column": f"{table_name}_tsv",
+        }
 
     def fts_search(
         self,

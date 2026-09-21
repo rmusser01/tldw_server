@@ -50,6 +50,7 @@ export function useUndoNotification() {
     let undoClicked = false
 
     const handleUndo = async () => {
+      if (undoClicked) return
       undoClicked = true
       notification.destroy(key)
       try {
@@ -83,7 +84,7 @@ export function useUndoNotification() {
       duration,
       placement: "bottomRight",
       className: "undo-notification",
-      btn: (
+      actions: (
         <Button
           type="primary"
           size="small"

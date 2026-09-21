@@ -14,6 +14,8 @@ export type HistoryInfo = {
   last_used_prompt?: LastUsedModelType;
   model_id?: string;
   server_chat_id?: string;
+  // Optional data-only association. Legacy histories are adopted only by a verified session.
+  server_scope_key?: string;
   // Timeline/branching fields (server-compatible with ChaChaDB)
   root_id?: string;                    // All forks share same root_id
   parent_conversation_id?: string;     // Parent in fork tree
@@ -190,7 +192,7 @@ export type FewShotExample = {
   explanation?: string | null;
 };
 
-export type PromptSyncStatus = 'local' | 'synced' | 'pending' | 'conflict';
+export type PromptSyncStatus = 'local' | 'synced' | 'pending' | 'conflict' | 'error';
 export type PromptSourceSystem = 'workspace' | 'studio' | 'copilot';
 export type PromptFormat = 'legacy' | 'structured';
 export type StructuredPromptDefinition = Record<string, any>;
@@ -232,7 +234,7 @@ export type Prompt = {
   studioPromptId?: number | null;     // Prompt Studio prompt link (same as serverId usually)
 
   // Sync state
-  syncStatus?: PromptSyncStatus;      // 'local' | 'synced' | 'pending' | 'conflict'
+  syncStatus?: PromptSyncStatus;      // 'local' | 'synced' | 'pending' | 'conflict' | 'error'
   sourceSystem?: PromptSourceSystem;  // 'workspace' | 'studio' | 'copilot'
   lastSyncedAt?: number | null;       // Timestamp of last successful sync
   serverUpdatedAt?: string | null;    // Server's updated_at for conflict detection

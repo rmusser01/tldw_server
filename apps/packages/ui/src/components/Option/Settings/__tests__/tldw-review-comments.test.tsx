@@ -14,6 +14,10 @@ const {
   modalConfirmMock: vi.fn()
 }))
 
+vi.mock("@/hooks/useAntdModal", () => ({
+  useAntdModal: () => ({ confirm: modalConfirmMock })
+}))
+
 vi.mock("@heroicons/react/24/outline", () => ({
   CheckIcon: () => <svg aria-hidden="true" />,
   XMarkIcon: () => <svg aria-hidden="true" />
@@ -195,7 +199,7 @@ vi.mock("antd", () => {
 })
 
 vi.mock("@/config/platform", () => ({
-  isFirefoxTarget: () => false
+  isFirefoxTarget: false
 }))
 
 import { TldwBillingSettings } from "../TldwBillingSettings"
@@ -224,6 +228,7 @@ const createConnectionProps = (
   setAuthMode: vi.fn(),
   isLoggedIn: false,
   setIsLoggedIn: vi.fn(),
+  refreshLoginStatus: vi.fn(async () => {}),
   loginMethod: "magic-link",
   setLoginMethod: vi.fn(),
   magicEmail: "persisted@example.com",
@@ -287,6 +292,13 @@ const createBillingProps = (
 })
 
 describe("settings PR review fixes", () => {
+  it("offers a working Disconnect action for a configured manual single-user connection", () => {
+    const props = createConnectionProps()
+    render(<TldwConnectionSettings {...props} />)
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect" }))
+    expect(props.onLogout).toHaveBeenCalledTimes(1)
+  })
+
   beforeEach(() => {
     formItemSpy.mockClear()
     modalConfirmMock.mockReset()
@@ -297,6 +309,21 @@ describe("settings PR review fixes", () => {
 
   afterEach(() => {
     cleanup()
+  })
+
+  it("switches an empty connection form without confirming credential loss", () => {
+    const props = createConnectionProps({ magicEmail: "", magicToken: "", magicSent: false })
+    render(<TldwConnectionSettings {...props} />)
+    fireEvent.change(screen.getByRole("combobox", { name: "segmented" }), {
+      target: { value: "multi-user" }
+    })
+    expect(modalConfirmMock).not.toHaveBeenCalled()
+    expect(props.setAuthMode).toHaveBeenCalledWith("multi-user")
+  })
+
+  it("does not offer extension site permission controls in the WebUI", () => {
+    render(<TldwConnectionSettings {...createConnectionProps()} />)
+    expect(screen.queryByRole("button", { name: "Grant Site Access" })).not.toBeInTheDocument()
   })
 
   it("clears both password and magic-link credentials when auth mode changes", () => {
@@ -488,6 +515,18 @@ describe("settings PR review fixes", () => {
       "aria-busy",
       "true"
     )
+  })
+
+  it("updates the actual connection notices when the owner changes login status", () => {
+    const props = createConnectionProps({ authMode: "multi-user", isLoggedIn: false })
+    const { rerender } = render(<TldwConnectionSettings {...props} />)
+    expect(screen.getByText("Login Required")).toBeInTheDocument()
+    rerender(<TldwConnectionSettings {...props} isLoggedIn />)
+    expect(screen.queryByText("Login Required")).not.toBeInTheDocument()
+    expect(screen.getByText("Logged In")).toBeInTheDocument()
+    rerender(<TldwConnectionSettings {...props} isLoggedIn={false} />)
+    expect(screen.queryByText("Logged In")).not.toBeInTheDocument()
+    expect(screen.getByText("Login Required")).toBeInTheDocument()
   })
 
   it("offers cookie-session logout through the production auth handler", () => {

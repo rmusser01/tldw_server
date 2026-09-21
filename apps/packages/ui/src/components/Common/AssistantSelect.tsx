@@ -10,6 +10,8 @@ import { useSelectedAssistant } from "@/hooks/useSelectedAssistant"
 import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state"
 import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord"
 import { useStoreMessageOption } from "@/store/option"
+import { usePlaygroundSessionStore } from "@/store/playground-session"
+import { dispatchChatRouteReplacement } from "@/utils/character-chat-mode-intent"
 import {
   OPEN_ASSISTANT_SELECT_EVENT,
   type AssistantSelectOpenDetail,
@@ -127,9 +129,10 @@ export const AssistantSelect: React.FC<Props> = ({
   onSelectionComplete
 }) => {
   const { t } = useTranslation(["option", "common"])
-  const [storedAssistant, setSelectedAssistant] =
+  const [storedAssistant, setSelectedAssistant, assistantMeta] =
     useSelectedAssistant(null)
   const selectedAssistant = selection === undefined ? storedAssistant : selection
+  const selectionPending = !onSelectionChange && Boolean(assistantMeta?.isLoading)
   const historyId = useStoreMessageOption((state) => state.historyId)
   const serverChatId = useStoreMessageOption((state) => state.serverChatId)
   const setHistoryId = useStoreMessageOption((state) => state.setHistoryId)
@@ -523,6 +526,7 @@ export const AssistantSelect: React.FC<Props> = ({
 
   const handleSelect = React.useCallback(
     async (entry: AssistantSelection) => {
+      if (selectionPending) return
       const nextMode =
         pendingSelectionModeIntentRef.current ?? selectionModeIntentRef.current
       const isTrackedMode =
@@ -555,10 +559,16 @@ export const AssistantSelect: React.FC<Props> = ({
       }
       if (
         nextMode === "tracked" &&
-        serverChatId &&
         !trackedSelectionMatchesActiveChat(nextEntry)
       ) {
-        clearActiveServerChat()
+        const current = useStoreMessageOption.getState()
+        dispatchChatRouteReplacement({
+          serverChatId: current.serverChatId,
+          historyId: current.historyId,
+          restoreRevision: usePlaygroundSessionStore.getState().restoreRevision,
+          characterId: nextEntry.kind === "character" ? nextEntry.id : null
+        })
+        if (serverChatId) clearActiveServerChat()
       }
       await setSelectedAssistant(nextEntry)
       if (nextMode === "overlay") {
@@ -586,6 +596,7 @@ export const AssistantSelect: React.FC<Props> = ({
       await onSelectionComplete?.(nextEntry)
     },
     [
+      selectionPending,
       effectiveAssistantState.mode,
       clearActiveServerChat,
       onSelectionChange,
@@ -753,6 +764,7 @@ export const AssistantSelect: React.FC<Props> = ({
                 <button
                   type="button"
                   aria-label={entry.name}
+                  disabled={selectionPending}
                   className={`flex min-w-0 flex-1 items-center gap-2 rounded-md border px-3 py-2 text-left text-sm transition ${
                     isActive
                       ? "border-primary bg-primary/10 text-text"

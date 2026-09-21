@@ -427,6 +427,25 @@ describe("e2e harness readiness contracts", () => {
     )
   })
 
+  it("reviews the question and prefilled answer before saving a chat flashcard", () => {
+    const source = readSource("../test-utils/real-server-workflows.ts")
+    const workflow = source.slice(
+      source.indexOf('test("chat -> save to flashcards -> review card"'),
+      source.indexOf('test("media trash -> delete -> restore')
+    )
+
+    expect(workflow).toContain('name: /Review flashcard/i')
+    expect(workflow).toContain('getByLabel("Question", { exact: true })')
+    expect(workflow).toContain('getByLabel("Answer", { exact: true })')
+    expect(workflow).toContain('getByRole("button", { name: /^Save flashcard$/i })')
+    expect(workflow).toContain('expect(questionField).toHaveValue("")')
+    expect(workflow).toContain('expect(saveFlashcardButton).toBeDisabled()')
+    expect(workflow).toContain('questionField.fill(flashcardQuestion)')
+    expect(workflow).toContain('expect(savedFlashcard.front).toBe(flashcardQuestion)')
+    expect(workflow).toContain('expect(savedFlashcard.back).toBe(flashcardAnswer)')
+    expect(workflow).not.toContain("probeSaveChatKnowledge(")
+  })
+
   it("shares intentional first-run and tour dismissal state across both live wrappers", () => {
     const storageSeed = createRealServerWorkflowStorageSeed(123)
 

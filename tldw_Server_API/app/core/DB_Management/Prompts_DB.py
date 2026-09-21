@@ -51,6 +51,9 @@ from tldw_Server_API.app.core.DB_Management.prompts_db_helpers import (
     deserialize_prompt_record,
     normalize_keyword,
     normalize_text_for_search,
+    prepare_recipe_storage_fields,
+    reject_misplaced_prompt_identity,
+    reject_recipe_runtime_values,
     serialize_prompt_definition,
 )
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
@@ -1352,7 +1355,22 @@ class PromptsDatabase:
 
         current_time = self._get_current_utc_timestamp_str()
         client_id = self.client_id
-        prompt_definition_json = self._serialize_prompt_definition(prompt_definition)
+        try:
+            recipe_fields = prepare_recipe_storage_fields(
+                prompt_format,
+                prompt_schema_version,
+                prompt_definition,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+            )
+            if recipe_fields:
+                prompt_definition = recipe_fields["prompt_definition"]
+                prompt_schema_version = recipe_fields["prompt_schema_version"]
+                system_prompt = recipe_fields["system_prompt"]
+                user_prompt = recipe_fields["user_prompt"]
+            prompt_definition_json = self._serialize_prompt_definition(prompt_definition)
+        except ValueError as error:
+            raise InputError(str(error)) from error
 
         try:
             with self.transaction() as conn:
@@ -1502,7 +1520,7 @@ class PromptsDatabase:
                 return prompt_id, prompt_uuid, msg
 
         except (InputError, ConflictError, DatabaseError, sqlite3.Error) as e:
-            logger.error(f"Error adding/updating prompt '{name}': {e}", exc_info=True)
+            logger.error("Error adding/updating prompt: {}", type(e).__name__)
             if isinstance(e, (InputError, ConflictError, DatabaseError)): raise  # noqa: E701
             else: raise DatabaseError(f"Failed to process prompt '{name}': {e}") from e  # noqa: E701, TRY003
 
@@ -1598,6 +1616,13 @@ class PromptsDatabase:
         if 'name' in update_data and (not update_data['name'] or not update_data['name'].strip()):
             raise InputError("Prompt name cannot be empty if provided for update.")  # noqa: TRY003
 
+        try:
+            reject_recipe_runtime_values(update_data)
+            reject_misplaced_prompt_identity(update_data)
+        except ValueError as error:
+            raise InputError(str(error)) from error
+        update_data = dict(update_data)
+
         current_time = self._get_current_utc_timestamp_str()
         client_id = self.client_id
 
@@ -1605,11 +1630,25 @@ class PromptsDatabase:
             with self.transaction() as conn:
                 cursor = conn.cursor()
                 # Get current state of the prompt being updated
-                cursor.execute("SELECT uuid, name, version, deleted FROM Prompts WHERE id = ?", (prompt_id,))
+                cursor.execute("SELECT * FROM Prompts WHERE id = ?", (prompt_id,))
                 existing_prompt_state = cursor.fetchone()
 
                 if not existing_prompt_state:
                     return None, f"Prompt with ID {prompt_id} not found."  # Or raise InputError("Prompt not found")
+
+                existing_definition = existing_prompt_state["prompt_definition_json"]
+                try:
+                    update_data.update(
+                        prepare_recipe_storage_fields(
+                            update_data.get("prompt_format", existing_prompt_state["prompt_format"]),
+                            update_data.get("prompt_schema_version", existing_prompt_state["prompt_schema_version"]),
+                            update_data.get("prompt_definition", existing_definition),
+                            system_prompt=update_data.get("system_prompt"),
+                            user_prompt=update_data.get("user_prompt"),
+                        )
+                    )
+                except ValueError as error:
+                    raise InputError(str(error)) from error
 
                 original_uuid = existing_prompt_state['uuid']
                 original_name = existing_prompt_state['name']
@@ -1661,7 +1700,10 @@ class PromptsDatabase:
                     params.append(update_data.get('prompt_schema_version'))
                 if 'prompt_definition' in update_data:
                     set_clauses.append("prompt_definition_json = ?")
-                    params.append(self._serialize_prompt_definition(update_data.get('prompt_definition')))
+                    try:
+                        params.append(self._serialize_prompt_definition(update_data.get('prompt_definition')))
+                    except ValueError as error:
+                        raise InputError(str(error)) from error
                 if 'usage_count' in update_data:
                     usage_count = update_data.get('usage_count')
                     if usage_count is not None:
@@ -1717,7 +1759,7 @@ class PromptsDatabase:
                 return original_uuid, f"Prompt ID {prompt_id} updated successfully to version {new_version}."
 
         except (InputError, ConflictError, DatabaseError, sqlite3.Error) as e:
-            logger.error(f"Error updating prompt ID {prompt_id}: {e}", exc_info=True)
+            logger.error("Error updating prompt ID {}: {}", prompt_id, type(e).__name__)
             if isinstance(e, (InputError, ConflictError, DatabaseError)):
                 raise
             raise DatabaseError(f"Failed to update prompt ID {prompt_id}: {e}") from e  # noqa: TRY003
@@ -2870,7 +2912,13 @@ def export_prompts_formatted(db_instance: PromptsDatabase,
 
     # --- Fetch Prompts Data ---
     # Build base query parts
-    select_fields = ["p.id", "p.name", "p.uuid"] # Always include id, name, uuid
+    select_fields = [
+        "p.id",
+        "p.name",
+        "p.uuid",
+        "p.prompt_format",
+        "p.prompt_schema_version",
+    ]  # Always include identity required to prevent lossy recipe exports
     if include_author: select_fields.append("p.author")  # noqa: E701
     if include_details: select_fields.append("p.details")  # noqa: E701
     if include_system: select_fields.append("p.system_prompt")  # noqa: E701
@@ -2903,6 +2951,13 @@ def export_prompts_formatted(db_instance: PromptsDatabase,
 
         if not prompts_data:
             return "No prompts found matching the criteria for export.", "None"
+
+        if any(
+            prompt.get("prompt_format") == "structured"
+            and prompt.get("prompt_schema_version") == 2
+            for prompt in prompts_data
+        ):
+            raise InputError("single_text_recipe_export_requires_json")  # noqa: TRY003
 
         # Fetch associated keywords for each prompt if needed
         if include_associated_keywords:

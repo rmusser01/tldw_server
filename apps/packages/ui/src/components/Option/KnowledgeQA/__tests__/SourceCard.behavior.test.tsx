@@ -12,6 +12,18 @@ async function clickOverflowItem(label: RegExp | string) {
 }
 
 describe("SourceCard copy interactions", () => {
+  it.each(["compact", "default"] as const)("does not display RRF ranking as a match percentage in %s mode", (density) => {
+    render(<SourceCard
+      result={{ id: "late_chunk:2:0", score: 0.004838709677419355, content: "Project Cedar launches on 22 November 2026. The project lead is Mira Chen.", metadata: { title: "Cedar public launch brief" } }}
+      index={1} isCited={true} isFocused={false} density={density}
+      onSourceHover={vi.fn()} onAskAbout={vi.fn()} onViewFull={vi.fn()}
+      onSourceFeedback={vi.fn()} onRetrySourceFeedback={vi.fn()} onTogglePin={vi.fn()} onJumpToCitation={vi.fn()}
+      feedbackThumb={null} feedbackSubmitting={false} feedbackError={null} isPinned={false} highlightTerms={[]} citationUsages={[]}
+    />)
+    expect(screen.queryByText(/0%/)).not.toBeInTheDocument()
+    expect(screen.getByText("Relevance not measured")).toBeInTheDocument()
+  })
+
   it("ignores stale clipboard completions so the latest copy action owns the UI state", async () => {
     let resolveFirstCopy: (() => void) | null = null
     let callCount = 0
@@ -412,6 +424,7 @@ describe("SourceCard action structure", () => {
           content: "Some content",
           metadata: { title: "Source A", source_type: "media_db" as const },
           score: 0.21,
+          score_kind: "relevance_probability",
         }}
         index={1}
         isCited={false}
@@ -455,6 +468,7 @@ describe("SourceCard action structure", () => {
             chunk_id: "chunk_4_of_9",
           },
           score: 0.21,
+          score_kind: "relevance_probability",
         }}
         index={1}
         isCited={true}

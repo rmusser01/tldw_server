@@ -1,3 +1,4 @@
+import { excludeLocalRagDiagnostics } from "@/utils/local-rag-diagnostic"
 import {
   type ChatHistory as ChatHistoryType,
   type Message as MessageType,
@@ -26,11 +27,13 @@ import {
   deletePromptByIdFB,
   getAllPromptsFB,
   getPromptByIdFB,
+  restorePromptSnapshotFB,
   savePromptFB,
   updatePromptFB
 } from ".."
 import { ModelNickname } from "./nickname"
 import { ModelDb } from "./models"
+import { clearRecipePersistenceScoped, resolveRecipePersistenceOwnerView } from "@/services/recipe-persistence-uncertainty"
 
 // Helper function to generate IDs (keeping the same format)
 export const generateID = () => {
@@ -99,6 +102,22 @@ export const updateMessage = async (
 ) => {
   const db = new PageAssistDatabase()
   await db.updateMessage(history_id, message_id, content)
+}
+
+/** Attach a server acknowledgement to an existing owned user row without replacing its draft fields. */
+export const acknowledgeSavedUserMessage = async (
+  historyId: string,
+  messageId: string,
+  serverMessageId: string,
+  expectedContent: string
+) => {
+  await chatDB.messages.where("id").equals(messageId).modify((row) => {
+    if (row.history_id !== historyId || row.role !== "user" || row.content !== expectedContent) return
+    if (row.serverMessageId && row.serverMessageId !== serverMessageId) {
+      throw new Error("The saved user message changed. Reload the conversation before retrying.")
+    }
+    row.serverMessageId = serverMessageId
+  })
 }
 
 export const updateMessageMedia = async (
@@ -264,7 +283,8 @@ export const formatToChatHistory = (
   messages: MessageHistory
 ): ChatHistoryType => {
   const { collapsed } = collapseVariantMessages(messages)
-  return collapsed.map((message) => {
+  const eligibleIds = new Set(excludeLocalRagDiagnostics(formatToMessage(messages)).map(message => message.id))
+  return collapsed.filter(message => eligibleIds.has(message.id)).map((message) => {
     return {
       content: message.content,
       role: normalizeChatRole(message.role),
@@ -598,11 +618,33 @@ export const deletePromptById = async (id: string) => {
   return id
 }
 
-export const permanentlyDeletePrompt = async (id: string) => {
+export const permanentlyDeletePrompt = async (
+  id: string,
+  persistenceScope?: string | null
+) => {
+  const scope = persistenceScope === undefined
+    ? (await resolveRecipePersistenceOwnerView())?.ownerId ?? null
+    : persistenceScope
   // Hard delete: removes from both Dexie and Firefox storage
   const db = new PageAssistDatabase()
   await db.permanentlyDeletePrompt(id)
   await deletePromptByIdFB(id)
+  if (scope) await clearRecipePersistenceScoped(id, scope)
+  return id
+}
+
+export const restorePromptSnapshot = async (snapshot: Prompt) => {
+  const restored = structuredClone(snapshot)
+  const db = new PageAssistDatabase()
+  await db.restorePromptSnapshot(restored)
+  await restorePromptSnapshotFB(restored)
+  return restored.id
+}
+
+export const markPromptSyncError = async (id: string) => {
+  const db = new PageAssistDatabase()
+  await db.updatePromptSyncStatus(id, { syncStatus: "error" })
+  await updatePromptFB({ id, syncStatus: "error" })
   return id
 }
 

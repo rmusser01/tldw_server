@@ -58,6 +58,265 @@ def _retrieval_plan() -> RetrievalPlan:
     )
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("with_progress", [False, True])
+async def test_slow_retrieval_emits_keepalive_and_preserves_result(monkeypatch, with_progress):
+    monkeypatch.setattr(streaming_executor, "_RETRIEVAL_HEARTBEAT_SECONDS", 0.01, raising=False)
+    request = _resolved_request()
+    request.payload["enable_research_progress"] = with_progress
+    release, started = asyncio.Event(), asyncio.Event()
+
+    async def retrieve(**kwargs):
+        started.set()
+        await release.wait()
+        return UnifiedSearchResult(query=kwargs["query"], documents=[], metadata={})
+
+    stream = stream_rag_events(
+        resolved_request=request, retrieval_plan=_retrieval_plan(), standard_pipeline=retrieve,
+        extra_context={"generate_streaming_response": _fake_generate_streaming_response},
+    )
+    first = asyncio.create_task(stream.__anext__())
+    await started.wait()
+    try:
+        assert await asyncio.wait_for(asyncio.shield(first), 0.2) == {"type": "heartbeat"}
+        assert await asyncio.wait_for(stream.__anext__(), 0.2) == {"type": "heartbeat"}
+        release.set()
+        events = [event async for event in stream]
+        assert [event["type"] for event in events] == ["contexts", "reasoning", "delta", "complete"]
+        assert events[-2]["text"] == "answer text"
+    finally:
+        release.set()
+        await first
+        await stream.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("with_progress", [False, True])
+async def test_retrieval_keepalive_closes_owned_work_when_consumer_stops(monkeypatch, with_progress):
+    monkeypatch.setattr(streaming_executor, "_RETRIEVAL_HEARTBEAT_SECONDS", 0.01, raising=False)
+    request = _resolved_request()
+    request.payload["enable_research_progress"] = with_progress
+    stopped = asyncio.Event()
+
+    async def retrieve(**_kwargs):
+        try:
+            await asyncio.Future()
+        finally:
+            stopped.set()
+
+    stream = stream_rag_events(
+        resolved_request=request, retrieval_plan=_retrieval_plan(), standard_pipeline=retrieve,
+    )
+    try:
+        assert await asyncio.wait_for(stream.__anext__(), 0.2) == {"type": "heartbeat"}
+    finally:
+        await stream.aclose()
+    assert stopped.is_set()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("with_progress", [False, True])
+@pytest.mark.parametrize("retained", [False, True])
+async def test_stream_preserves_source_failures_with_only_public_fields(with_progress, retained):
+    request = _resolved_request()
+    request.payload["enable_research_progress"] = with_progress
+    request.payload["enable_generation"] = False
+    document = Document(id="owned", content="Rowan Observatory", source=DataSource.MEDIA_DB, metadata={})
+    statuses = {
+        "media_db": {"status": "searched" if retained else "empty", "count": int(retained)},
+        "characters": {
+            "status": "error", "count": 0, "reason": "retrieval_failed",
+            "exception": "private credential", "path": "/private/database",
+        },
+        "chats": {"status": "error", "count": 1, "reason": "retrieval_failed", "filtered_artifact_count": 2},
+        "private-source-name": {"status": "error", "count": 0},
+    }
+
+    async def retrieve(**kwargs):
+        return UnifiedSearchResult(
+            query=kwargs["query"], documents=[document] if retained else [],
+            metadata={"source_status": statuses},
+        )
+
+    events = [event async for event in stream_rag_events(
+        resolved_request=request, retrieval_plan=_retrieval_plan(), standard_pipeline=retrieve,
+    )]
+    context = next(event for event in events if event["type"] == "contexts")
+    assert context["source_status"] == {
+        "media_db": statuses["media_db"],
+        "characters": {"status": "error", "count": 0, "reason": "retrieval_failed"},
+        "chats": statuses["chats"],
+    }
+    assert len(context["contexts"]) == int(retained)
+    assert "private" not in str(events)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid", [None, [], {"status": "private-error", "count": 0},
+                                     {"status": "error", "count": -1},
+                                     {"status": "error", "count": True}])
+async def test_stream_omits_invalid_source_status_entries(invalid):
+    request = _resolved_request()
+    request.payload["enable_generation"] = False
+
+    async def retrieve(**kwargs):
+        return UnifiedSearchResult(query=kwargs["query"], documents=[], metadata={"source_status": {
+            "characters": invalid,
+            "notes": {"status": "empty", "count": 0, "reason": "/private/error", "filtered_artifact_count": -1},
+        }})
+
+    events = [event async for event in stream_rag_events(
+        resolved_request=request, retrieval_plan=_retrieval_plan(), standard_pipeline=retrieve,
+    )]
+    context = next(event for event in events if event["type"] == "contexts")
+    assert context["source_status"] == {"notes": {"status": "empty", "count": 0}}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("with_progress", [False, True])
+@pytest.mark.parametrize("retained,excluded", [(0, 1), (1, 1), (0, 0)])
+async def test_stream_preserves_safe_security_filter_outcome(retained, excluded, with_progress):
+    request = _resolved_request()
+    request.payload["enable_research_progress"] = with_progress
+    allowed = Document(id="public", content="Public release notice", source=DataSource.MEDIA_DB, metadata={})
+
+    async def retrieve(**kwargs):
+        return UnifiedSearchResult(
+            documents=[allowed] if retained else [],
+            query=kwargs["query"],
+            metadata={"security_filter": {
+                "excluded_count": excluded, "retained_count": retained,
+                "excluded_ids": ["secret-id"], "excluded_text": "secret-text",
+            }},
+        )
+
+    calls = []
+
+    async def generate(context, **kwargs):
+        calls.append(kwargs)
+        return await _fake_generate_streaming_response(context, **kwargs)
+
+    events = [event async for event in stream_rag_events(
+        resolved_request=request, retrieval_plan=_retrieval_plan(),
+        standard_pipeline=retrieve,
+        extra_context={"generate_streaming_response": generate},
+    )]
+    context = next(event for event in events if event["type"] == "contexts")
+    assert context["security_filter"] == {"excluded_count": excluded, "retained_count": retained}
+    assert "secret-id" not in str(events)
+    assert "secret-text" not in str(events)
+    assert bool(calls) is not (excluded > 0 and retained == 0)
+    assert events[-1]["output_emitted"] is bool(calls)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("with_progress", [False, True])
+async def test_stream_preserves_clarification_without_dispatching_provider(with_progress):
+    request = _resolved_request()
+    request.payload["enable_research_progress"] = with_progress
+
+    async def clarify(**kwargs):
+        return UnifiedSearchResult(
+            documents=[],
+            query=kwargs["query"],
+            generated_answer="Which document do you mean?",
+            metadata={"clarification": {"required": True, "stage": "pre_retrieval"}},
+        )
+
+    async def forbidden_generation(*args, **kwargs):
+        raise AssertionError("Clarification must not dispatch a provider")
+
+    events = [
+        event
+        async for event in stream_rag_events(
+            resolved_request=request,
+            retrieval_plan=_retrieval_plan(),
+            standard_pipeline=clarify,
+            extra_context={"generate_streaming_response": forbidden_generation},
+        )
+    ]
+    assert [event["type"] for event in events] == ["clarification", "delta", "complete"]
+    assert events[1]["text"] == "Which document do you mean?"
+    # The public stream contract conservatively marks any emitted text as
+    # dispatched, preventing retries after a visible clarification response.
+    assert events[-1]["allow_non_stream_fallback"] is False
+
+
+def test_stream_context_preserves_inspectable_evidence_without_internal_metadata():
+    document = Document(
+        id="chunk-1",
+        content="Project Juniper launches on 18 October 2026. " * 200,
+        source=DataSource.MEDIA_DB,
+        metadata={
+            "source_id": "1",
+            "chunk_id": "chunk-1",
+            "source_type": "media_db",
+            "evidence_origin": "retrieved",
+            "internal_secret": "must-not-leak",
+        },
+    )
+    event = streaming_executor._context_events(docs=[document], payload={}, request_defaults={})[0]
+    context = event["contexts"][0]
+    assert context["source_id"] == "1"
+    assert context["source"] == "media_db"
+    assert context["chunk_id"] == "chunk-1"
+    assert context["excerpt"] == document.content[:4000]
+    assert "must-not-leak" not in str(event)
+
+
+def test_stream_context_keeps_late_chunk_parent_identity():
+    document = Document(
+        id="late_chunk:2:0", content="Public release notice", source=DataSource.MEDIA_DB,
+        metadata={"media_id": 2, "chunk_id": "late_chunk:2:0"},
+    )
+    context = streaming_executor._context_events(docs=[document], payload={}, request_defaults={})[0]["contexts"][0]
+    assert context["source_id"] == "2"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("enable_citations", [True, False])
+async def test_stream_provider_prompt_matches_numbered_source_contract(monkeypatch, enable_citations):
+    from tldw_Server_API.app.core.RAG.rag_service import generation as generation_mod
+
+    request = _resolved_request()
+    request.payload.update({
+        "enable_citations": enable_citations, "generation_prompt": "operator", "top_k": 1,
+        "claims_top_k": 3, "claims_max": 10, "claims_concurrency": 8,
+    })
+    monkeypatch.setattr(
+        generation_mod.PromptTemplates, "get_template",
+        lambda _name: "Operator instruction: answer briefly.\n{context}\nQuestion: {question}",
+    )
+    prompts = []
+
+    async def capture_prompt(self, prompt, **kwargs):
+        prompts.append(prompt)
+        return "The release is in November."
+
+    monkeypatch.setattr(generation_mod.LLMGenerator, "_call_llm", capture_prompt)
+
+    async def retrieve(**kwargs):
+        return UnifiedSearchResult(documents=[
+            Document(id="allowed", content="Cedar launches in November.", metadata={"title": "Cedar", "source": "media_db"}, source=DataSource.MEDIA_DB),
+            Document(id="over-limit", content="Additional source outside visible limit.", metadata={}, source=DataSource.MEDIA_DB),
+        ], query=kwargs["query"])
+
+    events = [event async for event in stream_rag_events(
+        resolved_request=request, retrieval_plan=_retrieval_plan(), standard_pipeline=retrieve,
+    )]
+    assert len(events[0]["contexts"]) == 1
+    assert "Operator instruction: answer briefly." in prompts[0]
+    if enable_citations:
+        assert "Additional source outside visible limit" not in prompts[0]
+        assert "[1] Cedar (media_db)" in prompts[0]
+        assert "inline numbered citations" in prompts[0]
+        assert "Only cite the provided source numbers" in prompts[0]
+    else:
+        assert "Additional source outside visible limit" in prompts[0]
+        assert "[Source 1: Cedar (media_db)]" in prompts[0]
+        assert "inline numbered citations" not in prompts[0]
+
+
 class _StreamingRuntime:
     def __init__(self) -> None:
         self.handle: Any = None
@@ -695,28 +954,71 @@ async def test_streaming_generation_marks_partial_output_and_propagates_failure(
 
 
 @pytest.mark.asyncio
-async def test_stream_rag_events_continues_when_standard_prefetch_fails():
+async def test_stream_rag_events_reports_standard_prefetch_failure_without_generation():
+    from loguru import logger
+
     async def failing_standard_pipeline(**kwargs: Any) -> UnifiedSearchResult:  # noqa: ARG001
-        raise RuntimeError("retrieval backend unavailable")
+        raise RuntimeError("private-database-path query-secret")
 
-    events = [
-        event
-        async for event in stream_rag_events(
-            resolved_request=_resolved_request("standard"),
-            retrieval_plan=_retrieval_plan(),
-            standard_pipeline=failing_standard_pipeline,
-            extra_context={"generate_streaming_response": _fake_generate_streaming_response},
-        )
-    ]
+    calls = []
 
-    assert [event["type"] for event in events] == [  # nosec B101
-        "contexts",
-        "reasoning",
-        "delta",
-        "complete",
-    ]
-    assert events[0]["contexts"] == []  # nosec B101
-    assert events[-2]["text"] == "answer text"  # nosec B101
+    async def generate(context, **kwargs):
+        calls.append(True)
+        return await _fake_generate_streaming_response(context, **kwargs)
+
+    records = []
+    sink = logger.add(lambda message: records.append(message.record))
+    try:
+        events = [
+            event
+            async for event in stream_rag_events(
+                resolved_request=_resolved_request("standard"),
+                retrieval_plan=_retrieval_plan(),
+                standard_pipeline=failing_standard_pipeline,
+                extra_context={"generate_streaming_response": generate},
+            )
+        ]
+    finally:
+        logger.remove(sink)
+
+    assert [event["type"] for event in events] == ["error"]
+    assert not calls
+    assert events[0]["allow_non_stream_fallback"] is False
+    assert "private-database-path" not in str(events)
+    failures = [record for record in records if record["level"].name == "ERROR"]
+    assert len(failures) == 1
+    assert failures[0]["extra"]["operation"] == "rag_standard_retrieval"
+    assert failures[0]["extra"]["exception_type"] == "RuntimeError"
+    assert "RuntimeError" in failures[0]["message"]
+    assert failures[0]["exception"] is None
+    assert "private-database-path" not in str(failures)
+    assert "query-secret" not in str(failures)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("with_progress", [False, True])
+@pytest.mark.parametrize("error_code", ["document_retrieval_failed", "pipeline_failed"])
+async def test_stream_reports_empty_failed_retrieval_result(error_code, with_progress):
+    request = _resolved_request()
+    request.payload["enable_research_progress"] = with_progress
+
+    async def retrieve(**kwargs):
+        return UnifiedSearchResult(documents=[], query=kwargs["query"], errors=[error_code])
+
+    calls = []
+
+    async def generate(context, **kwargs):
+        calls.append(True)
+        return await _fake_generate_streaming_response(context, **kwargs)
+
+    events = [event async for event in stream_rag_events(
+        resolved_request=request, retrieval_plan=_retrieval_plan(),
+        standard_pipeline=retrieve,
+        extra_context={"generate_streaming_response": generate},
+    )]
+    assert [event["type"] for event in events] == ["error"]
+    assert not calls
+    assert events[0]["allow_non_stream_fallback"] is False
 
 
 @pytest.mark.asyncio

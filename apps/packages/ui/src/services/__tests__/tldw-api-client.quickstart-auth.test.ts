@@ -43,7 +43,7 @@ vi.mock("@/utils/safe-storage", () => ({
   }
 }))
 
-import { TldwApiClient } from "@/services/tldw/TldwApiClient"
+import { TldwApiClient, tldwClient } from "@/services/tldw/TldwApiClient"
 import {
   activateCookieSessionConfig,
   clearRuntimeAuthOverride,
@@ -72,16 +72,144 @@ describe("TldwApiClient quickstart auth bootstrap", () => {
     mocks.sessionStorage.clear()
     mocks.storageRemoveError = null
     window.localStorage.clear()
+    vi.stubGlobal(
+      "navigator",
+      Object.create(window.navigator, {
+        locks: {
+          value: {
+            request: async (_name: string, work: () => unknown) => await work()
+          }
+        }
+      })
+    )
     activateCookieSessionConfig()
     clearRuntimeAuthOverride()
   })
 
   afterEach(() => {
+    vi.unstubAllGlobals()
     vi.restoreAllMocks()
     vi.unstubAllEnvs()
     window.localStorage.clear()
     activateCookieSessionConfig()
     clearRuntimeAuthOverride()
+  })
+
+  describe("server capability cookie readiness", () => {
+    const sourceCapabilityPath = "/api/v1/ingestion-sources/capabilities"
+    const docsInfoPath = "/api/v1/config/docs-info"
+    const sourceCapabilitySpec = {
+      info: { version: "cookie-readiness" },
+      paths: {
+        "/api/v1/ingestion-sources": {},
+        [sourceCapabilityPath]: {}
+      }
+    }
+    const requestsForPath = (path: string) =>
+      mocks.bgRequest.mock.calls.filter(
+        ([request]) =>
+          typeof request === "object" &&
+          request !== null &&
+          (request as { path?: unknown }).path === path
+      )
+
+    const resetCapabilityCookieTestState = async () => {
+      mocks.storage.clear()
+      mocks.sessionStorage.clear()
+      mocks.bgRequest.mockReset()
+      window.localStorage.clear()
+      activateCookieSessionConfig()
+      clearRuntimeAuthOverride()
+      vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
+      vi.stubEnv("NEXT_PUBLIC_X_API_KEY", undefined)
+      await tldwClient.initialize()
+    }
+
+    beforeEach(async () => {
+      await resetCapabilityCookieTestState()
+    })
+
+    afterEach(async () => {
+      await resetCapabilityCookieTestState()
+    })
+
+    it.each([
+      {
+        caseName: "foreign-origin cookie marker",
+        stored: {
+          authMode: "single-user" as const,
+          authSource: "cookie-session" as const,
+          serverUrl: "https://foreign.example.test"
+        },
+        ready: false,
+        protectedRequests: 0,
+        localDirectoryCreation: null
+      },
+      {
+        caseName: "same-origin multi-user cookie marker",
+        stored: {
+          authMode: "multi-user" as const,
+          authSource: "cookie-session" as const,
+          serverUrl: window.location.origin
+        },
+        ready: false,
+        protectedRequests: 0,
+        localDirectoryCreation: null
+      },
+      {
+        caseName: "exact-origin single-user cookie marker",
+        stored: {
+          authMode: "single-user" as const,
+          authSource: "cookie-session" as const,
+          serverUrl: window.location.origin
+        },
+        ready: true,
+        protectedRequests: 1,
+        localDirectoryCreation: true
+      }
+    ])(
+      "keeps public discovery available while using actual client readiness for $caseName",
+      async ({ stored, ready, protectedRequests, localDirectoryCreation }) => {
+        mocks.storage.set("tldwConfig", stored)
+        await tldwClient.initialize()
+
+        await expect(tldwClient.getConfig()).resolves.toMatchObject(stored)
+        if (ready) {
+          await expect(tldwClient.ensureConfigForRequest(true)).resolves.toMatchObject(
+            stored
+          )
+        } else {
+          await expect(tldwClient.ensureConfigForRequest(true)).rejects.toThrow()
+        }
+
+        const getOpenAPISpec = vi
+          .spyOn(tldwClient, "getOpenAPISpec")
+          .mockResolvedValue(sourceCapabilitySpec)
+        mocks.bgRequest.mockImplementation(async (request: { path?: string }) =>
+          request.path === sourceCapabilityPath
+            ? { can_create_local_directory: true }
+            : {}
+        )
+
+        const { getServerCapabilities } = await import(
+          "@/services/tldw/server-capabilities"
+        )
+        const capabilities = await getServerCapabilities({ forceRefresh: true })
+
+        expect(capabilities.hasIngestionSources).toBe(true)
+        expect(capabilities.canCreateLocalDirectoryIngestionSource).toBe(
+          localDirectoryCreation
+        )
+        expect(getOpenAPISpec).toHaveBeenCalledTimes(1)
+        expect(requestsForPath(docsInfoPath)).toHaveLength(1)
+        expect(requestsForPath(docsInfoPath)[0]?.[0]).toMatchObject({
+          noAuth: true
+        })
+        expect(requestsForPath(sourceCapabilityPath)).toHaveLength(
+          protectedRequests
+        )
+      }
+    )
   })
 
   it("does not persist the public quickstart api key", async () => {

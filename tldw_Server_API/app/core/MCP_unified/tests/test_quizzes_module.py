@@ -2,13 +2,13 @@ import contextlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Dict, List
+from typing import Any
 
 import pytest
 
-from tldw_Server_API.app.core.MCP_unified.modules.implementations.quizzes_module import QuizzesModule
-from tldw_Server_API.app.core.MCP_unified.modules.base import ModuleConfig
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError
+from tldw_Server_API.app.core.MCP_unified.modules.base import ModuleConfig
+from tldw_Server_API.app.core.MCP_unified.modules.implementations.quizzes_module import QuizzesModule
 
 
 def _ensure(condition: bool, message: str) -> None:
@@ -21,9 +21,9 @@ class FakeQuizzesDB:
         self._quiz_id = 0
         self._question_id = 0
         self._attempt_id = 0
-        self.quizzes: Dict[int, Dict[str, Any]] = {}
-        self.questions: Dict[int, Dict[str, Any]] = {}
-        self.attempts: Dict[int, Dict[str, Any]] = {}
+        self.quizzes: dict[int, dict[str, Any]] = {}
+        self.questions: dict[int, dict[str, Any]] = {}
+        self.attempts: dict[int, dict[str, Any]] = {}
 
     def create_quiz(self, name: str, description=None, workspace_tag=None, media_id=None, time_limit_seconds=None, passing_score=None, client_id=None):
         self._quiz_id += 1
@@ -49,11 +49,20 @@ class FakeQuizzesDB:
             return None
         return dict(quiz)
 
-    def list_quizzes(self, q=None, media_id=None, workspace_tag=None, include_deleted=False, limit=50, offset=0):
+    def list_quizzes(
+        self,
+        q=None,
+        media_id=None,
+        workspace_tag=None,
+        activity_type="questions",
+        include_deleted=False,
+        limit=50,
+        offset=0,
+    ) -> dict[str, Any]:
         items = [v for v in self.quizzes.values() if include_deleted or not v.get("deleted")]
         return {"items": items[offset: offset + limit], "count": len(items)}
 
-    def update_quiz(self, quiz_id: int, updates: Dict[str, Any], client_id=None):
+    def update_quiz(self, quiz_id: int, updates: dict[str, Any], client_id=None):
         expected_version = updates.pop("expected_version", None)
         quiz = self.quizzes.get(quiz_id)
         if not quiz or quiz.get("deleted"):
@@ -107,10 +116,10 @@ class FakeQuizzesDB:
     def list_questions(self, quiz_id: int, q=None, include_answers=False, limit=50, offset=0):
         items = [v for v in self.questions.values() if v["quiz_id"] == quiz_id and not v.get("deleted")]
         if not include_answers:
-            items = [dict({k: v for k, v in item.items() if k not in {"correct_answer", "explanation"}}) for item in items]
+            items = [{k: v for k, v in item.items() if k not in {"correct_answer", "explanation"}} for item in items]
         return {"items": items[offset: offset + (limit or len(items))], "count": len(items)}
 
-    def update_question(self, question_id: int, updates: Dict[str, Any], client_id=None):
+    def update_question(self, question_id: int, updates: dict[str, Any], client_id=None):
         expected_version = updates.pop("expected_version", None)
         row = self.questions.get(question_id)
         if not row or row.get("deleted"):
@@ -134,13 +143,13 @@ class FakeQuizzesDB:
             row["version"] += 1
         return True
 
-    def start_attempt(self, quiz_id: int, client_id: str = "unknown") -> Dict[str, Any]:
+    def start_attempt(self, quiz_id: int, client_id: str = "unknown") -> dict[str, Any]:
         self._attempt_id += 1
         aid = self._attempt_id
         self.attempts[aid] = {"id": aid, "quiz_id": quiz_id}
         return {"id": aid, "quiz_id": quiz_id, "questions": []}
 
-    def submit_attempt(self, attempt_id: int, answers: List[Dict]) -> Dict[str, Any]:
+    def submit_attempt(self, attempt_id: int, answers: list[dict]) -> dict[str, Any]:
         if attempt_id not in self.attempts:
             raise ConflictError("Attempt not found", entity="quiz_attempts", identifier=attempt_id)
         return {"attempt_id": attempt_id, "score": 0, "answers": answers}
@@ -154,6 +163,88 @@ class FakeQuizzesDB:
 
     def close_all_connections(self) -> None:
         return None
+
+
+def test_quizzes_module_uses_user_id_as_database_and_mutation_owner(monkeypatch, tmp_path: Path):
+    mod = QuizzesModule(ModuleConfig(name="quizzes"))
+    stores: dict[str, FakeQuizzesDB] = {}
+    create_owners: list[tuple[str, str | None]] = []
+    update_owners: list[tuple[str, str | None]] = []
+
+    class TrackingQuizzesDB(FakeQuizzesDB):
+        def __init__(self, owner_id: str) -> None:
+            super().__init__()
+            self.owner_id = owner_id
+
+        def create_quiz(self, *args, client_id=None, **kwargs):
+            create_owners.append((self.owner_id, client_id))
+            return super().create_quiz(*args, client_id=client_id, **kwargs)
+
+        def update_quiz(self, quiz_id: int, updates: dict[str, Any], client_id=None):
+            update_owners.append((self.owner_id, client_id))
+            return super().update_quiz(quiz_id, updates, client_id=client_id)
+
+    def open_tracking_db(*, db_path, client_id):
+        del db_path
+        return stores.setdefault(client_id, TrackingQuizzesDB(client_id))
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.MCP_unified.modules.implementations.quizzes_module.CharactersRAGDB",
+        open_tracking_db,
+    )
+    shared_paths = {"chacha": str(tmp_path / "chacha.db")}
+    user_one = SimpleNamespace(user_id=101, client_id="shared-transport", db_paths=shared_paths)
+    user_two = SimpleNamespace(user_id=202, client_id="shared-transport", db_paths=shared_paths)
+    legacy = SimpleNamespace(client_id="legacy-client", db_paths=shared_paths)
+
+    first = mod._create_quiz_sync(user_one, {"name": "First"})
+    second = mod._create_quiz_sync(user_two, {"name": "Second"})
+    legacy_created = mod._create_quiz_sync(legacy, {"name": "Legacy"})
+    mod._update_quiz_sync(
+        user_one,
+        {"quiz_id": first["quiz_id"], "updates": {"name": "First updated"}},
+    )
+    mod._update_quiz_sync(
+        user_two,
+        {"quiz_id": second["quiz_id"], "updates": {"name": "Second updated"}},
+    )
+
+    assert set(stores) == {"101", "202", "legacy-client"}
+    assert create_owners == [
+        ("101", "101"),
+        ("202", "202"),
+        ("legacy-client", "legacy-client"),
+    ]
+    assert update_owners == [("101", "101"), ("202", "202")]
+    assert legacy_created["quiz_id"] == 1
+
+
+def test_quizzes_module_fails_closed_without_owner_identity(tmp_path: Path):
+    mod = QuizzesModule(ModuleConfig(name="quizzes"))
+    db_paths = {"chacha": str(tmp_path / "chacha.db")}
+
+    for context in [
+        SimpleNamespace(db_paths=db_paths),
+        SimpleNamespace(user_id="", client_id="", db_paths=db_paths),
+    ]:
+        with pytest.raises(ValueError, match="owner identity"):
+            mod._open_db(context)
+
+
+def test_quizzes_module_fails_closed_when_owner_identity_access_raises(tmp_path: Path):
+    mod = QuizzesModule(ModuleConfig(name="quizzes"))
+
+    class BrokenOwnerContext:
+        db_paths = {"chacha": str(tmp_path / "chacha.db")}
+
+        @property
+        def user_id(self):
+            raise RuntimeError("identity unavailable")
+
+        client_id = None
+
+    with pytest.raises(ValueError, match="owner identity"):
+        mod._open_db(BrokenOwnerContext())
 
 
 def test_quizzes_module_get_media_content_uses_managed_media_database(monkeypatch, tmp_path: Path):

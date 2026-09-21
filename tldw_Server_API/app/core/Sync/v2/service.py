@@ -13,7 +13,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from time import monotonic_ns
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 from uuid import RFC_4122, UUID, uuid4
 
 from loguru import logger
@@ -2468,6 +2468,28 @@ class SyncV2Service:
         if outcome == "mismatch":
             raise SyncStoreError("Personal Context authority cancellation raced")
         return outcome
+
+    def prepare_notes_suggestion_authority(
+        self, *, user_id: str, dataset: SyncDataset, note_db: Any | None = None
+    ) -> None:
+        """Fence prior local review state before a real Notes default snapshot."""
+
+        actual = self.store.get_dataset(dataset.dataset_id)
+        if (
+            actual is None
+            or actual.owner_user_id != user_id
+            or actual.scope_type != "personal"
+            or actual.metadata.get("default_personal") is not True
+            or actual.metadata.get("client_family") != "chatbook"
+        ):
+            raise SyncStoreError("Notes suggestion authority requires the owned default dataset")
+        product_db = note_db if note_db is not None else getattr(self.materializers.get("notes.note"), "note_db", None)
+        if product_db is None:
+            # A service without a Notes materializer owns no local Notes state.
+            return
+        if str(product_db.client_id) != str(user_id):
+            raise SyncStoreError("Notes suggestion product owner does not match")
+        product_db.note_graph_suggestion_store.reserve_canonical_scope(dataset_id=actual.dataset_id)
 
     def _notes_task_domains_ready(self, dataset: SyncDataset | None) -> bool:
         """Return the single service-level task/activity activation predicate."""

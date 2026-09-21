@@ -1,3 +1,4 @@
+import { useDefaultCharacterSelection } from "@/hooks/useDefaultCharacterSelection"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   Button,
@@ -34,8 +35,6 @@ import { useIsConnected } from "@/hooks/useConnectionState"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import {
-  DEFAULT_CHARACTER_STORAGE_KEY,
-  defaultCharacterStorage,
   resolveCharacterSelectionId
 } from "@/utils/default-character-preference"
 import {
@@ -121,14 +120,7 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
   const [createForm] = Form.useForm()
   const [editForm] = Form.useForm()
   const [, setSelectedCharacter] = useSelectedCharacter<any>(null)
-  const [defaultCharacterSelection, setDefaultCharacterSelection] =
-    useStorage<any | null>(
-      {
-        key: DEFAULT_CHARACTER_STORAGE_KEY,
-        instance: defaultCharacterStorage
-      },
-      null
-    )
+  const [defaultCharacterSelection, setDefaultCharacterSelection, defaultCharacterMeta] = useDefaultCharacterSelection()
   const createNameRef = React.useRef<InputRef>(null)
   const editNameRef = React.useRef<InputRef>(null)
   const hasPreloadedCharacterEditorRef = React.useRef(false)
@@ -613,53 +605,52 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
     onValuesChange,
     onFinish
   }: SharedCharacterFormProps) => (
-    <React.Suspense fallback={null}>
-      <LazyCharacterEditorForm
-        t={t}
-        form={form}
-        mode={mode}
-        initialValues={initialValues}
-        worldBookFieldContext={worldBookFieldContext}
-        isSubmitting={isSubmitting}
-        submitButtonClassName={submitButtonClassName}
-        submitPendingLabel={submitPendingLabel}
-        submitIdleLabel={submitIdleLabel}
-        showPreview={showPreview}
-        onTogglePreview={onTogglePreview}
-        onValuesChange={onValuesChange}
-        onFinish={onFinish}
-        generatingField={generatingField}
-        isGenerating={isGenerating}
-        handleGenerateField={handleGenerateField}
-        showSystemPromptExample={
-          mode === "create"
-            ? showCreateSystemPromptExample
-            : showEditSystemPromptExample
-        }
-        setShowSystemPromptExample={
-          mode === "create"
-            ? setShowCreateSystemPromptExample
-            : setShowEditSystemPromptExample
-        }
-        markModeDirty={markModeDirty}
-        popularTags={popularTags}
-        tagOptionsWithCounts={tagOptionsWithCounts}
-        characterFolderOptions={characterFolderOptions}
-        characterFolderOptionsLoading={characterFolderOptionsLoading}
-        showAdvanced={mode === "create" ? showCreateAdvanced : showEditAdvanced}
-        setShowAdvanced={
-          mode === "create" ? setShowCreateAdvanced : setShowEditAdvanced
-        }
-        advancedSections={
-          mode === "create" ? createAdvancedSections : editAdvancedSections
-        }
-        setAdvancedSections={
-          mode === "create" ? setCreateAdvancedSections : setEditAdvancedSections
-        }
-        createNameRef={createNameRef}
-        editNameRef={editNameRef}
-      />
-    </React.Suspense>
+    // Suspend the dialog until its Form connects, before exposing reset/cancel controls.
+    <LazyCharacterEditorForm
+      t={t}
+      form={form}
+      mode={mode}
+      initialValues={initialValues}
+      worldBookFieldContext={worldBookFieldContext}
+      isSubmitting={isSubmitting}
+      submitButtonClassName={submitButtonClassName}
+      submitPendingLabel={submitPendingLabel}
+      submitIdleLabel={submitIdleLabel}
+      showPreview={showPreview}
+      onTogglePreview={onTogglePreview}
+      onValuesChange={onValuesChange}
+      onFinish={onFinish}
+      generatingField={generatingField}
+      isGenerating={isGenerating}
+      handleGenerateField={handleGenerateField}
+      showSystemPromptExample={
+        mode === "create"
+          ? showCreateSystemPromptExample
+          : showEditSystemPromptExample
+      }
+      setShowSystemPromptExample={
+        mode === "create"
+          ? setShowCreateSystemPromptExample
+          : setShowEditSystemPromptExample
+      }
+      markModeDirty={markModeDirty}
+      popularTags={popularTags}
+      tagOptionsWithCounts={tagOptionsWithCounts}
+      characterFolderOptions={characterFolderOptions}
+      characterFolderOptionsLoading={characterFolderOptionsLoading}
+      showAdvanced={mode === "create" ? showCreateAdvanced : showEditAdvanced}
+      setShowAdvanced={
+        mode === "create" ? setShowCreateAdvanced : setShowEditAdvanced
+      }
+      advancedSections={
+        mode === "create" ? createAdvancedSections : editAdvancedSections
+      }
+      setAdvancedSections={
+        mode === "create" ? setCreateAdvancedSections : setEditAdvancedSections
+      }
+      createNameRef={createNameRef}
+      editNameRef={editNameRef}
+    />
   )
 
   // Apply generated data to form
@@ -792,7 +783,8 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
     editForm,
     defaultCharacterSelection,
     setDefaultCharacterSelection,
-    defaultCharacterId
+    defaultCharacterId,
+    defaultCharacterPreference: defaultCharacterMeta.preference
   })
   const {
     status,
@@ -845,6 +837,7 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
     editId,
     setEditId,
     editVersion,
+    setEditVersion,
     editCharacterNumericId,
     setOpen,
     setOpenEdit,
@@ -866,6 +859,7 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
     clearEditDraft,
     data,
     effectiveDefaultCharacterId,
+    writeDefaultCharacterPreference: defaultCharacterMeta.writePreference,
     defaultCharacterSelection,
     setDefaultCharacterSelection,
     activeChatModel: selectedChatModel,

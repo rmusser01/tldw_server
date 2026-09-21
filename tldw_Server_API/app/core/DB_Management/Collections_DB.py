@@ -1910,19 +1910,11 @@ class CollectionsDatabase:
         except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Collections schema init failed: {e}")
             raise
-        output_template_columns: set[str] = set()
-        output_columns: set[str] = set()
-        digest_columns: set[str] = set()
-        file_artifact_columns: set[str] = set()
-        content_columns: set[str] = set()
-        audiobook_project_columns: set[str] = set()
-        if self.backend.backend_type == BackendType.SQLITE:
-            output_template_columns = self._sqlite_columns("output_templates")
-            output_columns = self._sqlite_columns("outputs")
-            digest_columns = self._sqlite_columns("reading_digest_schedules")
-            file_artifact_columns = self._sqlite_columns("file_artifacts")
-            content_columns = self._sqlite_columns("content_items")
-            audiobook_project_columns = self._sqlite_columns("audiobook_projects")
+        output_template_columns = self._table_columns("output_templates")
+        output_columns = self._table_columns("outputs")
+        digest_columns = self._table_columns("reading_digest_schedules")
+        file_artifact_columns = self._table_columns("file_artifacts")
+        audiobook_project_columns = self._table_columns("audiobook_projects")
         # Backfill columns for existing tables
         if "metadata_json" not in output_template_columns:
             try:
@@ -2531,8 +2523,7 @@ class CollectionsDatabase:
         except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Collections content_items schema init failed: {e}")
             raise
-        if self.backend.backend_type == BackendType.SQLITE:
-            content_columns = self._sqlite_columns("content_items")
+        content_columns = self._table_columns("content_items")
         if fts_available:
             try:
                 self.backend.create_tables(

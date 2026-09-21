@@ -14,6 +14,7 @@ import { useQuizTimer } from "../../hooks/useQuizTimer"
 import { listQuestions } from "@/services/quizzes"
 import { TAKE_QUIZ_LIST_PREFS_KEY } from "../../stateKeys"
 import { drawDeterministicQuestionPool } from "../../utils/optionShuffle"
+import { advancedQuizFixtureMatrix } from "./advancedQuizFixtureMatrix"
 
 vi.mock("react-router-dom", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react-router-dom")>()
@@ -280,18 +281,16 @@ describe("TakeQuizTab study modes", () => {
       JSON.stringify({ modePreference: "practice" })
     )
 
+    const assertionReasoningQuestion = advancedQuizFixtureMatrix.profiles
+      .assertion_reasoning.output.questions?.[0]
+    expect(assertionReasoningQuestion).toBeDefined()
+
     vi.mocked(listQuestions).mockResolvedValue({
       items: [
         {
+          ...assertionReasoningQuestion,
           id: 21,
-          quiz_id: 7,
-          question_type: "multiple_choice",
-          question_text: "**Assertion:** Insulin lowers blood glucose.\n\n**Reason:** Insulin promotes cellular glucose uptake.",
-          options: ASSERTION_REASONING_OPTIONS,
-          correct_answer: 0,
-          explanation: "Both statements are true, and increased glucose uptake explains the effect.",
-          source_citations: [{ label: "Endocrinology source" }],
-          tags: ["assertion_reasoning"]
+          quiz_id: 7
         }
       ],
       count: 1
@@ -307,14 +306,40 @@ describe("TakeQuizTab study modes", () => {
 
     fireEvent.click(screen.getByRole("radio", { name: ASSERTION_REASONING_OPTIONS[2] }))
     expect(await screen.findByText("Incorrect")).toBeInTheDocument()
-    expect(screen.getByText("Both statements are true, and increased glucose uptake explains the effect.")).toBeInTheDocument()
+    expect(screen.getByText("Increased cellular uptake is one mechanism by which insulin lowers blood glucose.")).toBeInTheDocument()
     expect(screen.getByText("Endocrinology source")).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("radio", { name: ASSERTION_REASONING_OPTIONS[0] }))
     expect(await screen.findByText("Correct")).toBeInTheDocument()
-    expect(screen.getByText("Both statements are true, and increased glucose uptake explains the effect.")).toBeInTheDocument()
+    expect(screen.getByText("Increased cellular uptake is one mechanism by which insulin lowers blood glucose.")).toBeInTheDocument()
     expect(screen.getByText("Endocrinology source")).toBeInTheDocument()
     expect(screen.getAllByTestId("assertion-reasoning-scale")).toHaveLength(1)
+  }, 15000)
+
+  it("grades the shared Best-of-Five fixture as a five-option practice question", async () => {
+    window.sessionStorage.setItem(
+      TAKE_QUIZ_LIST_PREFS_KEY,
+      JSON.stringify({ modePreference: "practice" })
+    )
+    const bestOfFiveQuestion = advancedQuizFixtureMatrix.profiles
+      .best_of_five.output.questions?.[0]
+    if (!bestOfFiveQuestion) throw new Error("Best-of-Five fixture is missing")
+
+    vi.mocked(listQuestions).mockResolvedValue({
+      items: [{ ...bestOfFiveQuestion, id: 22, quiz_id: 7 }],
+      count: 1
+    } as any)
+
+    render(<MemoryRouter><TakeQuizTab onNavigateToGenerate={() => {}} onNavigateToCreate={() => {}} /></MemoryRouter>)
+
+    fireEvent.click(screen.getByRole("button", { name: /Start Practice/i }))
+
+    expect(await screen.findAllByRole("radio")).toHaveLength(5)
+    fireEvent.click(screen.getByRole("radio", { name: "High ferritin" }))
+    expect(await screen.findByText("Incorrect")).toBeInTheDocument()
+    expect(screen.getByText("Low ferritin reflects depleted iron stores and is the best answer.")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("radio", { name: "Low ferritin" }))
+    expect(await screen.findByText("Correct")).toBeInTheDocument()
   }, 15000)
 
   it("opens review mode as read-only with answers and explanations", async () => {
@@ -639,30 +664,24 @@ describe("TakeQuizTab study modes", () => {
   }, 15000)
 
   it("keeps an EMQ group atomic in a practice pool and grades each stem immediately", async () => {
-    const groupPrompt = "For each presentation, choose one condition from the shared bank."
-    const optionBank = ["Asthma", "Pneumonia", "Pulmonary embolism"]
-    const stems = [
-      "Episodic wheeze improves after a bronchodilator.",
-      "Fever, productive cough, and focal crackles are present.",
-      "Sudden pleuritic pain follows a long-haul flight."
-    ]
+    const emqQuestions = advancedQuizFixtureMatrix.profiles.emq.output.questions ?? []
+    expect(emqQuestions).toHaveLength(2)
+    const firstStem = emqQuestions[0]
+    if (!firstStem) throw new Error("EMQ fixture is missing")
+    const groupPrompt = firstStem.group_prompt as string
+    const optionBank = firstStem.options ?? []
+    const stems = emqQuestions.map((question) => question.question_text as string)
     window.sessionStorage.setItem(
       TAKE_QUIZ_LIST_PREFS_KEY,
       JSON.stringify({ modePreference: "practice", studyPoolSize: 1, studyPoolSeedOverride: 77 })
     )
     vi.mocked(listQuestions).mockResolvedValue({
-      items: stems.map((questionText, index) => ({
+      items: emqQuestions.map((question, index) => ({
+        ...question,
         id: 601 + index,
-        quiz_id: 7,
-        question_type: "multiple_choice",
-        question_text: questionText,
-        options: optionBank,
-        correct_answer: index,
-        explanation: `Explanation ${index + 1}`,
-        group_id: "respiratory-emq",
-        group_prompt: groupPrompt
+        quiz_id: 7
       })),
-      count: stems.length
+      count: emqQuestions.length
     } as any)
 
     render(<MemoryRouter><TakeQuizTab onNavigateToGenerate={() => {}} onNavigateToCreate={() => {}} /></MemoryRouter>)
@@ -670,7 +689,7 @@ describe("TakeQuizTab study modes", () => {
     fireEvent.click(screen.getByRole("button", { name: /Start Practice/i }))
 
     await waitFor(() => {
-      expect(screen.getAllByTestId(/quiz-question-/)).toHaveLength(3)
+      expect(screen.getAllByTestId(/quiz-question-/)).toHaveLength(2)
     })
     expect(screen.getAllByTestId("emq-group-bank")).toHaveLength(1)
     expect(screen.getAllByText(groupPrompt)).toHaveLength(1)

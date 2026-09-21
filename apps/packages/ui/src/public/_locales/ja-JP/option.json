@@ -2755,5 +2755,8 @@
   },
   "header_connectionCard_connectedCaption": {
     "message": "オプション画面とサイドパネルでチャットとツールが利用できるようになりました。"
+  },
+  "notesSearch_offlineSaveUnavailable": {
+    "message": "アカウントとローカル ストレージが確認されるまで、オフライン保存は利用できません。変更は未保存のままです。"
   }
 }

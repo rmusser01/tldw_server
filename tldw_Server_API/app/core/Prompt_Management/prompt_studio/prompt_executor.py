@@ -40,6 +40,9 @@ from tldw_Server_API.app.core.Prompt_Management.structured_prompts import (
     StructuredPromptAssemblyError,
     assemble_prompt_definition,
 )
+from tldw_Server_API.app.core.Prompt_Management.structured_prompts.single_text_renderer import (
+    SingleTextRecipeRenderResult,
+)
 
 ########################################################################################################################
 # Prompt Executor
@@ -682,6 +685,12 @@ class PromptExecutor:
                 "prompt_assembly_failed",
                 f"Failed to assemble structured prompt: {exc}",
             ) from exc
+
+        if isinstance(assembly, SingleTextRecipeRenderResult):
+            raise StructuredPromptAssemblyError(
+                "single_text_recipe_requires_render_apply",
+                "Single-text recipe must be rendered/applied first.",
+            )
 
         messages = self._apply_signature_to_messages(assembly.messages, signature)
         messages = self._enforce_messages_length(messages)

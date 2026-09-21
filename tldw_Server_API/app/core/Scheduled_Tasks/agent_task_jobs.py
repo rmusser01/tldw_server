@@ -32,6 +32,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from typing import Any
+from uuid import uuid4
 
 from loguru import logger
 
@@ -40,7 +41,13 @@ from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import (
     DefinitionRow,
     ScheduledTasksDatabase,
 )
-from tldw_Server_API.app.core.exceptions import BadRequestError
+from tldw_Server_API.app.core.exceptions import (
+    BadRequestError,
+    ScheduledTaskClaimBusy,
+    ScheduledTaskPersistenceError,
+)
+from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Jobs.worker_utils import jobs_manager_from_env
 from tldw_Server_API.app.core.Scheduled_Tasks.execution_certification import (
     ExecutionCertification,
     agent_execution_dispatch_readiness,
@@ -71,6 +78,7 @@ RESULT_SUMMARY_MAX_CHARS = 1000
 
 #: Definition families executable in phase 1 (side-effect-free only).
 _PHASE1_EXECUTABLE_FAMILIES = {"recurring_question", "agent_task"}
+
 
 Executor = Callable[[DefinitionRow, dict[str, Any]], Awaitable[str]]
 
@@ -141,18 +149,28 @@ def _notification_enabled(definition: DefinitionRow, status: str) -> bool:
     return True
 
 
+def _observe_abandoned_executor(task: asyncio.Future[str]) -> None:
+    """Observe a detached executor's outcome without releasing its durable claim."""
+    if task.cancelled():
+        return
+    error = task.exception()
+    logger.warning(
+        "Automation executor stopped after handler cancellation; its claim needs reconciliation (outcome={})",
+        type(error).__name__ if error is not None else "finished",
+    )
+
+
 async def handle_agent_task_job(
     job: dict[str, Any],
     *,
     scheduled_db: ScheduledTasksDatabase | None = None,
     collections_db: CollectionsDatabase | None = None,
+    jobs_manager: JobManager | None = None,
     execution_timeout_seconds: float = RUN_EXECUTION_TIMEOUT_SECONDS,
     execution_certification_resolver: Callable[
         [], ExecutionCertification
     ] = resolve_current_agent_execution_certification,
-    execution_stack_ready_resolver: Callable[
-        [], bool
-    ] = current_agent_execution_stack_ready,
+    execution_stack_ready_resolver: Callable[[], bool] = current_agent_execution_stack_ready,
 ) -> dict[str, Any]:
     """Consume one ``agent_task_run`` Job: run row, execute, notify, audit.
 
@@ -169,6 +187,16 @@ async def handle_agent_task_job(
     if owner is None or str(owner).strip() == "":
         raise BadRequestError("missing owner_user_id")
     user_id = int(owner)
+    if job.get("lease_id"):
+        jobs_manager = jobs_manager or jobs_manager_from_env()
+        acquired = jobs_manager.get_job(int(job["id"]))
+        if (
+            acquired is None
+            or acquired.get("status") != "processing"
+            or str(acquired.get("lease_id")) != str(job["lease_id"])
+            or str(acquired.get("owner_user_id")) != str(user_id)
+        ):
+            raise ValueError("stale Jobs lease")
 
     run_slot_utc = _normalize_slot_utc(payload.get("scheduled_for"))
     run_slot_key = run_slot_utc
@@ -213,166 +241,209 @@ async def handle_agent_task_job(
             "deduped": True,
         }
 
+    claim_id = str(uuid4())
+    if not sdb.claim_scheduled_task_run(
+        owner_id=user_id,
+        run_id=run["id"],
+        claim_id=claim_id,
+        job_id=str(job["id"]) if job.get("id") is not None else None,
+        lease_id=str(job["lease_id"]) if job.get("lease_id") else None,
+    ):
+        latest = sdb.get_scheduled_task_run_by_slot(
+            definition_id=definition_id,
+            run_slot_key=run_slot_key,
+        )
+        if latest and latest["status"] in ("succeeded", "skipped", "failed", "timed_out"):
+            return {
+                "status": latest["status"],
+                "definition_id": definition_id,
+                "run_id": run["id"],
+                "deduped": True,
+            }
+        raise ScheduledTaskClaimBusy(
+            f"execution claim for run {run['id']} is active or requires reconciliation; "
+            "confirm the previous executor has stopped before releasing its claim"
+        )
+
+    executor_task: asyncio.Future[str] | None = None
     try:
-        definition = sdb.get_definition(owner_id=user_id, definition_id=definition_id)
-    except KeyError:
-        definition = None
+        try:
+            definition = sdb.get_definition(owner_id=user_id, definition_id=definition_id)
+        except KeyError:
+            definition = None
 
-    cdb = collections_db or CollectionsDatabase.for_user(user_id=user_id)
-    if definition is None:
-        _finish(
-            sdb,
-            cdb,
-            definition=None,
-            run_id=run["id"],
-            status="skipped",
-            error="definition_missing",
-            summary=None,
-            jobs_job_id=str(job.get("id")) if job.get("id") is not None else None,
-            execution_timeout_seconds=execution_timeout_seconds,
-        )
-        return {"status": "skipped", "definition_id": definition_id, "run_id": run["id"]}
+        cdb = collections_db or CollectionsDatabase.for_user(user_id=user_id)
+        if definition is None:
+            _finish(
+                sdb,
+                cdb,
+                definition=None,
+                run_id=run["id"],
+                status="skipped",
+                error="definition_missing",
+                summary=None,
+                jobs_job_id=str(job.get("id")) if job.get("id") is not None else None,
+                execution_timeout_seconds=execution_timeout_seconds,
+                execution_claim_id=claim_id,
+            )
+            return {"status": "skipped", "definition_id": definition_id, "run_id": run["id"]}
 
-    # Lifecycle re-check at execution time: arming gates on 'configured',
-    # but the definition may have been paused/archived/disabled since.
-    if definition.lifecycle != "configured":
-        _finish(
-            sdb,
-            cdb,
-            definition=definition,
-            run_id=run["id"],
-            status="skipped",
-            error=f"definition_{definition.lifecycle}",
-            summary=None,
-            jobs_job_id=str(job.get("id")) if job.get("id") is not None else None,
-            execution_timeout_seconds=execution_timeout_seconds,
-        )
-        return {"status": "skipped", "definition_id": definition_id, "run_id": run["id"]}
-
-    if definition.family == "agent_task":
-        readiness = agent_execution_dispatch_readiness(
-            execution_certification_resolver(),
-            execution_stack_ready=execution_stack_ready_resolver(),
-        )
-        if not readiness.ready:
-            reason = readiness.reason or "agent_execution_unavailable"
+        # Lifecycle re-check at execution time: arming gates on 'configured',
+        # but the definition may have been paused/archived/disabled since.
+        if definition.lifecycle != "configured":
             _finish(
                 sdb,
                 cdb,
                 definition=definition,
                 run_id=run["id"],
                 status="skipped",
-                error=reason,
-                summary=(
-                    "Scheduled Agent execution is blocked by the deployment "
-                    f"readiness gate ({reason})."
-                ),
-                jobs_job_id=(
-                    str(job.get("id"))
-                    if job.get("id") is not None
-                    else None
-                ),
+                error=f"definition_{definition.lifecycle}",
+                summary=None,
+                jobs_job_id=str(job.get("id")) if job.get("id") is not None else None,
                 execution_timeout_seconds=execution_timeout_seconds,
+                execution_claim_id=claim_id,
             )
-            return {
-                "status": "skipped",
-                "definition_id": definition_id,
-                "run_id": run["id"],
-                "reason": reason,
-            }
+            return {"status": "skipped", "definition_id": definition_id, "run_id": run["id"]}
 
-    # Phase-1 boundary, enforced by the consumer (not assumed): tools are
-    # out of bounds until the approval-escalation design exists.
-    if _phase1_tools_requested(definition):
+        if definition.family == "agent_task":
+            readiness = agent_execution_dispatch_readiness(
+                execution_certification_resolver(),
+                execution_stack_ready=execution_stack_ready_resolver(),
+            )
+            if not readiness.ready:
+                reason = readiness.reason or "agent_execution_unavailable"
+                _finish(
+                    sdb,
+                    cdb,
+                    definition=definition,
+                    run_id=run["id"],
+                    status="skipped",
+                    error=reason,
+                    summary=("Scheduled Agent execution is blocked by the deployment " f"readiness gate ({reason})."),
+                    jobs_job_id=(str(job.get("id")) if job.get("id") is not None else None),
+                    execution_timeout_seconds=execution_timeout_seconds,
+                    execution_claim_id=claim_id,
+                )
+                return {
+                    "status": "skipped",
+                    "definition_id": definition_id,
+                    "run_id": run["id"],
+                    "reason": reason,
+                }
+
+        # Phase-1 boundary, enforced by the consumer (not assumed): tools are
+        # out of bounds until the approval-escalation design exists.
+        if _phase1_tools_requested(definition):
+            _finish(
+                sdb,
+                cdb,
+                definition=definition,
+                run_id=run["id"],
+                status="skipped",
+                error="tools_not_executable_in_phase1",
+                summary=(
+                    "This definition requests tools; server-side tool use is not "
+                    "executable until the approval-escalation design lands."
+                ),
+                jobs_job_id=str(job.get("id")) if job.get("id") is not None else None,
+                execution_timeout_seconds=execution_timeout_seconds,
+                execution_claim_id=claim_id,
+            )
+            return {"status": "skipped", "definition_id": definition_id, "run_id": run["id"]}
+
+        if definition.family not in _PHASE1_EXECUTABLE_FAMILIES:
+            _finish(
+                sdb,
+                cdb,
+                definition=definition,
+                run_id=run["id"],
+                status="skipped",
+                error=f"family_not_executable:{definition.family}",
+                summary=None,
+                jobs_job_id=str(job.get("id")) if job.get("id") is not None else None,
+                execution_timeout_seconds=execution_timeout_seconds,
+                execution_claim_id=claim_id,
+            )
+            return {"status": "skipped", "definition_id": definition_id, "run_id": run["id"]}
+
+        executor = _EXECUTORS.get(definition.family)
+        if executor is None:
+            # Not a failure: no executor is wired for this family in this
+            # deployment phase (phase 1 wires recurring_question only --
+            # agent_task messages are redacted at rest). The skip carries an
+            # actionable reason.
+            _finish(
+                sdb,
+                cdb,
+                definition=definition,
+                run_id=run["id"],
+                status="skipped",
+                error=f"family_not_wired_for_execution:{definition.family}",
+                summary=(
+                    "No executor is wired for this family in this deployment "
+                    "phase; the run was recorded and skipped without executing."
+                ),
+                jobs_job_id=str(job.get("id")) if job.get("id") is not None else None,
+                execution_timeout_seconds=execution_timeout_seconds,
+                execution_claim_id=claim_id,
+            )
+            return {"status": "skipped", "definition_id": definition_id, "run_id": run["id"]}
+
+        timed_out = False
+        result_text: str | None = None
+        error_text: str | None = None
+        jobs_job_id = str(job.get("id")) if job.get("id") is not None else None
+        try:
+            executor_task = asyncio.ensure_future(executor(definition, payload))
+            result_text = await asyncio.wait_for(executor_task, timeout=execution_timeout_seconds)
+        except asyncio.TimeoutError:
+            timed_out = True
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - one bad run must not kill the worker
+            error_text = f"{type(exc).__name__}: {exc}"
+            logger.warning(
+                "Automation run executor failed for definition {}: {}",
+                definition_id,
+                error_text,
+                definition_id=definition_id,
+                user_id=user_id,
+                run_id=run["id"],
+                job_id=job.get("id"),
+            )
+
+        status = "timed_out" if timed_out else ("failed" if error_text else "succeeded")
         _finish(
             sdb,
             cdb,
             definition=definition,
             run_id=run["id"],
-            status="skipped",
-            error="tools_not_executable_in_phase1",
-            summary=(
-                "This definition requests tools; server-side tool use is not "
-                "executable until the approval-escalation design lands."
-            ),
-            jobs_job_id=str(job.get("id")) if job.get("id") is not None else None,
+            status=status,
+            error=error_text,
+            summary=_bound_summary(result_text) if result_text is not None else None,
+            jobs_job_id=jobs_job_id,
             execution_timeout_seconds=execution_timeout_seconds,
+            execution_claim_id=claim_id,
         )
-        return {"status": "skipped", "definition_id": definition_id, "run_id": run["id"]}
-
-    if definition.family not in _PHASE1_EXECUTABLE_FAMILIES:
-        _finish(
-            sdb,
-            cdb,
-            definition=definition,
-            run_id=run["id"],
-            status="skipped",
-            error=f"family_not_executable:{definition.family}",
-            summary=None,
-            jobs_job_id=str(job.get("id")) if job.get("id") is not None else None,
-            execution_timeout_seconds=execution_timeout_seconds,
-        )
-        return {"status": "skipped", "definition_id": definition_id, "run_id": run["id"]}
-
-    executor = _EXECUTORS.get(definition.family)
-    if executor is None:
-        # Not a failure: no executor is wired for this family in this
-        # deployment phase (phase 1 wires recurring_question only --
-        # agent_task messages are redacted at rest). The skip carries an
-        # actionable reason.
-        _finish(
-            sdb,
-            cdb,
-            definition=definition,
-            run_id=run["id"],
-            status="skipped",
-            error=f"family_not_wired_for_execution:{definition.family}",
-            summary=(
-                "No executor is wired for this family in this deployment "
-                "phase; the run was recorded and skipped without executing."
-            ),
-            jobs_job_id=str(job.get("id")) if job.get("id") is not None else None,
-            execution_timeout_seconds=execution_timeout_seconds,
-        )
-        return {"status": "skipped", "definition_id": definition_id, "run_id": run["id"]}
-
-    timed_out = False
-    result_text: str | None = None
-    error_text: str | None = None
-    jobs_job_id = str(job.get("id")) if job.get("id") is not None else None
-    try:
-        result_text = await asyncio.wait_for(
-            executor(definition, payload), timeout=execution_timeout_seconds
-        )
-    except asyncio.TimeoutError:
-        timed_out = True
-    except asyncio.CancelledError:
-        raise
-    except Exception as exc:  # noqa: BLE001 - one bad run must not kill the worker
-        error_text = f"{type(exc).__name__}: {exc}"
-        logger.warning(
-            "Automation run executor failed for definition {}: {}",
-            definition_id,
-            error_text,
-            definition_id=definition_id,
-            user_id=user_id,
-            run_id=run["id"],
-            job_id=job.get("id"),
-        )
-
-    status = "timed_out" if timed_out else ("failed" if error_text else "succeeded")
-    _finish(
-        sdb,
-        cdb,
-        definition=definition,
-        run_id=run["id"],
-        status=status,
-        error=error_text,
-        summary=_bound_summary(result_text) if result_text is not None else None,
-        jobs_job_id=jobs_job_id,
-        execution_timeout_seconds=execution_timeout_seconds,
-    )
-    return {"status": status, "definition_id": definition_id, "run_id": run["id"]}
+        return {"status": status, "definition_id": definition_id, "run_id": run["id"]}
+    finally:
+        # Release after the executor stops so persistence errors remain retryable.
+        # A stale worker cannot clear a successor's claim.
+        if executor_task is not None and not executor_task.done():
+            # Repeated cancellation can interrupt wait_for's cancellation drain.
+            # The coroutine may still run: retain its claim even after it exits,
+            # and require the same verified-stopped reconciliation as a crash.
+            executor_task.add_done_callback(_observe_abandoned_executor)
+            logger.warning("Automation executor still active; retain claim for reconciliation", run_id=run["id"])
+        else:
+            try:
+                sdb.release_scheduled_task_run_claim(
+                    owner_id=user_id,
+                    run_id=run["id"],
+                    claim_id=claim_id,
+                )
+            except Exception:  # noqa: BLE001 - preserve the original handler failure
+                logger.exception("Automation execution claim release failed", run_id=run["id"])
 
 
 def _finish(
@@ -386,6 +457,7 @@ def _finish(
     summary: str | None,
     jobs_job_id: str | None = None,
     execution_timeout_seconds: float = RUN_EXECUTION_TIMEOUT_SECONDS,
+    execution_claim_id: str | None = None,
 ) -> None:
     """Record the terminal run state, deliver the notification, update health.
 
@@ -400,13 +472,15 @@ def _finish(
             error=error,
             result_summary=summary,
             completed_at=completed_at,
+            execution_claim_id=execution_claim_id,
         )
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
         logger.exception(
             "Automation run status update failed",
             run_id=run_id,
             status=status,
         )
+        raise ScheduledTaskPersistenceError("terminal run persistence failed") from exc
 
     if definition is None:
         return

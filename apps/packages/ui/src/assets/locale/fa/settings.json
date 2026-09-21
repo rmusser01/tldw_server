@@ -1206,7 +1206,7 @@
     "title": "خوش آمدید — بیایید شما را متصل کنیم",
     "description": "سرور و احراز هویت خود را پیکربندی کنید. اتصال و سلامت بازیابی تقویت‌شده را همان‌جا بررسی می‌کنیم.",
     "learnMoreTldw": "درباره نحوه کار سرور تی‌ال‌دی‌دبلیو بیشتر بدانید",
-    "serverDocsUrl": "https://github.com/rmusser01/tldw_browser_assistant",
+    "serverDocsUrl": "https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting_Started/README.md",
     "serverUrl": {
       "label": "نشانی سرور",
       "placeholder": "http://127.0.0.1:8000",

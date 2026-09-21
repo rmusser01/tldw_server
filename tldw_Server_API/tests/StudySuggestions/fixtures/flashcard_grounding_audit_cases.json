@@ -13,6 +13,7 @@
       }
     ],
     "study_pack_id": 44,
+    "expected_correct_count": 3,
     "reviews": [
       {"rating": 4, "answer_time_ms": 850},
       {"rating": 2, "answer_time_ms": 600},
@@ -27,6 +28,7 @@
     "tag_filter": null,
     "source_bundle_json": [],
     "study_pack_id": null,
+    "expected_correct_count": 2,
     "reviews": [
       {"rating": 2, "answer_time_ms": 500},
       {"rating": 1, "answer_time_ms": 550}

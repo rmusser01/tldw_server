@@ -1,8 +1,13 @@
+import type { AssistantSelection } from "@/types/assistant-selection"
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
+import { useStoreMessageOption } from "@/store/option"
+import { usePlaygroundSessionStore } from "@/store/playground-session"
+import { Playground } from "@/components/Option/Playground/Playground"
+import { selectedAssistantStorage } from "@/utils/selected-assistant-storage"
 
 const {
   mockBgRequest,
@@ -62,12 +67,16 @@ vi.mock("react-i18next", () => ({
   })
 }))
 
+vi.mock("@plasmohq/storage", () => import("../../../../../../tldw-frontend/extension/shims/plasmo-storage"))
+vi.mock("@plasmohq/storage/hook", () => import("../../../../../../tldw-frontend/extension/shims/plasmo-storage-hook"))
+
 vi.mock("react-router-dom", () => ({
-  useNavigate: () => mockNavigate
+  useNavigate: () => mockNavigate,
+  useLocation: () => ({ pathname: "/chat", search: "", hash: "", state: null, key: "chat" })
 }))
 
 vi.mock("@/services/background-proxy", () => ({
-  bgRequest: mockBgRequest
+  bgRequest: mockBgRequest, bgRequestClient: mockBgRequest, bgStream: vi.fn()
 }))
 
 vi.mock("@/hooks/useServerOnline", () => ({
@@ -103,20 +112,15 @@ vi.mock("@/services/note-keywords", () => ({
   searchNoteKeywords: mockSearchNoteKeywords
 }))
 
-vi.mock("@/store/option", () => ({
-  useStoreMessageOption: (selector: (state: Record<string, unknown>) => unknown) =>
-    selector({
-      setHistory: vi.fn(),
-      setMessages: vi.fn(),
-      setHistoryId: vi.fn(),
-      setServerChatId: vi.fn(),
-      setServerChatState: vi.fn(),
-      setServerChatTopic: vi.fn(),
-      setServerChatClusterId: vi.fn(),
-      setServerChatSource: vi.fn(),
-      setServerChatExternalRef: vi.fn()
-    })
+const chatAuthority = vi.hoisted(() => ({
+  owner: "A", selection: { kind: "character", id: "5", name: "Robot", metadata: { selectionMode: "tracked" } } as AssistantSelection | null,
+  controller: new AbortController(), setSelection: vi.fn()
 }))
+vi.mock("@/hooks/useSelectedAssistant", () => ({ useSelectedAssistant: () => [chatAuthority.selection, chatAuthority.setSelection] }))
+vi.mock("@/services/service-prompts", () => ({ loadServicePromptSnapshot: async () => ({
+  scopeKey: "scope-A", scopeSignal: chatAuthority.controller.signal, scopeInvalidatedSignal: chatAuthority.controller.signal,
+  requestScope: { config: { serverUrl: "http://server", authMode: "multi-user" }, userId: "A" }, release: vi.fn()
+}) }))
 
 vi.mock("@/services/settings/registry", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/services/settings/registry")>()
@@ -134,10 +138,27 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     getConfig: mockGetConfig,
     getChat: mockGetChat,
     listChatMessages: mockListChatMessages,
-    getCharacter: mockGetCharacter
+    getCharacter: mockGetCharacter,
+    getProvidersStatus: async () => null
   }
 }))
 
+
+vi.mock("@/hooks/useMessageOption", () => ({ useMessageOption: () => ({
+  ...useStoreMessageOption(), selectedAssistant: chatAuthority.selection,
+  selectedCharacter: chatAuthority.selection?.kind === "character" ? { id: chatAuthority.selection.id, name: chatAuthority.selection.name } : null,
+  setSelectedAssistant: chatAuthority.setSelection, setSelectedCharacter: vi.fn(), onSubmit: vi.fn(), regenerateLastMessage: vi.fn()
+}) }))
+vi.mock("@/components/Option/Playground/PlaygroundForm", () => ({ PlaygroundForm: ({ characterWorkflowActive, characterChatSendBlocker }: { characterWorkflowActive?: boolean; characterChatSendBlocker?: unknown }) => <div data-testid="loaded-chat-composer" data-character-workflow={String(characterWorkflowActive)} data-character-blocked={String(Boolean(characterChatSendBlocker))} /> }))
+vi.mock("@/components/Option/Playground/PlaygroundChat", () => ({ PlaygroundChat: () => <div data-testid="loaded-chat-body">{useStoreMessageOption(state => state.messages).map(row => <p key={row.id}>{row.message}</p>)}</div> }))
+vi.mock("@/components/Option/Playground/CharacterChatSessionsPanel", () => ({ CharacterChatSessionsPanel: () => null }))
+vi.mock("@/components/Sidepanel/Chat/ArtifactsPanel", () => ({ ArtifactsPanel: () => null }))
+vi.mock("@/hooks/useCharacterGreeting", () => ({ useCharacterGreeting: () => undefined }))
+vi.mock("@/hooks/useLoadLocalConversation", () => ({ useLoadLocalConversation: () => vi.fn() }))
+vi.mock("@/services/app", () => ({ webUIResumeLastChat: async () => false }))
+vi.mock("@/services/chat-settings", () => ({ syncChatSettingsForServerChat: async () => null }))
+vi.mock("@/services/chat-surface-scope", async original => ({ ...await original<typeof import("@/services/chat-surface-scope")>(), buildChatSurfaceScopeKeyFromConfig: () => "scope-A" }))
+vi.mock("@/services/tldw-server", async original => ({ ...await original<typeof import("@/services/tldw-server")>(), fetchChatModels: async () => [] }))
 vi.mock("@/services/tldw/TldwAuth", () => ({
   tldwAuth: { getCurrentUser: mockGetCurrentUser }
 }))
@@ -192,6 +213,12 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
     mockClearSetting.mockResolvedValue(undefined)
     mockGetAllNoteKeywordStats.mockResolvedValue([])
     mockSearchNoteKeywords.mockResolvedValue([])
+    chatAuthority.owner = "A"
+    chatAuthority.controller = new AbortController()
+    chatAuthority.selection = { kind: "character", id: "5", name: "Robot", metadata: { selectionMode: "tracked" } }
+    chatAuthority.setSelection.mockImplementation(async (selection, options) => { if (options?.isCurrent?.() !== false) chatAuthority.selection = selection })
+    useStoreMessageOption.setState({ messages: [], history: [], historyId: null, serverChatId: "robot", serverChatCharacterId: "5", serverChatMetaLoaded: true, streaming: false, isProcessing: false })
+    usePlaygroundSessionStore.getState().saveSession({ historyId: "robot-history", serverChatId: "robot", scopeKey: "scope-A" })
     mockInitialize.mockResolvedValue(undefined)
     mockGetConfig.mockResolvedValue({
       serverUrl: "https://notes.example.test",
@@ -247,7 +274,8 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
       username: string
       is_active: boolean
     }) => void
-    mockGetCurrentUser.mockReturnValueOnce(new Promise((resolve) => {
+    // Every concurrent authority lookup stays pending until the principal is verified.
+    mockGetCurrentUser.mockReturnValue(new Promise((resolve) => {
       resolvePrincipal = resolve
     }))
 
@@ -404,4 +432,161 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
     expect(openSpy).not.toHaveBeenCalled()
     openSpy.mockRestore()
   })
+  it("restores Cedar identity and canonical saved-message IDs before navigation, replacing the Robot restore target", async () => {
+    configureCommonRequests("cedar")
+    mockGetChat.mockResolvedValue({ id: "cedar", title: "Cedar chat", character_id: 4, source: "webui-character-chat", version: 3 })
+    mockListChatMessages.mockResolvedValue([{ id: "q", role: "user", content: "When?", created_at: "2026-02-18T10:00:00Z", version: 1 }, { id: "a", role: "assistant", content: "08:30", created_at: "2026-02-18T10:01:00Z", version: 1 }])
+    const atNavigation: { chat: string | null; selection: AssistantSelection | null }[] = []
+    mockNavigate.mockImplementation(() => atNavigation.push({ chat: useStoreMessageOption.getState().serverChatId, selection: chatAuthority.selection }))
+    renderPage()
+    fireEvent.click(await screen.findByTestId("notes-open-button-note-backlink-1"))
+    fireEvent.click(await screen.findByTestId("notes-overflow-menu-button"))
+    fireEvent.click(await screen.findByText(/open linked conversation/i))
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/chat"))
+    expect(atNavigation[0]).toMatchObject({ chat: "cedar", selection: { kind: "character", id: "4", metadata: { selectionMode: "tracked" } } })
+    expect(useStoreMessageOption.getState()).toMatchObject({ serverChatId: "cedar", serverChatCharacterId: 4, serverChatVersion: 3, serverChatMetaLoaded: true, temporaryChat: false })
+    expect(useStoreMessageOption.getState().messages).toMatchObject([{ serverMessageId: "q" }, { serverMessageId: "a", message: "08:30" }])
+    expect(usePlaygroundSessionStore.getState()).toMatchObject({ serverChatId: "cedar", historyId: null, trackedCharacterId: "4", scopeKey: "scope-A" })
+  })
+
+  it("keeps the linked Cedar reply through the real Playground mismatch and persisted-session initialization effects", async () => {
+    configureCommonRequests("cedar")
+    mockGetChat.mockResolvedValue({ id: "cedar", title: "Cedar chat", character_id: 4, source: "webui-character-chat", version: 3 })
+    mockListChatMessages.mockResolvedValue([{ id: "q", role: "user", content: "When?", created_at: "2026-02-18T10:00:00Z", version: 1 }, { id: "a", role: "assistant", content: "Cedar opens at 08:30.", created_at: "2026-02-18T10:01:00Z", version: 1 }])
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+    const Route = () => {
+      const [chat, setChat] = React.useState(false)
+      mockNavigate.mockImplementation(() => setChat(true))
+      return chat ? <Playground /> : <NotesManagerPage />
+    }
+    render(<QueryClientProvider client={queryClient}><Route /></QueryClientProvider>)
+    fireEvent.click(await screen.findByTestId("notes-open-button-note-backlink-1"))
+    fireEvent.click(await screen.findByTestId("notes-overflow-menu-button"))
+    fireEvent.click(await screen.findByText(/open linked conversation/i))
+    expect(await screen.findByText("Cedar opens at 08:30.")).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByTestId("loaded-chat-composer")).toBeInTheDocument())
+    expect(useStoreMessageOption.getState()).toMatchObject({ serverChatId: "cedar", serverChatCharacterId: 4 })
+    expect(usePlaygroundSessionStore.getState()).toMatchObject({ serverChatId: "cedar", trackedCharacterId: "4" })
+  })
+
+
+  it("opens an ordinary Note source in ordinary workflow after a persisted Character session", async () => {
+    localStorage.clear()
+    await selectedAssistantStorage.set("playgroundChatWorkflowMode", "character")
+    configureCommonRequests("ordinary")
+    mockGetChat.mockResolvedValue({ id: "ordinary", title: "Ordinary chat", source: "webui-chat", version: 1 })
+    mockListChatMessages.mockResolvedValue([{ id: "saved-user", role: "user", content: "When?", version: 1 }, { id: "saved-answer", role: "assistant", content: "An ordinary saved answer", version: 1 }])
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const Route = () => {
+      const [chat, setChat] = React.useState(false)
+      mockNavigate.mockImplementation(() => setChat(true))
+      return chat ? <Playground /> : <NotesManagerPage />
+    }
+    const view = render(<QueryClientProvider client={queryClient}><Route /></QueryClientProvider>)
+    try {
+      fireEvent.click(await screen.findByTestId("notes-open-button-note-backlink-1"))
+      fireEvent.click(await screen.findByTestId("notes-overflow-menu-button"))
+      fireEvent.click(await screen.findByText(/open linked conversation/i))
+      expect(await screen.findByText("An ordinary saved answer")).toBeInTheDocument()
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)) })
+      await waitFor(() => expect(screen.getByTestId("loaded-chat-composer")).toHaveAttribute("data-character-workflow", "false"))
+      expect(screen.getByTestId("loaded-chat-composer")).toHaveAttribute("data-character-blocked", "false")
+      expect(screen.queryByText("Choose a character to start character chat")).not.toBeInTheDocument()
+      expect(useStoreMessageOption.getState()).toMatchObject({ serverChatId: "ordinary", serverChatMetaLoaded: true, serverChatCharacterId: null })
+      expect(await selectedAssistantStorage.get("playgroundChatWorkflowMode")).toBe("character")
+    } finally { view.unmount(); localStorage.clear() }
+  })
+
+  it.each(["stream", "new-draft", "image-draft", "note-edit", "account"])("does not replace current work when %s changes during a linked read", async change => {
+    configureCommonRequests("cedar")
+    const chat = { id: "cedar", title: "Cedar chat", character_id: 4, source: "webui-character-chat" }
+    let release!: (rows: unknown[]) => void
+    mockGetChat.mockResolvedValue(chat)
+    mockListChatMessages.mockReturnValue(new Promise(resolve => { release = resolve }))
+    renderPage()
+    fireEvent.click(await screen.findByTestId("notes-open-button-note-backlink-1"))
+    fireEvent.click(await screen.findByTestId("notes-overflow-menu-button"))
+    fireEvent.click(await screen.findByText(/open linked conversation/i))
+    await waitFor(() => expect(mockListChatMessages).toHaveBeenCalled())
+    act(() => {
+      if (change === "stream") useStoreMessageOption.setState({ streaming: true })
+      if (change === "new-draft") useStoreMessageOption.setState({ messages: [{ id: "draft", role: "user", isBot: false, name: "You", message: "Keep this thought" }] })
+      if (change === "image-draft") useStoreMessageOption.setState({ messages: [{ id: "draft", role: "assistant", isBot: true, name: "Assistant", message: "", images: ["data:image/png;base64,YQ=="] }] })
+      if (change === "account") chatAuthority.controller.abort()
+    })
+    if (change === "note-edit") fireEvent.change(screen.getByPlaceholderText("Write your note here... (Markdown supported)"), { target: { value: "New note edits" } })
+    await act(async () => { release([{ id: "a", role: "assistant", content: "Late Cedar", version: 1 }]); await Promise.resolve(); await Promise.resolve() })
+    expect(mockNavigate).not.toHaveBeenCalled()
+    expect(useStoreMessageOption.getState().serverChatId).toBe("robot")
+    expect(chatAuthority.selection.id).toBe("5")
+  })
+
+  it.each(["display-error", "user-error-text", "assistant-draft", "malformed-error", "user-image-only", "assistant-image-only", "error-image"])("opens past only a retained assistant display error (%s)", async kind => {
+    configureCommonRequests("normal-saved")
+    mockGetChat.mockResolvedValue({ id: "normal-saved", title: "Recovered chat", source: "webui-chat" })
+    mockListChatMessages.mockResolvedValue([{ id: "server-user", role: "user", content: "Question" }, { id: "server-answer", role: "assistant", content: "Answer" }])
+    const error = '__tldw_error__:{"summary":"Provider failed","hint":"Try again","detail":"Stream completion failed"}'
+    useStoreMessageOption.setState({ historyId: "local-normal", serverChatId: "normal-saved", messages: [
+      { id: "local-user", serverMessageId: "server-user", isBot: false, name: "You", message: "Question" },
+      { id: "local-error", isBot: !kind.startsWith("user-"), role: kind.startsWith("user-") ? "user" : "assistant", name: "Assistant", images: kind.includes("image") ? ["data:image/png;base64,YQ=="] : undefined, message: kind.endsWith("image-only") ? "" : kind === "assistant-draft" ? "Unfinished reply" : kind === "malformed-error" ? "__tldw_error__:{broken" : error },
+      { id: "local-answer", serverMessageId: "server-answer", isBot: true, name: "Assistant", message: "Answer" }
+    ], streaming: false, isProcessing: false })
+    renderPage()
+    fireEvent.click(await screen.findByTestId("notes-open-button-note-backlink-1"))
+    fireEvent.click(await screen.findByTestId("notes-overflow-menu-button"))
+    fireEvent.click(await screen.findByText(/open linked conversation/i))
+    if (kind === "display-error") {
+      await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/chat"))
+      expect(useStoreMessageOption.getState().messages).toMatchObject([{ serverMessageId: "server-user" }, { serverMessageId: "server-answer" }])
+    } else {
+      expect(mockNavigate).not.toHaveBeenCalled()
+      expect(mockListChatMessages).not.toHaveBeenCalled()
+      expect(mockMessageWarning).toHaveBeenCalled()
+    }
+  })
+
+  it("does not cancel an owned linked read when only an assistant display error is restored", async () => {
+    configureCommonRequests("normal-saved")
+    mockGetChat.mockResolvedValue({ id: "normal-saved", title: "Recovered chat", source: "webui-chat" })
+    let release!: (rows: unknown[]) => void
+    mockListChatMessages.mockReturnValue(new Promise(resolve => { release = resolve }))
+    renderPage()
+    fireEvent.click(await screen.findByTestId("notes-open-button-note-backlink-1"))
+    fireEvent.click(await screen.findByTestId("notes-overflow-menu-button"))
+    fireEvent.click(await screen.findByText(/open linked conversation/i))
+    await waitFor(() => expect(mockListChatMessages).toHaveBeenCalled())
+    act(() => useStoreMessageOption.setState({ messages: [{ id: "restored-error", role: "assistant", isBot: true, name: "Assistant", message: '__tldw_error__:{"summary":"Provider failed","hint":"Try again"}' }] }))
+    await act(async () => { release([{ id: "saved-answer", role: "assistant", content: "Recovered answer" }]); await Promise.resolve(); await Promise.resolve() })
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/chat"))
+    expect(useStoreMessageOption.getState().messages).toMatchObject([{ serverMessageId: "saved-answer", message: "Recovered answer" }])
+  })
+
+  it.each([false, true])("opens a normally acknowledged saved Chat while retaining the unsent-draft guard (draft=%s)", async (withDraft) => {
+    configureCommonRequests("normal-saved")
+    mockGetChat.mockResolvedValue({ id: "normal-saved", title: "Normal saved chat", character_id: null, assistant_kind: null, assistant_id: null, source: "webui-chat", version: 1 })
+    mockListChatMessages.mockResolvedValue([
+      { id: "server-user", sender: "user", content: "Question" },
+      { id: "server-answer", sender: "assistant", content: "Answer" }
+    ])
+    chatAuthority.selection = null
+    useStoreMessageOption.setState({ historyId: "local-normal", serverChatId: "normal-saved", serverChatCharacterId: null, serverChatMetaLoaded: true, messages: [
+      { id: "local-user", serverMessageId: "server-user", isBot: false, name: "You", message: "Question" },
+      { id: "local-answer", serverMessageId: "server-answer", isBot: true, name: "Assistant", message: "Answer" },
+      ...(withDraft ? [{ id: "unsent", isBot: false, name: "You", message: "Question" }] : [])
+    ], history: [], streaming: false, isProcessing: false })
+    renderPage()
+    fireEvent.click(await screen.findByTestId("notes-open-button-note-backlink-1"))
+    fireEvent.click(await screen.findByTestId("notes-overflow-menu-button"))
+    fireEvent.click(await screen.findByText(/open linked conversation/i))
+    if (withDraft) {
+      expect(mockMessageWarning).toHaveBeenCalledWith("Finish or save the current chat before opening the linked conversation.")
+      expect(mockNavigate).not.toHaveBeenCalled()
+      expect(mockListChatMessages).not.toHaveBeenCalled()
+    } else {
+      await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/chat"))
+      expect(useStoreMessageOption.getState().serverChatId).toBe("normal-saved")
+      expect(chatAuthority.selection).toBeNull()
+    }
+  })
+
 })

@@ -148,11 +148,6 @@ vi.mock('@/services/settings/ui-settings', () => ({
   MEDIA_REVIEW_VIEW_MODE_SETTING: { key: 'mediaReviewViewMode', defaultValue: 'spread' }
 }))
 
-vi.mock('@/utils/media-detail-content', () => ({
-  extractMediaDetailContent: (detail: any) =>
-    detail?.content || detail?.transcription || detail?.text || detail?.analysis || ''
-}))
-
 vi.mock('@/components/Media/DiffViewModal', () => ({
   DiffViewModal: ({ open }: { open: boolean }) =>
     open ? <div data-testid="compare-diff-modal">diff</div> : null

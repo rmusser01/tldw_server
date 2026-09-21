@@ -18,6 +18,7 @@ import type { Prompt } from "@/db/dexie/types";
 import type { ChatModelSettings } from "@/store/model";
 import {
   personaToAssistantSelection,
+  characterToAssistantSelection,
   type AssistantSelection,
 } from "@/types/assistant-selection";
 import type { Character } from "@/types/character";
@@ -45,10 +46,10 @@ export interface UsePromptTemplatesDeps {
   setSelectedSystemPrompt: (id: string | undefined) => void;
   setSelectedQuickPrompt: (prompt: string | null) => void;
   setSystemPrompt: (prompt: string) => void;
-  setSelectedCharacter: (character: any) => void;
-  setSelectedAssistant: (
+  /** Explicit identity action: detach a different saved target before persistence. */
+  applyAssistantSelection: (
     assistant: AssistantSelection | null,
-  ) => Promise<void> | void;
+  ) => Promise<boolean | void> | boolean | void;
   setRagPinnedResults: (results: any[]) => void;
   updateChatModelSettings: (settings: Partial<ChatModelSettings>) => void;
   /** Compare mode (needed when applying template to sync model selection) */
@@ -87,8 +88,7 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
     setSelectedSystemPrompt,
     setSelectedQuickPrompt,
     setSystemPrompt,
-    setSelectedCharacter,
-    setSelectedAssistant,
+    applyAssistantSelection,
     setRagPinnedResults,
     updateChatModelSettings,
     compareModeActive,
@@ -295,7 +295,16 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
   );
 
   const applyStartupTemplateBundle = React.useCallback(
-    (template: StartupTemplateBundle) => {
+    async (template: StartupTemplateBundle) => {
+      const rolePlayIdentity = template.rolePlay?.identity;
+      const selection = rolePlayIdentity?.kind === "persona"
+        ? personaToAssistantSelection({ id: String(rolePlayIdentity.id), name: rolePlayIdentity.name })
+        : characterToAssistantSelection(
+            template.character || (rolePlayIdentity?.kind === "character"
+              ? { id: String(rolePlayIdentity.id), name: rolePlayIdentity.name } as Character
+              : null)
+          );
+      if (await applyAssistantSelection(selection) === false) return false;
       const promptResolution = resolveStartupTemplatePrompt(
         template,
         promptLibrary,
@@ -330,37 +339,15 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
         systemPromptTemplateId: behaviorTemplateId,
       });
 
-      const rolePlayIdentity = template.rolePlay?.identity;
-      if (rolePlayIdentity?.kind === "persona") {
-        void setSelectedAssistant(
-          personaToAssistantSelection({
-            id: String(rolePlayIdentity.id),
-            name: rolePlayIdentity.name,
-          }),
-        );
-        void setSelectedCharacter(null);
-      } else if (rolePlayIdentity?.kind === "character") {
-        void setSelectedAssistant(null);
-        void setSelectedCharacter(
-          template.character ||
-            ({
-              id: String(rolePlayIdentity.id),
-              name: rolePlayIdentity.name,
-            } as Character),
-        );
-      } else {
-        void setSelectedAssistant(null);
-        void setSelectedCharacter(template.character || null);
-      }
       setRagPinnedResults(template.ragPinnedResults || []);
+      return true;
     },
     [
       compareModeActive,
       promptLibrary,
       setCompareSelectedModels,
       setRagPinnedResults,
-      setSelectedAssistant,
-      setSelectedCharacter,
+      applyAssistantSelection,
       setSelectedModel,
       setSelectedSystemPrompt,
       setSystemPrompt,
@@ -368,9 +355,9 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
     ],
   );
 
-  const handleApplyStartupTemplate = React.useCallback(() => {
+  const handleApplyStartupTemplate = React.useCallback(async () => {
     if (!startupTemplatePreview) return;
-    applyStartupTemplateBundle(startupTemplatePreview);
+    if (await applyStartupTemplateBundle(startupTemplatePreview) === false) return false;
     setStartupTemplatePreview(null);
     setModeAnnouncement(
       t(
@@ -378,6 +365,7 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
         "Startup template applied.",
       ),
     );
+    return true;
   }, [
     applyStartupTemplateBundle,
     setModeAnnouncement,
@@ -386,8 +374,8 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
   ]);
 
   const handleApplySavedRolePlaySetup = React.useCallback(
-    (template: StartupTemplateBundle) => {
-      applyStartupTemplateBundle(template);
+    async (template: StartupTemplateBundle) => {
+      if (await applyStartupTemplateBundle(template) === false) return false;
       setStartupTemplatePreview(null);
       setModeAnnouncement(
         t(
@@ -395,6 +383,7 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
           "Role-play setup applied.",
         ),
       );
+      return true;
     },
     [applyStartupTemplateBundle, setModeAnnouncement, t],
   );
@@ -498,6 +487,7 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
     startupTemplateNameFallback,
     selectedSystemPromptRecord,
     // Handlers
+    applyStartupTemplateBundle,
     handleSaveStartupTemplate,
     handleSaveRolePlaySetup,
     handleOpenStartupTemplatePreview,

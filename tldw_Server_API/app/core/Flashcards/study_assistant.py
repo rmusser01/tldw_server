@@ -435,6 +435,11 @@ async def generate_study_assistant_reply(
     guidance: str | None = None,
 ) -> dict[str, Any]:
     """Generate an assistant reply for the provided card/question context."""
+    from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+    from tldw_Server_API.app.core.Chat.chat_target_resolution import resolve_chat_target
+    from tldw_Server_API.app.core.LLM_Calls.capability_registry import ProviderCallPolicy
+
     prompt_package = build_study_assistant_prompt_package(
         action=action,
         context=context,
@@ -448,17 +453,20 @@ async def generate_study_assistant_reply(
             " Return a JSON object with keys: verdict, corrections, missing_points, next_prompt, response_text."
         )
 
+    try:
+        target = resolve_chat_target(requested_provider=provider, requested_model=model)
+    except ByokResolutionError as exc:
+        raise ChatConfigurationError(message="Provider configuration is unavailable.") from exc
     response = await perform_chat_api_call_async(
         messages=[{"role": "user", "content": prompt_package["user_prompt"]}],
-        api_provider=provider,
-        model=model,
+        api_provider=target.provider,
+        model=target.model,
         system_message=system_prompt,
+        call_policy=ProviderCallPolicy(privacy_safe_errors=True),
         max_tokens=1000,
         temperature=0.3,
     )
     response_text = (extract_openai_content(response) or "").strip()
-    resolved_provider = provider or "default"
-    resolved_model = model
 
     if normalized_action == "fact_check":
         parsed = _extract_json_object(response_text) or {}
@@ -473,6 +481,6 @@ async def generate_study_assistant_reply(
     return {
         "assistant_text": assistant_text.strip(),
         "structured_payload": structured_payload,
-        "provider": resolved_provider,
-        "model": resolved_model,
+        "provider": target.provider,
+        "model": target.model,
     }

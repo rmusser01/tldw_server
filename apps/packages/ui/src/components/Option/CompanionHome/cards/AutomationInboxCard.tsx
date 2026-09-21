@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom"
 import { useTranslation } from "react-i18next"
+import type { AutomationHomeSourceStates } from "../hooks"
 
 import type {
   ScheduledTaskAutomationHomeItem,
@@ -11,6 +12,7 @@ type AutomationInboxCardProps = {
   loading: boolean
   partial: boolean
   error: string | null
+  sourceStates?: AutomationHomeSourceStates
   maxItems?: number
 }
 
@@ -42,11 +44,36 @@ export function AutomationInboxCard({
   loading,
   partial,
   error,
+  sourceStates,
   maxItems = 4
 }: AutomationInboxCardProps) {
   const { t } = useTranslation()
   const visibleItems = items.slice(0, maxItems)
   const hasItems = visibleItems.length > 0
+  const deniedPermissions = [
+    sourceStates?.tasks === "denied" || sourceStates?.results === "denied" ? "tasks.read" : null,
+    sourceStates?.notifications === "denied" ? "notifications.read" : null
+  ].filter(Boolean)
+  const states = Object.values(sourceStates ?? {})
+  const accessDescription = deniedPermissions.length
+    ? t("companionHome.automationInbox.permissionRequired", {
+        defaultValue: "Your account does not have the required permissions: {permissions}.",
+        permissions: deniedPermissions.join(", ")
+      })
+    : states.includes("unsupported")
+      ? t("companionHome.automationInbox.unsupported", {
+          defaultValue: "Automation sources are not supported by this server."
+        })
+      : states.includes("unknown")
+        ? t("companionHome.automationInbox.accessUnknown", {
+            defaultValue: "Automation access could not be verified. Refresh to check again."
+          })
+        : null
+  const accessLabel = deniedPermissions.length
+    ? t("companionHome.automationInbox.accessRestricted", { defaultValue: "Automation access restricted" })
+    : accessDescription
+      ? t("companionHome.automationInbox.accessUnavailable", { defaultValue: "Automation access unavailable" })
+      : null
   const signalCountLabel = `${items.length} signal${items.length === 1 ? "" : "s"}`
   const subtitle = loading && !hasItems
     ? t("companionHome.automationInbox.checking", { defaultValue: "Checking now" })
@@ -55,7 +82,7 @@ export function AutomationInboxCard({
           count: items.length,
           defaultValue: signalCountLabel
         })
-      : error
+      : error || accessDescription
         ? t("companionHome.automationInbox.zeroSignals", { defaultValue: "0 signals" })
         : t(
             "companionHome.automationInbox.nothingNew",
@@ -66,18 +93,18 @@ export function AutomationInboxCard({
         "companionHome.automationInbox.loadingLabel",
         { defaultValue: "Loading automation signals" }
       )
-    : error && !hasItems
+    : accessLabel ?? (error && !hasItems
       ? error
       : t(
           "companionHome.automationInbox.emptyLabel",
           { defaultValue: "No automation results yet" }
-        )
+        ))
   const emptyDescription = loading
     ? t(
         "companionHome.automationInbox.loadingDescription",
         { defaultValue: "Checking recent scheduled-task results and notifications." }
       )
-    : error && !hasItems
+    : accessDescription ?? (error && !hasItems
       ? t(
           "companionHome.automationInbox.errorDescription",
           {
@@ -91,7 +118,7 @@ export function AutomationInboxCard({
             defaultValue:
               "Results and failures from scheduled tasks appear here after a run. Future scheduled questions and agent outputs appear here only when routed by task visibility policy."
           }
-        )
+        ))
 
   return (
     <section className="rounded-3xl border border-border/80 bg-surface/90 p-5 shadow-sm backdrop-blur-sm">
@@ -109,7 +136,7 @@ export function AutomationInboxCard({
         </span>
       </div>
 
-      {error && partial && hasItems ? (
+      {(error || accessDescription) && partial && hasItems ? (
         <div className="mt-4 rounded-2xl border border-warn/30 bg-warn/10 px-4 py-3">
           <div className="text-sm font-semibold text-text">
             {t(
@@ -117,7 +144,8 @@ export function AutomationInboxCard({
               { defaultValue: "Partial automation data" }
             )}
           </div>
-          <p className="mt-1 text-sm leading-6 text-text-muted">{error}</p>
+          {accessDescription ? <p className="mt-1 text-sm leading-6 text-text-muted">{accessDescription}</p> : null}
+          {error ? <p className="mt-1 text-sm leading-6 text-text-muted">{error}</p> : null}
         </div>
       ) : null}
 
@@ -159,6 +187,7 @@ export function AutomationInboxCard({
         <div className="mt-4 rounded-2xl border border-dashed border-border/70 bg-bg/60 p-4">
           <div className="text-sm font-semibold text-text">{emptyLabel}</div>
           <p className="mt-2 text-sm leading-6 text-text-muted">{emptyDescription}</p>
+          {accessDescription && error ? <p className="mt-2 text-sm leading-6 text-text-muted">{error}</p> : null}
         </div>
       )}
     </section>

@@ -21,8 +21,40 @@ describe("setup onboarding API domain", () => {
     expect(bgRequest).toHaveBeenCalledWith({
       path: "/api/v1/setup/first-run/state",
       method: "GET",
-      noAuth: true,
+      expectedStatuses: [401],
     });
+  });
+
+  it("falls back to public progress when credentials are not yet configured", async () => {
+    vi.mocked(bgRequest)
+      .mockRejectedValueOnce(Object.assign(new Error("Not authenticated"), { status: 401 }))
+      .mockResolvedValueOnce({ status: "not_started" });
+
+    expect((await setupOnboardingMethods.getFirstRunState()).status).toBe("not_started");
+    expect(bgRequest).toHaveBeenLastCalledWith({
+      path: "/api/v1/setup/first-run/state", method: "GET", noAuth: true,
+    });
+    expect(bgRequest).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([403, 500])("does not downgrade a %s setup failure to anonymous", async (status) => {
+    const error = Object.assign(new Error("Setup unavailable"), { status });
+    vi.mocked(bgRequest).mockRejectedValueOnce(error);
+    await expect(setupOnboardingMethods.getFirstRunState()).rejects.toBe(error);
+    expect(bgRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives first-chat verification time for cold local inference", async () => {
+    vi.mocked(bgRequest).mockResolvedValueOnce({ status: "ready" });
+
+    await setupOnboardingMethods.verifyFirstRunChat({
+      provider: "llamacpp", model: "local.gguf", prompt: "Hello"
+    });
+
+    const request = vi.mocked(bgRequest).mock.calls[0][0];
+    expect(request.path).toBe("/api/v1/setup/first-run/first-chat");
+    expect(request.noAuth).toBe(true);
+    expect(request.timeoutMs).toBeGreaterThanOrEqual(120_000);
   });
 
   it("fetches setup metadata for auth and setup path decisions", async () => {

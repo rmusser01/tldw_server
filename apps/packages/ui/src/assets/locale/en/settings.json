@@ -43,6 +43,14 @@
         "label": "Writing Agent: Brainstorm",
         "description": "Controls writing assistance instructions. Manuscript context and provider settings remain fixed."
       },
+      "writingContinuationPredict": {
+        "label": "Writing continuation: Predict",
+        "description": "Controls non-chat continuation instructions. Context, fill templates, stopping rules and provider settings remain fixed."
+      },
+      "writingContinuationFill": {
+        "label": "Writing continuation: Fill",
+        "description": "Controls non-chat continuation instructions. Context, fill templates, stopping rules and provider settings remain fixed."
+      },
       "studyAssistantExplain": {
         "label": "Study explanation",
         "description": "Controls study response guidance. Grounding instructions, study context and provider settings remain fixed."
@@ -122,6 +130,7 @@
     },
     "workflows": {
       "writingAgent": "Writing Playground AI Agent",
+      "writingContinuation": "Writing Playground continuation",
       "writingFeedback": "Writing Playground feedback",
       "studyAssistantFlashcard": "Flashcard Study Assistant",
       "studyAssistantQuiz": "Quiz Study Assistant",
@@ -627,6 +636,9 @@
     }
   },
   "admin": {
+    "users": {
+      "passwordGuidance": "Use a long, unique password with uppercase and lowercase letters, a number, and a symbol. Avoid your username and sequences or repeats of three characters."
+    },
     "adminGuardForbiddenTitle": "Admin access required for these controls",
     "adminGuardNotFoundTitle": "Admin APIs are not available on this server",
     "adminGuardForbiddenBody": "Sign in as an admin user on your tldw server to view and manage users, roles, and system statistics.",
@@ -1303,6 +1315,65 @@
     "option2": "RAG",
     "questionPrompt": "Question Prompt",
     "search": "Search titles and contents",
+    "structured": {
+      "blockEditor": {
+        "nameLabel": "Block name",
+        "roleLabel": "Block role",
+        "sectionKey": "Section key",
+        "contentLabel": "Block content",
+        "enabledLabel": "Block enabled",
+        "templateLabel": "Block uses variables"
+      },
+      "blockList": {
+        "edit": "Edit {{name}} block",
+        "moveUp": "Move {{name}} up",
+        "moveDown": "Move {{name}} down",
+        "remove": "Remove {{name}}",
+        "number": "Block {{index}}",
+        "disabled": " • disabled"
+      },
+      "variables": {
+        "number": "Variable {{index}}",
+        "unnamed": "variable {{index}}",
+        "remove": "Remove {{name}}",
+        "nameLabel": "Variable name",
+        "inputTypeLabel": "Variable input type",
+        "label": "Label",
+        "labelLabel": "Variable label",
+        "maxLength": "Maximum length",
+        "maxLengthLabel": "Variable maximum length",
+        "description": "Description",
+        "descriptionLabel": "Variable description",
+        "options": "Options, one per line",
+        "optionsLabel": "Variable options",
+        "savedDefaultToggleLabel": "Use a saved starter default for {{name}}",
+        "saveDefault": "Save a starter default",
+        "savedDefault": "Starter default (saved)",
+        "savedDefaultLabel": "Starter default for {{name}} (saved)",
+        "requiredLabel": "Variable required",
+        "runtimeDescription": "Current inputs used only for this preview. They are not saved.",
+        "previewDescription": "Sample values passed to the backend preview endpoint.",
+        "currentValue": "{{name}} current value (not saved)",
+        "currentValueLabel": "Current value for {{name}} (not saved)"
+      }
+    },
+    "recipe": {
+      "starterTitle": "Structured recipe",
+      "starterDescription": "Start with ordered blocks, labels, variables, and editable default instructions.",
+      "starterAction": "Build a recipe",
+      "badge": "Recipe",
+      "targetSystem": "System",
+      "targetUser": "User",
+      "filters": {
+        "all": "Recipes",
+        "system": "System recipes",
+        "user": "User recipes"
+      },
+      "openEditor": "Open recipe editor",
+      "cardOpenLabel": "Open recipe editor for {{name}}",
+      "unavailableTitle": "Recipe unavailable",
+      "unavailableDescription": "This saved recipe cannot be opened safely. Its structured definition is invalid or uses an unsupported version."
+    },
     "filter": {
       "all": "All",
       "system": "System",
@@ -1773,7 +1844,7 @@
       "duplicate": "Duplicate character {{name}}",
       "viewConversations": "View conversations for {{name}}",
       "viewVersionHistory": "View version history for {{name}}",
-      "searchResults": "{{count}} characters found"
+      "searchResults": "{count, plural, one {# character found} other {# characters found}}"
     },
     "confirm": {
       "delete": "Are you sure you want to delete this character? This action cannot be undone."
@@ -2272,7 +2343,7 @@
     "title": "Welcome to tldw Browser Assistant— Let’s get you connected",
     "description": "Connect this extension to your tldw server (a separate app running on your machine or server). We’ll walk through adding the URL, API key, and checking that everything is reachable.",
     "exploreWithoutServer": "You can explore the UI without a server; some features (chat, media ingest, Knowledge search) will stay disabled until you connect.",
-    "serverDocsUrl": "https://github.com/rmusser01/tldw_browser_assistant",
+    "serverDocsUrl": "https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting_Started/README.md",
     "serverDocsCta": "Learn how tldw server works",
     "learnMoreTldw": "Learn how tldw server works",
     "serverUrl": {
@@ -2696,7 +2767,7 @@
     "privateModeDescription": "Firefox Private Mode does not support saving data to IndexedDB. Please add custom model from a normal window."
   },
   "serverOverview": {
-    "docsUrl": "https://github.com/rmusser01/tldw_browser_assistant"
+    "docsUrl": "https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting_Started/README.md"
   },
   "dataManagement": {
     "navTitle": "Data Management",

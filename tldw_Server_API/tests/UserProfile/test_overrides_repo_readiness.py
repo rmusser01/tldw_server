@@ -4,6 +4,7 @@ import ast
 import inspect
 import io
 import re
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
 import pytest
@@ -59,7 +60,7 @@ def test_override_repository_sql_always_qualifies_candidate_relations() -> None:
         overrides_repo.TeamProfileOverridesRepo,
     ],
 )
-@pytest.mark.parametrize("failure_mode", ["false", "exception"])
+@pytest.mark.parametrize("failure_mode", ["validation", "connection"])
 async def test_postgres_override_readiness_fails_closed_and_sanitizes(
     monkeypatch: pytest.MonkeyPatch,
     repo_type: type,
@@ -67,13 +68,17 @@ async def test_postgres_override_readiness_fails_closed_and_sanitizes(
 ) -> None:
     sentinel = "private schema failure detail"
 
-    async def _ensure(_pool: object) -> bool:
-        if failure_mode == "exception":
+    @asynccontextmanager
+    async def _acquire():
+        if failure_mode == "connection":
             raise RuntimeError(sentinel)
-        return False
+        yield object()
 
-    monkeypatch.setattr(overrides_repo, "ensure_authnz_core_tables_pg", _ensure)
-    repo = repo_type(db_pool=SimpleNamespace(pool=object()))
+    async def _validate(_conn: object) -> None:
+        raise RuntimeError(sentinel)
+
+    monkeypatch.setattr(overrides_repo, "validate_postgres_profile_candidate_schema", _validate)
+    repo = repo_type(db_pool=SimpleNamespace(pool=object(), acquire=_acquire))
     output = io.StringIO()
     sink = logger.add(output, format="{message} {extra}")
     try:
@@ -82,9 +87,7 @@ async def test_postgres_override_readiness_fails_closed_and_sanitizes(
     finally:
         logger.remove(sink)
 
-    assert str(raised.value) == (
-        "PostgreSQL AuthNZ profile override schema readiness failed"
-    )
+    assert str(raised.value) == ("PostgreSQL AuthNZ profile override schema readiness failed")
     assert raised.value.__cause__ is None
     assert sentinel not in output.getvalue()
 

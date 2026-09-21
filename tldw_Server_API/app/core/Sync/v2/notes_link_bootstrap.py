@@ -47,6 +47,7 @@ class NotesLinkBootstrapper:
         if batch_size < 1 or batch_size > 1000:
             raise ValueError("Notes link bootstrap batch_size must be 1..1000")
         self._links = NotesLinkStore(note_db)
+        self.note_db = note_db
         self._batch_size = batch_size
         self._after_group = after_group
 
@@ -61,6 +62,7 @@ class NotesLinkBootstrapper:
 
         if dataset.owner_user_id != user_id:
             raise SyncStoreError("Sync dataset was not found or is not accessible")
+        service.prepare_notes_suggestion_authority(user_id=user_id, dataset=dataset, note_db=self.note_db)
         metadata = dataset.metadata.get("notes_link_v1")
         if not isinstance(metadata, Mapping):
             raise SyncStoreError("notes_link_sync_not_ready")

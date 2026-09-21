@@ -1,6 +1,16 @@
-import { apiSend } from "@/services/api-send"
-import { appendPathQuery, toAllowedPath } from "@/services/tldw/path-utils"
+import { type ApiSendResponse, apiSend } from "@/services/api-send"
 import type { ApiResponseEnvelope } from "@/services/response-envelope"
+import type { StructuredPromptDefinition } from "@/services/structured-prompt-transport"
+import { appendPathQuery, toAllowedPath } from "@/services/tldw/path-utils"
+import type { RecipePersistenceRequestPolicy } from "@/services/tldw/recipe-request-snapshot"
+
+export { parseStructuredPromptDefinitionForTransport } from "@/services/structured-prompt-transport"
+export type {
+  MultiMessagePromptDefinitionV1,
+  ParsedStructuredPromptDefinition,
+  SingleTextRecipeDefinitionV2,
+  StructuredPromptDefinition
+} from "@/services/structured-prompt-transport"
 
 // Prompt Studio client – aligns with tldw_server prompt_studio endpoints.
 
@@ -12,6 +22,36 @@ export type PaginationMeta = {
 }
 
 export type StandardResponse<T> = ApiResponseEnvelope<T>
+
+type RecipePersistenceOptions = {
+  recipePersistence: RecipePersistenceRequestPolicy
+}
+
+const missingRecipePolicy = <T>(
+  payload: {
+    prompt_format?: PromptFormat
+    prompt_schema_version?: number | null
+    prompt_definition?: StructuredPromptDefinition | null
+  },
+  options?: RecipePersistenceOptions,
+  isUpdate = false
+): ApiSendResponse<T> | null => {
+  if (
+    (payload.prompt_schema_version !== 2 &&
+      payload.prompt_definition?.schema_version !== 2 &&
+      (!isUpdate ||
+        payload.prompt_format === "legacy" ||
+        payload.prompt_schema_version === 1)) ||
+    options?.recipePersistence.mode === "require"
+  )
+    return null
+  return {
+    ok: false,
+    status: 412,
+    error: "Recipe persistence requires an explicit owner policy",
+    recipePersistence: { state: "not_dispatched", actualOwnerId: null }
+  }
+}
 
 export type ListResponse<T> = StandardResponse<T[]> & {
   metadata?: PaginationMeta
@@ -52,7 +92,6 @@ export type FewShotExample = {
 }
 
 export type PromptFormat = "legacy" | "structured"
-export type StructuredPromptDefinition = Record<string, any>
 
 export type Prompt = {
   id: number
@@ -93,7 +132,8 @@ export type PromptUpdatePayload = {
   name?: string
   system_prompt?: string | null
   user_prompt?: string | null
-  prompt_format?: PromptFormat
+  /** Partial updates must identify the target kind; omission can inherit v2. */
+  prompt_format: PromptFormat
   prompt_schema_version?: number | null
   prompt_definition?: StructuredPromptDefinition | null
   few_shot_examples?: FewShotExample[] | null
@@ -117,6 +157,7 @@ export type StructuredPromptPreviewRequest = {
 export type StructuredPromptPreviewResponse = {
   prompt_format: PromptFormat
   prompt_schema_version?: number | null
+  rendered_text?: string
   assembled_messages: Array<{
     role: string
     content: string
@@ -133,6 +174,11 @@ export type PromptVersion = {
   change_description?: string | null
   created_at?: string
   parent_version_id?: number | null
+  prompt_format?: PromptFormat
+  prompt_schema_version?: number | null
+  prompt_definition?: StructuredPromptDefinition | null
+  system_prompt?: string | null
+  user_prompt?: string | null
 }
 
 export type ExecutePromptPayload = {
@@ -173,7 +219,9 @@ export type TestCaseCreatePayload = {
   signature_id?: number | null
 }
 
-export type TestCaseUpdatePayload = Partial<Omit<TestCaseCreatePayload, "project_id">>
+export type TestCaseUpdatePayload = Partial<
+  Omit<TestCaseCreatePayload, "project_id">
+>
 
 export type TestCaseBulkCreatePayload = {
   project_id: number
@@ -336,7 +384,10 @@ export async function getProject(projectId: number) {
   })
 }
 
-export async function updateProject(projectId: number, payload: ProjectUpdatePayload) {
+export async function updateProject(
+  projectId: number,
+  payload: ProjectUpdatePayload
+) {
   return await apiSend<StandardResponse<Project>>({
     path: toAllowedPath(
       `/api/v1/prompt-studio/projects/${encodeURIComponent(projectId)}`
@@ -347,7 +398,10 @@ export async function updateProject(projectId: number, payload: ProjectUpdatePay
 }
 
 // Prompts
-export async function listPrompts(projectId: number, params?: { page?: number; per_page?: number; include_deleted?: boolean }) {
+export async function listPrompts(
+  projectId: number,
+  params?: { page?: number; per_page?: number; include_deleted?: boolean }
+) {
   const query = buildQuery({
     page: params?.page ?? 1,
     per_page: params?.per_page ?? 20,
@@ -366,33 +420,66 @@ export async function listPrompts(projectId: number, params?: { page?: number; p
 
 export async function createPrompt(
   payload: PromptCreatePayload,
-  idempotencyKey?: string | null
+  idempotencyKeyOrOptions?: string | null | RecipePersistenceOptions,
+  requestOptions?: RecipePersistenceOptions
 ) {
-  return await apiSend<StandardResponse<Prompt>>({
+  const idempotencyKey =
+    typeof idempotencyKeyOrOptions === "string"
+      ? idempotencyKeyOrOptions
+      : undefined
+  const options =
+    typeof idempotencyKeyOrOptions === "object" && idempotencyKeyOrOptions
+      ? idempotencyKeyOrOptions
+      : requestOptions
+  const rejection = missingRecipePolicy<StandardResponse<Prompt>>(
+    payload,
+    options
+  )
+  if (rejection) return rejection
+  const response = await apiSend<StandardResponse<Prompt>>({
     path: "/api/v1/prompt-studio/prompts/create",
     method: "POST",
     body: payload,
-    headers: withIdempotency(idempotencyKey)
+    headers: withIdempotency(idempotencyKey),
+    ...options
   })
+  return response
 }
 
-export async function getPrompt(promptId: number) {
-  return await apiSend<StandardResponse<Prompt>>({
+export async function getPrompt(
+  promptId: number,
+  options?: RecipePersistenceOptions
+) {
+  const response = await apiSend<StandardResponse<Prompt>>({
     path: toAllowedPath(
       `/api/v1/prompt-studio/prompts/get/${encodeURIComponent(promptId)}`
     ),
-    method: "GET"
+    method: "GET",
+    ...options
   })
+  return response
 }
 
-export async function updatePrompt(promptId: number, payload: PromptUpdatePayload) {
-  return await apiSend<StandardResponse<Prompt>>({
+export async function updatePrompt(
+  promptId: number,
+  payload: PromptUpdatePayload,
+  options?: RecipePersistenceOptions
+) {
+  const rejection = missingRecipePolicy<StandardResponse<Prompt>>(
+    payload,
+    options,
+    true
+  )
+  if (rejection) return rejection
+  const response = await apiSend<StandardResponse<Prompt>>({
     path: toAllowedPath(
       `/api/v1/prompt-studio/prompts/update/${encodeURIComponent(promptId)}`
     ),
     method: "PUT",
-    body: payload
+    body: payload,
+    ...options
   })
+  return response
 }
 
 export async function previewPromptDefinition(
@@ -489,7 +576,10 @@ export async function getTestCase(testCaseId: number) {
   })
 }
 
-export async function updateTestCase(testCaseId: number, payload: TestCaseUpdatePayload) {
+export async function updateTestCase(
+  testCaseId: number,
+  payload: TestCaseUpdatePayload
+) {
   return await apiSend<StandardResponse<TestCase>>({
     path: toAllowedPath(
       `/api/v1/prompt-studio/test-cases/update/${encodeURIComponent(testCaseId)}`
@@ -545,7 +635,9 @@ export async function deleteEvaluation(evaluationId: number) {
 }
 
 // Status
-export async function getPromptStudioStatus(params?: { warn_seconds?: number }) {
+export async function getPromptStudioStatus(params?: {
+  warn_seconds?: number
+}) {
   const query = buildQuery({ warn_seconds: params?.warn_seconds })
   return await apiSend<StandardResponse<PromptStudioStatus>>({
     path: appendPathQuery("/api/v1/prompt-studio/status", query),
@@ -553,7 +645,9 @@ export async function getPromptStudioStatus(params?: { warn_seconds?: number }) 
   })
 }
 
-export async function getLlmProviders(params?: { include_deprecated?: boolean }) {
+export async function getLlmProviders(params?: {
+  include_deprecated?: boolean
+}) {
   const query = buildQuery({
     include_deprecated: params?.include_deprecated
   })
@@ -663,7 +757,10 @@ export type GenerateTestCasesPayload = {
   project_id: number
   prompt_id?: number
   count?: number
-  seed_examples?: Array<{ inputs: Record<string, any>; expected_outputs?: Record<string, any> }>
+  seed_examples?: Array<{
+    inputs: Record<string, any>
+    expected_outputs?: Record<string, any>
+  }>
   provider?: string
   model?: string
   signature_id?: number | null
@@ -818,7 +915,10 @@ export async function getOptimization(optimizationId: number) {
   })
 }
 
-export async function cancelOptimization(optimizationId: number, reason?: string) {
+export async function cancelOptimization(
+  optimizationId: number,
+  reason?: string
+) {
   return await apiSend<StandardResponse<Optimization>>({
     path: toAllowedPath(
       `/api/v1/prompt-studio/optimizations/${encodeURIComponent(optimizationId)}/cancel`

@@ -50,7 +50,7 @@ describe("Playground responsive parity guard", () => {
       "grid grid-cols-[auto_minmax(0,1fr)] items-end gap-2"
     )
     expect(formSource).toContain(
-      "col-span-2 flex shrink-0 justify-end self-end"
+      "col-span-2 flex shrink-0 items-end justify-end gap-2 self-end"
     )
     expect(formSource).toContain(
       "px-2 pb-0 sm:px-4 sm:pb-0"

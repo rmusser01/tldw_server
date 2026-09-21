@@ -34,7 +34,8 @@ vi.mock("react-i18next", () => ({
 
 vi.mock("../../hooks", () => ({
   useCreateQuizMutation: vi.fn(),
-  useCreateQuestionMutation: vi.fn()
+  useCreateQuestionMutation: vi.fn(),
+  useCreateOsceStationMutation: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false }))
 }))
 
 describe("CreateTab flexible composition", () => {
@@ -142,13 +143,13 @@ describe("CreateTab flexible composition", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Add Your First Question/i }))
 
-    const radios = screen.getAllByRole("radio")
+    const radios = screen.getAllByRole("radio", { name: /Mark option .* as correct/i })
     fireEvent.click(radios[2])
     expect(radios[2]).toBeChecked()
 
     fireEvent.click(screen.getByRole("button", { name: /Remove option 2 for question 1/i }))
 
-    const radiosAfterRemoval = screen.getAllByRole("radio")
+    const radiosAfterRemoval = screen.getAllByRole("radio", { name: /Mark option .* as correct/i })
     expect(radiosAfterRemoval).toHaveLength(3)
     expect(radiosAfterRemoval[1]).toBeChecked()
   }, 15000)

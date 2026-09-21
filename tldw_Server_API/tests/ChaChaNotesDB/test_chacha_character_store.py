@@ -292,7 +292,8 @@ def test_get_character_exemplar_by_id_uses_backend_safe_deleted_value(store, mon
 
     assert store.get_character_exemplar_by_id(11, "ex-1") is None
     assert "is_deleted = ?" in captured["query"]
-    assert captured["params"] == ("ex-1", 11, False)
+    assert "owner_card.client_id = ?" in captured["query"]
+    assert captured["params"] == ("ex-1", 11, False, store._db.client_id)
 
 
 def test_list_character_exemplars_uses_backend_safe_deleted_value(store, monkeypatch):
@@ -312,7 +313,8 @@ def test_list_character_exemplars_uses_backend_safe_deleted_value(store, monkeyp
 
     assert store.list_character_exemplars(22, limit=5, offset=3) == []
     assert "WHERE character_id = ? AND is_deleted = ?" in captured["query"]
-    assert captured["params"] == (22, False, 5, 3)
+    assert "owner_card.client_id = ?" in captured["query"]
+    assert captured["params"] == (22, False, store._db.client_id, 5, 3)
 
 
 def test_character_store_does_not_proxy_arbitrary_parent_db_attributes(store):

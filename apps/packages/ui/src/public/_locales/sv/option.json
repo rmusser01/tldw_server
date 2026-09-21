@@ -2722,5 +2722,8 @@
   },
   "header_connectionCard_connectedCaption": {
     "message": "Chatt och verktyg är nu tillgängliga i Inställningar och sidopanelen."
+  },
+  "notesSearch_offlineSaveUnavailable": {
+    "message": "Offline-sparande är inte tillgängligt förrän ditt konto och den lokala lagringen har bekräftats. Dina ändringar förblir osparade."
   }
 }

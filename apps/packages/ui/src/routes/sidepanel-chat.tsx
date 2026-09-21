@@ -66,8 +66,9 @@ import { normalizeConversationState } from "@/utils/conversation-state"
 import { normalizeChatRole } from "@/utils/normalize-chat-role"
 import { normalizeMessageMetadataExtra } from "@/utils/dynamic-ui"
 import { restoreQueuedRequests } from "@/utils/chat-request-queue"
-import { buildFlashcardsGenerateRoute } from "@/services/tldw/flashcards-generate-handoff"
-import { buildStudyPackRoute } from "@/services/tldw/study-pack-handoff"
+import { useFlashcardsGenerateTransfer, useStudyPackTransfer } from "@/hooks/useFlashcardsGenerateTransfer"
+import { flashcardsHandoffAuthority, loadFlashcardsTransferSnapshot } from "@/services/tldw/flashcards-generate-transfer"
+import type { ServicePromptSnapshot } from "@/services/service-prompts"
 import {
   buildCapturedNoteContent,
   CAPTURED_NOTE_KEYWORD
@@ -438,6 +439,8 @@ const buildHistorySnapshot = ({
 }
 
 const SidepanelChat = () => {
+  const transferFlashcards = useFlashcardsGenerateTransfer()
+  const transferStudyPack = useStudyPackTransfer()
   useServerOnline()
   const drop = React.useRef<HTMLDivElement>(null)
   const [dropedFile, setDropedFile] = React.useState<File | undefined>()
@@ -545,7 +548,7 @@ const SidepanelChat = () => {
     webSearch,
     setWebSearch
   } = useMessage()
-  const [selectedCharacter, setSelectedCharacter] =
+  const [selectedCharacter] =
     useSelectedCharacter<Character | null>(null)
   const [selectedAssistant] = useSelectedAssistant(null)
   const setRagMediaIds = useStoreMessageOption((state) => state.setRagMediaIds)
@@ -568,6 +571,12 @@ const SidepanelChat = () => {
   const [noteSuggestedTitle, setNoteSuggestedTitle] = React.useState("")
   const [noteSourceUrl, setNoteSourceUrl] = React.useState<string | undefined>()
   const [noteSourceMessageId, setNoteSourceMessageId] = React.useState<string | null>(null)
+  const [noteSourceConversationId, setNoteSourceConversationId] = React.useState<string | null>(null)
+  const noteCaptureRef = React.useRef<{
+    controller: AbortController
+    pending?: Promise<ServicePromptSnapshot>
+    release?: () => void
+  } | null>(null)
   const [noteSaving, setNoteSaving] = React.useState(false)
   const [noteError, setNoteError] = React.useState<string | null>(null)
   const [ingestCard, setIngestCard] = React.useState<IngestCardState | null>(null)
@@ -591,8 +600,7 @@ const SidepanelChat = () => {
     historyId,
     messagesLength: messages.length,
     setMessages,
-    setHistory,
-    setSelectedCharacter
+    setHistory
   })
   const composerPadding = composerHeight
     ? `${composerHeight + 16}px`
@@ -609,16 +617,28 @@ const SidepanelChat = () => {
     return `${Math.max(baseOffset, 128)}px`
   }, [composerHeight, stickyChatInput])
 
+  const clearNoteCapture = React.useCallback(() => {
+    const capture = noteCaptureRef.current
+    noteCaptureRef.current = null
+    capture?.controller.abort()
+    capture?.release?.()
+  }, [])
+  React.useEffect(() => clearNoteCapture, [clearNoteCapture])
+
   const resetNoteModal = React.useCallback(() => {
+    clearNoteCapture()
+    transferFlashcards.cancel()
+    transferStudyPack.cancel()
     setNoteModalOpen(false)
     setNoteDraftContent("")
     setNoteDraftTitle("")
     setNoteSuggestedTitle("")
     setNoteSourceUrl(undefined)
     setNoteSourceMessageId(null)
+    setNoteSourceConversationId(null)
     setNoteSaving(false)
     setNoteError(null)
-  }, [])
+  }, [clearNoteCapture, transferFlashcards, transferStudyPack])
 
   const openOptionsHashRoute = React.useCallback((route: string) => {
     const normalizedRoute = route.startsWith("/") ? route : `/${route}`
@@ -655,34 +675,49 @@ const SidepanelChat = () => {
     window.open(normalizedRoute, "_blank")
   }, [])
 
-  const handleGenerateFlashcardsFromSelection = React.useCallback(() => {
-    const content = noteDraftContent.trim()
-    if (!content) {
+  const handleGenerateFlashcardsFromSelection = React.useCallback(async () => {
+    const content = noteDraftContent
+    const capture = noteCaptureRef.current
+    if (!content.trim()) {
       setNoteError(t("sidepanel:notes.emptyContent", "Nothing to save"))
       return
     }
 
-    const route = buildFlashcardsGenerateRoute({
-      text: content,
-      sourceType: "message",
-      sourceId: activeTabId || undefined,
-      sourceTitle: (noteDraftTitle || noteSuggestedTitle).trim() || undefined,
-      conversationId: serverChatId || undefined
-    })
-    openOptionsHashRoute(route)
-    resetNoteModal()
+    try {
+      const messageId = noteSourceMessageId?.trim() || undefined
+      await transferFlashcards(async current => {
+        if (!capture?.pending) throw new Error("Capture this source again to verify its account. Your draft is unchanged.")
+        const owner = await capture.pending
+        owner.scopeSignal.throwIfAborted()
+        if (noteCaptureRef.current !== capture || flashcardsHandoffAuthority(owner) !== flashcardsHandoffAuthority(current)) {
+          throw new Error("The source account changed. Capture it again before transferring.")
+        }
+        return {
+          text: content,
+          sourceType: messageId ? "message" : "manual",
+          sourceId: messageId,
+          messageId,
+          sourceTitle: (noteDraftTitle || noteSuggestedTitle) || undefined,
+          conversationId: messageId ? noteSourceConversationId || undefined : undefined
+        }
+      }, { newTab: true })
+      if (noteCaptureRef.current === capture) resetNoteModal()
+    } catch (error) {
+      if (noteCaptureRef.current === capture && !(error instanceof Error && error.name === "AbortError")) setNoteError(error instanceof Error ? error.message : "The transfer could not be opened. Your draft is unchanged.")
+    }
   }, [
-    activeTabId,
+    noteSourceMessageId,
+    noteSourceConversationId,
     noteDraftContent,
     noteDraftTitle,
     noteSuggestedTitle,
-    openOptionsHashRoute,
+    transferFlashcards,
     resetNoteModal,
-    serverChatId,
     t
   ])
 
-  const handleCreateStudyPackFromSelection = React.useCallback(() => {
+  const handleCreateStudyPackFromSelection = React.useCallback(async () => {
+    const capture = noteCaptureRef.current
     const title = (noteDraftTitle || noteSuggestedTitle).trim()
     const messageId = noteSourceMessageId?.trim() || ""
     if (!title || !messageId) {
@@ -695,20 +730,24 @@ const SidepanelChat = () => {
       return
     }
 
-    openOptionsHashRoute(
-      buildStudyPackRoute({
-        title,
-        sourceItems: [
-          {
-            sourceType: "message",
-            sourceId: messageId,
-            sourceTitle: title
-          }
-        ]
-      })
-    )
-    resetNoteModal()
-  }, [noteDraftTitle, noteSuggestedTitle, noteSourceMessageId, openOptionsHashRoute, resetNoteModal, t])
+    try {
+      await transferStudyPack(async current => {
+        if (!capture?.pending) throw new Error("Capture this source again to verify its account. Your selection is unchanged.")
+        const owner = await capture.pending
+        owner.scopeSignal.throwIfAborted()
+        if (noteCaptureRef.current !== capture || flashcardsHandoffAuthority(owner) !== flashcardsHandoffAuthority(current)) {
+          throw new Error("The source account changed. Capture it again before transferring.")
+        }
+        return {
+          title,
+          sourceItems: [{ sourceType: "message", sourceId: messageId, sourceTitle: title }]
+        }
+      }, { newTab: true })
+      if (noteCaptureRef.current === capture) resetNoteModal()
+    } catch (error) {
+      if (noteCaptureRef.current === capture && !(error instanceof Error && error.name === "AbortError")) setNoteError(error instanceof Error ? error.message : "The study pack transfer could not be opened. Your selection is unchanged.")
+    }
+  }, [noteDraftTitle, noteSuggestedTitle, noteSourceMessageId, transferStudyPack, resetNoteModal, t])
 
   const handleNoteSave = React.useCallback(async () => {
     const content = noteDraftContent.trim()
@@ -1985,11 +2024,32 @@ const SidepanelChat = () => {
         typeof bgMsg.payload?.messageId === "string" || typeof bgMsg.payload?.messageId === "number"
           ? String(bgMsg.payload.messageId)
           : null
+      clearNoteCapture()
+      transferFlashcards.cancel()
+      transferStudyPack.cancel()
+      const capture: NonNullable<typeof noteCaptureRef.current> = { controller: new AbortController() }
+      noteCaptureRef.current = capture
+      capture.pending = loadFlashcardsTransferSnapshot(capture.controller.signal, () => {
+        if (noteCaptureRef.current === capture) resetNoteModal()
+      }).then(snapshot => {
+        if (noteCaptureRef.current !== capture) {
+          snapshot.release()
+          throw new DOMException("The source capture was cancelled.", "AbortError")
+        }
+        capture.release = snapshot.release
+        return snapshot
+      })
+      void capture.pending.catch(error => {
+        if (noteCaptureRef.current !== capture) return
+        if (error instanceof Error && error.name === "AbortError") resetNoteModal()
+        else setNoteError("The source account could not be verified. Reconnect and capture it again; your draft is unchanged.")
+      })
       setNoteDraftContent(selected)
       setNoteSuggestedTitle(suggestedTitle)
       setNoteDraftTitle(suggestedTitle)
       setNoteSourceUrl(sourceUrl)
       setNoteSourceMessageId(rawMessageId)
+      setNoteSourceConversationId(rawMessageId ? serverChatId || null : null)
       setNoteSaving(false)
       setNoteError(null)
         setNoteModalOpen(true)
@@ -2184,6 +2244,11 @@ const SidepanelChat = () => {
     }
   }, [
     bgMsg,
+    clearNoteCapture,
+    resetNoteModal,
+    transferFlashcards,
+    transferStudyPack,
+    serverChatId,
     streaming,
     selectedModel,
     onSubmit,

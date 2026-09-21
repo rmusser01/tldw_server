@@ -27,6 +27,7 @@ import {
   type QuestionUpdate,
   type QuizImportQuestion,
 } from "@/services/quizzes";
+import { advancedQuizFixtureMatrix } from "./advancedQuizFixtureMatrix";
 
 const navigationMocks = {
   navigate: vi.fn(),
@@ -136,6 +137,11 @@ describe("GenerateTab scalable media selection and generation flow", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    window.localStorage.clear();
+    window.localStorage.setItem("tldwConfig", JSON.stringify({ serverUrl: "https://quiz.test", authMode: "multi-user", accessToken: `test.${btoa(JSON.stringify({ sub: "1" }))}.signature` }));
+    let tail = Promise.resolve();
+    const locks = { request: (_name: string, work: () => unknown) => { const next = tail.then(work); tail = next.then(() => undefined, () => undefined); return next } };
+    vi.stubGlobal("navigator", new Proxy(window.navigator, { get: (target, key) => key === "locks" ? locks : Reflect.get(target, key, target) }));
     navigationMocks.navigate.mockReset();
 
     vi.mocked(tldwClient.getMediaDetails).mockResolvedValue({} as any);
@@ -169,6 +175,82 @@ describe("GenerateTab scalable media selection and generation flow", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("keeps available fallback profiles aligned with shared contract fixtures", () => {
+    const availableProfiles = QUIZ_GENERATION_PROFILES.filter(
+      (profile) => profile.status === "available",
+    );
+    const fallbackProfileIds = availableProfiles
+      .map((profile) => profile.id)
+      .sort();
+    const fixtureProfileIds = Object.keys(
+      advancedQuizFixtureMatrix.profiles,
+    ).sort();
+
+    expect(advancedQuizFixtureMatrix.schema_version).toBe(1);
+    expect(fixtureProfileIds).toEqual(fallbackProfileIds);
+    for (const profile of availableProfiles) {
+      const fixture = advancedQuizFixtureMatrix.profiles[profile.id];
+      expect(fixture.catalog).toEqual(profile);
+      expect(
+        fixture.request.generation_profile,
+      ).toBe(profile.id);
+      expect(fixture.output.output_kind).toBe(profile.output_kind);
+    }
+
+    const malformedCases = advancedQuizFixtureMatrix.malformed_output_cases;
+    expect(new Set(malformedCases.map((fixture) => fixture.profile))).toEqual(
+      new Set(fallbackProfileIds),
+    );
+    expect(malformedCases.map((fixture) => fixture.id)).toEqual(
+      expect.arrayContaining([
+        "question_count_mismatch",
+        "invalid_citation",
+        "best_of_five_wrong_option_count",
+        "best_of_five_too_many_options",
+        "best_of_five_invalid_answer",
+        "best_of_five_ambiguous_answer",
+        "best_of_five_duplicate_answer_label",
+        "best_of_five_non_multiple_choice",
+        "emq_incomplete_group",
+        "emq_inconsistent_option_bank",
+        "assertion_reasoning_missing_reason",
+        "assertion_reasoning_invalid_answer",
+        "assertion_reasoning_noncanonical_options",
+        "assertion_reasoning_unlabeled_question_text",
+        "reserved_tag_leakage",
+        "osce_missing_rubric",
+      ]),
+    );
+    for (const fixture of malformedCases) {
+      expect(fallbackProfileIds).toContain(fixture.profile);
+      expect([
+        "normalize_reject",
+        "normalize_expect",
+        "assertion_schema_reject",
+        "planned_reject",
+        "provenance_reject",
+        "osce_schema_reject",
+      ]).toContain(fixture.mode);
+      expect(
+        Object.values(fixture.output).some(
+          (value) => Array.isArray(value) && value.length > 0,
+        ),
+      ).toBe(true);
+      if (fixture.mode.endsWith("_reject")) {
+        expect(fixture.error).toEqual(expect.any(String));
+      }
+      if (fixture.mode === "normalize_expect") {
+        expect(Object.keys(fixture.expected ?? {})).not.toHaveLength(0);
+      }
+      if (fixture.mode === "planned_reject") {
+        expect(fixture.question_plan).not.toHaveLength(0);
+      }
+      if (fixture.mode === "provenance_reject") {
+        expect(fixture.selected_sources).not.toHaveLength(0);
+      }
+    }
   });
 
   it("loads media in pages and keeps selection stable while loading more", async () => {
@@ -991,13 +1073,13 @@ describe("GenerateTab scalable media selection and generation flow", () => {
         num_cards: 10,
         difficulty: "mixed",
       }),
-      { signal: expect.any(AbortSignal) },
+      { signal: expect.any(AbortSignal), requestScope: expect.objectContaining({ userId: 1, config: expect.objectContaining({ serverUrl: "https://quiz.test" }) }) },
     );
     expect(createDeck).toHaveBeenCalledWith(
       expect.objectContaining({
         name: "Biology Mastery - Flashcards",
       }),
-      { signal: expect.any(AbortSignal) },
+      { signal: expect.any(AbortSignal), requestScope: expect.objectContaining({ userId: 1, config: expect.objectContaining({ serverUrl: "https://quiz.test" }) }) },
     );
     expect(createFlashcard).toHaveBeenCalledTimes(2);
 
@@ -1009,7 +1091,13 @@ describe("GenerateTab scalable media selection and generation flow", () => {
     );
   }, 20000);
 
-  it("surfaces fallback handoff when combined flashcard generation cannot extract source content", async () => {
+  it.each([
+    { hasSource: false, outcome: "continue" },
+    { hasSource: true, outcome: "continue" },
+    { hasSource: true, outcome: "abandon" },
+    { hasSource: true, outcome: "failed-navigation" },
+    { hasSource: true, outcome: "authority-change" },
+  ])("surfaces a private fallback only when source exists ($hasSource, $outcome)", async ({ hasSource, outcome }) => {
     vi.mocked(tldwClient.listMedia).mockResolvedValue({
       items: [{ id: 88, title: "Sparse Source", type: "pdf" }],
       pagination: { total_items: 1 },
@@ -1017,7 +1105,7 @@ describe("GenerateTab scalable media selection and generation flow", () => {
     vi.mocked(tldwClient.getMediaDetails).mockImplementation(
       async (_mediaId, options) => {
         if (options?.include_content) {
-          return {} as any;
+          return hasSource ? { content: { text: "Exact private source" } } : {};
         }
         return { content: { word_count: 400 } } as any;
       },
@@ -1030,7 +1118,9 @@ describe("GenerateTab scalable media selection and generation flow", () => {
       isPending: false,
     } as any);
 
-    renderWithQueryClient();
+    const mountedSource = renderWithQueryClient();
+    // A successful router transition removes the actual source component.
+    navigationMocks.navigate.mockImplementation(() => mountedSource.unmount());
 
     await waitFor(() => {
       expect(screen.getByText("1 media items available")).toBeInTheDocument();
@@ -1048,10 +1138,49 @@ describe("GenerateTab scalable media selection and generation flow", () => {
       ).toBeInTheDocument();
     });
 
-    expect(generateFlashcards).not.toHaveBeenCalled();
+    const { FLASHCARDS_GENERATE_HANDOFF_PREFIX } = await import("@/services/tldw/flashcards-generate-handoff");
+    const transferKeys = () => Array.from({ length: window.localStorage.length }, (_, index) => window.localStorage.key(index)).filter(key => key?.startsWith(FLASHCARDS_GENERATE_HANDOFF_PREFIX));
+    if (outcome === "abandon" || outcome === "authority-change") {
+      expect(transferKeys()).toHaveLength(1);
+      if (outcome === "abandon") mountedSource.unmount();
+      else act(() => window.dispatchEvent(new Event("tldw:auth-principal-changed")));
+      await waitFor(() => expect(transferKeys()).toHaveLength(0));
+      expect(navigationMocks.navigate).not.toHaveBeenCalled();
+      return;
+    }
+    if (outcome === "failed-navigation") {
+      navigationMocks.navigate.mockImplementationOnce(() => { throw new Error("Navigation failed"); });
+      fireEvent.click(screen.getByTestId("generate-continue-flashcards-button"));
+      expect(await screen.findByText(/Flashcards could not be opened/)).toBeInTheDocument();
+      expect(transferKeys()).toHaveLength(1);
+      expect(screen.getByTestId("generate-preview-card")).toBeInTheDocument();
+      navigationMocks.navigate.mockClear();
+    }
     fireEvent.click(screen.getByTestId("generate-continue-flashcards-button"));
-    expect(navigationMocks.navigate).toHaveBeenCalledWith(
-      "/flashcards?tab=importExport",
-    );
+    const route = navigationMocks.navigate.mock.calls[0][0];
+    expect(route).not.toContain("Exact private source");
+    expect(route).not.toContain("Sparse Source");
+    if (hasSource) {
+      expect(generateFlashcards).toHaveBeenCalled();
+      expect(route).toContain("generate_handoff=");
+      const { loadServicePromptSnapshot } = await import("@/services/service-prompts");
+      const { flashcardsHandoffAuthority } = await import("@/services/tldw/flashcards-generate-transfer");
+      const { consumeFlashcardsGenerateHandoff } = await import("@/services/tldw/flashcards-generate-handoff");
+      const snapshot = await loadServicePromptSnapshot([]);
+      try { expect(await consumeFlashcardsGenerateHandoff(new URL(route, "https://app.test").searchParams.get("generate_handoff")!, flashcardsHandoffAuthority(snapshot))).toMatchObject({ text: "Exact private source", sourceId: "88", sourceTitle: "Sparse Source" }); }
+      finally { snapshot.release(); }
+    } else {
+      expect(generateFlashcards).not.toHaveBeenCalled();
+      expect(route).toBe("/flashcards?tab=importExport");
+    }
   }, 20000);
 });
+
+vi.mock("@/services/tldw-server", () => ({ getWebSearchPrompt: vi.fn(), promptForRag: vi.fn(), LEGACY_SERVICE_PROMPT_DEFAULTS: {} }));
+
+vi.mock("@plasmohq/storage", async () => import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage"));
+vi.mock("@/services/tldw/deployment-mode", () => ({ isHostedTldwDeployment: () => false }));
+vi.mock("@/services/tldw/TldwApiClient", () => ({ tldwClient: { initialize: async () => {}, ensureConfigForRequest: async () => JSON.parse(window.localStorage.getItem("tldwConfig") || "null") } }));
+vi.mock("@/services/tldw/TldwAuth", () => ({ tldwAuth: { getCurrentUser: async () => ({ id: 1, is_active: true }) } }));
+
+afterEach(() => vi.unstubAllGlobals());

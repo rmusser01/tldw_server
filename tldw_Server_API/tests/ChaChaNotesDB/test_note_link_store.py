@@ -15,6 +15,41 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 pytestmark = pytest.mark.unit
 
 
+@pytest.mark.asyncio
+async def test_link_list_pages_include_tombstones_with_deleted_endpoints(link_db, monkeypatch):
+    """A deleted endpoint must not hide explicitly requested link tombstones."""
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.api.v1.endpoints import notes_graph
+
+    db, store, (first, second, third) = link_db
+    edge_ids = sorted((str(uuid4()), str(uuid4())))
+    for edge_id, target in zip(edge_ids, (second, third)):
+        payload = _payload(first, target, modified_at=_timestamp(0))
+        store.upsert(edge_id=edge_id, payload=payload, expected_version=None)
+        store.tombstone(
+            edge_id=edge_id,
+            payload={**payload, "last_modified": _timestamp(1), "deleted_at": _timestamp(1)},
+            expected_version=1,
+        )
+    db.note_store.soft_delete_note(first, expected_version=1)
+    monkeypatch.setattr(notes_graph, "resolve_notes_link_dataset_authority", lambda **kwargs: None)
+    arguments = {
+        "dataset_id": None, "include_deleted": True, "limit": 1,
+        "current_user": SimpleNamespace(id_str="owner-1"), "db": db,
+        "_": None, "__": None, "___": None,
+    }
+
+    first_page = await notes_graph.list_manual_links(cursor=None, **arguments)
+    assert [link["edge_id"] for link in first_page["links"]] == edge_ids[:1]
+    assert first_page["has_more"] is True
+    second_page = await notes_graph.list_manual_links(cursor=first_page["next_cursor"], **arguments)
+    assert [link["edge_id"] for link in second_page["links"]] == edge_ids[1:]
+    assert second_page["has_more"] is False
+    visible_page = await notes_graph.list_manual_links(cursor=None, **{**arguments, "include_deleted": False})
+    assert visible_page["links"] == []
+
+
 class _ZeroRowcount:
     rowcount = 0
 

@@ -154,6 +154,7 @@ export interface UseContentMetadataDeps {
     setAnalysisModalOpen: (v: boolean) => void
   }
   onChatWithMedia?: () => void
+  chatWithMediaDisabledReason?: string
   onChatAboutMedia?: () => void
   onGenerateFlashcardsFromContent?: (payload: {
     text: string
@@ -176,6 +177,7 @@ export function useContentMetadata(deps: UseContentMetadataDeps) {
     editState,
     modals,
     onChatWithMedia,
+    chatWithMediaDisabledReason,
     onChatAboutMedia,
     onGenerateFlashcardsFromContent,
     onCreateNoteWithContent,
@@ -394,6 +396,8 @@ export function useContentMetadata(deps: UseContentMetadataDeps) {
       children: [
         ...(onChatWithMedia ? [{
           key: 'chat-with',
+          disabled: Boolean(chatWithMediaDisabledReason),
+          title: chatWithMediaDisabledReason,
           label: chatWithClarifiedLabel,
           icon: <Send className="w-4 h-4" />,
           onClick: onChatWithMedia
@@ -545,6 +549,7 @@ export function useContentMetadata(deps: UseContentMetadataDeps) {
   ], [
     isNote,
     onChatWithMedia,
+    chatWithMediaDisabledReason,
     onChatAboutMedia,
     onCreateNoteWithContent,
     onGenerateFlashcardsFromContent,

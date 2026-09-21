@@ -175,6 +175,16 @@ const KNOWN_DEFINITIONS = {
     label: "Writing Agent: Brainstorm",
     description: "Controls writing assistance instructions. Manuscript context and provider settings remain fixed."
   },
+  "writing.continuation.predict": {
+    key: "writingContinuationPredict",
+    label: "Writing continuation: Predict",
+    description: "Controls non-chat continuation instructions. Context, fill templates, stopping rules and provider settings remain fixed."
+  },
+  "writing.continuation.fill": {
+    key: "writingContinuationFill",
+    label: "Writing continuation: Fill",
+    description: "Controls non-chat continuation instructions. Context, fill templates, stopping rules and provider settings remain fixed."
+  },
   "study.assistant.explain": {
     key: "studyAssistantExplain",
     label: "Study explanation",
@@ -248,6 +258,7 @@ const KNOWN_DEFINITIONS = {
 const KNOWN_WORKFLOWS: Record<string, { key: string; label: string }> = {
   "study.assistant.flashcard": { key: "studyAssistantFlashcard", label: "Flashcard Study Assistant" },
   "writing.agent": { key: "writingAgent", label: "Writing Playground AI Agent" },
+  "writing.continuation": { key: "writingContinuation", label: "Writing Playground continuation" },
   "writing.feedback": { key: "writingFeedback", label: "Writing Playground feedback" },
   "study.assistant.quiz": { key: "studyAssistantQuiz", label: "Quiz Study Assistant" },
   "chat.main.rag": { key: "mainChatRag", label: "Main chat RAG" },

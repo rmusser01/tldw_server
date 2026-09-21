@@ -18,6 +18,8 @@ class VisualIdentityCapabilitiesResponse(BaseModel):
     max_frame_count: int = Field(..., ge=1)
     supported_mime_types: list[str] = Field(default_factory=list)
     avif_enabled: bool
+    metadata_supported: bool
+    metadata_unavailable_reason: str | None = None
 
 
 class VisualIdentityExpressionSlotResponse(BaseModel):

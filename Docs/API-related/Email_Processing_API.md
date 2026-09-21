@@ -91,6 +91,44 @@ curl -X POST \
 - Endpoint: `POST /api/v1/media/add`
 - Behavior: When `media_type=email`, the uploaded `.eml` is processed via the email parser and persisted to the database with versioning, keywords, and chunk metadata.
 
+Parsed `email` metadata (headers, participants, Message-ID, dates and attachment
+descriptors) is retained in safe document-version metadata for primary and child
+messages. Binary attachment content is not extracted into the search index.
+
+Email dedupe is scoped to tenant, provider and source. Provider message ID takes
+precedence over RFC Message-ID; body hash is used only when both IDs are absent.
+Distinct messages with identical bodies remain separate. Stored Media URLs use an
+opaque `email://identity/` key; source identity is retained in metadata. Upload source
+names still derive from filenames/container-member references, so renaming a source
+can create a separate import. Existing rows are reused when matching identity
+evidence exists; already overwritten historical messages are not automatically
+reconstructed.
+
+`overwrite_existing=false` retains saved body and metadata in both Media and email
+search. Enabling overwrite replaces both consistently and saves metadata in the
+new document version. Reimport also preserves existing normalized metadata when a
+legacy document version lacks parsed email fields.
+
+For explicitly model-free file ingestion, set `perform_analysis=false`,
+`perform_claims_extraction=false`, `perform_chunking=false`,
+`auto_chunking_use_llm=false`, and `generate_embeddings=false`. Analysis otherwise
+defaults on and claims can inherit server settings. See the synthetic validation
+record for the tested call guards and deployment limitations.
+
+### Search pagination
+
+`GET /api/v1/email/search` retains `limit`/`offset` behavior when `cursor` is omitted.
+Start cursor pagination with `cursor=`; pass the returned `next_cursor` on subsequent
+requests with the same query and deleted visibility. `next_cursor=null` ends the
+traversal. Nonzero offset and malformed or incompatible cursors return an input
+error. Cursor responses include the total matching count across the search scope.
+
+Results order by UTC internal date descending (undated messages last), then email
+message ID descending. Relative-date queries keep the initial traversal clock.
+This is a live traversal: newly inserted older messages may appear, and edits to
+existing sort dates may move rows across page boundaries. See
+`Docs/Design/email-search-cursor-pagination.md` for the full contract.
+
 Form fields (in addition to common `/media/add` fields)
 - `media_type`: `email`
 - `accept_archives`: bool (default false). When true, allows uploading a `.zip` of `.eml` files; each child email is expanded and processed.

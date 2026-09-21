@@ -1,0 +1,172 @@
+"""Keep duplicate-deck conflicts recognizable without exposing driver diagnostics."""
+
+import sqlite3
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from loguru import logger
+
+from tldw_Server_API.app.api.v1.endpoints import flashcards
+from tldw_Server_API.app.core.DB_Management.backends.base import (
+    BackendType,
+    DatabaseConfig,
+    DatabaseError,
+)
+from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.backends.postgresql_backend import PostgreSQLBackend
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+
+
+@pytest.fixture
+def pg_decks(pg_database_config):
+    """Use the official per-test PostgreSQL database, never an application database."""
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = CharactersRAGDB(":memory:", client_id="1", backend=backend)
+    try:
+        yield db
+    finally:
+        db.close_connection()
+        backend.get_pool().close_all()
+
+
+def _client(db):
+    app = FastAPI()
+    app.include_router(flashcards.router)
+    app.dependency_overrides[flashcards.get_chacha_db_for_user] = lambda: db
+    return TestClient(app)
+
+
+def _duplicate_deck_contract(db):
+    with _client(db) as client:
+        created = client.post("/flashcards/decks", json={"name": "Citrine", "description": "Original"})
+        assert created.status_code == 200, created.text
+        original = created.json()
+        duplicate = client.post("/flashcards/decks", json={"name": "Citrine", "description": "Replacement"})
+        assert duplicate.status_code == 409, duplicate.text
+        assert "Deck name already exists" in duplicate.json()["detail"]
+        assert db.get_deck(original["id"])["description"] == "Original"
+        assert len(db.list_decks()) == 1
+        recovered = client.post("/flashcards/decks", json={"name": "New name"})
+        assert recovered.status_code == 200, recovered.text
+        assert recovered.json()["id"] != original["id"]
+
+
+@pytest.mark.integration
+def test_postgres_duplicate_deck_returns_conflict_and_preserves_original(pg_decks):
+    _duplicate_deck_contract(pg_decks)
+
+
+@pytest.mark.integration
+def test_sqlite_duplicate_deck_retains_existing_conflict_behavior(tmp_path):
+    db = CharactersRAGDB(tmp_path / "decks.sqlite", client_id="1")
+    try:
+        _duplicate_deck_contract(db)
+    finally:
+        db.close_connection()
+
+
+@pytest.mark.integration
+def test_postgres_other_constraint_failure_stays_500_and_rolls_back(pg_decks):
+    pg_decks.backend.execute("ALTER TABLE decks ADD CHECK (name <> 'Blocked')")
+    with _client(pg_decks) as client:
+        failed = client.post("/flashcards/decks", json={"name": "Blocked"})
+        assert failed.status_code == 500, failed.text
+        assert failed.json()["detail"] == "Failed to create deck"
+        recovered = client.post("/flashcards/decks", json={"name": "Allowed"})
+        assert recovered.status_code == 200, recovered.text
+    assert [row["name"] for row in pg_decks.list_decks()] == ["Allowed"]
+
+
+@pytest.mark.integration
+def test_real_postgres_unique_failure_retains_only_a_safe_category(pg_database_config):
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    private_value = "UAT174_PRIVATE_UNIQUE_VALUE"
+    messages = []
+    sink = logger.add(messages.append, format="{message}")
+    try:
+        backend.execute("CREATE TABLE uat174_private_constraint (token TEXT UNIQUE)")
+        backend.execute("INSERT INTO uat174_private_constraint(token) VALUES (%s)", (private_value,))
+        with pytest.raises(DatabaseError) as raised:
+            backend.execute("INSERT INTO uat174_private_constraint(token) VALUES (%s)", (private_value,))
+        error = raised.value
+        assert CharactersRAGDB._is_unique_violation(None, error)
+        assert str(error) == "PostgreSQL query execution failed"
+        assert error.__cause__ is None
+        assert error.__context__ is None
+        assert vars(error) == {}
+        combined = "\n".join(messages) + repr(error)
+        assert private_value not in combined
+        assert "uat174_private_constraint" not in combined
+        assert "INSERT INTO" not in combined
+        assert backend.execute("SELECT COUNT(*) FROM uat174_private_constraint").scalar == 1
+    finally:
+        logger.remove(sink)
+        backend.get_pool().close_all()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("category", ["unique", "check", "foreign-runtime"])
+@pytest.mark.parametrize("rollback_fails", [False, True])
+def test_redacted_category_does_not_keep_driver_or_rollback_payload(category, rollback_fails):
+    psycopg = pytest.importorskip("psycopg")
+    if category == "unique":
+        failure = psycopg.errors.UniqueViolation("PRIVATE_DRIVER_DETAIL")
+    elif category == "check":
+        failure = psycopg.errors.CheckViolation("PRIVATE_DRIVER_DETAIL")
+    else:
+        failure = RuntimeError("PRIVATE_DRIVER_DETAIL")
+        failure.sqlstate = "23505"
+
+    class Connection:
+        def __init__(self):
+            self.rollbacks = 0
+
+        def cursor(self):
+            return self
+
+        def execute(self, _query, _params=None):
+            raise failure
+
+        def rollback(self):
+            self.rollbacks += 1
+            if rollback_fails:
+                raise RuntimeError("PRIVATE_ROLLBACK_DETAIL")
+
+    connection = Connection()
+
+    class Pool:
+        def __init__(self):
+            self.returned = []
+
+        def get_connection(self):
+            return connection
+
+        def return_connection(self, value):
+            self.returned.append(value)
+
+    backend = PostgreSQLBackend(DatabaseConfig(backend_type=BackendType.POSTGRESQL))
+    pool = Pool()
+    backend._pool = pool
+    messages = []
+    sink = logger.add(messages.append, format="{message}")
+    try:
+        with pytest.raises(DatabaseError) as raised:
+            backend.execute("SELECT PRIVATE_QUERY", log_errors=False)
+    finally:
+        logger.remove(sink)
+    error = raised.value
+    assert CharactersRAGDB._is_unique_violation(None, error) is (category == "unique")
+    assert str(error) == "PostgreSQL query execution failed"
+    assert error.__cause__ is None
+    assert error.__context__ is None
+    assert vars(error) == {}
+    assert "PRIVATE_" not in "\n".join(messages) + repr(error)
+    assert connection.rollbacks == 1
+    assert pool.returned == [connection]
+
+
+@pytest.mark.unit
+def test_unique_classifier_preserves_sqlite_and_generic_error_compatibility():
+    assert CharactersRAGDB._is_unique_violation(None, sqlite3.IntegrityError("UNIQUE constraint failed: decks.name"))
+    assert not CharactersRAGDB._is_unique_violation(None, DatabaseError("PostgreSQL query execution failed"))

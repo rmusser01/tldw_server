@@ -100,4 +100,25 @@ describe("TldwApiClient character delete", () => {
       calls.some((request) => request.method === "DELETE" && request.path?.includes("/api/v1/characters/123"))
     ).toBe(false)
   })
+
+  it("adds expected_version to updates only when the caller supplies the loaded version", async () => {
+    mocks.bgRequest.mockResolvedValue({ id: "123" })
+
+    const client = new TldwApiClient()
+    await client.updateCharacter("123", { name: "Saved from editor" }, 0)
+    await client.updateCharacter("124", { name: "No loaded version" })
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/characters/123?expected_version=0",
+        method: "PUT"
+      })
+    )
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/api/v1/characters/124",
+        method: "PUT"
+      })
+    )
+  })
 })

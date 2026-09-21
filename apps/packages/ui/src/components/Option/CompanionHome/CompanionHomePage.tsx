@@ -1,7 +1,8 @@
-import React, { useEffect, useRef } from "react"
+import React, { useEffect } from "react"
 import { Link } from "react-router-dom"
 
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
+import { useHomeMilestoneScope } from "@/hooks/useHomeMilestoneScope"
 import { useIsConnected } from "@/hooks/useConnectionState"
 import { DESIGN_SYSTEM_STATES, getDesignSystemState } from "@/design-system"
 import { useMilestoneStore } from "@/store/milestones"
@@ -58,30 +59,12 @@ export function CompanionHomePage({
   const { capabilities, loading: capsLoading } = useServerCapabilities()
   const [customizeOpen, setCustomizeOpen] = React.useState(false)
 
-  // Bootstrap milestones from existing usage evidence for returning users.
-  // Also re-bootstrap when connection becomes ready, so mission cards appear
-  // immediately after onboarding completes without requiring a page refresh.
   const isConnected = useIsConnected()
-  const bootstrapMilestones = useMilestoneStore((s) => s.bootstrapFromExistingUsage)
-  const markMilestone = useMilestoneStore((s) => s.markMilestone)
-  const milestoneBootstrapped = useRef(false)
+  const homeScope = useHomeMilestoneScope()
+  const markScopedMilestone = useMilestoneStore((s) => s.markScopedMilestone)
   useEffect(() => {
-    if (!milestoneBootstrapped.current) {
-      milestoneBootstrapped.current = true
-      bootstrapMilestones()
-    }
-  }, [bootstrapMilestones])
-  // Re-bootstrap when connection becomes ready so post-onboarding milestones appear
-  useEffect(() => {
-    if (isConnected && milestoneBootstrapped.current) {
-      bootstrapMilestones()
-    }
-  }, [isConnected, bootstrapMilestones])
-  useEffect(() => {
-    if (isConnected) {
-      markMilestone("first_connection")
-    }
-  }, [isConnected, markMilestone])
+    if (isConnected && homeScope) markScopedMilestone(homeScope, "first_connection")
+  }, [isConnected, homeScope, markScopedMilestone])
 
   const hasPersonalization = Boolean(capabilities?.hasPersonalization)
   const { layout, updateLayout } = useCompanionHomeLayout(surface)
@@ -105,9 +88,10 @@ export function CompanionHomePage({
     loading: scheduledTaskSignalsLoading,
     partial: scheduledTaskSignalsPartial,
     error: scheduledTaskSignalsError,
+    sourceStates: scheduledTaskSourceStates,
     refresh: refreshScheduledTaskSignals
   } = useScheduledTaskHomeSignals({
-    enabled: !capsLoading
+    enabled: !capsLoading && isConnected
   })
   const refreshHome = React.useCallback(() => {
     refresh()
@@ -225,12 +209,26 @@ export function CompanionHomePage({
   )
 
   const readingState =
-    resolvedSnapshot.readingQueue.length === 0 && readingUnavailable
-      ? {
-          label: "Temporarily unavailable",
-          description: "Reading queue data is temporarily unavailable."
-        }
-      : undefined
+    resolvedSnapshot.readingQueue.length > 0
+      ? undefined
+      : !hasPersonalization
+        ? {
+            label: SETUP_REQUIRED_LABEL,
+            description:
+              "Connect your tldw server and enable personalization to unlock your reading queue."
+          }
+        : profileLoaded && !profile?.enabled
+          ? {
+              label: "Enable Companion",
+              description:
+                "Turn on personalized recommendations to populate your reading queue."
+            }
+          : readingUnavailable
+            ? {
+                label: "Temporarily unavailable",
+                description: "Reading queue data is temporarily unavailable."
+              }
+            : undefined
 
   const topBand =
     !hasPersonalization
@@ -238,8 +236,14 @@ export function CompanionHomePage({
           eyebrow: "Setup",
           title: "Companion setup required",
           description:
-            "This server has not enabled personalization yet. The home hub stays available so you can still keep an eye on non-personalized work.",
-          action: null
+            "Personalization is unavailable on this connection. Your server operator may need to enable the backend feature using the configuration guide.",
+          action: (
+            <a href="https://github.com/rmusser01/tldw_server/blob/main/Docs/Product/Personalization_Design.md#current-status-v02x-dev"
+              target="_blank" rel="noopener noreferrer"
+              className="rounded-full border border-border px-4 py-2 text-sm font-medium text-text">
+              Personalization configuration guide
+            </a>
+          )
         }
       : profileLoaded && !profile?.enabled
         ? {
@@ -412,6 +416,7 @@ export function CompanionHomePage({
       <div className="grid gap-4 xl:grid-cols-2">
         <WhatsNextCard />
         <AutomationInboxCard
+          sourceStates={scheduledTaskSourceStates}
           items={scheduledTaskSignalItems}
           loading={scheduledTaskSignalsLoading}
           partial={scheduledTaskSignalsPartial}

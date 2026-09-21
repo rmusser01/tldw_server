@@ -555,5 +555,11 @@
     "minutesAgoShort": "{{count}}m sedan",
     "hoursAgoShort": "{{count}}h sedan",
     "daysAgoShort": "{{count}}d sedan"
+  },
+  "help": {
+    "loadFailed": "Det gick inte att läsa in hjälpen. Anslut igen, spara dina ändringar och ladda om sidan.",
+    "loading": "Läser in hjälp…",
+    "confirmReload": "Ladda om den här sidan? Osparade ändringar kan gå förlorade.",
+    "reload": "Ladda om sidan"
   }
 }

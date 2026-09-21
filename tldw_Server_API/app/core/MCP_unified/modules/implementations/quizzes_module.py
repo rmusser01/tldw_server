@@ -7,6 +7,7 @@ Supports quiz creation, question management, attempt tracking, and AI generation
 
 import asyncio
 import json
+from collections.abc import Mapping
 from typing import Any, Optional
 
 from loguru import logger
@@ -35,6 +36,7 @@ _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS = (
     UnicodeDecodeError,
     json.JSONDecodeError,
 )
+_UNSUPPORTED_ACTIVITY_ERROR = "This MCP quiz operation supports question quizzes only"
 
 
 class QuizzesModule(BaseModule):
@@ -300,6 +302,11 @@ class QuizzesModule(BaseModule):
                         "focus_topics": {"type": "array", "items": {"type": "string"}, "description": "Topics to focus on"},
                         "provider": {"type": "string", "description": "LLM provider override"},
                         "model": {"type": "string", "description": "LLM model to use for generation"},
+                        "activity_type": {
+                            "type": "string",
+                            "enum": ["questions"],
+                            "default": "questions",
+                        },
                     },
                     "required": ["media_id"],
                 },
@@ -529,16 +536,38 @@ class QuizzesModule(BaseModule):
         chacha_path = context.db_paths.get("chacha")
         if not chacha_path:
             raise ValueError("ChaChaNotes DB path not available in context")
-        return CharactersRAGDB(db_path=chacha_path, client_id=f"mcp_quizzes_{self.config.name}")
+        return CharactersRAGDB(db_path=chacha_path, client_id=self._get_client_id(context))
 
     def _get_client_id(self, context: Any) -> str:
         try:
-            return context.client_id or "mcp_quizzes"
-        except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS:
-            return "mcp_quizzes"
+            user_id = getattr(context, "user_id", None)
+            if user_id is not None and str(user_id).strip():
+                return str(user_id)
+            client_id = getattr(context, "client_id", None)
+            if client_id is not None and str(client_id).strip():
+                return str(client_id)
+        except _QUIZZES_MODULE_NONCRITICAL_EXCEPTIONS as exc:
+            raise ValueError("Missing quiz owner identity") from exc
+        raise ValueError("Missing quiz owner identity")
 
     def _log_db_close_failure(self) -> None:
         logger.debug("Failed to close DB")
+
+    def _require_question_quiz(self, quiz: Mapping[str, Any]) -> None:
+        if quiz.get("activity_type", "questions") != "questions":
+            raise ValueError(_UNSUPPORTED_ACTIVITY_ERROR)
+
+    def _load_question_quiz(self, db: CharactersRAGDB, quiz_id: int) -> dict[str, Any]:
+        quiz = db.get_quiz(quiz_id)
+        if not quiz:
+            raise ValueError(f"Quiz not found: {quiz_id}")
+        self._require_question_quiz(quiz)
+        return quiz
+
+    def _guard_parent_quiz(self, db: CharactersRAGDB, item: Mapping[str, Any]) -> None:
+        quiz_id = item.get("quiz_id")
+        if quiz_id is not None:
+            self._load_question_quiz(db, int(quiz_id))
 
     # Quiz CRUD
 
@@ -567,6 +596,7 @@ class QuizzesModule(BaseModule):
                 q=q,
                 media_id=media_id,
                 workspace_tag=workspace_tag,
+                activity_type="questions",
                 limit=limit,
                 offset=offset,
             )
@@ -595,6 +625,7 @@ class QuizzesModule(BaseModule):
             quiz = db.get_quiz(quiz_id)
             if not quiz:
                 raise ValueError(f"Quiz not found: {quiz_id}")
+            self._require_question_quiz(quiz)
             return {"quiz": quiz}
         finally:
             try:
@@ -697,6 +728,7 @@ class QuizzesModule(BaseModule):
         db = self._open_db(context)
         try:
             quiz_id = args.get("quiz_id")
+            self._load_question_quiz(db, quiz_id)
             q = args.get("q")
             include_answers = bool(args.get("include_answers", False))
             limit = int(args.get("limit", 50))
@@ -729,6 +761,7 @@ class QuizzesModule(BaseModule):
     def _create_question_sync(self, context: Any, args: dict[str, Any]) -> dict[str, Any]:
         db = self._open_db(context)
         try:
+            self._load_question_quiz(db, args.get("quiz_id"))
             self._validate_question_payload(args, require_core_fields=True)
             question_id = db.create_question(
                 quiz_id=args.get("quiz_id"),
@@ -764,6 +797,7 @@ class QuizzesModule(BaseModule):
             existing = db.get_question(question_id, include_deleted=False)
             if not existing:
                 raise ValueError(f"Question not found or version conflict: {question_id}")
+            self._guard_parent_quiz(db, existing)
             merged = dict(existing)
             merged.update(updates)
             self._validate_question_payload(merged)
@@ -794,6 +828,10 @@ class QuizzesModule(BaseModule):
             question_id = args.get("question_id")
             hard_delete = bool(args.get("hard_delete", False))
             expected_version = args.get("expected_version")
+            existing = db.get_question(question_id, include_deleted=False)
+            if not existing:
+                raise ValueError(f"Question not found: {question_id}")
+            self._guard_parent_quiz(db, existing)
             success = db.delete_question(
                 question_id=question_id,
                 expected_version=expected_version,
@@ -823,6 +861,7 @@ class QuizzesModule(BaseModule):
         db = self._open_db(context)
         try:
             quiz_id = args.get("quiz_id")
+            self._load_question_quiz(db, quiz_id)
             attempt = db.start_attempt(
                 quiz_id=quiz_id,
                 client_id=self._get_client_id(context),
@@ -844,6 +883,10 @@ class QuizzesModule(BaseModule):
         try:
             attempt_id = args.get("attempt_id")
             answers = args.get("answers", [])
+            attempt = db.get_attempt(attempt_id=attempt_id)
+            if not attempt:
+                raise ValueError(f"Attempt not found: {attempt_id}")
+            self._guard_parent_quiz(db, attempt)
             result = db.submit_attempt(
                 attempt_id=attempt_id,
                 answers=answers,
@@ -866,6 +909,8 @@ class QuizzesModule(BaseModule):
             quiz_id = args.get("quiz_id")
             limit = int(args.get("limit", 50))
             offset = int(args.get("offset", 0))
+            if quiz_id is not None:
+                self._load_question_quiz(db, quiz_id)
             result = db.list_attempts(
                 quiz_id=quiz_id,
                 limit=limit,
@@ -902,6 +947,7 @@ class QuizzesModule(BaseModule):
             )
             if not attempt:
                 raise ValueError(f"Attempt not found: {attempt_id}")
+            self._guard_parent_quiz(db, attempt)
             return {"attempt": attempt}
         finally:
             try:
@@ -913,6 +959,8 @@ class QuizzesModule(BaseModule):
 
     async def _generate_quiz(self, args: dict[str, Any], context: Any) -> dict[str, Any]:
         """AI-generate a quiz from media content."""
+        if args.get("activity_type", "questions") != "questions":
+            raise ValueError(_UNSUPPORTED_ACTIVITY_ERROR)
         media_id = args.get("media_id")
         name = args.get("name") or f"Quiz from Media {media_id}"
         num_questions = int(args.get("num_questions", 10))
