@@ -14,6 +14,15 @@ During the pre-counsel frontend licensing freeze, the release boundary is:
 A separate WebUI Docker image or release artifact remains the recommended
 post-freeze model, but it requires the later release-specific licensing gate.
 
+The approved application-distribution direction is a small PyPI launcher with
+managed matched runtime bundles plus a paired prebuilt Docker bundle. The
+[complete application distribution design](../Design/2026-09-20-complete-app-distribution-design.md)
+(TASK-13265, consolidated specification awaiting written-spec review) defines
+runtime routing, lean managed packaging, safe updates, recovery, and release
+qualification. It preserves the public `tldw-server` API-only package. The
+source-only/publication boundary above remains in force until its separate
+release gate is satisfied.
+
 Do not bundle `apps/tldw-frontend` into the root Python wheel unless the project
 explicitly chooses a new single-artifact distribution model.
 
