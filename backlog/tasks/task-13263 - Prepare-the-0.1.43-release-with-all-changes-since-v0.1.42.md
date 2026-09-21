@@ -4,7 +4,7 @@ title: Prepare the 0.1.43 release with all changes since v0.1.42
 status: In Progress
 assignee: []
 created_date: '2026-09-20 19:56'
-updated_date: '2026-09-20 23:47'
+updated_date: '2026-09-21 00:18'
 labels: []
 dependencies: []
 priority: high
@@ -59,6 +59,10 @@ Required-CI test-only repaircca220627a verified independently58tests, nonincreme
 Carry reviewed main-recovery test-isolation commit3b96a3cb04/PR2974 into0.1.43 so collection fixes are retained. Main repair:161 Prompt Studio passes,403 Chat/Macro/Skills passes with9 existing live-provider skips,4 collection regressions,independent review and no new lint/Bandit findings. PyPI still blocked by separate Media fixture FTS failure and one-hour full-gate scope decision; no publication approved. Candidate12c6 frontend unit shards all now pass; aggregate/coverage finishing. Protected frontend files unchanged by backend test-only carry.
 
 Verified candidate carry of PR2974 test-only fixes:180 Prompt Studio/isolation/artifact/Media-route/licensing tests pass; separately43Media FTS tests pass; final combinedBandit1073-to1073 and Ruff65-to35 no new findings. Independent reviews of both repairs found no issues. Protected frontend bytes and0.1.42legal record unchanged; existingcca220627a/7,322-file manifest remains valid. Recovery fullcollection with publication-matching pytest plugins91pass/13skip,not fullsuite. Existing publisher gate unchanged,scope answer pending. Main recovery plan and current candidate status now record these facts prominently.
+
+Requester approved adopting existingPR2956 bounded publication gate. Carry exact workflow/test hunks into0.1.43 with the recovery branch; retain normalCI and make pypi-check artifact barrier, manual TestPyPI/PyPI routes, detection fail-closed behavior and trusted publishing permissions. Preserve newer workflow contracts and source authority; verify contracts/startup/scopedBandit/actionlint/licensing. Human-summary/legal/release approval gates remain separate.
+
+Approved bounded PyPI gate adopted from PR2956 in both recovery and candidate. Candidate: 28 workflow/licensing tests pass including all 13 protected-source checks; startup HTTP200; actionlint clean; Ruff0; Bandit66 to58 with no new findings. Independent review clear. Updated both release plans and linked adoption/review evidence. Final-head CI and separate 0.1.43 legal/merge/publication gates remain pending.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
