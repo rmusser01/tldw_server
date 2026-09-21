@@ -176,6 +176,27 @@ const makeActions = (retryFetch = vi.fn()): MediaReviewActions =>
   }) as unknown as MediaReviewActions
 
 describe("MediaReviewReadingPane product-state alerts", () => {
+  it("counts a visible preview when no items are selected", () => {
+    const detail = makeDetail()
+    const state = {
+      ...makeState(detail, new Set()),
+      selectedIds: [],
+      viewerItems: [],
+      previewedId: detail.id,
+      previewedDetail: detail,
+      previewIndex: 0
+    }
+    const view = render(<MediaReviewReadingPane state={state} actions={makeActions()} />)
+
+    expect(screen.getByText("1 open")).toBeInTheDocument()
+
+    view.rerender(<MediaReviewReadingPane state={{ ...state, previewedId: null, previewedDetail: null }} actions={makeActions()} />)
+    expect(screen.getByText("0 open")).toBeInTheDocument()
+
+    view.rerender(<MediaReviewReadingPane state={makeState(detail, new Set())} actions={makeActions()} />)
+    expect(screen.getByText("1 open")).toBeInTheDocument()
+  })
+
   it("renders failed content through the design-system Alert and keeps retry behavior", () => {
     const retryFetch = vi.fn()
 

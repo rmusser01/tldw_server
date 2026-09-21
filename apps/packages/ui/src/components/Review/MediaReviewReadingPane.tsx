@@ -430,7 +430,7 @@ export const MediaReviewReadingPane: React.FC<MediaReviewReadingPaneProps> = ({ 
               <div className="text-sm font-medium text-text">{t('mediaPage.viewer', 'Viewer')}</div>
               <div className="text-xs text-text-muted">
                 {viewMode === "spread"
-                  ? t("mediaPage.viewerCount", "{{count}} open", { count: viewerItems.length })
+                  ? t("mediaPage.viewerCount", "{{count}} open", { count: effectiveItems.length })
                   : viewMode === "list"
                     ? t("mediaPage.viewerSingle", "Single item view")
                     : t("mediaPage.viewerAll", "All items (stacked)")}
