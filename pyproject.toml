@@ -341,7 +341,7 @@ STT_Parakeet = [
 STT_Parakeet_MLX = [
   "librosa",
   "parakeet-mlx",
-  "numpy<2.4; platform_system == \"Darwin\" and platform_machine == \"arm64\"",
+  "numpy<2.5; platform_system == \"Darwin\" and platform_machine == \"arm64\"",
   "mlx>=0.30.0; platform_system == \"Darwin\" and platform_machine == \"arm64\"",
 ]
 
