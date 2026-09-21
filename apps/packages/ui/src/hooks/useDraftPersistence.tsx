@@ -247,6 +247,12 @@ export const useDraftPersistence = ({
   // Get current value for effect dependency
   const currentValue = getValue()
 
+  React.useLayoutEffect(() => () => {
+    // In-app navigation has no pagehide event. Flush before the persistence
+    // cleanup cancels this write and passive owner teardown revokes its lease.
+    pendingPersistRef.current?.()
+  }, [])
+
   // Persist draft whenever the message changes
   React.useLayoutEffect(() => {
     if (!enabled) return
