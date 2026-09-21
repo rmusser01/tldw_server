@@ -6756,7 +6756,11 @@ async def character_chat_completion(
                     yield f"data: {json.dumps(tail)}\n\n"
                     yield "data: [DONE]\n\n"
                 except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as e:
-                    yield f"data: {json.dumps({'error': str(e)})}\n\n"
+                    logger.debug(
+                        "Character buffered stream failure error_type={}",
+                        type(e).__name__,
+                    )
+                    yield f"data: {json.dumps({'error': 'An internal error has occurred.'})}\n\n"
                     yield "data: [DONE]\n\n"
 
             return StreamingResponse(_stream_text(), media_type="text/event-stream", headers=sse_headers)

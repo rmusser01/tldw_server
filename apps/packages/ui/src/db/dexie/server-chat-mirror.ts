@@ -212,7 +212,7 @@ export const reconcileServerChatMirror = async ({
     const remoteVersion = remote.serverMessageVersion ?? 0
     const preserveContent = local && (local.serverMessageVersion == null || localVersion >= remoteVersion) && local.content !== remote.message
     const next: Message = {
-      ...local, id, history_id: historyId, name: remote.name || "Assistant",
+      ...local, id, history_id: historyId, name: remote.name || (remote.role === "user" || (!remote.role && !remote.isBot) ? "You" : remote.role === "system" ? "System" : "Assistant"),
       role: remote.role || (remote.isBot ? "assistant" : "user"), content: remote.message,
       images: remote.images || [], sources: remote.sources || [],
       messageType: remote.messageType, generationInfo: remote.generationInfo,

@@ -66,7 +66,7 @@ export const computeElapsedSeconds = ({
   }
   const started = parseTime(startedAt)
   const ended = parseTime(selfAssessmentStartedAt || serverNow)
-  if (started == null || ended == null) return 0
+  if (started === null || started === undefined || ended === null || ended === undefined) return 0
   return Math.max(0, Math.floor((ended - started) / 1_000))
 }
 
@@ -169,6 +169,7 @@ export const OscePracticePanel: React.FC<OscePracticePanelProps> = ({
   const modalErrorRef = React.useRef<HTMLDivElement | null>(null)
   const confirmButtonRef = React.useRef<HTMLButtonElement | null>(null)
   const wasOnlineRef = React.useRef(isOnline)
+  const focusSaveErrorRef = React.useRef(false)
   const reportSaveErrorRef = React.useRef<(error: unknown, focus?: boolean) => void>(() => undefined)
 
   patchMutationRef.current = patchMutation
@@ -194,12 +195,16 @@ export const OscePracticePanel: React.FC<OscePracticePanelProps> = ({
     const status = Number((error as { status?: unknown } | null)?.status)
     setSaveStatus(status === 409 ? "conflict" : status === 0 || !isOnline ? "offline" : "error")
     setSaveError(describeSaveError(error))
-    if (focus) {
-      window.setTimeout(() => (modalErrorRef.current ?? outerErrorRef.current)?.focus(), 0)
-    }
+    if (focus) focusSaveErrorRef.current = true
   }, [describeSaveError, isOnline])
 
   reportSaveErrorRef.current = reportSaveError
+
+  React.useEffect(() => {
+    if (!saveError || !focusSaveErrorRef.current) return
+    focusSaveErrorRef.current = false
+    ;(modalErrorRef.current ?? outerErrorRef.current)?.focus()
+  }, [saveError, saveStatus, revealConfirmationOpen])
 
   const setOuterErrorAlertRef = React.useCallback((node: HTMLDivElement | null) => {
     outerErrorRef.current = node
@@ -336,7 +341,7 @@ export const OscePracticePanel: React.FC<OscePracticePanelProps> = ({
       notesTimerRef.current = null
       const pendingNotes = pendingNotesRef.current
       pendingNotesRef.current = null
-      if (pendingNotes == null) return
+      if (pendingNotes === null || pendingNotes === undefined) return
       setSaveStatus(isOnline ? "saving" : "offline")
       void queue.enqueueStaged().catch(reportSaveError)
     }, Math.max(0, saveDebounceMs))
@@ -370,7 +375,7 @@ export const OscePracticePanel: React.FC<OscePracticePanelProps> = ({
       clearTimeout(notesTimerRef.current)
       notesTimerRef.current = null
     }
-    if (pendingNotesRef.current != null) {
+    if (pendingNotesRef.current !== null && pendingNotesRef.current !== undefined) {
       pendingNotesRef.current = null
       setSaveStatus(isOnline ? "saving" : "offline")
       await queueRef.current?.enqueueStaged()
@@ -498,7 +503,10 @@ export const OscePracticePanel: React.FC<OscePracticePanelProps> = ({
             <Tag icon={<ClockCircleOutlined />} aria-label={`Elapsed time ${formatElapsed(elapsedSeconds)}`}>
               {formatElapsed(elapsedSeconds)}
             </Tag>
-            <Tag>{Math.round(attempt.station.recommended_duration_seconds / 60)} min recommended</Tag>
+            <Tag>{t("option:quiz.osceRecommendedMinutes", {
+              defaultValue: "{{minutes}} min recommended",
+              minutes: Math.round(attempt.station.recommended_duration_seconds / 60)
+            })}</Tag>
           </div>
         </div>
         {onClose && (
@@ -704,14 +712,12 @@ export const OscePracticePanel: React.FC<OscePracticePanelProps> = ({
           </Space>
         )}
         afterOpenChange={(open) => {
-          window.setTimeout(() => {
-            if (open) {
-              if (modalErrorRef.current) modalErrorRef.current.focus()
-              else confirmButtonRef.current?.focus()
-              return
-            }
+          if (open) {
+            if (modalErrorRef.current) modalErrorRef.current.focus()
+            else confirmButtonRef.current?.focus()
+          } else {
             outerErrorRef.current?.focus()
-          }, 0)
+          }
         }}
         focusable={{ focusTriggerAfterClose: false, trap: revealConfirmationOpen }}
         destroyOnHidden

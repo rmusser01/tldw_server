@@ -42,6 +42,42 @@ Use these pages when you want recurring work, integrations, server operations, t
 | `/admin/usage` | Admin/operator | Inspect usage state. | Quota and usage review. |
 | `/admin/watchlists-items`, `/admin/watchlists-runs` | Admin/operator | Inspect watchlist item and run administration. | Watchlist operations. |
 
+## Recovering an interrupted scheduled executor
+
+Scheduled question/agent Jobs hold a durable execution claim for their schedule
+slot. A replaced or expired Jobs lease does not prove the previous executor has
+stopped, so another delivery cannot steal that claim. Normal completion, failure,
+and cancellation release the claim after execution stops. A failed terminal-state
+write is retryable; a hard process exit may require operator reconciliation.
+
+If worker logs report `needs execution reconciliation`, first stop all automation
+workers for that deployment, disable their automatic restart, and verify that the
+previous executor process has exited. Inspect the owner, run, and Jobs records and
+retain their identifiers before changing anything. If the process may still be
+running, leave the claim intact.
+
+After confirming execution stopped, use the deployment's configured environment
+and virtual environment to inspect and release the exact claim through the
+database interface:
+
+```python
+from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import ScheduledTasksDatabase
+
+db = ScheduledTasksDatabase.for_user(user_id=OWNER_ID)
+run = db.get_run(owner_id=OWNER_ID, run_id=RUN_ID)
+claim = run.run_summary.get("execution_claim") if run else None
+# Inspect this claim and verify it belongs to the stopped attempt first.
+if claim:
+    db.release_scheduled_task_run_claim(
+        owner_id=OWNER_ID, run_id=RUN_ID, claim_id=claim["id"]
+    )
+```
+
+Use the existing Jobs retry controls for the same job and schedule slot, then
+restart workers. Keep the original run identity; starting a new slot would create
+new work. This recovery does not promise exactly-once arbitrary external effects;
+the current consumer continues to prohibit unapproved tool execution.
+
 ## Related Docs
 
 - [Workflows examples](../WebUI_Extension/Workflows_Examples.md)

@@ -12,7 +12,7 @@ import uuid
 from collections.abc import Callable
 from configparser import ConfigParser
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
@@ -539,7 +539,9 @@ def _validated_public_first_run_step_data(step: str, data: dict[str, Any]) -> di
     return _strip_non_persisted_first_run_step_data(step, data)
 
 
-def _public_first_run_step_data(step: str, data: dict[str, Any]) -> dict[str, Any]:
+def _public_first_run_step_data(
+    step: str, data: dict[str, Any], *, allow_local_model_paths: bool = False,
+) -> dict[str, Any]:
     allowed_keys = _FIRST_RUN_STEP_DATA_ALLOWED_KEYS.get(step)
     if step == "state_recovery":
         allowed_keys = frozenset({"reason", "quarantined", "message"})
@@ -556,6 +558,11 @@ def _public_first_run_step_data(step: str, data: dict[str, Any]) -> dict[str, An
             continue
         if _is_unsafe_public_step_data_key(key) and not _is_explicitly_allowed_unsafe_named_step_key(step, key):
             continue
+        if step == "providers" and key == "default_model":
+            if _is_path_like_model_identifier(value) and not (
+                allow_local_model_paths and _is_local_setup_provider(data.get("default_provider"))
+            ):
+                continue
         if _is_public_first_run_step_value(
             value,
             allow_path_like=_allows_path_like_first_run_step_value(step, key, value, data),
@@ -600,20 +607,39 @@ def _require_safe_first_chat_request_metadata(*, provider: str, model: str) -> N
         )
 
 
-def _public_first_chat_payload(value: object) -> dict[str, Any]:
+def _is_path_like_model_identifier(value: object) -> bool:
+    """Recognize local path IDs without hiding ordinary provider names like org/model."""
+    if not isinstance(value, str):
+        return False
+    candidate = value.strip()
+    return bool(
+        candidate.startswith(("/", "\\", "~/", "~\\", "./", "../", ".\\", "..\\"))
+        or PureWindowsPath(candidate).drive
+        or _LOCAL_PATH_LIKE_FIRST_RUN_STEP_VALUE_RE.search(candidate)
+    )
+
+
+def _public_first_chat_payload(value: object, *, allow_local_model_paths: bool = False) -> dict[str, Any]:
+    """Project first-chat status without exposing local model paths anonymously."""
     payload = model_dump_compat(value)
+    model = payload.get("model")
+    allow_model_path = allow_local_model_paths and _is_local_setup_provider(payload.get("provider"))
+    if _is_path_like_model_identifier(model) and not allow_model_path:
+        model = None
     return {
         "completed": payload.get("completed") is True,
         "provider": _safe_public_first_chat_metadata_value(payload.get("provider")),
         "model": _safe_public_first_chat_metadata_value(
-            payload.get("model"), allow_path_like=_is_local_setup_provider(payload.get("provider"))
+            model, allow_path_like=allow_model_path
         ),
         "response_id": _safe_public_first_chat_metadata_value(payload.get("response_id")),
         "completed_at": payload.get("completed_at"),
     }
 
 
-def _public_first_run_state(state: FirstRunStateResponse) -> FirstRunStateResponse:
+def _public_first_run_state(
+    state: FirstRunStateResponse, *, allow_local_model_paths: bool = False,
+) -> FirstRunStateResponse:
     payload = model_dump_compat(state)
     current_step = payload.get("current_step")
     payload["current_step"] = current_step if _is_public_first_run_step_name(current_step) else None
@@ -628,12 +654,14 @@ def _public_first_run_state(state: FirstRunStateResponse) -> FirstRunStateRespon
             for step, data in step_data.items()
             if isinstance(step, str)
             if isinstance(data, dict)
-            for public_data in [_public_first_run_step_data(step, data)]
+            for public_data in [_public_first_run_step_data(step, data, allow_local_model_paths=allow_local_model_paths)]
             if public_data
         }
     else:
         payload["step_data"] = {}
-    payload["first_chat"] = _public_first_chat_payload(payload.get("first_chat"))
+    payload["first_chat"] = _public_first_chat_payload(
+        payload.get("first_chat"), allow_local_model_paths=allow_local_model_paths,
+    )
     return FirstRunStateResponse.model_validate(payload)
 
 
@@ -1304,9 +1332,19 @@ async def get_setup_status(_guard: None = Depends(require_local_setup_access)) -
 
 
 @router.get("/first-run/state", openapi_extra={"security": []}, response_model=FirstRunStateResponse)
-async def get_first_run_state(_guard: None = Depends(require_local_setup_access)) -> FirstRunStateResponse:
+async def get_first_run_state(
+    request: Request, _guard: None = Depends(require_local_setup_access),
+) -> FirstRunStateResponse:
+    """Return safe progress, preserving local model IDs for verified configuration admins."""
+    allow_model_paths = False
+    try:
+        principal = await get_auth_principal(request)
+        allow_model_paths = _has_system_configure_permission(principal)
+    except HTTPException as exc:
+        if exc.status_code not in {401, 403}:
+            raise
     state = await _run_first_run_store_call(lambda store: store.load())
-    return _public_first_run_state(state)
+    return _public_first_run_state(state, allow_local_model_paths=allow_model_paths)
 
 
 @router.get("/first-run/metadata", openapi_extra={"security": []}, response_model=FirstRunMetadataResponse)

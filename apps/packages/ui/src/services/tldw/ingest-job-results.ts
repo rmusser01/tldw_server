@@ -95,19 +95,16 @@ export const extractCompletedIngestJobMediaId = (
       : Array.isArray(record?.results)
         ? record.results
         : []
-  const firstResult = asRecord(results[0])
-  const mediaId =
-    payload?.media_id ??
-    payload?.mediaId ??
-    payload?.db_id ??
-    firstResult?.media_id ??
-    firstResult?.mediaId ??
-    firstResult?.db_id ??
-    null
-
-  return typeof mediaId === "string" || typeof mediaId === "number"
-    ? mediaId
-    : null
+  for (const candidate of [payload, ...results]) {
+    const item = asRecord(candidate)
+    for (const mediaId of [item?.media_id, item?.mediaId, item?.db_id]) {
+      if (
+        (typeof mediaId === "string" && mediaId.trim().length > 0) ||
+        (typeof mediaId === "number" && Number.isFinite(mediaId) && mediaId > 0)
+      ) return mediaId
+    }
+  }
+  return null
 }
 
 export const completedIngestJobIndicatesSkipped = (

@@ -1,4 +1,9 @@
-"""Manual real-VM proof of guest capability rejection and subsequent recovery."""
+"""Manual real-VM acceptance for TASK-13243.3 (GitHub issue #1442).
+
+Portable cleanup/opt-in tests run normally. The live acceptance requires the
+documented disposable bundles and isolated helper in Docs/Sandbox; its separate
+opt-in is intentional and must not be enabled by ordinary test automation.
+"""
 
 from __future__ import annotations
 
@@ -31,7 +36,10 @@ from tldw_Server_API.tests.sandbox.test_vz_linux_real_host_e2e import (
 def _require_mismatch_bundle() -> Path:
     """Require separate opt-in before accessing a deliberately incompatible guest."""
     if not is_truthy(os.getenv("TLDW_SANDBOX_VZ_LINUX_GUEST_MISMATCH_DRILL")):
-        pytest.skip("Set TLDW_SANDBOX_VZ_LINUX_GUEST_MISMATCH_DRILL=1 for this manual drill")
+        pytest.skip(
+            "TASK-13243.3 / #1442: set TLDW_SANDBOX_VZ_LINUX_GUEST_MISMATCH_DRILL=1 "
+            "for this manual disposable-guest drill"
+        )
     path = os.getenv("TLDW_SANDBOX_VZ_LINUX_MISMATCH_BASE_IMAGE", "").strip()
     _expect(bool(path), "A disposable missing-exec guest bundle is required")
     bundle = Path(path).expanduser().resolve(strict=True)
@@ -173,7 +181,7 @@ def test_guest_mismatch_drill_requires_fault_bundle(monkeypatch: pytest.MonkeyPa
 
 @pytest.mark.integration
 @pytest.mark.vz_linux_host_failure_drill
-@pytest.mark.skipif(sys.platform != "darwin", reason="macOS host only")
+@pytest.mark.skipif(sys.platform != "darwin", reason="TASK-13243.3 / #1442: requires a macOS host")
 def test_vz_linux_rejects_real_guest_missing_exec_then_runs_healthy_session(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -186,7 +194,7 @@ def test_vz_linux_rejects_real_guest_missing_exec_then_runs_healthy_session(
     """
     mismatch_bundle = _require_mismatch_bundle()
     if platform.machine() != "arm64":
-        pytest.skip("Apple silicon host only")
+        pytest.skip("TASK-13243.3 / #1442: requires an Apple silicon host")
     for name in (
         "TEST_MODE",
         "TLDW_SANDBOX_VZ_LINUX_FAKE_EXEC",

@@ -171,6 +171,7 @@ class OsceRubricLevelStored(OsceRubricLevelCreate):
 
 
 def _reject_duplicate_level_labels(levels: list[Any]) -> None:
+    """Require distinct rubric labels after whitespace and case normalization."""
     normalized = [level.label.strip().casefold() for level in levels]
     if len(normalized) != len(set(normalized)):
         raise ValueError("duplicate rubric level label")
@@ -234,6 +235,7 @@ class OsceKeyPointStored(OsceKeyPointCreate):
 
 
 def _nested_ids(content: Any) -> list[UUID]:
+    """Collect assigned checklist, rubric, level, and key-point identities."""
     ids: list[UUID] = []
     for item in content.checklist_items or []:
         if item.id is not None:
@@ -249,6 +251,7 @@ def _nested_ids(content: Any) -> list[UUID]:
 
 
 def _reject_duplicate_nested_ids(content: Any) -> None:
+    """Reject reused identities anywhere within one station content document."""
     ids = _nested_ids(content)
     if len(ids) != len(set(ids)):
         raise ValueError("duplicate UUID in station content")

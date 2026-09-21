@@ -2683,10 +2683,17 @@ def test_first_run_state_rejects_unsupported_public_step_data(
 
 @pytest.mark.parametrize(
     "model_id",
-    ["../../Language_Models/Qwen3.8-27B.gguf", "/opt/models/local.gguf", r"C:\models\local.gguf"],
+    ["../../Language_Models/Qwen3.8-27B.gguf", "/opt/models/local.gguf", r"C:\models\local.gguf", r"\\server\share\model.gguf", "C:/x", "/x"],
 )
-def test_first_run_provider_model_identifier_roundtrips_path_like_ids(monkeypatch, tmp_path, setup_client, model_id):
-    """A model identifier is not a file read and must survive setup resume."""
+@pytest.mark.parametrize("authenticated", [False, True, "unprivileged"])
+def test_first_run_provider_model_identifier_roundtrips_path_like_ids(monkeypatch, tmp_path, setup_client, model_id, authenticated):
+    """Persist local identifiers while disclosing paths only to configuration administrators."""
+    from fastapi import HTTPException
+    async def resolve_principal(request):
+        if not authenticated:
+            raise HTTPException(401, "Not authenticated")
+        return SimpleNamespace(permissions=["system.configure"] if authenticated is True else ["notes.read"])
+    monkeypatch.setattr(setup_endpoint, "get_auth_principal", resolve_principal)
     state_path = tmp_path / "first_run_state.json"
     monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
     _setup_needs_setup(monkeypatch)
@@ -2697,8 +2704,9 @@ def test_first_run_provider_model_identifier_roundtrips_path_like_ids(monkeypatc
     )
 
     assert response.status_code == 200
+    assert model_id not in response.text
     resumed = setup_client.get("/api/v1/setup/first-run/state")
-    assert resumed.json()["step_data"]["providers"]["default_model"] == model_id
+    assert resumed.json()["step_data"]["providers"].get("default_model") == (model_id if authenticated is True else None)
     assert FirstRunStateStore(state_path).load().step_data["providers"]["default_model"] == model_id
 
     from tldw_Server_API.app.core.Setup import first_chat_verifier
@@ -2718,7 +2726,10 @@ def test_first_run_provider_model_identifier_roundtrips_path_like_ids(monkeypatc
     assert verified.json()["model"] == model_id
     resumed_chat = setup_client.get("/api/v1/setup/first-run/state").json()["first_chat"]
     assert resumed_chat["completed"] is True
-    assert resumed_chat["model"] == model_id
+    assert resumed_chat["model"] == (model_id if authenticated is True else None)
+    skipped = setup_client.post("/api/v1/setup/first-run/skip", json={"reason": "later"})
+    assert skipped.status_code == 200
+    assert model_id not in skipped.text
 
 
 def test_first_run_state_rejects_path_model_for_hosted_provider(monkeypatch, tmp_path, setup_client):
@@ -3160,3 +3171,10 @@ def test_blocked_first_run_state_rejected_by_shared_write_guard(
 
     assert response.status_code == 409
     assert response.json()["detail"] == "state_blocked"
+
+
+@pytest.mark.parametrize("model_id", ["org/model", "llama3:8b", "local-model.gguf"])
+def test_public_setup_keeps_opaque_model_names(model_id):
+    provider = {"default_provider": "llamacpp", "default_model": model_id}
+    assert setup_endpoint._public_first_run_step_data("providers", provider)["default_model"] == model_id
+    assert setup_endpoint._public_first_chat_payload({"provider": "llamacpp", "model": model_id})["model"] == model_id

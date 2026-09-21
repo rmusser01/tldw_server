@@ -17,6 +17,97 @@ and this project adheres to Some kind of Versioning
 ### Removed
 
 
+## [0.1.43] - 2026-09-20
+
+> Draft release candidate. Includes all 616 development commits after `v0.1.42`
+> through `d72b1d2850ea947b6d12cac19f6b95867b68a580` (PR #2970), plus release
+> reconciliation. See the [complete change inventory](Docs/Development/releases/0.1.43-change-inventory.md)
+> and [release plan](Docs/superpowers/plans/2026-09-20-release-0.1.43-plan.md).
+
+### Added
+
+- **OSCE and advanced quizzes** — Added scenario-based OSCE practice, advanced
+  profile contract fixtures, and generation observability metrics (#2943–#2946,
+  #2948).
+- **Prompt recipes and writing** — Added structured single-text prompt recipes,
+  the compact composer Improve action, and configurable Writing Predict/Fill
+  service prompts. Generation and persistence retain their selected account,
+  source revision and request ownership (#2947, #2931).
+- **Visual-novel asset recovery** — Added generation preflight and targeted
+  recovery aligned with effective worker/model configuration (#2954).
+
+### Changed
+
+- **Scheduled tasks** — Bound model overrides to usable configured providers
+  during authoring, with explicit feedback for unavailable choices (#2942,
+  #2949).
+- **Navigation** — Exposed Explainer in WebUI and extension navigation (#2953).
+- **macOS sandbox validation** — Added reproducible real-guest failure drills
+  for readiness timeout, capability/protocol/workspace mismatches and launchd
+  restart recovery; preserve guest output and bound cancellation cleanup
+  (#2955, #2960, #2962, #2964, #2965).
+- **Release metadata** — Prepared package, FastAPI, README, documentation and
+  protected frontend source records for 0.1.43. The 0.1.42 record remains immutable.
+
+### Fixed
+
+- **Release review repairs** — Preserve image detail on retry/regeneration; clear
+  missing-chat loading state; retire media requests, bulk mutations and Undo on
+  account changes; scope local collections/favorites; redact anonymous local-model
+  paths while retaining setup resume; enforce finite OSCE request admission and
+  clean up focus lifetimes. Original-release transport, scheduled execution,
+  webhook, clone receipt, Notes and client contract fixes are tracked in the
+  [Qodo ledger](Docs/superpowers/plans/2026-09-20-release-qodo-remediation.md).
+  Unscoped legacy collections/favorites remain stored but are not assigned to an
+  account automatically.
+- **Authentication and account isolation** — Serialized credential mutations,
+  preserved workspace identity during login, prevented private conversation,
+  draft, Character selection/default, notification and study-source state from
+  crossing accounts, and enforced tenant ownership for shared prompt records
+  (#2967, #2969, #2970).
+- **Chat and provider behavior** — Preserved tab-specific drafts and restore
+  targets, selected providers/models, canonical saved turns and regeneration
+  variants; recovered safely from browser-storage and streaming failures.
+  Required saved setup models and discovered external llama.cpp vision
+  capabilities. Retained source evidence and truthful partial-retrieval errors
+  (#2967, #2969, #2970).
+- **PostgreSQL and data lifecycle** — Repaired portable queries, timestamps,
+  migration/sync-trigger compatibility, sequence allocation, ownership checks
+  and transaction lifetimes across Notes/Graph, Characters, World Books,
+  Flashcards/Study Packs, media, prompts, auth and MCP. Removed request-time
+  schema writes that caused repeated initialization and shutdown failures
+  (#2967, #2969, #2970).
+- **Study, ingestion and interface recovery** — Restored Study Pack worker
+  startup and pending/failure feedback, review analytics and billing usage;
+  fixed Notes/Media handoffs, literal searches, source links, Quick Ingest
+  singular wording, password-rule guidance and overlapping controls
+  (#2967, #2969, #2970).
+- **Verification** — Retained fresh SQLite/PostgreSQL single-/multi-user UAT
+  evidence, repaired historical fixtures and frontend coverage/workflow checks,
+  and reconciled the release transport security tests with newer persistence
+  behavior. The prior complete UAT matrix remains a failed historical run;
+  targeted repairs do not constitute a fresh full-matrix pass.
+
+### Upgrade and release qualifications
+
+- **Review follow-ups** — Rejected transport-owned credential headers and malformed
+  JSON-RPC replies; repaired refresh cancellation, browser speech fallback, batch
+  ingest identifiers, presentation recovery translations, readiness compatibility
+  fields and deleted-link pagination. Scheduled runs now retain execution claims
+  across lease replacement and retry terminal-write failures; macro final replies
+  commit atomically and destructive Personal Context requests validate strictly.
+  See the [Qodo disposition ledger](Docs/superpowers/plans/2026-09-20-release-qodo-remediation.md).
+- Back up persistent databases and files before upgrading; review the included
+  migrations and verify the selected SQLite/PostgreSQL deployment after upgrade.
+- UAT261's exact-output criterion remains open by requester direction. A fresh
+  complete four-configuration UAT pass has not been established for this candidate.
+- Broader supply-chain, lifecycle, capacity and global frontend strictness work
+  remains separately tracked (TASK-13013.7/.8/.9 and TASK-12116).
+- Protected frontend source remains under PolyForm Perimeter 1.0.1. The proposed
+  release-specific Countdown grant adds AGPL-3.0-only on September 20, 2028 at
+  12:00 UTC, subject to requester review before publication. No protected
+  frontend binary is included in server PyPI or GHCR publications.
+
 ## [0.1.42] - 2026-09-10
 
 > Rollup coverage: frozen `dev` commit

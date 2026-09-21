@@ -663,6 +663,16 @@ jobs:
           # Shared UI tests run under their package-owned config in the required unit shards.
           timeout --kill-after=30s 15m bun run test:coverage --exclude '../packages/ui/**'
 
+      - name: Shared UI coverage summary (report-only)
+        if: needs.changes.outputs.tldw_frontend_changed == 'true'
+        continue-on-error: true
+        timeout-minutes: 17
+        working-directory: apps/packages/ui
+        run: |
+          # Use the shared package's aliases/setup and include its source in the report.
+          # Required package-owned unit shards remain the pass/fail gate.
+          timeout --kill-after=30s 15m bun run test:coverage
+
       - name: Run family guardrails parity tests
         if: needs.changes.outputs.family_guardrails_changed == 'true'
         working-directory: apps/packages/ui

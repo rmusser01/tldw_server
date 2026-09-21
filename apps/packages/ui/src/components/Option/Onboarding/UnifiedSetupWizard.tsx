@@ -235,7 +235,10 @@ export function UnifiedSetupWizard({
   const [stepError, setStepError] = React.useState<string | null>(null);
   const [loginPending, setLoginPending] = React.useState(false);
   const isMultiUserServer = metadata?.auth_mode === "multi_user";
-  const activeStep = isMultiUserServer ? "multi_user_exit" : step;
+  // Public progress can omit a saved local path. Keep anonymous resume actionable.
+  const activeStep = isMultiUserServer
+    ? "multi_user_exit"
+    : step === "first_chat" && !providerSelection ? "provider_setup" : step;
 
   const handleSignIn = async () => {
     setLoginPending(true);
@@ -258,12 +261,12 @@ export function UnifiedSetupWizard({
   }, [state]);
 
   React.useEffect(() => {
-    if (step !== "provider_setup" || providerCatalog.length > 0) return;
+    if (activeStep !== "provider_setup" || providerCatalog.length > 0) return;
     void loadProviderCatalog().catch((err) => {
       console.error("Provider catalog could not be loaded", err);
       setStepError("Provider catalog could not be loaded. Try again.");
     });
-  }, [loadProviderCatalog, providerCatalog.length, step]);
+  }, [loadProviderCatalog, providerCatalog.length, activeStep]);
 
   React.useEffect(() => {
     if (step !== "audio_defaults" || audioRecommendations.length > 0) return;

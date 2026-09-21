@@ -86,6 +86,23 @@ describe("ingest job result helpers", () => {
     expect(extractCompletedIngestJobMediaId(payload)).toBe(321)
   })
 
+  it.each(["failed", "skipped"])("finds persisted media after a %s first batch item", (status) => {
+    expect(extractCompletedIngestJobMediaId({
+      result: { results: [{ status }, { status: "Success", mediaId: "saved-2" }] }
+    })).toBe("saved-2")
+  })
+
+  it("scans all identifier aliases and skips invalid identifiers in order", () => {
+    expect(extractCompletedIngestJobMediaId([
+      null, { media_id: false }, { media_id: " ", mediaId: 0, db_id: -1 },
+      { media_id: Number.NaN }, { media_id: {}, db_id: 321 }, { media_id: 456 }
+    ])).toBe(321)
+  })
+
+  it("prefers a valid top-level persistence identifier over batch results", () => {
+    expect(extractCompletedIngestJobMediaId({ media_id: "", db_id: 123, results: [{ db_id: 321 }] })).toBe(123)
+  })
+
   it("extracts the persisted media id from a media/add result list", () => {
     expect(
       extractCompletedIngestJobMediaId({

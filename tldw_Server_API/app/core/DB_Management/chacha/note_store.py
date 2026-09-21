@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, Any
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
-from tldw_Server_API.app.core.DB_Management.backends.base import UniqueConstraintError
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     _CHACHA_NONCRITICAL_EXCEPTIONS,
     _SUPPORTED_NOTE_STUDIO_HANDWRITING_MODES,
@@ -103,6 +102,7 @@ class NoteStore:
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         if self._db.backend_type == BackendType.POSTGRESQL:
+            query += " ON CONFLICT (id) DO NOTHING"
             params = (
                 final_note_id, title.strip(), content, now, client_id_to_use, 1, False, now,
                 normalized_conversation_id, normalized_message_id
@@ -117,7 +117,35 @@ class NoteStore:
             def _execute(transaction_conn: sqlite3.Connection | BackendConnectionWrapper) -> str:
                 self._db._require_selected_owner_row(transaction_conn, "messages", normalized_message_id, self._db.client_id)
                 self._db._require_selected_owner_row(transaction_conn, "conversations", normalized_conversation_id, self._db.client_id)
-                transaction_conn.execute(query, params)
+                try:
+                    inserted = transaction_conn.execute(query, params)
+                except sqlite3.IntegrityError as e:
+                    msg = str(e).lower()
+                    if "foreign key constraint failed" in msg:
+                        raise ConflictError(
+                            "Conversation or message not found.", entity="notes", entity_id=final_note_id
+                        ) from e  # noqa: TRY003
+                    if (
+                        "unique constraint failed: notes.id" in msg
+                        or "unique constraint failed: notes.client_id, notes.id" in msg
+                    ):
+                        raise ConflictError(
+                            f"Note with ID '{final_note_id}' already exists.", entity="notes", entity_id=final_note_id
+                        ) from e  # noqa: TRY003
+                    raise
+                except BackendDatabaseError as e:
+                    if "foreign key" in str(e).lower():
+                        raise ConflictError(
+                            "Conversation or message not found.", entity="notes", entity_id=final_note_id
+                        ) from e  # noqa: TRY003
+                    raise
+                # Only the explicitly named note identifier conflict is ignored
+                # by PostgreSQL. Other unique failures (including projections)
+                # must remain database errors rather than a misleading 409.
+                if self._db.backend_type == BackendType.POSTGRESQL and inserted.rowcount == 0:
+                    raise ConflictError(
+                        f"Note with ID '{final_note_id}' already exists.", entity="notes", entity_id=final_note_id
+                    )  # noqa: TRY003
                 self._db.note_graph_projection_store.replace_projection(
                     note_id=final_note_id,
                     source_version=1,
@@ -132,18 +160,8 @@ class NoteStore:
                     return _execute(transaction_conn)
             return _execute(conn)
         except sqlite3.IntegrityError as e:
-            msg = str(e).lower()
-            if "foreign key constraint failed" in msg:
-                raise ConflictError("Conversation or message not found.", entity="notes", entity_id=final_note_id) from e  # noqa: TRY003
-            if "unique constraint failed: notes.id" in msg or "unique constraint failed: notes.client_id, notes.id" in msg:
-                raise ConflictError(f"Note with ID '{final_note_id}' already exists.", entity="notes", entity_id=final_note_id) from e  # noqa: TRY003
             raise CharactersRAGDBError(f"Database integrity error adding note: {e}") from e  # noqa: TRY003
         except BackendDatabaseError as e:
-            msg = str(e).lower()
-            if "foreign key" in msg:
-                raise ConflictError("Conversation or message not found.", entity="notes", entity_id=final_note_id) from e  # noqa: TRY003
-            if isinstance(e, UniqueConstraintError) or "duplicate key" in msg or "unique constraint" in msg:
-                raise ConflictError(f"Note with ID '{final_note_id}' already exists.", entity="notes", entity_id=final_note_id) from e  # noqa: TRY003
             raise CharactersRAGDBError(f"Backend error adding note: {e}") from e  # noqa: TRY003
         except CharactersRAGDBError as e:
             logger.error(f"Database error adding note '{title.strip()}': {e}")
@@ -2434,16 +2452,19 @@ class NoteStore:
             if not search_term or not str(search_term).strip():
                 logger.debug("Empty notes search term; returning no results.")
                 return []
+            owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id, "n")
             tsquery = FTSQueryTranslator.normalize_query(search_term, 'postgresql')
             fallback_query = """
                 SELECT n.*
                 FROM notes n
-                WHERE n.deleted = FALSE AND n.client_id = ?
+                WHERE n.deleted = FALSE{owner_clause}
                   AND (n.title ILIKE ? OR n.content ILIKE ?)
                 ORDER BY n.last_modified DESC
                 LIMIT ? OFFSET ?
-            """
-            fallback_params = (self._db.client_id, f"%{search_term}%", f"%{search_term}%", limit, offset)
+            """.format_map(
+                locals()
+            )  # nosec B608
+            fallback_params = (*owner_params, f"%{search_term}%", f"%{search_term}%", limit, offset)
             if not tsquery:
                 logger.debug("Notes search term normalized to empty tsquery for input '{}'", search_term)
                 cursor = self._db.execute_query(fallback_query, fallback_params)
@@ -2452,13 +2473,15 @@ class NoteStore:
             query = """
                 SELECT n.*, ts_rank(n.notes_fts_tsv, to_tsquery('english', ?)) AS rank
                 FROM notes n
-                WHERE n.deleted = FALSE AND n.client_id = ?
+                WHERE n.deleted = FALSE{owner_clause}
                   AND n.notes_fts_tsv @@ to_tsquery('english', ?)
                 ORDER BY rank DESC, n.last_modified DESC
                 LIMIT ? OFFSET ?
-            """
+            """.format_map(
+                locals()
+            )  # nosec B608
             try:
-                cursor = self._db.execute_query(query, (tsquery, self._db.client_id, tsquery, limit, offset))
+                cursor = self._db.execute_query(query, (tsquery, *owner_params, tsquery, limit, offset))
                 rows = cursor.fetchall()
                 if rows:
                     return [dict(row) for row in rows]
@@ -2507,6 +2530,8 @@ class NoteStore:
         like_params = [f"%{t}%" for t in tokens]
 
         if self._db.backend_type == BackendType.POSTGRESQL:
+            note_scope, note_owner_params = self._db._selected_owner_filter(self._db.client_id, "n")
+            keyword_scope, keyword_owner_params = self._db._selected_owner_filter(self._db.client_id, "k")
             if search_term and str(search_term).strip():
                 tsquery = FTSQueryTranslator.normalize_query(str(search_term), 'postgresql')
                 if not tsquery:
@@ -2517,27 +2542,31 @@ class NoteStore:
                     FROM notes n
                     JOIN note_keywords nk ON n.id = nk.note_id
                     JOIN {keyword_table} k ON k.id = nk.keyword_id
-                    WHERE n.deleted = FALSE AND n.client_id = ? AND k.client_id = ?
+                    WHERE n.deleted = FALSE{note_scope}{keyword_scope}
                       AND k.deleted = FALSE
                       AND n.notes_fts_tsv @@ to_tsquery('english', ?)
                       AND ({like_clause})
                     ORDER BY rank DESC, n.last_modified DESC
                     LIMIT ? OFFSET ?
-                """.format_map(locals())  # nosec B608
-                params = (tsquery, self._db.client_id, self._db.client_id, tsquery, *like_params, limit, offset)
+                """.format_map(
+                    locals()
+                )  # nosec B608
+                params = (tsquery, *note_owner_params, *keyword_owner_params, tsquery, *like_params, limit, offset)
             else:
                 query = """
                     SELECT DISTINCT n.*
                     FROM notes n
                     JOIN note_keywords nk ON n.id = nk.note_id
                     JOIN {keyword_table} k ON k.id = nk.keyword_id
-                    WHERE n.deleted = FALSE AND n.client_id = ? AND k.client_id = ?
+                    WHERE n.deleted = FALSE{note_scope}{keyword_scope}
                       AND k.deleted = FALSE
                       AND ({like_clause})
                     ORDER BY n.last_modified DESC
                     LIMIT ? OFFSET ?
-                """.format_map(locals())  # nosec B608
-                params = (self._db.client_id, self._db.client_id, *like_params, limit, offset)
+                """.format_map(
+                    locals()
+                )  # nosec B608
+                params = (*note_owner_params, *keyword_owner_params, *like_params, limit, offset)
             cursor = self._db.execute_query(query, params)
             return [dict(row) for row in cursor.fetchall()]
 
@@ -2592,6 +2621,8 @@ class NoteStore:
         like_params = [f"%{t}%" for t in tokens]
 
         if self._db.backend_type == BackendType.POSTGRESQL:
+            note_scope, note_owner_params = self._db._selected_owner_filter(self._db.client_id, "n")
+            keyword_scope, keyword_owner_params = self._db._selected_owner_filter(self._db.client_id, "k")
             if search_term and str(search_term).strip():
                 tsquery = FTSQueryTranslator.normalize_query(str(search_term), 'postgresql')
                 if not tsquery:
@@ -2602,23 +2633,27 @@ class NoteStore:
                     FROM notes n
                     JOIN note_keywords nk ON n.id = nk.note_id
                     JOIN {keyword_table} k ON k.id = nk.keyword_id
-                    WHERE n.deleted = FALSE AND n.client_id = ? AND k.client_id = ?
+                    WHERE n.deleted = FALSE{note_scope}{keyword_scope}
                       AND k.deleted = FALSE
                       AND n.notes_fts_tsv @@ to_tsquery('english', ?)
                       AND ({like_clause})
-                """.format_map(locals())  # nosec B608
-                params = (self._db.client_id, self._db.client_id, tsquery, *like_params)
+                """.format_map(
+                    locals()
+                )  # nosec B608
+                params = (*note_owner_params, *keyword_owner_params, tsquery, *like_params)
             else:
                 query = """
                     SELECT COUNT(DISTINCT n.id) AS cnt
                     FROM notes n
                     JOIN note_keywords nk ON n.id = nk.note_id
                     JOIN {keyword_table} k ON k.id = nk.keyword_id
-                    WHERE n.deleted = FALSE AND n.client_id = ? AND k.client_id = ?
+                    WHERE n.deleted = FALSE{note_scope}{keyword_scope}
                       AND k.deleted = FALSE
                       AND ({like_clause})
-                """.format_map(locals())  # nosec B608
-                params = (self._db.client_id, self._db.client_id, *like_params)
+                """.format_map(
+                    locals()
+                )  # nosec B608
+                params = (*note_owner_params, *keyword_owner_params, *like_params)
             cursor = self._db.execute_query(query, params)
             row = cursor.fetchone()
             return int(row["cnt"]) if row else 0

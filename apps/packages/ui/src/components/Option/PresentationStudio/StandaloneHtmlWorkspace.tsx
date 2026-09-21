@@ -1,4 +1,5 @@
 import React from "react"
+import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router-dom"
 
 import { Button } from "@/components/Common/Button"
@@ -35,6 +36,16 @@ import {
   type StandaloneHtmlSourceEditorHandle
 } from "./StandaloneHtmlSourceEditor"
 
+type WorkspaceMessage =
+  | "loadFailed"
+  | "serverChanged"
+  | "saveUnconfirmed"
+  | "overwriteVerified"
+  | "overwriteUnverified"
+  | "draftChanged"
+  | "serverLoadFailed"
+  | "downloadFailed"
+
 type SaveStatus = "Saved" | "Saving" | "Not saved" | "Conflict"
 type LoadStatus = "loading" | "ready" | "error"
 type RecoveryOperation = "read" | "write" | "cleanup"
@@ -64,7 +75,7 @@ type WorkspaceSnapshot = {
   latestPreflightCandidate: string
   title: string
   saveStatus: SaveStatus
-  message: string | null
+  message: WorkspaceMessage | null
   recovery: AvailableRecovery | null
 }
 
@@ -160,6 +171,7 @@ export const StandaloneHtmlWorkspace: React.FC<{
   onKindAuthoritySettled,
   isKindAuthorityCurrent
 }) => {
+  const { t } = useTranslation("playground")
   const navigate = useNavigate()
   const online = useServerOnline()
   const slides = useSlidesCapabilities()
@@ -199,7 +211,7 @@ export const StandaloneHtmlWorkspace: React.FC<{
   const [accepted, setAccepted] = React.useState<AcceptedStandaloneHtmlSource | null>(null)
   const [hasPendingCandidate, setHasPendingCandidate] = React.useState(false)
   const [saveStatus, setSaveStatus] = React.useState<SaveStatus>("Saved")
-  const [message, setMessage] = React.useState<string | null>(null)
+  const [message, setMessage] = React.useState<WorkspaceMessage | null>(null)
   const [recoveryWarning, setRecoveryWarning] = React.useState<string | null>(null)
   const [recovery, setRecovery] = React.useState<AvailableRecovery | null>(null)
   const [outline, setOutline] = React.useState<StandaloneHtmlOutline | null>(null)
@@ -1078,7 +1090,7 @@ export const StandaloneHtmlWorkspace: React.FC<{
         clearPendingCandidate(false)
         setAccepted(null)
         setLoadStatus("error")
-        setMessage("This standalone HTML presentation could not be loaded safely.")
+        setMessage("loadFailed")
       } finally {
         detail = null
       }
@@ -1181,7 +1193,7 @@ export const StandaloneHtmlWorkspace: React.FC<{
           overwriteEtagRef.current = null
           setConfirmOverwrite(false)
           setSaveStatus("Conflict")
-          setMessage("The server version changed. Choose how to continue.")
+          setMessage("serverChanged")
           return
         }
         if (reconcileAmbiguous) {
@@ -1211,7 +1223,7 @@ export const StandaloneHtmlWorkspace: React.FC<{
         }
         if (!saveIsCurrent()) return
         setSaveStatus("Not saved")
-        setMessage("Save could not be confirmed. Your local draft is preserved.")
+        setMessage("saveUnconfirmed")
       } finally {
         if (conflictAction) finishConflictAction(conflictAction)
         else if (saveControllerRef.current === controller) saveControllerRef.current = null
@@ -1282,11 +1294,11 @@ export const StandaloneHtmlWorkspace: React.FC<{
       overwriteEtagRef.current = loaded.etag
       setSaveStatus("Conflict")
       setConfirmOverwrite(true)
-      setMessage("The current server version was verified. Confirm before overwriting it.")
+      setMessage("overwriteVerified")
     } catch {
       if (!prepareIsCurrent()) return
       setSaveStatus("Conflict")
-      setMessage("The current server version could not be verified. Your draft is preserved.")
+      setMessage("overwriteUnverified")
     } finally {
       finishConflictAction(action)
     }
@@ -1354,7 +1366,7 @@ export const StandaloneHtmlWorkspace: React.FC<{
       if (!discardIsCurrent()) return
       if (acceptedRef.current?.digest !== confirmedDigest) {
         setSaveStatus("Conflict")
-        setMessage("Your draft changed while the server version was loading. Your newer draft is preserved.")
+        setMessage("draftChanged")
         return
       }
       if (
@@ -1362,7 +1374,7 @@ export const StandaloneHtmlWorkspace: React.FC<{
         latestPreflightCandidateRef.current !== confirmedCandidate
       ) {
         setSaveStatus("Conflict")
-        setMessage("Your draft changed while the server version was loading. Your newer draft is preserved.")
+        setMessage("draftChanged")
         return
       }
       if (!adoptConflictAction(action)) return
@@ -1370,7 +1382,7 @@ export const StandaloneHtmlWorkspace: React.FC<{
     } catch {
       if (!discardIsCurrent()) return
       setSaveStatus("Conflict")
-      setMessage("The server version could not be loaded. Your draft is preserved.")
+      setMessage("serverLoadFailed")
     } finally {
       finishConflictAction(action)
     }
@@ -1415,7 +1427,7 @@ export const StandaloneHtmlWorkspace: React.FC<{
         ) {
           return
         }
-        setMessage("Download could not be prepared. Your draft is preserved.")
+        setMessage("downloadFailed")
       }
     },
     [ensureDownloadManager, presentationId]
@@ -1476,15 +1488,32 @@ export const StandaloneHtmlWorkspace: React.FC<{
     }
   }, [flushDraftAuthority, stopOwnedWork])
 
+  const translatedMessage = message ? {
+    loadFailed: t("standaloneHtml.loadFailed", "This standalone HTML presentation could not be loaded safely."),
+    serverChanged: t("standaloneHtml.serverChanged", "The server version changed. Choose how to continue."),
+    saveUnconfirmed: t("standaloneHtml.saveUnconfirmed", "Save could not be confirmed. Your local draft is preserved."),
+    overwriteVerified: t("standaloneHtml.overwriteVerified", "The current server version was verified. Confirm before overwriting it."),
+    overwriteUnverified: t("standaloneHtml.overwriteUnverified", "The current server version could not be verified. Your draft is preserved."),
+    draftChanged: t("standaloneHtml.draftChanged", "Your draft changed while the server version was loading. Your newer draft is preserved."),
+    serverLoadFailed: t("standaloneHtml.serverLoadFailed", "The server version could not be loaded. Your draft is preserved."),
+    downloadFailed: t("standaloneHtml.downloadFailed", "Download could not be prepared. Your draft is preserved."),
+  }[message] : null
+  const translatedSaveStatus = {
+    "Saved": t("standaloneHtml.statusSaved", "Saved"),
+    "Saving": t("standaloneHtml.statusSaving", "Saving"),
+    "Not saved": t("standaloneHtml.statusNotSaved", "Not saved"),
+    "Conflict": t("standaloneHtml.statusConflict", "Conflict"),
+  }[saveStatus]
+
   const renderWorkspaceShell = (content: React.ReactNode) => (
     <>
       <RouteLeavePrompt
         when={dirty && !leaveApproved}
-        message="Leave without saving? Your local draft is preserved only in this tab."
+        message={t("standaloneHtml.leavePrompt", "Leave without saving? Your local draft is preserved only in this tab.")}
       />
       {recoveryWarning ? (
         <p role="alert" className="mb-4 text-sm text-warning">
-          {recoveryWarning}
+          {t("standaloneHtml.recoveryUnavailable", "Recovery unavailable. Keep this tab open or download your draft.")}
         </p>
       ) : null}
       {content}
@@ -1494,8 +1523,8 @@ export const StandaloneHtmlWorkspace: React.FC<{
   if (!online) {
     return renderWorkspaceShell(
       <section className="rounded-xl border border-border bg-surface p-6">
-        <h1 className="text-2xl font-semibold text-text">Standalone HTML presentation</h1>
-        <p className="mt-2 text-sm text-text-muted">Server is offline. Your in-memory draft has not been sent.</p>
+        <h1 className="text-2xl font-semibold text-text">{t("standaloneHtml.presentationTitle", "Standalone HTML presentation")}</h1>
+        <p className="mt-2 text-sm text-text-muted">{t("standaloneHtml.offline", "Server is offline. Your in-memory draft has not been sent.")}</p>
       </section>
     )
   }
@@ -1507,30 +1536,30 @@ export const StandaloneHtmlWorkspace: React.FC<{
   ) {
     return renderWorkspaceShell(
       <section className="rounded-xl border border-border bg-surface p-6" aria-live="polite">
-        <p className="text-sm text-text-muted">Confirming current server and account…</p>
+        <p className="text-sm text-text-muted">{t("standaloneHtml.confirmingPrincipal", "Confirming current server and account…")}</p>
       </section>
     )
   }
 
   const capabilityGuardText = !capabilityReadReady
     ? slides.status === "loading"
-      ? "Checking standalone HTML access…"
+      ? t("standaloneHtml.checkingAccess", "Checking standalone HTML access…")
       : slides.status === "auth_required"
-        ? "Current standalone HTML access requires authentication."
+        ? t("standaloneHtml.authenticationRequired", "Current standalone HTML access requires authentication.")
         : slides.status === "forbidden"
-          ? "This account cannot read standalone HTML presentations."
+          ? t("standaloneHtml.forbidden", "This account cannot read standalone HTML presentations.")
           : isReadCapabilitySettled(slides.status) && !slides.canReadStandalone
-            ? "This server does not support reading standalone HTML presentations."
-            : "Standalone HTML access could not be confirmed."
+            ? t("standaloneHtml.readingUnsupported", "This server does not support reading standalone HTML presentations.")
+            : t("standaloneHtml.accessUnconfirmed", "Standalone HTML access could not be confirmed.")
     : null
 
   if (capabilityGuardText) {
     return renderWorkspaceShell(
       <section className="rounded-xl border border-border bg-surface p-6" aria-live="polite">
-        <h1 className="text-2xl font-semibold text-text">Standalone HTML presentation</h1>
+        <h1 className="text-2xl font-semibold text-text">{t("standaloneHtml.presentationTitle", "Standalone HTML presentation")}</h1>
         <p className="mt-2 text-sm text-danger">{capabilityGuardText}</p>
         <Button size="lg" variant="secondary" onClick={() => void slides.retry()} className="mt-4">
-          Retry
+          {t("standaloneHtml.retry", "Retry")}
         </Button>
       </section>
     )
@@ -1539,10 +1568,10 @@ export const StandaloneHtmlWorkspace: React.FC<{
   if (principal.status === "guarded") {
     return renderWorkspaceShell(
       <section className="rounded-xl border border-border bg-surface p-6">
-        <h1 className="text-2xl font-semibold text-text">Standalone HTML presentation</h1>
-        <p className="mt-2 text-sm text-danger">Current server and account could not be confirmed.</p>
+        <h1 className="text-2xl font-semibold text-text">{t("standaloneHtml.presentationTitle", "Standalone HTML presentation")}</h1>
+        <p className="mt-2 text-sm text-danger">{t("standaloneHtml.principalUnconfirmed", "Current server and account could not be confirmed.")}</p>
         <Button size="lg" variant="secondary" onClick={() => void principal.retry()} className="mt-4">
-          Retry
+          {t("standaloneHtml.retry", "Retry")}
         </Button>
       </section>
     )
@@ -1551,7 +1580,7 @@ export const StandaloneHtmlWorkspace: React.FC<{
   if (principal.status === "loading" || loadStatus === "loading") {
     return renderWorkspaceShell(
       <section className="rounded-xl border border-border bg-surface p-6" aria-live="polite">
-        <p className="text-sm text-text-muted">Confirming current server and account…</p>
+        <p className="text-sm text-text-muted">{t("standaloneHtml.confirmingPrincipal", "Confirming current server and account…")}</p>
       </section>
     )
   }
@@ -1559,8 +1588,8 @@ export const StandaloneHtmlWorkspace: React.FC<{
   if (loadStatus === "error" || !accepted) {
     return renderWorkspaceShell(
       <section className="rounded-xl border border-border bg-surface p-6">
-        <h1 className="text-2xl font-semibold text-text">Standalone HTML presentation</h1>
-        <p className="mt-2 text-sm text-danger">{message ?? "Presentation unavailable."}</p>
+        <h1 className="text-2xl font-semibold text-text">{t("standaloneHtml.presentationTitle", "Standalone HTML presentation")}</h1>
+        <p className="mt-2 text-sm text-danger">{message ? translatedMessage : t("standaloneHtml.unavailable", "Presentation unavailable.")}</p>
       </section>
     )
   }
@@ -1581,10 +1610,10 @@ export const StandaloneHtmlWorkspace: React.FC<{
       <header className="rounded-xl border border-border bg-surface p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">Standalone HTML</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">{t("standaloneHtml.formatLabel", "Standalone HTML")}</p>
             <h1 className="mt-1 text-2xl font-semibold text-text">{title}</h1>
             <p className="mt-2 max-w-2xl text-sm text-text-muted">
-              Studio never runs this code. Downloading and opening the file leaves tldw&apos;s security boundary.
+              {t("standaloneHtml.securityBoundary", "Studio never runs this code. Downloading and opening the file leaves tldw's security boundary.")}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -1592,7 +1621,7 @@ export const StandaloneHtmlWorkspace: React.FC<{
               if (dirty) setConfirmLeave(true)
               else navigate("/presentation-studio")
             }}>
-              Back to presentations
+              {t("standaloneHtml.back", "Back to presentations")}
             </Button>
             <Button
               size="lg"
@@ -1600,10 +1629,10 @@ export const StandaloneHtmlWorkspace: React.FC<{
               disabled={!canDownload}
               onClick={() => void downloadSource(accepted.source)}
             >
-              Download current draft
+              {t("standaloneHtml.downloadCurrent", "Download current draft")}
             </Button>
             <Button size="lg" variant="primary" disabled={!canSave} onClick={handleSave}>
-              Save
+              {t("standaloneHtml.save", "Save")}
             </Button>
           </div>
         </div>
@@ -1613,18 +1642,18 @@ export const StandaloneHtmlWorkspace: React.FC<{
           aria-live="polite"
           className="mt-3 text-sm font-medium text-text"
         >
-          {saveStatus}
+          {translatedSaveStatus}
         </div>
         {!slides.canEditStandalone ? (
-          <p className="mt-2 text-sm text-warning">Saving is unavailable</p>
+          <p className="mt-2 text-sm text-warning">{t("standaloneHtml.savingUnavailable", "Saving is unavailable")}</p>
         ) : null}
-        {message ? <p role="alert" className="mt-2 text-sm text-danger">{message}</p> : null}
+        {message ? <p role="alert" className="mt-2 text-sm text-danger">{translatedMessage}</p> : null}
       </header>
 
       {recovery ? (
-        <section aria-label="Recovered draft" role="region" className="rounded-xl border border-warning/40 bg-warning/10 p-4">
-          <h2 className="font-semibold text-text">Recovered draft</h2>
-          <p className="mt-1 text-sm text-text-muted">A different draft was saved in this tab. It has not been applied.</p>
+        <section aria-label={t("standaloneHtml.recoveredDraft", "Recovered draft")} role="region" className="rounded-xl border border-warning/40 bg-warning/10 p-4">
+          <h2 className="font-semibold text-text">{t("standaloneHtml.recoveredDraft", "Recovered draft")}</h2>
+          <p className="mt-1 text-sm text-text-muted">{t("standaloneHtml.recoveryDescription", "A different draft was saved in this tab. It has not been applied.")}</p>
           <div className="mt-3 flex flex-wrap gap-2">
             <Button
               size="lg"
@@ -1632,7 +1661,7 @@ export const StandaloneHtmlWorkspace: React.FC<{
               disabled={!slides.canEditStandalone || hasPendingCandidate}
               onClick={() => handleAcceptedChange(recovery.acceptedSource)}
             >
-              Restore recovered draft
+              {t("standaloneHtml.restoreRecovery", "Restore recovered draft")}
             </Button>
             <Button
               size="lg"
@@ -1640,17 +1669,17 @@ export const StandaloneHtmlWorkspace: React.FC<{
               disabled={!canDownload}
               onClick={() => void downloadSource(recovery.acceptedSource.source)}
             >
-              Download recovered draft
+              {t("standaloneHtml.downloadRecovery", "Download recovered draft")}
             </Button>
             <Button size="lg" variant="danger" onClick={() => setConfirmRecoveryDiscard(true)}>
-              Discard recovered draft
+              {t("standaloneHtml.discardRecovery", "Discard recovered draft")}
             </Button>
           </div>
           {confirmRecoveryDiscard ? (
             <div className="mt-3 rounded-lg border border-danger/30 bg-surface p-3">
-              <p className="text-sm text-text">Confirm discarding the recovered draft. This cannot be undone.</p>
+              <p className="text-sm text-text">{t("standaloneHtml.discardRecoveryPrompt", "Confirm discarding the recovered draft. This cannot be undone.")}</p>
               <Button size="lg" variant="danger" className="mt-2" onClick={discardRecovery}>
-                Confirm discard recovered draft
+                {t("standaloneHtml.confirmDiscardRecovery", "Confirm discard recovered draft")}
               </Button>
             </div>
           ) : null}
@@ -1658,9 +1687,9 @@ export const StandaloneHtmlWorkspace: React.FC<{
       ) : null}
 
       {saveStatus === "Conflict" ? (
-        <section className="rounded-xl border border-warning/40 bg-warning/10 p-4" aria-label="Save conflict">
-          <h2 className="font-semibold text-text">Conflict</h2>
-          <p className="mt-1 text-sm text-text-muted">Your draft is unchanged. Choose an explicit next step.</p>
+        <section className="rounded-xl border border-warning/40 bg-warning/10 p-4" aria-label={t("standaloneHtml.saveConflict", "Save conflict")}>
+          <h2 className="font-semibold text-text">{t("standaloneHtml.statusConflict", "Conflict")}</h2>
+          <p className="mt-1 text-sm text-text-muted">{t("standaloneHtml.conflictDescription", "Your draft is unchanged. Choose an explicit next step.")}</p>
           <div className="mt-3 flex flex-wrap gap-2">
             <Button
               size="lg"
@@ -1668,7 +1697,7 @@ export const StandaloneHtmlWorkspace: React.FC<{
               disabled={!slides.canEditStandalone || hasPendingCandidate}
               onClick={() => setConfirmServerDiscard(true)}
             >
-              Discard my changes and load server version
+              {t("standaloneHtml.discardAndLoad", "Discard my changes and load server version")}
             </Button>
             <Button
               size="lg"
@@ -1676,7 +1705,7 @@ export const StandaloneHtmlWorkspace: React.FC<{
               disabled={!slides.canEditStandalone || hasPendingCandidate}
               onClick={() => void handlePrepareOverwrite()}
             >
-              Overwrite server with my draft
+              {t("standaloneHtml.overwrite", "Overwrite server with my draft")}
             </Button>
             <Button
               size="lg"
@@ -1684,12 +1713,12 @@ export const StandaloneHtmlWorkspace: React.FC<{
               disabled={!canDownload}
               onClick={() => void downloadSource(accepted.source)}
             >
-              Download my draft
+              {t("standaloneHtml.downloadDraft", "Download my draft")}
             </Button>
           </div>
           {confirmOverwrite ? (
             <div className="mt-3 rounded-lg border border-warning/40 bg-surface p-3">
-              <p className="text-sm text-text">Confirm replacing the current server version with your local draft.</p>
+              <p className="text-sm text-text">{t("standaloneHtml.overwritePrompt", "Confirm replacing the current server version with your local draft.")}</p>
               <Button
                 size="lg"
                 variant="danger"
@@ -1697,13 +1726,13 @@ export const StandaloneHtmlWorkspace: React.FC<{
                 disabled={!slides.canEditStandalone || hasPendingCandidate}
                 onClick={handleOverwrite}
               >
-                Confirm overwrite
+                {t("standaloneHtml.confirmOverwrite", "Confirm overwrite")}
               </Button>
             </div>
           ) : null}
           {confirmServerDiscard ? (
             <div className="mt-3 rounded-lg border border-danger/30 bg-surface p-3">
-              <p className="text-sm text-text">Confirm discarding your local changes and loading the server version.</p>
+              <p className="text-sm text-text">{t("standaloneHtml.discardLocalPrompt", "Confirm discarding your local changes and loading the server version.")}</p>
               <Button
                 size="lg"
                 variant="danger"
@@ -1711,7 +1740,7 @@ export const StandaloneHtmlWorkspace: React.FC<{
                 disabled={!slides.canEditStandalone || hasPendingCandidate}
                 onClick={() => void handleDiscardAndLoad()}
               >
-                Confirm discard and load server version
+                {t("standaloneHtml.confirmDiscardAndLoad", "Confirm discard and load server version")}
               </Button>
             </div>
           ) : null}
@@ -1720,20 +1749,20 @@ export const StandaloneHtmlWorkspace: React.FC<{
 
       {confirmLeave ? (
         <section className="rounded-xl border border-danger/30 bg-surface p-4">
-          <h2 className="font-semibold text-text">Leave without saving?</h2>
-          <p className="mt-1 text-sm text-text-muted">Your in-memory draft will close. Scoped recovery may still be available in this tab.</p>
+          <h2 className="font-semibold text-text">{t("standaloneHtml.leaveTitle", "Leave without saving?")}</h2>
+          <p className="mt-1 text-sm text-text-muted">{t("standaloneHtml.leaveDescription", "Your in-memory draft will close. Scoped recovery may still be available in this tab.")}</p>
           <div className="mt-3 flex gap-2">
             <Button size="lg" variant="danger" onClick={() => setLeaveApproved(true)}>
-              Leave presentation
+              {t("standaloneHtml.leave", "Leave presentation")}
             </Button>
             <Button size="lg" variant="secondary" onClick={() => setConfirmLeave(false)}>
-              Keep editing
+              {t("standaloneHtml.keepEditing", "Keep editing")}
             </Button>
           </div>
         </section>
       ) : null}
 
-      <div role="tablist" aria-label="Standalone HTML workspace views" className="flex gap-2 md:hidden">
+      <div role="tablist" aria-label={t("standaloneHtml.viewsLabel", "Standalone HTML workspace views")} className="flex gap-2 md:hidden">
         <button
           ref={codeTabRef}
           id={codeTabId}
@@ -1746,7 +1775,7 @@ export const StandaloneHtmlWorkspace: React.FC<{
           onKeyDown={handleTabKeyDown}
           className="min-h-[44px] rounded-md px-4 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
         >
-          Code
+          {t("standaloneHtml.codeTab", "Code")}
         </button>
         <button
           ref={outlineTabRef}
@@ -1760,7 +1789,7 @@ export const StandaloneHtmlWorkspace: React.FC<{
           onKeyDown={handleTabKeyDown}
           className="min-h-[44px] rounded-md px-4 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
         >
-          Outline
+          {t("standaloneHtml.outlineTab", "Outline")}
         </button>
       </div>
 

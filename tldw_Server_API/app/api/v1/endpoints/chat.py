@@ -2803,11 +2803,14 @@ def _validate_explicit_model_availability(provider: str, model: str) -> dict[str
 
 async def _process_content_for_db_sync(
     content_iterable: Any, # Can be list of dicts or string
-    conversation_id: str # For logging
+    conversation_id: str, # For logging
+    *,
+    image_details: list[str] | None = None,
 ) -> tuple[list[str], list[tuple[bytes, str]]]:
     """
     Async helper to process message content, including base64 decoding.
     Runs within the event loop (uses async image processor when available).
+    When supplied, image_details receives one option per successfully decoded image.
     """
     text_parts_sync: list[str] = []
     images_sync: list[tuple[bytes, str]] = []   # (bytes, mime)
@@ -2893,6 +2896,8 @@ async def _process_content_for_db_sync(
                     )
                     if is_valid and decoded_bytes:
                         images_sync.append((decoded_bytes, mime_type))
+                        if image_details is not None:
+                            image_details.append(url_dict.get("detail") or "auto")
                         logger.debug("[DB SYNC] Successfully processed large image for conv={}", conversation_id)
                     else:
                         logger.warning(
@@ -2905,6 +2910,8 @@ async def _process_content_for_db_sync(
                     is_valid, mime_type, decoded_bytes = validate_image_url(url_str)
                     if is_valid and decoded_bytes:
                         images_sync.append((decoded_bytes, mime_type))
+                        if image_details is not None:
+                            image_details.append(url_dict.get("detail") or "auto")
                         logger.debug("[DB SYNC] Successfully validated and decoded image for conv={}", conversation_id)
                     else:
                         logger.warning(
@@ -3047,7 +3054,10 @@ async def _save_message_turn_to_db(
         # Track image processing if content contains images
         image_start_time = time.time()
         # Call async function directly instead of using run_in_executor
-        text_parts, images = await _process_content_for_db_sync(content, conversation_id)
+        image_details: list[str] = []
+        text_parts, images = await _process_content_for_db_sync(
+            content, conversation_id, image_details=image_details,
+        )
 
         # Track image processing metrics if images were processed
         if images:
@@ -3149,6 +3159,11 @@ async def _save_message_turn_to_db(
         if normalized_images:
             primary_image_data = normalized_images[0]["data"]
             primary_image_mime = normalized_images[0]["mime"]
+
+    if normalized_images:
+        if serialized_extra is None:
+            serialized_extra = {}
+        serialized_extra["image_details"] = image_details
 
     if not text_parts and normalized_images:
         text_parts = [f"<Image attachment x{len(normalized_images)}>"]

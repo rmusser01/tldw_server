@@ -1,3 +1,4 @@
+import { browser } from "wxt/browser"
 import { useEffect, useRef, useState } from "react"
 import {
   getElevenLabsModel,
@@ -232,8 +233,9 @@ export const useTTS = () => {
           }
           const settle = () => finish()
           settlePlaybackRef.current = settle
-          if (isChromiumTarget && typeof chrome !== "undefined" && chrome.tts) {
-            chrome.tts.speak(processedUtterance, {
+          // The web shim has a no-op tts object; use native speech outside an extension.
+          if (isChromiumTarget && browser.runtime?.id && browser.tts) {
+            browser.tts.speak(processedUtterance, {
               voiceName: voice,
               rate: playbackSpeed,
               onEvent(event) {
@@ -541,8 +543,8 @@ export const useTTS = () => {
       return
     }
 
-    if (isChromiumTarget && typeof chrome !== "undefined" && chrome.tts) {
-      chrome.tts.stop()
+    if (isChromiumTarget && browser.runtime?.id && browser.tts) {
+      browser.tts.stop()
     } else if (typeof window !== "undefined" && window.speechSynthesis) {
       window.speechSynthesis.cancel()
     }

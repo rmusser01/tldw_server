@@ -221,10 +221,23 @@ async def api_liveness():
 
 @router.get("/health/ready", tags=["health"], summary="Readiness probe")
 async def api_readiness(request: Request) -> JSONResponse:
-    """Return the shared authenticated operator readiness projection."""
+    """Retain typed-client fields alongside sanitized operator readiness."""
+    from datetime import datetime, timezone
+
     snapshot = await readiness_service.collect_readiness_snapshot(request.app)
+    payload = readiness_service.operator_readiness_payload(snapshot)
+    database = snapshot.details.get("database", {})
+    payload.update(
+        ready=snapshot.ready,
+        engine=snapshot.details.get("engine", {}),
+        db={
+            "ok": database.get("status") == "healthy",
+            "backend": database.get("type"),
+        },
+        time=datetime.now(timezone.utc).isoformat(),
+    )
     return JSONResponse(
-        readiness_service.operator_readiness_payload(snapshot),
+        payload,
         status_code=200 if snapshot.ready else 503,
         headers=_NO_STORE_HEADERS,
     )
