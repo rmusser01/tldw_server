@@ -52,21 +52,32 @@ def test_publish_docker_release_workflow_targets_ghcr_only() -> None:
 
 
 @pytest.mark.unit
-def test_publish_pypi_workflow_installs_portaudio_before_dev_dependencies() -> None:
-    """PyPI release tests must install PortAudio before installing dev extras."""
+def test_publish_pypi_workflow_runs_targeted_release_contract_gate() -> None:
+    """PyPI release gating must avoid running the full backend test suite.
+
+    Returns:
+        None. The pytest assertions encode the release workflow contract.
+    """
     workflow = _load(".github/workflows/publish-pypi.yml")
     on = _workflow_on(workflow)
-    steps = workflow["jobs"]["test-suite"]["steps"]
+    steps = workflow["jobs"]["release-gate"]["steps"]
     install_step = _get_step(steps, "Install FFmpeg and PortAudio (Linux)")
     setup_step = _get_step(steps, "Setup Python")
     deps_step = _get_step(steps, "Install test dependencies")
+    tests_step = _get_step(steps, "Run release contract tests")
+    smoke_step = _get_step(steps, "Run minimal startup smoke")
 
-    assert ".github/workflows/publish-pypi.yml" in on["push"]["paths"]
-    assert install_step["uses"] == "./.github/actions/setup-ffmpeg"
-    assert install_step["with"]["install-ffmpeg"] == "false"
-    assert install_step["with"]["install-portaudio"] == "true"
-    assert steps.index(install_step) < steps.index(setup_step) < steps.index(deps_step)
-    assert 'python -m pip install -e ".[dev]"' in deps_step["run"]
+    assert ".github/workflows/publish-pypi.yml" in on["push"]["paths"]  # nosec B101
+    assert install_step["uses"] == "./.github/actions/setup-ffmpeg"  # nosec B101
+    assert install_step["with"]["install-ffmpeg"] == "false"  # nosec B101
+    assert install_step["with"]["install-portaudio"] == "true"  # nosec B101
+    assert steps.index(install_step) < steps.index(setup_step) < steps.index(deps_step)  # nosec B101
+    assert 'python -m pip install -e ".[dev]"' in deps_step["run"]  # nosec B101
+    assert "tldw_Server_API/tests/CI/test_pypi_workflow_contracts.py" in tests_step["run"]  # nosec B101
+    assert all(  # nosec B101
+        line.strip() != "python -m pytest -q" for line in tests_step["run"].splitlines()
+    )
+    assert smoke_step["run"] == "python Helper_Scripts/ci/minimal_env_smoke.py --timeout 150"  # nosec B101
 
 
 def test_publish_ghcr_main_workflow_remains_push_to_main_driven() -> None:
