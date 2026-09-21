@@ -19,7 +19,7 @@ const supportedPairs: Array<{ fact: string; question: RegExp; answer: RegExp }> 
   {
     fact: 'mitochondria',
     question: /^what (?:is|are) (?:the )?mitochondri(?:a|on)(?: known as)?$/,
-    answer: /^(?:the )?powerhouse of the cell$/,
+    answer: /^(?:(?:the )?mitochondri(?:a|on) (?:is|are) )?(?:the )?powerhouse of the cell$/,
   },
   {
     fact: 'dna',
@@ -29,7 +29,7 @@ const supportedPairs: Array<{ fact: string; question: RegExp; answer: RegExp }> 
   },
   {
     fact: 'photosynthesis',
-    question: /^what does photosynthesis convert$/,
+    question: /^what does photosynthesis convert(?: light energy into)?$/,
     answer: /^(?:photosynthesis converts )?light energy into chemical energy$/,
   },
   {

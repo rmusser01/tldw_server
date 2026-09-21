@@ -67,7 +67,7 @@ export async function ingestReviewDrafts(page: Page, contents: string[]): Promis
     .first()
     .setInputFiles(files);
   await dialog
-    .getByRole('button', { name: new RegExp(`configure ${files.length} items`, 'i') })
+    .getByRole('button', { name: new RegExp(`^configure ${files.length} items?$`, 'i') })
     .click();
   for (const option of ['analysis', 'chunking']) {
     const toggle = dialog.getByRole('switch', {

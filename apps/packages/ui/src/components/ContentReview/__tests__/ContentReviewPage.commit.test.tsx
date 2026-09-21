@@ -14,7 +14,27 @@ const state = vi.hoisted(() => ({
   draft: {} as Record<string, unknown>,
   saved: {} as Record<string, unknown>,
   updateFails: false,
+  localWriteFails: false,
+  owner: "alice" as string | null,
+  generation: 0,
+  controller: new AbortController(),
+  listeners: new Set<() => void>(),
+  uploadGate: null as null | Promise<void>,
+  requests: [] as Array<{ path: string; servicePromptConfig?: unknown }>,
 }));
+vi.mock("@/services/tldw/quick-ingest-authority", () => ({
+  useQuickIngestAuthority: () => React.useSyncExternalStore(callback => {
+    state.listeners.add(callback); return () => { state.listeners.delete(callback) }
+  }, () => state.owner),
+  quickIngestAuthority: { capture: () => {
+    const owner = state.owner; const signal = state.controller.signal
+    return { authorityKey: owner, authorityRevision: state.generation, signal, requestScope: { config: { serverUrl: "http://owned-server", authMode: "multi-user", expectedUserId: owner } },
+      isCurrent: () => !signal.aborted && state.owner === owner,
+      assertCurrent: () => { if (signal.aborted || state.owner !== owner) throw new Error("Account changed") }
+    }
+  } }
+}))
+vi.mock("@/store/quick-ingest-session", () => ({ useQuickIngestSessionStore: (selector: (state: { generation: number }) => unknown) => selector({ generation: state.generation }) }))
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, fallback?: string | { defaultValue?: string }) =>
@@ -48,6 +68,7 @@ vi.mock("@/db/dexie/drafts", () => ({
   getDraftsByBatch: async () => [state.draft],
   getDraftById: async () => state.draft,
   upsertContentDraft: async (draft: Record<string, unknown>) => {
+    if (state.localWriteFails) throw new Error("Local storage is full")
     state.draft = draft;
   },
   getDraftAsset: async () => ({
@@ -61,7 +82,10 @@ vi.mock("@/db/dexie/drafts", () => ({
 }));
 vi.mock("@/services/background-proxy", () => ({
   // Actual BatchMediaAddResponse contract: persisted ID is results[].db_id.
-  bgUpload: async () => ({
+  bgUpload: async (request: { servicePromptConfig?: unknown }) => {
+    state.requests.push({ path: "/api/v1/media/add", ...request })
+    await state.uploadGate
+    return ({
     results: [
       {
         status: "Success",
@@ -71,12 +95,13 @@ vi.mock("@/services/background-proxy", () => ({
         content: "Original content",
       },
     ],
-  }),
+  }) },
   bgRequest: async (request: {
     path: string;
     method: string;
     body: Record<string, unknown>;
   }) => {
+    state.requests.push(request)
     if (request.path === "/api/v1/media/389" && request.method === "PUT") {
       if (state.updateFails) throw new Error("Review update failed");
       state.saved = request.body;
@@ -89,8 +114,10 @@ vi.mock("@/services/background-proxy", () => ({
 
 describe("Content Review commit identity", () => {
   beforeEach(() => {
+    state.owner = "alice"; state.generation += 1; state.controller = new AbortController(); state.uploadGate = null; state.requests = [];
     state.saved = {};
     state.updateFails = false;
+    state.localWriteFails = false;
     state.draft = {
       id: "draft-389",
       batchId: "batch-389",
@@ -106,6 +133,45 @@ describe("Content Review commit identity", () => {
       processingOptions: { perform_analysis: false, perform_chunking: false },
     };
   });
+
+  it("masks loaded private content immediately when the verified account is lost", async () => {
+    render(<ContentReviewPage />)
+    await screen.findByDisplayValue("Reviewed UAT389")
+    act(() => { state.owner = null; state.generation += 1; state.controller.abort(); state.listeners.forEach(notify => notify()) })
+    expect(screen.queryByDisplayValue("Reviewed UAT389")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /^Commit$/ })).not.toBeInTheDocument()
+    expect(state.draft.content).toBe("Reviewed content")
+  })
+
+  it("retires an in-flight commit before updating media under a replacement account", async () => {
+    let release!: () => void
+    state.uploadGate = new Promise<void>(resolve => { release = resolve })
+    render(<ContentReviewPage />)
+    await screen.findByDisplayValue("Reviewed UAT389")
+    fireEvent.click(screen.getByRole("button", { name: /^Commit$/ }))
+    await waitFor(() => expect(state.requests).toHaveLength(1))
+    act(() => { state.owner = null; state.generation += 1; state.controller.abort(); state.listeners.forEach(notify => notify()) })
+    await act(async () => { release() })
+    expect(state.requests.map(request => request.path)).toEqual(["/api/v1/media/add"])
+    expect(state.saved).toEqual({})
+    expect(state.draft.status).toBe("in_progress")
+    expect(state.requests[0].servicePromptConfig).toEqual({ serverUrl: "http://owned-server", authMode: "multi-user", expectedUserId: "alice" })
+  })
+
+  it("retains a draft and allows manual retry after local storage fails (UAT401)", async () => {
+    render(<ContentReviewPage />)
+    await screen.findByDisplayValue("Reviewed UAT389")
+    const save = screen.getByRole("button", { name: "Save draft" })
+    state.localWriteFails = true
+    fireEvent.click(save)
+    await screen.findByText("Local storage is full")
+    expect(save).not.toHaveClass("ant-btn-loading")
+    expect(screen.getByDisplayValue("Reviewed content")).toBeInTheDocument()
+    state.localWriteFails = false
+    await act(async () => { fireEvent.click(save) })
+    await waitFor(() => expect(Number(state.draft.updatedAt)).toBeGreaterThan(1))
+    expect(state.draft.content).toBe("Reviewed content")
+  })
 
   it("saves reviewed content to the db_id returned by ingestion and finalizes the draft", async () => {
     render(<ContentReviewPage />);

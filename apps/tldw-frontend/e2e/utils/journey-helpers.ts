@@ -172,7 +172,7 @@ const waitForQuickIngestQueueAdvance = async (
           .isVisible()
           .catch(() => false)
         const configureVisible = await dialog
-          .getByRole("button", { name: /configure \d+ items/i })
+          .getByRole("button", { name: /^configure \d+ items?$/i })
           .isVisible()
           .catch(() => false)
         const startProcessingVisible = await dialog
@@ -396,7 +396,7 @@ const startQueuedQuickIngestFromCurrentStep = async (
   options: Pick<QueueUrlAndStartProcessingOptions, "performAnalysis" | "performChunking"> = {}
 ): Promise<void> => {
   const configureBtn = dialog
-    .getByRole("button", { name: /configure \d+ items/i })
+    .getByRole("button", { name: /^configure \d+ items?$/i })
     .first()
   if (await configureBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
     await configureBtn.click()
@@ -709,7 +709,7 @@ export async function advanceQuickIngestToConfigureStep(
   }
 
   const configureBtn = dialog
-    .getByRole("button", { name: /configure \d+ items/i })
+    .getByRole("button", { name: /^configure \d+ items?$/i })
     .first()
   await configureBtn.click()
   await waitForQuickIngestConfigureUi(dialog, timeoutMs)
@@ -846,12 +846,11 @@ export async function ingestAndWaitForReady(
     await queueFileForQuickIngest(quickIngestDialog, input.file, timeoutMs)
 
     const configureBtn = quickIngestDialog
-      .getByRole("button", { name: /configure \d+ items/i })
+      .getByRole("button", { name: /^configure \d+ items?$/i })
       .first()
-    if (await configureBtn.isVisible({ timeout: 5_000 }).catch(() => false)) {
-      await configureBtn.click()
-      await waitForQuickIngestConfigureUi(quickIngestDialog, timeoutMs)
-    }
+    await expect(configureBtn).toBeVisible({ timeout: 15_000 })
+    await configureBtn.click()
+    await waitForQuickIngestConfigureUi(quickIngestDialog, timeoutMs)
 
     await applyQuickIngestProcessOptions(quickIngestDialog, {}, timeoutMs)
     const nextBtn = quickIngestDialog.getByRole("button", { name: /^next$/i }).first()
