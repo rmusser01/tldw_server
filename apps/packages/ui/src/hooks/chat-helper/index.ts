@@ -560,7 +560,7 @@ export const saveMessageOnSuccess = async ({
     throw error
   }
 
-  const title = historyId
+  let title = historyId
     ? null
     : scopeSignal || requestScope
       ? await generateTitle(
@@ -570,6 +570,10 @@ export const saveMessageOnSuccess = async ({
           { signal: scopeInvalidatedSignal, requestScope }
         )
       : await generateTitle(selectedModel, message, message)
+
+  if (!historyId && !title?.trim()) {
+    title = buildFallbackHistoryTitle(message)
+  }
 
   const persistedHistoryId = await runChatPersistenceTransaction(
     scopeInvalidatedSignal,
