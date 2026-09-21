@@ -91,3 +91,19 @@ Bandit findings or lint findings were introduced. Duplicate findings and propose
 gate/classifier changes have explicit, evidence-backed dispositions. The sync's
 head now passes 71 checks with 39 skips and none pending or failed; final review
 replies, approved sync merge and final follow-up CI remain to be completed.
+
+
+## Approved sync complete
+
+PR2971 merged at `08e980a453d12155cccf10d0c5eb7fe32d05ac75` after all 71 checks passed
+(39 skipped) and every review thread was answered. The released main commit is
+an ancestor of dev. Follow-up commit bd53b9d71a addresses the final review batch;
+all 22 second/final-batch threads are answered and resolved, in addition to the
+10 initial threads. This branch now includes the merged dev base. Publication
+records and the release plan record the completed sync. Final PR2978 CI and its
+separate merge/summary gate remain outstanding.
+
+After the base merge and publication-record updates, all 52 release-documentation
+and published-refresh contracts pass, including the strict docs build. Git
+ancestry confirms both released main and the sync merge in this branch; immutable
+0.1.43 legal-record and package-version bytes remain unchanged.

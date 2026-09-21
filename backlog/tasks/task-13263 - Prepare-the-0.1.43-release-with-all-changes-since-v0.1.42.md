@@ -1,10 +1,10 @@
 ---
 id: TASK-13263
 title: Prepare the 0.1.43 release with all changes since v0.1.42
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-20 19:56'
-updated_date: '2026-09-21 07:26'
+updated_date: '2026-09-21 14:38'
 labels: []
 dependencies: []
 priority: high
@@ -85,12 +85,18 @@ Post-publication inventory correction: originalPR2761 and recovery2973 have zero
 0.1.43 PUBLICATION VERIFIED: GitHub tag c2bab8a56a9483bbfea637677bb234cd16ae8590; PyPI run35570985611 and GHCR run35571016884 succeed. Wheel c2836bf424ca201756b155cfff5638d2c80b423b12a5654400d92960b5b6d74d; sdist a3c54d14db9ddb69a69001414b8ad93164d4cf02bec1b4e2ac981e63def46bbe match Actions/PyPI. Image app e23841f4cfdd2a7ee1155acad81ceed06320807aa926d618ca78389e80d9347e; worker efb0799d68e145e49567e9bba95cf83a3ad9185d5cb7c95dd1a6a852dbeda40c; audio4261d5defeb7e743f35b71ee961d7ff2cbe4a16087628ca465bb385ba1bcef30. All registry tag digests/signatures/source/tag/run identities verified. Evidence Docs/Development/releases/0.1.43-publication-verification.json. Approved sync final push/CI/merge remains; newly posted review follow-up TASK13263.3 separate.
 <!-- SECTION:NOTES:END -->
 
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Release 0.1.43 is published and verified: PR2972 merged at c2bab8a56a9483bbfea637677bb234cd16ae8590 after 73 passing checks; immutable tag, GitHub release, PyPI bytes and all three GHCR signed identities verified. Approved sync PR2971 merged at 08e980a453d12155cccf10d0c5eb7fe32d05ac75 after 71 passing checks/39 skips; released main is an ancestor of dev. Explicit release/legal-date approvals and scoped summary waivers are recorded in the release plan. Publication evidence is Docs/Development/releases/0.1.43-publication-verification.json. Additional post-publication review work remains open under TASK13263.3 / PR2978; UAT261/TASK13260 and broader certification remain separate.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
