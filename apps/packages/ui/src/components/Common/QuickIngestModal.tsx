@@ -1,3 +1,4 @@
+import { quickIngestAuthority, useQuickIngestAuthority, type QuickIngestOperation } from "@/services/tldw/quick-ingest-authority"
 import React, { useCallback } from 'react'
 import { useHomeMilestoneScope } from '@/hooks/useHomeMilestoneScope'
 import { useMilestoneStore } from '@/store/milestones'
@@ -138,6 +139,8 @@ export const QuickIngestModal: React.FC<Props> = ({
   autoProcessQueued = false
 }) => {
   const homeScope = useHomeMilestoneScope()
+  useQuickIngestAuthority()
+  const reviewOperationRef = React.useRef<QuickIngestOperation | null>(null)
   const runMilestoneRef = React.useRef<{ ownerScope: string | null; storesMedia: boolean } | null>(null)
   const { t } = useTranslation(['option', 'settings'])
   const qi = React.useCallback(
@@ -533,6 +536,7 @@ export const QuickIngestModal: React.FC<Props> = ({
 
   const handleRunCompleted = React.useCallback(
     async (normalizedResults: ResultItem[]) => {
+      if (reviewBeforeStorage && !reviewOperationRef.current?.isCurrent()) return
       const out = appendMissingResultsFromPlan(
         normalizedResults,
         qi("missingResultItems", "No result was returned for this item."),
@@ -570,7 +574,8 @@ export const QuickIngestModal: React.FC<Props> = ({
       if (reviewBeforeStorage && hasOkResults) {
         let draftErrorMessage: string | null = null
         try {
-          createdDraftBatch = await createDraftsFromResults(out, fileLookup)
+          createdDraftBatch = await createDraftsFromResults(out, fileLookup, reviewOperationRef.current!)
+          if (!reviewOperationRef.current?.isCurrent()) return
           if (createdDraftBatch?.batchId) results.setReviewBatchId(createdDraftBatch.batchId)
         } catch (err) {
           console.error("[quickIngest] Failed to create review drafts", err)
@@ -609,6 +614,10 @@ export const QuickIngestModal: React.FC<Props> = ({
 
   // ---- Main run function ----
   const run = React.useCallback(async () => {
+    if (reviewBeforeStorage) {
+      try { reviewOperationRef.current = quickIngestAuthority.capture({ sessionBound: false }) }
+      catch { messageApi.error(qi("verifyReviewAccount", "Verify your connection before creating review drafts.")); return }
+    }
     runMilestoneRef.current = { ownerScope: homeScope, storesMedia: storeRemote && !processOnly }
     setLastRunError(null)
     setLastRunCancelled(false)
@@ -806,7 +815,7 @@ export const QuickIngestModal: React.FC<Props> = ({
   }, [
     advancedValues, autoApplyTemplate, chunkingTemplateName, clearFailure, common,
     handleRunCompleted, handleRunFailure, ingestBlocked, ingestConnectionStatus,
-    attachedFiles, attachedFileStubs, fileForStubId, formatBytes, markFailure,
+    attachedFiles, attachedFileStubs, fileForStubId, formatBytes,
     messageApi, mergeDefaults, processOnly, qi, fileTypeFromName,
     reviewBeforeStorage, rows, storeRemote, t, normalizedTypeDefaults,
     homeScope, missingFileStubs.length, setActiveSessionId, setLastRunCancelled, setLastRunError,

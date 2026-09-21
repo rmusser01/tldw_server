@@ -10,6 +10,16 @@ const cards = [
 ];
 
 describe('F-BIOLOGY card acceptance oracle', () => {
+  it.each(['What does photosynthesis convert?', 'What does photosynthesis convert light energy into?'])('accepts inspected native source sentences: %s', photosynthesisQuestion => {
+    expect(assertBiologyCardSet([
+      { front: 'What is the mitochondria?', back: 'The mitochondria is the powerhouse of the cell.' },
+      { front: 'What does DNA stand for?', back: 'DNA stands for deoxyribonucleic acid.' },
+      { front: photosynthesisQuestion, back: 'Photosynthesis converts light energy into chemical energy.' },
+      { front: 'How many bones does the human body have?', back: 'The human body has 206 bones.' },
+      { front: 'At what temperature does water boil at sea level?', back: 'Water boils at 100 degrees Celsius at sea level.' },
+    ])).toEqual(['mitochondria', 'dna', 'photosynthesis', 'bones', 'water'])
+  })
+
   it('accepts exactly one supported question and answer per source fact', () => {
     expect(assertBiologyCardSet(cards)).toEqual([
       'mitochondria',

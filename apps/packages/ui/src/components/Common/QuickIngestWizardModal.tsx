@@ -1,3 +1,4 @@
+import { createReviewDraftsFromResults } from "./hooks/useIngestResults"
 import { quickIngestAuthority, useQuickIngestAuthority } from "@/services/tldw/quick-ingest-authority"
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Modal, Button } from "antd"
@@ -1665,6 +1666,31 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
 
   // Navigation callbacks for WizardResultsStep CTAs
   const navigate = useNavigate()
+  const [reviewError, setReviewError] = useState<string | null>(null)
+  const [reviewRetry, setReviewRetry] = useState(0)
+  const reviewCreationRef = useRef(false)
+  useEffect(() => {
+    if (!open || currentStep !== 5 || !presetConfig.reviewBeforeStorage || reviewCreationRef.current || !results.some(item => item.status === "ok")) return
+    reviewCreationRef.current = true
+    setReviewError(null)
+    const files = new Map<string, File>()
+    for (const item of queueItems) if (item.file) files.set(item.id, item.file)
+    void createReviewDraftsFromResults({ results, files, operation,
+      batchId: "quick-ingest-review:" + session.id,
+      processingOptions: {
+        perform_analysis: Boolean(presetConfig.common.perform_analysis),
+        perform_chunking: Boolean(presetConfig.common.perform_chunking),
+        overwrite_existing: Boolean(presetConfig.common.overwrite_existing),
+        advancedValues: { ...presetConfig.advancedValues }
+      }
+    }).then(batch => {
+      if (!operation.isCurrent() || !batch) return
+      navigate("/content-review?batch=" + encodeURIComponent(batch.batchId))
+      onClose()
+    }).catch(error => {
+      if (operation.isCurrent()) setReviewError(error instanceof Error ? error.message : "Failed to save review drafts.")
+    })
+  }, [currentStep, navigate, onClose, open, operation, presetConfig, queueItems, results, reviewRetry, session.id])
 
   const handleSearchKnowledge = useCallback(() => {
     if (!operation.isCurrent()) return
@@ -1748,6 +1774,13 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         return <ProcessingStep onCancelAll={handleCancelAll} onMinimize={onClose} />
       case 5:
         return (
+          <>
+          {reviewError && <div role="alert">
+            <p>{reviewError}</p>
+            <Button onClick={() => { reviewCreationRef.current = false; setReviewRetry(value => value + 1) }}>
+              {qi("reviewDraftsRetry", "Retry saving review drafts")}
+            </Button>
+          </div>}
           <WizardResultsStep
             onClose={onClose}
             onIngestMore={handleIngestMore}
@@ -1756,6 +1789,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
             onOpenWorkspace={handleOpenWorkspace}
             onOpenCollection={handleOpenCollection}
           />
+          </>
         )
       default:
         return null
@@ -1763,6 +1797,8 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   }, [
     connectionRecoveryMessage,
     currentStep,
+    reviewError,
+    qi,
     handleCancelAll,
     handleOpenMedia,
     handleOpenCollection,

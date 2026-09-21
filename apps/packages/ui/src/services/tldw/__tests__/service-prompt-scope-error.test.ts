@@ -13,6 +13,19 @@ import {
 
 describe("Service Prompt scope policy", () => {
   it.each([
+    ["/api/v1/media/389", "PUT", true],
+    ["/api/v1/media/389/metadata", "PATCH", true],
+    ["/api/v1/media/389/reprocess", "POST", true],
+    ["/api/v1/media/389/metadata", "PUT", false],
+    ["/api/v1/media/389/reprocess", "GET", false],
+    ["/api/v1/media/389/reprocess/extra", "POST", false],
+    ["/api/v1/media/389%2fother", "PUT", false],
+    ["/api/v1/media/../settings", "PUT", false],
+  ])("bounds owned Content Review commit %s %s", (path, method, allowed) => {
+    expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+  })
+
+  it.each([
     ["/api/v1/chats/owned/complete-v2", "POST", true],
     ["/api/v1/chats/owned/complete-v2?scope_type=workspace&workspace_id=w", "POST", true],
     ["/api/v1/chats/owned/complete-v2", "GET", false],
