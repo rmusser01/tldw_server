@@ -12,7 +12,7 @@ import { downloadBlob } from '@/utils/download-blob'
 import { useUndoNotification } from '@/hooks/useUndoNotification'
 import type { MediaResultItem } from '@/components/Media/types'
 import type { MediaLibraryStorageUsage } from '@/components/Media/MediaLibraryStatsPanel'
-import { getErrorStatusCode } from './useMediaSearch'
+import { getErrorStatusCode, useMediaRequestLifetime } from './useMediaSearch'
 
 const MEDIA_COLLECTIONS_STORAGE_KEY = 'media:collections:v1'
 const READING_PROGRESS_MEDIA_ID_SEPARATOR = '\u001f'
@@ -83,7 +83,28 @@ type MediaCollectionRecord = {
   updatedAt: string
 }
 
+type OwnedMediaValues<T> = { ownerScope: string; values: T[] }
+
+/** Never adopt unowned legacy values, or render the previous key while a new key hydrates. */
+function useOwnedMediaValues<T>(key: string, ownerScope: string | null, isCurrent: () => boolean) {
+  const [record, setRecord, meta] = useStorage<OwnedMediaValues<T> | null>(
+    `${key}:owner:${ownerScope ?? 'unresolved'}`, null
+  )
+  const current = isCurrent()
+  const values = useMemo(() => current && record?.ownerScope === ownerScope && Array.isArray(record.values) ? record.values : [],
+    [current, record, ownerScope])
+  const setValues = useCallback((next: React.SetStateAction<T[]>) => {
+    if (!ownerScope || !isCurrent() || meta?.isLoading) return
+    return setRecord(previous => {
+      const values = previous?.ownerScope === ownerScope && Array.isArray(previous.values) ? previous.values : []
+      return { ownerScope, values: typeof next === 'function' ? next(values) : next }
+    })
+  }, [ownerScope, isCurrent, meta?.isLoading, setRecord])
+  return [values, setValues] as const
+}
+
 export interface UseMediaSelectionDeps {
+  ownerScope: string | null
   t: (key: string, opts?: Record<string, any>) => string
   message: {
     error: (msg: string) => void
@@ -101,15 +122,39 @@ export interface UseMediaSelectionDeps {
 
 export function useMediaSelection(deps: UseMediaSelectionDeps) {
   const {
-    t, message, displayResults,
+    t, message, displayResults, ownerScope,
     selected, setSelected, setSelectedContent, setSelectedDetail, setLastFetchedId,
     refetch
   } = deps
   const navigate = useNavigate()
   const { showUndoNotification } = useUndoNotification()
 
+  const ownerRef = useRef(ownerScope)
+  ownerRef.current = ownerScope
+  const lifetime = useMediaRequestLifetime(() => {
+    setBulkSelectedIds([])
+    setBulkKeywordsDraft('')
+    setCollectionDraftName('')
+    setActiveCollectionId(null)
+    setShowFavoritesOnly(false)
+    setReadingProgressMap(new Map())
+    setLibraryStorageUsage({ ...DEFAULT_MEDIA_LIBRARY_STORAGE_USAGE, loading: false })
+  })
+  const captureOperation = useCallback(() => {
+    const signal = lifetime.current.signal
+    const isCurrent = () => Boolean(ownerScope && ownerRef.current === ownerScope && !signal.aborted)
+    const request = async <T,>(init: Parameters<typeof bgRequest<T>>[0]): Promise<T> => {
+      if (!isCurrent()) throw new DOMException('Media account changed', 'AbortError')
+      const result = await bgRequest<T>({ ...init, abortSignal: signal })
+      if (!isCurrent()) throw new DOMException('Media account changed', 'AbortError')
+      return result
+    }
+    return { signal, isCurrent, request }
+  }, [lifetime, ownerScope])
+  const isOwnerCurrent = useCallback(() => captureOperation().isCurrent(), [captureOperation])
+
   // Favorites
-  const [favorites, setFavorites] = useStorage<string[]>('media:favorites', [])
+  const [favorites, setFavorites] = useOwnedMediaValues<string>('media:favorites', ownerScope, isOwnerCurrent)
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false)
   const favoritesSet = useMemo(() => new Set(favorites || []), [favorites])
 
@@ -122,9 +167,8 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
   )
 
   // Collections
-  const [mediaCollections, setMediaCollections] = useStorage<MediaCollectionRecord[]>(
-    MEDIA_COLLECTIONS_STORAGE_KEY,
-    []
+  const [mediaCollections, setMediaCollections] = useOwnedMediaValues<MediaCollectionRecord>(
+    MEDIA_COLLECTIONS_STORAGE_KEY, ownerScope, isOwnerCurrent
   )
   const [activeCollectionId, setActiveCollectionId] = useState<string | null>(null)
   const [collectionDraftName, setCollectionDraftName] = useState('')
@@ -212,6 +256,8 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
 
   // Reading progress
   useEffect(() => {
+    const { signal, isCurrent } = captureOperation()
+    if (!isCurrent()) return
     if (readingProgressUnavailableRef.current) {
       updateReadingProgressMap([])
       return
@@ -232,9 +278,10 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
     const fetchProgress = async () => {
       const entries: Array<[string, number]> = []
       for (const mediaId of mediaIds) {
+        if (cancelled || !isCurrent()) return
         try {
-          const result = await getReadingProgress.call(tldwClient, mediaId)
-          if (cancelled) return
+          const result = await getReadingProgress.call(tldwClient, mediaId, { signal })
+          if (cancelled || !isCurrent()) return
           if (result?.has_progress !== false) {
             const pct = result?.percent_complete
             if (typeof pct === 'number' && pct > 0) {
@@ -242,7 +289,7 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
             }
           }
         } catch (error) {
-          if (cancelled) return
+          if (cancelled || !isCurrent()) return
           if (isReadingProgressEndpointUnavailableError(error)) {
             readingProgressUnavailableRef.current = true
             updateReadingProgressMap(entries)
@@ -250,16 +297,18 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
           }
         }
       }
-      if (!cancelled) {
+      if (!cancelled && isCurrent()) {
         updateReadingProgressMap(entries)
       }
     }
     void fetchProgress()
     return () => { cancelled = true }
-  }, [readingProgressMediaIdsKey, updateReadingProgressMap])
+  }, [readingProgressMediaIdsKey, updateReadingProgressMap, captureOperation])
 
   // Storage usage
   const refreshLibraryStorageUsage = useCallback(async () => {
+    const { request, isCurrent } = captureOperation()
+    if (!isCurrent()) return
     setLibraryStorageUsage((prev) => ({
       ...prev,
       loading: true,
@@ -270,8 +319,9 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
       let response: any = null
       if (typeof (tldwClient as any).getCurrentUserStorageQuota === 'function') {
         try {
-          response = await (tldwClient as any).getCurrentUserStorageQuota()
+          response = await request({ path: '/api/v1/users/storage', method: 'GET' })
         } catch {
+          if (!isCurrent()) return
           response = null
         }
       }
@@ -279,8 +329,8 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
         response == null &&
         typeof (tldwClient as any).getCurrentUserProfile === 'function'
       ) {
-        const profile = await (tldwClient as any).getCurrentUserProfile({
-          sections: 'quotas'
+        const profile = await request<{ quotas?: Record<string, unknown> }>({
+          path: '/api/v1/users/me/profile?sections=quotas', method: 'GET'
         })
         const quotas = profile?.quotas ?? {}
         response = {
@@ -289,6 +339,7 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
           usage_percentage: quotas?.usage_percentage
         }
       }
+      if (!isCurrent()) return
       const totalMb = toNonNegativeFiniteNumber(
         response?.storage_used_mb ??
           response?.storageUsedMb ??
@@ -318,6 +369,7 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
         warning
       })
     } catch {
+      if (!isCurrent()) return
       setLibraryStorageUsage({
         loading: false,
         error: 'Unable to load storage usage.',
@@ -327,7 +379,7 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
         warning: null
       })
     }
-  }, [])
+  }, [captureOperation])
 
   useEffect(() => {
     void refreshLibraryStorageUsage()
@@ -361,6 +413,8 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
   }, [])
 
   const handleBulkAddKeywords = useCallback(async () => {
+    const { request, isCurrent } = captureOperation()
+    if (!isCurrent()) return
     const keywordsToAdd = bulkKeywordsDraft
       .split(',')
       .map((keyword) => keyword.trim())
@@ -389,10 +443,11 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
     const updatedKeywordMap = new Map<string, string[]>()
 
     for (const item of bulkSelectedMediaItems) {
+      if (!isCurrent()) return
       const currentKeywords = Array.isArray(item.keywords) ? item.keywords : []
       const mergedKeywords = Array.from(new Set([...currentKeywords, ...keywordsToAdd]))
       try {
-        await bgRequest({
+        await request({
           path: `/api/v1/media/${item.id}` as any,
           method: 'PUT' as any,
           headers: { 'Content-Type': 'application/json' },
@@ -401,6 +456,7 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
         updatedKeywordMap.set(String(item.id), mergedKeywords)
         updatedCount += 1
       } catch {
+        if (!isCurrent()) return
         failedCount += 1
       }
     }
@@ -413,6 +469,7 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
         return { ...prev, keywords: nextKeywords }
       })
       await refetch()
+      if (!isCurrent()) return
     }
 
     if (failedCount > 0) {
@@ -441,6 +498,7 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
       )
     }
   }, [
+    captureOperation,
     bulkKeywordsDraft,
     bulkSelectedMediaItems,
     bulkSelectedNoteCount,
@@ -451,6 +509,8 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
   ])
 
   const handleBulkDelete = useCallback(async () => {
+    const { request, isCurrent } = captureOperation()
+    if (!isCurrent()) return
     if (bulkSelectedItems.length === 0) {
       message.warning(
         t('review:mediaPage.bulkDeleteNothingSelected', {
@@ -474,9 +534,10 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
     const deletedIdSet = new Set<string>()
 
     for (const item of bulkSelectedItems) {
+      if (!isCurrent()) return
       try {
         if (item.kind === 'note') {
-          const latest = await bgRequest<any>({
+          const latest = await request<any>({
             path: `/api/v1/notes/${item.id}` as any,
             method: 'GET' as any
           })
@@ -485,13 +546,13 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
           if (expectedVersion == null) {
             throw new Error('Missing expected version')
           }
-          await bgRequest({
+          await request({
             path: `/api/v1/notes/${item.id}` as any,
             method: 'DELETE' as any,
             headers: { 'expected-version': String(expectedVersion) }
           })
         } else {
-          await bgRequest({
+          await request({
             path: `/api/v1/media/${item.id}` as any,
             method: 'DELETE' as any
           })
@@ -499,6 +560,7 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
         deletedIdSet.add(String(item.id))
         deletedCount += 1
       } catch {
+        if (!isCurrent()) return
         failedCount += 1
       }
     }
@@ -517,6 +579,7 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
       setSelectedDetail(null)
       setLastFetchedId(null)
       await refetch()
+      if (!isCurrent()) return
       void refreshLibraryStorageUsage()
     }
 
@@ -538,6 +601,7 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
       })
     )
   }, [
+    captureOperation,
     bulkSelectedItems,
     message,
     refetch,
@@ -551,6 +615,7 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
   ])
 
   const handleBulkExport = useCallback(() => {
+    if (!isOwnerCurrent()) return
     if (bulkSelectedItems.length === 0) {
       message.warning(
         t('review:mediaPage.bulkExportNothingSelected', {
@@ -620,9 +685,10 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
         defaultValue: 'Bulk export ready.'
       })
     )
-  }, [bulkExportFormat, bulkSelectedItems, message, t])
+  }, [bulkExportFormat, bulkSelectedItems, isOwnerCurrent, message, t])
 
   const handleAddSelectionToCollection = useCallback(() => {
+    if (!isOwnerCurrent()) return
     if (bulkSelectedItems.length === 0) {
       message.warning(
         t('review:mediaPage.collectionRequiresSelection', {
@@ -691,6 +757,7 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
       })
     )
   }, [
+    isOwnerCurrent,
     activeCollection?.name,
     bulkSelectedItems,
     collectionDraftName,
@@ -701,6 +768,8 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
   ])
 
   const handleOpenSelectionInMultiReview = useCallback(async () => {
+    const { isCurrent } = captureOperation()
+    if (!isCurrent()) return
     if (bulkSelectedIds.length === 0) {
       message.warning(
         t('review:mediaPage.bulkOpenInMultiReviewNone', {
@@ -710,11 +779,15 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
       return
     }
     await setSetting(MEDIA_REVIEW_SELECTION_SETTING, bulkSelectedIds)
+    if (!isCurrent()) return
     await setSetting(LAST_MEDIA_ID_SETTING, String(bulkSelectedIds[0]))
+    if (!isCurrent()) return
     navigate('/media-multi')
-  }, [bulkSelectedIds, message, navigate, t])
+  }, [bulkSelectedIds, captureOperation, message, navigate, t])
 
   const handleOpenCollectionInMultiReview = useCallback(async () => {
+    const { isCurrent } = captureOperation()
+    if (!isCurrent()) return
     if (!activeCollection || activeCollection.itemIds.length === 0) {
       message.warning(
         t('review:mediaPage.collectionEmpty', {
@@ -725,12 +798,16 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
     }
     const collectionIds = activeCollection.itemIds.map((id) => String(id))
     await setSetting(MEDIA_REVIEW_SELECTION_SETTING, collectionIds)
+    if (!isCurrent()) return
     await setSetting(LAST_MEDIA_ID_SETTING, String(collectionIds[0]))
+    if (!isCurrent()) return
     navigate('/media-multi')
-  }, [activeCollection, message, navigate, t])
+  }, [activeCollection, captureOperation, message, navigate, t])
 
   const handleDeleteItem = useCallback(
     async (item: MediaResultItem, detail: any | null) => {
+      const { request, isCurrent } = captureOperation()
+      if (!isCurrent()) return
       const id = item.id
       const idStr = String(id)
       const wasFavorite = favoritesSet.has(idStr)
@@ -767,7 +844,7 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
           }
           if (expectedVersion == null) {
             try {
-              const latest = await bgRequest<any>({
+              const latest = await request<any>({
                 path: `/api/v1/notes/${id}` as any,
                 method: 'GET' as any
               })
@@ -789,19 +866,20 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
               })
             )
           }
-          await bgRequest({
+          await request({
             path: `/api/v1/notes/${id}` as any,
             method: 'DELETE' as any,
             headers: { 'expected-version': String(expectedVersion) }
           })
           deletedAtVersion = expectedVersion + 1
         } else {
-          await bgRequest({
+          await request({
             path: `/api/v1/media/${id}` as any,
             method: 'DELETE' as any
           })
         }
       } catch (err) {
+        if (!isCurrent()) return
         const status = err && typeof err === 'object' && 'status' in err
           ? (err as { status?: number }).status
           : undefined
@@ -828,6 +906,7 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
       )
 
       await clearSetting(LAST_MEDIA_ID_SETTING)
+      if (!isCurrent()) return
 
       const remainingResults = displayResults.filter(
         (r) => String(r.id) !== idStr
@@ -860,15 +939,16 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
           title: itemTitle
         }),
         onUndo: async () => {
+          if (!isCurrent()) return
           if (item.kind === 'note') {
             if (deletedAtVersion != null) {
-              await bgRequest({
+              await request({
                 path: `/api/v1/notes/${id}/restore?expected_version=${deletedAtVersion}` as any,
                 method: 'POST' as any
               })
             }
           } else {
-            await bgRequest({
+            await request({
               path: `/api/v1/media/${id}/restore` as any,
               method: 'POST' as any
             })
@@ -881,6 +961,7 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
             })
           }
           const refreshed = await refetch()
+          if (!isCurrent()) return
           void refreshLibraryStorageUsage()
           const restoredItem = refreshed.data?.find(
             (r: MediaResultItem) => String(r.id) === idStr
@@ -896,6 +977,7 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
       })
     },
     [
+      captureOperation,
       displayResults,
       favoritesSet,
       refetch,

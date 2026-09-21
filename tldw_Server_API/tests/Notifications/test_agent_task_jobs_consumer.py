@@ -543,3 +543,306 @@ async def test_failed_run_degrades_health_and_audits(consumer_env) -> None:
         owner_id=user_id, definition_id=definition.id
     )
     assert any(a.event_type == "run_failed" for a in audits)
+
+
+@pytest.mark.asyncio
+async def test_terminal_persistence_failure_fails_job_before_notification(consumer_env, monkeypatch):
+    user_id = 1030
+    definition = _create_definition(user_id)
+    sdb = ScheduledTasksDatabase.for_user(user_id=user_id)
+    register_executor("recurring_question", lambda d, p: asyncio.sleep(0, result="42"))
+    original = sdb.update_scheduled_task_run_status
+
+    def unavailable(**kwargs):
+        raise RuntimeError("terminal write unavailable")
+
+    monkeypatch.setattr(sdb, "update_scheduled_task_run_status", unavailable)
+    with pytest.raises(agent_task_jobs.ScheduledTaskPersistenceError, match="terminal run persistence failed"):
+        await handle_agent_task_job(_job(definition, user_id), scheduled_db=sdb)
+    assert _latest_notification(user_id) is None
+    monkeypatch.setattr(sdb, "update_scheduled_task_run_status", original)
+    result = await handle_agent_task_job(_job(definition, user_id), scheduled_db=sdb)
+    assert result["status"] == "succeeded"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_deliveries_execute_scheduled_slot_once(consumer_env):
+    user_id = 1031
+    definition = _create_definition(user_id)
+    started = asyncio.Event()
+    release = asyncio.Event()
+    calls = []
+
+    async def executor(d, p):
+        calls.append(d.id)
+        started.set()
+        await release.wait()
+        return "42"
+
+    register_executor("recurring_question", executor)
+    first = asyncio.create_task(handle_agent_task_job(_job(definition, user_id)))
+    await asyncio.wait_for(started.wait(), timeout=2)
+    try:
+        with pytest.raises(agent_task_jobs.ScheduledTaskClaimBusy):
+            await asyncio.wait_for(handle_agent_task_job(_job(definition, user_id)), timeout=0.2)
+        assert calls == [definition.id]
+    finally:
+        release.set()
+        await first
+
+
+def test_scheduled_run_claim_fences_stale_completion_and_release(consumer_env):
+    user_id = 1032
+    definition = _create_definition(user_id)
+    sdb = ScheduledTasksDatabase.for_user(user_id=user_id)
+    run = sdb.create_scheduled_task_run(
+        definition_id=definition.id,
+        owner_id=user_id,
+        scheduled_for=SLOT,
+        job_id="77",
+        run_slot_utc=SLOT,
+        run_slot_key=SLOT,
+        status="running",
+    )
+    kwargs = dict(owner_id=user_id, run_id=run["id"], job_id="77", lease_id="lease-1")
+    assert sdb.claim_scheduled_task_run(**kwargs, claim_id="first")
+    assert not sdb.claim_scheduled_task_run(**kwargs, claim_id="duplicate")
+    sdb.release_scheduled_task_run_claim(owner_id=user_id, run_id=run["id"], claim_id="wrong")
+    assert not sdb.claim_scheduled_task_run(**kwargs, claim_id="second")
+    sdb.release_scheduled_task_run_claim(owner_id=user_id, run_id=run["id"], claim_id="first")
+    assert sdb.claim_scheduled_task_run(**kwargs, claim_id="second")
+    sdb.release_scheduled_task_run_claim(owner_id=user_id, run_id=run["id"], claim_id="first")
+    with pytest.raises(ValueError, match="stale execution claim"):
+        sdb.update_scheduled_task_run_status(run_id=run["id"], status="succeeded", execution_claim_id="first")
+    assert not sdb.claim_scheduled_task_run(**kwargs, claim_id="third")
+    sdb.update_scheduled_task_run_status(run_id=run["id"], status="succeeded", execution_claim_id="second")
+    assert not sdb.claim_scheduled_task_run(**kwargs, claim_id="third")
+
+
+@pytest.mark.asyncio
+async def test_reclaimed_jobs_lease_requires_explicit_stopped_claim_reconciliation(consumer_env):
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    user_id = 1033
+    definition = _create_definition(user_id)
+    manager = JobManager()
+    manager.create_job(
+        domain="scheduled_tasks",
+        job_type="agent_task_run",
+        queue="default",
+        payload=_job(definition, user_id)["payload"],
+        owner_user_id=str(user_id),
+    )
+    original = manager.acquire_next_job(domain="scheduled_tasks", queue="default", worker_id="first", lease_seconds=60)
+    sdb = ScheduledTasksDatabase.for_user(user_id=user_id)
+    run = sdb.create_scheduled_task_run(
+        definition_id=definition.id,
+        owner_id=user_id,
+        scheduled_for=SLOT,
+        job_id=str(original["id"]),
+        run_slot_utc=SLOT,
+        run_slot_key=SLOT,
+        status="running",
+    )
+    assert sdb.claim_scheduled_task_run(
+        owner_id=user_id,
+        run_id=run["id"],
+        claim_id="abandoned",
+        job_id=str(original["id"]),
+        lease_id=original["lease_id"],
+    )
+    executor = AsyncMock(return_value="recovered")
+    register_executor("recurring_question", executor)
+    with pytest.raises(agent_task_jobs.ScheduledTaskClaimBusy):
+        await handle_agent_task_job(original, scheduled_db=sdb)
+    executor.assert_not_awaited()
+    assert manager.release_job(int(original["id"]), worker_id="first", lease_id=original["lease_id"])
+    replacement = manager.acquire_next_job(
+        domain="scheduled_tasks", queue="default", worker_id="second", lease_seconds=60
+    )
+    with pytest.raises(ValueError, match="stale Jobs lease"):
+        await handle_agent_task_job(original, scheduled_db=sdb, jobs_manager=manager)
+    with pytest.raises(agent_task_jobs.ScheduledTaskClaimBusy):
+        await handle_agent_task_job(replacement, scheduled_db=sdb, jobs_manager=manager)
+    # The prior attempt was never started in this test; explicit reconciliation is safe.
+    sdb.release_scheduled_task_run_claim(owner_id=user_id, run_id=run["id"], claim_id="abandoned")
+    result = await handle_agent_task_job(replacement, scheduled_db=sdb, jobs_manager=manager)
+    assert result["status"] == "succeeded"
+    assert executor.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_worker_retries_terminal_persistence_failure_with_same_manager(monkeypatch):
+    from tldw_Server_API.app.services import agent_task_jobs_worker as worker
+    from tldw_Server_API.app.core.Scheduled_Tasks import automation_executors
+
+    stop = asyncio.Event()
+    captured = {}
+
+    class Manager:
+        def acquire_next_job(self, **kwargs):
+            return {"id": 77, "lease_id": "lease", "job_type": "agent_task_run"}
+
+        def fail_job(self, job_id, **kwargs):
+            captured.update(kwargs)
+            stop.set()
+
+    manager = Manager()
+
+    async def handler(job, **kwargs):
+        captured["manager"] = kwargs.get("jobs_manager")
+        error_class = getattr(agent_task_jobs, "ScheduledTaskPersistenceError", RuntimeError)
+        raise error_class("terminal persistence failed")
+
+    monkeypatch.setattr(worker, "JobManager", lambda: manager, raising=False)
+    monkeypatch.setattr(worker, "jobs_manager_from_env", lambda: manager, raising=False)
+    monkeypatch.setattr(worker, "handle_agent_task_job", handler)
+    monkeypatch.setattr(automation_executors, "register_automation_executors", lambda: None)
+    await worker.run_agent_task_jobs_worker(stop)
+    assert captured["retryable"] is True
+    assert captured["manager"] is manager
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("previous", [None, {"owner_user_id": "9999", "status": "completed"}])
+async def test_unverifiable_prior_jobs_claim_is_not_stolen(consumer_env, previous):
+    user_id = 1034
+    definition = _create_definition(user_id)
+    sdb = ScheduledTasksDatabase.for_user(user_id=user_id)
+    run = sdb.create_scheduled_task_run(
+        definition_id=definition.id,
+        owner_id=user_id,
+        scheduled_for=SLOT,
+        job_id="78",
+        run_slot_utc=SLOT,
+        run_slot_key=SLOT,
+        status="running",
+    )
+    assert sdb.claim_scheduled_task_run(
+        owner_id=user_id, run_id=run["id"], claim_id="prior", job_id="78", lease_id="unverifiable"
+    )
+    job = {**_job(definition, user_id), "lease_id": "current", "status": "processing"}
+    manager = Mock()
+    manager.get_job.side_effect = lambda job_id: job if job_id == 77 else previous
+    executor = AsyncMock(return_value="must not run")
+    register_executor("recurring_question", executor)
+    with pytest.raises(agent_task_jobs.ScheduledTaskClaimBusy):
+        await handle_agent_task_job(job, scheduled_db=sdb, jobs_manager=manager)
+    executor.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_replaced_lease_cannot_overlap_cancellation_resistant_executor(consumer_env):
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    user_id = 1035
+    definition = _create_definition(user_id)
+    manager = JobManager()
+    manager.create_job(
+        domain="scheduled_tasks",
+        job_type="agent_task_run",
+        queue="default",
+        payload=_job(definition, user_id)["payload"],
+        owner_user_id=str(user_id),
+    )
+    original = manager.acquire_next_job(domain="scheduled_tasks", queue="default", worker_id="old", lease_seconds=60)
+    started, cancelling, stopped = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    calls = []
+
+    async def executor(d, p):
+        calls.append(d.id)
+        if len(calls) > 1:
+            return "duplicate execution"
+        started.set()
+        try:
+            await stopped.wait()
+        except asyncio.CancelledError:
+            cancelling.set()
+            await stopped.wait()
+        return "old result"
+
+    register_executor("recurring_question", executor)
+    first = asyncio.create_task(handle_agent_task_job(original, jobs_manager=manager))
+    await asyncio.wait_for(started.wait(), timeout=2)
+    first.cancel()
+    await asyncio.wait_for(cancelling.wait(), timeout=2)
+    assert manager.release_job(int(original["id"]), worker_id="old", lease_id=original["lease_id"])
+    replacement = manager.acquire_next_job(domain="scheduled_tasks", queue="default", worker_id="new", lease_seconds=60)
+    try:
+        with pytest.raises(RuntimeError, match="claim.*active|reconciliation"):
+            await handle_agent_task_job(replacement, jobs_manager=manager)
+        assert calls == [definition.id]
+    finally:
+        stopped.set()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+    result = await handle_agent_task_job(replacement, jobs_manager=manager)
+    assert result["status"] == "succeeded"
+    assert calls == [definition.id, definition.id]
+
+
+@pytest.mark.asyncio
+async def test_worker_does_not_ack_or_fail_a_busy_execution_claim(monkeypatch):
+    from tldw_Server_API.app.services import agent_task_jobs_worker as worker
+    from tldw_Server_API.app.core.Scheduled_Tasks import automation_executors
+
+    stop = asyncio.Event()
+    transitions = []
+
+    class Manager:
+        def acquire_next_job(self, **kwargs):
+            return {"id": 77, "lease_id": "lease", "job_type": "agent_task_run"}
+
+        def fail_job(self, *args, **kwargs):
+            transitions.append("failed")
+
+        def complete_job(self, *args, **kwargs):
+            transitions.append("completed")
+
+    async def handler(job, **kwargs):
+        stop.set()
+        error_class = getattr(agent_task_jobs, "ScheduledTaskClaimBusy", RuntimeError)
+        raise error_class("claim active; reconciliation required")
+
+    monkeypatch.setattr(worker, "jobs_manager_from_env", Manager)
+    monkeypatch.setattr(worker, "handle_agent_task_job", handler)
+    monkeypatch.setattr(automation_executors, "register_automation_executors", lambda: None)
+    await worker.run_agent_task_jobs_worker(stop)
+    assert transitions == []
+
+
+@pytest.mark.asyncio
+async def test_repeated_handler_cancellation_retains_live_executor_claim(consumer_env):
+    user_id = 1036
+    definition = _create_definition(user_id)
+    started, cancelling, stop_executor = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    executor_tasks = []
+
+    async def executor(d, p):
+        executor_tasks.append(asyncio.current_task())
+        if len(executor_tasks) > 1:
+            return "duplicate execution"
+        started.set()
+        try:
+            await stop_executor.wait()
+        except asyncio.CancelledError:
+            cancelling.set()
+            await stop_executor.wait()
+        return "old result"
+
+    register_executor("recurring_question", executor)
+    first = asyncio.create_task(handle_agent_task_job(_job(definition, user_id)))
+    await asyncio.wait_for(started.wait(), timeout=2)
+    first.cancel()
+    await asyncio.wait_for(cancelling.wait(), timeout=2)
+    first.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+    try:
+        assert not executor_tasks[0].done()
+        with pytest.raises(agent_task_jobs.ScheduledTaskClaimBusy):
+            await handle_agent_task_job(_job(definition, user_id))
+        assert len(executor_tasks) == 1
+    finally:
+        stop_executor.set()
+        await asyncio.gather(*executor_tasks, return_exceptions=True)

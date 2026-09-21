@@ -1,0 +1,131 @@
+# PR2761 CodeQL remediation plan
+
+**Tracking:** TASK-13013.3.1 (release parent TASK-13013.3).
+**Goal:** Address every open release CodeQL finding with a verified repair or an individually reviewed, reproducible false-positive disposition.
+**Source:** `28797892b1e021dad55cbc736532e702f0963ae8`; retain all release ancestry and approved legal dates.
+
+## Stage 1: Inventory exact findings
+**Goal:** Save alert identities, source/sink traces, analyzed revisions, and rule counts.
+**Success Criteria:** Every alert maps to an owned investigation; mixed-revision scans are explicitly identified.
+**Tests:** GitHub alert/SARIF reconciliation and source location/hash comparisons.
+**Status:** Complete; final head reconciled with zero open alerts.
+
+Initial snapshot: 443 open alerts: 241 Actions, 152 Python path injection,
+18 other Python, and 32 JavaScript. Actions analysis covers the current source;
+the initial Python/JavaScript analyses cover preceding `43165c8c82`.
+
+## Stage 2: Reproduce and repair source deficiencies
+**Goal:** Repair demonstrated security failures without changing unrelated behavior.
+**Success Criteria:** Failing behavior tests turn green; relevant neighboring tests and scoped lint/Bandit pass.
+**Tests:** Real loopback redirect tests, temporary-directory snapshot escape tests, and further source-specific boundary tests.
+**Status:** Complete; follow-up repairs confirmed by hosted analysis.
+
+The current-source scan exposed operator-key persistence in the shared UAT
+initializer and a session-directory alias in snapshot listing/quota. The UAT
+helper now uses document-memory storage, verified against native Chromium
+storage; snapshot directories reject symlinks before canonicalization.
+Research writers have the equivalent cross-session directory check. Whisper
+again treats tilde-prefixed model input literally under its managed root, with
+no OS account lookup. Shared containment comparisons preserve original path
+spelling; checkpoint lexical checks precede filesystem resolution and retain
+the canonical postcheck. Fresh scan traces remain individually reviewed before
+classification.
+
+Independent ownership: Python path/file boundaries; Python HTTP/XPath/hash/regex
+boundaries; frontend transport/storage/DOM boundaries; Actions event and checkout
+trust boundaries. Parent integrates changes and manages source metadata and GitHub.
+
+## Stage 3: Review each analyzer disposition
+**Goal:** Distinguish unreachable analyzer flows from real or unresolved risks.
+**Success Criteria:** Every proposed false-positive closure has its exact alert ID, trace-specific explanation, source hashes and executable evidence. Shared causes may share tests, but every alert is individually mapped and checked.
+**Tests:** Event-specific checkout selection and real fetch-only Git workflow probes; sanitizer, persistence, hash and path containment invariants.
+**Status:** Complete; 424 individual dispositions independently reconciled.
+
+The requester approved the 416 remaining reviewed repository-wide dispositions.
+All completed and were independently reconciled with GitHub state. Together
+with the earlier alert 2671, this is 417 verified dispositions (405 false
+positives, 12 synthetic-test findings). See the
+[disposition ledger](../../Evidence/PR2761-codeql-dispositions.md).
+Real defects and main checkpoint alerts 2281/2282 remain excluded.
+Three later PR-only false positives, 2675/2676/2679, were independently reviewed
+and resolved with committed proof. The ledger totals 420 dispositions. New real
+rescan findings 2673/2674/2677/2678 were repaired, not dismissed.
+
+Do not disable queries, lower thresholds, delete legitimate behavior/tests, or
+blanket-dismiss alerts. Apply individual false-positive dispositions only after
+reviewing the actual trace and verifying the relevant boundary. True findings
+must be repaired and rescanned. Unproven findings remain open.
+
+## Stage 4: Integrate and verify the final candidate
+**Goal:** Commit verified batches, refresh the protected-source record, and obtain current-source analysis.
+**Success Criteria:** Every finding is repaired or individually resolved; all required checks refer to the final source; release PR accurately records remaining non-CodeQL gates.
+**Tests:** Focused suites, lint/Bandit, source/manifest equality, required CI and complete Python/JavaScript/Actions scans.
+**Status:** Complete for CodeQL scope; separate release gates remain open.
+
+The verified follow-up source is `3f9866a860033b70b3434319fadfdd37b12819a2`.
+Its protected manifest covers 7,117 files, SHA-256
+`e38f39788bdbf6ee691a27cc91357e0d92a6b21a47355d745409938ea6e66f76`.
+Release date and Countdown start are unchanged. Validation includes 61 UAT
+tests plus the real Chromium storage proof, 105 Whisper tests, 150 combined
+path tests, independent review and scoped lint/security checks; counts overlap.
+Final-source hosted analysis remains necessary before claiming alert closure.
+
+The `009505c415` JavaScript scan cleared real UAT storage findings. Two synthetic
+regression writes were independently resolved, bringing the ledger to 422.
+The final Python follow-up closes a Windows case-only sibling escape and
+preliminary filesystem probes: compare original canonical spelling, require
+exact lexical root spelling before candidate probes, check links parent-first,
+and retain canonical checks. Absolute/root case aliases fail closed by design.
+The combined suite passes 162 tests; Ruff and scoped Bandit pass. Native Windows
+execution remains unverified. This follow-up needs its own source/manifest
+binding and hosted scan; no query or model suppression is used.
+
+No main merge or publication until the separate release gates are satisfied.
+
+Final verified path source: `968ad1aaf95fccac966cfb31a8ac981508befb88`.
+Independent review passes 36 focused cases with matching frozen file hashes.
+The 7,117-file protected manifest remains byte-identical; source record and test
+pins are rebound to this commit. Legal dates/digests are unchanged. Hosted
+analysis must now verify this final source, including the earlier unrecognized
+main-shared paths; no global dismissal of their actual main defects is used.
+
+## Final rescan follow-up: Whisper and Research leaf boundaries
+
+Python analysis 1759306505 introduced Whisper alerts 2682–2684. Their exact
+flows exposed case-only Windows model-root escapes; source repair now requires
+exact lexical and canonical containment before directory checks, preserving
+valid model identifiers and mixed-case descendants. Nine new Windows-emulated
+regressions/controls pass, with 114 focused tests and no new Bandit findings.
+
+Independent Research leaf review also reproduced a case-only sibling target
+and a leaf link to the session root that allowed version naming outside that
+session. The artifact result must be a strict canonical descendant, preserving
+valid same-session file links. These follow-ups remain source repairs pending
+hosted confirmation; none is added to the 422 reviewed alert dispositions.
+Source commit, protected-source rebind and fresh hosted scans follow final
+independent review. Native Windows execution is not claimed.
+
+The follow-up batches passed final independent review: 38 Whisper model tests
+and 32 Research artifact tests, with all six source/test/evidence hashes
+matching their frozen manifests. Research has 56 combined artifact/helper
+tests; its Bandit scan has zero findings. Whisper retains exactly the existing
+eight scoped baseline findings and has no new findings or scan errors.
+Python analysis 1759364372 on 49cce1 cleared the ten prior snapshot/Research/
+checkpoint alerts. It retains three now-repaired Whisper alerts and introduces
+2686/2687 in administrative shared-workspace root validation; those exact
+traces are under independent review and remain open.
+
+Follow-up source committed as `2e037be4452ddae74807ab672fec94a88c030cc0`.
+The protected-source record is rebound to this commit; all 7,117 protected
+files and the manifest digest remain unchanged. Legal dates and digests remain
+unchanged. Eleven licensing tests, licensing Ruff and Bandit pass.
+
+## Completion
+
+Verified head **58070a0fea5e636d5426b25ced16b66e7147f397** has zero open PR
+CodeQL alerts and a passing CodeQL check. Python analysis1759451338 confirms
+the final Whisper fixes; JavaScript1759415368 and Actions1759389568 cover the
+same head. All424 reviewed dispositions reconcile with GitHub.
+The final result and remaining CI/release limitations are recorded in
+[the result artifact](../../Evidence/PR2761-codeql-final-result.json).
+CodeQL remediation is complete; this does not complete the parent release.

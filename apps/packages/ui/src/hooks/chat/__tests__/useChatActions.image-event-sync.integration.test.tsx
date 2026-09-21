@@ -128,7 +128,7 @@ vi.mock("@/utils/selected-character-storage", () => ({
   selectedCharacterSyncStorage: {
     get: vi.fn(async () => null)
   },
-  parseSelectedCharacterValue: vi.fn(() => null)
+  parseSelectedCharacterValue: vi.fn((value: unknown) => value)
 }))
 
 vi.mock("@/hooks/chat/useChatSettingsRecord", () => ({
@@ -163,6 +163,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     createChat: createChatMock,
     streamCharacterChatCompletion: streamCharacterChatCompletionMock,
     persistCharacterCompletion: persistCharacterCompletionMock,
+    getChatSettings: vi.fn(async () => ({ settings: null })),
     initialize: vi.fn(async () => null),
     getMessage: vi.fn(async () => ({ version: 1 })),
     editMessage: vi.fn(async () => null)
@@ -559,7 +560,9 @@ describe("useChatActions image event sync integration", () => {
         kind: "character", id: "7", name: "Guide",
         metadata: { selectionMode: "tracked" }
       },
-      serverChatCharacterId: 7
+      serverChatCharacterId: 7,
+      serverChatAssistantKind: "character",
+      serverChatAssistantId: "7"
     })
     const { result } = renderHook(() => useChatActions(options))
 
@@ -629,6 +632,12 @@ describe("useChatActions character stream throttling integration", () => {
     const { options, setMessages, getCurrentMessages } = createHookOptions([])
     options.serverChatId = null
     options.serverChatCharacterId = null
+    options.selectedAssistant = {
+      kind: "character",
+      id: "101",
+      name: "Stream Character",
+      metadata: { selectionMode: "tracked" }
+    }
     options.selectedCharacter = {
       id: 101,
       name: "Stream Character",
@@ -652,6 +661,7 @@ describe("useChatActions character stream throttling integration", () => {
 
     // Fake timers freeze the throttle window so this bound stays deterministic in CI.
     expect(setMessages.mock.calls.length).toBeLessThan(40)
+    expect(options.notification.error.mock.calls).toEqual([])
     expect(streamCharacterChatCompletionMock).toHaveBeenCalledTimes(1)
     expect(normalChatModeMock).not.toHaveBeenCalled()
 
@@ -688,6 +698,9 @@ describe("useChatActions character stream throttling integration", () => {
 
     const { options } = createHookOptions([])
     options.serverChatId = "chat-character-1"
+    options.serverChatCharacterId = 101
+    options.serverChatAssistantKind = "character"
+    options.serverChatAssistantId = "101"
     options.selectedCharacter = {
       id: 101,
       name: "Stream Character",
@@ -755,6 +768,9 @@ describe("useChatActions character stream throttling integration", () => {
 
     const { options } = createHookOptions([])
     options.serverChatId = "server-chat-1"
+    options.serverChatCharacterId = 101
+    options.serverChatAssistantKind = "character"
+    options.serverChatAssistantId = "101"
     options.selectedCharacter = {
       id: 101,
       name: "Stream Character",

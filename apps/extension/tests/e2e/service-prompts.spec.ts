@@ -11,6 +11,7 @@ import http from "node:http"
 import type { AddressInfo } from "node:net"
 import path from "node:path"
 
+import { fixtureCorsHeaders } from "./utils/cors"
 import { launchWithExtension } from "./utils/extension"
 import { grantHostPermission } from "./utils/permissions"
 
@@ -341,29 +342,27 @@ const listen = async (server: http.Server): Promise<string> => {
 }
 
 const sendJson = (
-  request: http.IncomingMessage,
   response: http.ServerResponse,
   status: number,
   body: unknown
 ) => {
-  const origin = request.headers.origin || "*"
   response.writeHead(status, {
-    "access-control-allow-credentials": "true",
-    "access-control-allow-origin": origin,
     "content-type": "application/json"
   })
   response.end(JSON.stringify(body))
 }
 
-const startUnresolvedScopeServer = async () => {
+const startUnresolvedScopeServer = async (allowedOrigins: ReadonlySet<string>) => {
   const server = http.createServer((request, response) => {
+    for (const [name, value] of Object.entries(fixtureCorsHeaders(request.headers.origin, allowedOrigins))) {
+      response.setHeader(name, value)
+    }
     const url = new URL(request.url || "/", "http://127.0.0.1")
     if (request.method === "OPTIONS") {
       response.writeHead(204, {
         "access-control-allow-headers":
           "authorization, content-type, x-api-key",
-        "access-control-allow-methods": "GET, PUT, DELETE, OPTIONS",
-        "access-control-allow-origin": request.headers.origin || "*"
+        "access-control-allow-methods": "GET, PUT, DELETE, OPTIONS"
       })
       return response.end()
     }
@@ -371,9 +370,9 @@ const startUnresolvedScopeServer = async () => {
       url.pathname === "/api/v1/health" ||
       url.pathname === "/api/v1/health/live"
     ) {
-      return sendJson(request, response, 200, { status: "ok" })
+      return sendJson(response, 200, { status: "ok" })
     }
-    return sendJson(request, response, 401, {
+    return sendJson(response, 401, {
       detail: "Authenticated test scope is intentionally unresolved."
     })
   })
@@ -405,18 +404,20 @@ const packagedDetail = (): ServicePromptDetail & typeof promptDefinition => ({
   source: "packaged"
 })
 
-const startCorruptServer = async () => {
+const startCorruptServer = async (allowedOrigins: ReadonlySet<string>) => {
   let corrupt = true
   const requests: RecordedRequest[] = []
   const server = http.createServer(async (request, response) => {
     const method = (request.method || "GET").toUpperCase()
+    for (const [name, value] of Object.entries(fixtureCorsHeaders(request.headers.origin, allowedOrigins))) {
+      response.setHeader(name, value)
+    }
     const url = new URL(request.url || "/", "http://127.0.0.1")
     if (method === "OPTIONS") {
       response.writeHead(204, {
         "access-control-allow-headers":
           "authorization, content-type, x-api-key",
-        "access-control-allow-methods": "GET, PUT, DELETE, OPTIONS",
-        "access-control-allow-origin": request.headers.origin || "*"
+        "access-control-allow-methods": "GET, PUT, DELETE, OPTIONS"
       })
       return response.end()
     }
@@ -431,17 +432,17 @@ const startCorruptServer = async () => {
       ["/api/v1/health", "/api/v1/health/live"].includes(url.pathname) &&
       method === "GET"
     ) {
-      return sendJson(request, response, 200, { status: "ok" })
+      return sendJson(response, 200, { status: "ok" })
     }
     if (url.pathname === "/api/v1/service-prompts" && method === "GET") {
-      return sendJson(request, response, 200, [promptDefinition])
+      return sendJson(response, 200, [promptDefinition])
     }
     if (
       url.pathname === `/api/v1/service-prompts/${PROMPT_ID}` &&
       method === "GET"
     ) {
       if (corrupt) {
-        return sendJson(request, response, 500, {
+        return sendJson(response, 500, {
           detail: {
             can_reset: true,
             code: "service_prompt_corrupt_override",
@@ -450,14 +451,14 @@ const startCorruptServer = async () => {
           }
         })
       }
-      return sendJson(request, response, 200, packagedDetail())
+      return sendJson(response, 200, packagedDetail())
     }
     if (
       url.pathname === `/api/v1/service-prompts/${PROMPT_ID}` &&
       method === "DELETE"
     ) {
       if (url.searchParams.get("expected_revision") !== CORRUPT_REVISION) {
-        return sendJson(request, response, 409, {
+        return sendJson(response, 409, {
           detail: {
             code: "service_prompt_revision_conflict",
             current_revision: CORRUPT_REVISION,
@@ -466,9 +467,9 @@ const startCorruptServer = async () => {
         })
       }
       corrupt = false
-      return sendJson(request, response, 200, packagedDetail())
+      return sendJson(response, 200, packagedDetail())
     }
-    return sendJson(request, response, 404, { detail: "not found" })
+    return sendJson(response, 404, { detail: "not found" })
   })
   return { baseUrl: await listen(server), requests, server }
 }
@@ -520,7 +521,10 @@ test.describe("Workflow prompts cross-host release gate", () => {
       seedConfig: extensionConfig(target.serverUrl, target.apiKey)
     })
     const { context, extensionId, optionsUrl, page: extensionPage } = launch
-    const unresolved = await startUnresolvedScopeServer()
+    const unresolved = await startUnresolvedScopeServer(new Set([
+      new URL(target.webUrl).origin,
+      `chrome-extension://${extensionId}`
+    ]))
 
     try {
       await grantOrigin(context, extensionId, target.serverUrl)
@@ -788,7 +792,8 @@ test.describe("Workflow prompts cross-host release gate", () => {
 
   test("preserves a corrupt revision through built-extension reset and recovers packaged state", async () => {
     test.setTimeout(120_000)
-    const corruptServer = await startCorruptServer()
+    const allowedOrigins = new Set<string>()
+    const corruptServer = await startCorruptServer(allowedOrigins)
     let context: BrowserContext | null = null
 
     try {
@@ -797,6 +802,7 @@ test.describe("Workflow prompts cross-host release gate", () => {
       })
       context = launch.context
       const { extensionId, optionsUrl, page } = launch
+      allowedOrigins.add(`chrome-extension://${extensionId}`)
       await assertHealthy(
         `${corruptServer.baseUrl}/api/v1/health`,
         "Corrupt transport server"

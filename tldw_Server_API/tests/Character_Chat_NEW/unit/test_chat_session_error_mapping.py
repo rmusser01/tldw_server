@@ -1225,6 +1225,63 @@ async def test_complete_v2_bedrock_auth_contract_distinguishes_default_chain_fro
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("failure_type", [None, RuntimeError, ValueError])
+@pytest.mark.parametrize("offline", [False, True])
+@pytest.mark.parametrize("failure_stage", ["header", "content"])
+async def test_buffered_character_stream_preserves_output_and_sanitizes_failures(
+    monkeypatch: pytest.MonkeyPatch, failure_type: type[Exception] | None,
+    offline: bool, failure_stage: str,
+) -> None:
+    """Buffered provider replies share the lazy stream's public error boundary."""
+    lifecycle: list[Any] = []
+    _install_character_completion_runtime(
+        monkeypatch,
+        provider_response={"choices": [{"message": {"content": "Safe reply"}}]},
+        lifecycle=lifecycle,
+    )
+    if offline:
+        for flag in ("ENABLE_LOCAL_LLM_PROVIDER", "DISABLE_OFFLINE_SIM", "ALLOW_LOCAL_LLM_CALLS"):
+            monkeypatch.setenv(flag, "false")
+    response = await character_chat_sessions.character_chat_completion(
+        chat_id="chat-1",
+        body=CharacterChatCompletionV2Request(
+            provider="local-llm", model="local-test", stream=True,
+            save_to_db=False, include_character_context=False,
+        ),
+        db=_CompletionReadyChatSessionDb(), current_user=_test_user(),
+        http_request=SimpleNamespace(state=SimpleNamespace()),
+    )
+    sentinel = "/private/provider-cache.json?credential=private-test-value"
+    if failure_type is not None:
+        def fail_stream_id() -> None:
+            raise failure_type(sentinel)
+
+        if failure_stage == "header":
+            monkeypatch.setattr(character_chat_sessions.uuid, "uuid4", fail_stream_id)
+        else:
+            original_dumps = json.dumps
+
+            def fail_content_serialization(value: Any, *args: Any, **kwargs: Any) -> str:
+                if isinstance(value, dict) and value.get("choices", [{}])[0].get("delta", {}).get("content"):
+                    raise failure_type(sentinel)
+                return original_dumps(value, *args, **kwargs)
+
+            monkeypatch.setattr(character_chat_sessions.json, "dumps", fail_content_serialization)
+
+    frames = [chunk async for chunk in response.body_iterator]
+    assert frames[-1] == "data: [DONE]\n\n"
+    assert sentinel not in "".join(frames)
+    if failure_type is None:
+        assert ("hello" if offline else "Safe reply") in "".join(frames)
+        assert '"finish_reason": "stop"' in frames[-2]
+    else:
+        assert json.loads(frames[-2].removeprefix("data: ")) == {
+            "error": "An internal error has occurred."
+        }
+        assert len(frames) == (2 if failure_stage == "header" else 3)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("stream_kind", ["sync", "async"])
 async def test_complete_v2_stream_marks_success_then_closes_upstream_before_runtime(
     monkeypatch: pytest.MonkeyPatch,

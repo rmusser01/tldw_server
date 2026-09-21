@@ -508,3 +508,53 @@ def test_openapi_owns_all_routes_once_and_discriminates_attempt_phases() -> None
     assert "OsceCandidateAttemptResponse" in serialized_schema
     assert "OsceRevealedAttemptResponse" in serialized_schema
     assert attempt_schema["discriminator"]["propertyName"] == "state"
+
+
+def test_osce_router_applies_finite_ingress_limit_before_handler(monkeypatch):
+    from fastapi import FastAPI
+
+    from tldw_Server_API.app.api.v1.API_Deps import auth_deps
+    from tldw_Server_API.app.api.v1.endpoints import quizzes_osce
+
+    monkeypatch.setenv("RG_ENABLED", "0")
+    monkeypatch.setattr(auth_deps, "_is_test_mode", lambda: False)
+    monkeypatch.setenv("AUTH_DEPS_FALLBACK_RATE_LIMIT", "1")
+    monkeypatch.setenv("AUTH_DEPS_FALLBACK_RATE_WINDOW_SECONDS", "60")
+    app = FastAPI()
+    app.include_router(quizzes_osce.router)
+    app.dependency_overrides[get_chacha_db_for_user] = lambda: None
+    calls = []
+    monkeypatch.setattr(quizzes_osce, "_require_osce_quiz", lambda *args: calls.append(args))
+    # Missing request body yields validation failure without running a handler,
+    # but admission must still consume its finite request budget.
+    with TestClient(app, client=(f"osce-{uuid4().hex}", 50000)) as client:
+        first = client.post("/1/osce-stations", json={})
+        second = client.post("/1/osce-stations", json={})
+    assert first.status_code == 422
+    assert second.status_code == 429
+    assert second.headers.get("retry-after")
+    assert calls == []
+    assert all(
+        any(dep.call is quizzes_osce._enforce_osce_rate_limit for dep in route.dependant.dependencies)
+        for route in quizzes_osce.router.routes
+    )
+
+
+def test_osce_rate_limit_does_not_add_internal_query_parameters():
+    from fastapi import FastAPI
+
+    from tldw_Server_API.app.api.v1.endpoints import quizzes_osce
+
+    app = FastAPI()
+    app.include_router(quizzes_osce.router)
+    paths = app.openapi()["paths"]
+    assert [
+        parameter for parameter in paths["/{quiz_id}/osce-stations"]["post"]["parameters"]
+        if parameter["in"] == "query"
+    ] == []
+    assert all(
+        parameter["name"] != "rate_limiter"
+        for methods in paths.values()
+        for operation in methods.values()
+        for parameter in operation.get("parameters", [])
+    )

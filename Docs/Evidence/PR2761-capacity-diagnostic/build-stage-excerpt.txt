@@ -1,0 +1,9 @@
+#18 [runtime  5/14] RUN python -c "import mcp_unified; import tldw_profile_core"
+#18 DONE 3.9s
+#27 [runtime 14/14] RUN mkdir -p /app/Databases &&     chown appuser:appuser /app/Databases &&     chmod +x /usr/local/bin/tldw-app-first-run
+#27 DONE 0.4s
+#28 exporting to image
+#28 exporting layers
+#28 exporting layers 217.6s done
+#28 CANCELED
+ERROR: failed to build: failed to solve: Canceled: context canceled

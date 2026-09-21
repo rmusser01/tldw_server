@@ -114,10 +114,10 @@ Optional add-ons (apply AFTER your base profile is healthy):
 ## Current Status
 
 Current release line:
-- `0.1.41` Beta status. Expect rough edges and please report issues.
+- `0.1.43` Beta status. Expect rough edges and please report issues.
 - Primary client surfaces are the Next.js WebUI, Admin UI, and browser extension.
 - Package metadata is prepared under the canonical PyPI name `tldw-server`; use a repository checkout until publishing is complete.
-- The `dev` branch carries work beyond `0.1.41`, including post-`0.1.41` branch work, and `main` is prepared for the `0.1.41` release; see [CHANGELOG.md](CHANGELOG.md) for the PR rollup and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for the published release entry point.
+- The `dev` branch carries work beyond `0.1.43`; this draft candidate includes all changes since `v0.1.42` through PR #2970. See [CHANGELOG.md](CHANGELOG.md) for the PR rollup and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for the published release entry point.
 
 <details>
 <summary>Current focus and migration notes from the old Gradio version</summary>
@@ -152,6 +152,42 @@ Current release line:
 ## What's New (in the last few releases)
 
 <details>
+<summary>0.1.43 release candidate</summary>
+
+- OSCE practice, advanced quiz metrics, structured prompt recipes and Writing Predict/Fill service prompts.
+- Usable-provider scheduled-task overrides, Explainer navigation and visual-novel generation recovery.
+- Fresh-install and post-merge repairs across Chat, Notes, Study, World Books, account isolation and PostgreSQL lifecycle handling.
+- macOS guest mismatch, timeout and launchd recovery drills.
+- All 616 commits through PR #2970 are listed in the [change inventory](Docs/Development/releases/0.1.43-change-inventory.md).
+- This is a draft: exact-head CI, the human Change summary, legal-date review and publication remain pending. See the [release plan](Docs/superpowers/plans/2026-09-20-release-0.1.43-plan.md).
+- Back up persistent data before upgrading. UAT261 remains open and a fresh complete UAT matrix is outstanding.
+
+</details>
+
+<details>
+<summary>0.1.42 release</summary>
+
+Included in the `0.1.42` release candidate (frozen through PR #2941):
+- Chat macros and service prompts, notes/personal-context sync, Research Workspace improvements, and standalone HTML presentations.
+- Audio/persona and buddy workflows, MCP HTTP/SSE transports, durable webhooks, administration improvements, and production backup/rollback checks.
+- Provider credential resolution is shared across Chat, RAG, embeddings, and audio, with fail-closed BYOK handling and safer streaming.
+- Inline embeddings workflows, Jobs admission transactions and quotas, and strict Skills live-integration certification were hardened.
+- The protected frontend source-available boundary, trusted license gate, protected-branch prerequisites, and license-first PR sequencing were established.
+- Package, FastAPI, README, release-note, and MkDocs metadata were bumped to `0.1.42`.
+- Protected frontend source remains under PolyForm Perimeter 1.0.1; the `0.1.42` Countdown grant adds `AGPL-3.0-only` on September 10, 2028 at 12:00 UTC. See [the immutable release record](LICENSES/releases/0.1.42/release.json). No protected frontend binary is published.
+
+Still active on `dev`:
+- Treat [CHANGELOG.md](CHANGELOG.md) as the authoritative branch-level history for work after this frozen release.
+
+Currently landing on `dev` (post-`0.1.43` branch work):
+- Continue the license-first CI cutover only after this release is published and
+  synchronized back to `dev`.
+
+See [CHANGELOG.md](CHANGELOG.md) for the full running history and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for published release notes.
+
+</details>
+
+<details>
 <summary>0.1.41 release</summary>
 
 Included in the `0.1.41` release:
@@ -161,6 +197,7 @@ Included in the `0.1.41` release:
 - Package, FastAPI, README, release-note, and MkDocs metadata were bumped to `0.1.41`.
 
 Still active on `dev`:
+- `0.1.41` is superseded by the `0.1.42` release metadata above.
 - Treat [CHANGELOG.md](CHANGELOG.md) as the authoritative branch-level history for what has entered the release train.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full running history and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for published release notes.

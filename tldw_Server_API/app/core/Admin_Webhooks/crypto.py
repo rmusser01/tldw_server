@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from enum import Enum
 from types import MappingProxyType
 
+from tldw_Server_API.app.core.exceptions import WebhookKeyError
 from tldw_Server_API.app.core.Security.crypto import (
     decrypt_json_blob_with_key,
     encrypt_json_blob_with_key,
@@ -63,14 +64,6 @@ class WebhookKeyLoadCode(str, Enum):
     AVAILABLE = "available"
     KEY_UNAVAILABLE = WebhookKeyErrorCode.KEY_UNAVAILABLE.value
     CONFIGURATION_INVALID = WebhookKeyErrorCode.CONFIGURATION_INVALID.value
-
-
-class WebhookKeyError(Exception):
-    """Expected key-ring failure that exposes only a stable code."""
-
-    def __init__(self, code: WebhookKeyErrorCode) -> None:
-        self.code = code
-        super().__init__(code.value)
 
 
 @dataclass(frozen=True)

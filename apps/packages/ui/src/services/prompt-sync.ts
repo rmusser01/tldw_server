@@ -1046,7 +1046,7 @@ export async function pullFromStudio(
           serverPrompt,
           recipeOwnership
         )
-        if (!reconciliation.safe)
+        if (reconciliation.safe === false)
           return {
             success: false,
             localId: existingLocalId,
@@ -1077,7 +1077,7 @@ export async function pullFromStudio(
         serverPrompt,
         recipeOwnership
       )
-      if (!reconciliation.safe)
+      if (reconciliation.safe === false)
         return {
           success: false,
           localId: existing.id,

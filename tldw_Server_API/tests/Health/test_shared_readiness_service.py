@@ -21,6 +21,31 @@ from tldw_Server_API.app.services.readiness_service import (
 pytestmark = pytest.mark.unit
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ready", [True, False])
+async def test_compatibility_readiness_retains_typed_client_fields(monkeypatch, ready):
+    """Legacy typed clients receive a readiness boolean and sanitized diagnostics."""
+    import json
+    from datetime import datetime
+
+    from starlette.requests import Request
+
+    snapshot = ReadinessSnapshot(
+        ready, None if ready else "database_unavailable",
+        {"database": {"status": "healthy" if ready else "unhealthy", "type": "sqlite"},
+         "engine": {"queue_depth": 0}},
+    )
+    monkeypatch.setattr(readiness_service, "collect_readiness_snapshot", AsyncMock(return_value=snapshot))
+    response = await health.api_readiness(Request({"type": "http", "app": FastAPI()}))
+    body = json.loads(response.body)
+
+    assert body["ready"] is ready
+    assert body["db"] == {"ok": ready, "backend": "sqlite"}
+    assert body["engine"] == {"queue_depth": 0}
+    assert datetime.fromisoformat(body["time"]).tzinfo is not None
+    assert response.status_code == (200 if ready else 503)
+
+
 def test_internal_projection_discards_all_detail() -> None:
     snapshot = ReadinessSnapshot(
         ready=False,

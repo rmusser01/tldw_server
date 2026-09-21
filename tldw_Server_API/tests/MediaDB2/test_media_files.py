@@ -9,12 +9,14 @@ Tests cover:
 - has_original_file check
 - Soft-delete and include_deleted behavior
 """
-import pytest
-from unittest.mock import MagicMock
+import json
 from typing import Any
+from unittest.mock import MagicMock
 
-from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
+import pytest
+
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
+from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.core.DB_Management.media_db.repositories.media_files_repository import (
     MediaFilesRepository,
 )
@@ -197,6 +199,16 @@ class TestGetMediaFiles:
 
         files = db.get_media_files(media_id)
         assert files == []
+
+    @pytest.mark.unit
+    def test_get_media_files_returns_json_serializable_records(self, db_with_media: tuple[MediaDatabase, int]) -> None:
+        """Consumers can serialize file metadata without private row adapters."""
+        db, media_id = db_with_media
+        db.insert_media_file(media_id=media_id, file_type="original", storage_path="original.pdf")
+
+        files = json.loads(json.dumps(db.get_media_files(media_id)))
+
+        assert files[0]["storage_path"] == "original.pdf"
 
 
 class TestHasOriginalFile:

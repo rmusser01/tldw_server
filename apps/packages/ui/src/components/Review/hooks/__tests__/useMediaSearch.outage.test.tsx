@@ -45,6 +45,35 @@ afterEach(() => {
 })
 
 describe("Media search outage handling", () => {
+  it.each(["tldw:auth-principal-changed", "tldw:auth-credentials-changed", "tldw:config-updated", "storage"])("clears cached private results and retires pending work at %s", async eventName => {
+    vi.mocked(bgRequest).mockResolvedValue({ items: [{ id: 1, title: "Prior private source", keywords: ["private-keyword"] }], pagination: { total_items: 1 } })
+    const { result, client, feedback } = mountSearch()
+    await waitFor(() => expect(result.current.results).toHaveLength(1))
+    let resolve!: (value: unknown) => void
+    vi.mocked(bgRequest).mockImplementationOnce(() => new Promise(done => { resolve = done }))
+    let refresh!: Promise<unknown>
+    act(() => { refresh = result.current.refetch() })
+    await waitFor(() => expect(resolve).toBeTypeOf("function"))
+    act(() => window.dispatchEvent(eventName === "storage"
+      ? new StorageEvent("storage", {
+        key: "tldwConfig",
+        oldValue: JSON.stringify({ serverUrl: "http://fixture.invalid", apiKey: "old-account" }),
+        newValue: JSON.stringify({ serverUrl: "http://fixture.invalid", apiKey: "new-account" })
+      })
+      : new CustomEvent(eventName, { detail: { authorityChanged: true } })))
+    expect(result.current.isCurrent()).toBe(false)
+    expect(result.current.results).toEqual([])
+    expect(result.current.keywordOptions).toEqual([])
+    expect(client.getQueriesData({ queryKey: ["media-search"] }).every(([, data]) => data === undefined)).toBe(true)
+    await act(async () => {
+      resolve({ items: [{ id: 2, title: "Late private source" }], pagination: { total_items: 1 } })
+      await refresh
+    })
+    expect(result.current.results).toEqual([])
+    expect(JSON.stringify(client.getQueriesData({ queryKey: ["media-search"] }))).not.toContain("private source")
+    expect(feedback).toEqual([])
+  })
+
   it.each(["resolve", "reject"])("discards late search/type work after unmount (%s)", async outcome => {
     const pending: Array<{ resolve: (value: unknown) => void; reject: (error: Error) => void }> = []
     vi.mocked(bgRequest).mockImplementation(() => new Promise((resolve, reject) => { pending.push({ resolve, reject }) }))
@@ -95,11 +124,12 @@ describe("Media search outage handling", () => {
   })
 
   it("loads a replacement owner without cached content from the previous mounted lifetime", async () => {
-    const previous = mountSearch()
     vi.mocked(bgRequest).mockResolvedValue({ items: [{ id: 1, title: 'Old private source' }], pagination: { total_items: 1 } })
+    const previous = mountSearch()
     await act(async () => { await previous.result.current.refetch() })
-    expect(previous.result.current.results[0].title).toBe('Old private source')
+    await waitFor(() => expect(previous.result.current.results[0]?.title).toBe('Old private source'))
     previous.unmount()
+    expect(JSON.stringify(previous.client.getQueriesData({ queryKey: ["media-search"] }))).not.toContain('Old private source')
     vi.mocked(bgRequest).mockResolvedValue({ items: [], pagination: { total_items: 0 } })
     const next = renderHook(() => useMediaSearch({ t, message: { error: vi.fn(), warning: vi.fn() } }), {
       wrapper: ({ children }: React.PropsWithChildren) => <QueryClientProvider client={previous.client}>{children}</QueryClientProvider>
@@ -117,6 +147,7 @@ describe("Media search outage handling", () => {
     const data = { items: [{ id: 7, title: 'Current source' }], pagination: { total_items: 1 } }
     vi.mocked(bgRequest).mockResolvedValue(data)
     await act(async () => {
+      window.dispatchEvent(new CustomEvent('tldw:config-updated', { detail: { authorityChanged: false } }))
       useConnectionStore.setState(({ state }) => ({ state: { ...state, isConnected: true, isChecking: true } }))
       for (const resolve of resolvers) resolve(data)
     })
@@ -157,4 +188,17 @@ describe("Media search outage handling", () => {
     await waitFor(() => expect(feedback).toContain("Failed to search media"))
     expect(runtimeErrors).toHaveBeenCalledWith("Media search error:", unexpected)
   })
+})
+
+it('does not reload another account media types from legacy shared cache', async () => {
+  const { seedMediaTypesCache, MEDIA_TYPES_CACHE_KEY } = await import('../../mediaTypeCache')
+  seedMediaTypesCache(['private-project-type'])
+  const legacy = localStorage.getItem(MEDIA_TYPES_CACHE_KEY)
+  vi.mocked(bgRequest).mockResolvedValue({ items: [{ id: 1, type: 'pdf' }], pagination: { total_items: 1 } })
+  const { result } = mountSearch()
+  await waitFor(() => expect(bgRequest).toHaveBeenCalled())
+  await act(async () => {})
+  expect(result.current.availableMediaTypes).not.toContain('private-project-type')
+  expect(result.current.availableMediaTypes).toContain('pdf')
+  expect(localStorage.getItem(MEDIA_TYPES_CACHE_KEY)).toBe(legacy)
 })

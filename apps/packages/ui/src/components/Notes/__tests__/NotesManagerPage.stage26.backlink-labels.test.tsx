@@ -25,7 +25,9 @@ const {
   mockInitialize,
   mockGetChat,
   mockListChatMessages,
-  mockGetCharacter
+  mockGetCharacter,
+  mockGetConfig,
+  mockGetCurrentUser
 } = vi.hoisted(() => ({
   mockBgRequest: vi.fn(),
   mockMessageSuccess: vi.fn(),
@@ -42,7 +44,9 @@ const {
   mockInitialize: vi.fn(),
   mockGetChat: vi.fn(),
   mockListChatMessages: vi.fn(),
-  mockGetCharacter: vi.fn()
+  mockGetCharacter: vi.fn(),
+  mockGetConfig: vi.fn(),
+  mockGetCurrentUser: vi.fn()
 }))
 
 vi.mock("react-i18next", () => ({
@@ -113,7 +117,6 @@ const chatAuthority = vi.hoisted(() => ({
   controller: new AbortController(), setSelection: vi.fn()
 }))
 vi.mock("@/hooks/useSelectedAssistant", () => ({ useSelectedAssistant: () => [chatAuthority.selection, chatAuthority.setSelection] }))
-vi.mock("@/components/Notes/hooks/useNotesGraphAuthorityScope", () => ({ useNotesGraphAuthorityScope: () => chatAuthority.owner }))
 vi.mock("@/services/service-prompts", () => ({ loadServicePromptSnapshot: async () => ({
   scopeKey: "scope-A", scopeSignal: chatAuthority.controller.signal, scopeInvalidatedSignal: chatAuthority.controller.signal,
   requestScope: { config: { serverUrl: "http://server", authMode: "multi-user" }, userId: "A" }, release: vi.fn()
@@ -132,10 +135,10 @@ vi.mock("@/services/settings/registry", async (importOriginal) => {
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: mockInitialize,
+    getConfig: mockGetConfig,
     getChat: mockGetChat,
     listChatMessages: mockListChatMessages,
     getCharacter: mockGetCharacter,
-    getConfig: async () => ({ serverUrl: "http://server", authMode: "multi-user", accessToken: "test-token" }),
     getProvidersStatus: async () => null
   }
 }))
@@ -156,6 +159,9 @@ vi.mock("@/services/app", () => ({ webUIResumeLastChat: async () => false }))
 vi.mock("@/services/chat-settings", () => ({ syncChatSettingsForServerChat: async () => null }))
 vi.mock("@/services/chat-surface-scope", async original => ({ ...await original<typeof import("@/services/chat-surface-scope")>(), buildChatSurfaceScopeKeyFromConfig: () => "scope-A" }))
 vi.mock("@/services/tldw-server", async original => ({ ...await original<typeof import("@/services/tldw-server")>(), fetchChatModels: async () => [] }))
+vi.mock("@/services/tldw/TldwAuth", () => ({
+  tldwAuth: { getCurrentUser: mockGetCurrentUser }
+}))
 
 const renderPage = () => {
   const queryClient = new QueryClient({
@@ -214,6 +220,16 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
     useStoreMessageOption.setState({ messages: [], history: [], historyId: null, serverChatId: "robot", serverChatCharacterId: "5", serverChatMetaLoaded: true, streaming: false, isProcessing: false })
     usePlaygroundSessionStore.getState().saveSession({ historyId: "robot-history", serverChatId: "robot", scopeKey: "scope-A" })
     mockInitialize.mockResolvedValue(undefined)
+    mockGetConfig.mockResolvedValue({
+      serverUrl: "https://notes.example.test",
+      authMode: "single-user",
+      authSource: "cookie-session"
+    })
+    mockGetCurrentUser.mockResolvedValue({
+      id: 1,
+      username: "notes-user",
+      is_active: true
+    })
     mockListChatMessages.mockResolvedValue([])
     mockGetCharacter.mockResolvedValue(null)
   })
@@ -249,6 +265,32 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
       return {}
     })
   }
+
+  it("waits for a verified principal before reading linked notes", async () => {
+    configureCommonRequests("conv-verified")
+    mockGetChat.mockResolvedValue({ id: "conv-verified", title: "Verified session" })
+    let resolvePrincipal!: (user: {
+      id: number
+      username: string
+      is_active: boolean
+    }) => void
+    // Every concurrent authority lookup stays pending until the principal is verified.
+    mockGetCurrentUser.mockReturnValue(new Promise((resolve) => {
+      resolvePrincipal = resolve
+    }))
+
+    renderPage()
+    await waitFor(() => expect(mockGetCurrentUser).toHaveBeenCalled())
+    expect(screen.queryByText("Verified session")).not.toBeInTheDocument()
+    expect(mockBgRequest.mock.calls.some(([request]) =>
+      request.path?.startsWith("/api/v1/notes/?")
+    )).toBe(false)
+
+    await act(async () => {
+      resolvePrincipal({ id: 1, username: "notes-user", is_active: true })
+    })
+    expect(await screen.findByText("Verified session")).toBeInTheDocument()
+  })
 
   it("shows conversation title labels with UUID debug tooltip in list and header", async () => {
     configureCommonRequests("conv-1234")

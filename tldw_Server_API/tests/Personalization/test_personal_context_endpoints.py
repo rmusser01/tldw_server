@@ -305,3 +305,77 @@ def test_personal_context_router_is_registered_in_canonical_groups() -> None:
     minimal = {spec.name for spec in iter_minimal_optional_router_specs()}
     assert "personal-context" in content
     assert "personal-context" in minimal
+
+
+@pytest.mark.parametrize("value", [True, False, "1", 1.0])
+def test_purge_rejects_non_integer_generations_before_service(api, monkeypatch, value):
+    client, service = api
+
+    def must_not_purge(**kwargs):
+        raise AssertionError("invalid generation reached destructive service")
+
+    monkeypatch.setattr(service, "purge_profile", must_not_purge)
+    response = client.post(
+        "/api/v1/personal-context/purge",
+        json={
+            "mode": "everywhere",
+            "confirmation": "PURGE PERSONAL CONTEXT",
+            "expected_purge_generation": value,
+        },
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("value", ["false", "true", 0, 1])
+@pytest.mark.parametrize(
+    "route, method, field, service_method",
+    [
+        ("manifest", "post", "runtime_enabled", "create_profile"),
+        ("runtime", "patch", "enabled", "set_runtime_enabled"),
+    ],
+)
+def test_runtime_rejects_coerced_booleans_before_service(
+    api,
+    monkeypatch,
+    value,
+    route,
+    method,
+    field,
+    service_method,
+):
+    client, service = api
+
+    def must_not_update(*args, **kwargs):
+        raise AssertionError("invalid boolean reached service")
+
+    monkeypatch.setattr(service, service_method, must_not_update)
+    response = getattr(client, method)(f"/api/v1/personal-context/{route}", json={field: value})
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("value", ["false", "true", 0, 1])
+@pytest.mark.parametrize("update", [False, True])
+def test_record_requests_reject_coerced_no_expiry(api, monkeypatch, value, update):
+    client, service = api
+
+    def must_not_mutate(*args, **kwargs):
+        raise AssertionError("invalid no_expiry reached service")
+
+    monkeypatch.setattr(service, "update_record" if update else "create_record", must_not_mutate)
+    if update:
+        response = client.patch(
+            "/api/v1/personal-context/records/record-id",
+            json={
+                "expected_version_id": "version-id",
+                "no_expiry": value,
+            },
+        )
+    else:
+        response = client.post(
+            "/api/v1/personal-context/records",
+            json={
+                **_record_body("scope-id"),
+                "no_expiry": value,
+            },
+        )
+    assert response.status_code == 422

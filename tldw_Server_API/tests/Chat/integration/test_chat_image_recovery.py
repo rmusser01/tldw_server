@@ -318,3 +318,32 @@ def test_opt_in_jpeg_requires_complete_pixel_data(persona_chat_client, persona_c
     assert response.status_code == (409 if truncated else 200)
     if not truncated:
         assert response.json()["messages"][0]["images"] == ["data:image/jpeg;base64," + base64.b64encode(data).decode()]
+
+
+@pytest.mark.parametrize("detail", ["high", "low"])
+@pytest.mark.parametrize("operation", ["retry", "regenerate"])
+def test_image_detail_survives_saved_turn_reuse(persona_chat_client, persona_chat_db, detail, operation):
+    client, headers, provider = persona_chat_client
+    _, url = image_data()
+    chat_id = persona_chat_db.add_conversation({"client_id": "1", "title": "Image detail"})
+    body = image_body(chat_id, "Question", url)
+    body["messages"][0]["content"][0]["image_url"]["detail"] = detail
+    other_detail = "low" if detail == "high" else "high"
+    _, other_url = image_data("blue")
+    body["messages"][0]["content"].insert(1, {"type": "image_url", "image_url": {"url": other_url, "detail": other_detail}})
+    if operation == "retry":
+        provider.side_effect = HTTPException(502, "Provider failed")
+    initial = client.post("/api/v1/chat/completions", headers=headers, json=body)
+    assert initial.status_code == (502 if operation == "retry" else 200)
+    rows = persona_chat_db.get_messages_for_conversation(chat_id)
+    provider.side_effect = None
+    if operation == "retry":
+        body["metadata"]["tldw_retry_failed_turn"] = True
+    else:
+        body["metadata"]["tldw_regenerate_from_message_id"] = next(row["id"] for row in rows if row["sender"] == "assistant")
+    response = client.post("/api/v1/chat/completions", headers=headers, json=body)
+    assert response.status_code == 200, response.text
+    users = [row for row in provider.call_args.kwargs["messages_payload"] if row["role"] == "user"]
+    images = [part["image_url"] for part in users[-1]["content"] if part["type"] == "image_url"]
+    assert [(image["url"], image["detail"]) for image in images] == [(url, detail), (other_url, other_detail)]
+    assert len([row for row in persona_chat_db.get_messages_for_conversation(chat_id) if row["sender"] == "user"]) == 1

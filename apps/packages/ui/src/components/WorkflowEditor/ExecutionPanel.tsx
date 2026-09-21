@@ -5,7 +5,7 @@
  * and handles human-in-the-loop approvals.
  */
 
-import { useEffect, useMemo } from "react"
+import { useEffect, useMemo, useState } from "react"
 import {
   Button,
   Progress,
@@ -128,15 +128,23 @@ export const ExecutionPanel = ({ className = "" }: ExecutionPanelProps) => {
     return Math.round((completed / total) * 100)
   }, [nodes, nodeStates])
 
-  // Calculate elapsed time
+  const [now, setNow] = useState(Date.now)
+  useEffect(() => {
+    if (startedAt == null || completedAt != null) return
+    setNow(Date.now())
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [startedAt, completedAt])
+
+  // Calculate elapsed time from the clock snapshot; completed runs stay fixed.
   const elapsed = useMemo(() => {
-    if (!startedAt) return null
-    const end = completedAt || Date.now()
+    if (startedAt == null) return null
+    const end = completedAt ?? now
     const seconds = Math.floor((end - startedAt) / 1000)
     const minutes = Math.floor(seconds / 60)
     const remainingSeconds = seconds % 60
     return `${minutes}:${remainingSeconds.toString().padStart(2, "0")}`
-  }, [startedAt, completedAt])
+  }, [startedAt, completedAt, now])
 
   // Build timeline items from node states
   const timelineItems = useMemo(() => {

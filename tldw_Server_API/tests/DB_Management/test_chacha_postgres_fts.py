@@ -263,3 +263,131 @@ def test_search_keywords_postgres_uses_tsquery(monkeypatch: pytest.MonkeyPatch) 
     assert "keywords_fts_tsv" in sql and "to_tsquery('english', ?)" in sql
     assert "k.client_id = ?" in sql
     assert params == ("fruit", "pg-test", "fruit", 5)
+
+
+@pytest.mark.parametrize(
+    "mode", ["fts", "fallback", "keyword_fts", "keyword_only", "keyword_count_fts", "keyword_count_only"]
+)
+def test_postgres_notes_search_uses_selected_owner_predicates(monkeypatch, mode):
+    from tldw_Server_API.app.core.DB_Management.chacha.note_store import NoteStore
+
+    db = _make_postgres_db()
+    store = NoteStore(db)
+    statements = []
+
+    def selected_owner(owner_client_id, alias=""):
+        # Distinct bindings prove the returned predicate and parameters travel
+        # together; production policy still selects the unchanged single owner.
+        return f" AND {alias}.client_id = ?", (f"selected-{alias}",)
+
+    def execute(query, params):
+        statements.append((query, params))
+        return SimpleNamespace(fetchall=lambda: [{"id": "owned-note"}], fetchone=lambda: {"cnt": 1})
+
+    monkeypatch.setattr(db, "_selected_owner_filter", selected_owner)
+    monkeypatch.setattr(db, "execute_query", execute)
+    monkeypatch.setattr(db, "_map_table_for_backend", lambda name: name)
+    if mode == "fallback":
+        monkeypatch.setattr(
+            "tldw_Server_API.app.core.DB_Management.chacha.note_store.FTSQueryTranslator.normalize_query",
+            lambda *args: "",
+        )
+    if mode in ("fts", "fallback"):
+        assert store.search_notes("needle", limit=3, offset=2) == [{"id": "owned-note"}]
+    elif mode.startswith("keyword_count"):
+        assert store.count_notes_matching_keywords("needle" if mode.endswith("fts") else None, ["tag"]) == 1
+    else:
+        assert store.search_notes_with_keywords(
+            "needle" if mode.endswith("fts") else None, ["tag"], limit=3, offset=2
+        ) == [{"id": "owned-note"}]
+    query, params = statements[-1]
+    assert "n.client_id = ?" in query
+    assert "selected-n" in params
+    assert db.client_id not in params
+    if mode.startswith("keyword"):
+        assert "k.client_id = ?" in query
+        assert "selected-k" in params
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        (
+            "UPDATE notes SET title = ? WHERE id = ? AND deleted = 0",
+            "UPDATE notes SET title = %s WHERE id = %s AND deleted = FALSE",
+        ),
+        (
+            "UPDATE notes SET deleted = 1 WHERE id = ? AND deleted = 0",
+            "UPDATE notes SET deleted = TRUE WHERE id = %s AND deleted = FALSE",
+        ),
+        (
+            "UPDATE notes SET deleted = 0 WHERE id = ? AND deleted = 1",
+            "UPDATE notes SET deleted = FALSE WHERE id = %s AND deleted = TRUE",
+        ),
+        (
+            "SELECT k.* FROM keywords k WHERE k.id = ? AND k.deleted = 0",
+            "SELECT k.* FROM keywords k WHERE k.id = %s AND k.deleted = FALSE",
+        ),
+    ],
+)
+@pytest.mark.parametrize("path", ["backend", "chacha-transaction"])
+def test_notes_boolean_literals_reach_postgres_driver_as_booleans(query, expected, path):
+    """Both execution routes must normalize repository SQL before psycopg sees it."""
+    from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
+    from tldw_Server_API.app.core.DB_Management.backends.postgresql_backend import PostgreSQLBackend
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import BackendConnectionWrapper
+
+    backend = PostgreSQLBackend(DatabaseConfig(backend_type=BackendType.POSTGRESQL))
+    connection = MagicMock()
+    cursor = connection.cursor.return_value
+    cursor.description = None
+    cursor.statusmessage = "UPDATE 1" if query.startswith("UPDATE") else "SELECT 0"
+    cursor.rowcount = 1
+    params = ("title", "note") if "title = ?" in query else ("note",)
+    if path == "chacha-transaction":
+        db = _make_postgres_db()
+        db._backend = backend
+        BackendConnectionWrapper(db, connection, backend).execute(query, params)
+    else:
+        backend.execute(query, params, connection=connection)
+
+    cursor.execute.assert_called_once_with(expected, params)
+
+
+@pytest.mark.parametrize("operation", ["single", "foreign-note", "batch", "reverse", "foreign-keyword"])
+def test_postgres_note_keyword_queries_filter_both_endpoints(postgres_db, operation):
+    """Execute the PostgreSQL-selected predicates against malformed link rows.
+
+    SQLite runs this portable SQL without requiring a live PostgreSQL service;
+    the database facade retains its PostgreSQL owner selection and table mapping.
+    """
+    import sqlite3
+    from contextlib import closing
+
+    from tldw_Server_API.app.core.DB_Management.chacha.note_store import NoteStore
+
+    with closing(sqlite3.connect(":memory:")) as connection:
+        connection.row_factory = sqlite3.Row
+        connection.executescript(
+            """
+            CREATE TABLE notes(id TEXT, client_id TEXT, deleted INTEGER, last_modified TEXT);
+            CREATE TABLE chacha_keywords(id INTEGER, keyword TEXT, client_id TEXT, deleted INTEGER);
+            CREATE TABLE note_keywords(note_id TEXT, keyword_id INTEGER);
+            INSERT INTO notes VALUES ('own', 'pg-test', 0, ''), ('foreign', 'other', 0, '');
+            INSERT INTO chacha_keywords VALUES (1, 'Own', 'pg-test', 0), (2, 'Foreign', 'other', 0);
+            INSERT INTO note_keywords VALUES ('own', 1), ('own', 2), ('foreign', 1), ('foreign', 2);
+            """
+        )
+        postgres_db.execute_query = lambda query, params, **kwargs: connection.execute(query, params)
+        store = NoteStore(postgres_db)
+        if operation == "single":
+            assert [row["id"] for row in store.get_keywords_for_note("own")] == [1]
+        elif operation == "foreign-note":
+            assert store.get_keywords_for_note("foreign") == []
+        elif operation == "batch":
+            result = store.get_keywords_for_notes(["own", "foreign"])
+            assert {note: [row["id"] for row in rows] for note, rows in result.items()} == {"own": [1], "foreign": []}
+        elif operation == "reverse":
+            assert [row["id"] for row in store.get_notes_for_keyword(1)] == ["own"]
+        else:
+            assert store.get_notes_for_keyword(2) == []

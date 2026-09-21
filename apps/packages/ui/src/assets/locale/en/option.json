@@ -2163,6 +2163,7 @@
     "assistantMessageAria": "Assistant message"
   },
   "quiz": {
+    "osceRecommendedMinutes": "{{minutes}} min recommended",
     "itemsPerPage": "items/page",
     "editQuizTitle": "Edit Quiz",
     "updateSuccess": "Quiz updated successfully",

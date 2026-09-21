@@ -169,6 +169,7 @@ vi.mock("@/hooks/useMediaNavigation", () => ({
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
+    initialize: vi.fn().mockResolvedValue(undefined),
     getConfig: vi.fn().mockResolvedValue({})
   }
 }))
@@ -295,6 +296,17 @@ describe("ViewMediaPage connection states", () => {
     })
     expect(await screen.findByText('Bob source')).toBeInTheDocument()
     expect(screen.queryByText('Alice source')).not.toBeInTheDocument()
+  })
+
+  it.each(["tldw:auth-principal-changed", "tldw:config-updated"])("remounts same-server private catalogue on %s", async eventName => {
+    useConnectionStore.setState(({ state }) => ({ state: { ...state, isConnected: true } }))
+    vi.mocked(bgRequest).mockResolvedValue({ items: [{ id: 1, title: 'Alice private source' }], pagination: { total_items: 1 } })
+    renderPage()
+    await screen.findByText('Alice private source')
+    vi.mocked(bgRequest).mockResolvedValue({ items: [{ id: 2, title: 'Bob private source' }], pagination: { total_items: 1 } })
+    act(() => window.dispatchEvent(new CustomEvent(eventName, { detail: { authorityChanged: true } })))
+    expect(await screen.findByText('Bob private source')).toBeInTheDocument()
+    expect(screen.queryByText('Alice private source')).not.toBeInTheDocument()
   })
 
   it("shows credential guidance and opens settings when auth is missing", () => {

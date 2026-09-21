@@ -139,6 +139,28 @@ describe("background proxy web token refresh", () => {
     }
   })
 
+  it.each(["fetch", "body"])("propagates a stream refresh %s abort without reading the original unauthorized response", async (phase) => {
+    const originalResponse = new Response("unauthorized", { status: 401 })
+    const readResponse = vi.spyOn(originalResponse, "text")
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith("/auth/refresh")) {
+        const error = new DOMException("Refresh cancelled", "AbortError")
+        if (phase === "fetch") throw error
+        const response = new Response("{}", { status: 200 })
+        vi.spyOn(response, "json").mockRejectedValueOnce(error)
+        return response
+      }
+      return originalResponse
+    })
+    vi.stubGlobal("fetch", fetchSpy)
+    const { bgStream } = await importProxy()
+    await expect(collectStream(bgStream({
+      path: "/api/v1/chat/completions", method: "POST", body: { stream: true }
+    }))).rejects.toMatchObject({ name: "AbortError" })
+    expect(readResponse).not.toHaveBeenCalled()
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+  })
+
   it("still reports an actual request deadline as a connection failure", async () => {
     const { bgRequest } = await importProxy()
     const events: Event[] = []

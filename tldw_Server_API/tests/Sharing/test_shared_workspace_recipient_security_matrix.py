@@ -372,6 +372,7 @@ async def recipient_security_harness(
     tmp_path: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> RecipientSecurityHarness:
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path))
     sharing_db.execute(
         "INSERT OR IGNORE INTO users (id, username, email, password_hash) VALUES (?, ?, ?, ?)",
         (NONMEMBER_ID, "nonmember", "nonmember@example.test", "hash"),

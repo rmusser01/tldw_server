@@ -27,7 +27,7 @@ export const ACPPermissionModal: React.FC<ACPPermissionModalProps> = ({
 
   const [batchApprove, setBatchApprove] = useState(false)
   const [showPolicyDetails, setShowPolicyDetails] = useState(false)
-  const [now, setNow] = useState(Date.now())
+  const [now, setNow] = useState(Date.now)
   const currentPermission = pendingPermissions[0]
   const currentRequestId = currentPermission?.request_id ?? null
 

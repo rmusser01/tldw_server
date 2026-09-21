@@ -300,6 +300,7 @@ async function setFirstSourceSessionState(
       createDraftSession: (seed: Record<string, unknown>) => {
         id: string
         resultSummary: Record<string, unknown>
+        openDetail?: Record<string, unknown> | null
       }
       upsertSession: (patch: Record<string, unknown>) => void
     }

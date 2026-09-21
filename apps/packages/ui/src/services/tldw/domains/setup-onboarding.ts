@@ -82,11 +82,22 @@ function extractMcpToolsApplyConflict(error: unknown): McpToolsApplyResponse {
 
 export const setupOnboardingMethods = {
   async getFirstRunState(): Promise<FirstRunState> {
-    return await bgRequest<FirstRunState>({
-      path: "/api/v1/setup/first-run/state",
-      method: "GET",
-      noAuth: true,
-    });
+    try {
+      // Preserve authenticated configuration resume when credentials are available.
+      return await bgRequest<FirstRunState>({
+        path: "/api/v1/setup/first-run/state",
+        method: "GET",
+        expectedStatuses: [401],
+      });
+    } catch (error) {
+      if ((error as { status?: number } | null)?.status !== 401) throw error;
+      // First-time setup remains reachable before the client has credentials.
+      return await bgRequest<FirstRunState>({
+        path: "/api/v1/setup/first-run/state",
+        method: "GET",
+        noAuth: true,
+      });
+    }
   },
 
   async updateFirstRunState(

@@ -3,6 +3,7 @@
  * oversight tables. Uses the API-key context (round-4 Part B pattern) since
  * hard navigation with a fresh JWT races the auth redirect. */
 import { chromium } from "@playwright/test"
+import { seedManualUatBrowser } from "./browser-uat-seed.mjs"
 import fs from "node:fs/promises"
 
 const WEB = process.env.WEB_URL || "http://localhost:8080"
@@ -17,13 +18,8 @@ await fs.mkdir(OUT, { recursive: true })
 
 const browser = await chromium.launch()
 const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } })
-await ctx.addInitScript(({ serverUrl, apiKey }) => {
-  localStorage.setItem(
-    "tldwConfig",
-    JSON.stringify({ serverUrl, authMode: "single-user", apiKey })
-  )
-  localStorage.setItem("isMigrated", "true")
-}, { serverUrl: SERVER, apiKey: ADMIN_KEY })
+await ctx.addInitScript(seedManualUatBrowser, { webUrl: WEB, serverUrl: SERVER, apiKey: ADMIN_KEY })
+
 const page = await ctx.newPage()
 const fails = []
 const check = (name, ok, detail) => {

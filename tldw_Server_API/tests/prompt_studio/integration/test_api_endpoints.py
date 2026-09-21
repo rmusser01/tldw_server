@@ -14,16 +14,11 @@ import pytest
 from fastapi import status
 from fastapi.testclient import TestClient
 
-# Disable CSRF for testing
-os.environ["AUTH_MODE"] = "single_user"
-os.environ["CSRF_ENABLED"] = "false"
-
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_current_active_user
 from tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps import get_prompt_studio_db, get_security_config
 from tldw_Server_API.app.api.v1.schemas.prompt_studio_base import SecurityConfig
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings as get_auth_settings
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import PromptStudioDatabase
-from tldw_Server_API.app.main import app
 
 ########################################################################################################################
 # Test Client Setup
@@ -191,7 +186,7 @@ async def test_list_evaluations_honors_non_multiple_offset() -> None:
 
 
 @pytest.fixture
-def client(mock_user, test_db):
+def client(app, mock_user, test_db):
     """Create a test client for the FastAPI app with mocked authentication."""
     os.environ["TEST_MODE"] = "true"
     # Override the auth dependency
@@ -812,6 +807,7 @@ class TestPromptEndpoints:
 
     def test_preview_prompt_rejects_oversized_assistant_block(
         self,
+        app,
         client,
         project_id,
         auth_headers,
@@ -887,6 +883,7 @@ class TestPromptEndpoints:
 
     def test_create_prompt_rejects_signature_augmented_payload_exceeding_security_limit(
         self,
+        app,
         client,
         test_db,
         project_id,
@@ -959,6 +956,7 @@ class TestPromptEndpoints:
 
     def test_create_prompt_rejects_structured_payload_exceeding_security_limit(
         self,
+        app,
         client,
         project_id,
         auth_headers,
@@ -997,6 +995,7 @@ class TestPromptEndpoints:
 
     def test_create_prompt_rejects_oversized_assistant_block(
         self,
+        app,
         client,
         project_id,
         auth_headers,
@@ -1049,6 +1048,7 @@ class TestPromptEndpoints:
 
     def test_create_prompt_rejects_oversized_variable_default_value(
         self,
+        app,
         client,
         project_id,
         auth_headers,
@@ -1111,6 +1111,7 @@ class TestPromptEndpoints:
 
     def test_update_prompt_rejects_oversized_variable_default_value(
         self,
+        app,
         client,
         project_id,
         auth_headers,
@@ -1162,6 +1163,7 @@ class TestPromptEndpoints:
 
     def test_update_prompt_rejects_signature_augmented_payload_exceeding_security_limit(
         self,
+        app,
         client,
         test_db,
         project_id,
