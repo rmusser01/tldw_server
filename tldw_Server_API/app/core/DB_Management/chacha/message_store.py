@@ -1243,6 +1243,57 @@ class MessageStore:
             )
             raise
 
+    def get_retry_message_context(self, conversation_id: str) -> tuple[list[str], list[dict[str, Any]]]:
+        """Read the non-system tail and latest instruction block without attachment blobs.
+
+        System updates can follow an unanswered user. Count only non-system rows
+        to locate that turn and the latest contiguous instruction block, regardless
+        of the caller's LLM history limit. Block IDs separate consecutive updates;
+        legacy unmarked rows retain their contiguous-block interpretation.
+        """
+        cursor = self._db.execute_query(
+            """
+            WITH ordered AS (
+                SELECT m.id, m.sender, m.content, mm.extra_json,
+                       m.timestamp, m.last_modified,
+                       SUM(CASE WHEN lower(m.sender) = 'system' THEN 0 ELSE 1 END)
+                           OVER (ORDER BY m.timestamp DESC, m.last_modified DESC, m.id DESC
+                                 ROWS UNBOUNDED PRECEDING) AS non_system_count
+                FROM messages m
+                JOIN conversations c ON c.id = m.conversation_id
+                LEFT JOIN message_metadata mm ON mm.message_id = m.id
+                WHERE m.conversation_id = ? AND c.client_id = ?
+                  AND m.deleted = FALSE AND c.deleted = FALSE
+            )
+            SELECT id, sender, content, extra_json FROM ordered
+            WHERE (lower(sender) != 'system' AND non_system_count <= 2)
+               OR (lower(sender) = 'system' AND non_system_count = (
+                   SELECT MIN(non_system_count) FROM ordered WHERE lower(sender) = 'system'
+               ))
+            ORDER BY timestamp DESC, last_modified DESC, id DESC
+            """,
+            (conversation_id, self._db.client_id),
+        )
+        tail_ids: list[str] = []
+        system_messages: list[dict[str, Any]] = []
+        block_id = None
+        block_finished = False
+        for row in cursor.fetchall():
+            if str(self._row_value(row, "sender", 1)).lower() != "system":
+                tail_ids.append(str(self._row_value(row, "id")))
+                continue
+            if block_finished:
+                continue
+            extra = self._metadata_json_value(self._row_value(row, "extra_json", 3))
+            row_block_id = extra.get("system_instruction_block_id") if isinstance(extra, dict) else None
+            if system_messages and row_block_id != block_id:
+                block_finished = True
+                continue
+            block_id = row_block_id
+            system_messages.append({"role": "system", "content": self._row_value(row, "content", 2)})
+        system_messages.reverse()
+        return tail_ids, system_messages
+
     def has_system_message_for_conversation(
         self,
         conversation_id: str,

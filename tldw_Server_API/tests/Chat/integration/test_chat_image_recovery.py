@@ -119,6 +119,41 @@ def test_retry_with_prior_successful_image_turn_matches_entire_overlap(persona_c
     assert "<Image attachment" not in str(payload)
 
 
+@pytest.mark.parametrize("stream", [False, True])
+def test_selected_system_prompt_image_retry_survives_repeated_provider_failure(
+    persona_chat_client, persona_chat_db, stream,
+):
+    """Retry retains the original prompt/image rows through two failures and reload."""
+    client, headers, provider = persona_chat_client
+    _, url = image_data()
+    chat_id = persona_chat_db.add_conversation({"client_id": "1", "title": "Pirate image retry"})
+    body = image_body(chat_id, "Count the dots", url)
+    body["messages"].insert(0, {"role": "system", "content": "Speak like a pirate."})
+    body["stream"] = stream
+    provider.side_effect = HTTPException(502, "Provider failed")
+    assert client.post("/api/v1/chat/completions", headers=headers, json=body).status_code == 502
+    original = persona_chat_db.get_messages_for_conversation(chat_id)
+    body["metadata"]["tldw_retry_failed_turn"] = True
+    assert client.post("/api/v1/chat/completions", headers=headers, json=body).status_code == 502
+    assert persona_chat_db.get_messages_for_conversation(chat_id) == original
+    provider.side_effect = None
+    if stream:
+        provider.return_value = iter([
+            'data: {"choices":[{"delta":{"content":"Three dots, ARRR"},"finish_reason":null}]}\n\n',
+            'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',
+            'data: [DONE]\n\n',
+        ])
+    response = client.post("/api/v1/chat/completions", headers=headers, json=body)
+    assert response.status_code == 200, response.text
+    reloaded = client.get(
+        f"/api/v1/chats/{chat_id}/messages?include_images=true&render_placeholders=false", headers=headers,
+    )
+    rows = reloaded.json()["messages"]
+    assert [row["sender"] for row in rows] == ["system", "user", "assistant"]
+    assert [row["id"] for row in rows[:2]] == [row["id"] for row in original]
+    assert rows[1]["images"] == [url]
+
+
 @pytest.mark.parametrize("fault", ["ordered-read", "corrupt", "truncated", "position", "budget"])
 def test_opt_in_read_never_returns_partial_attachments(persona_chat_client, persona_chat_db, monkeypatch, fault):
     client, headers, _ = persona_chat_client

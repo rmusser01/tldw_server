@@ -4386,6 +4386,7 @@ async def build_context_and_messages(
         client_message_id = None
     explicit_failed_retry = isinstance(metadata, dict) and metadata.get("tldw_retry_failed_turn") is True
     retry_user_message_id: str | None = None
+    saved_retry_system_messages: list[dict[str, Any]] = []
     legacy_regenerated_reply: dict[str, Any] | None = None
     if regenerate_reply_id:
         if not request_messages:
@@ -4412,6 +4413,13 @@ async def build_context_and_messages(
         # Read the actual tail independently of the requested context window.
         # Retry is an explicit operation; equal text on an ordinary send is new.
         tail_rows = await asyncio.to_thread(partial(chat_db.get_messages_for_conversation, conv_id, 2, 0, "DESC", strict_images=True))
+        if (any(message.get("role") == "system" for message in request_messages)
+                or any(str(row.get("sender", "")).lower() == "system" for row in tail_rows)):
+            tail_ids, saved_retry_system_messages = await asyncio.to_thread(chat_db.get_retry_message_context, conv_id)
+            tail_rows = [await asyncio.to_thread(partial(chat_db.get_message_by_id, message_id, strict_images=True))
+                         for message_id in tail_ids]
+            if any(row is None for row in tail_rows):
+                raise HTTPException(status_code=409, detail="The failed turn changed. Reload before retrying.")
         tail_metadata = {row["id"]: await asyncio.to_thread(chat_db.get_message_metadata, row["id"]) for row in tail_rows}
         requested_user = request_messages[-1]
         if requested_user.get("role") != "user":
@@ -4442,6 +4450,14 @@ async def build_context_and_messages(
                     )
                     if not (client_message_id and saved_identity_is_valid and saved_client_id != client_message_id):
                         raise HTTPException(status_code=409, detail="This turn already has an answer. Reload the conversation before retrying.")
+
+    retry_system_messages: list[dict[str, Any]] = []
+    if explicit_failed_retry and retry_user_message_id:
+        # Instructions are the requested current block, even when the client
+        # also supplies overlapping history. A matched user suffix must not
+        # trim a deliberately changed system prefix from persistence.
+        retry_system_messages = [message for message in request_messages if message.get("role") == "system"]
+        request_messages = [message for message in request_messages if message.get("role") != "system"]
 
     # If the client included history with conversation_id, trim overlaps against DB history
     overlap_cut = 0
@@ -4546,10 +4562,19 @@ async def build_context_and_messages(
             raise HTTPException(status_code=409, detail="The saved reply changed. Reload before regenerating.") from exc
 
     persisted_user_message_id: str | None = retry_user_message_id
-    current_turn: list[dict[str, Any]] = []
+    system_block_id = str(_uuid.uuid4())
+    if (should_persist and retry_system_messages
+            and _extract_system_messages(retry_system_messages) != _extract_system_messages(saved_retry_system_messages)):
+        for message in retry_system_messages:
+            await save_message_fn(
+                chat_db, conv_id, {**message, "system_instruction_block_id": system_block_id}, use_transaction=True,
+            )
+    current_turn: list[dict[str, Any]] = list(retry_system_messages)
     for index, msg_dict in enumerate(request_messages[overlap_cut:], start=overlap_cut):
         role = msg_dict.get("role")
         msg_for_db = msg_dict.copy()
+        if role == "system":
+            msg_for_db["system_instruction_block_id"] = system_block_id
         if role == "assistant" and character_card:
             # Persist assistant sender as sanitized character name
             msg_for_db["name"] = sanitize_sender_name(character_card.get("name", "Assistant"))
