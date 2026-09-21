@@ -1,6 +1,6 @@
 {
   "version": "0.1.42",
-  "verified_at": "2026-09-20T20:27:27.388769+00:00",
+  "verified_at": "2026-09-21T05:16:35.712589+00:00",
   "release_url": "https://github.com/rmusser01/tldw_server/releases/tag/v0.1.42",
   "tag_commit": "25608249ed5f0fe3700f6e87feeedce77c503425",
   "docker_run": "https://github.com/rmusser01/tldw_server/actions/runs/35533805758",
@@ -105,15 +105,50 @@
   ],
   "verification_command": "gh attestation verify oci://<subject.name>@sha256:<subject.digest.sha256> --repo rmusser01/tldw_server --format json",
   "pypi": {
-    "status": "recovery_running",
-    "version_endpoint_http_status": 404,
-    "failed_run": "https://github.com/rmusser01/tldw_server/actions/runs/35533776321",
-    "cause": "Duplicate AuthNZ conftest registration during collection",
-    "recovery_pr": "https://github.com/rmusser01/tldw_server/pull/2973",
-    "recovery_commit": "cd2dbc792b8888555abac5c5c9eafa7a43d9b0e4",
-    "recovery_run": "https://github.com/rmusser01/tldw_server/actions/runs/35540174556",
-    "approval": "Requester explicitly approved summary waiver, merge and retry.",
-    "checked_at": "2026-09-20T22:04:40.266741+00:00"
+    "status": "published_verified",
+    "version_endpoint_http_status": 200,
+    "recovery_pr": "https://github.com/rmusser01/tldw_server/pull/2974",
+    "recovery_commit": "a30038e0888cc858bbac9cb0da9f94d477c16b9a",
+    "recovery_run": "https://github.com/rmusser01/tldw_server/actions/runs/35563437447",
+    "workflow_result": "success",
+    "approval": "Requester explicitly approved PR2974 summary waiver, merge and automatic 0.1.42 publication after approving the bounded release gate.",
+    "checked_at": "2026-09-21T05:16:35.712589+00:00",
+    "actions_artifact_id": 10623043603,
+    "files": [
+      {
+        "filename": "tldw_server-0.1.42-py3-none-any.whl",
+        "sha256": "13f177966df3326cd17daf13fc29dcb85ba144e18c72e828a5dbc4f7272c7da0",
+        "size": 18238271,
+        "url": "https://files.pythonhosted.org/packages/1f/8f/13951e7294b4156b986f62fc2d3391e4edba3babee1d96e907199703c51f/tldw_server-0.1.42-py3-none-any.whl",
+        "upload_time": "2026-09-21T05:14:23.016703Z",
+        "matches_actions_artifact": true
+      },
+      {
+        "filename": "tldw_server-0.1.42.tar.gz",
+        "sha256": "9b3e0ad97a5dbdd833fb93f8c22b6a7300d30746d49006eae332203e1d3873be",
+        "size": 16322566,
+        "url": "https://files.pythonhosted.org/packages/fd/66/9bd4f02d584654eeb23a650bb4c8e250a615cc3a6061fa1d103664994525/tldw_server-0.1.42.tar.gz",
+        "upload_time": "2026-09-21T05:14:27.240246Z",
+        "matches_actions_artifact": true
+      }
+    ],
+    "validation": [
+      "SHA-256 agrees with PyPI metadata",
+      "Downloaded registry files exactly match Actions distributions",
+      "Twine metadata checks pass",
+      "Backend/API-only contents checks pass",
+      "Application source, package version and legal records at recovery merge equal immutable v0.1.42 tag"
+    ],
+    "previous_failed_runs": [
+      {
+        "url": "https://github.com/rmusser01/tldw_server/actions/runs/35533776321",
+        "cause": "Duplicate AuthNZ conftest registration during collection"
+      },
+      {
+        "url": "https://github.com/rmusser01/tldw_server/actions/runs/35540174556",
+        "cause": "Full test gate timed out after one hour; build and publish skipped."
+      }
+    ]
   },
   "sync_pr": "https://github.com/rmusser01/tldw_server/pull/2971",
   "next_release_pr": "https://github.com/rmusser01/tldw_server/pull/2972"

@@ -4,7 +4,7 @@ title: Prepare the 0.1.43 release with all changes since v0.1.42
 status: In Progress
 assignee: []
 created_date: '2026-09-20 19:56'
-updated_date: '2026-09-21 00:18'
+updated_date: '2026-09-21 05:16'
 labels: []
 dependencies: []
 priority: high
@@ -63,6 +63,10 @@ Verified candidate carry of PR2974 test-only fixes:180 Prompt Studio/isolation/a
 Requester approved adopting existingPR2956 bounded publication gate. Carry exact workflow/test hunks into0.1.43 with the recovery branch; retain normalCI and make pypi-check artifact barrier, manual TestPyPI/PyPI routes, detection fail-closed behavior and trusted publishing permissions. Preserve newer workflow contracts and source authority; verify contracts/startup/scopedBandit/actionlint/licensing. Human-summary/legal/release approval gates remain separate.
 
 Approved bounded PyPI gate adopted from PR2956 in both recovery and candidate. Candidate: 28 workflow/licensing tests pass including all 13 protected-source checks; startup HTTP200; actionlint clean; Ruff0; Bandit66 to58 with no new findings. Independent review clear. Updated both release plans and linked adoption/review evidence. Final-head CI and separate 0.1.43 legal/merge/publication gates remain pending.
+
+Requester explicitly approved the PR2974 human-summary waiver and merge. PR2974 merged at a30038e0888cc858bbac9cb0da9f94d477c16b9a; automatic PyPI run35563437447 is in progress. Recovery final head47ef9aaa:47 checks pass/26 skipped. Candidate c60ee7d172:73 checks pass/36 skipped, no failed/pending. Reconciling merged main history and publication evidence into candidate; no 0.1.43 release authorization inferred.
+
+Carried successful 0.1.42 publication evidence and approved recovery main ancestry into candidate. Only internal records differ after merge; 28 workflow/licensing tests pass (including13 explicit protected-source checks). Previous full candidate CI73pass/36skip, no failures/pending. Protected-source authority/manifest unchanged. New evidence head requires final CI; candidate legal dates, human-summary/merge/publication remain separately pending.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
