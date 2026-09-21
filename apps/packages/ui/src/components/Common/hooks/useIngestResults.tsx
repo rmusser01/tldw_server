@@ -777,7 +777,7 @@ export function useIngestResults(deps: UseIngestResultsDeps) {
     async (batchId: string): Promise<boolean> => {
       const hash = `#/content-review?batch=${batchId}`
       const isOptionsContext = window.location.pathname.includes("options.html")
-      if (isOptionsContext) {
+      if (!isExtensionRuntime() || isOptionsContext) {
         try { navigate(`/content-review?batch=${batchId}`); return true } catch {
           messageApi.error(qi("reviewNavigationFailed", "Couldn't open Content Review. Please try again."))
           return false

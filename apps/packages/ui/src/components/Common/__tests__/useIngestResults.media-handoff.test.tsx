@@ -213,3 +213,40 @@ describe("Quick Ingest destination-owned media handoff", () => {
     )
   })
 })
+
+describe("Quick Ingest content-review handoff (UAT396)", () => {
+  it.each([
+    { extension: false, path: "/media" },
+    { extension: true, path: "/options.html" },
+    { extension: true, path: "/sidepanel.html" },
+  ])(
+    "opens the produced review batch from $path (extension=$extension)",
+    async ({ extension, path }) => {
+      runtime.extension = extension;
+      runtime.navigate.mockReset();
+      runtime.createTab.mockReset().mockResolvedValue({ id: 42 });
+      window.history.replaceState(null, "", path);
+      const { result } = renderHook(() => useIngestResults(deps));
+      let opened = false;
+      await act(async () => {
+        opened = await result.current.openContentReview("uat396-batch");
+      });
+      expect(opened).toBe(true);
+      if (extension && path === "/sidepanel.html") {
+        expect(runtime.createTab).toHaveBeenCalledWith({
+          url: "chrome-extension://test/options.html#/content-review?batch=uat396-batch",
+        });
+        expect(runtime.navigate).not.toHaveBeenCalled();
+      } else {
+        // The shipped WebUI page is pages/content-review.tsx; it is not options.html.
+        expect(runtime.navigate).toHaveBeenCalledWith(
+          "/content-review?batch=uat396-batch",
+        );
+        expect(runtime.createTab).not.toHaveBeenCalled();
+      }
+    },
+  );
+  afterEach(() => {
+    window.history.replaceState(null, "", "/");
+  });
+});
