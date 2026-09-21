@@ -1,7 +1,8 @@
 # Post-publication Qodo follow-up
 
-Tracking: TASK-13263.3. Scope: four PR2974 findings and six PR2972 findings found
-in the final publication review inventory. PR2972's six comments were posted at
+Tracking: TASK-13263.3. Scope: four PR2974 findings, six PR2972 findings found
+in the final publication review inventory, and thirteen findings on follow-up
+PR2978 plus nine final sync PR2971 comments. PR2972's six comments were posted at
 07:08 UTC, after its approved merge/tag/release. Published v0.1.43 and its source
 record remain immutable. The approved main-to-dev sync carries that release;
 this separate branch prepares verified follow-up fixes.
@@ -25,7 +26,7 @@ TypeScript, scoped lint and Bandit against baseline.
 **Status:** Complete
 
 ## Stage 3: Review and prepare follow-up
-**Goal:** Produce a reviewable PR with all ten dispositions and evidence.
+**Goal:** Produce a reviewable PR with every disposition and its evidence.
 **Success Criteria:** Independent review, fresh focused verification, documented
 limits and inline Qodo replies linked to the fix or evidence. Publication and
 follow-up merge are separate from preparing these changes.
@@ -61,3 +62,32 @@ availability and bundle enabled state; all 19 owning tests, ESLint and full
 TypeScript pass. No timeout, retry or production change is added. The unchanged
 sync reruns only its affected shard; the permanent repair is in this follow-up.
 Remote final-head CI and the PR-specific human-summary/merge gate remain pending.
+
+## Second review batch
+
+The thirteen PR2978 comments also cover release changes visible while the base
+branch awaits the approved sync. Confirmed repairs cover missing production
+Docker profile data, safe structured requeue warning context, readiness response
+validation, setup helper documentation, and DSR/CodeQL test boundaries and
+categories. Intent comments explain nullish timestamp and native browser-storage
+checks. Evidence-backed dispositions retain the HTTP setup projection, existing
+shared-package filename convention, and the Qwen local-model confinement guard.
+
+Docker packaging failed its expanded contract before the fix; a wheel built from
+production COPY inputs includes all 47 declared profile JSON files afterward.
+Both requeue logging regressions failed on missing operation context before the
+fix, then all five owning tests passed with no invalid-payload value in logs.
+Readiness validation passes all 45 Health tests; the exact CI-compatible API fingerprint and full WebUI TypeScript check pass. Parent combined verification passes 112 tests.
+No published artifact, source manifest, legal date or version is changed.
+
+
+## Final sync review checkpoint
+
+The final nine sync comments are included in the review ledger. Saved-image
+normalization reproduces ten failing cases and now passes 57 owning tests with
+one official PostgreSQL availability skip. Soak diagnostics/documentation pass
+40 tests, with bounded safe categories and Loguru output. No new production
+Bandit findings or lint findings were introduced. Duplicate findings and proposed
+gate/classifier changes have explicit, evidence-backed dispositions. The sync's
+head now passes 71 checks with 39 skips and none pending or failed; final review
+replies, approved sync merge and final follow-up CI remain to be completed.
