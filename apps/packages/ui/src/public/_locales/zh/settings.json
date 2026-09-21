@@ -1,4 +1,7 @@
 {
+  "onboarding_loginSettingsError": {
+    "message": "无法打开登录设置。请重试。"
+  },
   "navigation_serverAndAuth": {
     "message": "服务器与认证"
   },

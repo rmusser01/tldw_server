@@ -1,4 +1,5 @@
 import React from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 
 import { PageAssistLoader } from "@/components/Common/PageAssistLoader";
@@ -124,6 +125,7 @@ export function UnifiedSetupWizard({
   onComplete,
 }: UnifiedSetupWizardProps = {}) {
   const navigate = useNavigate();
+  const { t } = useTranslation("settings");
   const { setConfigPartial } = useConnectionActions();
   const { setSelectedModel } = useSelectedModel();
   const handoffRef = React.useRef<SetupModelHandoff | null>(null);
@@ -243,11 +245,23 @@ export function UnifiedSetupWizard({
   const handleSignIn = async () => {
     setLoginPending(true);
     setStepError(null);
+    let stage = "configuration";
     try {
       await setConfigPartial({ authMode: "multi-user" });
+      stage = "navigation";
       navigate("/settings/tldw");
-    } catch {
-      setStepError("Login settings could not be opened. Try again.");
+    } catch (error) {
+      // Config/navigation errors can contain credentials. Report only the
+      // operation and built-in type; omit payload, stack, and custom names.
+      console.error("Setup sign-in failed", {
+        stage,
+        errorType:
+          error instanceof TypeError ? "TypeError" :
+          error instanceof Error ? "Error" : "NonError",
+      });
+      setStepError(t("onboarding.loginSettingsError", {
+        defaultValue: "Login settings could not be opened. Try again.",
+      }));
     } finally {
       setLoginPending(false);
     }

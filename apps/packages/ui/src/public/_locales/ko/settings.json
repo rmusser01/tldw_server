@@ -1,4 +1,7 @@
 {
+  "onboarding_loginSettingsError": {
+    "message": "로그인 설정을 열 수 없습니다. 다시 시도해 주세요."
+  },
   "navigation_serverAndAuth": {
     "message": "서버 및 인증"
   },
