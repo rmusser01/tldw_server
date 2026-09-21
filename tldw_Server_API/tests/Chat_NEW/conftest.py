@@ -14,15 +14,8 @@ os.environ["TEST_MODE"] = "true"
 os.environ["DEFAULT_LLM_PROVIDER"] = "openai"
 os.environ["API_BEARER"] = os.environ.get("API_BEARER", "test-api-key-12345")
 os.environ["SINGLE_USER_API_KEY"] = os.environ.get("SINGLE_USER_API_KEY", "test-api-key-12345")
-# Keep app imports lightweight in Chat_NEW tests; avoids torch/faster_whisper import paths.
+# Use the standard minimal test profile without disabling other suites' routes.
 os.environ.setdefault("MINIMAL_TEST_APP", "1")
-_routes_disable = {
-    part.strip()
-    for part in str(os.environ.get("ROUTES_DISABLE", "")).split(",")
-    if part and part.strip()
-}
-_routes_disable.add("media")
-os.environ["ROUTES_DISABLE"] = ",".join(sorted(_routes_disable))
 # Reduce background services during tests
 os.environ.setdefault("DISABLE_AUTHNZ_SCHEDULER", "1")
 os.environ.setdefault("WORKFLOWS_SCHEDULER_ENABLED", "false")

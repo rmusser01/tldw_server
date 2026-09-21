@@ -243,6 +243,17 @@ class MCTSOptimizer:
         # Collect top scored candidates per depth when debugging
         self._debug_top_by_depth: dict[int, list[dict[str, Any]]] = {} if debug_decisions else None
 
+        # Endpoint imports can be cyclic during startup. Retry once work begins,
+        # when the optional transport may have finished loading.
+        global ws_connection_manager
+        if ws_connection_manager is None and optimization_id is not None:
+            try:
+                from tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_websocket import (
+                    connection_manager as ws_connection_manager,
+                )
+            except _MCTS_IMPORT_EXCEPTIONS:
+                logger.debug("MCTS optional WebSocket transport remains unavailable")
+
         broadcaster = None
         if ws_connection_manager is not None and optimization_id is not None:
             broadcaster = EventBroadcaster(ws_connection_manager, self.db)
