@@ -192,3 +192,35 @@ Independent cross-review of the frontend and five fixture files found no
 additional actionable issues. Parent inspected both production frontend changes
 and the helper-to-driver test. `git diff --check` passes; package version and
 published LICENSES/releases/0.1.43 bytes exactly match immutable v0.1.43.
+
+
+# Research console CI race follow-up — TASK-13263.3
+
+Worktree: /Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/release-main-0.1.42
+Branch: codex/release-0.1.43-review-followup
+Only file changed in this work unit: apps/tldw-frontend/__tests__/pages/research-run-console.test.tsx
+No production code, released source record, manifest, version, lockfile, commit, or push changes.
+
+## Evidence and root cause
+
+The final sync CI log /tmp/sync0143-frontend-shard2.log records `lazy-loads artifacts and completed bundles` failing at `getByRole('button', { name: 'Load plan.json' })`, while the exact-base replay passes all 19 tests. The test waits for `Investigate local evidence`, which is rendered from the run-list query. The artifact controls are rendered from `selectedSnapshot.artifacts`, supplied independently by subscribeResearchRunEvents in a later effect/event. A resolved run title therefore does not establish artifact readiness. No production invariant says they must arrive simultaneously.
+
+The same test's bundle button is always rendered and remains disabled until getResearchRun refresh returns a completed run. Waiting for the button's enabled state avoids treating the completed user-event click as proof the asynchronous refresh has completed.
+
+## Deterministic reproduction and repair
+
+The existing final test now installs its event subscription without immediately delivering the snapshot. It waits for the visible run title and subscription, confirms the artifact button is absent, starts the button readiness query, then explicitly delivers the snapshot using act. No wall-clock delay, timer sleep, test retry, or timeout increase is involved.
+
+With the original synchronous getByRole at that boundary, the isolated test reliably failed with the same missing Load plan.json error as CI (1 failed, 18 skipped). Changing the readiness query to findByRole fixes that deterministic failure. The bundle click additionally waits for its existing button to be enabled after refresh. Existing assertions still verify lazy artifact fetching, rendered artifact body, bundle request, and final answer.
+
+## Verification
+
+- RED: `./node_modules/.bin/vitest run __tests__/pages/research-run-console.test.tsx -t 'lazy-loads artifacts and completed bundles'` — exit 1; same missing Load plan.json error. /tmp/postrelease-research-race-red.log
+- GREEN: `./node_modules/.bin/vitest run __tests__/pages/research-run-console.test.tsx` — exit 0, 19 passed. /tmp/postrelease-research-race-green.log
+- `./node_modules/.bin/eslint __tests__/pages/research-run-console.test.tsx` — exit 0, no warnings/errors. /tmp/postrelease-research-race-lint.log
+- `npm run typecheck` — exit 0. /tmp/postrelease-research-race-typecheck.log
+- `git diff --check -- apps/tldw-frontend/__tests__/pages/research-run-console.test.tsx` — exit 0.
+
+The only test-run warning is the existing Node experimental localStorage warning. This is a test scheduling assumption, not evidence of a released runtime regression; the published source remains untouched.
+
+Parent reviewed the delayed-snapshot test repair: no production changes, timeout increases or assertion removals. All ten original review threads are answered and resolved with links to follow-up PR #2978; fixes remain unreleased until that PR is merged.

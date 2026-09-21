@@ -45,3 +45,19 @@ replies remain pending.
 
 Detailed ten-finding dispositions and commands:
 [review evidence](../reviews/2026-09-21-post-publication-qodo.md).
+
+
+## Pushed review and sync CI follow-up
+
+[PR #2978](https://github.com/rmusser01/tldw_server/pull/2978) holds the changes
+and depends on the approved sync #2971. All ten original review threads are
+answered and resolved with fixes or dispositions; this does not claim the new
+code is in the immutable release.
+
+Sync CI exposed a research-console test race: the run-list title renders before
+independent artifact metadata arrives. Controlled delayed-snapshot reproduction
+fails with the original synchronous query. The follow-up test waits for artifact
+availability and bundle enabled state; all 19 owning tests, ESLint and full
+TypeScript pass. No timeout, retry or production change is added. The unchanged
+sync reruns only its affected shard; the permanent repair is in this follow-up.
+Remote final-head CI and the PR-specific human-summary/merge gate remain pending.
