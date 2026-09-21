@@ -118,6 +118,7 @@ import {
 } from "@/hooks/chat/abort-turn-cleanup"
 import { resolveSavedDegradedCharacterPersist } from "@/hooks/chat/characterPersistOutcome"
 import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state"
+import { hydrateTrackedCharacterForSend } from "@/hooks/chat/tracked-character-hydration"
 import { ensurePersonaServerChat } from "@/hooks/chat/personaServerChat"
 import { resolveUseMessageSendMode } from "@/hooks/useMessage.routing"
 import { WEBUI_CHAT_SOURCE } from "@/utils/character-chat-session"
@@ -1339,7 +1340,7 @@ export const useChatActions = ({
         ? overrides.webSearch
         : webSearch
 
-    return {
+    const params = {
       selectedModel: effectiveSelectedModel || "",
       useOCR: resolvedUseOCR,
       selectedSystemPrompt: resolvedSelectedSystemPrompt,
@@ -1371,6 +1372,31 @@ export const useChatActions = ({
       systemPromptAppendix,
       messageSteeringPrompts: resolvedMessageSteeringPrompts,
       ...overrides
+    }
+    // A mode may attempt rollback after its owner has signed out. Neither that
+    // rollback nor its final cleanup may publish into the replacement account.
+    return {
+      ...params,
+      setMessages: (next: Parameters<typeof setMessages>[0]) => {
+        if (!snapshot?.scopeInvalidatedSignal.aborted) params.setMessages(next)
+      },
+      setHistory: (next: Parameters<typeof setHistory>[0]) => {
+        if (!snapshot?.scopeInvalidatedSignal.aborted) params.setHistory(next)
+      },
+      setHistoryId: (...args: Parameters<typeof setHistoryId>) => {
+        if (!snapshot?.scopeInvalidatedSignal.aborted) params.setHistoryId(...args)
+      },
+      setIsProcessing: (next: boolean) => {
+        if (!snapshot?.scopeInvalidatedSignal.aborted) params.setIsProcessing(next)
+      },
+      setStreaming: (next: boolean) => {
+        if (!snapshot?.scopeInvalidatedSignal.aborted) params.setStreaming(next)
+      },
+      setAbortController: (next: Parameters<typeof setAbortController>[0]) => {
+        if (!snapshot?.scopeInvalidatedSignal.aborted) params.setAbortController(next)
+      },
+      releaseAbortControllerIfOwned: (turnSignal: AbortSignal) =>
+        !snapshot?.scopeInvalidatedSignal.aborted && params.releaseAbortControllerIfOwned(turnSignal)
     }
   }
 
@@ -1687,6 +1713,7 @@ export const useChatActions = ({
     character,
     messageSteering,
     serverChatIdOverride,
+    historyIdOverride,
     servicePromptSnapshot
   }: {
     message: string
@@ -1699,6 +1726,7 @@ export const useChatActions = ({
     regenerateFromMessage?: Message
     character?: Character | null
     serverChatIdOverride?: string | null
+    historyIdOverride?: string | null
     servicePromptSnapshot?: ServicePromptSnapshot
     messageSteering: {
       continueAsUser: boolean
@@ -1999,7 +2027,7 @@ export const useChatActions = ({
               name: "You",
               message,
               sources: [],
-              images: [],
+              images: image ? [image] : [],
               createdAt,
               id: resolvedUserMessageId,
               parentMessageId: null
@@ -2453,6 +2481,8 @@ export const useChatActions = ({
             explicitCharacterName !== "Assistant"
           speakerCharacterName =
             activeCharacterMatchesChat &&
+            (directedSpeakerId == null || directedSpeakerId === fallbackSpeakerId) &&
+            characterName.trim().toLowerCase() !== "assistant" &&
             (createdNewChat ||
               selectedCharacterMatchesActive ||
               selectedAssistantMatchesActive ||
@@ -2715,7 +2745,7 @@ export const useChatActions = ({
       }
 
       await saveMessageOnSuccess({
-        historyId,
+        historyId: historyIdOverride ?? historyId,
         isRegenerate,
         selectedModel: resolvedModel,
         modelId: resolvedModel,
@@ -2951,7 +2981,7 @@ export const useChatActions = ({
         conversationId: activeChatId,
         botMessage: assistantContent,
         history: historyBase,
-        historyId,
+        historyId: historyIdOverride ?? historyId,
         image,
         selectedModel: resolvedModel,
         modelId: resolvedModel,
@@ -3214,6 +3244,7 @@ export const useChatActions = ({
     requestOverrides,
     continueOutputTarget = "chat",
     serverChatIdOverride,
+    historyIdOverride,
     researchContext
   }: {
     message: string
@@ -3239,6 +3270,7 @@ export const useChatActions = ({
     requestOverrides?: ChatModeOverrides
     continueOutputTarget?: "chat" | "composer_input"
     serverChatIdOverride?: string | null
+    historyIdOverride?: string | null
     researchContext?: ChatResearchContext
   }): Promise<ChatSubmitResult> => {
     const historyOriginIsCurrent = historySelection?.fence()
@@ -3454,19 +3486,13 @@ export const useChatActions = ({
           ? historySelection
           : null
       )
-      const needsSavedMirrorScope = !temporaryChat && (
-        Boolean(requestOverrides?.serverChatId ?? serverChatIdOverride ?? serverChatId) ||
-        (!compareModeActive && (turnResolvedSendMode === "tracked_character" || turnResolvedSendMode === "tracked_persona"))
-      )
-      if (turnPromptIds.length > 0 || needsSavedNormalScope || needsSavedMirrorScope) {
+      // Every persisted turn needs an owner, including local Compare and image
+      // histories that have no server conversation or service prompt yet.
+      if (turnPromptIds.length > 0 || !temporaryChat) {
         const loadedSnapshot = await loadServicePromptSnapshot(turnPromptIds, {
           signal
         })
-        if (
-          compareModeActive &&
-          turnPromptIds.length === 1 &&
-          turnPromptIds[0] === "chat.web_search.answer"
-        ) {
+        if (compareModeActive) {
           compareServicePromptSnapshot = loadedSnapshot
         } else {
           turnServicePromptSnapshot = loadedSnapshot
@@ -3608,6 +3634,7 @@ export const useChatActions = ({
             "image-generation"
         const enhancedChatModeParams = {
           ...chatModeParamsWithRegen,
+          servicePromptSnapshot: turnServicePromptSnapshot,
           selectedModel: resolvedImageModelLabel,
           uploadedFiles: turnHasExplicitImageBackend ? [] : turnUploadedFiles,
           imageBackendOverride: turnHasExplicitImageBackend
@@ -3869,6 +3896,19 @@ export const useChatActions = ({
               return { status: "submitted" }
             }
             markSteeringApplied()
+            const hydrationSignal = turnServicePromptSnapshot?.scopeSignal ?? signal
+            const hydratedCharacter = await hydrateTrackedCharacterForSend(
+              resolvedSelectedCharacter,
+              (id) => tldwClient.getCharacter(id, {
+                ...(scope ? { scope } : {}),
+                ...(turnServicePromptSnapshot
+                  ? { requestScope: turnServicePromptSnapshot.requestScope }
+                  : {}),
+                signal: hydrationSignal
+              })
+            )
+            throwIfServicePromptScopeInvalidated(turnServicePromptSnapshot)
+            hydrationSignal.throwIfAborted()
             const characterResult = await characterChatMode({
               message,
               image,
@@ -3878,7 +3918,8 @@ export const useChatActions = ({
               signal,
               model: resolvedModel,
               regenerateFromMessage,
-              character: resolvedSelectedCharacter,
+              character: hydratedCharacter,
+              historyIdOverride,
               messageSteering: messageSteeringForTurn,
               serverChatIdOverride,
               servicePromptSnapshot: turnServicePromptSnapshot
@@ -3915,18 +3956,6 @@ export const useChatActions = ({
           const scopedNormalModeParams = workspaceServerChat.chatId
             ? {
                 ...normalModeParams,
-                // A late local-save failure must not restore this turn's
-                // captured messages over a newly signed-in account's state.
-                setMessages: (next: Parameters<typeof setMessages>[0]) => {
-                  if (!turnServicePromptSnapshot?.scopeInvalidatedSignal.aborted) {
-                    setMessages(next)
-                  }
-                },
-                setHistory: (next: Parameters<typeof setHistory>[0]) => {
-                  if (!turnServicePromptSnapshot?.scopeInvalidatedSignal.aborted) {
-                    setHistory(next)
-                  }
-                },
                 historyId:
                   workspaceServerChat.historyId ?? normalModeParams.historyId,
                 serverChatId: workspaceServerChat.chatId,
@@ -4085,7 +4114,7 @@ export const useChatActions = ({
                 compareServicePromptSnapshot.scopeSignal,
                 async () => {
                   const targetHistoryId = existingHistoryId ?? (
-                    await saveHistory(compareTitle!, false, "web-ui")
+                    await saveHistory(compareTitle!, false, "web-ui", undefined, undefined, compareServicePromptSnapshot.requestScope)
                   ).id
                   await saveSharedCompareMessage(targetHistoryId)
                   return targetHistoryId
@@ -4275,11 +4304,12 @@ export const useChatActions = ({
             }
           }
           if (requestScopeChanged) {
-            // Fan-out requests cannot share one database transaction. Restore
-            // the shared in-memory turn and compensate the local pre-branch
-            // commit after every branch has settled.
-            setMessages(baseMessages)
-            setHistory(baseHistory)
+            // Compensate the captured local turn, but never restore its UI over
+            // an account that replaced the request's owner.
+            if (!compareScopeInvalidated()) {
+              setMessages(baseMessages)
+              setHistory(baseHistory)
+            }
             if (!temporaryChat && activeHistoryId) {
               await rollbackScopedComparePersistence({
                 clusterId,
@@ -4297,10 +4327,11 @@ export const useChatActions = ({
             }
           }
           if (!requestScopeChanged) refreshHistoryFromMessages()
-          setIsProcessing(false)
-          setStreaming(false)
-          setAbortController(null)
-          activeAbortControllerRef.current = null
+          if (!compareScopeInvalidated() && releaseAbortControllerIfOwned(signal)) {
+            setIsProcessing(false)
+            setStreaming(false)
+            setAbortController(null)
+          }
           if (requestScopeChanged) {
             return chatSubmitSkipped("Request scope changed")
           }

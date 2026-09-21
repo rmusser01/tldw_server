@@ -21,7 +21,7 @@ import { InContentSearch } from "@/components/Review/InContentSearch"
 import { SectionNavigator, type ContentSection } from "@/components/Review/SectionNavigator"
 import { ComparisonSplit } from "@/components/Review/ComparisonSplit"
 import type { MediaReviewState, MediaReviewActions, MediaDetail } from "@/components/Review/media-review-types"
-import { getContent, MINIMAP_COLLAPSE_THRESHOLD } from "@/components/Review/media-review-types"
+import { getContent, includesId, MINIMAP_COLLAPSE_THRESHOLD } from "@/components/Review/media-review-types"
 import { scrollSectionIntoView } from "@/components/Review/reading-pane-section-navigation"
 import { extractMediaDetailAnalysis } from "@/utils/media-detail-content"
 
@@ -242,7 +242,7 @@ export const MediaReviewReadingPane: React.FC<MediaReviewReadingPaneProps> = ({ 
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap justify-end">
-            {viewMode === "spread" && (
+            {viewMode === "spread" && includesId(selectedIds, d.id) && (
               <Tooltip title={t("mediaPage.unstackTooltip", "Remove this item from selection")}>
                 <Button size="small" onClick={() => removeFromSelection(d.id)}>
                   {t("mediaPage.unstack", "Remove from selection")}
@@ -430,7 +430,7 @@ export const MediaReviewReadingPane: React.FC<MediaReviewReadingPaneProps> = ({ 
               <div className="text-sm font-medium text-text">{t('mediaPage.viewer', 'Viewer')}</div>
               <div className="text-xs text-text-muted">
                 {viewMode === "spread"
-                  ? t("mediaPage.viewerCount", "{{count}} open", { count: viewerItems.length })
+                  ? t("mediaPage.viewerCount", "{{count}} open", { count: effectiveItems.length })
                   : viewMode === "list"
                     ? t("mediaPage.viewerSingle", "Single item view")
                     : t("mediaPage.viewerAll", "All items (stacked)")}

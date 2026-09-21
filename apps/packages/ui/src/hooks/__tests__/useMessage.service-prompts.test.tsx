@@ -1,5 +1,9 @@
 import React from "react"
-import { act, render, renderHook, screen } from "@testing-library/react"
+import type { Message } from "@/store/option"
+import type { AssistantSelection } from "@/types/assistant-selection"
+import type { EffectiveAssistantState } from "@/hooks/chat/effective-assistant-state"
+import type { SelectedChatModelValidationResult } from "@/utils/chat-model-validation"
+import { act, render, renderHook, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => {
@@ -33,7 +37,10 @@ const mocks = vi.hoisted(() => {
     invoke: vi.fn(async () => ({ content: "standalone retrieval query" }))
   }
 
-  const storeState: Record<string, unknown> = {
+  const storeState: Record<string, unknown> & {
+    setServerChatId: ReturnType<typeof vi.fn<(id: string | null) => void>>
+    setServerChatMetaLoaded: ReturnType<typeof vi.fn<(ready: boolean) => void>>
+  } = {
     messages: [
       {
         id: "user-old",
@@ -87,6 +94,9 @@ const mocks = vi.hoisted(() => {
     setServerChatPersonaMemoryMode: vi.fn(),
     serverChatMetaLoaded: true,
     setServerChatMetaLoaded: vi.fn(),
+    serverChatLoadState: "loading",
+    setServerChatLoadState: vi.fn(),
+    setServerChatLoadError: vi.fn(),
     serverChatState: null,
     setServerChatState: vi.fn(),
     setServerChatVersion: vi.fn(),
@@ -189,6 +199,11 @@ const mocks = vi.hoisted(() => {
   })
 
   return {
+    useRealQueueState: false,
+    selectedAssistant: null as AssistantSelection | null,
+    effectiveAssistantState: null as EffectiveAssistantState | null,
+    createChat: vi.fn(),
+    getChat: vi.fn(),
     deleteMessage: vi.fn(),
     removeMessageById: vi.fn(),
     addMedia: vi.fn(),
@@ -244,10 +259,23 @@ vi.mock("@/services/service-prompts", () => ({
     mocks.renderServicePromptPart(...args)
 }))
 
-vi.mock("~/store/option", () => ({
-  useStoreMessageOption: (selector?: (state: Record<string, unknown>) => unknown) =>
-    selector ? selector(mocks.storeState) : mocks.storeState
-}))
+vi.mock("~/store/option", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("~/store/option")>()
+  return {
+    useStoreMessageOption: Object.assign(
+      (selector?: (state: Record<string, unknown>) => unknown) =>
+        mocks.useRealQueueState
+          ? actual.useStoreMessageOption(selector ?? (state => state))
+          : selector ? selector(mocks.storeState) : mocks.storeState,
+      {
+        getState: () => mocks.useRealQueueState
+          ? actual.useStoreMessageOption.getState() : mocks.storeState,
+        subscribe: (listener: Parameters<typeof actual.useStoreMessageOption.subscribe>[0]) =>
+          mocks.useRealQueueState ? actual.useStoreMessageOption.subscribe(listener) : () => {}
+      }
+    )
+  }
+})
 
 vi.mock("~/store", () => ({
   useStoreMessage: () => ({ currentURL: "", setCurrentURL: vi.fn() })
@@ -269,9 +297,13 @@ vi.mock("@plasmohq/storage/hook", () => ({
   ]
 }))
 
-vi.mock("@/hooks/chat/useChatBaseState", () => ({
-  useChatBaseState: () => mocks.chatBaseState
-}))
+vi.mock("@/hooks/chat/useChatBaseState", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/hooks/chat/useChatBaseState")>()
+  return {
+    useChatBaseState: (...args: Parameters<typeof actual.useChatBaseState>) =>
+      mocks.useRealQueueState ? actual.useChatBaseState(...args) : mocks.chatBaseState
+  }
+})
 
 vi.mock("@/hooks/chat/useSelectedModel", () => ({
   useSelectedModel: () => ({ selectedModel: "model-1", setSelectedModel: vi.fn() })
@@ -289,7 +321,8 @@ vi.mock("@/hooks/useSelectedCharacter", () => ({
 }))
 
 vi.mock("@/hooks/useSelectedAssistant", () => ({
-  useSelectedAssistant: () => [null, vi.fn()]
+  getSelectedAssistantOperationRevision: () => 0,
+  useSelectedAssistant: () => [mocks.selectedAssistant, vi.fn()]
 }))
 
 vi.mock("@/hooks/useAntdNotification", () => ({
@@ -301,7 +334,7 @@ vi.mock("@/hooks/chat/useChatSettingsRecord", () => ({
 }))
 
 vi.mock("@/hooks/chat/effective-assistant-state", () => ({
-  resolveEffectiveAssistantState: () => ({
+  resolveEffectiveAssistantState: () => mocks.effectiveAssistantState ?? ({
     mode: "plain",
     kind: null,
     id: null,
@@ -351,6 +384,11 @@ vi.mock("@/libs/get-html", () => ({
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: vi.fn(async () => undefined),
+    getChat: (...args: unknown[]) => mocks.getChat(...args),
+    createChat: (...args: unknown[]) => mocks.createChat(...args),
+    addChatMessage: vi.fn(async () => ({ id: "saved-user", version: 1 })),
+    streamCharacterChatCompletion: vi.fn(async function* () { yield { delta: "Image received" } }),
+    persistCharacterCompletion: vi.fn(async () => ({ assistant_message_id: "saved-answer", version: 1 })),
     deleteMessage: mocks.deleteMessage,
     addMedia: (...args: unknown[]) => mocks.addMedia(...args),
     ragSearch: (...args: unknown[]) => mocks.ragSearch(...args)
@@ -397,10 +435,29 @@ vi.mock("@/db/dexie/helpers", () => {
   }
 })
 
-vi.mock("@/hooks/utils/messageHelpers", () => ({
-  createSaveMessageOnError: () => mocks.saveMessageOnError,
-  createSaveMessageOnSuccess: () => mocks.saveMessageOnSuccess,
-  validateBeforeSubmit: () => true
+vi.mock("@/hooks/utils/messageHelpers", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/hooks/utils/messageHelpers")>()
+  return {
+    createSaveMessageOnError: (...args: Parameters<typeof actual.createSaveMessageOnError>) =>
+      mocks.useRealQueueState ? actual.createSaveMessageOnError(...args) : mocks.saveMessageOnError,
+    createSaveMessageOnSuccess: (...args: Parameters<typeof actual.createSaveMessageOnSuccess>) =>
+      mocks.useRealQueueState ? actual.createSaveMessageOnSuccess(...args) : mocks.saveMessageOnSuccess,
+    validateBeforeSubmit: actual.validateBeforeSubmit
+  }
+})
+
+vi.mock("@/hooks/chat-helper", () => ({
+  saveMessageOnSuccess: (...args: Parameters<typeof mocks.saveMessageOnSuccess>) => mocks.saveMessageOnSuccess(...args),
+  saveMessageOnError: (...args: Parameters<typeof mocks.saveMessageOnError>) => mocks.saveMessageOnError(...args)
+}))
+vi.mock("@/libs/get-screenshot", () => ({
+  getScreenshotFromCurrentTab: vi.fn(async () => ({ screenshot: "data:image/png;base64,synthetic" }))
+}))
+vi.mock("@/services/chat-settings", () => ({
+  syncChatSettingsForServerChat: vi.fn(async () => undefined)
+}))
+vi.mock("@/services/application", () => ({
+  getPrompt: vi.fn(async () => "Please summarize {text}")
 }))
 
 vi.mock("@/hooks/handlers/messageHandlers", () => ({
@@ -417,6 +474,114 @@ vi.mock("@/utils/mcp-disclosure", () => ({
 }))
 
 import { useMessage } from "../useMessage"
+import { validateSelectedChatModelAvailability } from "@/utils/chat-model-validation"
+import { normalChatMode } from "../chat-modes/normalChatMode"
+
+describe("sidepanel saved conversation metadata lifetime", () => {
+  it.each([false, true])("uses the real Persona creation helper without adopting a replacement (replaced=%s)", async (replaced) => {
+    vi.clearAllMocks()
+    mocks.storeState.serverChatId = null
+    mocks.storeState.serverChatMetaLoaded = false
+    mocks.selectedAssistant = { kind: "persona", id: "p1", name: "Persona", metadata: { selectionMode: "tracked" } }
+    mocks.effectiveAssistantState = { mode: "tracked_persona", kind: "persona", id: "p1", displayName: "Persona", avatarUrl: null, systemPromptSnapshot: null, source: "tracked" }
+    const idSetter = mocks.storeState.setServerChatId
+    idSetter.mockImplementation((id) => { mocks.storeState.serverChatId = id })
+    const readySetter = mocks.storeState.setServerChatMetaLoaded
+    readySetter.mockImplementation((ready) => { mocks.storeState.serverChatMetaLoaded = ready })
+    let resolveCreation!: (value: unknown) => void
+    mocks.createChat.mockReturnValue(new Promise(resolve => { resolveCreation = resolve }))
+    const hook = renderHook(() => useMessage())
+    const guard = hook.result.current.conversationMetadata.captureQueuedDispatchGuard()
+    const submission = hook.result.current.onSubmit({
+      message: "First queued Persona turn", image: "", requestOverrides: { chatMode: "normal" },
+      assertQueuedDispatchCurrent: guard
+    }).then(() => null, (error: unknown) => error)
+    try {
+      await waitFor(() => expect(mocks.createChat).toHaveBeenCalledTimes(1))
+      if (replaced) mocks.storeState.serverChatId = "foreign-replacement"
+      await act(async () => { resolveCreation({ id: "created-persona", assistant_kind: "persona", assistant_id: "p1" }) })
+      const error = await submission
+      if (replaced) {
+        expect(mocks.storeState.serverChatId).toBe("foreign-replacement")
+        expect(error).toBeInstanceOf(Error)
+        expect(normalChatMode).not.toHaveBeenCalled()
+      } else {
+        expect(error).toBeNull()
+        expect(mocks.storeState.serverChatId).toBe("created-persona")
+        expect(mocks.storeState.serverChatMetaLoaded).toBe(true)
+        expect(normalChatMode).toHaveBeenCalledTimes(1)
+      }
+    } finally {
+      hook.unmount()
+      mocks.selectedAssistant = null
+      mocks.effectiveAssistantState = null
+      mocks.storeState.serverChatId = null
+      mocks.storeState.serverChatMetaLoaded = true
+      idSetter.mockImplementation(() => {})
+      readySetter.mockImplementation(() => {})
+    }
+  })
+
+  it("rejects a queued request when model preflight finishes after conversation replacement", async () => {
+    vi.clearAllMocks()
+    mocks.storeState.serverChatId = "saved-chat"
+    mocks.storeState.serverChatMetaLoaded = true
+    let resolveModel!: (value: SelectedChatModelValidationResult) => void
+    vi.mocked(validateSelectedChatModelAvailability).mockReturnValueOnce(new Promise(resolve => { resolveModel = resolve }))
+    const hook = renderHook(() => useMessage())
+    const assertCurrent = hook.result.current.conversationMetadata.captureQueuedDispatchGuard()
+    const submission = hook.result.current.onSubmit({
+      message: "Queued private request", image: "", requestOverrides: { chatMode: "normal" },
+      assertQueuedDispatchCurrent: assertCurrent
+    }).then(() => null, (error: unknown) => error)
+    await waitFor(() => expect(validateSelectedChatModelAvailability).toHaveBeenCalled())
+    mocks.storeState.serverChatId = "replacement-chat"
+    await act(async () => { resolveModel({ status: "valid" }) })
+    expect(await submission).toMatchObject({ message: "Conversation changed. The queued request was not sent." })
+    expect(normalChatMode).not.toHaveBeenCalled()
+    hook.unmount()
+    mocks.storeState.serverChatId = null
+  })
+
+  it.each(["unmount", "account", "conversation"])("does not publish a held read after %s", async (boundary) => {
+    vi.clearAllMocks()
+    mocks.storeState.serverChatId = "saved-chat"
+    mocks.storeState.serverChatMetaLoaded = false
+    const scope = new AbortController()
+    mocks.loadServicePromptSnapshot.mockResolvedValue(mocks.makeSnapshot("supported", undefined, undefined, {
+      scopeInvalidatedSignal: scope.signal
+    }))
+    let resolveChat!: (value: unknown) => void
+    mocks.getChat.mockReturnValue(new Promise((resolve) => { resolveChat = resolve }))
+    const hook = renderHook(() => useMessage())
+    await waitFor(() => expect(mocks.getChat).toHaveBeenCalled())
+    if (boundary === "unmount") hook.unmount()
+    if (boundary === "account") scope.abort()
+    if (boundary === "conversation") mocks.storeState.serverChatId = "replacement-chat"
+    await act(async () => {
+      resolveChat({ id: "saved-chat", title: "Old private title" })
+    })
+    expect(mocks.storeState.setServerChatTitle).not.toHaveBeenCalled()
+    expect(mocks.storeState.setServerChatMetaLoaded).not.toHaveBeenCalled()
+    hook.unmount()
+    mocks.storeState.serverChatId = null
+    mocks.storeState.serverChatMetaLoaded = true
+  })
+
+  it("exposes metadata failure for a retained queue instead of silently hanging", async () => {
+    vi.clearAllMocks()
+    mocks.storeState.serverChatId = "saved-chat"
+    mocks.storeState.serverChatMetaLoaded = false
+    mocks.loadServicePromptSnapshot.mockResolvedValue(mocks.makeSnapshot())
+    mocks.getChat.mockRejectedValue(new Error("private transport detail"))
+    const hook = renderHook(() => useMessage())
+    await waitFor(() => expect(mocks.storeState.setServerChatLoadState).toHaveBeenCalledWith("failed"))
+    expect(mocks.storeState.setServerChatMetaLoaded).not.toHaveBeenCalled()
+    hook.unmount()
+    mocks.storeState.serverChatId = null
+    mocks.storeState.serverChatMetaLoaded = true
+  })
+})
 
 describe("useMessage legacy Sidepanel Service Prompts", () => {
   const expectNoMessageMutation = () => {
@@ -465,6 +630,59 @@ describe("useMessage legacy Sidepanel Service Prompts", () => {
           Object.prototype.hasOwnProperty.call(values, key) ? values[key] : _match
         )
     )
+  })
+
+  it.each([
+    ...(["rag", "vision", "preset", "normal"] as const).flatMap(mode =>
+      [false, true].map(temporary => ({ mode, temporary, server: false }))
+    ),
+    { mode: "normal" as const, temporary: false, server: true }
+  ])("keeps queued $mode completion owned after its own promotion (temporary=$temporary, server=$server)", async ({ mode, temporary, server }) => {
+    const { useStoreMessageOption: realStore } = await vi.importActual<typeof import("@/store/option")>("@/store/option")
+    const previous = realStore.getState()
+    const chatMode = mode === "preset" ? "normal" : mode
+    mocks.useRealQueueState = true
+    realStore.setState({ historyId: null, serverChatId: null, serverChatMetaLoaded: false, messages: [], history: [], temporaryChat: temporary, chatMode, streaming: false, selectedSystemPrompt: null })
+    mocks.saveMessageOnSuccess.mockImplementation(async payload => {
+      payload.setHistoryId("created-local-history")
+      return "created-local-history"
+    })
+    vi.mocked(normalChatMode).mockImplementationOnce(async (...args) => {
+      const options = args[6]
+      await options.saveMessageOnSuccess({
+        historyId: null,
+        setHistoryId: options.setHistoryId,
+        selectedModel: "model-1",
+        modelId: "model-1",
+        assistantMessageId: "queued-answer",
+        isRegenerate: args[2],
+        message: args[0],
+        image: args[1],
+        fullText: "Queued reply",
+        source: [],
+        reasoning_time_taken: 0,
+        ...(server ? { conversationId: "created-server" } : {})
+      })
+      return { status: "submitted" }
+    })
+    const hook = renderHook(() => useMessage())
+    const guard = hook.result.current.conversationMetadata.captureQueuedDispatchGuard(null)
+    const completion = hook.result.current.conversationMetadata.isQueuedCompletionCurrent
+    try {
+      await act(async () => {
+        await hook.result.current.onSubmit({ message: "First queued request", image: "", controller: new AbortController(), requestOverrides: { chatMode }, ...(mode === "preset" ? { messageType: "summary" } : {}), assertQueuedDispatchCurrent: guard })
+      })
+      if (!temporary) expect(mocks.saveMessageOnSuccess).toHaveBeenCalled()
+      expect(realStore.getState().historyId).toBe(temporary ? "temp" : "created-local-history")
+      if (server) expect(realStore.getState().serverChatId).toBe("created-server")
+      expect(completion()).toBe(true)
+    } finally {
+      hook.unmount()
+      realStore.setState(previous, true)
+      mocks.useRealQueueState = false
+      mocks.saveMessageOnSuccess.mockReset()
+      vi.mocked(normalChatMode).mockReset()
+    }
   })
 
   it.each(["local", "server"])("deletes a qualified sidepanel row and clears the %s reply target", async replyKind => {
@@ -1250,5 +1468,31 @@ describe("useMessage legacy Sidepanel Service Prompts", () => {
     expect(mocks.setMessages).toHaveBeenLastCalledWith(mocks.storeState.messages)
     expect(mocks.setHistory).toHaveBeenLastCalledWith(mocks.history)
     expect(release).toHaveBeenCalledTimes(1)
+  })
+})
+
+
+describe("Character live attachments in the legacy caller", () => {
+  it.each(["", "Describe this image", null])("preserves the submitted image for text %s", async text => {
+    vi.clearAllMocks()
+    const previous = { ...mocks.storeState }
+    const image = text === null ? "" : "data:image/png;base64,aW1hZ2U="
+    let visible: Message[] = []
+    mocks.effectiveAssistantState = { mode: "tracked_character", kind: "character", id: "42", displayName: "Mira", avatarUrl: null, systemPromptSnapshot: null, source: "tracked" }
+    mocks.loadServicePromptSnapshot.mockResolvedValue(mocks.makeSnapshot())
+    Object.assign(mocks.storeState, { messages: [], serverChatId: "character-chat", serverChatCharacterId: 42, serverChatMetaLoaded: true })
+    mocks.setMessages.mockImplementation(next => { visible = typeof next === "function" ? next(visible) : next })
+    const hook = renderHook(() => useMessage())
+    try {
+      await act(async () => { await hook.result.current.onSubmit({ message: text ?? "Text-only control", image, requestOverrides: { chatMode: "normal" } }) })
+      const user = visible.find(row => !row.isBot)
+      expect(user).toBeDefined()
+      expect(user.images).toEqual(image ? [image] : [])
+    } finally {
+      hook.unmount()
+      Object.assign(mocks.storeState, previous)
+      mocks.effectiveAssistantState = null
+      mocks.setMessages.mockImplementation(() => {})
+    }
   })
 })

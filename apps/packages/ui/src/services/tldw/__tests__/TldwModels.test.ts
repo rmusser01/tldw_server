@@ -258,6 +258,66 @@ describe("TldwModelsService caching", () => {
     expect(mocks.getModels).toHaveBeenCalledTimes(1)
   })
 
+  it("refreshes capability data without waiting for cooldown or clearing durable records on failure", async () => {
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+    mocks.getModels.mockResolvedValue([{ id: "model-a", name: "Model A", provider: "llama", vision: false }])
+    await service.getModels(true)
+    const durable = structuredClone(mocks.storageValue)
+    mocks.getModels.mockRejectedValue(new Error("Discovery unavailable"))
+    expect(await service.getModels(true, { requireFresh: true })).toEqual([])
+    expect(mocks.storageValue).toEqual(durable)
+    mocks.getModels.mockResolvedValue([{ id: "model-a", name: "Model A", provider: "llama", vision: true }])
+    expect((await service.getModels(true, { requireFresh: true }))[0].capabilities).toContain("vision")
+  })
+
+  it("coalesces fresh capability requests and prevents an older discovery from replacing them", async () => {
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+    const old = deferred<Array<{ id: string; name: string; provider: string; vision: boolean }>>()
+    const fresh = deferred<Array<{ id: string; name: string; provider: string; vision: boolean }>>()
+    mocks.getModels.mockReturnValueOnce(old.promise).mockReturnValueOnce(fresh.promise)
+    const oldRead = service.getModels(true)
+    await vi.waitFor(() => expect(mocks.getModels).toHaveBeenCalledTimes(1))
+    const first = service.getModels(true, { requireFresh: true })
+    const second = service.getModels(true, { requireFresh: true })
+    await vi.waitFor(() => expect(mocks.getModels).toHaveBeenCalledTimes(2))
+    fresh.resolve([{ id: "model-a", name: "Model A", provider: "llama", vision: true }])
+    const [a, b] = await Promise.all([first, second])
+    expect(a[0].capabilities).toContain("vision")
+    expect(b).toEqual(a)
+    old.resolve([{ id: "model-a", name: "Model A", provider: "llama", vision: false }])
+    await oldRead
+    expect((await service.getModel("model-a"))?.capabilities).toContain("vision")
+  })
+
+  it("does not return a fresh capability result invalidated while the read was pending", async () => {
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+    const pending = deferred<Array<{ id: string; name: string; provider: string; vision: boolean }>>()
+    mocks.getModels.mockReturnValue(pending.promise)
+    const read = service.getModels(true, { requireFresh: true })
+    await vi.waitFor(() => expect(mocks.getModels).toHaveBeenCalledTimes(1))
+    await service.clearCache()
+    pending.resolve([{ id: "model-a", name: "Model A", provider: "llama", vision: true }])
+    expect(await read).toEqual([])
+    expect(await service.getCachedChatModels()).toEqual([])
+  })
+
+  it("does not return fresh capabilities invalidated while their durable write is pending", async () => {
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+    const write = deferred<void>()
+    mocks.getModels.mockResolvedValue([{ id: "model-a", name: "Model A", provider: "llama", vision: true }])
+    mocks.storageSet.mockImplementationOnce(() => write.promise)
+    const read = service.getModels(true, { requireFresh: true })
+    await vi.waitFor(() => expect(mocks.storageSet).toHaveBeenCalledTimes(1))
+    const clear = service.clearCache()
+    write.resolve()
+    expect(await read).toEqual([])
+    await clear
+  })
+
   it("ignores legacy cache entries without schema version and refetches models", async () => {
     mocks.storageGet.mockResolvedValue({
       timestamp: Date.now(),

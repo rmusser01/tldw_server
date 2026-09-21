@@ -3,17 +3,15 @@ import { linkServerChatMirror, reconcileServerChatMirror, serverChatMirrorOwnerK
 import { HistorySelectionContext, useHistorySelection, useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import { HistorySelectionReview } from "@/components/Common/Playground/HistorySelectionReview"
 import { formatSelectedHistory } from "@/db/dexie/helpers"
+import { useSidepanelChatOwner, type SidepanelChatOwner } from "@/hooks/useSidepanelChatOwner"
+import { PageAssistLoader } from "@/components/Common/PageAssistLoader"
 import {
   formatToChatHistory,
   formatToMessage,
   getTitleById,
   getRecentChatFromCopilot,
   generateID,
-  getFullChatData,
-  getHistoryByServerChatId,
-  getHistoriesWithMetadata,
-  saveHistory,
-  saveMessage
+  getFullChatData
 } from "@/db/dexie/helpers"
 import { getDesignSystemState } from "@/design-system"
 import useBackgroundMessage from "@/hooks/useBackgroundMessage"
@@ -98,9 +96,9 @@ import {
   type TimelineActionDetail
 } from "@/utils/timeline-actions"
 import {
-  getLegacyStorageKey,
   getTabsStorageKey,
-  type LegacySidepanelChatSnapshot,
+  readSidepanelTabs,
+  type SidepanelTabsState,
   readSidepanelRuntimeTabId
 } from "./sidepanel-chat-resume"
 
@@ -149,12 +147,6 @@ type IngestCardState = {
   canRetry: boolean
   starterQuestions: string[]
   timestampSeconds?: number
-}
-
-type SidepanelTabsState = {
-  tabs: SidepanelChatTab[]
-  activeTabId: string | null
-  snapshotsById: Record<string, SidepanelChatSnapshot>
 }
 
 const formatSecondsAsClock = (seconds: number): string => {
@@ -444,15 +436,23 @@ const buildHistorySnapshot = ({
 }
 
 const SidepanelChat = () => {
+  const owner = useSidepanelChatOwner()
+  return owner
+    ? <OwnedSidepanelChat key={`${owner.ownerKey}:${owner.revision}`} owner={owner} />
+    : <PageAssistLoader />
+}
+
+const OwnedSidepanelChat = ({ owner }: { owner: SidepanelChatOwner }) => {
   const selection = useHistorySelection({ onCapture: capture => {
+    if (!owner.isCurrent()) return
     const display = formatSelectedHistory(capture)
     useStoreMessageOption.getState().setHistory(display.history)
     useStoreMessageOption.getState().setMessages(display.messages)
   } })
-  return <HistorySelectionContext.Provider value={selection}><SidepanelChatContent /></HistorySelectionContext.Provider>
+  return <HistorySelectionContext.Provider value={selection}><SidepanelChatContent owner={owner} /></HistorySelectionContext.Provider>
 }
 
-const SidepanelChatContent = () => {
+const SidepanelChatContent = ({ owner }: { owner: SidepanelChatOwner }) => {
   const historySelection = useHistorySelectionContext()!
   const transferFlashcards = useFlashcardsGenerateTransfer()
   const transferStudyPack = useStudyPackTransfer()
@@ -575,6 +575,8 @@ const SidepanelChatContent = () => {
   const [timelineAction, setTimelineAction] =
     React.useState<TimelineActionDetail | null>(null)
   const isSwitchingTabRef = React.useRef(false)
+  const loadGenerationRef = React.useRef(0)
+  const invalidateLoads = React.useCallback(() => { loadGenerationRef.current++ }, [])
   const { containerRef, isAutoScrollToBottom, autoScrollToBottom } =
     useSmartScroll(messages, streaming, 100)
   const uiMode = useUiModeStore((state) => state.mode)
@@ -870,6 +872,7 @@ const SidepanelChatContent = () => {
 
   const applySnapshot = React.useCallback(
     (snapshot: SidepanelChatSnapshot) => {
+      if (!owner.isCurrent()) return
       historySelection.activate(useSidepanelChatTabsStore.getState().activeTabId || "initial")
       void historySelection.loadConversation({ historyId: snapshot.historyId, serverChatId: snapshot.serverChatId, temporary: snapshot.temporaryChat }, snapshot.historySelectionReference).then(loaded => { if (loaded) return restoreReadableLocalComparison(historySelection, display => { setHistory(display.history); setMessages(display.messages) }) }).catch(error => console.warn("Failed to restore readable comparison", error))
       setHistory(snapshot.history || [])
@@ -905,11 +908,13 @@ const SidepanelChatContent = () => {
       applyChatModelSettingsSnapshot(snapshot.modelSettings)
     },
     [
+      owner,
       setHistory,
       setMessages,
       setHistoryId,
       setChatMode,
       setWebSearch,
+      setToolChoice,
       setSelectedModel,
       setSelectedSystemPrompt,
       setSelectedQuickPrompt,
@@ -933,13 +938,13 @@ const SidepanelChatContent = () => {
 
   const saveActiveTabSnapshot = React.useCallback(() => {
     const currentTabId = useSidepanelChatTabsStore.getState().activeTabId
-    if (!currentTabId) return
+    if (!owner.isCurrent() || isSwitchingTabRef.current || !currentTabId || currentTabId !== activeTabId) return
     const snapshot = buildSnapshot()
     snapshot.modelSettings = pickChatModelSettings(
       useStoreChatModelSettings.getState()
     )
     useSidepanelChatTabsStore.getState().setSnapshot(currentTabId, snapshot)
-  }, [buildSnapshot])
+  }, [activeTabId, buildSnapshot, owner])
 
   const toggleSidebar = () => {
     setSidebarOpen((prev) => !prev)
@@ -995,193 +1000,63 @@ const SidepanelChatContent = () => {
     messagesRef.current = messages
   }, [messages])
 
-  const restoreSidepanelState = async () => {
-    // Wait until we've attempted to resolve tab id so we don't
-    // accidentally attach a tab-specific snapshot to the wrong key.
-    if (tabId === undefined) {
-      return
-    }
-
-    historySelection.beginLoad()
-    const isCurrentRestore = historySelection.fence()
-    const storage = storageRef.current
+  const applySnapshotRef = React.useRef(applySnapshot)
+  applySnapshotRef.current = applySnapshot
+  const restoreDefaults = React.useRef({ modelSettingsSnapshot, selectedModel, toolChoice, useOCR, webSearch, newChatLabel })
+  const restoreSidepanelState = React.useCallback(async () => {
+    const { modelSettingsSnapshot, selectedModel, toolChoice, useOCR, webSearch, newChatLabel } = restoreDefaults.current
+    if (tabId === undefined || !owner.isCurrent()) return
+    const generation = ++loadGenerationRef.current
+    const current = () => owner.isCurrent() && generation === loadGenerationRef.current
     setIsRestoringChat(true)
     try {
-      // Prefer a tab-specific snapshot; fall back to the legacy/global key
-      // so existing users don't lose their last session.
-      const keysToTry: string[] = [getTabsStorageKey(tabId)]
-      if (tabId != null) {
-        keysToTry.push(getTabsStorageKey(null))
-      }
-
-      let tabsState: SidepanelTabsState | null = null
-      for (const key of keysToTry) {
-        // eslint-disable-next-line no-await-in-loop
-        const candidate = (await storage.get(key)) as SidepanelTabsState | null
-        if (!isCurrentRestore()) return
-        if (candidate && Array.isArray(candidate.tabs)) {
-          tabsState = candidate
-          break
-        }
-      }
-
-      if (tabsState && tabsState.tabs.length > 0) {
-        const fallbackId = tabsState.tabs[0]?.id ?? null
-        const resolvedActiveId =
-          (tabsState.activeTabId &&
-            tabsState.snapshotsById?.[tabsState.activeTabId] &&
-            tabsState.activeTabId) ||
-          fallbackId
-        useSidepanelChatTabsStore
-          .getState()
-          .setTabsState({
-            tabs: tabsState.tabs,
-            activeTabId: resolvedActiveId,
-            snapshotsById: tabsState.snapshotsById || {}
-          })
-        if (resolvedActiveId) {
-          const snapshot = tabsState.snapshotsById?.[resolvedActiveId]
-          if (snapshot) {
-            applySnapshot(snapshot)
-          }
-        }
-        setIsRestoringChat(false)
-        return
-      }
-
-      const legacyKeysToTry: string[] = [getLegacyStorageKey(tabId)]
-      if (tabId != null) {
-        legacyKeysToTry.push(getLegacyStorageKey(null))
-      }
-
-      let legacySnapshot: LegacySidepanelChatSnapshot | null = null
-      for (const key of legacyKeysToTry) {
-        // eslint-disable-next-line no-await-in-loop
-        const candidate = (await storage.get(key)) as
-          | LegacySidepanelChatSnapshot
-          | null
-        if (!isCurrentRestore()) return
-        if (candidate && Array.isArray(candidate.messages)) {
-          legacySnapshot = candidate
-          break
-        }
-      }
-
-      if (legacySnapshot && Array.isArray(legacySnapshot.messages)) {
-        const restoredSnapshot: SidepanelChatSnapshot = {
-          history: legacySnapshot.history || [],
-          messages: legacySnapshot.messages || [],
-          chatMode: legacySnapshot.chatMode || "normal",
-          historyId: legacySnapshot.historyId ?? null,
-          webSearch,
-          toolChoice,
-          selectedModel: selectedModel ?? null,
-          selectedSystemPrompt,
-          selectedQuickPrompt,
-          temporaryChat,
-          useOCR,
-          serverChatId,
-          serverChatState,
-          serverChatTopic,
-          serverChatClusterId,
-          serverChatSource,
-          serverChatExternalRef,
-          queuedMessages,
-          modelSettings: modelSettingsSnapshot
-        }
-        const initialTab: SidepanelChatTab = {
-          id: generateID(),
-          label: newChatLabel,
-          historyId: legacySnapshot.historyId ?? null,
-          serverChatId: null,
-          serverChatTopic: null,
-          updatedAt: Date.now()
-        }
+      const tabsState = await readSidepanelTabs(storageRef.current, tabId, owner.ownerKey, current)
+      if (!current()) return
+      if (tabsState?.tabs.length) {
+        const activeId = tabsState.tabs.some(tab => tab.id === tabsState.activeTabId)
+          ? tabsState.activeTabId : tabsState.tabs[0].id
         useSidepanelChatTabsStore.getState().setTabsState({
-          tabs: [initialTab],
-          activeTabId: initialTab.id,
-          snapshotsById: { [initialTab.id]: restoredSnapshot }
+          tabs: tabsState.tabs, activeTabId: activeId, snapshotsById: tabsState.snapshotsById
         })
-        applySnapshot(restoredSnapshot)
-        setIsRestoringChat(false)
-        return
-      }
-    } catch {
-      // fall through to recent chat resume
-    }
-
-    try {
-      const isEnabled = await copilotResumeLastChat()
-      if (!isCurrentRestore()) return
-      if (!isEnabled) {
-        setIsRestoringChat(false)
-        return
-      }
-      if (messages.length === 0) {
-        const recentChat = await getRecentChatFromCopilot()
-        if (!isCurrentRestore()) return
-        if (recentChat) {
-          const restoredHistory = formatToChatHistory(recentChat.messages)
-          const restoredMessages = formatToMessage(recentChat.messages)
-          const restoredSnapshot: SidepanelChatSnapshot = {
-            history: restoredHistory,
-            messages: restoredMessages,
-            chatMode,
-            historyId: recentChat.history.id,
-            webSearch,
-            toolChoice,
-            selectedModel: selectedModel ?? null,
-            selectedSystemPrompt,
-            selectedQuickPrompt,
-            temporaryChat,
-            useOCR,
-            serverChatId,
-            serverChatState,
-            serverChatTopic,
-            serverChatClusterId,
-            serverChatSource,
-            serverChatExternalRef,
-            queuedMessages,
-            modelSettings: modelSettingsSnapshot
+        if (activeId && tabsState.snapshotsById[activeId]) applySnapshotRef.current(tabsState.snapshotsById[activeId])
+      } else {
+        const enabled = await copilotResumeLastChat()
+        if (!current()) return
+        if (enabled && messagesRef.current.length === 0) {
+          const recent = await getRecentChatFromCopilot(owner.snapshot)
+          if (!current()) return
+          if (recent && messagesRef.current.length === 0) {
+            const snapshot = buildHistorySnapshot({
+              historyInfo: recent.history, restoredHistory: formatToChatHistory(recent.messages),
+              restoredMessages: formatToMessage(recent.messages), modelSettings: modelSettingsSnapshot,
+              selectedModel: selectedModel ?? null, toolChoice, useOCR, webSearch
+            })
+            const id = generateID()
+            useSidepanelChatTabsStore.getState().setTabsState({
+              tabs: [{ id, label: recent.history.title || newChatLabel, historyId: recent.history.id,
+                serverChatId: snapshot.serverChatId, serverChatTopic: null, updatedAt: Date.now() }],
+              activeTabId: id, snapshotsById: { [id]: snapshot }
+            })
+            applySnapshotRef.current(snapshot)
           }
-          const initialTab: SidepanelChatTab = {
-            id: generateID(),
-            label: newChatLabel,
-            historyId: recentChat.history.id,
-            serverChatId: null,
-            serverChatTopic: null,
-            updatedAt: Date.now()
-          }
-          useSidepanelChatTabsStore.getState().setTabsState({
-            tabs: [initialTab],
-            activeTabId: initialTab.id,
-            snapshotsById: { [initialTab.id]: restoredSnapshot }
-          })
-          applySnapshot(restoredSnapshot)
-          setIsRestoringChat(false)
         }
       }
-    } finally {
-      setIsRestoringChat(false)
+      if (current()) setIsRestoringChat(false)
+    } catch {
+      // Keep persistence suspended: a failed read must not replace an owner's
+      // saved tabs with an empty scaffold. A remount retries the owned read.
     }
-  }
+  }, [owner, tabId])
 
   const persistSidepanelState = React.useCallback(() => {
-    if (tabId === undefined || isRestoringChat) return
-    const storage = storageRef.current
-    const key = getTabsStorageKey(tabId)
+    if (tabId === undefined || isRestoringChat || !owner.isCurrent()) return
     saveActiveTabSnapshot()
-    const { tabs, activeTabId, snapshotsById } =
-      useSidepanelChatTabsStore.getState()
+    const { tabs, activeTabId, snapshotsById } = useSidepanelChatTabsStore.getState()
     const snapshot: SidepanelTabsState = {
-      tabs,
-      activeTabId,
-      snapshotsById
+      version: 2, ownerKey: owner.ownerKey, tabs, activeTabId, snapshotsById
     }
-    void storage.set(key, snapshot).catch(() => {
-      // ignore persistence errors in sidepanel
-    })
-  }, [isRestoringChat, saveActiveTabSnapshot, tabId])
+    void storageRef.current.set(getTabsStorageKey(tabId, owner.ownerKey), snapshot).catch(() => {})
+  }, [isRestoringChat, owner, saveActiveTabSnapshot, tabId])
 
   React.useEffect(() => {
     void checkOnce()
@@ -1207,7 +1082,8 @@ const SidepanelChatContent = () => {
 
   React.useEffect(() => {
     void restoreSidepanelState()
-  }, [tabId])
+    return invalidateLoads
+  }, [restoreSidepanelState, invalidateLoads])
 
   const truncateTabLabel = React.useCallback((label: string) => {
     const trimmed = label.trim()
@@ -1222,7 +1098,7 @@ const SidepanelChatContent = () => {
   }, [historyId, serverChatTopic, messages])
 
   React.useEffect(() => {
-    if (!activeTabId || isSwitchingTabRef.current) return
+    if (!owner.isCurrent() || !activeTabId || isRestoringChat || isSwitchingTabRef.current) return
     let isCurrent = true
     const updateLabel = async () => {
       const store = useSidepanelChatTabsStore.getState()
@@ -1245,7 +1121,7 @@ const SidepanelChatContent = () => {
       if (!label) {
         label = newChatLabel
       }
-      if (!isCurrent) return
+      if (!isCurrent || !owner.isCurrent()) return
       useSidepanelChatTabsStore.getState().upsertTab({
         id: activeTabId,
         label:
@@ -1265,6 +1141,8 @@ const SidepanelChatContent = () => {
     }
   }, [
     activeTabId,
+    owner,
+    isRestoringChat,
     fallbackLabel,
     historyId,
     serverChatId,
@@ -1276,22 +1154,19 @@ const SidepanelChatContent = () => {
   const handleRenameActiveTab = React.useCallback(
     (nextLabel: string) => {
       const trimmed = nextLabel.trim()
-      if (!activeTabId || !trimmed) return
+      if (!owner.isCurrent() || isRestoringChat || !activeTabId || !trimmed) return
       useSidepanelChatTabsStore.getState().renameTab(activeTabId, trimmed)
     },
-    [activeTabId]
+    [activeTabId, owner, isRestoringChat]
   )
 
   React.useEffect(() => {
-    if (!activeTabId || isSwitchingTabRef.current) return
-    useSidepanelChatTabsStore.getState().setSnapshot(
-      activeTabId,
-      buildSnapshot()
-    )
-  }, [activeTabId, buildSnapshot])
+    if (isRestoringChat) return
+    saveActiveTabSnapshot()
+  }, [isRestoringChat, saveActiveTabSnapshot])
 
   React.useEffect(() => {
-    if (isRestoringChat || isSwitchingTabRef.current) return
+    if (!owner.isCurrent() || isRestoringChat || isSwitchingTabRef.current) return
     if (tabs.length > 0 && activeTabId) return
     const initialTabId = generateID()
     const initialTab: SidepanelChatTab = {
@@ -1309,6 +1184,7 @@ const SidepanelChatContent = () => {
     })
   }, [
     activeTabId,
+    owner,
     buildSnapshot,
     historyId,
     isRestoringChat,
@@ -1319,6 +1195,8 @@ const SidepanelChatContent = () => {
   ])
 
   const handleNewTab = React.useCallback(() => {
+    if (!owner.isCurrent() || isRestoringChat) return
+    loadGenerationRef.current++
     saveActiveTabSnapshot()
     if (streaming) {
       stopStreamingRequest()
@@ -1342,6 +1220,8 @@ const SidepanelChatContent = () => {
       isSwitchingTabRef.current = false
     }, 0)
   }, [
+    owner,
+      isRestoringChat,
     clearChat,
     saveActiveTabSnapshot,
     setDropedFile,
@@ -1352,7 +1232,8 @@ const SidepanelChatContent = () => {
 
   const handleSelectTab = React.useCallback(
     (tabId: string) => {
-      if (!tabId || tabId === activeTabId) return
+      if (!owner.isCurrent() || isRestoringChat || !tabId || tabId === activeTabId) return
+      loadGenerationRef.current++
       saveActiveTabSnapshot()
       if (streaming) {
         stopStreamingRequest()
@@ -1373,6 +1254,8 @@ const SidepanelChatContent = () => {
     },
     [
       activeTabId,
+      owner,
+      isRestoringChat,
       applySnapshot,
       clearChat,
       saveActiveTabSnapshot,
@@ -1384,6 +1267,7 @@ const SidepanelChatContent = () => {
 
   const handleCloseTab = React.useCallback(
     (tabId: string) => {
+      if (!owner.isCurrent() || isRestoringChat) return
       const store = useSidepanelChatTabsStore.getState()
       if (store.tabs.length <= 1) {
         store.removeTab(tabId)
@@ -1400,11 +1284,12 @@ const SidepanelChatContent = () => {
       }
       store.removeTab(tabId)
     },
-    [handleNewTab, handleSelectTab]
+    [handleNewTab, handleSelectTab, owner, isRestoringChat]
   )
 
   const openSnapshotTab = React.useCallback(
     (tab: SidepanelChatTab, snapshot: SidepanelChatSnapshot) => {
+      if (!owner.isCurrent()) return
       const store = useSidepanelChatTabsStore.getState()
       store.upsertTab(tab)
       store.setSnapshot(tab.id, snapshot)
@@ -1415,11 +1300,14 @@ const SidepanelChatContent = () => {
         isSwitchingTabRef.current = false
       }, 0)
     },
-    [applySnapshot]
+    [applySnapshot, owner]
   )
 
   const openLocalHistory = React.useCallback(
     async (targetHistoryId: string) => {
+      if (!owner.isCurrent() || isRestoringChat) return
+      const generation = ++loadGenerationRef.current
+      const current = () => owner.isCurrent() && generation === loadGenerationRef.current
       const existingTab = tabs.find((tab) => tab.historyId === targetHistoryId)
       if (existingTab) {
         handleSelectTab(existingTab.id)
@@ -1435,8 +1323,8 @@ const SidepanelChatContent = () => {
       const isCurrentLoad = historySelection.fence()
       try {
         const chatData = await getFullChatData(targetHistoryId)
-        if (!isCurrentLoad()) return
-        if (!chatData) {
+        if (!current() || !isCurrentLoad()) return
+        if (!chatData || chatData.historyInfo.server_scope_key !== owner.ownerKey) {
           notification.error({
             message: t("common:error", "Error"),
             description: t(
@@ -1477,6 +1365,7 @@ const SidepanelChatContent = () => {
           snapshot
         )
       } catch (err: any) {
+        if (!current()) return
         notification.error({
           message: t("common:error", "Error"),
           description:
@@ -1484,10 +1373,12 @@ const SidepanelChatContent = () => {
             t("common:serverChatLoadError", "Failed to load conversation.")
         })
       } finally {
-        setIsLoading(false)
+        if (current()) setIsLoading(false)
       }
     },
     [
+      owner,
+      isRestoringChat,
       handleSelectTab,
       modelSettingsSnapshot,
       notification,
@@ -1541,6 +1432,9 @@ const SidepanelChatContent = () => {
 
   const openServerChat = React.useCallback(
     async (chat: ServerChatHistoryItem) => {
+      if (!owner.isCurrent() || isRestoringChat) return
+      const generation = ++loadGenerationRef.current
+      const current = () => owner.isCurrent() && generation === loadGenerationRef.current
       const chatId = String(chat.id)
       const existingTab = tabs.find((tab) => tab.serverChatId === chatId)
       if (existingTab) {
@@ -1553,25 +1447,23 @@ const SidepanelChatContent = () => {
       }
       setDropedFile(undefined)
       setIsLoading(true)
+      const snapshotOwner = owner.snapshot
       try {
         const loaded = await historySelection.loadConversation({ serverChatId: chatId })
-        if (!loaded) return
+        if (!loaded || !current()) return
         const isCurrent = historySelection.fence()
-        const owner = historySelection.getCurrent().owner
+        const historyOwner = historySelection.getCurrent().owner
         const list = await tldwClient.listChatMessages(chatId, {
           include_deleted: "false", include_metadata: "true"
-        }, { signal: historySelection.getSignal() })
-        if (!isCurrent() || (owner?.kind === "native" && !owner.validate_lease())) return
+        }, { signal: historySelection.getSignal(), requestScope: snapshotOwner.requestScope })
+        if (!current() || !isCurrent() || (historyOwner?.kind === "native" && !historyOwner.validate_lease())) return
         const messageList: ServerChatMessageInput[] = list
         const { history, mappedMessages } = mapServerChatMessages(
           messageList,
           userDisplayName
         )
-        const localHistoryId = await ensureLocalHistoryMirror(
-          chatId,
-          chat,
-          messageList
-        )
+        const localHistoryId = await ensureLocalHistoryMirror(chatId, chat, messageList)
+        if (!current()) return
 
         if (!isCurrent()) return
         const snapshot: SidepanelChatSnapshot = {
@@ -1612,6 +1504,7 @@ const SidepanelChatContent = () => {
           snapshot
         )
       } catch (err: any) {
+        if (!current()) return
         notification.error({
           message: t("common:error", "Error"),
           description:
@@ -1619,12 +1512,14 @@ const SidepanelChatContent = () => {
             t("common:serverChatLoadError", "Failed to load conversation.")
         })
       } finally {
-        setIsLoading(false)
+        if (current()) setIsLoading(false)
       }
     },
     [
+      owner,
+      isRestoringChat,
+      userDisplayName,
       chatMode,
-      ensureLocalHistoryMirror,
       handleSelectTab,
       modelSettingsSnapshot,
       notification,
@@ -1648,6 +1543,7 @@ const SidepanelChatContent = () => {
   )
 
   React.useEffect(() => {
+    persistSidepanelState()
     const handleBeforeUnload = () => {
       persistSidepanelState()
     }
@@ -1664,7 +1560,6 @@ const SidepanelChatContent = () => {
     return () => {
       window.removeEventListener("beforeunload", handleBeforeUnload)
       document.removeEventListener("visibilitychange", handleVisibilityChange)
-      persistSidepanelState()
     }
   }, [persistSidepanelState])
 
@@ -2315,7 +2210,8 @@ const SidepanelChatContent = () => {
           <LazySidepanelChatSidebar
             open={isSidebarVisible}
             variant={isDockedSidebar ? "docked" : "overlay"}
-            tabs={tabs}
+            owner={owner}
+          tabs={tabs}
             activeTabId={activeTabId}
             onSelectTab={handleSelectTab}
             onCloseTab={handleCloseTab}

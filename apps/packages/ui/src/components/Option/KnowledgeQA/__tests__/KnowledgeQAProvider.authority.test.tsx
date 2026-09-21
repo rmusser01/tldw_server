@@ -8,6 +8,8 @@ import { SourceViewerModal } from "../SourceViewerModal"
 import { SourceList } from "../SourceList"
 import { getKnowledgeQaHistoryStorageKey } from "../historyStorage"
 import type { ServicePromptSnapshot } from "@/services/service-prompts"
+import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
+import { SearchBar } from "../SearchBar"
 
 const harness = vi.hoisted(() => ({
   config: { serverUrl: "http://alice-server", authMode: "multi-user" as const, accessToken: "alice" },
@@ -15,6 +17,9 @@ const harness = vi.hoisted(() => ({
   connected: true,
   snapshot: {} as ServicePromptSnapshot,
   fetch: vi.fn(),
+  searchCharacters: vi.fn(),
+  listCharacters: vi.fn(),
+  getChat: vi.fn(),
   search: vi.fn(),
   stream: vi.fn(),
   create: vi.fn(),
@@ -47,11 +52,11 @@ vi.mock("@/services/feedback", () => ({
 vi.mock("@/services/tldw/TldwApiClient", () => ({ tldwClient: {
   initialize: vi.fn().mockResolvedValue(undefined),
   fetchWithAuth: (...args: unknown[]) => harness.fetch(...args),
-  searchCharacters: vi.fn().mockResolvedValue([]),
-  listCharacters: vi.fn().mockResolvedValue([]),
+  searchCharacters: (...args: unknown[]) => harness.searchCharacters(...args),
+  listCharacters: (...args: unknown[]) => harness.listCharacters(...args),
   ragSourceHealth: vi.fn().mockResolvedValue({}),
   createChat: (...args: unknown[]) => harness.create(...args),
-  getChat: vi.fn().mockResolvedValue({ version: 1 }),
+  getChat: (...args: unknown[]) => harness.getChat(...args),
   addChatMessage: (...args: unknown[]) => harness.add(...args),
   ragSearch: (...args: unknown[]) => harness.search(...args),
   ragSearchStream: (...args: unknown[]) => harness.stream(...args),
@@ -114,11 +119,107 @@ describe("Knowledge QA verified account boundary", () => {
     harness.settings = undefined
     account("alice")
     harness.fetch.mockResolvedValue(response([]))
+    harness.searchCharacters.mockResolvedValue([])
+    harness.listCharacters.mockResolvedValue([])
+    harness.getChat.mockResolvedValue({ version: 1 })
     harness.create.mockResolvedValue({ id: "alice-thread", version: 1 })
     harness.add.mockResolvedValue({ id: "saved-message" })
     harness.remove.mockResolvedValue(undefined)
     harness.search.mockResolvedValue({ results: [], generated_answer: null, metadata: {} })
-    harness.stream.mockImplementation(async function* () { yield { type: "done", status: "success" } })
+    harness.stream.mockImplementation(async function* () {
+      yield { schema_version: 1, type: "complete", code: "complete", upstream_dispatched: true, output_emitted: false, allow_non_stream_fallback: false, message: "Search completed." }
+    })
+  })
+
+  it("does not start private QA from the SearchBar before authority is verified and can recover", async () => {
+    harness.loading = true
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {})
+    const rendered = render(<KnowledgeQAProvider><Recent /><SearchBar autoFocus={false} /></KnowledgeQAProvider>)
+    fireEvent.change(screen.getByRole("textbox", { name: "Search your knowledge base" }), { target: { value: "Wait for verified account" } })
+    fireEvent.click(screen.getByRole("button", { name: "Ask" }))
+    await act(async () => {})
+    expect(errors).not.toHaveBeenCalled()
+    expect(harness.create).not.toHaveBeenCalled()
+    expect(harness.stream).not.toHaveBeenCalled()
+    expect(current.currentThreadId).toBeNull()
+    expect(current.isLocalOnlyThread).toBe(false)
+    expect(current.isSearching).toBe(false)
+    expect(current.messages).toEqual([])
+
+    harness.loading = false
+    rendered.rerender(<KnowledgeQAProvider><Recent /><SearchBar autoFocus={false} /></KnowledgeQAProvider>)
+    await waitFor(() => expect(current.historyHydrated).toBe(true))
+    act(() => current.setQuery("Current owner retry"))
+    await act(async () => { await current.search() })
+    expect(current.currentThreadId).toBe("alice-thread")
+    expect(current.queryStage).toBe("complete")
+    expect(errors).not.toHaveBeenCalled()
+  })
+
+  it.each(["create", "new topic"])("returns cancellation for private %s before verification", async action => {
+    harness.loading = true
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {})
+    render(view())
+    act(() => current.setQuery("Keep this draft"))
+    let result: unknown
+    await act(async () => { result = action === "create" ? await current.createNewThread("Private thread") : await current.startNewTopic() })
+    expect(result).toBeNull()
+    expect(current.query).toBe("Keep this draft")
+    expect(current.currentThreadId).toBeNull()
+    expect(errors).not.toHaveBeenCalled()
+    expect(harness.create).not.toHaveBeenCalled()
+  })
+
+  it.each(["character search", "character list", "create", "version", "tag", "server tag", "user save", "stream", "assistant save", "rag context", "server rag context"])("settles scope cancellation during %s without local fallback or failed history", async stage => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {})
+    const warnings = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const denied = createServicePromptScopeChangedError()
+    render(view())
+    await waitFor(() => expect(current.historyHydrated).toBe(true))
+    if (stage === "character search") harness.searchCharacters.mockRejectedValueOnce(denied)
+    if (stage === "character list") harness.listCharacters.mockRejectedValueOnce(denied)
+    if (stage === "create") harness.create.mockRejectedValueOnce(denied)
+    if (stage === "version") {
+      harness.create.mockResolvedValueOnce({ id: "alice-thread" })
+      harness.getChat.mockRejectedValueOnce(denied)
+    }
+    if (stage === "tag") harness.fetch.mockRejectedValueOnce(denied)
+    const deniedResponse = { ...response(denied.details), ok: false, status: denied.status, data: denied.details, text: async () => JSON.stringify(denied.details) }
+    if (stage === "server tag") harness.fetch.mockResolvedValueOnce(deniedResponse)
+    if (stage === "user save") harness.add.mockRejectedValueOnce(denied)
+    if (stage === "stream") harness.stream.mockImplementationOnce(async function* () { yield await Promise.reject(denied) })
+    if (["assistant save", "rag context", "server rag context"].includes(stage)) {
+      harness.stream.mockImplementationOnce(async function* () {
+        yield { type: "delta", text: "Current owner answer" }
+        yield { schema_version: 1, type: "complete", code: "complete", upstream_dispatched: true, output_emitted: true, allow_non_stream_fallback: false, message: "Search completed." }
+      })
+      if (stage === "assistant save") harness.add.mockResolvedValueOnce({ id: "saved-user" }).mockRejectedValueOnce(denied)
+      if (stage === "rag context") harness.fetch.mockImplementation(async (path: string) => {
+        if (path.endsWith("/rag-context")) throw denied
+        return response([])
+      })
+      if (stage === "server rag context") harness.fetch.mockImplementation(async (path: string) => path.endsWith("/rag-context") ? deniedResponse : response([]))
+    }
+    act(() => current.setQuery("Cancelled owner operation"))
+    await act(async () => { await expect(current.search()).resolves.toBeUndefined() })
+    expect(errors).not.toHaveBeenCalled()
+    expect(warnings).not.toHaveBeenCalled()
+    expect(current.isLocalOnlyThread).toBe(false)
+    expect(current.isSearching).toBe(false)
+    expect(current.queryStage).toBe("cancelled")
+    expect(current.error).toBeNull()
+    expect(current.searchHistory).toEqual([])
+    if (["character search", "character list", "create", "version", "tag", "server tag"].includes(stage)) {
+      expect(current.currentThreadId).toBeNull()
+      expect(harness.add).not.toHaveBeenCalled()
+    }
+    if (["character search", "character list"].includes(stage)) expect(harness.create).not.toHaveBeenCalled()
+    if (!["stream", "assistant save", "rag context", "server rag context"].includes(stage)) expect(harness.stream).not.toHaveBeenCalled()
+
+    await act(async () => { await current.search() })
+    expect(current.queryStage).toBe("complete")
+    expect(current.error).toBeNull()
+    expect(current.isLocalOnlyThread).toBe(false)
   })
 
   it("does not expose unowned legacy questions through the real Recent buttons", async () => {

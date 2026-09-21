@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query"
 import { Link } from "react-router-dom"
 import { useMessageOption } from "@/hooks/useMessageOption"
 import { useDynamicUIActionBridge } from "@/hooks/chat/useDynamicUIActionBridge"
-import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
+import { assistantSelectionToCharacter } from "@/types/assistant-selection"
 import { PlaygroundEmpty } from "./PlaygroundEmpty"
 import {
   PlaygroundMessage,
@@ -215,7 +215,8 @@ export const PlaygroundChat = ({
     compareSplitChats,
     setCompareSplitChat,
     compareMaxModels,
-    selectedAssistant
+    selectedAssistant: resolvedAssistantSelection,
+    effectiveAssistantState
   } = useMessageOption({
     visualIdentityManualExpressionOverride: visualManualExpressionKey,
     setVisualIdentityManualExpressionOverride: setVisualManualExpressionKey
@@ -238,7 +239,13 @@ export const PlaygroundChat = ({
   })
   const resolvedDynamicUIAction = onDynamicUIAction ?? bridgedDynamicUIAction
   const [openReasoning] = useStorage("openReasoning", false)
-  const [selectedCharacter] = useSelectedCharacter<Character | null>(null)
+  const selectedAssistant = effectiveAssistantState?.mode === "plain"
+    ? null
+    : resolvedAssistantSelection
+  const selectedCharacter = React.useMemo(
+    () => assistantSelectionToCharacter<Character>(selectedAssistant),
+    [selectedAssistant]
+  )
   const isConnected = useIsConnected()
   const { data: chatModels = [], isFetched: chatModelsFetched, refetch: refetchChatModels } = useQuery({
     queryKey: ["playground:chatModels"],

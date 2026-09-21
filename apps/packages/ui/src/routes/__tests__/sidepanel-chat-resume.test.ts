@@ -4,8 +4,11 @@ const mocks = vi.hoisted(() => ({
   storageGet: vi.fn<(key: string) => Promise<unknown>>(),
   copilotResumeLastChat: vi.fn<() => Promise<boolean>>(),
   getRecentChatFromCopilot: vi.fn<() => Promise<unknown>>(),
+  loadSnapshot: vi.fn(),
   sendMessage: vi.fn<(message: { type: string }) => Promise<{ tabId?: unknown }>>()
 }))
+
+vi.mock("@/services/service-prompts", () => ({ loadServicePromptSnapshot: () => mocks.loadSnapshot() }))
 
 vi.mock("@/utils/safe-storage", () => ({
   createSafeStorage: () => ({
@@ -38,12 +41,32 @@ describe("hasResumableSidepanelChat", () => {
     mocks.copilotResumeLastChat.mockResolvedValue(false)
     mocks.getRecentChatFromCopilot.mockResolvedValue(null)
     mocks.sendMessage.mockResolvedValue({ tabId: 7 })
+    mocks.loadSnapshot.mockImplementation(async () => ({
+      requestScope: { config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "alice" },
+      scopeSignal: new AbortController().signal, scopeInvalidatedSignal: new AbortController().signal, release: () => {}
+    }))
+  })
+
+  it("does not offer another account's unowned cached tabs", async () => {
+    mocks.storageGet.mockResolvedValue({ tabs: [{ id: "old-tab", historyId: "alice-private" }], activeTabId: "old-tab", snapshotsById: {} })
+    await expect(hasResumableSidepanelChat()).resolves.toBe(false)
+  })
+
+  it("ignores a held resume read after an account boundary", async () => {
+    let finish!: (value: unknown) => void
+    mocks.storageGet.mockImplementationOnce(() => new Promise(resolve => { finish = resolve })).mockResolvedValue(null)
+    const pending = hasResumableSidepanelChat()
+    await vi.waitFor(() => expect(finish).toBeTypeOf("function"))
+    window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed"))
+    finish({ version: 2, ownerKey: '["http://chat.test","multi-user","manual",null,"alice",null]', tabs: [{ id: "old-tab", historyId: "alice-private" }], activeTabId: "old-tab", snapshotsById: {} })
+    await expect(pending).resolves.toBe(false)
   })
 
   it("treats a stored tabs snapshot with real chat state as resumable", async () => {
     mocks.storageGet.mockImplementation(async (key: string) => {
-      if (key === "sidepanelChatTabsState:tab-7") {
+      if (key === `sidepanelChatTabsState:v2:${encodeURIComponent('["http://chat.test","multi-user","manual",null,"alice",null]')}:tab-7`) {
         return {
+          version: 2, ownerKey: '["http://chat.test","multi-user","manual",null,"alice",null]',
           tabs: [{ id: "tab-1" }],
           activeTabId: "tab-1",
           snapshotsById: {
@@ -84,8 +107,9 @@ describe("hasResumableSidepanelChat", () => {
 
   it("does not treat a blank persisted tab scaffold as resumable", async () => {
     mocks.storageGet.mockImplementation(async (key: string) => {
-      if (key === "sidepanelChatTabsState:tab-7") {
+      if (key === `sidepanelChatTabsState:v2:${encodeURIComponent('["http://chat.test","multi-user","manual",null,"alice",null]')}:tab-7`) {
         return {
+          version: 2, ownerKey: '["http://chat.test","multi-user","manual",null,"alice",null]',
           tabs: [{ id: "tab-1" }],
           activeTabId: "tab-1",
           snapshotsById: {
@@ -126,8 +150,9 @@ describe("hasResumableSidepanelChat", () => {
       "sidepanelChatOverlayResume:tldw:sidepanelChatDraft:tab-2"
 
     mocks.storageGet.mockImplementation(async (key: string) => {
-      if (key === "sidepanelChatTabsState:tab-7") {
+      if (key === `sidepanelChatTabsState:v2:${encodeURIComponent('["http://chat.test","multi-user","manual",null,"alice",null]')}:tab-7`) {
         return {
+          version: 2, ownerKey: '["http://chat.test","multi-user","manual",null,"alice",null]',
           tabs: [{ id: "tab-1" }],
           activeTabId: "tab-1",
           snapshotsById: {
@@ -171,8 +196,9 @@ describe("hasResumableSidepanelChat", () => {
 
   it("does not treat unrelated scratch overlays as resumable for a blank persisted tab scaffold", async () => {
     mocks.storageGet.mockImplementation(async (key: string) => {
-      if (key === "sidepanelChatTabsState:tab-7") {
+      if (key === `sidepanelChatTabsState:v2:${encodeURIComponent('["http://chat.test","multi-user","manual",null,"alice",null]')}:tab-7`) {
         return {
+          version: 2, ownerKey: '["http://chat.test","multi-user","manual",null,"alice",null]',
           tabs: [{ id: "tab-1" }],
           activeTabId: "tab-1",
           snapshotsById: {
@@ -217,7 +243,7 @@ describe("hasResumableSidepanelChat", () => {
     await expect(hasResumableSidepanelChat()).resolves.toBe(false)
   })
 
-  it("treats a legacy snapshot with an empty messages array as resumable", async () => {
+  it("does not adopt an unowned legacy snapshot", async () => {
     mocks.storageGet.mockImplementation(async (key: string) => {
       if (key === "sidepanelChatState:tab-7") {
         return {
@@ -230,7 +256,7 @@ describe("hasResumableSidepanelChat", () => {
       return null
     })
 
-    await expect(hasResumableSidepanelChat()).resolves.toBe(true)
+    await expect(hasResumableSidepanelChat()).resolves.toBe(false)
   })
 
   it("returns false when there is no stored state and copilot resume is disabled", async () => {

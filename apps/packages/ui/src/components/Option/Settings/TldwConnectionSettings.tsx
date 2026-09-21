@@ -35,6 +35,7 @@ export type TldwConnectionSettingsProps = {
   onManualServerOriginChange: () => void
   authMode: "single-user" | "multi-user"
   setAuthMode: (mode: "single-user" | "multi-user") => void
+  signInTargetSaved?: boolean
   isLoggedIn: boolean
   setIsLoggedIn: (loggedIn: boolean) => void
   refreshLoginStatus: () => Promise<void>
@@ -94,6 +95,7 @@ export const TldwConnectionSettings = ({
   onManualServerOriginChange,
   authMode,
   setAuthMode,
+  signInTargetSaved = false,
   isLoggedIn,
   setIsLoggedIn,
   refreshLoginStatus,
@@ -297,6 +299,11 @@ export const TldwConnectionSettings = ({
             />
           </Form.Item>
 
+          {!signInTargetSaved && (
+            <p role="status" className="mb-4 text-sm text-text-muted">
+              {t('settings:tldw.login.saveFirst', 'Save connection settings before signing in.')}
+            </p>
+          )}
           {loginMethod === 'password' ? (
             <>
               <Form.Item
@@ -316,7 +323,7 @@ export const TldwConnectionSettings = ({
               </Form.Item>
 
               <Form.Item>
-                <Button type="primary" onClick={onLogin}>
+                <Button type="primary" onClick={onLogin} disabled={!signInTargetSaved}>
                   {t('settings:tldw.buttons.login', 'Login')}
                 </Button>
               </Form.Item>
@@ -345,12 +352,12 @@ export const TldwConnectionSettings = ({
 
               <Form.Item>
                 <Space>
-                  <Button onClick={onSendMagicLink} loading={magicSending}>
+                  <Button onClick={onSendMagicLink} loading={magicSending} disabled={!signInTargetSaved}>
                     {magicSent
                       ? t('settings:tldw.magicLink.resend', 'Resend magic link')
                       : t('settings:tldw.magicLink.send', 'Send magic link')}
                   </Button>
-                  <Button type="primary" onClick={onVerifyMagicLink}>
+                  <Button type="primary" onClick={onVerifyMagicLink} disabled={!signInTargetSaved}>
                     {t('settings:tldw.magicLink.verify', 'Verify & Login')}
                   </Button>
                 </Space>

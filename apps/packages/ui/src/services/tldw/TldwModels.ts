@@ -123,6 +123,7 @@ export class TldwModelsService {
   private storageInitPromise: Promise<void> | null = null
   private storageWritePromise: Promise<void> = Promise.resolve()
   private inFlightFetch: Promise<ModelInfo[]> | null = null
+  private inFlightFreshFetch: Promise<ModelInfo[]> | null = null
   private cacheScopeKey: string | null = null
   private invalidationGeneration = 0
   private lastAppliedInvalidationToken: string | null = null
@@ -233,6 +234,7 @@ export class TldwModelsService {
     this.lastFetchTime = 0
     this.lastForcedFetchTime = 0
     this.inFlightFetch = null
+    this.inFlightFreshFetch = null
     this.cacheScopeKey = null
   }
 
@@ -340,8 +342,9 @@ export class TldwModelsService {
    */
   async getModels(
     forceRefresh: boolean = false,
-    options?: { refreshOpenRouter?: boolean }
+    options?: { refreshOpenRouter?: boolean; requireFresh?: boolean }
   ): Promise<ModelInfo[]> {
+    const requireFresh = options?.requireFresh === true
     await this.ensureStorageLoaded()
     let fetchGeneration = this.invalidationGeneration
     const config = await tldwClient.getConfig().catch(() => null)
@@ -351,22 +354,32 @@ export class TldwModelsService {
     const now = Date.now()
 
     // Return cached models if available and not expired
-    if (!forceRefresh && this.cachedModels && (now - this.lastFetchTime) < this.CACHE_DURATION) {
+    if (!requireFresh && !forceRefresh && this.cachedModels && (now - this.lastFetchTime) < this.CACHE_DURATION) {
       return this.cachedModels
     }
     if (
       forceRefresh &&
+      !requireFresh &&
       this.cachedModels &&
       (now - this.lastForcedFetchTime) < this.FORCE_REFRESH_COOLDOWN
     ) {
       return this.cachedModels
     }
-    if (this.inFlightFetch) {
+    if (requireFresh && this.inFlightFreshFetch) {
+      return await this.inFlightFreshFetch
+    }
+    if (!requireFresh && this.inFlightFetch) {
       return await this.inFlightFetch
     }
 
     if (!this.isConfiguredForModels(config)) {
-      return this.cachedModels || []
+      return requireFresh ? [] : this.cachedModels || []
+    }
+
+    if (requireFresh) {
+      // Capability Retry must outlive an older discovery, without discarding
+      // the last useful catalog if the new read fails.
+      fetchGeneration = ++this.invalidationGeneration
     }
 
     const fetchFromServer = async () => {
@@ -374,6 +387,9 @@ export class TldwModelsService {
       const models = await tldwClient.getModels({
         refreshOpenRouter: options?.refreshOpenRouter === true
       })
+      if (requireFresh && fetchGeneration !== this.invalidationGeneration) {
+        return []
+      }
 
       // Transform tldw models to our format
       const transformedModels = models.map(model => this.transformModel(model))
@@ -386,10 +402,13 @@ export class TldwModelsService {
         await this.persistCache(fetchGeneration)
       }
 
-      return transformedModels
+      return requireFresh && fetchGeneration !== this.invalidationGeneration
+        ? []
+        : transformedModels
     }
 
     const fetchPromise = fetchFromServer().catch(async (error) => {
+      if (requireFresh) return []
       if (isAbortLikeModelFetchError(error)) {
         return this.cachedModels || []
       }
@@ -409,12 +428,16 @@ export class TldwModelsService {
 
     if (fetchGeneration === this.invalidationGeneration) {
       this.inFlightFetch = fetchPromise
+      if (requireFresh) this.inFlightFreshFetch = fetchPromise
     }
     try {
       return await fetchPromise
     } finally {
       if (this.inFlightFetch === fetchPromise) {
         this.inFlightFetch = null
+      }
+      if (this.inFlightFreshFetch === fetchPromise) {
+        this.inFlightFreshFetch = null
       }
     }
   }

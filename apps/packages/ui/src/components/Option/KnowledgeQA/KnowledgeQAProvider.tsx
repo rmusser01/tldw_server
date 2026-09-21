@@ -51,6 +51,7 @@ import { KNOWLEDGE_QA_KEYWORD } from "./constants"
 import { trackKnowledgeQaSearchMetric } from "@/utils/knowledge-qa-search-metrics"
 import { getKnowledgeQaHistoryStorageKey, getKnowledgeQaStorageScopeKey, persistKnowledgeQaHistory } from "./historyStorage"
 import { useKnowledgeQAAuthority } from "./hooks/useKnowledgeQAAuthority"
+import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 import {
   getKnowledgeQaSearchErrorLogCode,
   mapKnowledgeQaSearchErrorMessage,
@@ -1677,6 +1678,10 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
   const [state, rawDispatch] = useReducer(reducer, initialState)
   const mounted = useRef(true)
   const isCurrent = useCallback(() => mounted.current && authority.isCurrent(), [authority])
+  const canStartPrivateOperation = useCallback(
+    () => Boolean(authority.snapshot) && isCurrent(),
+    [authority.snapshot, isCurrent]
+  )
   const tldwClient = useMemo(() => createKnowledgeQaClient(authority.snapshot, isCurrent), [authority.snapshot, isCurrent])
   const dispatch = useCallback((action: Action) => {
     if (isCurrent()) rawDispatch(action)
@@ -1764,7 +1769,10 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
         await tldwClient.initialize()
         const searchResults = await tldwClient
           .searchCharacters(DEFAULT_CHARACTER_NAME, { limit: 5 })
-          .catch(() => [])
+          .catch((error) => {
+            if (isRequestConfigScopeChangedError(error)) throw error
+            return []
+          })
         const match =
           searchResults.find(
             (c: any) =>
@@ -1776,7 +1784,10 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
           return match.id
         }
 
-        const listResults = await tldwClient.listCharacters({ limit: 10 }).catch(() => [])
+        const listResults = await tldwClient.listCharacters({ limit: 10 }).catch((error) => {
+          if (isRequestConfigScopeChangedError(error)) throw error
+          return []
+        })
         const fallback =
           listResults.find(
             (c: any) =>
@@ -1788,6 +1799,7 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
           return fallback.id
         }
       } catch (error) {
+        if (isRequestConfigScopeChangedError(error)) throw error
         console.warn("Failed to resolve default character:", error)
       }
       return null
@@ -1834,6 +1846,7 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
           }),
         })
       } catch (error) {
+        if (isRequestConfigScopeChangedError(error)) throw error
         console.warn("Failed to tag Knowledge QA conversation:", error)
       }
     },
@@ -1853,7 +1866,8 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
   )
 
   const createNewThread = useCallback(
-    async (title?: string, options?: CreateThreadOptions): Promise<string> => {
+    async (title?: string, options?: CreateThreadOptions): Promise<string | null> => {
+      if (!canStartPrivateOperation()) return null
       const shouldActivate = options?.shouldActivate ?? (() => true)
       const cleanupRemoteIfSkipped = options?.cleanupRemoteIfSkipped ?? false
       try {
@@ -1908,6 +1922,7 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
               await tagConversationKeyword(String(threadId), currentVersion)
             }
           } catch (error) {
+            if (isRequestConfigScopeChangedError(error)) throw error
             console.warn("Failed to fetch conversation version for tagging:", error)
           }
         }
@@ -1934,7 +1949,8 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
 
         return threadId
       } catch (error) {
-        if (isCurrent()) console.error("Failed to create thread:", error)
+        if (!isCurrent() || isRequestConfigScopeChangedError(error)) return null
+        console.error("Failed to create thread:", error)
         // Return a local ID as fallback
         const localId = `${LOCAL_THREAD_PREFIX}${crypto.randomUUID()}`
         if (!shouldActivate()) {
@@ -1950,7 +1966,7 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
         return localId
       }
     },
-    [dispatch, isCurrent, resolveDefaultCharacterId, tagConversationKeyword, tldwClient]
+    [canStartPrivateOperation, dispatch, isCurrent, resolveDefaultCharacterId, tagConversationKeyword, tldwClient]
   )
 
   const notifyPersistenceFailure = useCallback(() => {
@@ -2005,6 +2021,7 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
           timestamp: response?.created_at ? String(response.created_at) : undefined,
         }
       } catch (error) {
+        if (isRequestConfigScopeChangedError(error)) throw error
         if (!isCurrent()) return null
         console.warn("Failed to persist chat message:", error)
         notifyPersistenceFailure()
@@ -2044,6 +2061,7 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
         const result = await response.json()
         return result?.success ?? false
       } catch (error) {
+        if (isRequestConfigScopeChangedError(error)) throw error
         // Metadata-only failure path: answers/sources remain usable even if context persistence fails.
         if (isCurrent()) console.error("Failed to persist RAG context:", error)
         return false
@@ -2053,6 +2071,7 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
   )
 
   const retrySync = useCallback(async (): Promise<boolean> => {
+    if (!canStartPrivateOperation()) return false
     try {
       const messagesToSync = state.messages.filter(
         (candidate) =>
@@ -2071,6 +2090,7 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
           state.query ||
           "Knowledge QA"
         targetThreadId = await createNewThread(firstQuestion)
+        if (!targetThreadId) return false
       }
 
       if (!targetThreadId || isLocalThreadId(targetThreadId)) {
@@ -2164,13 +2184,16 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
       })
       return true
     } catch (error) {
+      if (!isCurrent() || isRequestConfigScopeChangedError(error)) return false
       console.warn("Failed to retry Knowledge QA sync:", error)
       dispatch({ type: "MARK_SYNC_FAILED" })
       return false
     }
   }, [
+    canStartPrivateOperation,
     createNewThread,
     dispatch,
+    isCurrent,
     message,
     persistChatMessage,
     persistRagContext,
@@ -2231,6 +2254,7 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
       addToHistory: boolean,
       settingsOverrides?: Partial<RagSettings>
     ) => {
+      if (!canStartPrivateOperation()) return
       const trimmedQuery = question.trim()
       if (!trimmedQuery) return
       const queryWasTruncated = trimmedQuery.length > RAG_QUERY_MAX_LENGTH
@@ -2282,51 +2306,55 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
         })
 
       let threadId = state.currentThreadId
-      if (!threadId) {
-        threadId = await createNewThread(trimmedQuery, {
-          shouldActivate: () => !isStaleSearchRequest(),
-          cleanupRemoteIfSkipped: true,
-        })
+      try {
+        if (!threadId) {
+          threadId = await createNewThread(trimmedQuery, {
+            shouldActivate: () => !isStaleSearchRequest(),
+            cleanupRemoteIfSkipped: true,
+          })
+          if (isStaleSearchRequest()) {
+            return
+          }
+          if (!threadId) {
+            dispatch({ type: "CANCEL_SEARCH" })
+            return
+          }
+        }
+        let threadSyncFailed = Boolean(threadId && isLocalThreadId(threadId))
+        const markThreadSyncFailed = () => {
+          threadSyncFailed = true
+          dispatch({ type: "SET_LOCAL_ONLY_THREAD", payload: true })
+          dispatch({
+            type: "SET_EXTENSION_FAILURE_STATE",
+            payload: "search_succeeded_sync_failed",
+          })
+        }
+        const isThreadSyncFailed = () =>
+          threadSyncFailed || Boolean(threadId && isLocalThreadId(threadId))
+
+        const userTimestamp = new Date().toISOString()
+        const persistedUser = threadId
+          ? await persistChatMessage(threadId, "user", trimmedQuery, null)
+          : null
         if (isStaleSearchRequest()) {
           return
         }
-      }
-      let threadSyncFailed = Boolean(threadId && isLocalThreadId(threadId))
-      const markThreadSyncFailed = () => {
-        threadSyncFailed = true
-        dispatch({ type: "SET_LOCAL_ONLY_THREAD", payload: true })
-        dispatch({
-          type: "SET_EXTENSION_FAILURE_STATE",
-          payload: "search_succeeded_sync_failed",
-        })
-      }
-      const isThreadSyncFailed = () =>
-        threadSyncFailed || Boolean(threadId && isLocalThreadId(threadId))
-
-      const userTimestamp = new Date().toISOString()
-      const persistedUser = threadId
-        ? await persistChatMessage(threadId, "user", trimmedQuery, null)
-        : null
-      if (isStaleSearchRequest()) {
-        return
-      }
-      if (threadId && !isLocalThreadId(threadId) && !persistedUser) {
-        markThreadSyncFailed()
-      }
-      const userMessageId = persistedUser?.id || crypto.randomUUID()
-
-      if (threadId) {
-        const userMessage: KnowledgeQAMessage = {
-          id: userMessageId,
-          conversationId: threadId,
-          role: "user",
-          content: trimmedQuery,
-          timestamp: persistedUser?.timestamp || userTimestamp,
+        if (threadId && !isLocalThreadId(threadId) && !persistedUser) {
+          markThreadSyncFailed()
         }
-        dispatch({ type: "ADD_MESSAGE", payload: userMessage })
-      }
+        const userMessageId = persistedUser?.id || crypto.randomUUID()
 
-      try {
+        if (threadId) {
+          const userMessage: KnowledgeQAMessage = {
+            id: userMessageId,
+            conversationId: threadId,
+            role: "user",
+            content: trimmedQuery,
+            timestamp: persistedUser?.timestamp || userTimestamp,
+          }
+          dispatch({ type: "ADD_MESSAGE", payload: userMessage })
+        }
+
         const { options } = buildRagSearchRequest({
           ...effectiveSettings,
           query: trimmedQuery,
@@ -2752,6 +2780,10 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
         if (isStaleSearchRequest()) {
           return
         }
+        if (isRequestConfigScopeChangedError(error)) {
+          dispatch({ type: "CANCEL_SEARCH" })
+          return
+        }
         if (isAbortError) {
           const abortReason = abortController.signal.reason
           if (abortReason === "clear" || abortReason === "superseded") {
@@ -2798,6 +2830,7 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
       }
     },
     [
+      canStartPrivateOperation,
       dispatch,
       beginThreadHydrationRequest,
       state.settings,
@@ -2879,7 +2912,8 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
     state.results.length,
   ])
 
-  const startNewTopic = useCallback(async (): Promise<string> => {
+  const startNewTopic = useCallback(async (): Promise<string | null> => {
+    if (!canStartPrivateOperation()) return null
     clearResults()
     dispatch({ type: "SET_QUERY", payload: "" })
     const newTopicRequestId = beginThreadHydrationRequest()
@@ -2888,7 +2922,7 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
         activeThreadHydrationRequestIdRef.current === newTopicRequestId,
       cleanupRemoteIfSkipped: true,
     })
-  }, [beginThreadHydrationRequest, clearResults, createNewThread, dispatch])
+  }, [beginThreadHydrationRequest, canStartPrivateOperation, clearResults, createNewThread, dispatch])
 
   const selectThread = useCallback(async (threadId: string): Promise<ThreadHydrationResult> => {
     const threadHydrationRequestId = beginThreadHydrationRequest()
@@ -3109,6 +3143,7 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
 
   const branchFromTurn = useCallback(
     async (messageId: string) => {
+      if (!canStartPrivateOperation()) return
       const branchRequestId = beginThreadHydrationRequest()
       const isStaleBranchRequest = () =>
         !isCurrent() ||
@@ -3155,7 +3190,7 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
         shouldActivate: () => !isStaleBranchRequest(),
         cleanupRemoteIfSkipped: true,
       })
-      if (isStaleBranchRequest()) {
+      if (!branchThreadId || isStaleBranchRequest()) {
         return
       }
 
@@ -3163,12 +3198,18 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
       let parentMessageId: string | null = null
 
       for (const sourceMessage of branchSeedMessages) {
-        const persisted = await persistChatMessage(
-          branchThreadId,
-          sourceMessage.role,
-          sourceMessage.content,
-          parentMessageId
-        )
+        let persisted: Awaited<ReturnType<typeof persistChatMessage>>
+        try {
+          persisted = await persistChatMessage(
+            branchThreadId,
+            sourceMessage.role,
+            sourceMessage.content,
+            parentMessageId
+          )
+        } catch (error) {
+          if (!isCurrent() || isRequestConfigScopeChangedError(error)) return
+          throw error
+        }
         if (isStaleBranchRequest()) {
           await cleanupStaleBranchThread(branchThreadId)
           return
@@ -3189,7 +3230,12 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
           sourceMessage.ragContext &&
           persisted?.id
         ) {
-          await persistRagContext(persisted.id, sourceMessage.ragContext)
+          try {
+            await persistRagContext(persisted.id, sourceMessage.ragContext)
+          } catch (error) {
+            if (!isCurrent() || isRequestConfigScopeChangedError(error)) return
+            throw error
+          }
           if (isStaleBranchRequest()) {
             await cleanupStaleBranchThread(branchThreadId)
             return
@@ -3244,6 +3290,7 @@ function OwnedKnowledgeQAProvider({ children, authority }: {
     },
     [
       beginThreadHydrationRequest,
+      canStartPrivateOperation,
       createNewThread,
       dispatch,
       isCurrent,

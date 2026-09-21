@@ -701,7 +701,7 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
               name: "You",
               message,
               sources: [],
-              images: [],
+              images: image ? [image] : [],
               createdAt,
               id: resolvedUserMessageId,
               parentMessageId: null,
