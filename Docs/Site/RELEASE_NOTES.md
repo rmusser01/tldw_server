@@ -2,9 +2,9 @@
 
 Published release notes entry point.
 
-## 0.1.43 - 2026-09-20 (draft)
+## 0.1.43 - 2026-09-20
 
-This candidate includes all 616 commits merged into the frozen development
+This release includes all 616 commits merged into the frozen development
 snapshot through PR #2970 after `v0.1.42`, preserving the release-only repairs.
 
 - OSCE scenario practice, advanced quiz fixtures/metrics, structured prompt
@@ -16,6 +16,8 @@ snapshot through PR #2970 after `v0.1.42`, preserving the release-only repairs.
 - PostgreSQL ownership, queries, migrations, timestamps and transaction/shutdown
   repairs across Notes, Study, Characters, World Books, media, prompts and auth.
 - Fresh-install usability/recovery fixes and real macOS guest recovery drills.
+- Prompt Studio optimization events recover correctly when optional WebSocket
+  transport finishes loading after a startup import cycle.
 - Release review fixes preserve image quality options during chat retry and
   regeneration, retire media requests/actions on account changes, isolate saved
   media collections/favorites, limit OSCE traffic, and keep local model paths out
@@ -28,17 +30,17 @@ assigned to a signed-in account, because their original owner cannot be verified
 Back up persistent data before upgrading. UAT261 remains open by requester
 direction; the previous full four-configuration UAT matrix failed and subsequent
 targeted repairs do not establish a new full-matrix pass. Wider certification
-remains separately tracked. The candidate requires exact-head CI/review and a
-requester-written Change summary before merge.
+remains separately tracked. The release passed all 73 reported CI checks and final protected-source verification;
+the requester approved the release and its PR-specific human-summary waiver.
 
-The new protected source record proposes a September 20, 2026 release date and
-September 20, 2028 at 12:00 UTC Countdown start. Requester review is pending.
+The approved protected source record uses a September 20, 2026 release date and
+September 20, 2028 at 12:00 UTC Countdown start.
 The prior 0.1.42 grant is unchanged. Server packages/images exclude protected
-frontend material; no protected frontend binary publication is planned.
+frontend material; no protected frontend binary is published.
 
 See the repository [complete change inventory](https://github.com/rmusser01/tldw_server/blob/main/Docs/Development/releases/0.1.43-change-inventory.md)
 and [execution plan](https://github.com/rmusser01/tldw_server/blob/main/Docs/superpowers/plans/2026-09-20-release-0.1.43-plan.md)
-for all merged PRs, commits, verification and outstanding release decisions.
+for the full change inventory, verification, and separately tracked readiness work.
 
 ## 0.1.42 - 2026-09-10
 
