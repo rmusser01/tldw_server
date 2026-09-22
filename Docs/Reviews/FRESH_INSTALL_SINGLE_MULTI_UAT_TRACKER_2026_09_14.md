@@ -34,6 +34,8 @@ Hosted Jobs run35783110332 on `33e545ccd8` has passed SQLite; its PostgreSQL job
 
 The entire AuthNZ PostgreSQL integration directory now passes **56/56** on the official real PostgreSQL fixture with zero skips and a normal process exit on the local branch. This consolidates the UAT451 fixture subgroups; it does not count as hosted PostgreSQL CI or close the UAT451 umbrella.
 
+UAT457's v57→v59 SQLite fixtures were constructing the current v68 catalog and relabeling it as v57/v58; the fail-closed v60 source verifier correctly rejected the mismatch. The tests now build actual numbered v57/v58 schemas, insert historical note rows without calling today's graph-dependent note API, and target the historical v59 boundary. Three PostgreSQL unit doubles now observe the current coordinator transaction boundary while retaining missing-index, version-lock and rollback assertions. The two complete modules move from three focused failures and three remaining fake-backend failures to **84 passes, zero skips** locally. Ruff is clean; Bandit reports only test assertions (B101), with no errors. Hosted Windows acceptance and other UAT457 historical groups remain open. TASK13260.278.17.56.
+
 Current totals: **470 findings /444 verified /26 open**: UAT261,351,352,354,356,359–361,365,375,390–392,413,415,419,422,424,430,441,451,457,467–470. These counts describe bounded finding scope, not complete fresh-install acceptance. Captures, private profiles, database files and logs remain excluded from Git.
 
 ## Repair checkpoint after publication — 2026-09-22
