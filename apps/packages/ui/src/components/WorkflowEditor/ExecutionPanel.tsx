@@ -129,6 +129,7 @@ export const ExecutionPanel = ({ className = "" }: ExecutionPanelProps) => {
   }, [nodes, nodeStates])
 
   const [now, setNow] = useState(Date.now)
+  // Intentional nullish checks below: null/undefined mean absent; epoch 0 is valid.
   useEffect(() => {
     if (startedAt == null || completedAt != null) return
     setNow(Date.now())

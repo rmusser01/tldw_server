@@ -2886,6 +2886,9 @@ async def _process_content_for_db_sync(
                 if not isinstance(url_dict, dict):
                     url_dict = {"url": getattr(url_dict, "url", "")}
             url_str = url_dict.get("url", "")
+            detail = url_dict.get("detail")
+            if not isinstance(detail, str) or detail not in {"auto", "high", "low"}:
+                detail = "auto"
 
             if url_str.startswith("data:"):
                 # Use chunked image processor for large images
@@ -2897,7 +2900,7 @@ async def _process_content_for_db_sync(
                     if is_valid and decoded_bytes:
                         images_sync.append((decoded_bytes, mime_type))
                         if image_details is not None:
-                            image_details.append(url_dict.get("detail") or "auto")
+                            image_details.append(detail)
                         logger.debug("[DB SYNC] Successfully processed large image for conv={}", conversation_id)
                     else:
                         logger.warning(
@@ -2911,7 +2914,7 @@ async def _process_content_for_db_sync(
                     if is_valid and decoded_bytes:
                         images_sync.append((decoded_bytes, mime_type))
                         if image_details is not None:
-                            image_details.append(url_dict.get("detail") or "auto")
+                            image_details.append(detail)
                         logger.debug("[DB SYNC] Successfully validated and decoded image for conv={}", conversation_id)
                     else:
                         logger.warning(

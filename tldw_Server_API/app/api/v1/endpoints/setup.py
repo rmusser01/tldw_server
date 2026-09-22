@@ -542,6 +542,12 @@ def _validated_public_first_run_step_data(step: str, data: dict[str, Any]) -> di
 def _public_first_run_step_data(
     step: str, data: dict[str, Any], *, allow_local_model_paths: bool = False,
 ) -> dict[str, Any]:
+    """Project stored step data onto the public HTTP response allowlist.
+
+    Local model paths are hidden unless the caller has already authorized
+    ``allow_local_model_paths`` and the step names a local provider. Secrets,
+    unsupported fields, and local ingestion roots remain excluded.
+    """
     allowed_keys = _FIRST_RUN_STEP_DATA_ALLOWED_KEYS.get(step)
     if step == "state_recovery":
         allowed_keys = frozenset({"reason", "quarantined", "message"})
@@ -640,6 +646,12 @@ def _public_first_chat_payload(value: object, *, allow_local_model_paths: bool =
 def _public_first_run_state(
     state: FirstRunStateResponse, *, allow_local_model_paths: bool = False,
 ) -> FirstRunStateResponse:
+    """Return a validated public copy of persisted first-run state.
+
+    ``allow_local_model_paths`` must reflect the HTTP caller's verified
+    configuration permission; it preserves local-provider model identifiers
+    in step and first-chat projections without relaxing other redaction.
+    """
     payload = model_dump_compat(state)
     current_step = payload.get("current_step")
     payload["current_step"] = current_step if _is_public_first_run_step_name(current_step) else None

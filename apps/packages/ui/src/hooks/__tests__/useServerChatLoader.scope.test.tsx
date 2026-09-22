@@ -124,6 +124,7 @@ describe("useServerChatLoader scoped local history", () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.clearAllMocks()
+    mocks.store.setServerChatId.mockReset()
     mocks.streaming = false
     mocks.getCharacter.mockResolvedValue(null)
     mocks.store.serverChatAssistantKind = "character"
@@ -155,13 +156,46 @@ describe("useServerChatLoader scoped local history", () => {
     expect(mocks.store.setServerChatTitle).toHaveBeenCalledWith(null)
   })
 
-  it("finishes loading after a missing chat clears the selected server identifier", async () => {
+  it.each([401, 403, 404])("finishes loading and clears the selected server identifier after HTTP %s", async status => {
     mocks.store.setServerChatId.mockImplementationOnce((id) => { mocks.store.serverChatId = id })
-    mocks.listChatMessages.mockRejectedValue(Object.assign(new Error("HTTP 404"), { status: 404 }))
+    mocks.listChatMessages.mockRejectedValue(Object.assign(new Error(`HTTP ${status}`), { status }))
     renderHook(() => useServerChatLoader({ ensureServerChatHistoryId: vi.fn(), notification: { error: vi.fn() }, t: ((_key: string) => "Error") as TFunction }))
     await act(async () => { await vi.advanceTimersByTimeAsync(200) })
     expect(mocks.store.serverChatId).toBeNull()
     expect(mocks.setIsLoading).toHaveBeenLastCalledWith(false)
+  })
+
+  it.each([401, 403])("does not clear a newer chat selection after a stale HTTP %s rejection", async status => {
+    const response = deferred<ServerChatMessage[]>()
+    mocks.listChatMessages.mockReturnValue(response.promise)
+    mocks.store.setServerChatId.mockImplementationOnce(id => { mocks.store.serverChatId = id })
+    renderHook(() => useServerChatLoader({ ensureServerChatHistoryId: vi.fn(), notification: { error: vi.fn() }, t: ((_key: string) => "Error") as TFunction }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(200) })
+    mocks.store.serverChatId = "chat-b"
+    await act(async () => { response.reject(Object.assign(new Error("Access denied"), { status })) })
+    expect(mocks.store.serverChatId).toBe("chat-b")
+    expect(mocks.setMessages).not.toHaveBeenCalled()
+    expect(mocks.setHistory).not.toHaveBeenCalled()
+    expect(mocks.store.setServerChatTitle).not.toHaveBeenCalled()
+  })
+
+  it.each([401, 403])("ignores HTTP %s from an invalidated principal", async status => {
+    const response = deferred<ServerChatMessage[]>()
+    mocks.listChatMessages.mockReturnValue(response.promise)
+    mocks.store.setServerChatId.mockImplementationOnce(id => { mocks.store.serverChatId = id })
+    renderHook(() => useServerChatLoader({ ensureServerChatHistoryId: vi.fn(), notification: { error: vi.fn() }, t: ((_key: string) => "Error") as TFunction }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(200) })
+    mocks.ensureConfigForRequest.mockResolvedValue({ serverUrl: "http://server", authMode: "multi-user", accessToken: `test.${btoa(JSON.stringify({ sub: "B" }))}.signature` })
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent("tldw:config-updated"))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    await act(async () => { response.reject(Object.assign(new Error("Access denied"), { status })) })
+    expect(mocks.store.serverChatId).toBe("chat-a")
+    expect(mocks.setMessages).not.toHaveBeenCalled()
+    expect(mocks.setHistory).not.toHaveBeenCalled()
+    expect(mocks.store.setServerChatTitle).not.toHaveBeenCalled()
   })
 
   it.each(["normal", "persona", "character"] as const)("keeps canonical raw reads limited to %s presentation", async kind => {

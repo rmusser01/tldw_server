@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequirePermission
+from tldw_Server_API.app.api.v1.schemas.health_schemas import ReadinessResponse
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_LOGS
 from tldw_Server_API.app.core.DB_Management.DB_Manager import create_workflows_database, get_content_backend_instance
 from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
@@ -219,7 +220,12 @@ async def api_liveness():
     return {"status": "alive"}
 
 
-@router.get("/health/ready", tags=["health"], summary="Readiness probe")
+@router.get(
+    "/health/ready", tags=["health"], summary="Readiness probe",
+    response_model=ReadinessResponse,
+    response_model_exclude_unset=True,
+    responses={503: {"model": ReadinessResponse, "description": "Dependencies are not ready"}},
+)
 async def api_readiness(request: Request) -> JSONResponse:
     """Retain typed-client fields alongside sanitized operator readiness."""
     from datetime import datetime, timezone
@@ -236,8 +242,9 @@ async def api_readiness(request: Request) -> JSONResponse:
         },
         time=datetime.now(timezone.utc).isoformat(),
     )
+    validated_payload = ReadinessResponse.model_validate(payload)
     return JSONResponse(
-        payload,
+        validated_payload.model_dump(mode="json", exclude_unset=True),
         status_code=200 if snapshot.ready else 503,
         headers=_NO_STORE_HEADERS,
     )

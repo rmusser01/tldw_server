@@ -45,7 +45,7 @@
   },
   "docker_run": "https://github.com/rmusser01/tldw_server/actions/runs/35571016884",
   "sync_pr": "https://github.com/rmusser01/tldw_server/pull/2971",
-  "sync_status": "Final main-to-dev sync CI and merge pending",
+  "sync_status": "merged_verified",
   "protected_source": "cca220627a8f0f9f3124126b50add2e0e88ee8a7",
   "protected_manifest_sha256": "bfd14b9e3fb5efa6ecbe54c2e27267cd4958b51881aad9cd3e1b4ab100ecd4e1",
   "scope_limits": [
@@ -227,5 +227,14 @@
     }
   ],
   "verification_command": "gh attestation verify oci://<subject.name>@sha256:<subject.digest.sha256> --repo rmusser01/tldw_server --format json",
-  "post_publication_review": "TASK-13263.3 tracks the newly inventoried comments separately without modifying published artifacts."
+  "post_publication_review": "TASK-13263.3 tracks the newly inventoried comments separately without modifying published artifacts.",
+  "sync_merge_commit": "08e980a453d12155cccf10d0c5eb7fe32d05ac75",
+  "sync_merged_at": "2026-09-21T14:37:27Z",
+  "sync_ci": {
+    "passed": 71,
+    "skipped": 39,
+    "failed": 0,
+    "pending": 0
+  },
+  "sync_contains_release_commit": true
 }

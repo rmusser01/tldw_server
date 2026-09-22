@@ -1000,6 +1000,7 @@
     }
   },
   "onboarding": {
+    "loginSettingsError": "Не удалось открыть настройки входа. Попробуйте ещё раз.",
     "title": "Welcome — Let’s get you connected",
     "description": "Configure your server and authentication. We’ll verify the connection and RAG health inline.",
     "learnMoreTldw": "Узнайте, как работает сервер tldw",

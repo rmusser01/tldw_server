@@ -1,4 +1,7 @@
 {
+  "onboarding_loginSettingsError": {
+    "message": "Login settings could not be opened. Try again."
+  },
   "managePrompts_structured_blockEditor_nameLabel": {
     "message": "Block name"
   },

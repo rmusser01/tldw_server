@@ -1,4 +1,4 @@
-"""Validate that worker build inputs can satisfy the root package manifest."""
+"""Validate that container build inputs can satisfy the root package manifest."""
 
 import shlex
 from pathlib import Path, PurePosixPath
@@ -7,13 +7,18 @@ import pytest
 import tomllib
 
 ROOT = Path(__file__).resolve().parents[3]
-WORKERS = ("Dockerfile.worker", "Dockerfile.audio_gpu_worker")
+CONTAINERS = ("Dockerfile.worker", "Dockerfile.audio_gpu_worker", "Dockerfile.prod")
 
 
 def _copy_inputs(dockerfile: str) -> list[tuple[Path, PurePosixPath]]:
-    """Resolve repository COPY instructions in the worker's /app build context."""
+    """Resolve repository COPY instructions in the first /app build stage."""
     inputs = []
+    stages = 0
     for line in (ROOT / "Dockerfiles" / dockerfile).read_text().splitlines():
+        if line.startswith("FROM "):
+            stages += 1
+            if stages > 1:
+                break
         if not line.startswith("COPY "):
             continue
         tokens = shlex.split(line)[1:]
@@ -31,7 +36,7 @@ def _copy_inputs(dockerfile: str) -> list[tuple[Path, PurePosixPath]]:
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("dockerfile", WORKERS)
+@pytest.mark.parametrize("dockerfile", CONTAINERS)
 def test_worker_copy_sources_exist(dockerfile: str) -> None:
     """A stale root Config_Files reference must fail before release publishing."""
     missing = [str(path.relative_to(ROOT)) for path, _ in _copy_inputs(dockerfile) if not path.exists()]
@@ -39,7 +44,7 @@ def test_worker_copy_sources_exist(dockerfile: str) -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("dockerfile", WORKERS)
+@pytest.mark.parametrize("dockerfile", CONTAINERS)
 def test_worker_build_covers_declared_local_package_inputs(dockerfile: str) -> None:
     """Every manifest-declared package and profile data file must reach /app."""
     config = tomllib.loads((ROOT / "pyproject.toml").read_text())
@@ -61,4 +66,4 @@ def test_worker_build_covers_declared_local_package_inputs(dockerfile: str) -> N
             for source, destination in copies
         ):
             missing.append(str(path))
-    assert not missing, f"Declared package inputs omitted from worker: {missing}"
+    assert not missing, f"Declared package inputs omitted from builder: {missing}"

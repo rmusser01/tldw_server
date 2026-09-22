@@ -1000,6 +1000,7 @@
     }
   },
   "onboarding": {
+    "loginSettingsError": "Die Anmeldeeinstellungen konnten nicht geöffnet werden. Versuche es erneut.",
     "title": "Willkommen — Lass uns die Verbindung einrichten",
     "description": "Konfiguriere Server und Anmeldung. Wir prüfen Verbindung und RAG‑Status direkt im Ablauf.",
     "learnMoreTldw": "Erfahren Sie, wie der tldw-Server funktioniert",

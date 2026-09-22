@@ -5,8 +5,10 @@ import uuid
 from datetime import datetime, timezone
 
 import pytest
+from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager, APIKeyStatus
+from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.repos.api_keys_repo import AuthnzApiKeysRepo
 from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
 
@@ -200,9 +202,13 @@ async def test_authnz_api_keys_repo_usage_and_audit_postgres(test_db_pool):
 
 
 @pytest.mark.asyncio
-async def test_create_virtual_key_row_persists_text_and_jsonb_lists_postgres(test_db_pool):
-    """Virtual-key inserts must pass the guard for text and JSONB columns."""
-    pool = test_db_pool
+async def test_create_virtual_key_row_persists_text_and_jsonb_lists_postgres(
+    isolated_test_environment: tuple[TestClient, str],
+) -> None:
+    """Exercise column-type changes only in the standard per-test database."""
+    _client, db_name = isolated_test_environment
+    pool = await get_db_pool()
+    assert await pool.fetchval("SELECT current_database()") == db_name  # nosec B101
     username = "pg_virtual_key_repo_user"
     users_db = UsersDB(pool)
     await users_db.initialize()

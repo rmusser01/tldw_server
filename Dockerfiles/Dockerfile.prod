@@ -22,7 +22,7 @@ COPY pyproject.toml README.md LICENSE /app/
 COPY LICENSES /app/LICENSES
 COPY tldw_Server_API /app/tldw_Server_API
 COPY apps/mcp-unified/src /app/apps/mcp-unified/src
-COPY packages/tldw_profile_core/src /app/packages/tldw_profile_core/src
+COPY packages/tldw_profile_core /app/packages/tldw_profile_core
 
 RUN pip install --upgrade pip && \
     pip install --prefix=/install .
@@ -48,6 +48,10 @@ COPY --from=builder /install /usr/local
 
 # Verify local packages are installed, without relying on repository PYTHONPATH.
 RUN python -c "import mcp_unified; import tldw_profile_core"
+RUN python -c "import json, sys; from pathlib import Path; \
+    root = Path(sys.prefix) / 'share/tldw_profile_core'; \
+    json.loads((root / 'schemas/personal-context-v1.json').read_text()); \
+    json.loads((root / 'fixtures/v1/01-manifest.json').read_text())"
 
 # Create runtime user up front so content copies can avoid recursive chown.
 RUN useradd -m -u 10001 appuser

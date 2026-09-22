@@ -1147,7 +1147,9 @@ export const useServerChatLoader = ({
             setServerChatTitle(null)
             updatePageTitle()
           }
-          if (!isAbort && isMissingServerChatReferenceError(e) && canCommitCurrentLoad()) {
+          if (!isAbort &&
+            (isMissingServerChatReferenceError(e) || isDeniedServerChatError(e)) &&
+            canCommitCurrentLoad()) {
             setIsLoading(false)
             setServerChatId(null)
             return

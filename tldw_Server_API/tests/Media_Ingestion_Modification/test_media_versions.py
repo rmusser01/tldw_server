@@ -2,6 +2,7 @@
 # Description: This file contains tests for the media versioning endpoints.
 #
 # Imports
+from collections.abc import Iterator
 import sys
 import time
 import uuid
@@ -30,7 +31,7 @@ from tldw_Server_API.tests.test_utils import temp_db
 # --- Fixtures ---
 
 @pytest.fixture
-def db_instance():
+def db_instance() -> Iterator[MediaDatabase]:
     """
     Use a fresh temporary database, including search indexes, for each test.
     """
@@ -60,7 +61,7 @@ def db_instance():
 
 
 @pytest.fixture
-def db_session(db_instance):
+def db_session(db_instance: MediaDatabase) -> MediaDatabase:
     """Share this test's database without raw deletion that leaves stale FTS rows."""
     return db_instance
 
@@ -69,14 +70,14 @@ def db_session(db_instance):
 test_db_instance_ref = None
 
 @pytest.fixture(scope="function")
-def client_module(db_instance):
+def client_module(db_instance: MediaDatabase) -> Iterator[TestClient]:
     """
     Creates a TestClient for the module, overriding the DB dependency to use this test's temporary DB.
     """
-    async def _override_user():
+    async def _override_user() -> User:
         return User(id=1, username="tester", email=None, is_active=True)
 
-    def override_get_media_db_for_user():
+    def override_get_media_db_for_user() -> MediaDatabase:
 
         # Return a stable instance instead of yielding a generator
         # This avoids generator lifecycle/cleanup mismatches across requests
@@ -105,7 +106,7 @@ def client_module(db_instance):
 
 # --- Seeding Fixtures ---
 @pytest.fixture(scope="function") # Run for each test function
-def seeded_document_media(db_session):
+def seeded_document_media(db_session: MediaDatabase) -> int:
     """Creates a Media record (type=document) and an initial DocumentVersion."""
     try:
         media_id = None
@@ -138,11 +139,11 @@ def seeded_document_media(db_session):
             if media_id is None:
                 raise RuntimeError("Failed to retrieve media_id after insertion.")
 
-            db_session._update_fts_media(
+            db_session.sync_refresh_fts_for_entity(
                 db_session.get_connection(),
-                media_id,
-                "Test Document",
-                "Initial content v1",
+                entity="Media",
+                entity_uuid=media_uuid,
+                operation="create",
             )
 
             # Create an initial version using the imported function
@@ -161,7 +162,7 @@ def seeded_document_media(db_session):
 
 
 @pytest.fixture(scope="function")
-def seeded_multi_media(db_session):
+def seeded_multi_media(db_session: MediaDatabase) -> dict[str, int]:
     """Creates multiple media records (doc, video, audio) with keywords for list/detail tests."""
     media_ids = {}
     try:
@@ -245,16 +246,20 @@ def seeded_multi_media(db_session):
                 id_row = id_cursor.fetchone()
                 media_ids["audio"] = id_row[0] if id_row else None
 
+            # These legacy fixtures intentionally omit video/audio document versions.
+            # Refresh their index through the public sync API after inserting the rows.
+            for media_uuid in (doc_uuid, vid_uuid, aud_uuid):
+                db_session.sync_refresh_fts_for_entity(
+                    db_session.get_connection(),
+                    entity="Media",
+                    entity_uuid=media_uuid,
+                    operation="create",
+                )
+
             # Add keywords
             keywords = ["multi", "test", "seed"]
             for media_id in media_ids.values():
                 if media_id is None: continue  # Skip if ID wasn't retrieved
-                row = db_session.execute_query(
-                    "SELECT title, content FROM Media WHERE id = ?", (media_id,)
-                ).fetchone()
-                db_session._update_fts_media(
-                    db_session.get_connection(), media_id, row[0], row[1]
-                )
                 for keyword in keywords:
                     keyword_id = None  # Reset keyword_id for each iteration
 
@@ -991,10 +996,12 @@ class TestMediaListDetailEndpoints:
     # --------------------- UPDATE (PUT /media/{id}) TESTS - Basic Placeholder ---------------------
     # These need to be adapted based on the actual PUT endpoint implementation and Pydantic model
 
-    def test_update_media_item_title(self):
+    def test_update_media_item_title(self) -> None:
 
         """Test updating the title of a media item."""
         doc_id = self.media_ids["document"]
+        # Inspect FTS directly: public search can fall back to LIKE on index errors,
+        # hiding the stale/missing-index regression this test protects against.
         for kind, title in (
             ("document", "Multi Test Doc"),
             ("video", "Multi Test Video"),

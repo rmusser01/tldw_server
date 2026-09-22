@@ -21,6 +21,9 @@ type ExtensionChrome = {
   runtime?: { lastError?: unknown }
 }
 
+// Intentionally probe native extension storage. In WebUI, wxt/browser supplies
+// an in-memory session shim, which would bypass the caller's tab-persistent
+// sessionStorage fallback. Native callbacks also expose runtime.lastError.
 const getExtensionChrome = (): ExtensionChrome | undefined =>
   (globalThis as { chrome?: ExtensionChrome }).chrome
 

@@ -9,6 +9,8 @@ from typing import Any
 import pytest
 import yaml
 
+pytestmark = pytest.mark.unit
+
 ROOT = Path(__file__).resolve().parents[3]
 EVIDENCE = json.loads((ROOT / "Docs/Evidence/PR2761-codeql-actions.json").read_text())
 CASES = sorted({(p["workflow"], p["job"], p["event"]) for p in EVIDENCE["checkout_event_proofs"].values()})
