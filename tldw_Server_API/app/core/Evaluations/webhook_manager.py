@@ -598,23 +598,16 @@ class WebhookManager:
                         "timeout_seconds": row['timeout_seconds']
                     })
 
-            # Final safety: in TEST_MODE, if still no webhooks for this user, try all active webhooks
-            from tldw_Server_API.app.core.testing import is_test_mode as _is_test_mode
-            if not webhooks and _is_test_mode():
-                rows = self.db_adapter.fetch_all("""
-                    SELECT id, url, secret, retry_count, timeout_seconds
-                    FROM webhook_registrations
-                    WHERE active = ?
-                """, (self._active_flag(True),))
-                for row in rows:
-                    webhooks.append({
-                        "id": row['id'],
-                        "url": row['url'],
-                        "secret": row['secret'],
-                        "retry_count": row['retry_count'],
-                        "timeout_seconds": row['timeout_seconds']
-                    })
-
+            # NOTE: a "final safety" fallback here previously selected every active
+            # webhook_registrations row -- including each row's secret -- with no
+            # user_id predicate. It was unreachable (the TEST_MODE branch at the top
+            # of this method returns unconditionally, so this guard can only be
+            # evaluated when _is_test_mode() is False), but it would have leaked
+            # other users' webhook URLs and signing secrets the moment that early
+            # return was refactored. Removed rather than left dormant. The
+            # user-scoped fallback above already covers "this user has webhooks but
+            # none match the event"; a user with no active webhooks legitimately has
+            # none. See tests/Evaluations/unit/test_webhook_manager_user_scoping.py.
             return webhooks
 
     async def _deliver_webhook(

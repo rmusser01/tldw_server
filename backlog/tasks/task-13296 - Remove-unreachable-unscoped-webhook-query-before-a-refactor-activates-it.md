@@ -1,9 +1,10 @@
 ---
 id: TASK-13296
-title: TEST_MODE fallback leaks every user's webhook URLs and secrets
+title: Remove unreachable unscoped webhook query before a refactor activates it
 status: To Do
 assignee: []
 created_date: '2026-09-22 04:45'
+updated_date: '2026-09-22 05:19'
 labels:
   - security
   - evaluations
@@ -11,7 +12,7 @@ labels:
 dependencies: []
 references:
   - 'tldw_Server_API/app/core/Evaluations/webhook_manager.py:601'
-priority: high
+priority: medium
 ---
 
 ## Description
@@ -50,6 +51,20 @@ Found by the comprehensive core-module review; independently verified by the orc
 - [ ] #5 secret is not selected into any code path that does not need it
 - [ ] #6 Bandit run for touched scope
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+CORRECTION by the filer, 2026-09-21. This task was filed as a live cross-user leak. That was wrong, and the error was mine: I read the unscoped query and its is_test_mode() gate but did not trace reachability.
+
+The block is UNREACHABLE. _get_webhooks opens with 'if _is_test_mode():' whose branch returns unconditionally (webhook_manager.py:548 guard, return at :555-564). So the two later fallbacks -- both guarded by 'if not webhooks and _is_test_mode()' -- can only be evaluated on the path where _is_test_mode() is False, where their own guard is therefore False. Neither ever executes, in either mode.
+
+Proven, not reasoned: tests/Evaluations/unit/test_webhook_manager_user_scoping.py asserts that no query lacking a user_id predicate is issued, parametrized over TEST_MODE set and unset. All six tests pass against the UNFIXED code -- which is the demonstration that there is no live leak.
+
+What remains true and why this is still worth doing: an unscoped 'SELECT id, url, secret, ... FROM webhook_registrations WHERE active = ?' sat in the file, dormant, behind a condition that can never be true. The early return keeping it dead is itself a TEST_MODE hack and a plausible refactor target; removing it would have activated a cross-user disclosure of webhook URLs and signing secrets. Removed rather than left dormant, with the parametrized test as the guard against reactivation.
+
+Severity corrected High -> Medium: latent hazard and dead code, not a live disclosure. The is_test_mode-reads-an-env-var observation still stands as a general concern (see AUTHNZ-1, which documents four strictness levels for test-context detection), but it is not exploitable here.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
