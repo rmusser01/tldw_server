@@ -6047,7 +6047,9 @@ async def create_chat_completion(
                         client_detail = "Request failed."
                 else:
                     # Server errors should be generic
-                    if err_status == 502:
+                    if err_status == 502 and error_code == "provider_output_limit":
+                        client_detail = PROVIDER_STREAM_ERROR_MESSAGES[error_code]
+                    elif err_status == 502:
                         client_detail = "The chat service provider is currently unavailable."
                     elif err_status == 503:
                         client_detail = "The chat service is temporarily unavailable."

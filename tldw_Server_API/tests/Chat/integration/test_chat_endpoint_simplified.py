@@ -3592,6 +3592,54 @@ def test_real_openai_adapter_nonstream_failure_is_bounded_across_endpoint_logs_a
     assert runtime_key not in serialized_audit_calls
 
 
+@pytest.mark.parametrize("finish_reason", ["length", "stop"])
+def test_nonstream_output_limit_guidance_reaches_http_boundary(
+    authenticated_client,
+    mock_chacha_db,
+    setup_dependencies,
+    finish_reason,
+):
+    """The final HTTP sanitizer preserves bounded output-limit guidance only."""
+    sentinel = "hidden-provider-reasoning-must-not-leak"
+    provider_result = {
+        "choices": [
+            {
+                "message": {"role": "assistant", "content": "", "reasoning_content": sentinel},
+                "finish_reason": finish_reason,
+            }
+        ],
+        "usage": {"prompt_tokens": 5, "completion_tokens": 128, "total_tokens": 133},
+    }
+    runtime_type = _credential_runtime_double()
+    provider_manager = MagicMock()
+    provider_manager.circuit_breakers = {"openai": SimpleNamespace(can_attempt_call=lambda: True)}
+    with (
+        patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
+        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch.object(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", False),
+        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch.object(chat_service, "get_request_queue", return_value=None),
+        patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
+        patch.object(chat_endpoint, "_shared_is_test_mode", return_value=False),
+        patch.object(chat_endpoint, "perform_chat_api_call", return_value=provider_result) as provider_call,
+    ):
+        response = authenticated_client.post(
+            "/api/v1/chat/completions",
+            json={
+                "model": "gpt-4o-mini",
+                "api_provider": "openai",
+                "stream": False,
+                "messages": [{"role": "user", "content": "Hello"}],
+            },
+        )
+
+    assert response.status_code == status.HTTP_502_BAD_GATEWAY
+    expected_code = "provider_output_limit" if finish_reason == "length" else "provider_unavailable"
+    assert response.json()["detail"] == chat_endpoint.PROVIDER_STREAM_ERROR_MESSAGES[expected_code]
+    assert sentinel not in response.text
+    assert provider_call.call_count == 1
+
+
 class UnknownAdapterFailure(Exception):
     """Adapter exception deliberately absent from legacy finite catch tuples."""
 
