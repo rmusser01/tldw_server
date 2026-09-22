@@ -78,3 +78,6 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-045](045-persona-live-pending-plan-handoff.md) | Accepted | Project the latest active owned pending Persona plan through authenticated session detail for explicit full Live review. |
 | [ADR-044](044-cookie-session-governance-owner-preflight.md) | Accepted | Resolve canonical cookie-session owners before ingress quotas only when policy scopes cannot admit anonymous requests. |
 | [ADR-046](046-persona-live-conversation-and-voice-runtime.md) | Accepted | Reuse authenticated Chat admission for Live conversation and require owned runtime preparation before voice capture. |
+| [ADR-047](047-retry-backoff-schedules.md) | Accepted | Outbound HTTP retries use decorrelated jitter; in-process contention retries use short capped exponential. |
+| [ADR-048](048-mcp-admin-claims.md) | Accepted | One MCP admin predicate, taking roles from AuthNZ but deliberately narrower on permissions: system.configure is not admin. |
+| [ADR-049](049-rag-cross-source-fusion.md) | Accepted | Multi-source RAG results are ordered by reciprocal rank fusion rescaled to (0,1]; single-source retrieval is unchanged. |

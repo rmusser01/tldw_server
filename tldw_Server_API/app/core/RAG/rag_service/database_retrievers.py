@@ -4897,7 +4897,10 @@ class MultiDatabaseRetriever:
         else:
             results = []
 
-        # Flatten and filter out failures
+        # Filter out failures, keeping each source's results in their own list. The
+        # grouping is what makes rank-based fusion possible below; flattening first
+        # throws away the only information that tells the two scales apart.
+        per_source: list[list[Document]] = []
         for source, res in zip(task_sources, results):
             if (
                 getattr(self, "credential_runtime", None) is not None
@@ -4918,7 +4921,8 @@ class MultiDatabaseRetriever:
                 # Skip failed sources (partial success expected)
                 had_source_failure = True
                 continue
-            if isinstance(res, list):
+            if isinstance(res, list) and res:
+                per_source.append(res)
                 documents.extend(res)
 
         if had_source_failure and not documents:
@@ -4926,12 +4930,90 @@ class MultiDatabaseRetriever:
                 "Document retrieval failed.", operation_type="search",
             ) from None
 
-        # Sort globally by score desc and cap by max_results
-        documents.sort(key=lambda d: getattr(d, "score", 0.0), reverse=True)
+        documents = self._order_across_sources(per_source, documents)
         if config is not None and getattr(config, "max_results", None):
             documents = documents[: int(config.max_results)]
 
         return documents
+
+    def _order_across_sources(
+        self,
+        per_source: list[list[Document]],
+        documents: list[Document],
+    ) -> list[Document]:
+        """Order documents drawn from several sources without comparing raw scores.
+
+        The sources do not share a scale. Across the retrievers here, `score` is
+        min-max normalised (media, chunk FTS, vector), a constant 1.0 (both notes
+        paths), a constant 0.5 (chat history, character cards, SQL) or a constant
+        0.6/0.4 (claims). Sorting them together compared numbers that mean different
+        things, and the constants won.
+
+        Worked example, from the review that found this: sources=["media_db","notes"]
+        with top_k=10 and an include list of 20 note ids. _retrieve_allowed_notes_via_sql
+        returns notes ordered by last_modified with no text match required at all, and
+        stamps every one score=1.0. Media is min-max normalised, so exactly one media
+        document reaches 1.0. The global sort put all 20 notes at or above every media
+        document, and the top-10 cut returned notes only -- zero media documents,
+        including the best BM25 matches -- after which generation answered from
+        documents never scored for relevance at all. The same flaw decided ordinary
+        ties by dict insertion order, since min-max maps every source's best hit to
+        exactly 1.0 and list.sort is stable.
+
+        Reciprocal rank fusion uses only each document's RANK WITHIN ITS OWN SOURCE, so
+        no calibration between scales is needed. Each source keeps its own ordering,
+        which is self-consistent; only the interleaving changes.
+
+        Scores are rescaled onto (0, 1] rather than left as raw RRF values (~0.016 at
+        rank 1), because callers depend on that range: unified_pipeline re-sorts by
+        score and caps to top_k in three places, applies a [0,1]-bounded boost
+        (min(1.0, score * 1.1 + 0.02)), and Research/providers/local.py returns the
+        value in an API response. Rescaling keeps the fused order under those re-sorts
+        while leaving the range they assume intact.
+
+        Single-source results are returned untouched: their scores are meaningful
+        within one scale, there is nothing to fuse, and rank-based scores would be a
+        loss of fidelity. This is a cross-source fix only.
+
+        One further change when fusing: a document returned by two sources now appears
+        once, with its ranks summed, where the global sort listed it twice. That is
+        standard RRF and matches the existing _reciprocal_rank_fusion, but it means a
+        multi-source result set can be shorter than before for the same inputs.
+
+        See Docs/ADR/049-rag-cross-source-fusion.md.
+        """
+        if len(per_source) < 2:
+            documents.sort(key=lambda d: getattr(d, "score", 0.0), reverse=True)
+            return documents
+
+        k = 60  # standard RRF damping; rank 1 contributes 1/61, rank 2 1/62, ...
+        fused: dict[str, float] = {}
+        first_seen: dict[str, Document] = {}
+        for docs in per_source:
+            for rank, doc in enumerate(docs, start=1):
+                key = getattr(doc, "id", None)
+                if key is None:
+                    key = f"_anon:{id(doc)}"
+                fused[key] = fused.get(key, 0.0) + 1.0 / (k + rank)
+                first_seen.setdefault(key, doc)
+
+        ordered = sorted(
+            first_seen.values(),
+            key=lambda d: fused[getattr(d, "id", None) or f"_anon:{id(d)}"],
+            reverse=True,
+        )
+
+        # Rescale onto (0, 1], preserving the fused order.
+        top = max(fused.values())
+        if top > 0:
+            for doc in ordered:
+                key = getattr(doc, "id", None) or f"_anon:{id(doc)}"
+                try:
+                    doc.score = fused[key] / top
+                except (AttributeError, TypeError):
+                    # A frozen or exotic Document: order still holds, score is stale.
+                    pass
+        return ordered
 
     async def retrieve_from_plan(
         self,
