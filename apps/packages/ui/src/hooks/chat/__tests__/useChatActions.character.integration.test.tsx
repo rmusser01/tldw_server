@@ -406,6 +406,28 @@ describe("useChatActions character integration", () => {
 
 
 
+  it.each(["messages", "history", "saved-greeting", "new-chat"] as const)("keeps existing transcript greeting provenance for %s", async kind => {
+    const greeting = "Welcome from the Character default"
+    const user: Message = { id: "earlier-user", name: "You", isBot: false, role: "user", message: "Earlier question", sources: [] }
+    const savedGreeting: Message = { id: "saved-greeting", name: "Guide", isBot: true, role: "assistant", message: greeting, messageType: "character:greeting", sources: [] }
+    const initial = kind === "new-chat" || kind === "history" ? [] : kind === "saved-greeting" ? [savedGreeting, user] : [user]
+    let visible = initial
+    const options = { ...createHookOptions(), selectedCharacter: { id: "char-tracked", name: "Guide", greeting },
+      serverChatId: kind === "new-chat" ? null : "tracked-chat-1", messages: initial,
+      history: kind === "history" ? [{ role: "user", content: "Earlier question" }] : [],
+      setMessages: (next: Message[] | ((old: Message[]) => Message[])) => { visible = typeof next === "function" ? next(visible) : next }
+    }
+    const { result, unmount } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    try {
+      await act(async () => { await result.current.onSubmit({ message: "Follow-up", image: "" }) })
+      const expected = kind === "saved-greeting" || kind === "new-chat" ? 1 : 0
+      expect(visible.filter(row => row.messageType === "character:greeting")).toHaveLength(expected)
+      expect(saveLocalSuccessMock).toHaveBeenCalled()
+      const savedHistory = options.setHistory.mock.calls.at(-1)?.[0] as ChatHistory
+      expect(savedHistory.filter(row => row.content === greeting)).toHaveLength(expected)
+    } finally { unmount() }
+  })
+
   it.each([
     ["cleared", false],
     ["foreign", false],

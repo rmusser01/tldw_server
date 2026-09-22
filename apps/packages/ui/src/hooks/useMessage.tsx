@@ -1227,6 +1227,14 @@ export const useMessage = () => {
         return fromHistory.content.trim();
       }
 
+      // Existing turns own their transcript; only reuse a recorded greeting.
+      if (
+        messages.some((entry) => !entry.isBot) ||
+        history.some((entry) => entry.role === "user")
+      ) {
+        return "";
+      }
+
       const fromCharacter = collectGreetings(activeCharacter as any).find(
         (candidate) =>
           typeof candidate === "string" && candidate.trim().length > 0,

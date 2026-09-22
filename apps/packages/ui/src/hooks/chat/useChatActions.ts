@@ -1789,6 +1789,9 @@ export const useChatActions = ({
         return fromHistory.content.trim()
       }
 
+      // Existing turns own their transcript; only reuse a recorded greeting.
+      if (hasUserTurns) return ""
+
       if (selectedGreeting.length > 0) {
         return selectedGreeting
       }
