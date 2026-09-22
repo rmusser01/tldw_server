@@ -5681,6 +5681,75 @@ class _SQLitePromptStudioDatabase(PromptsDatabase):
         except sqlite3.Error as exc:  # noqa: BLE001
             raise DatabaseError(f"Failed to fetch optimization {optimization_id}: {exc}") from exc  # noqa: TRY003
 
+    def list_optimizations(
+        self,
+        *,
+        project_id: Optional[int] = None,
+        status: Optional[str] = None,
+        include_deleted: bool = False,
+        page: int = 1,
+        per_page: int = 20,
+    ) -> dict[str, Any]:
+        """List optimizations for the SQLite backend.
+
+        Mirrors _BackendPromptStudioDatabase.list_optimizations. This method was
+        absent here while the facade delegated to it unconditionally, so the
+        optimizations endpoint returned HTTP 500 on every request against the default
+        backend. The SQLite dialect differs in one place only: soft deletes are
+        `deleted = 0` rather than `deleted = FALSE`.
+        """
+        if page < 1:
+            raise InputError("Page index must be >= 1")  # noqa: TRY003
+        if per_page < 1:
+            raise InputError("Items per page must be >= 1")  # noqa: TRY003
+
+        conditions: list[str] = []
+        params: list[Any] = []
+
+        if project_id is not None:
+            conditions.append("project_id = ?")
+            params.append(project_id)
+        if status is not None:
+            conditions.append("status = ?")
+            params.append(status)
+        if not include_deleted:
+            conditions.append("deleted = 0")
+
+        where_clause = " WHERE " + " AND ".join(conditions) if conditions else ""
+
+        try:
+            conn = self.get_connection()
+            cursor = conn.cursor()
+
+            count_sql = f"SELECT COUNT(*) FROM prompt_studio_optimizations{where_clause}"  # nosec B608
+            cursor.execute(count_sql, params)
+            total_row = cursor.fetchone()
+            total = int(total_row[0]) if total_row and total_row[0] is not None else 0
+
+            offset = max(page - 1, 0) * per_page
+            list_sql = """
+                SELECT *
+                FROM prompt_studio_optimizations
+                {where_clause}
+                ORDER BY created_at DESC, id DESC
+                LIMIT ? OFFSET ?
+            """.format_map(locals())  # nosec B608
+            cursor.execute(list_sql, list(params) + [per_page, offset])
+            rows = cursor.fetchall()
+            optimizations = [self._row_to_dict(cursor, row) for row in rows if row]
+        except sqlite3.Error as exc:  # noqa: BLE001
+            raise DatabaseError(f"Failed listing optimizations: {exc}") from exc  # noqa: TRY003
+
+        return {
+            "optimizations": optimizations,
+            "pagination": {
+                "page": page,
+                "per_page": per_page,
+                "total": total,
+                "total_pages": (total + per_page - 1) // per_page if per_page else 0,
+            },
+        }
+
     def update_optimization(
         self,
         optimization_id: int,
