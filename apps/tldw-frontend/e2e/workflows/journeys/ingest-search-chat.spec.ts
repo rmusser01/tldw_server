@@ -34,6 +34,7 @@ test.describe('Ingest -> Search -> Chat journey', () => {
     test.setTimeout(360_000);
     const mode = process.env.TLDW_UAT390_MODE;
     const provider = process.env.TLDW_UAT390_PROVIDER;
+    const providerOption = process.env.TLDW_UAT390_PROVIDER_OPTION ?? provider;
     const model = process.env.TLDW_UAT390_MODEL;
     expect(['deterministic', 'live'], 'Declare the downstream provider test mode').toContain(mode);
     expect(provider, 'Set the actual Knowledge QA provider').toBeTruthy();
@@ -46,6 +47,7 @@ test.describe('Ingest -> Search -> Chat journey', () => {
       runId,
       mode,
       provider,
+      providerOption,
       model,
       auth: 'seeded',
       variant: 'txt-fts-loaded-handoff',
@@ -160,7 +162,7 @@ test.describe('Ingest -> Search -> Chat journey', () => {
         await qa.selectSpecificSource('media', distractor.title);
         await page.getByRole('button', { name: 'Choose answer model' }).click();
         const modelDialog = page.getByRole('dialog', { name: 'Answer model controls' });
-        await modelDialog.getByLabel('Answer provider', { exact: true }).selectOption(provider!);
+        await modelDialog.getByLabel('Answer provider', { exact: true }).selectOption(providerOption!);
         await modelDialog.getByLabel('Answer model', { exact: true }).fill(model!);
         await page.getByRole('button', { name: 'Choose answer model' }).click();
         const created = page.waitForResponse(
