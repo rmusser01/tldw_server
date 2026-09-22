@@ -21,6 +21,38 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.validation import (
 from tldw_Server_API.app.core.DB_Management.scope_context import get_scope
 
 
+def append_sqlite_media_visibility(conditions: list[str], params: list[Any]) -> None:
+    """Apply the current personal/shared scope to a query using Media alias m."""
+    scope = get_scope()
+    if scope is None or scope.is_admin:
+        return
+    visibility_parts: list[str] = []
+    user_id_str = str(scope.user_id) if scope.user_id is not None else ""
+    if user_id_str:
+        visibility_parts.append(
+            "(COALESCE(m.visibility, 'personal') = 'personal' "
+            "AND (COALESCE(CAST(m.owner_user_id AS TEXT), m.client_id) = ?))"
+        )
+        params.append(user_id_str)
+    if scope.team_ids:
+        team_placeholders = ",".join("?" * len(scope.team_ids))
+        visibility_parts.append(
+            f"(m.visibility = 'team' AND m.team_id IN ({team_placeholders}))"
+        )
+        params.extend(scope.team_ids)
+    if scope.org_ids:
+        org_placeholders = ",".join("?" * len(scope.org_ids))
+        visibility_parts.append(
+            f"(m.visibility = 'org' AND m.org_id IN ({org_placeholders}))"
+        )
+        params.extend(scope.org_ids)
+
+    if visibility_parts:
+        conditions.append(f"({' OR '.join(visibility_parts)})")
+    else:
+        conditions.append("(0 = 1)")
+
+
 def _append_case_insensitive_like(
     backend_type: BackendType,
     clauses: list[str],
@@ -210,41 +242,7 @@ class MediaSearchRepository:
             conditions.append("m.is_trash = 0")
 
         if backend_type == BackendType.SQLITE:
-            try:
-                scope = get_scope()
-            except Exception as scope_err:  # pragma: no cover - defensive
-                logger.debug(
-                    "Failed to resolve scope for SQLite visibility filter; falling back to no scope: {}",
-                    scope_err,
-                )
-                scope = None
-
-            if scope and not scope.is_admin:
-                visibility_parts: list[str] = []
-                user_id_str = str(scope.user_id) if scope.user_id is not None else ""
-                if user_id_str:
-                    visibility_parts.append(
-                        "(COALESCE(m.visibility, 'personal') = 'personal' "
-                        "AND (COALESCE(CAST(m.owner_user_id AS TEXT), m.client_id) = ?))"
-                    )
-                    params.append(user_id_str)
-                if scope.team_ids:
-                    team_placeholders = ",".join("?" * len(scope.team_ids))
-                    visibility_parts.append(
-                        f"(m.visibility = 'team' AND m.team_id IN ({team_placeholders}))"
-                    )
-                    params.extend(scope.team_ids)
-                if scope.org_ids:
-                    org_placeholders = ",".join("?" * len(scope.org_ids))
-                    visibility_parts.append(
-                        f"(m.visibility = 'org' AND m.org_id IN ({org_placeholders}))"
-                    )
-                    params.extend(scope.org_ids)
-
-                if visibility_parts:
-                    conditions.append(f"({' OR '.join(visibility_parts)})")
-                else:
-                    conditions.append("(0 = 1)")
+            append_sqlite_media_visibility(conditions, params)
 
         if media_ids_filter:
             if not all(isinstance(media_id, (int, str)) for media_id in media_ids_filter):
