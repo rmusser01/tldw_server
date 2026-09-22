@@ -1,10 +1,10 @@
 ---
 id: TASK-13290
 title: Prompt Studio optimizations endpoint returns 500 on every SQLite deployment
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-22 04:34'
-updated_date: '2026-09-22 15:29'
+updated_date: '2026-09-22 16:54'
 labels:
   - bug
   - prompt-studio
@@ -68,6 +68,18 @@ The real gap is test design, not infrastructure:
 
 ACTIONABLE: extend dual_backend_env coverage to the retriever paths that carry per-backend SQL, rather than provisioning anything new. The same argument applies to this task's own defect: PromptStudioDatabase has 59 paired methods of which 51 are never called in any postgres-marked test, so porting list_optimizations without adding backend-parity coverage just resets the clock.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+FIXED 2026-09-22 in PR #2981. list_optimizations ported to _SQLitePromptStudioDatabase, mirroring the PostgreSQL implementation; the only dialect difference is `deleted = 0` rather than `deleted = FALSE`.
+
+Verified against a real SQLite database rather than a stub -- the two existing endpoint tests substitute a stub defining list_optimizations(self, *_args, **_kwargs), which is exactly why the gap was invisible. 4 new tests, all red before the change. Full prompt_studio suite: 1145 passed, 17 skipped.
+
+Also added a parity test asserting the two backend classes expose the same public surface, with the eight genuinely PostgreSQL-only methods listed by name. That is the cheap guard against the next missing method; it would have caught this one at edit time.
+
+STILL OPEN, tracked separately: the decomposition itself. 59 method names implemented twice (~5,565 LOC of paired bodies) plus a third *args/**kwargs delegating facade, and 51 of the 59 are never called in any postgres-marked test. Porting one method does not address that -- the parity test is a guard, not a fix.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
