@@ -63,7 +63,7 @@ test.describe('Ingest -> Search -> Chat journey', () => {
       ] as const) {
         await test.step(`Ingest and corroborate ${fixture}`, async () => {
           // Ingestion deduplicates content even when the filename changes.
-          const text = `${fixtureText}\n\nFixture run: ${runId}\n`;
+          const text = `${fixtureText.trimEnd()}\n\nFixture run: ${runId}\n`;
           const fileName = `${runId}-${fixture}.txt`;
           const filePath = testInfo.outputPath(fileName);
           await writeFile(filePath, text, 'utf8');
