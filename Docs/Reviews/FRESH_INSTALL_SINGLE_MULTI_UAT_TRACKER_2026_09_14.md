@@ -1,6 +1,16 @@
 # Fresh-install UAT: single-user and multi-user
 
-- **Current tracker status: 415 findings / 400 verified / 15 open (261, 351, 352, 354, 356, 359–361, 365, 375, 390–392, 413, 415).** All four configurations concluded with failures and limits recorded in the [frozen 365-finding matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_20.md). Targeted fresh SQLite and real PostgreSQL acceptance now verifies353/355/357/358/362/363/364/366–374/376–387. Remaining findings include application recovery/quality and newly confirmed test-coverage gaps. Counts describe findings, not UAT completion. Generated evidence remains local.
+- **Current tracker status: 417 findings / 400 verified / 17 open (261, 351, 352, 354, 356, 359–361, 365, 375, 390–392, 413, 415–417).** All four configurations concluded with failures and limits recorded in the [frozen 365-finding matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_20.md). Targeted fresh SQLite and real PostgreSQL acceptance now verifies353/355/357/358/362/363/364/366–374/376–387. Remaining findings include application recovery/quality and newly confirmed test-coverage gaps. Counts describe findings, not UAT completion. Generated evidence remains local.
+
+### PR2979 engineering and review checkpoint — UAT416/417
+
+Further native/full UAT is paused by requester direction. Draft [PR2979](https://github.com/rmusser01/tldw_server/pull/2979) rebased on dev2922bd50322149598ef74f7f5b2e8f1dbcda5dc4; focused rebase checks187frontend/432backend pass with no skipped tests, including the official PostgreSQL strict-image fixture. Generated Playwright captures remain excluded.
+
+**UAT416 / TASK13260.278.14, source repaired, remote verification pending:** Direct PR and license-follow-up workflow_run events shared the same per-PR cancellation group. Actual frontend-required35690741339 was cancelled by a higher-priority request for frontend-required-2979, while replacement35690768072/35690813461 skipped every job. Event identity now qualifies all27 affected groups, preserving same-event supersession and existing admission/trust rules. The concurrency contract fails before the edit; all146 workflow/admission contracts then pass. Actionlint passes with empty output. Touched Python test Bandit has168baseline findings (assertions/import/subprocess/test literals), zero new. This does not activate the separately managed license-first cutover.
+
+**UAT417 / TASK13260.278.15, source repaired, image execution pending:** The unchanged exhaustive shard contract found test_character_chat_images.py absent from every full-suite matrix. It is now registered once in each of five existing Character chat shards; the unchanged inventory assertion passes. The complete96-case image suite is running, including actual SQLite and the official PostgreSQL fixture. No test is removed or skipped.
+
+Qodo review requested and posted14 findings; TASK13260.278.16 owns technical disposition and repairs before further UAT. CodeRabbit declined review because284 considered files exceed its150-file limit. No reviewer approval is implied. PR readiness and the requester-owned final Change summary remain pending.
 
 ### UAT413 output-limit repair verified; original failure remains open
 

@@ -490,7 +490,10 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
             assert "concurrency" not in data
         else:
             prefix = "${{ github.workflow }}" if name == "jobs-suite.yml" else name.removesuffix(".yml")
-            assert data["concurrency"]["group"] == f"{prefix}-{concurrency_suffix}", name
+            # A non-admitted workflow_run must not cancel direct PR CI.
+            assert data["concurrency"]["group"] == (
+                f"{prefix}-{concurrency_suffix}-${{{{ github.event_name }}}}"
+            ), name
             expected_cancel: object = True
             if name == "jobs-suite.yml":
                 expected_cancel = (
