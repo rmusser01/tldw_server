@@ -547,25 +547,17 @@ export class ChatPage {
    * Select a model from the model selector
    */
   async selectModel(modelId: string): Promise<void> {
-    // Click model selector to open dropdown
-    const selector =
-      this.modelSelector || this.page.getByTestId("model-select-trigger")
+    const selector = this.modelSelector
+    await expect(selector).toBeVisible({ timeout: 10_000 })
+    await selector.click()
 
-    if ((await selector.count()) > 0) {
-      await selector.click()
-
-      const modelChoiceCandidates = [
-        this.page.getByRole("option", { name: new RegExp(modelId, "i") }).first(),
-        this.page.getByRole("menuitem", { name: new RegExp(modelId, "i") }).first(),
-      ]
-
-      for (const candidate of modelChoiceCandidates) {
-        if (await candidate.isVisible().catch(() => false)) {
-          await candidate.click()
-          return
-        }
-      }
-    }
+    const choice = this.page.getByTestId("model-selector-option")
+      .and(this.page.locator(`[data-model-id=${JSON.stringify(modelId)}]`))
+      .filter({ visible: true })
+    await expect(choice).toBeVisible({ timeout: 10_000 })
+    const label = await choice.locator("span").first().innerText()
+    await choice.click()
+    await expect(selector).toContainText(label, { timeout: 10_000 })
   }
 
   /**
