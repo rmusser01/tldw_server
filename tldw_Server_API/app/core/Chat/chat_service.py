@@ -4626,10 +4626,33 @@ async def build_context_and_messages(
     system_block_id = str(_uuid.uuid4())
     if (should_persist and retry_system_messages
             and _extract_system_messages(retry_system_messages) != _extract_system_messages(saved_retry_system_messages)):
-        for message in retry_system_messages:
-            await save_message_fn(
-                chat_db, conv_id, {**message, "system_instruction_block_id": system_block_id}, use_transaction=True,
-            )
+        import sqlite3
+
+        from tldw_Server_API.app.core.Buddy.publication import current_buddy_publication
+        from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError as BackendDatabaseError
+        from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError
+
+        publication = current_buddy_publication.get()
+
+        def persist_retry_instructions() -> None:
+            """Keep publication receipts and the complete block in one transaction."""
+            with chat_db.transaction() as conn:
+                if publication is not None:
+                    publication.repository.assert_publication(conn, publication.turn, conv_id)
+                message_ids = chat_db.add_retry_system_instruction_block(
+                    conv_id, retry_system_messages, system_block_id,
+                )
+                if publication is not None:
+                    for message_id in message_ids:
+                        publication.repository.record_message(conn, publication.turn["id"], "system", message_id)
+
+        try:
+            await asyncio.to_thread(persist_retry_instructions)
+        except (CharactersRAGDBError, sqlite3.Error, BackendDatabaseError) as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="Unable to save updated retry instructions. Try again.",
+            ) from exc
     current_turn: list[dict[str, Any]] = list(retry_system_messages)
     for index, msg_dict in enumerate(request_messages[overlap_cut:], start=overlap_cut):
         role = msg_dict.get("role")

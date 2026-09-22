@@ -1243,6 +1243,65 @@ class MessageStore:
             )
             raise
 
+    def add_retry_system_instruction_block(
+        self,
+        conversation_id: str,
+        messages: list[dict[str, Any]],
+        block_id: str,
+    ) -> list[str]:
+        """Persist an ordered retry instruction block and its metadata atomically.
+
+        Args:
+            conversation_id: Existing conversation owned by this database client.
+            messages: Validated system-message dictionaries with string content;
+                optional speaker names are retained. Empty/whitespace-only entries
+                are ignored consistently with prompt comparison. Inputs are not mutated.
+            block_id: Shared application-generated identity for the complete block.
+
+        Returns:
+            New message IDs in instruction order after all writes succeed. An
+            enclosing transaction retains control of its final commit.
+
+        Raises:
+            InputError: The conversation is unavailable or a message is not a
+                system message with string content.
+            CharactersRAGDBError: Any row or metadata write fails. The transaction
+                rolls back every member, preserving the previous instruction block.
+        """
+        try:
+            self._db._ensure_message_metadata_table()
+            message_ids: list[str] = []
+            with self._db.transaction() as conn:
+                owned = conn.execute(
+                    "SELECT 1 FROM conversations WHERE id = ? AND client_id = ? AND deleted = FALSE",
+                    (conversation_id, self._db.client_id),
+                ).fetchone()
+                if not owned:
+                    raise InputError("Retry conversation is unavailable.")  # noqa: TRY003
+                for message in messages:
+                    if message.get("role") != "system" or not isinstance(message.get("content"), str):
+                        raise InputError("Retry instructions require system messages with text content.")  # noqa: TRY003
+                    if not message["content"].strip():
+                        continue
+                    message_id = self._db.add_message({
+                        "conversation_id": conversation_id,
+                        "sender": "system",
+                        "content": message["content"],
+                        "client_id": self._db.client_id,
+                    }, conn=conn)
+                    if not message_id:
+                        raise CharactersRAGDBError("Failed to persist retry instruction.")  # noqa: TRY003
+                    extra = {"sender_role": "system", "system_instruction_block_id": block_id}
+                    if message.get("name"):
+                        extra["sender_name"] = message["name"]
+                    if not self._db.add_message_metadata(message_id, extra=extra, conn=conn):
+                        raise CharactersRAGDBError("Failed to persist retry instruction metadata.")  # noqa: TRY003
+                    message_ids.append(message_id)
+            return message_ids
+        except (sqlite3.Error, BackendDatabaseError) as exc:
+            raise CharactersRAGDBError("Failed to persist retry instruction block.") from exc  # noqa: TRY003
+
+
     def get_retry_message_context(self, conversation_id: str) -> tuple[list[str], list[dict[str, Any]]]:
         """Read the non-system tail and latest instruction block without attachment blobs.
 
