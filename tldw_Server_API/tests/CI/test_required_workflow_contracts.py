@@ -1961,3 +1961,50 @@ def test_critical_e2e_budget_preserves_other_policies_and_still_enforces_limits(
     configured["policies"]["character_chat.default"]["requests"]["rpm"] = 60
     assert configured == source
     assert workflow["steps"].index(step) < workflow["steps"].index(_get_step(workflow["steps"], "Start backend server"))
+
+
+def test_required_backend_jobs_override_skipped_ancestor_status() -> None:
+    """An intentional admission skip must not suppress successful downstream gates."""
+    targets = {
+        ".github/workflows/ci.yml": (
+            "full-suite-linux-311-smoke", "full-suite-linux-312-shards",
+            "full-suite-linux-313-shards", "full-suite-macos-312-shards",
+            "full-suite-windows-312-shards", "full-suite-os-313-release-shards",
+            "character-chat-rate-limits",
+        ),
+        ".github/workflows/jobs-suite.yml": ("jobs-postgres",),
+    }
+    for path, names in targets.items():
+        jobs = _load(path)["jobs"]
+        for name in names:
+            job = jobs[name]
+            condition = " ".join(str(job.get("if", "")).split())
+            assert "!cancelled()" in condition, (path, name)
+            dependencies = job["needs"]
+            if isinstance(dependencies, str):
+                dependencies = [dependencies]
+            for dependency in dependencies:
+                assert f"needs['{dependency}'].result == 'success'" in condition, (path, name, dependency)
+
+
+def test_selected_full_suite_summaries_reject_unexecuted_shards(tmp_path: Path) -> None:
+    """Execute the real summary shell with successful, skipped and failed results."""
+    import shutil
+    import subprocess  # nosec B404 - run checked-in summary commands in an isolated directory
+
+    bash = shutil.which("bash")
+    assert bash is not None
+    jobs = _load(".github/workflows/ci.yml")["jobs"]
+    for name, job in jobs.items():
+        if not name.startswith("full-suite-") or not name.endswith("-summary"):
+            continue
+        shard = job["needs"][0]
+        script = job["steps"][0]["run"]
+        placeholder = "${{ needs['" + shard + "'].result }}"
+        assert placeholder in script
+        for result in ("success", "skipped", "failure", "cancelled"):
+            process = subprocess.run(  # nosec B603 - trusted workflow shell with fixed result values
+                [bash, "-c", script.replace(placeholder, result)],
+                cwd=tmp_path, capture_output=True, text=True, timeout=5, check=False,
+            )
+            assert (process.returncode == 0) is (result == "success"), (name, result, process.stdout)

@@ -129,6 +129,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     needs: jobs-sqlite
+    if: ${{ !cancelled() && needs['jobs-sqlite'].result == 'success' }}
     services:
       postgres:
         image: postgres:18-bookworm

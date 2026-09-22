@@ -438,13 +438,21 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                 assert _normalized(job.get("if")) == _normalized(expected_condition), (name, job_name)
             else:
                 assert "admission" not in needs, (name, job_name)
+                prerequisite_guard = "!cancelled() && " + " && ".join(
+                    f"needs['{dependency}'].result == 'success'"
+                    for dependency in original_needs
+                )
                 if name == "ci.yml" and job_name in BACKEND_CHANGED_JOBS:
-                    assert _normalized(job.get("if")) == _normalized(backend_changed), (name, job_name)
+                    assert _normalized(job.get("if")) == _normalized(
+                        f"{prerequisite_guard} && ({backend_changed})"
+                    ), (name, job_name)
                 elif (name, job_name) == ("ci.yml", "full-suite-os-313-release-shards"):
                     assert _normalized(job.get("if")) == _normalized(
-                        "github.event_name != 'pull_request' && "
-                        "github.event_name != 'workflow_run'"
+                        f"{prerequisite_guard} && (github.event_name != 'pull_request' && "
+                        "github.event_name != 'workflow_run')"
                     )
+                elif (name, job_name) == ("jobs-suite.yml", "jobs-postgres"):
+                    assert _normalized(job.get("if")) == _normalized(prerequisite_guard)
                 elif (name, job_name) in {
                     ("coverage-required.yml", "coverage-required"),
                     ("e2e-required.yml", "e2e-required"),
