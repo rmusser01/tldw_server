@@ -40,6 +40,8 @@ The remaining UAT468 Windows host-permission fixture failures are test expectati
 
 UAT470 addresses four Windows release-soak failures caused by exact poll counts and coarse repeated telemetry timestamps in test fixtures. The final-observation case now detects the final call after phase iteration and retains the phase-maxima/final-regression assertions. Failure-category fixtures give each telemetry sample a strictly increasing timestamp under a simulated coarse clock. All 40 release-soak tests pass locally with no skips; production unchanged, native Windows acceptance pending.
 
+The UAT457 v57/v58 fixtures now build historical catalogs through numbered migrations instead of relabeling today's v68 schema. Historical note rows are inserted without the later graph-dependent note API, and the v59 tests stop at their own migration boundary. PostgreSQL doubles observe the coordinator transaction boundary for missing-index, version-lock and rollback checks. The complete v58/v59 modules pass 84 checks locally, zero skips; Ruff is clean and Bandit has only test assertions. Hosted Windows and the remaining historical fixture groups are still open.
+
 ## Global constraints
 
 - Four cells: sqlite-single, sqlite-multi, pg-single, pg-multi. Record each domain's actual database engine and normal actor role.
