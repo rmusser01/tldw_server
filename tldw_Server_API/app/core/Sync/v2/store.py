@@ -2236,6 +2236,16 @@ class SyncV2Store:
     ) -> SyncBlobQuotaUsage:
         return self.db.summarize_blob_quota(owner_user_id, dataset_id=dataset_id)
 
+    def expire_blob_upload_sessions(
+        self,
+        *,
+        dataset_id: str | None = None,
+        limit: int = 500,
+    ) -> int:
+        """Reap timed-out upload sessions, releasing slot and reserved quota."""
+
+        return self.db.expire_blob_upload_sessions(dataset_id=dataset_id, limit=limit)
+
     def summarize_restore_manifest_dataset(
         self,
         dataset_id: str,

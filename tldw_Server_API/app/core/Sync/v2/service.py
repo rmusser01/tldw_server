@@ -11,7 +11,7 @@ import json
 import os
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from time import monotonic_ns
 from typing import TYPE_CHECKING, Any, Literal
 from uuid import RFC_4122, UUID, uuid4
@@ -842,6 +842,11 @@ class SyncV2Settings:
     max_blob_bytes: int | None = None
     max_chunk_bytes: int = 4_194_304
     max_active_blob_uploads: int = 8
+    # How long an unfinished upload session holds one of those eight slots and its
+    # reserved quota. Sessions had no expiry at all: expires_at defaulted to None,
+    # was never set at insert and appeared in no WHERE clause, and no reaper existed,
+    # so eight failed uploads permanently disabled attachments for that user.
+    blob_upload_session_ttl_seconds: int = 86_400
     user_blob_quota_bytes: int | None = None
     reserved_blob_bytes: int = 0
     used_blob_bytes: int = 0
@@ -3321,6 +3326,33 @@ class SyncV2Service:
                 offline_restore_window_seconds=offline_restore_window_seconds,
             )
         )
+        if apply_blob_gc:
+            # Reap upload sessions that timed out mid-upload. Their slot counts against
+            # max_active_blob_uploads and their reserved_quota_bytes counts against the
+            # user's quota, and nothing else releases them: the upload_id is minted
+            # server-side and never returned, so the cancel endpoint cannot reach an
+            # orphan. Eight transient failures used to disable attachments for good.
+            try:
+                expired_sessions = self.store.expire_blob_upload_sessions(
+                    dataset_id=dataset_id,
+                )
+            except SyncStoreError as error:
+                logger.bind(
+                    operation="sync_retention_blob_upload_expiry",
+                    dataset_id=dataset_id,
+                    exception_type=type(error).__name__,
+                ).warning("Blob upload session expiry failed (error={})", type(error).__name__)
+            else:
+                if expired_sessions:
+                    logger.bind(
+                        operation="sync_retention_blob_upload_expiry",
+                        dataset_id=dataset_id,
+                        expired_session_count=expired_sessions,
+                    ).info(
+                        "Expired {} stale blob upload session(s)",
+                        expired_sessions,
+                    )
+
         blob_gc, revalidated_blob_blocked, blob_fence_mutated = (
             self._apply_retention_blob_gc(
                 dataset=dataset,
@@ -6201,6 +6233,9 @@ class SyncV2Service:
                 chunk_count=chunk_count,
                 reserved_quota_bytes=size_bytes,
                 idempotency_key=idempotency_key,
+                # Without this the session never expires, so a failed upload keeps one
+                # of max_active_blob_uploads slots and its reserved quota for ever.
+                expires_at=self._blob_upload_expires_at(),
                 metadata=normalized_metadata,
             )
         )
@@ -11003,6 +11038,25 @@ class SyncV2Service:
         if domain is not None and domain not in dataset.domains:
             raise SyncInvalidDomainError(f"Sync domain is not enrolled for this dataset: {domain}")
         return dataset
+
+    def _blob_upload_expires_at(self) -> str | None:
+        """Return when a new upload session stops holding its slot and reserved quota.
+
+        Sessions previously had no expiry at all: expires_at defaulted to None, was
+        never set at insert, and appeared in no WHERE clause anywhere in the repo. With
+        max_active_blob_uploads = 8 and no reaper, eight ordinary transient failures --
+        a flaky network on one large attachment suffices -- permanently disabled
+        attachment upload for that user, through both this API and Notes, with no
+        self-service recovery: the upload_id is minted server-side and never returned,
+        so the cancel endpoint could not reach the orphans either.
+        """
+        ttl = int(self.settings.blob_upload_session_ttl_seconds or 0)
+        if ttl <= 0:
+            return None
+        started = _parse_sync_timestamp(self.clock())
+        if started is None:
+            started = datetime.now(timezone.utc)
+        return (started + timedelta(seconds=ttl)).isoformat()
 
     def _validate_blob_limits(
         self,

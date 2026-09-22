@@ -4879,6 +4879,7 @@ async def upload_note_attachment(
                 coordinator.service.settings.max_chunk_bytes,
             )
             chunk_count = (len(payload) + chunk_size - 1) // chunk_size
+            session = None
             try:
                 session = coordinator.service.create_blob_upload_session(
                     user_id=str(current_user.id),
@@ -4949,6 +4950,29 @@ async def upload_note_attachment(
                     )
                 )
             except Exception as exc:  # noqa: BLE001 - mapped to a stable public error.
+                # Release the session before surfacing the failure. Without this the
+                # sequence had no compensation at all: sessions are capped at
+                # max_active_blob_uploads, and the upload_id is minted server-side and
+                # never returned to the client, so the cancel endpoint could not reach
+                # an orphan. Eight transient failures -- a flaky network on one large
+                # attachment suffices -- permanently disabled attachment upload for
+                # that user, through this endpoint and the sync API alike, with no
+                # self-service recovery, each orphan also holding reserved_quota_bytes.
+                if session is not None:
+                    try:
+                        coordinator.service.cancel_blob_upload(
+                            user_id=str(current_user.id),
+                            dataset_id=ready.dataset.dataset_id,
+                            upload_id=session.upload_id,
+                        )
+                    except Exception:  # noqa: BLE001 - compensation must not mask exc.
+                        logger.bind(
+                            operation="notes_attachment_upload_compensation",
+                            dataset_id=ready.dataset.dataset_id,
+                            upload_id=session.upload_id,
+                        ).warning(
+                            "Failed to release blob upload session after upload error"
+                        )
                 raise _notes_attachment_http_error(exc) from exc
             return _canonical_to_legacy_attachment_response(result.attachment)
 
