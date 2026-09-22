@@ -11,6 +11,9 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.LLM_Calls.tokenizer_resolver import (
+    resolve_tiktoken_encoding_or_default,
+)
 from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.testing import is_test_mode
@@ -454,11 +457,9 @@ async def run_context_window_check_adapter(config: dict[str, Any], context: dict
     # Count tokens
     token_count = 0
     try:
-        import tiktoken
-        try:
-            encoding = tiktoken.encoding_for_model(model)
-        except KeyError:
-            encoding = tiktoken.get_encoding("cl100k_base")
+        import tiktoken  # noqa: F401 - probe so a missing dep still hits except ImportError
+
+        encoding = resolve_tiktoken_encoding_or_default(model)
         token_count = len(encoding.encode(text))
     except ImportError:
         token_count = int(len(text) / 4)

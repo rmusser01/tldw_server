@@ -6868,7 +6868,18 @@ class SyncV2Service:
                                 _store=guarded_store,
                                 _verified_personal_context_exchange=verified_exchange,
                             )
-                except Exception:  # noqa: BLE001 - preserve per-item API outcomes.
+                except Exception as exc:  # noqa: BLE001 - preserve per-item API outcomes.
+                    # Keep the per-item outcome contract, but do not discard the cause.
+                    # Every failure mode inside resolve_batch_item collapsed to the same
+                    # opaque rejection, so a real regression, a stale fixture and a
+                    # KeyError on dataset metadata were indistinguishable from the API
+                    # response and the logs.
+                    logger.opt(exception=True).warning(
+                        "Sync v2 conflict resolution item {} rejected: {}: {}",
+                        index,
+                        type(exc).__name__,
+                        exc,
+                    )
                     rejected.append(index)
                     continue
                 selected[conflict_id] = outcome

@@ -43,16 +43,34 @@ class AuthnzDataSubjectRequestsRepo:
 
     @staticmethod
     def _parse_json_field(value: Any, *, fallback: Any) -> Any:
+        """Decode a stored JSON blob, clamped to the container the caller asked for.
+
+        The four sibling copies in this package end with
+        ``dict(parsed) if isinstance(parsed, dict) else {}``; this one returned
+        ``json.loads(...)`` raw, so a column holding "[]", "null" or "123" yielded a
+        list / None / int where ``fallback`` promised a dict. coverage_metadata is
+        declared ``dict[str, Any]`` on the response models
+        (api/v1/schemas/admin_schemas.py:1027, :1082), so that surfaced as a validation
+        error on a GDPR data-subject-request read rather than a benign default.
+        """
         if value is None:
             return fallback
-        if isinstance(value, (list, dict)):
-            return value
+
         if isinstance(value, str):
             try:
-                return json.loads(value)
+                parsed: Any = json.loads(value)
             except json.JSONDecodeError:
                 return fallback
-        return fallback
+        elif isinstance(value, (list, dict)):
+            parsed = value
+        else:
+            return fallback
+
+        if isinstance(fallback, dict):
+            return parsed if isinstance(parsed, dict) else fallback
+        if isinstance(fallback, list):
+            return parsed if isinstance(parsed, list) else fallback
+        return parsed
 
     @classmethod
     def _normalize_record(cls, row: Any) -> dict[str, Any]:

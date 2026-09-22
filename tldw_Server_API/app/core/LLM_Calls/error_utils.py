@@ -142,7 +142,7 @@ def get_http_status_from_exception(exc: Exception) -> int | None:
             except (TypeError, ValueError):
                 pass
     if isinstance(exc, NetworkError):
-        match = re.search(r"HTTP\\s+(\\d{3})", str(exc))
+        match = re.search(r"HTTP\s+(\d{3})", str(exc))
         if match:
             try:
                 return int(match.group(1))

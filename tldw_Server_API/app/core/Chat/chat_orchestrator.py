@@ -71,6 +71,9 @@ from tldw_Server_API.app.core.exceptions import (
     SyncCallInEventLoopError,
 )
 from tldw_Server_API.app.core.LLM_Calls.deprecation import log_legacy_once
+from tldw_Server_API.app.core.LLM_Calls.error_utils import (
+    get_http_status_from_exception as _llm_get_http_status_from_exception,
+)
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
 from tldw_Server_API.app.core.testing import is_truthy as _shared_is_truthy
 
@@ -110,6 +113,11 @@ except ImportError:
 
 _CHAT_ORCHESTRATOR_PROVIDER_EXCEPTIONS = (
     *_CHAT_ORCHESTRATOR_NONCRITICAL_EXCEPTIONS,
+    # _is_network_exception explicitly classifies these two, and the handler has a
+    # ChatProviderError(504) branch for them -- but neither was catchable here, so both
+    # escaped chat_api_call unmapped and that branch was dead.
+    NetworkError,
+    RetryExhaustedError,
     *((_REQUESTS_REQUEST_EXCEPTION,) if _REQUESTS_REQUEST_EXCEPTION else ()),
     *((_HTTPX_REQUEST_ERROR,) if _HTTPX_REQUEST_ERROR else ()),
     *((_HTTPX_HTTP_ERROR,) if _HTTPX_HTTP_ERROR else ()),
@@ -245,33 +253,15 @@ def _build_command_context(llm_user_identifier: Optional[str]) -> command_router
 
 
 def _get_http_status_from_exception(exc: Exception) -> Optional[int]:
-    response = getattr(exc, "response", None)
-    if response is not None:
-        status = getattr(response, "status_code", None)
-        if status is None:
-            status = getattr(response, "status", None)
-        if status is not None:
-            try:
-                return int(status)
-            except (TypeError, ValueError):
-                pass
-    status = getattr(exc, "status_code", None)
-    if status is None:
-        status = getattr(exc, "status", None)
-    if status is not None:
-        try:
-            return int(status)
-        except (TypeError, ValueError):
-            return None
-    if isinstance(exc, NetworkError):
-        import re
-        match = re.search(r"HTTP\\s+(\\d{3})", str(exc))
-        if match:
-            try:
-                return int(match.group(1))
-            except ValueError:
-                return None
-    return None
+    """Delegate to the canonical extractor in LLM_Calls.
+
+    This was a third copy of the same walk (response.status_code -> response.status ->
+    exc.status_code -> exc.status -> message text). Two of the three copies carried a
+    double-escaped regex that could never match, so an upstream status carried only in
+    the message was silently lost. Kept as a thin alias so the single in-module caller
+    and any patch points keep working.
+    """
+    return _llm_get_http_status_from_exception(exc)
 
 
 def _get_http_error_text(exc: Exception) -> str:

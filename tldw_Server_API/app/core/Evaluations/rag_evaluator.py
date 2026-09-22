@@ -31,6 +31,7 @@ from tldw_Server_API.app.core.Chat.bounded_daemon import (
     await_owned_worker,
 )
 from tldw_Server_API.app.core.testing import is_test_mode
+from tldw_Server_API.app.core.Evaluations.scoring import normalize_likert
 
 _RAG_EVAL_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -562,7 +563,7 @@ class RAGEvaluator:
             )
 
             raw = float(score_str.strip())
-            llm_score = raw / 5.0  # Normalize to 0-1
+            llm_score = normalize_likert(raw)
 
             # Clamp heuristics for obvious mismatches/strong matches to stabilize outputs
             # Only apply when we have enough lexical signal (>=3 distinct tokens)
@@ -641,7 +642,7 @@ class RAGEvaluator:
             )
 
             raw = float(score_str.strip())
-            llm_score = raw / 5.0
+            llm_score = normalize_likert(raw)
 
             # Clamp for obvious hallucinations (very low coverage) / strong coverage
             score = llm_score
@@ -821,7 +822,7 @@ class RAGEvaluator:
                 provider_credentials=self.provider_credentials,
             )
 
-            score = float((score_str or "").strip()) / 5.0
+            score = normalize_likert(float((score_str or "").strip()))
 
             return ("answer_similarity", {
                 "name": "answer_similarity",
@@ -868,7 +869,7 @@ class RAGEvaluator:
                     provider_credentials=self.provider_credentials,
                 )
 
-                relevance_scores.append(float(score_str.strip()) / 5.0)
+                relevance_scores.append(normalize_likert(float(score_str.strip())))
 
             except DaemonCapacityError:
                 raise
@@ -926,7 +927,7 @@ class RAGEvaluator:
                 # Parse score and handle invalid responses
                 try:
                     score = float((score_str or "").strip())
-                    relevance_scores.append(score / 5.0)
+                    relevance_scores.append(normalize_likert(score))
                 except (ValueError, AttributeError):
                     # Invalid response format - treat as 0.0
                     logger.warning("Invalid score format from evaluation provider")
@@ -991,7 +992,7 @@ class RAGEvaluator:
                 provider_credentials=self.provider_credentials,
             )
 
-            score = float(score_str.strip()) / 5.0
+            score = normalize_likert(float(score_str.strip()))
 
             return ("context_recall", {
                 "name": "context_recall",
@@ -1043,10 +1044,9 @@ class RAGEvaluator:
         Returns:
             Normalized score on 0-1 scale
         """
-        # Clamp score to 1-5 range
-        score = max(1, min(5, score))
-        # Normalize to 0-1
-        return (score - 1) / 4
+        # Delegates to the one normalizer; this method always implemented the correct
+        # affine mapping but had zero production callers while 11 sites inlined raw/5.0.
+        return normalize_likert(score)
 
     def _calculate_overall_score(self, metrics: dict[str, dict], weights: Optional[dict[str, float]] = None) -> float:
         """

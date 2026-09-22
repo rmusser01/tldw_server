@@ -380,16 +380,6 @@ def convert_to_seconds(time_str):
     raise ValueError(f"Invalid time format '{time_str}'")
 
 
-def truncate_content(content: str | None, max_length: int = 200) -> str | None:
-    """Truncate content to the specified maximum length with ellipsis."""
-    if not content:
-        return content
-
-    if len(content) <= max_length:
-        return content
-
-    return content[:max_length - 3] + "..."
-
 #
 # End of Misc-Functions
 #######################################################################################################################
@@ -598,20 +588,6 @@ def generate_unique_filename(base_path, base_filename):
     return filename
 
 
-def generate_unique_identifier(file_path):
-    """Build a local identifier from file timestamp, content hash, and filename."""
-    filename = os.path.basename(file_path)
-    timestamp = int(time.time())
-
-    # Generate a hash of the file content
-    hasher = hashlib.md5(usedforsecurity=False)
-    with open(file_path, 'rb') as f:
-        for block in iter(lambda: f.read(1024 * 1024), b''):
-            hasher.update(block)
-    content_hash = hasher.hexdigest()[:8]  # Use first 8 characters of the hash
-
-    return f"local:{timestamp}:{content_hash}:{filename}"
-
 #
 # End of UUID-Functions
 #######################################################################################################################
@@ -622,19 +598,6 @@ def generate_unique_identifier(file_path):
 # Sanitization/Verification Functions
 
 # Helper function to validate URL format
-def is_valid_url(url: str) -> bool:
-    """Return whether a string matches the accepted URL pattern."""
-    regex = re.compile(
-        r'^(?:http|ftp)s?://'  # http:// or https://
-        r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+(?:[A-Z]{2,6}\.?|[A-Z0-9-]{2,}\.?)|'  # domain...
-        r'localhost|'  # localhost...
-        r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|'  # ...or ipv4
-        r'\[?[A-F0-9]*:[A-F0-9:]+\]?)'  # ...or ipv6
-        r'(?::\d+)?'  # optional port
-        r'(?:/?|[/?]\S+)$', re.IGNORECASE)
-    return re.match(regex, url) is not None
-
-
 def verify_checksum(file_path, expected_checksum):
     """Return whether a file's SHA-256 digest matches the expected checksum."""
     sha256_hash = hashlib.sha256()
