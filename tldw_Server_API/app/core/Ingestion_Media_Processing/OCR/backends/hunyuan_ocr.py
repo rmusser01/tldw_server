@@ -185,15 +185,20 @@ def _ocr_via_vllm(image_bytes: bytes, prompt: str) -> str:
     use_data_url = str(os.getenv("HUNYUAN_VLLM_USE_DATA_URL", "true")).lower() in ("1", "true", "yes")
 
     content_image = None
+    tmp_path = None
     if use_data_url:
         b64 = base64.b64encode(image_bytes).decode("ascii")
         content_image = {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}}
     else:
-        # Path-based URL is likely only useful for local file access
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=True) as f:
+        # Path-based URL is likely only useful for local file access. delete=False is
+        # required: delete=True unlinks the file when the with-block closes, i.e. before
+        # the request below, and the server is handed a path that no longer exists.
+        # Cleaned up in the finally at the request site.
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
             f.write(image_bytes)
             f.flush()
-            content_image = {"type": "image_url", "image_url": {"url": f.name}}
+            tmp_path = f.name
+        content_image = {"type": "image_url", "image_url": {"url": tmp_path}}
 
     def _getf(env: str, cast, default):
         try:
@@ -221,7 +226,12 @@ def _ocr_via_vllm(image_bytes: bytes, prompt: str) -> str:
 
     from tldw_Server_API.app.core.http_client import fetch_json
 
-    j = fetch_json(method="POST", url=url, json=data, timeout=timeout)
+    try:
+        j = fetch_json(method="POST", url=url, json=data, timeout=timeout)
+    finally:
+        if tmp_path:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp_path)
     return (
         j.get("choices", [{}])[0]
         .get("message", {})
