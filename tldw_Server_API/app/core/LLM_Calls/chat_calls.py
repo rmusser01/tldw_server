@@ -117,23 +117,16 @@ def create_session_with_retries(
     """Return a session object.
 
     Provider POSTs are single-attempt until an idempotency contract exists.
-    - Under pytest, return the legacy session facade so tests can patch
-      `create_session_with_retries` directly.
-    - In production, return a shim that routes non-streaming POSTs through
-      the centralized HTTP client (egress policy, TLS pinning) and streaming
-      through the legacy session facade for iter_lines semantics.
+
+    Returns a shim that routes non-streaming POSTs through the centralized HTTP client
+    (egress policy, TLS pinning) and streaming through the legacy session facade for
+    iter_lines semantics.
+
+    This used to return the legacy facade instead whenever PYTEST_CURRENT_TEST was set,
+    which meant the object every production call receives was never constructed by the
+    test suite. Tests that need to control the session monkeypatch this function
+    directly, so that branch bought nothing the seam did not already provide.
     """
-    import os as _os
-    if _os.getenv("PYTEST_CURRENT_TEST"):
-        log_runtime_deprecation(
-            "llm_chat_legacy_session",
-            message=(
-                "LLM chat used legacy session compatibility path under pytest runtime."
-            ),
-        )
-        return _legacy_create_session_with_retries(
-            total=1,
-        )
     return _SessionShim(
         total=total,
         backoff_factor=backoff_factor,
