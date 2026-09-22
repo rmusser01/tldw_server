@@ -1,0 +1,64 @@
+---
+id: TASK-13302
+title: Evaluations created timestamps violate ADR-014 by the host UTC offset
+status: In Progress
+assignee: []
+created_date: '2026-09-22 04:52'
+updated_date: '2026-09-22 05:36'
+labels:
+  - bug
+  - evaluations
+  - adr-drift
+dependencies: []
+references:
+  - 'tldw_Server_API/app/core/DB_Management/Evaluations_DB.py:2489'
+  - 'tldw_Server_API/app/core/Evaluations/unified_evaluation_service.py:1503'
+  - 'tldw_Server_API/app/api/v1/endpoints/evaluations/evaluations_datasets.py:51'
+  - Docs/ADR/014-evaluations-openai-compatible-schemas.md
+priority: high
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+_ensure_unix_timestamp does datetime.fromisoformat(s.replace("Z","+00:00")) then int(dt.timestamp()). Verified under TZ=America/Los_Angeles against SQLite CURRENT_TIMESTAMP format:
+- .replace("Z","+00:00") is a no-op, that format has no Z
+- fromisoformat returns a NAIVE datetime
+- .timestamp() interprets it in the host local zone: 1790050015 vs true UTC 1790024815, delta 25200s = exactly 7h
+
+ADR-014:12 names Unix created timestamps as a preserved OpenAI-compatible convention, so this is a binding-contract violation. The except fallback returns int(datetime.now().timestamp()), also naive. Three further copies carry the identical defect. On PostgreSQL the datasets converter matches no isinstance branch and falls through to now(), so every dataset created becomes the time it was READ.
+
+No test catches it because CI runs UTC where the delta is exactly zero. See companion task for the non-UTC CI shard.
+
+Source: synthesis F6
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [ ] #1 Naive SQLite timestamps are interpreted as UTC, not local
+- [ ] #2 Fallback path no longer substitutes a naive now()
+- [ ] #3 PostgreSQL datetime inputs are handled rather than falling through to now()
+- [ ] #4 Test asserts a fixed stored value converts identically under two TZ settings
+<!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+DONE (converter). Evaluations_DB._ensure_unix_timestamp now treats naive datetimes as UTC via a local _to_epoch helper, and all five naive datetime.now() fallbacks became datetime.now(timezone.utc). Fixes both the string-parse path AND the isinstance(value, datetime) branch at :2483, which had the same defect and was not in the original finding.
+
+KEY CHOICE: rather than depending on a CI timezone change, the test CARRIES ITS OWN TZ - tldw_Server_API/tests/Evaluations/unit/test_created_timestamp_utc_contract.py sets TZ=America/Los_Angeles with time.tzset() and restores it. So it catches this class even in UTC CI, which removes the hard dependency on TASK-13336. Red before (2 failed on the naive cases), green after (4 passed).
+
+Verified no regression: tests/Evaluations/unit went from 27 failed to 25 failed with the change applied - my fix turned 2 red into green and broke nothing. The remaining 25 are pre-existing ModuleNotFoundError: sklearn failures (sklearn is a DECLARED core dep at pyproject.toml:87 but missing from this venv).
+
+STILL OPEN: the three bypassing copies (unified_evaluation_service.py:1503, evaluations_datasets.py:51, evaluations_rag_pipeline.py:72/116/174) and the PostgreSQL fall-through-to-now() path. Those are owner-only for the two endpoint files.
+<!-- SECTION:NOTES:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
+<!-- DOD:END -->

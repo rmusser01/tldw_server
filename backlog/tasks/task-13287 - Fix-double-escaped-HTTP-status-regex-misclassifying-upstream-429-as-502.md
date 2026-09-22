@@ -1,9 +1,10 @@
 ---
 id: TASK-13287
 title: Fix double-escaped HTTP status regex misclassifying upstream 429 as 502
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-09-22 03:55'
+updated_date: '2026-09-22 14:29'
 labels:
   - llm
   - bug
@@ -46,6 +47,26 @@ Source: comprehensive core-module review prompt smoke run, findings LLM_Calls-2 
 - [ ] #5 Existing coverage in tests/Local_LLM/test_http_utils.py:105-107 still passes against the consolidated helper
 - [ ] #6 Bandit run for touched scope
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+STAGE 1 APPLIED. Three changes, all verified.
+
+1) REGEX FIXED at core/LLM_Calls/error_utils.py:145 - r"HTTP\\s+(\\d{3})" -> r"HTTP\s+(\d{3})".
+
+2) COPY DELETED, NOT JUST FIXED. core/Chat/chat_orchestrator.py had a third full copy of the same walk; its body is gone and it is now a thin alias delegating to the LLM_Calls canonical (the file already imported from LLM_Calls at :73, and the private copy had exactly one in-module caller). That is the promote-one-and-delete this task specifies. The 4th copy, Embeddings_Create.py:174, is untouched - different implementation, different precedence, belongs with the Stage 2 destination module.
+
+3) THE COMPOUNDING DEFECT IS FIXED TOO, and this is the part the original ticket did not cover. NetworkError and RetryExhaustedError were absent from _CHAT_ORCHESTRATOR_PROVIDER_EXCEPTIONS, verified at runtime: "NetworkError in tuple: False, caught by tuple: False". So NetworkError escaped chat_api_call UNMAPPED and the ChatProviderError(504) branch was unreachable - fixing the regex alone would NOT have fixed the Chat path. Conclusive evidence it was an omission rather than a design choice: _is_network_exception:282 explicitly names both types, and the handler has a branch for them. Both added to the tuple.
+
+TESTS (both new, red before / green after):
+- tests/LLM_Calls/test_http_status_extraction_parity.py - 24 tests asserting all three extractor copies agree across 400/401/429/500/503, embedded text, absent status, and attribute-branch precedence. Was 12 failed / 12 passed (the exact 2-of-3 split), now 24 passed.
+- tests/Chat/unit/test_orchestrator_network_exception_routing.py - asserts the invariant that the tuple must catch everything _is_network_exception classifies. 3 passed.
+
+REGRESSION: tests/Chat/unit + tests/LLM_Calls went from 33 failed / 2259 passed to 18 failed / 2274 passed. Net 15 fixed, 0 broken. 14 of the 15 are the new tests; one pre-existing test was also repaired. The remaining 18 are pre-existing and unrelated (tabbyapi/vllm strict filters, plus 2 hypothesis collection errors from a missing declared dep).
+
+Still open: the Stage 2 consolidation into core/Utils/http_status_extraction.py covering all four copies plus the is_http_status_error cluster.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

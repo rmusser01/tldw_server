@@ -35,7 +35,7 @@ Weight = severity × blast radius × (1/effort), where blast radius is site coun
 | **F5** | MCP base denylist rejects `--` and `/*` — ordinary content hard-fails on 22 inherited modules | 88 | High / divergent-copies |
 | **F6** | Evaluations `created` timestamps violate **ADR-014** by the host's UTC offset; CI is UTC so no test can see it | 86 | High / divergent-copies |
 | **F7** | 149-file MCP test tree in **zero** CI shards; a test red since 2026-06-03 across 28 commits to the same file | 85 | High / test-estate |
-| **F8** | `tests/Sync` aborts at collection without `psycopg` — 2,958 tests interrupted, not skipped; red test ~18 days | 84 | High / test-estate |
+| **F8** | `tests/Sync` aborts at collection without `psycopg`; behind it, **12 red tests** in a 3-hour suite no blocking gate runs | 84 | High / test-estate |
 | **F9** | OCR temp image closed and unlinked before the request that names it — silent total data loss, every page | 82 | High / divergent-copies |
 | **F10** | Resampler returns input unchanged on ImportError, caller relabels 48 kHz as 16 kHz — 3×-speed garbage | 80 | High / divergent-copies |
 | **F11** | Unkeyed model cache returns the **wrong model** while reporting the requested name | 78 | High / divergent-copies |
@@ -194,7 +194,21 @@ This is the systemic finding, and it is the mechanism by which the rest survive.
 
 **F7 — `app/core/MCP_unified/tests/` is in no CI shard.** Verified: `grep -c "app/core/MCP_unified/tests" .github/workflows/ci.yml` → **0**. The `platform-mcp-core` shard (`ci.yml:1758-1760`) runs only `tests/MCP` and `tests/MCP_unified`. The in-app tree is **149 files, 63.6% of the module's lines**, and *is* in `pyproject.toml` `testpaths` — so a bare `pytest` runs it and CI never does. Consequence, reproduced: `test_filesystem_glob_marks_file_size_unavailable` fails at `filesystem_module.py:1778` (`OSError: metadata unavailable` from an unguarded `is_symlink()`, 15 lines above the correctly-guarded `stat(follow_symlinks=False)`). It was added **2026-06-03**, and `filesystem_module.py` has had **28 commits since** — every one merged with this test red.
 
-**F8 — `tests/Sync` aborts at collection.** Verified: `Interrupted: 2 errors during collection`, `2958 tests collected` and **none executed**, caused by two unguarded `from psycopg import sql` imports at module scope. So the directory does not partially skip — it does not run. Compounding: neither blocking gate covers it (`backend-required.yml:193-195` runs only `tests/unit`; `coverage-required.yml:154-157` runs `tests/unit` + `sanity_tests`), and a real assertion failure has sat red ~18 days. This is **not** the known `--cov-fail-under=12` complaint; it is that the largest behavioural suite protecting a 43,905-LOC module is outside every contractual gate.
+**F8 — `tests/Sync` aborts at collection, and hides 12 red tests.** Verified: `Interrupted: 2 errors during collection`, `2958 tests collected` and **none executed**, caused by two unguarded `from psycopg import sql` imports at module scope. So the directory does not partially skip — it does not run.
+
+**Revised 2026-09-22 after a full run completed (3h 01m).** The collection abort was concealing **12 failing tests**, not one. Five names were recovered and *all five reproduce in isolation*, so they are deterministic rather than ordering artifacts:
+
+- `test_sync_v2_store.py::test_postgres_personal_context_receipt_locks_binding_before_upsert` — the `link_state` fixture drift, red since 2026-09-03.
+- `test_sync_v2_personal_context_exchange_gate.py` × 3 — `test_mixed_selected_conflicts_with_exact_proof_resolve_in_request_order` and both parametrisations of `test_mixed_exact_proof_preserves_native_notes_resolution_actions`. All assert `['mixed-exact-note'] == ['mixed-exact-note', 'mixed-exact-personal']`: a **mixed** notes/personal-context batch returns only the notes item. Reproduced in 7s (3 failed, 95 passed) — and note every failure is a `mixed_*` case while the pure personal-context cases pass, which is the shape of a real defect rather than fixture rot. Root cause now visible (see below) but **not yet classified as defect vs fixture**.
+- `test_sync_v2_server_origin_capture.py::test_workspace_chat_api_write_stays_direct_when_sync_active` — `assert 404 == 201`.
+
+The other seven names were lost to the output buffer and were not recovered.
+
+**The runtime is itself the finding: 3h 01m.** That is why nobody runs the directory, and it means the obvious remedy — "add `tests/Sync` to a CI shard" — is wrong as stated. A 3-hour suite cannot sit in a PR gate; it needs a scoped gate-able subset or a nightly.
+
+**A diagnosability defect blocks triage of three of them.** `core/Sync/v2/service.py:resolve_conflicts_batch` caught `except Exception` and appended to `rejected` without recording the cause, so a real regression, a stale fixture and a `KeyError` on dataset metadata were indistinguishable — the endpoint logged only "Sync v2 conflict resolution item failed". That swallow now logs the exception (per-item outcome contract unchanged), which immediately surfaced the real cause: `SyncStoreError: Personal Context conflict candidate is unavailable`, raised at `core/Sync/v2/personal_context_conflicts.py:203` when the source/remote envelope lookup or an identity check fails. **A connection-threading cause was hypothesised (per F-sync-5, where 62 of 125 store forwarders omit `connection=self._connection`) and disproved** — both `get_envelope_by_server_cursor` and `get_envelope_by_client_id` do thread it.
+
+Compounding: neither blocking gate covers the directory (`backend-required.yml:193-195` runs only `tests/unit`; `coverage-required.yml:154-157` runs `tests/unit` + `sanity_tests`). This is **not** the known `--cov-fail-under=12` complaint; it is that the largest behavioural suite protecting a 43,905-LOC module is outside every contractual gate — and 12 tests went red inside it unobserved.
 
 **F33 — no written rule for where a test goes.** The `_NEW` suffix carries no consistent meaning, and the per-module verdicts genuinely differ — this is reported per module rather than generalised:
 

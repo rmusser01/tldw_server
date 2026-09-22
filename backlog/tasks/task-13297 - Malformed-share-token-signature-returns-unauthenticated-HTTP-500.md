@@ -1,9 +1,10 @@
 ---
 id: TASK-13297
 title: Malformed share-token signature returns unauthenticated HTTP 500
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-09-22 04:45'
+updated_date: '2026-09-22 05:12'
 labels:
   - bug
   - chat
@@ -50,6 +51,13 @@ Found by the comprehensive core-module review; independently verified by the orc
 - [ ] #4 A valid token still resolves (no regression)
 - [ ] #5 Bandit run for touched scope
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+DONE. Signature decode moved inside a guarded block at chat.py:6506 raising 400 (binascii.Error subclasses ValueError). Regression test added at tldw_Server_API/tests/Chat/unit/test_share_token_malformed_signature.py covering 4 malformed-signature shapes plus the wrong-arity case: red before (4 failed), green after (5 passed). Existing test_chat_share_links_api.py still passes (8). Test asserts a handled 4xx rather than strictly 400, because a well-formed but wrong signature correctly yields 403 - the defect was the UNHANDLED exception.
+Remaining: Bandit on touched scope (owner-only file under app/api/v1/**).
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

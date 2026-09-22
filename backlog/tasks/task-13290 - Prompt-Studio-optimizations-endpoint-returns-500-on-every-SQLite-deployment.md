@@ -1,9 +1,10 @@
 ---
 id: TASK-13290
 title: Prompt Studio optimizations endpoint returns 500 on every SQLite deployment
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-09-22 04:34'
+updated_date: '2026-09-22 05:36'
 labels:
   - bug
   - prompt-studio
@@ -46,6 +47,17 @@ Found by the comprehensive core-module review; independently verified by the orc
 - [ ] #5 The stub-based tests no longer mask a missing method (stub derives from or is checked against the real class)
 - [ ] #6 Bandit run for touched scope
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+DONE (core fix). list_optimizations implemented on _SQLitePromptStudioDatabase, inserted beside the other optimization methods. Signature mirrors _BackendPromptStudioDatabase keyword-for-keyword - verified at runtime, inspect.signature equality is True - so the facade *args/**kwargs delegation cannot produce a TypeError. Uses the SQLite class conventions: get_connection()/cursor, "deleted = 0" (matching get_optimization, not the backend FALSE), and _row_to_dict(cursor, row) for the 2-arg arity.
+
+Verification: new test tldw_Server_API/tests/prompt_studio/test_list_optimizations_sqlite.py (4 tests: existence, round-trip, filter+paginate, bad pagination) red before / green after. FULL prompt_studio suite: 1077 passed, 79 skipped.
+
+The retry loops follow the established idiom of this class and carry a comment pointing at the backoff consolidation task; they should collapse when that lands.
+NOTE: the endpoint at app/api/v1/endpoints/prompt_studio/prompt_studio_optimization.py is untouched - the defect was entirely in core. Remaining: Bandit on touched scope.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

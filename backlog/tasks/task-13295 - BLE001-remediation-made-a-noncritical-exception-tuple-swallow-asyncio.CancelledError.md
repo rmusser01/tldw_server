@@ -3,9 +3,10 @@ id: TASK-13295
 title: >-
   BLE001 remediation made a noncritical-exception tuple swallow
   asyncio.CancelledError
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-09-22 04:45'
+updated_date: '2026-09-22 05:08'
 labels:
   - bug
   - ingestion
@@ -49,6 +50,18 @@ Found by the comprehensive core-module review; the MRO and subclass relationship
 - [ ] #5 The two sibling tuples in Audio/ are corrected in the same pass
 - [ ] #6 A tests/lint/ AST rule rejects any BaseException-derived member in a *_NONCRITICAL_EXCEPTIONS tuple, seeded so it cannot regress
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+SCOPE CORRECTION during Stage 0: the defect is systemic, not 3 files. An AST sweep found asyncio.CancelledError in 39 *_NONCRITICAL_EXCEPTIONS tuples across 39 files (19 under api/v1/endpoints, 20 under core). 16 of those files ALREADY contain an explicit "except asyncio.CancelledError: raise" handler, proving the authors knew it must propagate and that the tuple membership is a mistake.
+
+Done: all 39 removed; new AST ratchet at tldw_Server_API/tests/lint/test_noncritical_exception_tuples.py (red before, green after) bans CancelledError, KeyboardInterrupt, SystemExit, GeneratorExit and BaseException from any *_NONCRITICAL_EXCEPTIONS tuple. All 39 files parse and app.main imports.
+
+HTTPException: NOT removed from the tuple - 130 sites catch _PERSISTENCE_NONCRITICAL_EXCEPTIONS and a wholesale removal is not a zero-risk change. Instead the specific 413 path was fixed surgically with "except HTTPException: raise" immediately before the tuple catch (persistence.py:5078), matching the file own idiom at :2815, :2975, :3041.
+
+asyncio.TimeoutError was checked and deliberately LEFT - it is an alias of the builtin TimeoutError, an Exception subclass, so it is safe.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

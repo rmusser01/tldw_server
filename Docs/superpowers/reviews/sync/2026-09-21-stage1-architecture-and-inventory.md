@@ -110,6 +110,31 @@ ERROR tldw_Server_API/tests/Sync/test_sync_v2_notes_task_activity_postgres_contr
 ERROR tldw_Server_API/tests/Sync/test_sync_v2_notes_task_postgres_contract.py
 !!! Interrupted: 2 errors during collection !!!
 7 warnings, 2 errors in 3.17s
+
+# Full directory, with the two uncollectable files excluded (background run, exit 0):
+$ python -m pytest tldw_Server_API/tests/Sync -q -p no:randomly \
+      --ignore=.../test_sync_v2_notes_task_postgres_contract.py \
+      --ignore=.../test_sync_v2_notes_task_activity_postgres_contract.py
+12 failed, 2908 passed, 38 skipped, 62 warnings in 10895.35s (3:01:35)
+
+# Five of the twelve failure names survived the run's output buffer:
+FAILED .../test_sync_v2_personal_context_exchange_gate.py::test_mixed_selected_conflicts_with_exact_proof_resolve_in_request_order
+FAILED .../test_sync_v2_personal_context_exchange_gate.py::test_mixed_exact_proof_preserves_native_notes_resolution_actions[overwrite]
+FAILED .../test_sync_v2_personal_context_exchange_gate.py::test_mixed_exact_proof_preserves_native_notes_resolution_actions[duplicate_rename]
+FAILED .../test_sync_v2_server_origin_capture.py::test_workspace_chat_api_write_stays_direct_when_sync_active
+FAILED .../test_sync_v2_store.py::test_postgres_personal_context_receipt_locks_binding_before_upsert
+
+# All of them reproduce in isolation — deterministic, not a test-ordering artifact:
+$ python -m pytest .../test_sync_v2_personal_context_exchange_gate.py \
+      .../test_sync_v2_server_origin_capture.py -q -p no:randomly
+4 failed, 127 passed, 13 warnings in 32.57s
+
+# test_sync_v2_personal_context_exchange_gate.py:772
+E   AssertionError: assert ['mixed-exact-note'] == ['mixed-exact-note', 'mixed-exact-personal']
+E     Right contains one more item: 'mixed-exact-personal'
+
+# test_sync_v2_server_origin_capture.py:1484
+E   assert 404 == 201
 ```
 
 ## Findings
@@ -226,16 +251,37 @@ confidence:  confirmed (the six duplicated guard bodies, the 125 forwarders, the
 axis:        duplication
 class:       true-duplication
 severity:    Medium
-sites:       Unguarded module-scope psycopg imports that abort collection of the whole directory:
+sites:       NOTE (2026-09-22): between this audit's runs and its write-up, a concurrent session
+             in this working tree applied `pytest.importorskip("psycopg")` to both files below.
+             The collection-abort half of this finding is therefore already fixed and uncommitted
+             locally; the conftest, the 12 red tests, and the CI gate remain.
+             Unguarded module-scope psycopg imports that abort collection of the whole directory
+             (as observed during this audit, before that change):
                tests/Sync/test_sync_v2_notes_task_postgres_contract.py:10
                tests/Sync/test_sync_v2_notes_task_activity_postgres_contract.py:10
              (the four sibling *_postgres_contract.py files do not import psycopg at module scope);
-             a red test that has been red since 2026-09-03:
+             12 failing tests in the directory, of which these five were recovered from the run
+             output and all five reproduce deterministically in isolation:
                tests/Sync/test_sync_v2_store.py:test_postgres_personal_context_receipt_locks_binding_before_upsert
-               (3036-3066) — its fake dataset row (3272-3283 region, `metadata_json` at :275)
-               omits `link_state`, which
-               core/DB_Management/Sync_DB.py:complete_personal_context_link_receipt (3968-3974)
-               began requiring in commit 8c97f181e5 (2026-09-03);
+                 (3036-3066) — red since 2026-09-03: its fake dataset row (`metadata_json` at
+                 :275) omits `link_state`, which
+                 core/DB_Management/Sync_DB.py:complete_personal_context_link_receipt (3968-3974)
+                 began requiring in commit 8c97f181e5;
+               tests/Sync/test_sync_v2_personal_context_exchange_gate.py:772
+                 (`test_mixed_selected_conflicts_with_exact_proof_resolve_in_request_order`) plus
+                 the two `test_mixed_exact_proof_preserves_native_notes_resolution_actions`
+                 parametrisations — a mixed notes/personal-context resolution batch returns only
+                 the notes item in `resolved`; the personal-context item is silently dropped.
+                 That symptom is exactly what core/Sync/v2/service.py:resolve_conflicts_batch
+                 (6871-6872) produces: `except Exception: rejected.append(index); continue` turns
+                 ANY failure inside `PersonalContextConflictService.resolve_batch_item` into an
+                 indistinguishable per-item rejection, so the suite cannot say whether this is a
+                 real regression or a stale fixture. Last touched 2026-09-04 (42bb7cf0f1);
+               tests/Sync/test_sync_v2_server_origin_capture.py:1484
+                 (`test_workspace_chat_api_write_stays_direct_when_sync_active`) — asserts 201,
+                 gets 404. Last touched 2026-08-10 (1058c09dd4);
+             the remaining seven failure names scrolled out of the run's output buffer and were
+             not recovered;
              no shared fixture module — `sync_store`/`_clock`/`_envelope`/`_ready_encryption`
              redefined per file, e.g. tests/Sync/test_sync_v2_service.py:92,106,108,218;
              tests/Sync/test_sync_v2_chat_materializer.py:22,39;
@@ -259,16 +305,29 @@ impact:      Medium. Three compounding facts: (1) `pytest tldw_Server_API/tests/
              (2) neither blocking gate executes this directory — `backend-required.yml:193-195`
              runs only `tldw_Server_API/tests/unit` with `-m "unit and not e2e and not jobs"`,
              and `coverage-required.yml:154-157` runs only `tests/unit` + `tests/sanity_tests`
-             (plus the AuthNZ floor at :167-169); (3) as a direct consequence a real assertion
-             failure has sat red for ~18 days.
+             (plus the AuthNZ floor at :167-169); (3) as a direct consequence **12 tests are
+             red**, at least one since 2026-09-03 (~18 days), and the three exchange-gate
+             failures sit on the personal-context conflict path where `resolve_conflicts_batch`'s
+             blind `except Exception` (core/Sync/v2/service.py:6871-6872) makes a genuine
+             regression and a stale fixture look identical from the outside.
+             A contributing factor worth stating plainly: the directory takes **3h 01m** to run,
+             which is why nobody runs it — the CI step proposed below has to be a scoped subset
+             or a nightly, not this command.
              This is NOT the repo-wide `--cov-fail-under=12` complaint: it is that the largest
              behavioural suite protecting a 43,905-LOC module is outside every contractual gate.
 cost-driver: n/a
 tests:       n/a — this finding is about the tests
-effort:      cheap — two `importorskip` lines, one conftest, one fixture fix; the CI step has a
-             precedent to copy verbatim (`coverage-required.yml:160-169`, "AuthNZ coverage floor").
+effort:      cheap for the two `importorskip` lines and the conftest. Triaging 12 red tests and
+             picking a gate-able subset out of a 3-hour suite is moderate, and the three
+             exchange-gate failures need the blind `except` at service.py:6871-6872 to surface
+             the real error before anyone can tell what they mean. The CI step has a precedent to
+             copy (`coverage-required.yml:160-169`, "AuthNZ coverage floor").
 owner-only:  no
-confidence:  confirmed (all three, each reproduced in the validation run above)
+confidence:  confirmed (the collection abort, the 12 failures, and the five named failures
+             reproducing in isolation were all observed in the validation runs above);
+             assumption (that all 12 are pre-existing rather than environment-specific — the
+             working tree carries unrelated uncommitted edits from a concurrent session, though
+             none under core/Sync/)
 ```
 
 ### FINDING sync-14

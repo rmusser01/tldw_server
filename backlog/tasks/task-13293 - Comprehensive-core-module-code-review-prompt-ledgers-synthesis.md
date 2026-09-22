@@ -4,6 +4,7 @@ title: 'Comprehensive core-module code review: prompt, ledgers, synthesis'
 status: Done
 assignee: []
 created_date: '2026-09-22 04:42'
+updated_date: '2026-09-22 05:01'
 labels:
   - docs
   - review
@@ -35,6 +36,19 @@ Defects filed from this review: TASK-13287, TASK-13288, TASK-13289, TASK-13290, 
 - [ ] #3 No source file modified by the review
 - [ ] #4 Verified defects filed as individual Backlog tasks
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+COMPLETE FILED SET (44 tasks). The description above was written mid-filing and says "remaining findings are proposals"; that is superseded - all 40 ranked synthesis findings are now filed.
+
+Pre-existing / filed during the review: 13287 13288 13289 13290 13291 13292 13294 13295 13296 13297
+Filed from the ranked table afterwards: 13300 13301 13302 13306 13307 13308 13309 13310 13314 13315 13316 13317 13318 13319 13322 13323 13324 13325 13326 13327 13328 13329 13330 13331 13332 13333 13334 13335 13336 13337 13338 13339 13340 13341
+
+TASK-13287 gained an addendum: the regex fix alone does not fix the Chat path, because NetworkError is absent from _CHAT_ORCHESTRATOR_PROVIDER_EXCEPTIONS.
+
+Stage 0 of the migration plan (zero-risk items) is being executed under the individual task IDs.
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

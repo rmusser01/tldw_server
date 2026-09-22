@@ -1,9 +1,10 @@
 ---
 id: TASK-13291
 title: 144 MCP_unified test files run in no CI job
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-09-22 04:34'
+updated_date: '2026-09-22 06:13'
 labels:
   - ci
   - mcp
@@ -41,6 +42,20 @@ Found by the comprehensive core-module review; independently verified by the orc
 - [ ] #4 A green run of that gate is recorded with its observed output
 - [ ] #5 The naming collision between tests/MCP_unified and app/core/MCP_unified/tests is documented so the next reader does not assume the gate covers both
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+DONE. Two parts.
+
+1) FIXED THE RED TEST. filesystem_module.py:1778 candidate.is_symlink() was unguarded, 15 lines above the correctly guarded stat(follow_symlinks=False) at :1797. Path.is_symlink() lstats and re-raises EACCES/EIO/ESTALE, so one unreadable entry aborted the ENTIRE fs.glob walk instead of degrading that entry. Now wrapped in except OSError with a debug log, falling back to the directory entry kind - which is exactly the shape test_filesystem_glob_marks_file_size_unavailable asserts. Red since 2026-06-03 (5009fc8b95) across 28 commits to that file; now green.
+
+2) WIRED THE TREE INTO CI AS ITS OWN SHARD, not appended to platform-mcp-core. Verified why: running the in-app tree in the same process as tests/MCP_unified makes test_rag_module::test_rag_module_jsonrpc_tools_call_smoke and test_gateway_protocol_stdio::test_default_adapter_preserves_globals_and_closes_only_duplicated_fds fail through cross-test state pollution, while both pass in isolation (77 passed). That is the singleton/lifecycle isolation class from the 2026-07-04 audit. A separate shard avoids it AND leaves the currently-green platform-mcp-core byte-identical - the ci.yml diff is 110 insertions, 0 deletions.
+
+VERIFICATION: extracted the exact paths value from the parsed YAML and ran the real shard command locally. platform-mcp-inapp => exit 0, 2948 passed, 0 failures, 2m14s. All 5 duplicated matrix copies updated identically (the matrix is duplicated 5x in ci.yml - a separate problem).
+
+QUARANTINE: 10 files were ALREADY red when the tree was wired in (21 entries total) and carry --ignore with a comment saying the list may only shrink. 13 of those 21 are the two distribution-building files, which build sdists and shell out and do not belong in a unit shard anyway. The other 8 are genuine product/test drift accumulated while the tree was unwatched - e.g. refresh_token() missing a required positional argument, a changed result shape (KeyError: rows). Follow-up task filed to drain the quarantine.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
