@@ -1,6 +1,12 @@
 # Fresh-install UAT: single-user and multi-user
 
-- **Current tracker status: 414 findings / 399 verified / 15 open (261, 351, 352, 354, 356, 359–361, 365, 375, 390–392, 413–414).** All four configurations concluded with failures and limits recorded in the [frozen 365-finding matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_20.md). Targeted fresh SQLite and real PostgreSQL acceptance now verifies353/355/357/358/362/363/364/366–374/376–387. Remaining findings include application recovery/quality and newly confirmed test-coverage gaps. Counts describe findings, not UAT completion. Generated evidence remains local.
+- **Current tracker status: 414 findings / 400 verified / 14 open (261, 351, 352, 354, 356, 359–361, 365, 375, 390–392, 413).** All four configurations concluded with failures and limits recorded in the [frozen 365-finding matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_20.md). Targeted fresh SQLite and real PostgreSQL acceptance now verifies353/355/357/358/362/363/364/366–374/376–387. Remaining findings include application recovery/quality and newly confirmed test-coverage gaps. Counts describe findings, not UAT completion. Generated evidence remains local.
+
+### UAT414 native verification complete
+
+Diagnostic11 verifies the committed c2230dfdf86b743618a3f5ab976d9a1b0b3ec06a production extension in fresh SQLite/PostgreSQL Chromium profiles using normal connection forms. Text → reload → real PNG-only Character turn → save200 → reload retains exactly four visible messages and canonical five rows including system. Original message IDs, image bytes and real final replies match saved readback; no fallback greeting appears. SQLite chat17db2426-0241-4d59-a1e0-7776df2a275b; PostgreSQL c3ca6354-4f0d-4d24-9ff9-4bf066fb8339. TASK13260.278.12 Done.
+
+Production build succeeds; source25258 files SHA d43561e90b3b67638e13384951d356d3aeb1c5ea1de9ce5794c51f0b61aa0451 and copied artifact1386 files SHA e22cc46dc7a1a0194a7942bfed5e6936b083234b69c11ff3daa7ed73bdd9eb94 remain unchanged after verification. Copied manifest adds only owned API host permissions. Reuses diagnostic10 backend be15ff445e (backend unchanged), dependencies and server state; this is bounded single-user native acceptance, not clean-install or integrated full-matrix qualification. Evidence and initial recorder/sender/reasoning-display harness corrections remain ignored under diagnostic11/native-extension.
 
 ### UAT393 native verification and UAT414 source repair
 
