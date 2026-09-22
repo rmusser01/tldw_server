@@ -10,6 +10,10 @@
 
 **Approved specification:** [Release UAT playbook](Docs/Development/RELEASE_UAT_PLAYBOOK.md), plus the migrated user-approved sweep sequence recorded in TASK13260.278. Task13262 created the playbook only; it did not implement fixtures or a complete runner.
 
+## Current execution order — requester update 2026-09-22
+
+The requester now requires a PR for this task's work missing from dev, followed by root-cause disposition, repairs and PR review resolution for all identified findings before any additional UAT. Native/full UAT stages below remain planned and are suspended until that repair/review work is handled. Focused causal unit/integration verification remains part of each repair. Do not launch the already-built UAT415 native package in the meantime. Create the PR as a draft while investigation or engineering gates remain incomplete. Keep existing acceptance gaps and provider-quality exceptions explicit; do not relabel them as verified.
+
 ## Global constraints
 
 - Four cells: sqlite-single, sqlite-multi, pg-single, pg-multi. Record each domain's actual database engine and normal actor role.
