@@ -532,13 +532,28 @@ class BufferedTranscriber:
         return ' '.join(merged_texts)
 
     def _resample(self, audio: np.ndarray, orig_sr: int, target_sr: int) -> np.ndarray:
-        """Resample audio to target sample rate."""
+        """Return audio AT ``target_sr``, resampling if necessary.
+
+        Post-condition: the returned array is at ``target_sr``. Both callers relabel
+        ``sample_rate = target_sr`` immediately after calling this, so returning the
+        input unchanged silently mislabels the stream - a 48 kHz buffer declared as
+        16 kHz is fed to the model at 3x speed with every timestamp 3x short.
+
+        Falls back to linear interpolation when librosa is absent, matching
+        Audio_Transcription_Lib._resample_audio_if_needed, rather than lying.
+        """
+        if orig_sr == target_sr:
+            return audio
         try:
             import librosa
             return librosa.resample(audio, orig_sr=orig_sr, target_sr=target_sr)
         except ImportError:
-            logger.warning("librosa not available, returning original audio")
-            return audio
+            logger.debug("librosa not available; using linear-interpolation resample")
+            ratio = float(target_sr) / float(orig_sr)
+            new_len = max(1, int(round(len(audio) * ratio)))
+            x_old = np.linspace(0.0, 1.0, num=len(audio), endpoint=False)
+            x_new = np.linspace(0.0, 1.0, num=new_len, endpoint=False)
+            return np.interp(x_new, x_old, audio).astype(np.float32, copy=False)
 
 
 class LCSMergeTranscriber(BufferedTranscriber):

@@ -1775,7 +1775,20 @@ class FilesystemModule(BaseModule):
                     is_directory=candidate_kind == "directory",
                 ):
                     continue
-                is_symlink = candidate.is_symlink()
+                try:
+                    is_symlink = candidate.is_symlink()
+                except OSError as exc:
+                    # Path.is_symlink() lstats the entry and re-raises EACCES/EIO/ESTALE.
+                    # A single unreadable entry must degrade that entry, not abort the
+                    # whole walk - the same rule the size and mtime reads below already
+                    # encode. Undeterminable symlink status falls back to the directory
+                    # entry kind.
+                    logger.debug(
+                        "Unable to determine fs.glob symlink status for workspace path {}: {}",
+                        rel_path,
+                        exc,
+                    )
+                    is_symlink = False
                 if is_symlink:
                     candidate_type = "symlink"
                 else:

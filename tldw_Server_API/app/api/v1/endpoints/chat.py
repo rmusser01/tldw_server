@@ -349,7 +349,6 @@ from . import chat_dictionaries, chat_documents, chat_grammars
 from .llm_providers import get_configured_providers
 
 _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,
@@ -6504,7 +6503,16 @@ def _decode_knowledge_qa_share_token(token: str) -> dict[str, Any]:
         encoded_payload.encode("utf-8"),
         hashlib.sha256,
     ).digest()
-    provided_signature = _urlsafe_b64decode(encoded_signature)
+    try:
+        provided_signature = _urlsafe_b64decode(encoded_signature)
+    except ValueError as exc:
+        # binascii.Error subclasses ValueError. Decoding here rather than inside the
+        # payload try below meant a signature segment of an undecodable length left
+        # this function as an unhandled exception and surfaced as HTTP 500 on the
+        # public, unauthenticated share route.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Malformed share token"
+        ) from exc
     if not hmac.compare_digest(expected_signature, provided_signature):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid share token")
 

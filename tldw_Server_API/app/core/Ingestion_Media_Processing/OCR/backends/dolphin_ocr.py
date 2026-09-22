@@ -4,6 +4,7 @@ import base64
 import importlib.util
 import io
 import json
+import contextlib
 import os
 import tempfile
 import threading
@@ -319,15 +320,20 @@ def _ocr_via_openai(image_bytes: bytes, prompt: str) -> str:
         logging.warning("DOLPHIN_USE_DATA_URL=false with non-local URL; forcing data URL for reliability.")
         use_data_url = True
 
+    tmp_path = None
     if use_data_url:
         b64 = base64.b64encode(image_bytes).decode("ascii")
         content_image = {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}}
     else:
         # Path-based URLs are generally only useful for local file access
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=True) as f:
+        # delete=False: the file must outlive this block, because the request below
+        # references it by path. With delete=True it is unlinked at the with-exit and
+        # the POST names a path that no longer exists.
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
             f.write(image_bytes)
             f.flush()
-            content_image = {"type": "image_url", "image_url": {"url": f.name}}
+            tmp_path = f.name
+        content_image = {"type": "image_url", "image_url": {"url": tmp_path}}
 
     data = {
         "model": model,
@@ -345,7 +351,12 @@ def _ocr_via_openai(image_bytes: bytes, prompt: str) -> str:
 
     from tldw_Server_API.app.core.http_client import fetch_json
 
-    j = fetch_json(method="POST", url=url, json=data, timeout=timeout)
+    try:
+        j = fetch_json(method="POST", url=url, json=data, timeout=timeout)
+    finally:
+        if tmp_path:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp_path)
     return (
         j.get("choices", [{}])[0]
         .get("message", {})

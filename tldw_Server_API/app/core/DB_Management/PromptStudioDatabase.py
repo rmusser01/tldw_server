@@ -5681,6 +5681,104 @@ class _SQLitePromptStudioDatabase(PromptsDatabase):
         except sqlite3.Error as exc:  # noqa: BLE001
             raise DatabaseError(f"Failed to fetch optimization {optimization_id}: {exc}") from exc  # noqa: TRY003
 
+    def list_optimizations(
+        self,
+        *,
+        project_id: Optional[int] = None,
+        status: Optional[str] = None,
+        include_deleted: bool = False,
+        page: int = 1,
+        per_page: int = 20,
+    ) -> dict[str, Any]:
+        """List optimizations with pagination.
+
+        Signature deliberately mirrors _BackendPromptStudioDatabase.list_optimizations
+        keyword-for-keyword: PromptStudioDatabase delegates through *args/**kwargs, so
+        any divergence between the two implementations becomes a runtime TypeError that
+        neither mypy nor the IDE can see.
+
+        The retry loops below follow the established idiom of this class (see
+        list_evaluations); they should collapse into the shared retry policy when the
+        backoff consolidation lands.
+        """
+        import random
+        import sqlite3
+        import time
+
+        if page < 1:
+            raise InputError("Page index must be >= 1")  # noqa: TRY003
+        if per_page < 1:
+            raise InputError("Items per page must be >= 1")  # noqa: TRY003
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        conditions: list[str] = []
+        params: list[Any] = []
+        if project_id is not None:
+            conditions.append("project_id = ?")
+            params.append(project_id)
+        if status is not None:
+            conditions.append("status = ?")
+            params.append(status)
+        if not include_deleted:
+            # SQLite stores the soft-delete flag as 0/1, matching get_optimization.
+            conditions.append("deleted = 0")
+
+        where_clause = " WHERE " + " AND ".join(conditions) if conditions else ""
+
+        count_query = f"SELECT COUNT(*) FROM prompt_studio_optimizations{where_clause}"  # nosec B608
+
+        base_delay = 0.05
+        total = 0
+        for attempt in range(5):
+            try:
+                cursor.execute(count_query, params)
+                row = cursor.fetchone()
+                total = int(row[0]) if row and row[0] is not None else 0
+                break
+            except sqlite3.OperationalError as exc:
+                if "database is locked" in str(exc).lower() and attempt < 4:
+                    time.sleep(base_delay * (2 ** attempt) * (0.5 + random.random()))
+                    continue
+                raise DatabaseError(f"Failed counting optimizations: {exc}") from exc  # noqa: TRY003
+            except sqlite3.Error as exc:  # noqa: BLE001
+                raise DatabaseError(f"Failed counting optimizations: {exc}") from exc  # noqa: TRY003
+        else:
+            raise DatabaseError("Failed counting optimizations due to database locks")  # noqa: TRY003
+
+        offset = (page - 1) * per_page
+        list_query = (
+            "SELECT * FROM prompt_studio_optimizations"  # nosec B608
+            f"{where_clause}"
+            " ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
+        )
+        params_with_page = list(params) + [per_page, offset]
+
+        for attempt in range(5):
+            try:
+                cursor.execute(list_query, params_with_page)
+                rows = cursor.fetchall()
+                optimizations = [self._row_to_dict(cursor, row) for row in rows if row]
+                return {
+                    "optimizations": optimizations,
+                    "pagination": {
+                        "page": page,
+                        "per_page": per_page,
+                        "total": total,
+                        "total_pages": (total + per_page - 1) // per_page if per_page else 0,
+                    },
+                }
+            except sqlite3.OperationalError as exc:
+                if "database is locked" in str(exc).lower() and attempt < 4:
+                    time.sleep(base_delay * (2 ** attempt) * (0.5 + random.random()))
+                    continue
+                raise DatabaseError(f"Failed listing optimizations: {exc}") from exc  # noqa: TRY003
+            except sqlite3.Error as exc:  # noqa: BLE001
+                raise DatabaseError(f"Failed listing optimizations: {exc}") from exc  # noqa: TRY003
+
+        raise DatabaseError("Failed listing optimizations due to database locks")  # noqa: TRY003
+
     def update_optimization(
         self,
         optimization_id: int,

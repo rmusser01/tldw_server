@@ -2471,20 +2471,33 @@ class EvaluationsDatabase:
         - strings in ISO8601 (with optional 'Z') or '%Y-%m-%d %H:%M:%S'
         Returns None when unparsable unless fallback_now=True, in which case 'now'.
         """
+        def _utc_now_epoch() -> int:
+            return int(datetime.now(timezone.utc).timestamp())
+
+        def _to_epoch(dt: datetime) -> int:
+            # A naive datetime here is UTC: SQLite writes CURRENT_TIMESTAMP as naive
+            # UTC, and datetime.strptime/fromisoformat return naive for such input.
+            # Calling .timestamp() on it would interpret it in the HOST's local zone,
+            # putting `created` out by the host UTC offset -- an ADR-014 violation
+            # invisible to UTC CI.
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return int(dt.timestamp())
+
         if value is None:
-            return int(datetime.now().timestamp()) if fallback_now else None
+            return _utc_now_epoch() if fallback_now else None
         # Already numeric
         if isinstance(value, (int, float)):
             try:
                 return int(value)
             except _EVAL_DB_NONCRITICAL_EXCEPTIONS:
-                return int(datetime.now().timestamp()) if fallback_now else None
+                return _utc_now_epoch() if fallback_now else None
         # datetime instance
         if isinstance(value, datetime):
             try:
-                return int(value.timestamp())
+                return _to_epoch(value)
             except _EVAL_DB_NONCRITICAL_EXCEPTIONS:
-                return int(datetime.now().timestamp()) if fallback_now else None
+                return _utc_now_epoch() if fallback_now else None
         # string inputs
         if isinstance(value, str):
             s = value.strip()
@@ -2496,15 +2509,15 @@ class EvaluationsDatabase:
                 try:
                     dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
                 except ValueError:
-                    # Try legacy SQLite format
+                    # Try legacy SQLite format (naive UTC)
                     dt = datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
-                return int(dt.timestamp())
+                return _to_epoch(dt)
             except _EVAL_DB_NONCRITICAL_EXCEPTIONS as e:
                 logger.debug(f"Failed to parse timestamp value: value={value!r}, error={e}")
-                return int(datetime.now().timestamp()) if fallback_now else None
+                return _utc_now_epoch() if fallback_now else None
         # Unknown type
         logger.debug(f"Unsupported timestamp type: {type(value)} value={value!r}")
-        return int(datetime.now().timestamp()) if fallback_now else None
+        return _utc_now_epoch() if fallback_now else None
 
     def _coerce_datetime_filter(self, value: Optional[Any]) -> Optional[str]:
         """Coerce date filter inputs into ISO-like strings for SQL comparisons."""

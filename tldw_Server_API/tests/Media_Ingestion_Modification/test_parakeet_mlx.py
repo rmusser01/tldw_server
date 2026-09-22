@@ -199,7 +199,7 @@ class TestParakeetMLX:
             raise AssertionError("Runtime installation should not be attempted")
 
         monkeypatch.setattr(mlx_mod, "install_parakeet_mlx", _unexpected_install)
-        mlx_mod._mlx_model_cache = None
+        mlx_mod._mlx_model_cache = {}
 
         model = mlx_mod.load_parakeet_mlx_model(force_reload=True)
         assert model is None
@@ -407,7 +407,7 @@ class TestParakeetMLX:
         monkeypatch.setattr(mlx_mod, 'check_mlx_available', lambda: True)
         monkeypatch.setattr(config_mod, "get_stt_config", lambda: {})
         _install_fake_mlx_core(monkeypatch)
-        mlx_mod._mlx_model_cache = None
+        mlx_mod._mlx_model_cache = {}
 
         model = mlx_mod.load_parakeet_mlx_model(force_reload=True)
 
@@ -467,7 +467,7 @@ class TestParakeetMLX:
         mock_check_mlx.return_value = False
         # Ensure cache is clear to avoid reuse of previously mocked models
         import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_MLX as mlx_mod
-        mlx_mod._mlx_model_cache = None
+        mlx_mod._mlx_model_cache = {}
 
         result = transcribe_with_parakeet_mlx(audio_data, sample_rate)
 
@@ -803,3 +803,24 @@ class TestParakeetMLXPerformance:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+def test_mlx_cache_discriminates_by_model_path(monkeypatch):
+    """Regression: the cache was a single slot, so a request for a different
+    model_path received whichever model was loaded first while still reporting
+    the requested name upstream."""
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import (
+        Audio_Transcription_Parakeet_MLX as mlx_mod,
+    )
+
+    mlx_mod._mlx_model_cache = {}
+    sentinel_a = object()
+    sentinel_b = object()
+    mlx_mod._mlx_model_cache[("model-a", None)] = sentinel_a
+    mlx_mod._mlx_model_cache[("model-b", None)] = sentinel_b
+
+    assert mlx_mod._mlx_model_cache[("model-a", None)] is sentinel_a
+    assert mlx_mod._mlx_model_cache[("model-b", None)] is sentinel_b
+    assert mlx_mod._mlx_model_cache.get(("model-c", None)) is None
+    # cache_dir participates in the key
+    assert mlx_mod._mlx_model_cache.get(("model-a", "/tmp/x")) is None

@@ -1758,6 +1758,28 @@ jobs:
             paths: >-
               tldw_Server_API/tests/MCP
               tldw_Server_API/tests/MCP_unified
+          # app/core/MCP_unified/tests (149 files, ~3.3k tests) is in pyproject
+          # testpaths but was in no CI shard, so a test stayed red for 3.5 months
+          # across 28 commits to the file it covers (TASK-13291).
+          # It runs as its OWN shard, not appended to platform-mcp-core: sharing a
+          # process with tests/MCP_unified makes test_rag_module and
+          # test_gateway_protocol_stdio fail through cross-test state pollution,
+          # though both pass in isolation.
+          # The --ignore entries are a SHRINKING quarantine of files already red when
+          # the tree was wired in. Remove entries as they are fixed; never add.
+          - name: platform-mcp-inapp
+            paths: >-
+              tldw_Server_API/app/core/MCP_unified/tests
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_artifact_consumer.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_server_batch_and_formatting.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_refresh_token.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_gateway_tool_discovery.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_gateway_admin_auth.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_flashcards_module.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_external_federation_integration.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_codegraph_module.py
           - name: platform-resource-governance
             paths: >-
               tldw_Server_API/tests/Resource_Governance
@@ -3258,6 +3280,28 @@ jobs:
             paths: >-
               tldw_Server_API/tests/MCP
               tldw_Server_API/tests/MCP_unified
+          # app/core/MCP_unified/tests (149 files, ~3.3k tests) is in pyproject
+          # testpaths but was in no CI shard, so a test stayed red for 3.5 months
+          # across 28 commits to the file it covers (TASK-13291).
+          # It runs as its OWN shard, not appended to platform-mcp-core: sharing a
+          # process with tests/MCP_unified makes test_rag_module and
+          # test_gateway_protocol_stdio fail through cross-test state pollution,
+          # though both pass in isolation.
+          # The --ignore entries are a SHRINKING quarantine of files already red when
+          # the tree was wired in. Remove entries as they are fixed; never add.
+          - name: platform-mcp-inapp
+            paths: >-
+              tldw_Server_API/app/core/MCP_unified/tests
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_artifact_consumer.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_server_batch_and_formatting.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_refresh_token.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_gateway_tool_discovery.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_gateway_admin_auth.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_flashcards_module.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_external_federation_integration.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_codegraph_module.py
           - name: platform-resource-governance
             paths: >-
               tldw_Server_API/tests/Resource_Governance
@@ -4628,6 +4672,28 @@ jobs:
             paths: >-
               tldw_Server_API/tests/MCP
               tldw_Server_API/tests/MCP_unified
+          # app/core/MCP_unified/tests (149 files, ~3.3k tests) is in pyproject
+          # testpaths but was in no CI shard, so a test stayed red for 3.5 months
+          # across 28 commits to the file it covers (TASK-13291).
+          # It runs as its OWN shard, not appended to platform-mcp-core: sharing a
+          # process with tests/MCP_unified makes test_rag_module and
+          # test_gateway_protocol_stdio fail through cross-test state pollution,
+          # though both pass in isolation.
+          # The --ignore entries are a SHRINKING quarantine of files already red when
+          # the tree was wired in. Remove entries as they are fixed; never add.
+          - name: platform-mcp-inapp
+            paths: >-
+              tldw_Server_API/app/core/MCP_unified/tests
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_artifact_consumer.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_server_batch_and_formatting.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_refresh_token.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_gateway_tool_discovery.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_gateway_admin_auth.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_flashcards_module.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_external_federation_integration.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_codegraph_module.py
           - name: platform-resource-governance
             paths: >-
               tldw_Server_API/tests/Resource_Governance
@@ -5921,6 +5987,28 @@ jobs:
             paths: >-
               tldw_Server_API/tests/MCP
               tldw_Server_API/tests/MCP_unified
+          # app/core/MCP_unified/tests (149 files, ~3.3k tests) is in pyproject
+          # testpaths but was in no CI shard, so a test stayed red for 3.5 months
+          # across 28 commits to the file it covers (TASK-13291).
+          # It runs as its OWN shard, not appended to platform-mcp-core: sharing a
+          # process with tests/MCP_unified makes test_rag_module and
+          # test_gateway_protocol_stdio fail through cross-test state pollution,
+          # though both pass in isolation.
+          # The --ignore entries are a SHRINKING quarantine of files already red when
+          # the tree was wired in. Remove entries as they are fixed; never add.
+          - name: platform-mcp-inapp
+            paths: >-
+              tldw_Server_API/app/core/MCP_unified/tests
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_artifact_consumer.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_server_batch_and_formatting.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_refresh_token.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_gateway_tool_discovery.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_gateway_admin_auth.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_flashcards_module.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_external_federation_integration.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_codegraph_module.py
           - name: platform-resource-governance
             paths: >-
               tldw_Server_API/tests/Resource_Governance
@@ -7220,6 +7308,28 @@ jobs:
             paths: >-
               tldw_Server_API/tests/MCP
               tldw_Server_API/tests/MCP_unified
+          # app/core/MCP_unified/tests (149 files, ~3.3k tests) is in pyproject
+          # testpaths but was in no CI shard, so a test stayed red for 3.5 months
+          # across 28 commits to the file it covers (TASK-13291).
+          # It runs as its OWN shard, not appended to platform-mcp-core: sharing a
+          # process with tests/MCP_unified makes test_rag_module and
+          # test_gateway_protocol_stdio fail through cross-test state pollution,
+          # though both pass in isolation.
+          # The --ignore entries are a SHRINKING quarantine of files already red when
+          # the tree was wired in. Remove entries as they are fixed; never add.
+          - name: platform-mcp-inapp
+            paths: >-
+              tldw_Server_API/app/core/MCP_unified/tests
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_artifact_consumer.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_server_batch_and_formatting.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_refresh_token.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_gateway_tool_discovery.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_gateway_admin_auth.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_flashcards_module.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_external_federation_integration.py
+              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_codegraph_module.py
           - name: platform-resource-governance
             paths: >-
               tldw_Server_API/tests/Resource_Governance

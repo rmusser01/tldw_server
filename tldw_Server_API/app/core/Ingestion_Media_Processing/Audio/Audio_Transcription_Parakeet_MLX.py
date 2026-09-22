@@ -39,8 +39,11 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_con
 # Check if we're on macOS
 IS_MACOS = sys.platform == 'darwin'
 
-# Global model cache
-_mlx_model_cache: Optional[Any] = None
+# Global model cache, keyed by the inputs that select a distinct model.
+# A bare single-slot cache returned whichever model happened to be loaded first,
+# so a request for a different model_path silently received the wrong weights
+# while the requested name was still reported upstream.
+_mlx_model_cache: dict[tuple[str, Optional[str]], Any] = {}
 _DEFAULT_MLX_MODEL_ID = "mlx-community/parakeet-tdt-0.6b-v3"
 
 
@@ -340,9 +343,11 @@ def load_parakeet_mlx_model(
         logger.error("Parakeet MLX is only supported on macOS with Apple Silicon")
         return None
 
-    if _mlx_model_cache and not force_reload:
-        logger.debug("Using cached Parakeet MLX model")
-        return _mlx_model_cache
+    cache_key = (model_path or _DEFAULT_MLX_MODEL_ID, cache_dir)
+    cached_model = _mlx_model_cache.get(cache_key)
+    if cached_model is not None and not force_reload:
+        logger.debug("Using cached Parakeet MLX model for {}", cache_key[0])
+        return cached_model
 
     # Check MLX availability (tests may monkeypatch this to True)
     if not check_mlx_available():
@@ -411,8 +416,8 @@ def load_parakeet_mlx_model(
             logger.exception(f"Failed to load model {model_id}: {e}")
             return None
 
-        _mlx_model_cache = model
-        logger.info("Successfully loaded Parakeet MLX model")
+        _mlx_model_cache[cache_key] = model
+        logger.info("Successfully loaded Parakeet MLX model for {}", cache_key[0])
 
         return model
 
@@ -805,11 +810,10 @@ def unload_parakeet_mlx_model():
     """Unload the cached Parakeet MLX model to free memory."""
     global _mlx_model_cache
 
-    if _mlx_model_cache is not None:
+    if _mlx_model_cache:
         try:
             # MLX models can be deleted directly
-            del _mlx_model_cache
-            _mlx_model_cache = None
+            _mlx_model_cache.clear()
 
             # MLX specific cleanup
             try:
