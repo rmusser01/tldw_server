@@ -304,12 +304,11 @@ const ensureQuickIngestAddStep = async (
     return
   }
 
-  const ingestMoreBtn = dialog.getByRole("button", { name: /ingest more/i }).first()
+  const ingestMoreBtn = dialog.getByRole("button", { name: /start a new ingest|ingest more/i }).first()
   if (await ingestMoreBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
     await ingestMoreBtn.click()
-    await expect(urlInput).toBeVisible({ timeout: timeoutMs })
-    return
   }
+  await expect(urlInput).toBeVisible({ timeout: timeoutMs })
 }
 
 const advanceQuickIngestToReviewStep = async (

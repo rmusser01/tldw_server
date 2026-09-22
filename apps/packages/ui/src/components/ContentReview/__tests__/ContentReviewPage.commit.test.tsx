@@ -15,12 +15,13 @@ const state = vi.hoisted(() => ({
   saved: {} as Record<string, unknown>,
   updateFails: false,
   localWriteFails: false,
+  selectedModel: null as string | null,
   owner: "alice" as string | null,
   generation: 0,
   controller: new AbortController(),
   listeners: new Set<() => void>(),
   uploadGate: null as null | Promise<void>,
-  requests: [] as Array<{ path: string; servicePromptConfig?: unknown }>,
+  requests: [] as Array<{ path: string; body?: Record<string, unknown>; servicePromptConfig?: unknown }>,
 }));
 vi.mock("@/services/tldw/quick-ingest-authority", () => ({
   useQuickIngestAuthority: () => React.useSyncExternalStore(callback => {
@@ -49,7 +50,7 @@ vi.mock("react-router-dom", () => ({
   useNavigate: () => () => {},
 }));
 vi.mock("@plasmohq/storage/hook", () => ({
-  useStorage: () => [null, () => {}],
+  useStorage: (key: string) => [key === "selectedModel" ? state.selectedModel : null, () => {}],
 }));
 vi.mock("@/components/Media/DiffViewModal", () => ({
   DiffViewModal: () => null,
@@ -102,10 +103,11 @@ vi.mock("@/services/background-proxy", () => ({
     body: Record<string, unknown>;
   }) => {
     state.requests.push(request)
+    if (request.path === "/api/v1/chat/completions") return { choices: [{ message: { content: "Corrected content" } }] };
     if (request.path === "/api/v1/media/389" && request.method === "PUT") {
       if (state.updateFails) throw new Error("Review update failed");
       state.saved = request.body;
-      return { media_id: 389, new_version: 2, message: "updated" };
+      return { media_id: 389, versions: [{ media_id: 389, version_number: 2 }] };
     }
     if (request.path === "/api/v1/media/389/reprocess") return {};
     throw new Error(`Unexpected request: ${request.method} ${request.path}`);
@@ -118,6 +120,7 @@ describe("Content Review commit identity", () => {
     state.saved = {};
     state.updateFails = false;
     state.localWriteFails = false;
+    state.selectedModel = null;
     state.draft = {
       id: "draft-389",
       batchId: "batch-389",
@@ -132,6 +135,21 @@ describe("Content Review commit identity", () => {
       updatedAt: 1,
       processingOptions: { perform_analysis: false, perform_chunking: false },
     };
+  });
+
+  it.each([null, "llama.cpp/owned-model", "default"])("preserves selected model %s and omits an unselected server default (UAT403)", async (selectedModel) => {
+    state.selectedModel = selectedModel;
+    render(<ContentReviewPage />);
+    await screen.findByDisplayValue("Reviewed UAT389");
+    const fix = screen.getByRole("button", { name: "AI fix" });
+    await waitFor(() => expect(fix).toBeEnabled());
+    fireEvent.click(fix);
+    await waitFor(() => expect(state.draft.content).toBe("Corrected content"));
+    const request = state.requests.find(item => item.path === "/api/v1/chat/completions");
+    const sentBody = JSON.parse(JSON.stringify(request?.body));
+    if (selectedModel === null) expect(sentBody).not.toHaveProperty("model");
+    else expect(sentBody.model).toBe(selectedModel);
+    expect(request?.servicePromptConfig).toEqual({ serverUrl: "http://owned-server", authMode: "multi-user", expectedUserId: "alice" });
   });
 
   it("masks loaded private content immediately when the verified account is lost", async () => {

@@ -179,14 +179,19 @@ test.describe('Content Review — owned draft acceptance', () => {
     });
     const updated = await successfulReviewResponse(updateResponse);
     expect(updated.media_id).toBe(mediaId);
-    expect(Number.isInteger(updated.new_version) && updated.new_version > 1).toBe(true);
+    // PUT returns MediaDetailResponse; its versions carry the canonical numbers.
+    expect(updated.versions.length).toBeGreaterThan(1);
+    const committedVersion = Math.max(
+      ...updated.versions.map((version: { version_number: number }) => version.version_number)
+    );
+    expect(Number.isInteger(committedVersion) && committedVersion > 1).toBe(true);
     await expect(review.committedTag.first()).toHaveText('1 committed');
     await expect(review.commitButton).toBeDisabled();
-    const canonical = await assertCommittedMedia(mediaId, updated.new_version, changed);
+    const canonical = await assertCommittedMedia(mediaId, committedVersion, changed);
     await authedPage.reload();
     await openReviewDraft(authedPage, changed);
     await expect(review.commitButton).toBeDisabled();
-    expect(await assertCommittedMedia(mediaId, updated.new_version, changed)).toEqual(canonical);
+    expect(await assertCommittedMedia(mediaId, committedVersion, changed)).toEqual(canonical);
     expect(adds).toHaveLength(1);
     await review.clearDraftsButton.click();
     await authedPage
@@ -194,13 +199,13 @@ test.describe('Content Review — owned draft acceptance', () => {
       .getByRole('button', { name: 'Clear drafts', exact: true })
       .click();
     await expect(review.emptyState).toBeVisible();
-    expect(await assertCommittedMedia(mediaId, updated.new_version, changed)).toEqual(canonical);
+    expect(await assertCommittedMedia(mediaId, committedVersion, changed)).toEqual(canonical);
     await testInfo.attach('uat389-committed-identity.json', {
       body: JSON.stringify({
         draftId: draft.id,
         batchId: draft.batchId,
         mediaId,
-        version: updated.new_version,
+        version: committedVersion,
         title: changed.title,
         content: changed.content,
       }),

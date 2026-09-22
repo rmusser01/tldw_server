@@ -747,7 +747,7 @@ const OwnedContentReviewPage: React.FC = () => {
       modelOverride?: string | null
     ) => {
       const body = {
-        model: modelOverride || selectedModel || "default",
+        model: modelOverride || selectedModel || undefined,
         stream: false,
         messages: [
           { role: "system", content: systemPrompt },

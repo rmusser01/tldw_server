@@ -19,7 +19,9 @@ Reuse the existing verified Quick Ingest authority and request-scope checks. Add
 **Goal**: Validate a newly identified application/harness candidate.
 **Success Criteria**: Owned SQLite and official PostgreSQL review edit, AI and commit/reload checks; account-switch evidence recorded separately from full matrix.
 **Tests**: Scoped regression/types/lint, builds, exact native-case reports with source/artifact provenance.
-**Status**: Not Started
+**Status**: In Progress
 
 ## Verification checkpoint
 214 affected UI tests across 8 files and 18 biology oracle tests pass, with no failures or skips. Ten real Chromium IndexedDB checks pass. Source repair includes follow-on UAT401 manual-save failure cleanup. Frontend TypeScript passes; native archived application follow-up remains pending. See the running tracker for retained failed invocations and precise scope.
+
+Diagnostic3 aa45:3passed/3failed per SQLite/official PostgreSQL, zero skips/retries. Native handoff and edit/reset pass; Study source/scheduling journey passes. Commit/readback is blocked by a repaired response-field oracle, AI Fix by UAT403 literal default model (causal7controls/1failure then8passes). UAT402 webpack namespace retention fixed with named Sentry import; both production bundlers pass unchanged budgets. Full native account-switch/local-save-failure and new production follow-up remain outstanding.
