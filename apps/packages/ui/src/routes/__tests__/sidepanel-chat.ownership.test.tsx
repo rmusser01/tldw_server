@@ -318,6 +318,41 @@ describe.each([
     useStoreChatModelSettings.getState().reset()
   })
 
+  it("offers restore Retry without overwriting unread owned tabs", async () => {
+    const saved = tabsState()
+    io.data.set(storedKey("alice"), saved)
+    io.read.mockImplementation(async key => {
+      if (key === storedKey("alice")) throw new Error("Disk temporarily unavailable")
+      return io.data.get(key)
+    })
+    render(<Route />)
+    const alert = await screen.findByRole("alert")
+    expect(alert).toHaveTextContent("Could not restore your saved chat. Retry to load it.")
+    expect(screen.queryByLabelText("Restoring previous chat")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "New conversation" }))
+    expect(io.data.get(storedKey("alice"))).toEqual(saved)
+    expect(useSidepanelChatTabsStore.getState().tabs).toEqual([])
+    io.read.mockImplementation(async key => io.data.get(key))
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+    await screen.findByRole("button", { name: "alice one" })
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+    expect(useStoreMessageOption.getState().messages[0]?.message).toBe("alice first")
+    expect(useSidepanelChatTabsStore.getState().tabs).toHaveLength(2)
+  })
+
+  it.each(["account", "unmount"])("ignores a restore rejection after %s replacement", async boundary => {
+    let rejectRead!: (error: Error) => void
+    io.read.mockImplementation(key => key === storedKey("alice")
+      ? new Promise((_resolve, reject) => { rejectRead = reject })
+      : Promise.resolve(io.data.get(key)))
+    const view = render(<Route />)
+    await waitFor(() => expect(rejectRead).toBeTypeOf("function"))
+    if (boundary === "account") switchAccount("bob")
+    else view.unmount()
+    await act(async () => { rejectRead(new Error("Late Alice read failure")) })
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+  })
+
   it("recovers a completed owned reply from its stale streaming snapshot", async () => {
     const { saved, stale, mirror } = completedReplyFixture()
     io.data.set(storedKey("alice"), saved)

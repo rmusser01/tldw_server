@@ -2484,7 +2484,7 @@ export const useChatActions = ({
             explicitCharacterName !== "Assistant"
           speakerCharacterName =
             activeCharacterMatchesChat &&
-            (directedSpeakerId == null || directedSpeakerId === fallbackSpeakerId) &&
+            (directedSpeakerId === null || directedSpeakerId === undefined || directedSpeakerId === fallbackSpeakerId) &&
             characterName.trim().toLowerCase() !== "assistant" &&
             (createdNewChat ||
               selectedCharacterMatchesActive ||

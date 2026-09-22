@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterator
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, Literal
 
 import pytest
 
@@ -27,7 +30,7 @@ INTERRUPTED = {"role": "user", "content": "Interrupted question"}
 
 
 @pytest.fixture(params=["sqlite", pytest.param("postgres", marks=pytest.mark.postgres)])
-def queued_chat(request, tmp_path):
+def queued_chat(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[SimpleNamespace]:
     """Use real adapters and the official per-test PostgreSQL fixture."""
     backend = None
     if request.param == "postgres":
@@ -45,7 +48,7 @@ def queued_chat(request, tmp_path):
             backend.get_pool().close_all()
 
 
-def rows(chat):
+def rows(chat: SimpleNamespace) -> list[dict[str, Any]]:
     """Release canonical read transactions before another worker saves."""
     try:
         return chat.db.get_messages_for_conversation(chat.conversation_id)
@@ -53,7 +56,7 @@ def rows(chat):
         chat.db.close_connection()
 
 
-async def resume(chat, messages, *, limit=20, order="asc"):
+async def resume(chat: SimpleNamespace, messages: list[dict[str, Any]], *, limit: int=20, order: Literal["asc", "desc"]="asc") -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Call production request preparation and persistence without an LLM."""
     request = ChatCompletionRequest(
         model="unused-provider", conversation_id=chat.conversation_id, save_to_db=True,
@@ -74,7 +77,7 @@ async def resume(chat, messages, *, limit=20, order="asc"):
         await loop.run_in_executor(None, chat.db.close_connection)
 
 
-def text_content(message):
+def text_content(message: dict[str, Any]) -> str:
     """Normalize persisted text parts only for assertions on the provider payload."""
     content = message.get("content")
     return content if isinstance(content, str) else "".join(part.get("text", "") for part in content or [])
@@ -83,7 +86,7 @@ def text_content(message):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("order", ["asc", "desc"])
 @pytest.mark.parametrize("prefix_start", [0, 2])
-async def test_stale_prefix_preserves_canonical_gap_and_new_client_identity(queued_chat, order, prefix_start):
+async def test_stale_prefix_preserves_canonical_gap_and_new_client_identity(queued_chat: SimpleNamespace, order: Literal["asc", "desc"], prefix_start: int) -> None:
     """Native Character cancellation leaves client history behind the canonical user."""
     before = rows(queued_chat)
     state, payload = await resume(
@@ -103,7 +106,7 @@ async def test_stale_prefix_preserves_canonical_gap_and_new_client_identity(queu
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("limit,order,prefix_start,expected_gap", [(3, "desc", 2, 1), (4, "asc", 0, 0)])
-async def test_proven_overlap_respects_the_configured_history_window(queued_chat, limit, order, prefix_start, expected_gap):
+async def test_proven_overlap_respects_the_configured_history_window(queued_chat: SimpleNamespace, limit: int, order: Literal["asc", "desc"], prefix_start: int, expected_gap: int) -> None:
     before = rows(queued_chat)
     _, payload = await resume(
         queued_chat, [*PREFIX[prefix_start:], {"role": "user", "content": "Queued question"}],
@@ -116,7 +119,7 @@ async def test_proven_overlap_respects_the_configured_history_window(queued_chat
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("text", ["Interrupted question", "First question"])
-async def test_deliberately_repeated_final_user_is_a_new_turn(queued_chat, text):
+async def test_deliberately_repeated_final_user_is_a_new_turn(queued_chat: SimpleNamespace, text: str) -> None:
     before = rows(queued_chat)
     state, _ = await resume(queued_chat, [*PREFIX, {"role": "user", "content": text}])
     saved = rows(queued_chat)
@@ -128,7 +131,7 @@ async def test_deliberately_repeated_final_user_is_a_new_turn(queued_chat, text)
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("limit,order", [(0, "asc"), (1, "asc"), (1, "desc")])
-async def test_insufficient_history_window_does_not_guess_a_match(queued_chat, limit, order):
+async def test_insufficient_history_window_does_not_guess_a_match(queued_chat: SimpleNamespace, limit: int, order: Literal["asc", "desc"]) -> None:
     before = rows(queued_chat)
     await resume(queued_chat, [*PREFIX, {"role": "user", "content": "Queued question"}], limit=limit, order=order)
     saved = rows(queued_chat)
@@ -146,7 +149,7 @@ async def test_insufficient_history_window_does_not_guess_a_match(queued_chat, l
     [PREFIX[0]],
     [{"role": "user", "content": "First question"}],
 ])
-async def test_unmatched_start_or_no_assistant_is_not_a_proven_history_prefix(queued_chat, prefix):
+async def test_unmatched_start_or_no_assistant_is_not_a_proven_history_prefix(queued_chat: SimpleNamespace, prefix: list[dict[str, Any]]) -> None:
     before = rows(queued_chat)
     await resume(queued_chat, [*prefix, {"role": "user", "content": "Queued question"}])
     saved = rows(queued_chat)
@@ -156,14 +159,14 @@ async def test_unmatched_start_or_no_assistant_is_not_a_proven_history_prefix(qu
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("order", ["asc", "desc"])
-async def test_existing_complete_history_overlap_still_saves_one_new_turn(queued_chat, order):
+async def test_existing_complete_history_overlap_still_saves_one_new_turn(queued_chat: SimpleNamespace, order: Literal["asc", "desc"]) -> None:
     before = rows(queued_chat)
     await resume(queued_chat, [*PREFIX, INTERRUPTED, {"role": "user", "content": "Queued question"}], order=order)
     assert rows(queued_chat)[:-1] == before
 
 
 @pytest.mark.asyncio
-async def test_foreign_conversation_is_not_used_as_history_evidence(queued_chat):
+async def test_foreign_conversation_is_not_used_as_history_evidence(queued_chat: SimpleNamespace) -> None:
     foreign = queued_chat.db.add_conversation({"client_id": "2", "title": "Other owner"})
     for message in PREFIX:
         queued_chat.db.add_message({"conversation_id": foreign, "sender": message["role"], "content": message["content"]})

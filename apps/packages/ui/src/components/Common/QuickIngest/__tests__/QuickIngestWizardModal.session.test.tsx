@@ -1,4 +1,5 @@
 import React from "react"
+import i18n from "i18next"
 import { File as NodeFile } from "node:buffer"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
@@ -26,6 +27,8 @@ const mocks = vi.hoisted(() => ({
   reviewDrafts: new Map<string, Record<string, unknown>>(),
   reviewFiles: new Map<string, File>(),
   failReviewWrite: false,
+  reviewWriteWait: null as Promise<void> | null,
+  reviewWriteStarted: vi.fn(),
   bgRequest: vi.fn(),
   bgUpload: vi.fn(),
   connectionState: {
@@ -43,6 +46,8 @@ vi.mock("@/db/dexie/drafts", () => ({
   getDraftBatchById: async (id: string) => mocks.reviewBatches.get(id),
   getDraftsByBatch: async (id: string) => [...mocks.reviewDrafts.values()].filter(row => row.batchId === id),
   upsertDraftBatch: async (batch: Record<string, unknown>, operation: { authorityKey: string }) => {
+    mocks.reviewWriteStarted()
+    await mocks.reviewWriteWait
     if (mocks.failReviewWrite) throw new Error("Review disk is full")
     mocks.reviewBatches.set(String(batch.id), { ...batch, ownerScope: operation.authorityKey })
   },
@@ -551,6 +556,8 @@ describe("QuickIngestWizardModal session runtime", () => {
     mocks.queueSourceFile = false
     mocks.queuedReviewFile = null
     mocks.reviewBatches.clear(); mocks.reviewDrafts.clear(); mocks.reviewFiles.clear(); mocks.failReviewWrite = false
+    mocks.reviewWriteWait = null
+    mocks.reviewWriteStarted.mockClear()
     mocks.bgRequest.mockReset()
     mocks.bgUpload.mockReset()
     mocks.runtimeListeners.splice(0, mocks.runtimeListeners.length)
@@ -771,6 +778,47 @@ describe("QuickIngestWizardModal session runtime", () => {
     await waitFor(() => expect(mocks.navigate).toHaveBeenCalledTimes(2))
     expect(mocks.reviewDrafts.size).toBe(1)
     expect(mocks.reviewDrafts.get(String(draft.id))?.content).toBe("User reviewed edits")
+  })
+
+  it.each(["close", "unmount", "rerender", "close-reopen"])("settles pending review creation safely after %s", async transition => {
+    let resolveWrite!: () => void
+    mocks.reviewWriteWait = new Promise<void>(resolve => { resolveWrite = resolve })
+    useQuickIngestSessionStore.getState().createDraftSession({ ...createEmptyQuickIngestSession(), currentStep: 5, lifecycle: "completed",
+      presetConfig: { ...resolvePresetMap().quick, reviewBeforeStorage: true },
+      processingState: { status: "complete", perItemProgress: [], elapsed: 1, estimatedRemaining: 0 },
+      results: [{ id: "cedar", status: "ok", type: "document", data: { content: "Pending processed text", title: "Cedar" } }],
+    })
+    const onClose = vi.fn()
+    const modal = (open: boolean) => <React.StrictMode><QuickIngestWizardModal open={open} onClose={onClose} /></React.StrictMode>
+    const view = render(modal(true))
+    await waitFor(() => expect(mocks.reviewWriteStarted).toHaveBeenCalledTimes(1))
+    if (transition === "unmount") view.unmount()
+    else if (transition === "rerender") view.rerender(modal(true))
+    else view.rerender(modal(false))
+    if (transition === "close-reopen") view.rerender(modal(true))
+    await act(async () => { resolveWrite() })
+    await waitFor(() => expect(mocks.reviewDrafts.size).toBe(1))
+    const shouldNavigate = transition === "rerender" || transition === "close-reopen"
+    expect(mocks.navigate).toHaveBeenCalledTimes(shouldNavigate ? 1 : 0)
+    expect(onClose).toHaveBeenCalledTimes(shouldNavigate ? 1 : 0)
+    expect(mocks.reviewWriteStarted).toHaveBeenCalledTimes(1)
+  })
+
+  it("uses the active locale for an untitled review draft", async () => {
+    const translate = vi.spyOn(i18n, "t").mockReturnValue("Source sans titre")
+    try {
+      useQuickIngestSessionStore.getState().createDraftSession({ ...createEmptyQuickIngestSession(), currentStep: 5, lifecycle: "completed",
+        presetConfig: { ...resolvePresetMap().quick, reviewBeforeStorage: true },
+        processingState: { status: "complete", perItemProgress: [], elapsed: 1, estimatedRemaining: 0 },
+        results: [{ id: "untitled", status: "ok", type: "document", data: { content: "Owned source without title" } }],
+      })
+      render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+      await waitFor(() => expect(mocks.reviewDrafts.size).toBe(1))
+      expect([...mocks.reviewDrafts.values()][0].title).toBe("Source sans titre")
+      expect(translate).toHaveBeenCalledWith("playground:sharedWorkspace.untitled", "Untitled source")
+    } finally {
+      translate.mockRestore()
+    }
   })
 
   it("keeps failed draft creation recoverable and retries the actual saved results", async () => {

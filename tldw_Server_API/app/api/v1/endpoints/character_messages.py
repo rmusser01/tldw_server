@@ -596,8 +596,8 @@ async def get_chat_messages(
         # Get messages (honor include_deleted and DB pagination)
         expand_images = include_images is True or format_for_completions is True
         if expand_images:
-            messages, attachment_urls = read_messages_with_images(
-                db, chat_id, limit=limit, offset=offset, include_deleted=include_deleted,
+            messages, attachment_urls = await run_in_threadpool(
+                read_messages_with_images, db, chat_id, limit=limit, offset=offset, include_deleted=include_deleted,
                 image_byte_limit=MAX_CHAT_ATTACHMENT_READ_BYTES,
                 for_completions=format_for_completions is True,
             )

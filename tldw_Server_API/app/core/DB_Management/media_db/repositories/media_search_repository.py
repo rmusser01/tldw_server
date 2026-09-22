@@ -22,7 +22,19 @@ from tldw_Server_API.app.core.DB_Management.scope_context import get_scope
 
 
 def append_sqlite_media_visibility(conditions: list[str], params: list[Any]) -> None:
-    """Apply the current personal/shared scope to a query using Media alias m."""
+    """Apply the current personal/shared scope to a query using Media alias m.
+
+    Args:
+        conditions: Mutable SQL predicates; append the current visibility filter.
+        params: Mutable bound values; append owner/team/org IDs in predicate order.
+
+    Returns:
+        None. An absent scope or admin scope leaves both inputs unchanged. A
+        non-admin scope without any identity adds a deny-all condition.
+
+    Raises:
+        No expected application exceptions; callers must supply mutable lists.
+    """
     scope = get_scope()
     if scope is None or scope.is_admin:
         return
