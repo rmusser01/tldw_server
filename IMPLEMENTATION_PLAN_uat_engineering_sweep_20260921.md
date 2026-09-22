@@ -28,6 +28,10 @@ Children45–47 now have causal red/green evidence: the BYOK PostgreSQL module m
 
 The next PostgreSQL AuthNZ checkpoint repairs seven more guarded-user fixture modules (eight actual PostgreSQL passes) and exposes UAT466: the auth service passed a pool rather than its active transaction connection into the profile-version gateway. Binding that connection through the write transaction passes two actual PostgreSQL service checks, one real SQLite pool check,26adjacent service checks and six caller-owned PostgreSQL magic-link checks. The UAT451 umbrella and hosted CI acceptance remain open; no full/native UAT has resumed. A fresh fetch and explicit rebase after local commit7f18655aad report zero missing dev commits.
 
+The profile-version migration fixture subgroup moves from seven failures/one pass to eight actual PostgreSQL passes. Historical schema and indirect-write setup use the official isolated fixture database directly; guarded migration paths and all substantive assertions remain. The startup-corruption oracle now checks the existing `False` result and direct migration error. TASK13260.278.17.50 is locally verified; UAT451 remains open for other failures and hosted acceptance.
+
+The adjacent candidate-schema fixture moves from one failure/two passes to three actual PostgreSQL passes. Its shadow-FK and missing-default DDL is confined to rolled-back transactions on a direct connection to the official isolated fixture DB; runtime validation and the production guard remain unchanged. TASK13260.278.17.51 is locally verified. Next focus is outstanding hosted AuthNZ, historical migration and Windows CI failures before resuming any full/native UAT.
+
 ## Global constraints
 
 - Four cells: sqlite-single, sqlite-multi, pg-single, pg-multi. Record each domain's actual database engine and normal actor role.

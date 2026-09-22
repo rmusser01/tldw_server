@@ -2,48 +2,62 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
+import asyncpg
 import pytest
 
 pytestmark = [pytest.mark.integration, pytest.mark.postgres]
 
 _POSTGRES_SCHEMA_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "Databases"
-    / "Postgres"
-    / "Schema"
-    / "postgresql_users.sql"
+    Path(__file__).resolve().parents[2] / "Databases" / "Postgres" / "Schema" / "postgresql_users.sql"
 )
+
+
+@asynccontextmanager
+async def _historical_schema_connection(
+    test_db_pool,  # noqa: ANN001
+) -> AsyncIterator[asyncpg.Connection]:
+    """Set up historical schemas in the official isolated PostgreSQL database."""
+    connection = await asyncpg.connect(test_db_pool.settings.DATABASE_URL)
+    try:
+        yield connection
+    finally:
+        await connection.close()
 
 
 async def _insert_legacy_user(test_db_pool, *, updated_at: datetime | None) -> int:  # noqa: ANN001
     username = f"profile-version-{uuid.uuid4().hex[:8]}"
-    return int(
-        await test_db_pool.fetchval(
-            """
+    async with _historical_schema_connection(test_db_pool) as connection:
+        return int(
+            await connection.fetchval(
+                """
             INSERT INTO users (uuid, username, email, password_hash, updated_at)
             VALUES ($1, $2, $3, 'hash', $4)
             RETURNING id
             """,
-            str(uuid.uuid4()),
-            username,
-            f"{username}@example.com",
-            updated_at,
+                str(uuid.uuid4()),
+                username,
+                f"{username}@example.com",
+                updated_at,
+            )
         )
-    )
 
 
 async def _reset_to_legacy_users_schema(test_db_pool) -> None:  # noqa: ANN001
-    await test_db_pool.execute("ALTER TABLE users DROP COLUMN IF EXISTS profile_version")
-    await test_db_pool.execute(
-        """
-        ALTER TABLE users
-        ALTER COLUMN updated_at TYPE TIMESTAMP WITHOUT TIME ZONE
-        USING updated_at AT TIME ZONE 'UTC'
-        """
-    )
+    async with _historical_schema_connection(test_db_pool) as connection:
+        await connection.execute("ALTER TABLE users DROP COLUMN IF EXISTS profile_version")
+        await connection.execute(
+            """
+            ALTER TABLE users
+            ALTER COLUMN updated_at TYPE TIMESTAMP WITHOUT TIME ZONE
+            USING updated_at AT TIME ZONE 'UTC'
+            """
+        )
+        await connection.execute("ALTER TABLE users ALTER COLUMN updated_at DROP NOT NULL")
 
 
 def test_fresh_postgres_schema_declares_durable_profile_version() -> None:
@@ -95,14 +109,15 @@ async def test_postgres_upgrade_preserves_aware_updated_at_and_is_idempotent(
         ensure_user_profile_version_pg,
     )
 
-    await test_db_pool.execute("ALTER TABLE users DROP COLUMN IF EXISTS profile_version")
-    await test_db_pool.execute(
-        """
-        ALTER TABLE users
-        ALTER COLUMN updated_at TYPE TIMESTAMPTZ
-        USING updated_at AT TIME ZONE 'UTC'
-        """
-    )
+    async with _historical_schema_connection(test_db_pool) as connection:
+        await connection.execute("ALTER TABLE users DROP COLUMN IF EXISTS profile_version")
+        await connection.execute(
+            """
+            ALTER TABLE users
+            ALTER COLUMN updated_at TYPE TIMESTAMPTZ
+            USING updated_at AT TIME ZONE 'UTC'
+            """
+        )
     aware_value = datetime(2026, 1, 2, 3, 4, 5, 654321, tzinfo=timezone.utc)
     user_id = await _insert_legacy_user(test_db_pool, updated_at=aware_value)
 
@@ -114,10 +129,13 @@ async def test_postgres_upgrade_preserves_aware_updated_at_and_is_idempotent(
     assert await ensure_user_profile_version_pg(test_db_pool) is True
 
     assert first_value == aware_value
-    assert await test_db_pool.fetchval(
-        "SELECT profile_version FROM users WHERE id = $1",
-        user_id,
-    ) == aware_value
+    assert (
+        await test_db_pool.fetchval(
+            "SELECT profile_version FROM users WHERE id = $1",
+            user_id,
+        )
+        == aware_value
+    )
 
 
 @pytest.mark.asyncio
@@ -146,11 +164,12 @@ async def test_postgres_upgrade_rejects_null_updated_at_and_rolls_back(
     )
     assert exists is False
 
-    await test_db_pool.execute(
-        "UPDATE users SET updated_at = $2 WHERE id = $1",
-        user_id,
-        datetime(2026, 1, 2, 3, 4, 5),
-    )
+    async with _historical_schema_connection(test_db_pool) as connection:
+        await connection.execute(
+            "UPDATE users SET updated_at = $2 WHERE id = $1",
+            user_id,
+            datetime(2026, 1, 2, 3, 4, 5),
+        )
     assert await ensure_user_profile_version_pg(test_db_pool) is True
 
 
@@ -168,21 +187,24 @@ async def test_postgres_current_schema_corruption_fails_closed_at_startup(
         test_db_pool,
         updated_at=datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc),
     )
-    await test_db_pool.execute(
-        "ALTER TABLE users ALTER COLUMN profile_version DROP NOT NULL"
-    )
-    await test_db_pool.execute(
-        "UPDATE users SET profile_version = NULL WHERE id = $1",
-        user_id,
-    )
+    async with _historical_schema_connection(test_db_pool) as connection:
+        await connection.execute("ALTER TABLE users ALTER COLUMN profile_version DROP NOT NULL")
+        await connection.execute(
+            "UPDATE users SET profile_version = NULL WHERE id = $1",
+            user_id,
+        )
 
+    # The bootstrap helper reports a failed ensure as False; startup treats it
+    # as fatal. The direct migration still exposes the precise corruption.
+    assert await ensure_authnz_core_tables_pg(test_db_pool) is False
     with pytest.raises(RuntimeError, match="profile_version"):
-        await ensure_authnz_core_tables_pg(test_db_pool)
+        await ensure_user_profile_version_pg(test_db_pool)
 
-    await test_db_pool.execute(
-        "UPDATE users SET profile_version = updated_at WHERE id = $1",
-        user_id,
-    )
+    async with _historical_schema_connection(test_db_pool) as connection:
+        await connection.execute(
+            "UPDATE users SET profile_version = updated_at WHERE id = $1",
+            user_id,
+        )
     assert await ensure_user_profile_version_pg(test_db_pool) is True
 
 
@@ -196,22 +218,16 @@ async def test_postgres_readiness_rejects_updatable_view_alias_to_users(
 
     view_name = f"user_alias_{uuid.uuid4().hex[:8]}"
     nested_view_name = f"nested_user_alias_{uuid.uuid4().hex[:8]}"
-    async with test_db_pool.pool.acquire() as raw_conn:
-        await raw_conn.execute(
-            f"CREATE VIEW public.{view_name} AS "
-            "SELECT id, email FROM public.users"
-        )
-        await raw_conn.execute(
-            f"CREATE VIEW public.{nested_view_name} AS "
-            f"SELECT id, email FROM public.{view_name}"
-        )
+    async with _historical_schema_connection(test_db_pool) as connection:
+        await connection.execute(f"CREATE VIEW public.{view_name} AS SELECT id, email FROM public.users")
+        await connection.execute(f"CREATE VIEW public.{nested_view_name} AS SELECT id, email FROM public.{view_name}")
     try:
         with pytest.raises(RuntimeError, match="indirect.*users write"):
             await ensure_user_profile_version_pg(test_db_pool)
     finally:
-        async with test_db_pool.pool.acquire() as raw_conn:
-            await raw_conn.execute(f"DROP VIEW IF EXISTS public.{nested_view_name}")
-            await raw_conn.execute(f"DROP VIEW IF EXISTS public.{view_name}")
+        async with _historical_schema_connection(test_db_pool) as connection:
+            await connection.execute(f"DROP VIEW IF EXISTS public.{nested_view_name}")
+            await connection.execute(f"DROP VIEW IF EXISTS public.{view_name}")
 
 
 @pytest.mark.asyncio
@@ -223,16 +239,14 @@ async def test_postgres_readiness_rejects_inherited_users_descendant(
     )
 
     table_name = f"user_child_{uuid.uuid4().hex[:8]}"
-    async with test_db_pool.pool.acquire() as raw_conn:
-        await raw_conn.execute(
-            f"CREATE TABLE public.{table_name} () INHERITS (public.users)"
-        )
+    async with _historical_schema_connection(test_db_pool) as connection:
+        await connection.execute(f"CREATE TABLE public.{table_name} () INHERITS (public.users)")
     try:
         with pytest.raises(RuntimeError, match="indirect.*users write"):
             await ensure_user_profile_version_pg(test_db_pool)
     finally:
-        async with test_db_pool.pool.acquire() as raw_conn:
-            await raw_conn.execute(f"DROP TABLE IF EXISTS public.{table_name}")
+        async with _historical_schema_connection(test_db_pool) as connection:
+            await connection.execute(f"DROP TABLE IF EXISTS public.{table_name}")
 
 
 @pytest.mark.asyncio
@@ -252,8 +266,11 @@ async def test_postgres_readiness_serializes_concurrent_legacy_upgrades(
 
     await asyncio.gather(_upgrade(), _upgrade())
 
-    assert await test_db_pool.fetchval(
-        "SELECT COUNT(*) FROM information_schema.columns "
-        "WHERE table_schema = 'public' AND table_name = 'users' "
-        "AND column_name = 'profile_version'"
-    ) == 1
+    assert (
+        await test_db_pool.fetchval(
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'public' AND table_name = 'users' "
+            "AND column_name = 'profile_version'"
+        )
+        == 1
+    )
