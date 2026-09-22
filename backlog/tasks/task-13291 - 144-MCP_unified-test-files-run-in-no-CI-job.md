@@ -4,6 +4,7 @@ title: 144 MCP_unified test files run in no CI job
 status: To Do
 assignee: []
 created_date: '2026-09-22 04:34'
+updated_date: '2026-09-22 15:29'
 labels:
   - ci
   - mcp
@@ -41,6 +42,29 @@ Found by the comprehensive core-module review; independently verified by the orc
 - [ ] #4 A green run of that gate is recorded with its observed output
 - [ ] #5 The naming collision between tests/MCP_unified and app/core/MCP_unified/tests is documented so the next reader does not assume the gate covers both
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+TRIAGE (2026-09-22), per this task's own requirement not to gate blind.
+
+Collection is healthy: 3,351 tests collect from tldw_Server_API/app/core/MCP_unified/tests in 6.4s.
+
+But the tree CANNOT currently be run as a single pytest session. It aborts partway with a native error:
+  libc++abi: terminating due to uncaught exception of type std::__1::system_error: recursive_mutex lock failed: Invalid argument
+No summary line is produced. Run file-by-file it is fine -- test_filesystem_module.py alone gives 103 passed plus the one known red test -- so this is a cross-test interaction, not a single bad test. Reproduced on macOS/py3.12; unknown on the Linux runners.
+
+Second blocker, independent: test_runtime_package_boundary.py shells out to 'python -m build' and fails with "Backend 'setuptools.build_meta' is not available". That is environment-dependent and would need the build backend present on the runner, or those tests marked and excluded.
+
+CONSEQUENCE FOR THIS TASK: adding the tree to the platform-mcp-core shard is NOT the one-line change the original description assumed. The gating path is:
+  1. Reproduce the native abort on a Linux runner (it may be macOS-only).
+  2. If it reproduces, shard the tree so no single session runs all 3,351, or isolate the interacting tests.
+  3. Decide on test_runtime_package_boundary.py: install the build backend on the runner, or mark those tests and exclude them.
+  4. Fix or quarantine test_filesystem_glob_marks_file_size_unavailable (red since 2026-06-03, finding mcp-unified-5, unguarded is_symlink at filesystem_module.py:1778).
+  5. Only then add the paths to the shard.
+
+Related evidence: the shard-coverage guard reports baseline=130 test files already grandfathered as unshared repo-wide, so this tree is the largest instance of a standing problem rather than a one-off.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
