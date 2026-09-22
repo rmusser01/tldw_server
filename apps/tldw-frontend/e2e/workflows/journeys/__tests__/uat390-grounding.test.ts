@@ -15,11 +15,11 @@ const sources = [
   {
     source_id: '812',
     chunk_id: 'chunk-4',
-    excerpt: 'Its director is Dr. Mira Vale. It is in Cedar Ridge. Tours begin Friday at 18:00.',
+    excerpt: ROWAN_SOURCE,
   },
 ];
 const check = (text = answer, evidence = sources) =>
-  assertCitedRowanAnswer(text, evidence, '812', '913');
+  assertCitedRowanAnswer(text, evidence, '812', '913', { title: 'Owned Rowan source', text: ROWAN_SOURCE });
 
 describe('UAT390 acceptance discriminates actual source grounding', () => {
   it('accepts supported facts and the canonical source citation', () =>
@@ -61,6 +61,28 @@ describe('UAT390 acceptance discriminates actual source grounding', () => {
     ).toThrow(/Unsupported/));
   it('rejects a generic answer to the price question', () =>
     expect(() => assertPriceAbstention('You can visit Rowan Observatory.')).toThrow(/limitation/));
+});
+
+describe('UAT390 literal citation membership', () => {
+  const source = { title: 'Owned Rowan source', text: ROWAN_SOURCE };
+  const literal = { source_id: '812', chunk_id: 'media-level-812', excerpt: ROWAN_SOURCE };
+  const verify = (excerpt: string) => assertCitedRowanAnswer(answer, [{ ...literal, excerpt }], '812', '913', source);
+
+  it.each([
+    `${ROWAN_SOURCE.trim()}\nTickets cost ten dollars.`,
+    ROWAN_SOURCE.replace('2019', '1901'),
+    'Mira Vale, Cedar Ridge, Friday 18:00. An invented summary with the right facts.',
+    `Different source title\n${ROWAN_SOURCE}`,
+  ])('rejects correct facts inside an unsourced excerpt: %s', excerpt => {
+    expect(() => verify(excerpt)).toThrow(/not in the canonical source/);
+  });
+  it.each([
+    ROWAN_SOURCE,
+    `Owned Rowan source\n${ROWAN_SOURCE}`,
+    ROWAN_SOURCE.replaceAll('\n', '\r\n'),
+  ])('accepts the canonical body or its actual title prefix: %s', excerpt => {
+    expect(() => verify(excerpt)).not.toThrow();
+  });
 });
 
 describe('UAT390 saved turn identity', () => {

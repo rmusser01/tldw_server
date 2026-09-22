@@ -22,6 +22,7 @@ import {
   assertRowanFacts,
   assertSavedTurn,
   readMediaRecord,
+  normalizeSourceText,
   readSavedMessages,
   type SavedMessage,
 } from './uat390-grounding';
@@ -217,7 +218,8 @@ test.describe('Ingest -> Search -> Chat journey', () => {
           assistant.content,
           assistant.rag_context!.retrieved_documents,
           source.id,
-          distractor.id
+          distractor.id,
+          source
         );
         expect(assistant.rag_context!.trust_state).toBe('cited_answer');
         assertSavedTurn(qaMessages, ROWAN_QUESTION, assistant.content);
@@ -248,7 +250,11 @@ test.describe('Ingest -> Search -> Chat journey', () => {
           await card.getByRole('button', { name: `View source ${index}`, exact: true }).click();
           const preview = page.getByRole('dialog', { name: new RegExp(`^Source ${index}:`) });
           await expect(preview).toContainText(`Source ID ${source.id}`);
-          assertRowanFacts(await preview.locator('pre').innerText());
+          const excerpt = await preview.locator('pre').innerText();
+          const savedExcerpt = qaMessages.find(message => message.role === 'assistant')!
+            .rag_context!.retrieved_documents[index - 1].excerpt;
+          expect(normalizeSourceText(excerpt)).toBe(normalizeSourceText(savedExcerpt));
+          assertRowanFacts(excerpt);
           const [mediaPage] = await Promise.all([
             page.context().waitForEvent('page'),
             preview.getByRole('button', { name: 'Open in Media', exact: true }).click(),

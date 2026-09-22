@@ -40,9 +40,12 @@ export function assertCitedRowanAnswer(
   answer: string,
   sources: EvidenceSource[],
   sourceId: string,
-  distractorId: string
+  distractorId: string,
+  canonicalSource: { title: string; text: string }
 ): void {
   assertRowanFacts(answer);
+  // Media-level FTS may prefix the stored body with its canonical title.
+  const canonicalText = normalizeSourceText(`${canonicalSource.title}\n${canonicalSource.text}`);
   assert.notEqual(sourceId, distractorId, 'Source and distractor must be distinct');
   const citations = [...answer.matchAll(/\[(\d+)\]/g)].map((match) => Number(match[1]));
   assert.ok(citations.length > 0, 'Answer has no inspectable citation');
@@ -50,6 +53,11 @@ export function assertCitedRowanAnswer(
     const source = sources[citation - 1];
     assert.ok(source, `Citation ${citation} has no source`);
     assert.equal(source.source_id, sourceId, `Citation ${citation} targets the wrong source`);
+    const excerpt = normalizeSourceText(source.excerpt);
+    assert.ok(
+      excerpt.length > 0 && canonicalText.includes(excerpt),
+      `Citation ${citation} excerpt is not in the canonical source`
+    );
   }
   assertRowanFacts([...new Set(citations)].map((index) => sources[index - 1].excerpt).join('\n'));
 }

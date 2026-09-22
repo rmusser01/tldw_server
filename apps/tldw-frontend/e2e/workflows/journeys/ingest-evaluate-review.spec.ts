@@ -52,7 +52,8 @@ test.describe("Ingest -> Evaluate -> Review journey", () => {
       await wizard.getByLabel("Name", { exact: true }).fill(name)
       await wizard.getByLabel("Description", { exact: true }).fill("F-EVAL v1: one exact match and one mismatch")
       await wizard.getByLabel("Evaluation type", { exact: true }).click()
-      await page.getByRole("option", { name: "exact_match", exact: true }).click()
+      // Ant Select exposes only adjacent virtual options by role; select the visible option.
+      await page.getByTitle("exact_match", { exact: true }).click()
       await wizard.getByRole("button", { name: "Next", exact: true }).click()
       const caseSensitive = wizard.getByRole("switch", { name: "Case sensitive", exact: true })
       await expect(caseSensitive).toHaveAttribute("aria-checked", "false")

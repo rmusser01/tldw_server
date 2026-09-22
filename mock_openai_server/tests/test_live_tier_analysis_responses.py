@@ -178,3 +178,67 @@ def test_ci_content_patterns_match_only_valid_text(content: object, matches: boo
 
     pattern = ResponsePattern(match={"content_regex": r"^alpha\s+beta$"}, response_file="unused")
     assert pattern.matches({"messages": [{"role": "user", "content": content}]}) is matches
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_ci_price_followup_reformulates_before_answering(monkeypatch) -> None:
+    """The same provider must return a query to the rewriter and an answer to generation."""
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.RAG.rag_service.generation import GenerationConfig, LLMGenerator
+    from tldw_Server_API.app.core.RAG.rag_service.query_classifier import reformulate_query
+
+    root = Path(__file__).resolve().parents[2] / "apps/tldw-frontend/e2e/onboarding-uat/mock-openai"
+    config = MockConfig.from_file(root / "configs/ci-journeys.json")
+    selected = []
+
+    async def provider(**kwargs):
+        response_file = config.responses["chat_completions"].find_matching_response(kwargs)
+        selected.append(response_file)
+        return json.loads((root / "responses" / response_file).read_text(encoding="utf-8"))
+
+    monkeypatch.setattr(chat_service, "perform_chat_api_call_async", provider)
+    query = (
+        "What is the ticket price at Rowan Observatory? "
+        "Use only the source; state when it does not provide the answer."
+    )
+    rewritten = await reformulate_query(
+        query, [{"role": "user", "content": "Who directs Rowan Observatory?"}],
+        llm_model="gpt-4.1-mini",
+    )
+    generator = LLMGenerator(GenerationConfig(model="gpt-4.1-mini", fallback_enabled=False))
+    context = SimpleNamespace(documents=[SimpleNamespace(
+        content="Rowan Observatory: Mira Vale, Cedar Ridge, Friday 18:00. No ticket price is provided.",
+        metadata={"title": "Rowan source", "source": "media_db"},
+    )])
+    answer = await generator.generate(context, rewritten)
+    assert rewritten == query
+    assert selected == ["chat/ci-rowan-price-rewrite.json", "chat/ci-rowan-price.json"]
+    assert answer.response == "The source does not provide the ticket price at Rowan Observatory. [1]"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("changed", ["model", "system", "followup", "suffix"])
+def test_ci_price_rewrite_fixture_rejects_other_requests(changed: str) -> None:
+    """A price query in history cannot rewrite a different follow-up or request stage."""
+    root = Path(__file__).resolve().parents[2] / "apps/tldw-frontend/e2e/onboarding-uat/mock-openai"
+    config = MockConfig.from_file(root / "configs/ci-journeys.json")
+    question = (
+        "What is the ticket price at Rowan Observatory? "
+        "Use only the source; state when it does not provide the answer."
+    )
+    followup = "What is the weather?" if changed == "followup" else question
+    request = {
+        "model": "another-model" if changed == "model" else "gpt-4.1-mini",
+        "messages": [
+            {"role": "system", "content": "Answer the question." if changed == "system"
+             else "You are a query reformulation assistant."},
+            {"role": "user", "content": (
+                f"Conversation history:\nuser: {question}\n\nFollow-up question: {followup}"
+                "\n\nStandalone reformulation:" + ("extra" if changed == "suffix" else "")
+            )},
+        ],
+    }
+    assert config.responses["chat_completions"].find_matching_response(request) != "chat/ci-rowan-price-rewrite.json"
