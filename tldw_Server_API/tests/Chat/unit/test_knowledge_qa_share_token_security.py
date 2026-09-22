@@ -27,6 +27,9 @@ from fastapi import HTTPException
 
 from tldw_Server_API.app.api.v1.endpoints import chat as chat_ep
 
+# Suite marker: these are fast, isolated regression guards.
+pytestmark = pytest.mark.unit
+
 _LITERAL = b"knowledge_qa_share_link_default"
 
 
@@ -56,15 +59,12 @@ def test_signing_key_never_falls_back_to_a_published_constant(
 ) -> None:
     _break_derivation(monkeypatch)
 
-    with pytest.raises(Exception) as exc_info:
+    with pytest.raises(RuntimeError, match="Cannot sign knowledge-QA share links"):
         key = chat_ep._get_knowledge_qa_share_signing_key()
         assert key != _LITERAL, (
             "share tokens are being signed with a constant published in this "
             "repository -- anyone can forge a valid share link"
         )
-
-    # Whatever it raises, it must not be a silent downgrade.
-    assert exc_info.value is not None
 
 
 def test_explicit_secret_is_honoured(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -92,7 +92,7 @@ def test_transient_derivation_failure_is_not_pinned(
 
     monkeypatch.setattr(chat_ep, "derive_hmac_key", _flaky)
 
-    with pytest.raises(Exception):
+    with pytest.raises(RuntimeError):
         chat_ep._get_knowledge_qa_share_signing_key()
 
     state["fail"] = False

@@ -23,6 +23,7 @@ import os
 import subprocess  # nosec B404
 import sys
 import tempfile
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional, Union
@@ -48,6 +49,10 @@ _mlx_model_cache: Optional[Any] = None
 # wrong-model bug for a memory regression. None means "no keyed entry" — an entry
 # assigned directly to _mlx_model_cache by a caller is honoured as-is.
 _mlx_model_cache_key: Optional[tuple[str, Optional[str]]] = None
+# Guards the (_mlx_model_cache, _mlx_model_cache_key) pair. The loader is synchronous
+# and runs on worker threads, so the two globals must be read and published together
+# or a reader can observe one model paired with another model's key.
+_mlx_model_cache_lock = threading.Lock()
 _DEFAULT_MLX_MODEL_ID = "mlx-community/parakeet-tdt-0.6b-v3"
 
 
@@ -396,14 +401,17 @@ def load_parakeet_mlx_model(
         model_cache_dir = cache_dir or str(stt_cfg.get("mlx_cache_dir", "")).strip() or None
 
         # Serve from cache only when the resident model is the one being asked for.
+        # The key and the model are two globals, so they must be read together under
+        # the lock: this function is synchronous and is reached from worker threads,
+        # where an interleaved publish between the two reads could otherwise pair
+        # model B with key A and hand back a model the caller did not ask for.
         cache_key = (model_id, model_cache_dir)
-        if (
-            not force_reload
-            and _mlx_model_cache is not None
-            and _mlx_model_cache_key == cache_key
-        ):
+        with _mlx_model_cache_lock:
+            cached_model = _mlx_model_cache
+            cached_key = _mlx_model_cache_key
+        if not force_reload and cached_model is not None and cached_key == cache_key:
             logger.debug(f"Using cached Parakeet MLX model: {model_id}")
-            return _mlx_model_cache
+            return cached_model
 
         from_pretrained_kwargs: dict[str, Any] = {}
         if _dtype is not None and _supports_kwarg(parakeet_mlx.from_pretrained, "dtype"):
@@ -432,8 +440,13 @@ def load_parakeet_mlx_model(
             logger.exception(f"Failed to load model {model_id}: {e}")
             return None
 
-        _mlx_model_cache = model
-        _mlx_model_cache_key = cache_key
+        # Publish the pair atomically so no reader can observe a key/model mismatch.
+        # Two threads that raced to load different models each return their own local
+        # `model`, so every caller still gets what it asked for; the cache simply ends
+        # up holding whichever pair was published last, consistently.
+        with _mlx_model_cache_lock:
+            _mlx_model_cache = model
+            _mlx_model_cache_key = cache_key
         logger.info(f"Successfully loaded Parakeet MLX model: {model_id}")
 
         return model
@@ -827,7 +840,10 @@ def unload_parakeet_mlx_model():
     """Unload the cached Parakeet MLX model to free memory."""
     global _mlx_model_cache, _mlx_model_cache_key
 
-    _mlx_model_cache_key = None
+    # Invalidate the key first, and under the lock, so a concurrent reader can never
+    # match a key whose model is mid-teardown.
+    with _mlx_model_cache_lock:
+        _mlx_model_cache_key = None
     if _mlx_model_cache is not None:
         try:
             # MLX models can be deleted directly

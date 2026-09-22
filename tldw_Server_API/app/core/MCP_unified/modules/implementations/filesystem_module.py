@@ -1469,7 +1469,11 @@ class FilesystemModule(BaseModule):
             raise ValueError("Input too deeply nested")
 
         if isinstance(input_data, str):
-            return "".join(ch for ch in input_data if ch >= " " or ch == "\n")
+            # Must match BaseModule.sanitize_input and _sanitize_patch_diff below.
+            # This override shadows the base, so fixing only the base left fs.write
+            # corrupting tab-significant files and fs.edit unable to match
+            # tab-indented content -- the exact tools the defect was about.
+            return "".join(ch for ch in input_data if ch >= " " or ch in {"\n", "\r", "\t"})
         if isinstance(input_data, dict):
             return {k: self.sanitize_input(v, _depth + 1) for k, v in input_data.items()}
         if isinstance(input_data, list):

@@ -20,10 +20,14 @@ from typing import Any
 
 import pytest
 
+
 from tldw_Server_API.app.core.Evaluations.webhook_manager import (
     WebhookEvent,
     WebhookManager,
 )
+
+# Suite marker: these are fast, isolated regression guards.
+pytestmark = pytest.mark.unit
 
 # Rows belonging to two different users. Only user-a may ever be returned to user-a.
 _ROWS = [

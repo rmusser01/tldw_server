@@ -17,8 +17,13 @@ ADR-011 lists "permanent until process restart" as the *rejected* alternative to
 retry-after-cooldown, so this also restored an explicitly-rejected behaviour.
 """
 
+import pytest
+
 from tldw_Server_API.app.core.TTS.adapters.elevenlabs_adapter import ElevenLabsAdapter
 from tldw_Server_API.app.core.TTS.adapters.openai_adapter import OpenAIAdapter
+
+# Suite marker: these are fast, isolated regression guards.
+pytestmark = pytest.mark.unit
 
 
 class _PooledClient:
@@ -72,6 +77,50 @@ async def test_elevenlabs_matches_its_openai_sibling() -> None:
 
     assert eleven_client.aclose_calls == openai_client.aclose_calls == 0
     assert eleven.client is None and openai.client is None
+
+
+async def test_owned_client_is_closed() -> None:
+    """A client this adapter created itself must be closed, or it leaks.
+
+    Five convenience methods lazily do `self.client = create_async_client()` when no
+    pooled client exists. Never closing any client fixes the pool-corruption bug but
+    leaks these. Ownership has to be tracked, not assumed.
+    """
+    adapter = _adapter(ElevenLabsAdapter)
+    adapter._owns_http_client = True
+    client = adapter.client
+
+    await adapter._cleanup_resources()
+
+    assert client.aclose_calls == 1, "a self-created client was leaked"
+    assert adapter.client is None
+
+
+async def test_pooled_client_is_not_closed() -> None:
+    adapter = _adapter(ElevenLabsAdapter)
+    adapter._owns_http_client = False
+    client = adapter.client
+
+    await adapter._cleanup_resources()
+
+    assert client.aclose_calls == 0
+    assert adapter.client is None
+
+
+async def test_unknown_ownership_defaults_to_not_closing() -> None:
+    """Fail towards the less damaging outcome.
+
+    Wrongly closing a pooled client is a permanent provider outage until restart;
+    wrongly leaving an owned client open is a bounded resource leak. With no
+    ownership recorded, take the second.
+    """
+    adapter = _adapter(ElevenLabsAdapter)
+    client = adapter.client  # no _owns_http_client attribute set at all
+
+    await adapter._cleanup_resources()
+
+    assert client.aclose_calls == 0
+    assert adapter.client is None
 
 
 async def test_cleanup_is_idempotent_when_client_already_released() -> None:

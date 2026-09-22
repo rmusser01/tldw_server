@@ -28,6 +28,9 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import (
     Audio_Transcription_Parakeet_MLX as mlx_mod,
 )
 
+# Suite marker: these are fast, isolated regression guards.
+pytestmark = pytest.mark.unit
+
 
 class _FakeModel:
     """Carries the id it was built from so tests can tell models apart."""
