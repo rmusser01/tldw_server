@@ -265,6 +265,9 @@ export async function seedAuth(
     } catch {}
     try {
       localStorage.setItem('assistant_setup_dismissed', 'true');
+      // Authenticated workflow fixtures begin after onboarding. Notes starts
+      // its own tour after one second unless this shared-storage flag is set.
+      writeStorageValue('notes-tutorial-shown', '1');
     } catch {}
     try {
       if (cfg.allowOffline) {

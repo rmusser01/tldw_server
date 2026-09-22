@@ -80,11 +80,6 @@ async function expectCharacterSessionsReachable(page: Page): Promise<void> {
     return
   }
 
-  const showPanels = page.getByTestId("playground-chat-layout-mode-trigger")
-  if (await showPanels.isVisible().catch(() => false)) {
-    await showPanels.click()
-  }
-
   const contextTab = page.getByRole("tab", { name: "Context" })
   if (await contextTab.isVisible().catch(() => false)) {
     await contextTab.click()
@@ -110,6 +105,15 @@ test.describe("Character Chat Phase 6 signoff", () => {
         waitUntil: "domcontentloaded",
       })
       await waitForConnection(page)
+
+      // Mobile starts in focus mode. The same toggle enters focus on desktop,
+      // so only activate it when its current pressed state means exit focus.
+      const layoutToggle = page.getByTestId("playground-chat-layout-mode-trigger")
+      await expect(layoutToggle).toBeVisible()
+      if ((await layoutToggle.getAttribute("aria-pressed")) === "true") {
+        await layoutToggle.click()
+      }
+      await expect(layoutToggle).toHaveAttribute("aria-pressed", "false")
 
       await expect(
         page.getByTestId("playground-active-chat-mode"),

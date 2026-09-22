@@ -96,6 +96,7 @@ jobs:
       TLDW_UAT390_MODE: deterministic
       TLDW_UAT390_PROVIDER: openai
       TLDW_UAT390_MODEL: gpt-4.1-mini
+      TLDW_E2E_CHARACTER_PROVIDER_FAILURE_MODEL: tldw:openai:gpt-4.1-mini
       UAT_STUDY_PROVIDER: openai
       UAT_STUDY_MODEL: gpt-4.1-mini
       DEFAULT_LLM_PROVIDER: openai
@@ -181,21 +182,20 @@ jobs:
 
       - name: Run critical E2E tests
         working-directory: apps/tldw-frontend
-        run: bun run e2e:critical --reporter=list
-        continue-on-error: true
-        id: e2e_critical
-
-      - name: Retry critical E2E tests
-        if: steps.e2e_critical.outcome == 'failure'
-        working-directory: apps/tldw-frontend
-        run: bun run e2e:critical --reporter=list
+        timeout-minutes: 20
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: test-results/results.json
+        run: bun run e2e:critical --reporter=list,json --retries=0 --trace=retain-on-failure
 
       - name: Upload test artifacts
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: e2e-critical-results
-          path: apps/tldw-frontend/test-results/
+          include-hidden-files: true
+          path: |
+            apps/tldw-frontend/test-results/
+            .tmp/frontend-e2e/
           retention-days: 7
 
   # ── Tier 2 + 3 (features — on dispatch or full suite) ─────────────────

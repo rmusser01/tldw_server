@@ -54,6 +54,9 @@ describe('seedAuth WebUI runtime identity (UAT397)', () => {
         apiKey: 'uat397-fixture-key',
       },
     });
+    expect(await seeded.storage.local.get('notes-tutorial-shown')).toEqual({
+      'notes-tutorial-shown': '1',
+    });
     await seeded.storage.local.set({ uat397_probe: 'persisted' });
     expect(JSON.parse(localStorage.getItem('uat397_probe')!)).toBe('persisted');
   });

@@ -54,5 +54,20 @@
     "embeddings": {
       "default": "embeddings/default.json"
     }
+  },
+  "scenario_failures": {
+    "chat_completions": [
+      {
+        "match": {
+          "model": "gpt-4.1-mini",
+          "content_regex": "^Trigger the real provider configuration failure\\.$"
+        },
+        "status_code": 404,
+        "message": "CI controlled provider model is unavailable for the configuration-recovery scenario",
+        "type": "invalid_request_error",
+        "code": "model_not_found",
+        "times": -1
+      }
+    ]
   }
 }

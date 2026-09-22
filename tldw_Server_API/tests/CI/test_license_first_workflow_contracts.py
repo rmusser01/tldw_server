@@ -1034,3 +1034,23 @@ def test_frontend_critical_journeys_start_real_application_with_declared_provide
     assert critical["env"]["TLDW_UAT390_MODEL"] == critical["env"]["UAT_STUDY_MODEL"]
     assert critical["env"]["OPENAI_API_BASE_URL"].startswith("http://127.0.0.1:")
     assert any(step.get("name") == "Start deterministic downstream provider" for step in critical["steps"])
+
+
+def test_frontend_critical_keeps_first_attempt_evidence_within_job_deadline() -> None:
+    """A failed first pass must report failure and upload its own retained evidence."""
+    data = yaml.safe_load((REPO_ROOT / ".github/workflows/frontend-e2e-tiers.yml").read_text(encoding="utf-8"))
+    steps = data["jobs"]["critical"]["steps"]
+    executions = [step for step in steps if "bun run e2e:critical" in step.get("run", "")]
+    assert len(executions) == 1, "A second full run overwrites results and exhausts the upload deadline"
+    run = executions[0]
+    assert not run.get("continue-on-error", False)
+    assert run["timeout-minutes"] < data["jobs"]["critical"]["timeout-minutes"] - 5
+    assert "--retries=0" in run["run"]
+    assert "--trace=retain-on-failure" in run["run"]
+    assert "--reporter=list,json" in run["run"]
+    assert run["env"]["PLAYWRIGHT_JSON_OUTPUT_NAME"].endswith("/results.json")
+    upload = next(step for step in steps if step.get("name") == "Upload test artifacts")
+    assert upload["if"] == "always()"
+    assert "test-results/" in upload["with"]["path"]
+    assert ".tmp/frontend-e2e/" in upload["with"]["path"]
+    assert upload["with"]["include-hidden-files"] is True
