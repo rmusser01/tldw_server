@@ -12,11 +12,13 @@ from tldw_Server_API.app.core.DB_Management.backends import pg_rls_policies
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     BackendType,
     DatabaseConfig,
+    UniqueConstraintError,
 )
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha import schema_bootstrap
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
@@ -25,10 +27,15 @@ class _ReachedV61(Exception):
 
 
 class _FakeTransaction:
+    def __init__(self, connection: object) -> None:
+        self.connection = connection
+        self.exit_exception = None
+
     def __enter__(self) -> object:
-        return object()
+        return self.connection
 
     def __exit__(self, exc_type: object, exc: object, tb: object) -> bool:
+        self.exit_exception = exc_type
         return False
 
 
@@ -36,7 +43,7 @@ class _FakeBackend:
     backend_type = BackendType.POSTGRESQL
 
     def transaction(self) -> _FakeTransaction:
-        return _FakeTransaction()
+        return _FakeTransaction(self)
 
     def table_exists(self, _name: str, connection: object = None) -> bool:
         return True
@@ -51,7 +58,22 @@ def test_postgres_initializer_routes_schema_v60_through_v61(
     db._backend_refresh_suspended = False
     db._local = SimpleNamespace()
 
-    monkeypatch.setattr(db, "_get_schema_version_postgres", lambda _conn, lock=False: 60)
+    # Keep version routing separate from the real PostgreSQL session-lock tests.
+    migration_transaction = _FakeTransaction(object())
+    coordinator_calls: list[tuple[object, str]] = []
+    schema_version_reads: list[tuple[object, bool]] = []
+    migration_calls: list[object] = []
+
+    def _schema_migration(backend, lock_timeout):
+        coordinator_calls.append((backend, lock_timeout))
+        return migration_transaction
+
+    def _schema_version(conn: object, *, lock: bool = False) -> int:
+        schema_version_reads.append((conn, lock))
+        return 60
+
+    monkeypatch.setattr(schema_bootstrap, "postgres_schema_migration", _schema_migration)
+    monkeypatch.setattr(db, "_get_schema_version_postgres", _schema_version)
     monkeypatch.setattr(db, "_verify_note_attachment_schema_postgres", lambda _conn: None)
     monkeypatch.setattr(db, "_verify_note_task_schema_postgres", lambda _conn: None)
     monkeypatch.setattr(
@@ -61,12 +83,24 @@ def test_postgres_initializer_routes_schema_v60_through_v61(
     )
 
     def _reached_v61(_conn: object) -> None:
+        migration_calls.append(_conn)
         raise _ReachedV61
 
     monkeypatch.setattr(db, "_migrate_from_v60_to_v61_postgres", _reached_v61, raising=False)
 
     with pytest.raises(_ReachedV61):
         db._initialize_schema_postgres()
+
+    assert migration_calls == [migration_transaction.connection]
+    assert schema_version_reads == [
+        (db._backend, False),
+        (migration_transaction.connection, False),
+        (migration_transaction.connection, True),
+    ]
+    assert coordinator_calls == [
+        (db._backend, db._NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT),
+    ]
+    assert migration_transaction.exit_exception is _ReachedV61
 
 
 def test_postgres_v61_migration_uses_only_reviewed_policy_block_and_versions_last(
@@ -262,16 +296,32 @@ def _insert_request(
     )
 
 
+def _shared_chat_rows(backend: Any) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Read complete rows as the fixture admin to observe rejected-write rollback."""
+    return (
+        backend.execute(
+            "SELECT * FROM shared_workspace_chat_threads ORDER BY recipient_user_id, share_id"
+        ).rows,
+        backend.execute(
+            "SELECT * FROM shared_workspace_chat_requests ORDER BY recipient_user_id, share_id, request_id"
+        ).rows,
+    )
+
+
 def _assert_write_rejected(
     backend: Any,
     query: str,
     params: tuple[Any, ...],
     *,
-    match: str,
+    error_type: type[BackendDatabaseError] = BackendDatabaseError,
 ) -> None:
-    with pytest.raises(BackendDatabaseError, match=match):
+    before = _shared_chat_rows(backend)
+    # Driver diagnostics are intentionally private; verify the public error and
+    # actual database state after transaction rollback instead of their text.
+    with pytest.raises(error_type, match="^PostgreSQL query execution failed$"):
         with backend.transaction() as conn:
             backend.execute(query, params, connection=conn)
+    assert _shared_chat_rows(backend) == before
 
 
 def _set_restricted_recipient(
@@ -340,8 +390,22 @@ def test_postgres_v61_executes_constraints_defaults_and_cascades(
             ("recipient-a", 2, "constraint-conversation-2", "", "workspace-a"),
             ("recipient-a", 2, "constraint-conversation-2", "   ", "workspace-a"),
         ):
-            _assert_write_rejected(backend, thread_insert, params, match="check constraint")
+            _assert_write_rejected(backend, thread_insert, params)
 
+        # These invalid values would also fail the composite thread FK. Verify
+        # their exact validated CHECKs so a generic FK error cannot mask a gap.
+        request_checks = backend.execute(
+            "SELECT conname, convalidated, pg_get_constraintdef(oid) AS definition "
+            "FROM pg_constraint WHERE conrelid = 'shared_workspace_chat_requests'::regclass "
+            "AND conname IN ('shared_workspace_chat_requests_recipient_user_id_check', "
+            "'shared_workspace_chat_requests_share_id_check')"
+        ).rows
+        assert {row["conname"]: (row["convalidated"], row["definition"]) for row in request_checks} == {
+            "shared_workspace_chat_requests_recipient_user_id_check": (
+                True, "CHECK ((char_length(btrim(recipient_user_id)) > 0))",
+            ),
+            "shared_workspace_chat_requests_share_id_check": (True, "CHECK ((share_id > 0))"),
+        }
         request_insert = """
             INSERT INTO shared_workspace_chat_requests(
                 recipient_user_id, share_id, request_id, request_fingerprint,
@@ -355,19 +419,19 @@ def test_postgres_v61_executes_constraints_defaults_and_cascades(
             ("recipient-a", 1, "bad-lease", "fingerprint", "constraint-conversation", "in_progress", 0, "all"),
             ("recipient-a", 1, "bad-source", "fingerprint", "constraint-conversation", "in_progress", 1, "exclude"),
         ):
-            _assert_write_rejected(backend, request_insert, params, match="check constraint")
+            _assert_write_rejected(backend, request_insert, params)
 
         _assert_write_rejected(
             backend,
             thread_insert,
             ("recipient-a", 1, "constraint-conversation-2", "owner-a", "workspace-a"),
-            match="duplicate key value",
+            error_type=UniqueConstraintError,
         )
         _assert_write_rejected(
             backend,
             thread_insert,
             ("recipient-a", 2, "constraint-conversation", "owner-a", "workspace-a"),
-            match="duplicate key value",
+            error_type=UniqueConstraintError,
         )
 
         with backend.transaction() as conn:
@@ -392,7 +456,7 @@ def test_postgres_v61_executes_constraints_defaults_and_cascades(
                 1,
                 "all",
             ),
-            match="duplicate key value",
+            error_type=UniqueConstraintError,
         )
 
         with backend.transaction() as conn:
@@ -662,7 +726,8 @@ def test_postgres_v61_restricted_role_enforces_recipient_rls_predicates(
             *,
             recipient_user_id: str | None = "recipient-a",
         ) -> None:
-            with pytest.raises(BackendDatabaseError, match="row-level security"):
+            before = _shared_chat_rows(backend)
+            with pytest.raises(BackendDatabaseError, match="^PostgreSQL query execution failed$"):
                 with backend.transaction() as conn:
                     _set_restricted_recipient(
                         backend,
@@ -671,6 +736,7 @@ def test_postgres_v61_restricted_role_enforces_recipient_rls_predicates(
                         recipient_user_id,
                     )
                     backend.execute(query, params, connection=conn)
+            assert _shared_chat_rows(backend) == before
 
         assert_rls_denied(
             """
@@ -760,12 +826,64 @@ def test_postgres_v61_restricted_role_enforces_recipient_rls_predicates(
 
 @pytest.mark.integration
 @pytest.mark.timeout(30)
-def test_postgres_v61_fresh_upgrade_constraints_forced_rls_and_rerun(
+def test_postgres_v60_to_v61_constraints_forced_rls_and_head_rerun(
     pg_database_config: DatabaseConfig,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
-    db = CharactersRAGDB(":memory:", client_id="recipient-a", backend=backend)
+    with monkeypatch.context() as patch:
+        patch.setattr(CharactersRAGDB, "_initialize_schema", lambda self: None)
+        db = CharactersRAGDB(":memory:", client_id="recipient-a", backend=backend)
     try:
+        class _ReachedHistoricalV60(Exception):
+            pass
+
+        stopped_connections = []
+        stopped_process_ids = []
+
+        def stop_before_v61(conn: Any) -> None:
+            assert db._get_schema_version_postgres(conn) == 60
+            stopped_connections.append(conn)
+            stopped_process_ids.append(conn.info.backend_pid)
+            # Test-only historical boundary: persist the real v4-to-v60 prefix
+            # before stopping initialization. The real coordinator must unwind
+            # the sentinel, release its session lock, and discard this checkout.
+            conn.commit()
+            raise _ReachedHistoricalV60
+
+        with monkeypatch.context() as patch:
+            patch.setattr(db, "_migrate_from_v60_to_v61_postgres", stop_before_v61)
+            with pytest.raises(_ReachedHistoricalV60):
+                db._initialize_schema_postgres()
+        assert len(stopped_connections) == 1
+        assert stopped_connections[0].closed
+        assert backend.execute(
+            "SELECT count(*) FROM pg_locks WHERE pid=%s AND locktype='advisory' AND granted",
+            (stopped_process_ids[0],),
+        ).scalar == 0
+        assert backend.execute(
+            "SELECT version FROM db_schema_version WHERE schema_name = %s",
+            (CharactersRAGDB._SCHEMA_NAME,),
+        ).scalar == 60
+        assert not backend.table_exists("shared_workspace_chat_threads")
+        assert not backend.table_exists("shared_workspace_chat_requests")
+
+        conversation_id = "conversation-a"
+        with backend.transaction() as conn:
+            _insert_conversation(backend, conn, conversation_id, "recipient-a")
+        conversation_before = backend.execute(
+            "SELECT * FROM conversations WHERE id = %s", (conversation_id,)
+        ).rows
+        assert "history_version" not in conversation_before[0]
+        assert "conversations_fts_tsv" not in conversation_before[0]
+        with schema_bootstrap.postgres_schema_migration(
+            backend, db._NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT
+        ) as conn:
+            db._migrate_from_v60_to_v61_postgres(conn)
+        assert backend.execute(
+            "SELECT * FROM conversations WHERE id = %s", (conversation_id,)
+        ).rows == conversation_before
+
         version = backend.execute(
             "SELECT version FROM db_schema_version WHERE schema_name = %s",
             (CharactersRAGDB._SCHEMA_NAME,),
@@ -790,7 +908,7 @@ def test_postgres_v61_fresh_upgrade_constraints_forced_rls_and_rerun(
         )
         relations, policies = _policy_catalog(backend)
 
-        assert int(version) == 63
+        assert int(version) == 61
         types = {(row["table_name"], row["column_name"]): row["data_type"] for row in columns}
         assert types[("shared_workspace_chat_threads", "recipient_user_id")] == "text"
         assert types[("shared_workspace_chat_threads", "owner_user_id")] == "text"
@@ -806,18 +924,17 @@ def test_postgres_v61_fresh_upgrade_constraints_forced_rls_and_rerun(
         assert all(row["qual"] for row in policies)
         assert all(row["with_check"] for row in policies)
 
-        conversation_id = db.add_conversation({"id": "conversation-a", "title": "Shared"})
-        assert conversation_id == "conversation-a"
-        with db.transaction() as conn:
-            conn.execute(
+        with backend.transaction() as conn:
+            backend.execute(
                 """
                 INSERT INTO shared_workspace_chat_threads(
                     recipient_user_id, share_id, conversation_id, owner_user_id, workspace_id
                 ) VALUES (?, ?, ?, ?, ?)
                 """,
                 ("recipient-a", 1, conversation_id, "owner-a", "workspace-a"),
+                connection=conn,
             )
-            conn.execute(
+            backend.execute(
                 """
                 INSERT INTO shared_workspace_chat_requests(
                     recipient_user_id, share_id, request_id, request_fingerprint,
@@ -825,11 +942,13 @@ def test_postgres_v61_fresh_upgrade_constraints_forced_rls_and_rerun(
                 ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 ("recipient-a", 1, "request-a", "fingerprint-a", conversation_id, "completed", "include"),
+                connection=conn,
             )
+        shared_rows_before = _shared_chat_rows(backend)
 
-        with pytest.raises(BackendDatabaseError):
-            with db.transaction() as conn:
-                conn.execute(
+        with pytest.raises(BackendDatabaseError, match="^PostgreSQL query execution failed$"):
+            with backend.transaction() as conn:
+                backend.execute(
                     """
                     INSERT INTO shared_workspace_chat_requests(
                         recipient_user_id, share_id, request_id, request_fingerprint,
@@ -837,31 +956,28 @@ def test_postgres_v61_fresh_upgrade_constraints_forced_rls_and_rerun(
                     ) VALUES (?, ?, ?, ?, ?, ?)
                     """,
                     ("recipient-a", 2, "wrong-share", "fingerprint-b", conversation_id, "completed"),
+                    connection=conn,
                 )
+        assert _shared_chat_rows(backend) == shared_rows_before
 
-        with backend.transaction() as conn:
-            backend.execute("DROP TABLE shared_workspace_chat_requests", connection=conn)
-            backend.execute("DROP TABLE shared_workspace_chat_threads", connection=conn)
-            backend.execute(
-                "UPDATE db_schema_version SET version = %s WHERE schema_name = %s",
-                (60, CharactersRAGDB._SCHEMA_NAME),
-                connection=conn,
-            )
-
-        db.close_connection()
-        db._initialize_schema_postgres()
-        db._initialize_schema_postgres()
-
-        rerun_version = backend.execute(
-            "SELECT version FROM db_schema_version WHERE schema_name = %s",
-            (CharactersRAGDB._SCHEMA_NAME,),
-        ).scalar
-        rerun_relations, rerun_policies = _policy_catalog(backend)
-        assert int(rerun_version) == 63
-        assert len(rerun_relations) == 2
-        assert all(row["relrowsecurity"] is True for row in rerun_relations)
-        assert all(row["relforcerowsecurity"] is True for row in rerun_relations)
-        assert len(rerun_policies) == 2
+        for _ in range(2):
+            db._initialize_schema_postgres()
+            rerun_version = backend.execute(
+                "SELECT version FROM db_schema_version WHERE schema_name = %s",
+                (CharactersRAGDB._SCHEMA_NAME,),
+            ).scalar
+            rerun_relations, rerun_policies = _policy_catalog(backend)
+            assert int(rerun_version) == CharactersRAGDB._POSTGRES_SCHEMA_VERSION
+            assert rerun_relations == relations
+            assert rerun_policies == policies
+            assert _shared_chat_rows(backend) == shared_rows_before
+            # v65 adds history_version; head reconciliation adds the title's
+            # FTS vector. Every historical column and value remains unchanged.
+            assert backend.execute(
+                "SELECT * FROM conversations WHERE id = %s", (conversation_id,)
+            ).rows == [
+                {**conversation_before[0], "history_version": 1, "conversations_fts_tsv": ""},
+            ]
     finally:
         db.close_all_connections()
         backend.get_pool().close_all()

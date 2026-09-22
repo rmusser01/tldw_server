@@ -3034,7 +3034,7 @@ async def request_admin_reauth(
 async def verify_magic_link(
     data: MagicLinkVerifyRequest,
     request: Request,
-    db=Depends(get_db_transaction),
+    db=Depends(get_login_db_connection),
     jwt_service: JWTService = Depends(get_jwt_service_dep),
     session_manager: SessionManager = Depends(get_session_manager_dep),
     registration_service: RegistrationService = Depends(get_registration_service_dep),

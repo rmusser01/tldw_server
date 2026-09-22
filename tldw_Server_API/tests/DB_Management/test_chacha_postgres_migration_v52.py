@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.DB_Management.chacha import schema_bootstrap
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 pytestmark = pytest.mark.unit
@@ -15,11 +16,13 @@ pytestmark = pytest.mark.unit
 class _FakeTransaction:
     def __init__(self, connection):
         self.connection = connection
+        self.exit_exception = None
 
     def __enter__(self):
         return self.connection
 
     def __exit__(self, exc_type, exc, tb):
+        self.exit_exception = exc_type
         return False
 
 
@@ -96,17 +99,28 @@ def test_postgres_initializer_routes_historical_v52_through_v53_script(
     db._backend_refresh_suspended = False
     db._local = SimpleNamespace()
 
+    # Isolate routing from session-lock ownership, exercised with real PostgreSQL
+    # in test_chacha_postgres_schema_lock.
+    migration_transaction = _FakeTransaction(object())
+    coordinator_calls: list[tuple[object, str]] = []
+
+    def _schema_migration(backend, lock_timeout):
+        coordinator_calls.append((backend, lock_timeout))
+        return migration_transaction
+
+    monkeypatch.setattr(schema_bootstrap, "postgres_schema_migration", _schema_migration)
     applied_scripts: list[tuple[str, int | None]] = []
-    schema_version_locks: list[bool] = []
+    schema_version_reads: list[tuple[object, bool]] = []
 
     def _schema_version(_conn: object, *, lock: bool = False) -> int:
-        schema_version_locks.append(lock)
+        schema_version_reads.append((_conn, lock))
         return 52
 
     monkeypatch.setattr(db, "_get_schema_version_postgres", _schema_version)
     monkeypatch.setattr(db, "_ensure_postgres_fts", lambda conn: None)
 
     def _record_script(script: str, conn, expected_version=None):
+        assert conn is migration_transaction.connection
         applied_scripts.append((script, expected_version))
         if expected_version == 53:
             raise _ReachedV53Error
@@ -116,8 +130,16 @@ def test_postgres_initializer_routes_historical_v52_through_v53_script(
     with pytest.raises(_ReachedV53Error):
         db._initialize_schema_postgres()
 
-    assert (CharactersRAGDB._MIGRATION_SQL_V52_TO_V53_POSTGRES, 53) in applied_scripts
-    assert schema_version_locks == [True]
+    assert applied_scripts == [(CharactersRAGDB._MIGRATION_SQL_V52_TO_V53_POSTGRES, 53)]
+    assert schema_version_reads == [
+        (db._backend, False),
+        (migration_transaction.connection, False),
+        (migration_transaction.connection, True),
+    ]
+    assert coordinator_calls == [
+        (db._backend, db._NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT),
+    ]
+    assert migration_transaction.exit_exception is _ReachedV53Error
 
 
 def test_postgres_v53_script_adds_emq_group_columns_and_updates_version() -> None:

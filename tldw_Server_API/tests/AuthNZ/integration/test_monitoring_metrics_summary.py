@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from tldw_Server_API.app.core.AuthNZ.monitoring import AuthNZMonitor
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
 from tldw_Server_API.app.core.AuthNZ.migrations import (
     ensure_authnz_tables,
@@ -13,8 +12,9 @@ from tldw_Server_API.app.core.AuthNZ.migrations import (
     migration_073_create_federated_identities_table,
     migration_074_create_federated_managed_grants_table,
 )
+from tldw_Server_API.app.core.AuthNZ.monitoring import AuthNZMonitor
 from tldw_Server_API.app.core.AuthNZ.scheduler import AuthNZScheduler
-
+from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
 
 pytestmark = pytest.mark.integration
 
@@ -32,12 +32,13 @@ async def test_metrics_summary_uses_boolean_revoked_filter(monkeypatch):
     # Insert a dedicated user and related records for this test
     uname = f"metrics_user_{uuid.uuid4().hex[:8]}"
     email = f"{uname}@example.com"
-    await pool.execute(
-        """
-        INSERT INTO users (username, email, password_hash, is_active)
-        VALUES (?, ?, ?, 1)
-        """,
-        (uname, email, "hash"),
+    users = UsersDB(pool)
+    await users.initialize(ensure_schema=False)
+    await users.create_user(  # nosec B106 # Inert fixture hash, never used for login
+        username=uname,
+        email=email,
+        password_hash="hash",
+        is_active=True,
     )
     user_row = await pool.fetchone("SELECT id FROM users WHERE username = ?", uname)
     user_id = user_row["id"] if isinstance(user_row, dict) else user_row[0]
@@ -112,7 +113,7 @@ async def test_metrics_summary_uses_boolean_revoked_filter(monkeypatch):
     await pool.execute("DELETE FROM audit_logs WHERE user_id = ?", (user_id,))
     await pool.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
     await pool.execute("DELETE FROM api_keys WHERE user_id = ?", (user_id,))
-    await pool.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    await users.delete_user(user_id)
 
 
 class _NoopDispatcher:
