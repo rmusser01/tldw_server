@@ -29,6 +29,15 @@
         {
           "match": {
             "model": "gpt-4.1-mini",
+            "system_prompt": "You are a query reformulation assistant.",
+            "content_regex": "\\n\\nFollow-up question: What\\ is\\ the\\ ticket\\ price\\ at\\ Rowan\\ Observatory\\?\\ Use\\ only\\ the\\ source;\\ state\\ when\\ it\\ does\\ not\\ provide\\ the\\ answer\\.\\n\\nStandalone reformulation:\\Z"
+          },
+          "response_file": "chat/ci-rowan-price-rewrite.json",
+          "priority": 70
+        },
+        {
+          "match": {
+            "model": "gpt-4.1-mini",
             "system_prompt": "You are E2E-TestBot. Always respond with exactly: BEEP BOOP.",
             "content_regex": "\\AHello, who are you\\?\\Z"
           },

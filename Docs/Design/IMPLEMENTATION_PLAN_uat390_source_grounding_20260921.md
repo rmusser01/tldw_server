@@ -74,3 +74,7 @@ check was extended. Final focused run: **30/30** tests passed; ESLint and
 Prettier passed. Parent retains responsibility for final combined type checking
 and owned integrated/native execution. The earlier 29-test/mutation counts
 above describe the recorded intermediate run, not the final suite size.
+
+### Literal citation membership — 2026-09-22
+
+Four injected/altered/paraphrased/foreign-title controls fail before canonical title/body membership is required. All50grounding tests pass afterward; retained CI5dc06 actual Media and QA responses also pass the real oracle. The visible source preview must equal the saved cited excerpt. This closes that assertion gap without claiming arbitrary chunk identity or full A-07/four-cell acceptance. Scoped independent review is clean; next first-attempt CI remains pending.
