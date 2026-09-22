@@ -8,6 +8,8 @@ Pass-through capture identifies a concrete output-limit case: real llama.cpp at1
 
 A narrow shared classifier now returns a safe output-limit message for valid hidden-only length termination. Malformed/error envelopes keep existing sanitization, and visible partial answers/tool calls remain usable. Five real-adapter causal failures become10passing cases; full fallback suite372passes. Shared streaming/error regressions97pass with one inherited skipped async-coordination case; no PostgreSQL check is skipped. Ruff0findings, production Bandit0findings; test findings are ordinary assertions only. Native acceptance of this repair remains required before closing TASK13260.278.11.
 
+UAT413 native first repair exposed the final HTTP sanitizer still replacing the new code with generic502. Both engines reproduce this. A causal HTTP regression fails before the narrow allowlisted endpoint mapping; the full HTTP suite then passes217cases with one inherited TestClient-streaming skip. Endpoint/test lint matches its three existing import-order diagnostics, production Bandit remains clean. Native acceptance of the corrected committed HTTP path is still pending.
+
 ### UAT414 native verification complete
 
 Diagnostic11 verifies the committed c2230dfdf86b743618a3f5ab976d9a1b0b3ec06a production extension in fresh SQLite/PostgreSQL Chromium profiles using normal connection forms. Text → reload → real PNG-only Character turn → save200 → reload retains exactly four visible messages and canonical five rows including system. Original message IDs, image bytes and real final replies match saved readback; no fallback greeting appears. SQLite chat17db2426-0241-4d59-a1e0-7776df2a275b; PostgreSQL c3ca6354-4f0d-4d24-9ff9-4bf066fb8339. TASK13260.278.12 Done.
