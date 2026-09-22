@@ -12,6 +12,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Response, status
 from loguru import logger
 from pydantic import ValidationError
+from starlette.concurrency import run_in_threadpool
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     User,
@@ -565,8 +566,8 @@ async def get_chat_messages(
         # Get messages (honor include_deleted and DB pagination)
         expand_images = include_images is True or format_for_completions is True
         if expand_images:
-            messages, attachment_urls = read_messages_with_images(
-                db, chat_id, limit=limit, offset=offset, include_deleted=include_deleted,
+            messages, attachment_urls = await run_in_threadpool(
+                read_messages_with_images, db, chat_id, limit=limit, offset=offset, include_deleted=include_deleted,
                 image_byte_limit=MAX_CHAT_ATTACHMENT_READ_BYTES,
                 for_completions=format_for_completions is True,
             )

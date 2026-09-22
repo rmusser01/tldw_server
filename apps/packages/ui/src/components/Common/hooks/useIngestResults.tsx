@@ -1,6 +1,7 @@
 import type { QuickIngestOperation } from "@/services/tldw/quick-ingest-authority"
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import React from 'react'
+import i18n from 'i18next'
 import type { MessageInstance } from 'antd/es/message/interface'
 import { useNavigate } from "react-router-dom"
 import { browser } from "wxt/browser"
@@ -361,7 +362,7 @@ export async function createReviewDraftsFromResults({ results, files, rows = [],
         if (RESULT_FAILURE_STATUS_TOKENS.includes(status) || isSkippedStatus(status)) continue
         const id = crypto.randomUUID()
         const content = resolveContent(processed)
-        const title = resolveTitle(processed, sourceRow?.url || item.url || localFile?.name || item.fileName || "Untitled source")
+        const title = resolveTitle(processed, sourceRow?.url || item.url || localFile?.name || item.fileName || i18n.t("playground:sharedWorkspace.untitled", "Untitled source"))
         const metadata = processed.metadata || {}
         const contentFormat = inferContentFormat(content)
         const { sections, strategy } = detectSections(content, processed.segments)

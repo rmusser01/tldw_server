@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react"
 import { render, screen, act, waitFor } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { MemoryRouter } from "react-router-dom"
 
 import { PlaygroundChat } from "../PlaygroundChat"
@@ -348,7 +348,10 @@ describe("PlaygroundChat selected server chat load state", () => {
     expect(screen.queryByTestId("playground-empty")).not.toBeInTheDocument()
   })
 })
+afterEach(() => { vi.useRealTimers() })
+
 it("UAT355: a plain chat does not gain a greeting picker from a cross-tab mirror", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
   mirroredCharacter.value = null
   Object.assign(useMessageOptionState.value, {
     historyId: null,
@@ -387,7 +390,7 @@ it("UAT355: a plain chat does not gain a greeting picker from a cross-tab mirror
     </MemoryRouter>
   )
   await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 70))
+    await vi.advanceTimersByTimeAsync(70)
   })
   expect
     .soft(screen.queryAllByText("Foreign greeting", { exact: true }))

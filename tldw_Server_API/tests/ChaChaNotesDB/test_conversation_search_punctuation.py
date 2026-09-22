@@ -1,21 +1,31 @@
 """Real conversation search regressions for literal punctuation and FTS controls."""
 
+from __future__ import annotations
+
 import sqlite3
+from collections.abc import Iterator
+from pathlib import Path
+from typing import Any, NoReturn
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.fixture
-def db(tmp_path):
+def db(tmp_path: Path) -> Iterator[CharactersRAGDB]:
+    """Yield an isolated SQLite search store and close every connection afterward."""
     database = CharactersRAGDB(db_path=str(tmp_path / "punctuation.sqlite"), client_id="alice")
     yield database
     database.close_all_connections()
 
 
-def _add(db, conversation_id, title, *, owner="alice", workspace=None):
+def _add(db: CharactersRAGDB, conversation_id: str, title: str, *, owner: str="alice", workspace: str | None=None) -> str:
+    """Create an owned persona conversation in the requested global or workspace scope."""
     return db.add_conversation(
         {
             "id": conversation_id,
@@ -31,7 +41,8 @@ def _add(db, conversation_id, title, *, owner="alice", workspace=None):
     )
 
 
-def _ids(db, query, *, paged, **kwargs):
+def _ids(db: CharactersRAGDB, query: str, *, paged: bool, **kwargs: Any) -> set[str]:
+    """Compare both search APIs through their returned conversation IDs and total."""
     if paged:
         rows, total, _ = db.search_conversations_page(query, **kwargs)
         assert total == len(rows)
@@ -53,7 +64,8 @@ def _ids(db, query, *, paged, **kwargs):
         "!!!",
     ],
 )
-def test_punctuation_is_a_literal_search_when_fts_rejects_it(db, paged, query):
+def test_punctuation_is_a_literal_search_when_fts_rejects_it(db: CharactersRAGDB, paged: bool, query: str) -> None:
+    """Treat rejected FTS syntax as literal text without exposing foreign conversations."""
     _add(db, "own", query)
     _add(db, "foreign", query, owner="bob")
     _add(db, "unrelated", "other conversation")
@@ -64,7 +76,8 @@ def test_punctuation_is_a_literal_search_when_fts_rejects_it(db, paged, query):
 
 
 @pytest.mark.parametrize("order_by", ["recency", "bm25", "hybrid", "topic"])
-def test_punctuation_fallback_keeps_count_ranking_pagination_and_scope(db, order_by):
+def test_punctuation_fallback_keeps_count_ranking_pagination_and_scope(db: CharactersRAGDB, order_by: str) -> None:
+    """Keep counts, score normalization, pages and workspace ownership after fallback."""
     marker = "ALICE-CEDAR-SIDEPANEL-742"
     db.upsert_workspace("ws-a", "A")
     db.upsert_workspace("ws-b", "B")
@@ -92,7 +105,8 @@ def test_punctuation_fallback_keeps_count_ranking_pagination_and_scope(db, order
 
 
 @pytest.mark.parametrize("paged", [False, True])
-def test_deleted_punctuation_search_keeps_existing_text_search_and_owner_scope(db, paged):
+def test_deleted_punctuation_search_keeps_existing_text_search_and_owner_scope(db: CharactersRAGDB, paged: bool) -> None:
+    """Include deleted rows only when requested while preserving owner isolation."""
     marker = "ALICE-CEDAR-SIDEPANEL-742"
     for conversation_id, owner in (("live", "alice"), ("deleted", "alice"), ("foreign", "bob")):
         _add(db, conversation_id, marker, owner=owner)
@@ -117,7 +131,8 @@ def test_deleted_punctuation_search_keeps_existing_text_search_and_owner_scope(d
         ("title:cedar", {"near", "far"}),
     ],
 )
-def test_valid_fts_expressions_keep_their_meaning(db, paged, query, expected):
+def test_valid_fts_expressions_keep_their_meaning(db: CharactersRAGDB, paged: bool, query: str, expected: set[str]) -> None:
+    """Preserve valid phrases, prefixes, proximity, boolean and column expressions."""
     _add(db, "near", "cedar sidepanel")
     _add(db, "far", "cedar maple one two three four sidepanel")
     _add(db, "birch", "birch sidepanel")
@@ -135,10 +150,12 @@ def test_valid_fts_expressions_keep_their_meaning(db, paged, query, expected):
         "unable to use function MATCH in the requested context",
     ],
 )
-def test_unrelated_database_errors_are_not_retried(db, monkeypatch, paged, message):
+def test_unrelated_database_errors_are_not_retried(db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch, paged: bool, message: str) -> None:
+    """Propagate unrelated storage errors after exactly one database attempt."""
     attempts = []
 
-    def fail(query, params):
+    def fail(query: str, params: Any) -> NoReturn:
+        """Inject a non-parser storage failure and record its sole attempted query."""
         attempts.append(query)
         raise CharactersRAGDBError("storage failure") from sqlite3.OperationalError(message)
 
@@ -149,12 +166,14 @@ def test_unrelated_database_errors_are_not_retried(db, monkeypatch, paged, messa
 
 
 @pytest.mark.parametrize("paged", [False, True])
-def test_literal_retry_failure_is_propagated_without_further_retries(db, monkeypatch, paged):
+def test_literal_retry_failure_is_propagated_without_further_retries(db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch, paged: bool) -> None:
+    """Stop after the literal fallback itself fails rather than retrying indefinitely."""
     _add(db, "own", "cedar-maple")
     original = db.execute_query
     attempts = []
 
-    def fail_after_parse_error(query, params):
+    def fail_after_parse_error(query: str, params: Any) -> Any:
+        """Allow the original FTS parse error, then fail the single literal fallback."""
         attempts.append(params)
         if len(attempts) == 1:
             return original(query, params)
@@ -166,8 +185,9 @@ def test_literal_retry_failure_is_propagated_without_further_retries(db, monkeyp
     assert len(attempts) == 2
 
 
-@pytest.mark.integration
-def test_postgres_punctuation_preserves_scoped_search(pg_database_config):
+@pytest.mark.postgres
+def test_postgres_punctuation_preserves_scoped_search(pg_database_config: DatabaseConfig) -> None:
+    """Use the official temporary PostgreSQL database for punctuation and scope controls."""
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
     database = CharactersRAGDB(db_path=":memory:", client_id="alice", backend=backend)
     try:

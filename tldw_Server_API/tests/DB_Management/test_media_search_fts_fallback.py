@@ -1,5 +1,6 @@
 """Actual SQLite fallback filtering and scope/pagination regressions."""
 import sqlite3
+from collections.abc import Callable
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -129,3 +130,34 @@ def test_fallback_retains_team_org_visibility_and_date_exclusion(search_db):
         assert repo.search("AURORA-CYCLE5-MULTI-23", date_range={"start_date": datetime(2026, 9, 17)}) == ([], 0)
     finally:
         reset_scope(scope)
+
+
+@pytest.mark.parametrize("mode,expected", [
+    ("personal", {1, 2, 3}), ("shared", {1, 2, 3, 11, 12}),
+    ("anonymous", set()), ("admin", {1, 2, 3, 4, 11, 12}),
+])
+def test_visibility_helper_filters_real_rows_without_changing_existing_filters(
+    search_db: tuple[MediaSearchRepository, sqlite3.Connection, Callable[..., None], SimpleNamespace],
+    mode: str, expected: set[int],
+) -> None:
+    """The shared predicate preserves prior filters and personal/team/org boundaries."""
+    from tldw_Server_API.app.core.DB_Management.media_db.repositories.media_search_repository import (
+        append_sqlite_media_visibility,
+    )
+
+    _, connection, add, _ = search_db
+    add(11, "team source", owner=2, visibility="team", team_id=5)
+    add(12, "org source", owner=2, visibility="org", org_id=7)
+    token = set_scope(user_id=None if mode == "anonymous" else 1,
+                      team_ids=[5] if mode == "shared" else [], org_ids=[7] if mode == "shared" else [],
+                      is_admin=mode == "admin")
+    try:
+        conditions = ["m.deleted = 0", "m.is_trash = 0", "m.type = ?"]
+        params = ["document"]
+        append_sqlite_media_visibility(conditions, params)
+        # Predicates are trusted helper output; every owner/filter value stays bound.
+        rows = connection.execute("SELECT id FROM Media m WHERE " + " AND ".join(conditions), params).fetchall()  # nosec B608
+        assert {row["id"] for row in rows} == expected
+        assert params[0] == "document"
+    finally:
+        reset_scope(token)

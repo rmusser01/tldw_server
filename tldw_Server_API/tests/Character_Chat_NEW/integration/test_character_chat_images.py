@@ -1,19 +1,25 @@
 """Character completion keeps stored images through the real API/provider boundary."""
 
+from __future__ import annotations
+
 import base64
 import io
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
+from fastapi.testclient import TestClient
 from PIL import Image
 
 from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 pytestmark = pytest.mark.integration
 
 
 @pytest.fixture(params=["sqlite", "postgres"])
-def character_db(request, test_db_path):
+def character_db(request: pytest.FixtureRequest, test_db_path: Path) -> Iterator[CharactersRAGDB]:
     """Exercise the real endpoint with SQLite and the official Postgres fixture."""
     from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -30,7 +36,7 @@ def character_db(request, test_db_path):
             backend.get_pool().close_all()
 
 
-def create_character_chat(test_client, auth_headers):
+def create_character_chat(test_client: TestClient, auth_headers: dict[str, str]) -> str:
     """Use the public API to create an owned Character and its conversation."""
     character = test_client.post("/api/v1/characters/", json={"name": "Vision Character"}, headers=auth_headers)
     assert character.status_code == 201, character.text
@@ -41,7 +47,7 @@ def create_character_chat(test_client, auth_headers):
 
 @pytest.mark.parametrize("endpoint", ["context", "messages", "completions", "complete-v2"])
 @pytest.mark.parametrize("text", ["", "Describe this image", None])
-def test_character_completion_retains_saved_image(monkeypatch, test_client, auth_headers, endpoint, text):
+def test_character_completion_retains_saved_image(monkeypatch: pytest.MonkeyPatch, test_client: TestClient, auth_headers: dict[str, str], endpoint: str, text: str | None) -> None:
     """Stored PNG content reaches completion formatting without dropping text-only turns."""
     png = (Path(__file__).resolve().parents[4] / "apps/packages/ui/src/public/icon/128.png").read_bytes()
     chat_id = create_character_chat(test_client, auth_headers)
@@ -56,7 +62,7 @@ def test_character_completion_retains_saved_image(monkeypatch, test_client, auth
     assert saved.status_code == 201, saved.text
     captured = []
 
-    def capture_completion(**kwargs):
+    def capture_completion(**kwargs: Any) -> dict[str, Any]:
         captured.extend(kwargs["messages_payload"])
         return {"choices": [{"message": {"content": "Image received"}}]}
 
@@ -84,7 +90,7 @@ def test_character_completion_retains_saved_image(monkeypatch, test_client, auth
 
 
 @pytest.mark.parametrize("stream", [False, True])
-def test_character_provider_receives_ordered_png_and_jpeg(monkeypatch, test_client, auth_headers, character_db, stream):
+def test_character_provider_receives_ordered_png_and_jpeg(monkeypatch: pytest.MonkeyPatch, test_client: TestClient, auth_headers: dict[str, str], character_db: CharactersRAGDB, stream: bool) -> None:
     """Streaming and normal dispatch carry every attachment with exact MIME and bytes."""
     images = []
     for fmt, mime in [("PNG", "image/png"), ("JPEG", "image/jpeg")]:
@@ -97,7 +103,7 @@ def test_character_provider_receives_ordered_png_and_jpeg(monkeypatch, test_clie
     )
     captured = []
 
-    def provider(**kwargs):
+    def provider(**kwargs: Any) -> dict[str, Any] | Iterator[str]:
         captured.extend(kwargs["messages_payload"])
         if stream:
             return iter(
@@ -132,8 +138,8 @@ def test_character_provider_receives_ordered_png_and_jpeg(monkeypatch, test_clie
 
 @pytest.mark.parametrize("fault", ["corrupt", "budget", "unavailable", "foreign"])
 def test_character_rejects_incomplete_images_before_provider(
-    monkeypatch, test_client, auth_headers, character_db, fault
-):
+    monkeypatch: pytest.MonkeyPatch, test_client: TestClient, auth_headers: dict[str, str], character_db: CharactersRAGDB, fault: str
+) -> None:
     """Completion never silently drops an unreadable attachment or crosses ownership."""
     from tldw_Server_API.app.api.v1.utils import chat_message_images
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError
@@ -155,7 +161,7 @@ def test_character_rejects_incomplete_images_before_provider(
     if fault == "unavailable":
         original = character_db.get_messages_for_conversation
 
-        def read(*args, **kwargs):
+        def read(*args: Any, **kwargs: Any) -> Any:
             if kwargs.get("strict_images"):
                 raise CharactersRAGDBError("Unavailable attachment snapshot")
             return original(*args, **kwargs)
@@ -171,7 +177,7 @@ def test_character_rejects_incomplete_images_before_provider(
     assert called == []
 
 
-def test_character_offline_image_only_does_not_echo_an_earlier_turn(test_client, auth_headers, character_db):
+def test_character_offline_image_only_does_not_echo_an_earlier_turn(test_client: TestClient, auth_headers: dict[str, str], character_db: CharactersRAGDB) -> None:
     """Offline simulation can read multipart input without treating old text as current."""
     png = (Path(__file__).resolve().parents[4] / "apps/packages/ui/src/public/icon/128.png").read_bytes()
     chat_id = create_character_chat(test_client, auth_headers)
@@ -191,8 +197,8 @@ def test_character_offline_image_only_does_not_echo_an_earlier_turn(test_client,
 @pytest.mark.parametrize("endpoint", ["context", "messages", "completions", "complete-v2"])
 @pytest.mark.parametrize("details", [None, ["high", "low"], ["high"], ["high", "invalid"]])
 def test_character_preserves_or_rejects_saved_image_details(
-    monkeypatch, test_client, auth_headers, character_db, endpoint, details
-):
+    monkeypatch: pytest.MonkeyPatch, test_client: TestClient, auth_headers: dict[str, str], character_db: CharactersRAGDB, endpoint: str, details: list[str] | None
+) -> None:
     """Every formatter preserves the ordered options ordinary Chat uses for retry."""
     png = (Path(__file__).resolve().parents[4] / "apps/packages/ui/src/public/icon/128.png").read_bytes()
     chat_id = create_character_chat(test_client, auth_headers)
@@ -204,7 +210,7 @@ def test_character_preserves_or_rejects_saved_image_details(
         assert character_db.add_message_metadata(message_id, extra={"image_details": details})
     captured = []
 
-    def provider(**kwargs):
+    def provider(**kwargs: Any) -> dict[str, Any] | Iterator[str]:
         captured.extend(kwargs["messages_payload"])
         return {"choices": [{"message": {"content": "Seen"}}]}
 
@@ -231,8 +237,8 @@ def test_character_preserves_or_rejects_saved_image_details(
 
 
 def test_character_image_metadata_read_failure_prevents_dispatch(
-    monkeypatch, test_client, auth_headers, character_db
-):
+    monkeypatch: pytest.MonkeyPatch, test_client: TestClient, auth_headers: dict[str, str], character_db: CharactersRAGDB
+) -> None:
     """A real metadata read failure must not be mistaken for a legacy auto row."""
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError
 
@@ -243,7 +249,7 @@ def test_character_image_metadata_read_failure_prevents_dispatch(
     assert character_db.add_message_metadata(mid, extra={"image_details": ["high"]})
     execute = character_db.execute_query
 
-    def fail_metadata(query, *args, **kwargs):
+    def fail_metadata(query: str, *args: Any, **kwargs: Any) -> Any:
         if "FROM message_metadata" in query:
             raise CharactersRAGDBError("Test metadata read unavailable")
         return execute(query, *args, **kwargs)
@@ -260,8 +266,8 @@ def test_character_image_metadata_read_failure_prevents_dispatch(
 @pytest.mark.parametrize("endpoint", ["context", "messages", "completions", "complete-v2"])
 @pytest.mark.parametrize("text_kind", ["generated", "literal", "edited"])
 def test_character_image_only_text_preserves_retry_content(
-    monkeypatch, test_client, auth_headers, character_db, endpoint, text_kind
-):
+    monkeypatch: pytest.MonkeyPatch, test_client: TestClient, auth_headers: dict[str, str], character_db: CharactersRAGDB, endpoint: str, text_kind: str
+) -> None:
     """Discard only the server's unedited placeholder, never user-authored text."""
     png = (Path(__file__).resolve().parents[4] / "apps/packages/ui/src/public/icon/128.png").read_bytes()
     chat_id = create_character_chat(test_client, auth_headers)
@@ -279,7 +285,7 @@ def test_character_image_only_text_preserves_retry_content(
     assert raw.json()["messages"][0]["content"] == placeholder
     captured = []
 
-    def provider(**kwargs):
+    def provider(**kwargs: Any) -> dict[str, Any] | Iterator[str]:
         captured.extend(kwargs["messages_payload"])
         return {"choices": [{"message": {"content": "Seen"}}]}
 

@@ -464,6 +464,7 @@ const OwnedSidepanelChat = ({ owner }: { owner: SidepanelChatOwner }) => {
   // tabId: undefined = not resolved yet, null = resolved but unavailable.
   const [tabId, setTabId] = React.useState<number | null | undefined>(undefined)
   const [isRestoringChat, setIsRestoringChat] = React.useState(true)
+  const [restoreFailed, setRestoreFailed] = React.useState(false)
   const storageRef = React.useRef(
     createSafeStorage({
       area: "local"
@@ -989,6 +990,7 @@ const OwnedSidepanelChat = ({ owner }: { owner: SidepanelChatOwner }) => {
     const generation = ++loadGenerationRef.current
     const current = () => owner.isCurrent() && generation === loadGenerationRef.current
     setIsRestoringChat(true)
+    setRestoreFailed(false)
     try {
       const tabsState = await readSidepanelTabs(storageRef.current, tabId, owner.ownerKey, current)
       if (!current()) return
@@ -1024,7 +1026,8 @@ const OwnedSidepanelChat = ({ owner }: { owner: SidepanelChatOwner }) => {
       if (current()) setIsRestoringChat(false)
     } catch {
       // Keep persistence suspended: a failed read must not replace an owner's
-      // saved tabs with an empty scaffold. A remount retries the owned read.
+      // saved tabs with an empty scaffold. Offer an explicit same-owner retry.
+      if (current()) setRestoreFailed(true)
     }
   }, [owner, tabId])
 
@@ -2394,7 +2397,17 @@ const OwnedSidepanelChat = ({ owner }: { owner: SidepanelChatOwner }) => {
                 </div>
               </div>
             )}
-            {isRestoringChat ? (
+            {isRestoringChat && restoreFailed ? (
+              <div role="alert" className="flex flex-col items-center gap-3 px-4 py-8">
+                <p>{t("sidepanel:chat.restoreFailed", "Could not restore your saved chat. Retry to load it.")}</p>
+                <button
+                  type="button"
+                  className="rounded-md border border-border px-3 py-1 text-sm text-text hover:bg-surface2"
+                  onClick={() => void restoreSidepanelState()}>
+                  {t("common:retry", "Retry")}
+                </button>
+              </div>
+            ) : isRestoringChat ? (
               <div
                 className="relative flex w-full flex-col items-center pt-16 pb-4"
                 aria-busy="true"

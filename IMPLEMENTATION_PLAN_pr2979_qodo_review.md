@@ -6,13 +6,13 @@ Task: TASK-13260.278.16. Review: https://github.com/rmusser01/tldw_server/pull/2
 **Goal**: Trace each claim through its actual owner and existing tests.
 **Success Criteria**: All14 numbered findings have a documented fix or evidence-supported disagreement.
 **Tests**: Causal failure controls for transactional retry, wizard close and sidepanel storage-read errors; fixture provenance for PostgreSQL.
-**Status**: In Progress
+**Status**: Complete
 
 ## Stage 2: Repair confirmed behavior and contract gaps
 **Goal**: Preserve complete retry instruction blocks, stop dismissed-wizard navigation, expose safe sidepanel restore retry, and address confirmed documentation, typing, localization, timing and async-read gaps.
 **Success Criteria**: Each behavioral repair turns a causal failing test green without weakening ownership or persistence guards.
 **Tests**: Existing real SQLite/official PostgreSQL suites, actual mounted frontend callers and direct helper boundaries. Reuse existing DB transaction/thread-pool abstractions.
-**Status**: In Progress
+**Status**: Complete
 
 ## Stage 3: Review, verify and publish dispositions
 **Goal**: Commit bounded changes, reply on corresponding review threads and refresh final PR checks.
@@ -33,7 +33,7 @@ Task: TASK-13260.278.16. Review: https://github.com/rmusser01/tldw_server/pull/2
 |7|Untranslated source title|Uses existing playground:sharedWorkspace.untitled; actual wizard regression verifies localized draft title.|
 |8|Direct helper tests|Direct tests cover complete image bytes/options/HTTP failures and visibility using actual SQLite rows;35helper/HTTP regressions pass.|
 |9|Closed wizard late navigation|UAT420fixed with retained promise and cancellable UI subscription;2causal failures, StrictMode/reopen controls pass.|
-|10|Synchronous image reads|Confirmed with actual HTTP thread/context assertion; Starlette run_in_threadpool preserves request context and passes regression. Real PG message-path follow-up running.|
+|10|Synchronous image reads|Confirmed with actual HTTP thread/context assertion; Starlette run_in_threadpool preserves request context and passes regression. Actual SQLite/PostgreSQL message-path follow-up6passes, no skips.|
 |11|Image helper module location|Retained in API utils: maps DB failures to HTTP409/413/503 and formats OpenAI response parts; storage bounds/ownership remain in DB/core.|
 |12|Punctuation test marker|Module integration marker plus explicit PostgreSQL test marker added.|
 |13|PostgreSQL isolation|Verified official pg_database_config -> function-scoped pg_temp_db -> create/drop in finally; restricted role is removed.96real image cases pass, no skips. No custom DB replacement.|
@@ -46,3 +46,5 @@ UAT418:51 retry tests pass on SQLite/official PostgreSQL after6 partial-write fa
 UAT420:2 actual close/unmount failures become113 wizard tests passing; one promise and cancellable UI subscription preserve StrictMode/reopen semantics. UAT421:2 storage-read failures become82 ownership tests passing across both sidepanels; read errors expose Retry while writes remain suspended. Final verification and inline responses pending.
 
 Final combined frontend219passes/5suites; independent lifecycle review clean. Matched ESLint97baseline/current,0new; shared UI354type diagnostics unchanged. Raw image/helper HTTP and visibility35pass; typed retry/queued/punctuation134pass. Final publication checks remain pending.
+
+Final verification:219frontend/134backend/35helper-HTTP/6actual SQLite-PG image-path checks pass; no skips. Shared UI354type diagnostics unchanged, ESLint97warnings unchanged. Touched Python Ruff0added; Bandit additions are39test assertions only after documenting the trusted predicate false positive (bound values, static predicates). Independent retry and lifecycle reviews report no remaining material findings. PR CI setup remains separately tracked in TASK13260.278.17.

@@ -93,7 +93,25 @@ def read_messages_with_images(
     for_completions: bool = False,
     image_byte_limit: int = MAX_CHAT_ATTACHMENT_READ_BYTES,
 ) -> tuple[list[dict[str, Any]], dict[str, list[str]]]:
-    """Read one complete attachment page after the caller verifies ownership."""
+    """Read one complete attachment page after the caller verifies ownership.
+
+    Args:
+        db: Caller-owned database handle; this synchronous helper does not close it.
+        chat_id: Conversation whose access the caller has already authorized.
+        limit: Maximum message count in the page.
+        offset: Number of messages to skip.
+        include_deleted: Include soft-deleted message rows when requested.
+        for_completions: Remove only proven generated image-text placeholders.
+        image_byte_limit: Maximum aggregate raw attachment bytes for this page.
+
+    Returns:
+        Message rows and ordered data URLs keyed by message ID. Returned rows gain
+        saved image options and may have placeholder text normalized for completion.
+
+    Raises:
+        HTTPException: 409 for invalid or incomplete images, 413 for byte limits,
+            or 503 when the database cannot supply a complete image/metadata read.
+    """
     try:
         messages = db.get_messages_for_conversation(
             chat_id,
@@ -150,7 +168,21 @@ def read_messages_with_images(
 def format_message_content(
     text: str, image_urls: list[str], image_details: Any = None,
 ) -> str | list[dict[str, Any]]:
-    """Keep plain text unchanged and append each stored image in its saved order."""
+    """Keep plain text unchanged and append each stored image in its saved order.
+
+    Args:
+        text: Persisted text, including an empty string for image-only messages.
+        image_urls: Validated data URLs in canonical attachment order.
+        image_details: Optional saved detail list; absence preserves legacy output.
+
+    Returns:
+        Original text when there are no images; otherwise OpenAI content parts.
+        The supplied URL and detail lists are not mutated.
+
+    Raises:
+        HTTPException: 409 when supplied image details have an invalid value,
+            shape, or count. No detail validation is needed for text-only output.
+    """
     if not image_urls:
         return text
     parts = [{"type": "text", "text": text}] if text else []
