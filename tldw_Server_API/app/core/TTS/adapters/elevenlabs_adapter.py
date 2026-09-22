@@ -239,8 +239,13 @@ class ElevenLabsAdapter(TTSAdapter):
         self.style = self.config.get("elevenlabs_style", 0.0)
         self.use_speaker_boost = self.config.get("elevenlabs_speaker_boost", True)
 
-        # HTTP client
+        # HTTP client. When it comes from the shared TTS connection pool the adapter
+        # is a borrower and must not close it: aclose() does not evict from
+        # HTTPConnectionPool._pools (only close_pool/close_client do), so a closed
+        # client stays cached and every later get_http_client for this provider hands
+        # back a dead one. Only a client this adapter created itself is ours to close.
         self.client: Optional[Any] = None
+        self._owns_client: bool = False
 
         # Cache for user voices
         self._user_voices: list[VoiceInfo] = []
@@ -261,6 +266,7 @@ class ElevenLabsAdapter(TTSAdapter):
                 provider=self.provider_name.lower(),
                 base_url=self.base_url
             )
+            self._owns_client = False
 
             # Test API connection and fetch user voices
             await self._fetch_user_voices()
@@ -670,17 +676,34 @@ class ElevenLabsAdapter(TTSAdapter):
         raise_detached_error(normalized)
 
     async def _cleanup_resources(self):
-        """Clean up ElevenLabs adapter resources"""
-        if self.client:
-            try:
+        """Release the HTTP client, closing it only if this adapter created it.
+
+        A pooled client is shared process-wide and is closed by the resource manager,
+        not here. Closing it from the adapter made one transient failure permanent:
+        initialize() borrows the pooled client and then calls _fetch_user_voices(),
+        so a single network blip sent _initialize_adapter to its finally-block
+        adapter.close(), which closed the shared client while leaving it cached. Every
+        later request -- including every ADR-011 cooldown retry -- then got the dead
+        client and raised "Cannot send a request, as the client has been closed",
+        until process restart. Reachable per request in BYOK deployments via
+        _close_request_adapter.
+        """
+        if self.client is None:
+            return
+        try:
+            if self._owns_client:
                 await self.client.aclose()
-                self.client = None
                 logger.debug(f"{self.provider_name}: HTTP client closed")
-            except (AttributeError, OSError, RuntimeError) as e:
-                logger.warning(
-                    f"{self.provider_name}: Error closing HTTP client; "
-                    f"exception_type={_safe_exception_label(e)}"
-                )
+            else:
+                logger.debug(f"{self.provider_name}: released pooled HTTP client")
+        except (AttributeError, OSError, RuntimeError) as e:
+            logger.warning(
+                f"{self.provider_name}: Error closing HTTP client; "
+                f"exception_type={_safe_exception_label(e)}"
+            )
+        finally:
+            self.client = None
+            self._owns_client = False
 
     def map_voice(self, voice_id: str) -> str:
         """Map generic voice ID to ElevenLabs voice"""
@@ -765,12 +788,23 @@ class ElevenLabsTTSAdapter(ElevenLabsAdapter):
         lookup_key = model.lower()
         return lookup_key if lookup_key in cls.MODELS else model
 
+    def _ensure_client(self) -> None:
+        """Create an adapter-owned client if initialize() never ran.
+
+        The convenience API is reachable without initialize(), so there may be no
+        pooled client to borrow. A client created here is ours, and _cleanup_resources
+        closes it; a borrowed one is left alone.
+        """
+        if self.client is None:
+            from tldw_Server_API.app.core.http_client import create_async_client
+
+            self.client = create_async_client()
+            self._owns_client = True
+
     # --- Convenience API ---
     async def fetch_voices(self) -> list[dict[str, Any]]:
         """Return available voices as a list of dicts from the public API."""
-        if not self.client:
-            from tldw_Server_API.app.core.http_client import create_async_client
-            self.client = create_async_client()
+        self._ensure_client()
         headers = {"xi-api-key": self.api_key}
         resp = await afetch(
             method="GET",
@@ -784,9 +818,7 @@ class ElevenLabsTTSAdapter(ElevenLabsAdapter):
         return data.get("voices", [])
 
     async def get_voice_info(self, voice_id: str) -> dict[str, Any]:
-        if not self.client:
-            from tldw_Server_API.app.core.http_client import create_async_client
-            self.client = create_async_client()
+        self._ensure_client()
         headers = {"xi-api-key": self.api_key}
         resp = await afetch(
             method="GET",

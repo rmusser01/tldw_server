@@ -193,6 +193,10 @@ class TestElevenLabsSanitizedFallbackLogs:
         adapter = ElevenLabsAdapter({"elevenlabs_api_key": "xi-test"})
         adapter.client = AsyncMock()
         adapter.client.aclose = AsyncMock(side_effect=RuntimeError(raw_marker))
+        # aclose() only runs for an adapter-owned client; a pooled one is released,
+        # not closed. This test is about sanitizing the failure log, so it needs the
+        # owned path.
+        adapter._owns_client = True
         messages, sink_id = self._capture_logs(level="WARNING")
 
         try:
@@ -328,3 +332,96 @@ class TestElevenLabsSanitizedFallbackLogs:
         assert voice_id == adapter.DEFAULT_VOICES["rachel"].id
         assert any("Voice not found" in message for message in messages)
         assert all(raw_marker not in message for message in messages)
+
+
+class TestElevenLabsPooledClientOwnership:
+    """The adapter borrows the shared pooled client; closing it broke the process.
+
+    HTTPConnectionPool.get_client caches one client per provider, and aclose() does
+    not evict it -- only close_pool/close_client do. So the old _cleanup_resources,
+    which unconditionally closed self.client, left a dead client in the cache: every
+    later get_http_client("elevenlabs") handed it back and raised "Cannot send a
+    request, as the client has been closed" until the process restarted. initialize()
+    reaches that path on any transient failure of _fetch_user_voices, because
+    _initialize_adapter closes the adapter in its finally-block.
+    """
+
+    @pytest.mark.asyncio
+    async def test_cleanup_does_not_close_a_pooled_client(self):
+        adapter = ElevenLabsAdapter({"elevenlabs_api_key": "xi-test"})
+        pooled = AsyncMock()
+        adapter.client = pooled
+        adapter._owns_client = False  # what initialize() sets after borrowing
+
+        await adapter._cleanup_resources()
+
+        pooled.aclose.assert_not_awaited()
+        assert adapter.client is None
+
+    @pytest.mark.asyncio
+    async def test_cleanup_closes_a_client_the_adapter_created(self):
+        adapter = ElevenLabsAdapter({"elevenlabs_api_key": "xi-test"})
+        owned = AsyncMock()
+        adapter.client = owned
+        adapter._owns_client = True
+
+        await adapter._cleanup_resources()
+
+        owned.aclose.assert_awaited_once()
+        assert adapter.client is None
+        assert adapter._owns_client is False
+
+    @pytest.mark.asyncio
+    async def test_pool_still_serves_a_live_client_after_adapter_close(self):
+        """The end-to-end property: one adapter's close must not poison the pool."""
+        from tldw_Server_API.app.core.TTS.tts_resource_manager import (
+            HTTPConnectionPool,
+            ResourceMetrics,
+        )
+
+        class _StubClient:
+            def __init__(self) -> None:
+                self.is_closed = False
+
+            async def aclose(self) -> None:
+                self.is_closed = True
+
+        pool = HTTPConnectionPool()
+        stub = _StubClient()
+        pool._pools["elevenlabs"] = stub
+        pool._pool_metrics["elevenlabs"] = ResourceMetrics(created_at=0.0, last_used=0.0)
+
+        adapter = ElevenLabsAdapter({"elevenlabs_api_key": "xi-test"})
+        adapter.client = await pool.get_client("elevenlabs")
+        adapter._owns_client = False
+
+        await adapter._cleanup_resources()
+
+        next_client = await pool.get_client("elevenlabs")
+        assert next_client is stub
+        assert next_client.is_closed is False
+
+    @pytest.mark.asyncio
+    async def test_convenience_api_client_is_owned_and_closed(self):
+        """fetch_voices is reachable without initialize(), so it creates its own.
+
+        The convenience API lives on the ElevenLabsTTSAdapter subclass, which is where
+        _ensure_client sits; ownership itself is inherited from the base.
+        """
+        from tldw_Server_API.app.core.TTS.adapters.elevenlabs_adapter import (
+            ElevenLabsTTSAdapter,
+        )
+
+        adapter = ElevenLabsTTSAdapter({"elevenlabs_api_key": "xi-test"})
+        created = AsyncMock()
+        with patch(
+            "tldw_Server_API.app.core.http_client.create_async_client",
+            return_value=created,
+        ):
+            adapter._ensure_client()
+
+        assert adapter.client is created
+        assert adapter._owns_client is True
+
+        await adapter._cleanup_resources()
+        created.aclose.assert_awaited_once()
