@@ -136,6 +136,15 @@ def _simple_tokens(text: str) -> list[str]:
     return tokens
 
 
+# Alias metric keys are recorded alongside their canonical twins (pointing at the
+# same result dict) so the response stays OpenAI-style. They must not be scored as
+# independent metrics, or the aliased metric is weighted twice.
+_CANONICAL_METRIC_FOR_ALIAS = {
+    "answer_relevance": "relevance",
+    "answer_faithfulness": "faithfulness",
+}
+
+
 class RAGEvaluator:
     """Evaluator for RAG system performance"""
 
@@ -1052,6 +1061,16 @@ class RAGEvaluator:
         """
         if not metrics:
             return 0.0
+
+        # Drop alias keys whose canonical twin is also present: both point at the
+        # same result dict, so scoring both weights that metric twice and inflates
+        # the overall score. An alias that is the only remaining copy (the caller
+        # dropped the canonical) is scored normally. Aliases stay in the response.
+        metrics = {
+            name: data
+            for name, data in metrics.items()
+            if _CANONICAL_METRIC_FOR_ALIAS.get(name) not in metrics
+        }
 
         # Default to equal weights
         if weights is None:
