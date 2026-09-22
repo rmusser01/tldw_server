@@ -813,6 +813,24 @@ class BaseModule(ABC):
         # Pass-through for other primitives
         return input_data
 
+    def caller_is_admin(self, context: Any | None) -> bool:
+        """Return True when the request context carries MCP administrator claims.
+
+        The one admin check for every module. Five modules had grown their own, with
+        five different claim sets; see protocol_types.metadata_has_admin_claims for
+        what they disagreed about and why permissions are narrower than AuthNZ's.
+
+        Note there is no getattr(context, "is_admin") probe here. kanban and sandbox
+        both had one, but RequestContext defines no such attribute and server.py drops
+        principal.is_admin when building it, so the probe was always False and those
+        two only ever ran the claims logic they appeared stricter than.
+        """
+        # Local import: protocol_types imports BaseModule, so this cannot be
+        # module-level without a cycle.
+        from ..protocol_types import metadata_has_admin_claims
+
+        return metadata_has_admin_claims(getattr(context, "metadata", None))
+
     # Shared helpers for validators
     def is_write_tool_def(self, tool_def: dict[str, Any]) -> bool:
         """Heuristic and metadata-based check for write/management tools.

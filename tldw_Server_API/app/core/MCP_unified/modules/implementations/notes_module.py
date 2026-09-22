@@ -2006,7 +2006,7 @@ class NotesModule(BaseModule):
         permanent: bool,
         expected_version: Any,
     ) -> dict[str, Any]:
-        if permanent and not self._is_admin(context):
+        if permanent and not self.caller_is_admin(context):
             raise PermissionError("Admin role required for permanent delete")
         assert_identifier_in_scope(context, "note_id", note_id, label="Note")
         db = self._open_db(context)
@@ -2196,12 +2196,6 @@ class NotesModule(BaseModule):
             "loc": None,
         }
 
-    def _is_admin(self, context: Any | None) -> bool:
-        try:
-            roles = (getattr(context, "metadata", {}) or {}).get("roles")
-            return isinstance(roles, list) and any(str(r).lower() == "admin" for r in roles)
-        except _NOTES_MODULE_NONCRITICAL_EXCEPTIONS:
-            return False
 
     def _validate_tags(self, tags: Any, *, allow_empty: bool) -> None:
         if not isinstance(tags, list):

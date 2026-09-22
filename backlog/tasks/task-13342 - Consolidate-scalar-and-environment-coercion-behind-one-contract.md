@@ -1,9 +1,10 @@
 ---
 id: TASK-13342
 title: Consolidate scalar and environment coercion behind one contract
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-22 05:10'
+updated_date: '2026-09-22 05:11'
 labels:
   - refactor
   - security
@@ -44,6 +45,22 @@ Found by the comprehensive core-module review (TASK-13293). All three defects in
 - [ ] #6 No configuration key that parses today resolves to a different value after any stage
 - [ ] #7 Bandit run for touched scope
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Superseded by TASK-13322, which was filed first and identifies a better root cause: the de-facto canonical is_truthy lives in core/testing.py, a module documented as test-mode detection, imported by 140 production files -- so engineers reasonably write their own rather than importing production flag semantics from testing.py. 13322 also found a defect this task missed: one truthy set lowercases without stripping, so a trailing space from a docker-compose environment: list flips DOTS_VLLM_USE_DATA_URL to False and sends a server-local path to a remote vLLM.
+
+The design doc Docs/Design/2026-09-21-scalar-and-env-coercion-consolidation-design.md remains the design of record and is now referenced from 13322. It contributes what 13322 does not carry: the three-way contract decision (truthy / falsy / unrecognised returns explicit default) with the argument for why the two-way contract is what makes the fail-open class expressible; the ratchet-over-mass-refactor decision; the TRUTHY/FALSY union derived so no currently-accepted spelling changes meaning; the five staged migration gates; and the explicit exclusions.
+
+Closing as duplicate rather than merging, so one task owns the work.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Duplicate of TASK-13322. Design doc retained and linked from 13322.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
