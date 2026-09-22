@@ -49,6 +49,7 @@ from tldw_Server_API.app.core.Chatbooks.openwebui_hydration_jobs import (
     OPENWEBUI_ATTACHMENT_HYDRATION_JOB_TYPE,
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import resolve_user_id_value
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
@@ -90,9 +91,11 @@ def _jobs_manager() -> JobManager:
 
 
 def _normalize_user_id(value: Any) -> str:
-    if value is None or str(value).strip() == "":
-        return str(DatabasePaths.get_single_user_id())
-    return str(value)
+    # Fail rather than silently substituting user 1. resolve_user_id_value
+    # still falls back to the fixed id in single-user mode, where that is
+    # correct; in multi-user mode a job with no owner raises instead of
+    # opening another account's database.
+    return str(resolve_user_id_value(value, allow_none=False))
 
 
 def _coerce_int(value: Any, default: int) -> int:

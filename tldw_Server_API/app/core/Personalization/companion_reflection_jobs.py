@@ -11,6 +11,7 @@ from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import resolve_user_id_value
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Personalization.companion_lifecycle import rebuild_companion_scope
 from tldw_Server_API.app.core.Personalization.companion_proactive import (
@@ -48,7 +49,11 @@ def _parse_payload(payload: Any) -> dict[str, Any]:
 def _resolve_user_id(job: dict[str, Any], payload: dict[str, Any]) -> str:
     owner = job.get("owner_user_id") or payload.get("user_id")
     if owner is None or str(owner).strip() == "":
-        return str(DatabasePaths.get_single_user_id())
+    # Fail rather than silently substituting user 1. resolve_user_id_value
+    # still falls back to the fixed id in single-user mode, where that is
+    # correct; in multi-user mode a job with no owner raises instead of
+    # opening another account's database.
+        return str(resolve_user_id_value(None, allow_none=False))
     return str(owner)
 
 
