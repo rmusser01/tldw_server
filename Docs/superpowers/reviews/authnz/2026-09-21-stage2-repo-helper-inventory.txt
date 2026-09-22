@@ -1,0 +1,78 @@
+# Backend discriminator definitions inside core/AuthNZ (25 defs)
+tldw_Server_API/app/core/AuthNZ/rbac_seed.py:67:def _is_postgres_connection(conn: Any) -> bool:
+tldw_Server_API/app/core/AuthNZ/database.py:968:    def _should_use_postgres(self) -> bool:
+tldw_Server_API/app/core/AuthNZ/database.py:1949:async def is_postgres_backend() -> bool:
+tldw_Server_API/app/core/AuthNZ/pg_migrations_extra.py:3970:def _looks_like_postgres(obj: Any) -> bool:
+tldw_Server_API/app/core/AuthNZ/profile_user_sync_boundary.py:13:def _backend_dialect(backend: Any) -> str:
+tldw_Server_API/app/core/AuthNZ/byok_rotation.py:47:def _is_postgres_pool(pool: DatabasePool) -> bool:
+tldw_Server_API/app/core/AuthNZ/repos/org_stt_settings_repo.py:20:    def _is_postgres(self) -> bool:
+tldw_Server_API/app/core/AuthNZ/repos/maintenance_rotation_runs_repo.py:53:    def _is_postgres_backend(self) -> bool:
+tldw_Server_API/app/core/AuthNZ/repos/quotas_repo.py:23:    def _is_postgres_backend(self) -> bool:
+tldw_Server_API/app/core/AuthNZ/repos/shared_workspace_repo.py:67:    def _is_postgres_backend(self) -> bool:
+tldw_Server_API/app/core/AuthNZ/repos/orgs_teams_repo.py:32:    def _is_postgres(self, conn: Any | None = None) -> bool:
+tldw_Server_API/app/core/AuthNZ/repos/token_blacklist_repo.py:26:    def _is_postgres_backend(self) -> bool:
+tldw_Server_API/app/core/AuthNZ/repos/usage_repo.py:67:    def _is_postgres_backend(self) -> bool:
+tldw_Server_API/app/core/AuthNZ/repos/sessions_repo.py:25:    def _is_postgres_backend(self) -> bool:
+tldw_Server_API/app/core/AuthNZ/repos/org_invites_repo.py:42:    def _is_postgres(self, conn: Any | None = None) -> bool:
+tldw_Server_API/app/core/AuthNZ/repos/monitoring_repo.py:28:    def _is_postgres_backend(self) -> bool:
+tldw_Server_API/app/core/AuthNZ/repos/generated_files_repo.py:78:    def _is_postgres(self) -> bool:
+tldw_Server_API/app/core/AuthNZ/repos/registration_codes_repo.py:23:    def _is_postgres_backend(self) -> bool:
+tldw_Server_API/app/core/AuthNZ/repos/data_subject_requests_repo.py:20:    def _is_postgres_backend(self) -> bool:
+tldw_Server_API/app/core/AuthNZ/repos/api_keys_repo.py:96:    def _is_postgres_backend(self) -> bool:
+tldw_Server_API/app/core/AuthNZ/repos/users_repo.py:29:    def _is_postgres_backend(self) -> bool:
+tldw_Server_API/app/core/AuthNZ/repos/admin_monitoring_repo.py:38:    def _is_postgres_backend(self) -> bool:
+tldw_Server_API/app/core/AuthNZ/repos/rate_limits_repo.py:24:    def _is_postgres_backend(self) -> bool:
+tldw_Server_API/app/core/AuthNZ/repos/billing_repo.py:27:    def _is_postgres(self, conn: Any | None = None) -> bool:
+tldw_Server_API/app/core/AuthNZ/repos/prototype_workspaces_repo.py:154:    def _is_postgres_backend(self) -> bool:
+tldw_Server_API/app/core/AuthNZ/repos/storage_quotas_repo.py:36:    def _is_postgres(self) -> bool:
+tldw_Server_API/app/core/AuthNZ/repos/byok_validation_runs_repo.py:50:    def _is_postgres_backend(self) -> bool:
+tldw_Server_API/app/core/AuthNZ/repos/backup_schedules_repo.py:72:    def _is_postgres_backend(self) -> bool:
+tldw_Server_API/app/core/AuthNZ/repos/mfa_repo.py:29:    def _is_postgres_backend(self) -> bool:
+
+# Private JSON/datetime/row helper copies in repos/
+tldw_Server_API/app/core/AuthNZ/repos/maintenance_rotation_runs_repo.py:77:    def _row_to_dict(row: Any) -> dict[str, Any]:
+tldw_Server_API/app/core/AuthNZ/repos/maintenance_rotation_runs_repo.py:110:    def _command_touched_rows(result: Any) -> bool:
+tldw_Server_API/app/core/AuthNZ/repos/org_stt_settings_repo.py:100:    def _row_to_dict(cls, row: Any) -> dict[str, Any]:
+tldw_Server_API/app/core/AuthNZ/repos/org_provider_secrets_repo.py:66:    def _normalize_datetime_for_postgres(dt: datetime) -> datetime:
+tldw_Server_API/app/core/AuthNZ/repos/org_provider_secrets_repo.py:70:    def _row_to_dict(row: Any) -> dict[str, Any]:
+tldw_Server_API/app/core/AuthNZ/repos/telegram_runtime_repo.py:178:    def _normalize_datetime_for_postgres(value: datetime) -> datetime:
+tldw_Server_API/app/core/AuthNZ/repos/telegram_runtime_repo.py:184:    def _row_to_dict(row: Any) -> dict[str, Any]:
+tldw_Server_API/app/core/AuthNZ/repos/shared_workspace_repo.py:14:def _to_bool(value: Any) -> bool:
+tldw_Server_API/app/core/AuthNZ/repos/shared_workspace_repo.py:25:def _load_json_dict(raw: Any) -> dict[str, Any]:
+tldw_Server_API/app/core/AuthNZ/repos/shared_workspace_repo.py:121:    def _row_to_dict(row: Any) -> dict[str, Any]:
+tldw_Server_API/app/core/AuthNZ/repos/mcp_hub_repo.py:53:def _to_bool(value: Any) -> bool:
+tldw_Server_API/app/core/AuthNZ/repos/mcp_hub_repo.py:152:def _load_json_dict(raw: Any) -> dict[str, Any]:
+tldw_Server_API/app/core/AuthNZ/repos/mcp_hub_repo.py:166:def _load_json_list(raw: Any) -> list[Any]:
+tldw_Server_API/app/core/AuthNZ/repos/mcp_hub_repo.py:264:    def _row_to_dict(row: Any) -> dict[str, Any]:
+tldw_Server_API/app/core/AuthNZ/repos/mcp_hub_repo.py:522:    def _command_touched_rows(result: Any) -> bool:
+tldw_Server_API/app/core/AuthNZ/repos/byok_oauth_state_repo.py:47:    def _row_to_dict(row: Any) -> dict[str, Any]:
+tldw_Server_API/app/core/AuthNZ/repos/byok_oauth_state_repo.py:60:    def _command_touched_rows(result: Any) -> bool:
+tldw_Server_API/app/core/AuthNZ/repos/llm_provider_overrides_repo.py:90:    def _row_to_dict(row: Any) -> dict[str, Any]:
+tldw_Server_API/app/core/AuthNZ/repos/federated_managed_grant_repo.py:58:    def _row_to_dict(row: Any) -> dict[str, Any]:
+tldw_Server_API/app/core/AuthNZ/repos/data_subject_requests_repo.py:45:    def _parse_json_field(value: Any, *, fallback: Any) -> Any:
+tldw_Server_API/app/core/AuthNZ/repos/sessions_repo.py:35:    def _normalize_datetime_for_postgres(dt: datetime | None) -> datetime | None:
+tldw_Server_API/app/core/AuthNZ/repos/managed_secret_refs_repo.py:51:    def _normalize_datetime_for_postgres(dt: datetime | None) -> datetime | None:
+tldw_Server_API/app/core/AuthNZ/repos/managed_secret_refs_repo.py:57:    def _parse_json_field(value: Any) -> dict[str, Any]:
+tldw_Server_API/app/core/AuthNZ/repos/managed_secret_refs_repo.py:69:    def _row_to_dict(cls, row: Any) -> dict[str, Any]:
+tldw_Server_API/app/core/AuthNZ/repos/federated_identity_repo.py:54:    def _row_to_dict(row: Any) -> dict[str, Any]:
+tldw_Server_API/app/core/AuthNZ/repos/federated_identity_repo.py:67:    def _normalize_datetime_for_postgres(value: datetime | None) -> datetime | None:
+tldw_Server_API/app/core/AuthNZ/repos/telegram_approvals_repo.py:92:    def _normalize_datetime_for_postgres(value: datetime) -> datetime:
+tldw_Server_API/app/core/AuthNZ/repos/telegram_approvals_repo.py:98:    def _row_to_dict(row: Any) -> dict[str, Any]:
+tldw_Server_API/app/core/AuthNZ/repos/billing_repo.py:36:    def _row_to_dict(cursor, row: tuple) -> dict[str, Any]:
+tldw_Server_API/app/core/AuthNZ/repos/byok_validation_runs_repo.py:74:    def _row_to_dict(row: Any) -> dict[str, Any]:
+tldw_Server_API/app/core/AuthNZ/repos/byok_validation_runs_repo.py:111:    def _command_touched_rows(result: Any) -> bool:
+tldw_Server_API/app/core/AuthNZ/repos/prototype_workspaces_repo.py:64:def _to_bool(value: Any) -> bool:
+tldw_Server_API/app/core/AuthNZ/repos/prototype_workspaces_repo.py:75:def _load_json_dict(raw: Any) -> dict[str, Any]:
+tldw_Server_API/app/core/AuthNZ/repos/prototype_workspaces_repo.py:89:def _load_json_list(raw: Any) -> list[Any]:
+tldw_Server_API/app/core/AuthNZ/repos/prototype_workspaces_repo.py:191:    def _row_to_dict(row: Any) -> dict[str, Any]:
+tldw_Server_API/app/core/AuthNZ/repos/mfa_repo.py:34:    def _normalize_datetime_for_postgres(dt: datetime) -> datetime:
+tldw_Server_API/app/core/AuthNZ/repos/media_ingest_dedupe_repo.py:92:    def _normalize_datetime_for_postgres(value: datetime) -> datetime:
+tldw_Server_API/app/core/AuthNZ/repos/media_ingest_dedupe_repo.py:98:    def _row_to_dict(row: Any) -> dict[str, Any]:
+tldw_Server_API/app/core/AuthNZ/repos/workspace_provider_installations_repo.py:100:    def _normalize_datetime_for_postgres(dt: datetime) -> datetime:
+tldw_Server_API/app/core/AuthNZ/repos/workspace_provider_installations_repo.py:104:    def _row_to_dict(row: Any) -> dict[str, Any]:
+tldw_Server_API/app/core/AuthNZ/repos/user_provider_secrets_repo.py:57:    def _normalize_datetime_for_postgres(dt: datetime) -> datetime:
+tldw_Server_API/app/core/AuthNZ/repos/user_provider_secrets_repo.py:61:    def _row_to_dict(row: Any) -> dict[str, Any]:
+tldw_Server_API/app/core/AuthNZ/repos/identity_provider_repo.py:69:    def _row_to_dict(row: Any) -> dict[str, Any]:
+tldw_Server_API/app/core/AuthNZ/repos/identity_provider_repo.py:82:    def _normalize_datetime_for_postgres(value: datetime | None) -> datetime | None:
+tldw_Server_API/app/core/AuthNZ/repos/backup_schedules_repo.py:103:    def _row_to_dict(row: Any) -> dict[str, Any]:
+tldw_Server_API/app/core/AuthNZ/repos/backup_schedules_repo.py:153:    def _command_touched_rows(result: Any) -> bool:

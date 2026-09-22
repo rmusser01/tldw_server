@@ -1,0 +1,105 @@
+# PromptStudioDatabase.py dual-backend pair inventory, generated 2026-09-21
+# CLASS PromptStudioRowAdapter: 275-317 (43 lines)
+# CLASS PromptStudioBackendCursorAdapter: 320-375 (56 lines)
+# CLASS PromptStudioBackendCursorWrapper: 378-454 (77 lines)
+# CLASS PromptStudioBackendConnectionWrapper: 457-483 (27 lines)
+# CLASS PromptStudioBackendManagedTransaction: 486-510 (25 lines)
+# CLASS BackendPromptStudioDatabaseBase: 517-719 (203 lines)
+# CLASS _BackendPromptStudioDatabase: 722-3843 (3122 lines)
+# CLASS _SQLitePromptStudioDatabase: 3848-7141 (3294 lines)
+# CLASS PromptStudioDatabase: 7144-7426 (283 lines)
+
+## 59 method names implemented in BOTH _BackendPromptStudioDatabase and _SQLitePromptStudioDatabase
+method                                            backend           sqlite   facade
+__init__                                          781-800        3861-3880     7147
+_cursor_exec                                      802-814        3984-3990        -
+_format_test_case                               3436-3437        5322-5325        -
+_idem_lookup                                    1023-1052        4054-4085        -
+_idem_record                                    1054-1064        4087-4097        -
+_log_sync_event                                 1173-1228        5271-5312        -
+_row_to_dict                                    1137-1171        5235-5269        -
+acquire_next_job                                2867-3053        6170-6279     7288
+cleanup_jobs                                    3080-3094        6340-6359     7303
+complete_optimization                           2332-2369        5830-5865     7403
+create_bulk_test_cases                          3700-3724        6894-6951     7328
+create_evaluation                               1884-1919        4868-4924     7353
+create_job                                      2673-2714        5977-6036     7235
+create_optimization                             2036-2100        7089-7141     7367
+create_project                                  1235-1298        4102-4180        -
+create_prompt                                   1382-1470        5074-5172     7227
+create_prompt_version                           3162-3275        5386-5516        -
+create_signature                                1566-1622        4413-4499     7212
+create_test_case                                3473-3526        6593-6690     7313
+create_test_run                                 1803-1856        4762-4836     7345
+delete_project                                  1531-1562        5174-5230        -
+delete_signature                                1768-1799        4697-4757     7224
+delete_test_case                                3672-3698        6854-6892     7325
+ensure_prompt_stub                              2624-2669        6541-6588     7230
+get_evaluation                                  1959-1968        4972-4986     7359
+get_golden_test_cases                           3406-3432        7054-7067     7340
+get_job                                         2716-2725        6038-6049     7258
+get_job_by_uuid                                 2727-2736        6051-6062     7261
+get_latest_job_for_entity                       3096-3111        6361-6378     7306
+get_optimization                                2102-2120        5660-5682     7375
+get_project                                     1300-1315        4182-4225        -
+get_prompt                                      2521-2536        5330-5357        -
+get_prompt_with_project                         3138-3160        5359-5384        -
+get_signature                                   1624-1642        4501-4535     7215
+get_test_case                                   3528-3550        6692-6701     7316
+get_test_case_stats                             3781-3843        6985-7052     7337
+get_test_cases_by_ids                           1858-1880        4838-4863     7348
+get_test_cases_by_signature                     3767-3779        6971-6983     7334
+list_evaluations                                1970-2032        4988-5072     7362
+list_jobs                                       2738-2769        6064-6089     7264
+list_jobs_for_entity                            3113-3136        6380-6403     7309
+list_optimization_iterations                    2472-2517        5925-5973     7425
+list_projects                                   1317-1380        4227-4318        -
+list_prompt_versions                            2591-2622        6509-6539        -
+list_prompts                                    2538-2589        6461-6507        -
+list_signatures                                 1644-1707        4537-4623     7218
+list_test_cases                                 3552-3613        6703-6788     7319
+record_optimization_iteration                   2371-2418        5867-5923     7422
+renew_job_lease                                 2823-2865        6405-6459     7295
+retry_job_record                                3055-3078        6281-6338     7291
+revert_prompt_to_version                        3277-3404        5518-5656        -
+search_test_cases                               3726-3765        6953-6969     7331
+set_optimization_status                         2307-2330        5805-5828     7400
+update_evaluation                               1921-1957        4926-4970     7356
+update_job_status                               2771-2821        6091-6168     7273
+update_optimization                             2185-2305        5684-5803     7381
+update_project                                  1472-1529        4320-4408     7202
+update_signature                                1709-1766        4625-4695     7221
+update_test_case                                3615-3670        6790-6852     7322
+
+# paired-method LOC: backend=2559 sqlite=3006 total=5565
+# of the 59 paired names, 43 are ALSO redeclared on the PromptStudioDatabase facade
+
+## SIGNATURE MISMATCHES (same name, incompatible call surface)
+  __init__
+    backend L781: pos=('self', 'db_path', 'client_id') opt=() kwonly=('backend', 'config', 'tenant_user_id')
+    sqlite  L3861: pos=('self', 'db_path', 'client_id') opt=() kwonly=()
+  _format_test_case
+    backend L3436: pos=('self', 'row') opt=() kwonly=()
+    sqlite  L5322: pos=('self', 'cursor', 'row') opt=() kwonly=()
+  _row_to_dict
+    backend L1137: pos=('self', 'cursor') opt=('row',) kwonly=()
+    sqlite  L5235: pos=('self', 'cursor', 'row') opt=() kwonly=()
+  create_bulk_test_cases
+    backend L3700: pos=('self', 'project_id', 'test_cases') opt=() kwonly=('client_id', 'signature_id')
+    sqlite  L6894: pos=('self', 'project_id', 'test_cases') opt=() kwonly=('signature_id',)
+  delete_signature
+    backend L1768: pos=('self', 'signature_id') opt=('hard_delete',) kwonly=()
+    sqlite  L4697: pos=('self', 'signature_id') opt=() kwonly=('hard_delete',)
+  get_prompt
+    backend L2521: pos=('self', 'prompt_id') opt=('include_deleted',) kwonly=()
+    sqlite  L5330: pos=('self', 'prompt_id') opt=() kwonly=()
+  list_evaluations
+    backend L1970: pos=('self',) opt=() kwonly=('page', 'per_page', 'project_id', 'prompt_id', 'status')
+    sqlite  L4988: pos=('self',) opt=('project_id', 'prompt_id', 'status', 'page', 'per_page') kwonly=()
+
+## methods present on ONE implementation only
+  backend-only (9): ['_apply_postgres_migrations', '_build_test_case_filters', '_convert_sqlite_schema_to_postgres_statements', '_ensure_extensions', '_ensure_postgres_fts', '_initialize_schema_postgres', '_transform_sqlite_statement_for_postgres', 'get_fts_column', 'list_optimizations']
+  sqlite-only  (7): ['_apply_prompt_studio_migrations', '_execute', '_executemany', '_init_prompt_studio_schema', '_sqlite_journal_mode', 'row_to_dict', 'transaction']
+
+## duplicate defs within one class (second shadows first)
+  _BackendPromptStudioDatabase.list_optimization_iterations: [(2420, 2470), (2472, 2517)]

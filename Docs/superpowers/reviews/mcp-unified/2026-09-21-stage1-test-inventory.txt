@@ -1,0 +1,361 @@
+# MCP_unified test inventory — generated 2026-09-21
+## A. In-app tree: tldw_Server_API/app/core/MCP_unified/tests (NOT referenced by any ci.yml shard)
+   90042 total
+    6575 tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py
+    4429 tldw_Server_API/app/core/MCP_unified/tests/test_extraction_contracts.py
+    3677 tldw_Server_API/app/core/MCP_unified/tests/test_filesystem_module.py
+    3210 tldw_Server_API/app/core/MCP_unified/tests/test_gateway_cli_package.py
+    3059 tldw_Server_API/app/core/MCP_unified/tests/test_smoke_client.py
+    2857 tldw_Server_API/app/core/MCP_unified/tests/test_tool_use_reporting_protocol.py
+    2604 tldw_Server_API/app/core/MCP_unified/tests/test_idempotency_manager.py
+    2003 tldw_Server_API/app/core/MCP_unified/tests/test_gateway_external_runtime.py
+    1928 tldw_Server_API/app/core/MCP_unified/tests/test_git_module.py
+    1776 tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_validation.py
+    1775 tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_connection.py
+    1768 tldw_Server_API/app/core/MCP_unified/tests/test_run_command_module.py
+    1669 tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py
+    1566 tldw_Server_API/app/core/MCP_unified/tests/test_skills_module.py
+    1548 tldw_Server_API/app/core/MCP_unified/tests/test_gateway_profile_management.py
+    1431 tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_stdio.py
+    1315 tldw_Server_API/app/core/MCP_unified/tests/test_prepared_execution_integrity.py
+    1266 tldw_Server_API/app/core/MCP_unified/tests/test_kanban_module.py
+    1205 tldw_Server_API/app/core/MCP_unified/tests/test_mcp_unified_rc_harness.py
+    1164 tldw_Server_API/app/core/MCP_unified/tests/test_prompts_catalog.py
+    1098 tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_projection.py
+    1053 tldw_Server_API/app/core/MCP_unified/tests/test_external_server_manager.py
+    1020 tldw_Server_API/app/core/MCP_unified/tests/test_codegraph_module.py
+     969 tldw_Server_API/app/core/MCP_unified/tests/test_rag_module.py
+     849 tldw_Server_API/app/core/MCP_unified/tests/test_basic_functionality.py
+     845 tldw_Server_API/app/core/MCP_unified/tests/test_http_external_transport.py
+     810 tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_artifact_consumer.py
+     810 tldw_Server_API/app/core/MCP_unified/tests/test_gateway_external_registry_management.py
+     774 tldw_Server_API/app/core/MCP_unified/tests/test_protocol_catalog_filter.py
+     765 tldw_Server_API/app/core/MCP_unified/tests/test_protocol_tool_hooks.py
+     746 tldw_Server_API/app/core/MCP_unified/tests/test_protocol_allowed_tools.py
+     730 tldw_Server_API/app/core/MCP_unified/tests/test_stdio_external_transport.py
+     680 tldw_Server_API/app/core/MCP_unified/tests/test_protocol_prompts_catalog.py
+     679 tldw_Server_API/app/core/MCP_unified/tests/test_idempotency_and_category.py
+     662 tldw_Server_API/app/core/MCP_unified/tests/test_gateway_config_snapshots.py
+     655 tldw_Server_API/app/core/MCP_unified/tests/test_persona_scope_stage3.py
+     635 tldw_Server_API/app/core/MCP_unified/tests/test_profile_presets.py
+     627 tldw_Server_API/app/core/MCP_unified/tests/test_mounted_jsonrpc_transport_contract.py
+     625 tldw_Server_API/app/core/MCP_unified/tests/test_policy_grant_stores.py
+     621 tldw_Server_API/app/core/MCP_unified/tests/test_quizzes_module.py
+     620 tldw_Server_API/app/core/MCP_unified/tests/test_web_fetch_module.py
+     618 tldw_Server_API/app/core/MCP_unified/tests/test_http_security_guards.py
+     618 tldw_Server_API/app/core/MCP_unified/tests/test_gateway_external_runtime_adapter.py
+     604 tldw_Server_API/app/core/MCP_unified/tests/test_sqlite_storage_contracts.py
+     597 tldw_Server_API/app/core/MCP_unified/tests/test_command_runtime_execution.py
+     587 tldw_Server_API/app/core/MCP_unified/tests/test_flashcards_module.py
+     576 tldw_Server_API/app/core/MCP_unified/tests/test_profile_structured_resolution.py
+     575 tldw_Server_API/app/core/MCP_unified/tests/test_concurrency_and_breaker.py
+     561 tldw_Server_API/app/core/MCP_unified/tests/test_filesystem_notebook_tools.py
+     554 tldw_Server_API/app/core/MCP_unified/tests/test_persona_visuals_module.py
+     544 tldw_Server_API/app/core/MCP_unified/tests/test_profile_policy_decisions.py
+     529 tldw_Server_API/app/core/MCP_unified/tests/test_gateway_tool_discovery.py
+     526 tldw_Server_API/app/core/MCP_unified/tests/test_slides_module.py
+     516 tldw_Server_API/app/core/MCP_unified/tests/test_http_mapping.py
+     498 tldw_Server_API/app/core/MCP_unified/tests/test_external_websocket_adapter.py
+     489 tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_contracts.py
+     479 tldw_Server_API/app/core/MCP_unified/tests/test_filesystem_lock_managers.py
+     470 tldw_Server_API/app/core/MCP_unified/tests/test_tool_observability.py
+     463 tldw_Server_API/app/core/MCP_unified/tests/test_gateway_tool_use_reporting.py
+     456 tldw_Server_API/app/core/MCP_unified/tests/test_guarded_slides_websocket.py
+     450 tldw_Server_API/app/core/MCP_unified/tests/test_rate_limit_categories.py
+     446 tldw_Server_API/app/core/MCP_unified/tests/test_federation_shell_contracts.py
+     440 tldw_Server_API/app/core/MCP_unified/tests/test_web_research_module.py
+     438 tldw_Server_API/app/core/MCP_unified/tests/test_gateway_policy_simulation.py
+     429 tldw_Server_API/app/core/MCP_unified/tests/test_media_retrieval.py
+     418 tldw_Server_API/app/core/MCP_unified/tests/test_gateway_remote_runtime_cli.py
+     400 tldw_Server_API/app/core/MCP_unified/tests/test_notebook_files.py
+     400 tldw_Server_API/app/core/MCP_unified/tests/test_browser_cdp_module.py
+     371 tldw_Server_API/app/core/MCP_unified/tests/test_profile_registry_resolver.py
+     356 tldw_Server_API/app/core/MCP_unified/tests/test_dynamic_module_catalog.py
+     354 tldw_Server_API/app/core/MCP_unified/tests/test_tool_use_reporting_store.py
+     354 tldw_Server_API/app/core/MCP_unified/tests/fixtures/smoke_stdio_server.py
+     353 tldw_Server_API/app/core/MCP_unified/tests/test_protocol_path_scope_candidates.py
+     351 tldw_Server_API/app/core/MCP_unified/tests/test_gateway_credential_grants.py
+     343 tldw_Server_API/app/core/MCP_unified/tests/test_protocol_governance_preflight.py
+     316 tldw_Server_API/app/core/MCP_unified/tests/test_web_search_module.py
+     306 tldw_Server_API/app/core/MCP_unified/tests/test_browser_cdp_client.py
+     299 tldw_Server_API/app/core/MCP_unified/tests/test_gateway_policy_grant_manager.py
+     293 tldw_Server_API/app/core/MCP_unified/tests/test_protocol_preexec_validation.py
+     288 tldw_Server_API/app/core/MCP_unified/tests/test_security_hardening.py
+     279 tldw_Server_API/app/core/MCP_unified/tests/test_tool_use_reporting_models.py
+     270 tldw_Server_API/app/core/MCP_unified/tests/test_profile_permission_rules.py
+     269 tldw_Server_API/app/core/MCP_unified/tests/test_external_federation_integration.py
+     267 tldw_Server_API/app/core/MCP_unified/tests/test_storage_contracts.py
+     263 tldw_Server_API/app/core/MCP_unified/tests/test_protocol_nested_tool_preparation.py
+     258 tldw_Server_API/app/core/MCP_unified/tests/test_external_stdio_adapter.py
+     253 tldw_Server_API/app/core/MCP_unified/tests/test_governance_module.py
+     250 tldw_Server_API/app/core/MCP_unified/tests/test_filesystem_patch_parser.py
+     248 tldw_Server_API/app/core/MCP_unified/tests/test_gateway_admin_auth.py
+     247 tldw_Server_API/app/core/MCP_unified/tests/test_external_stdio_adapter_integration.py
+     240 tldw_Server_API/app/core/MCP_unified/tests/test_log_redaction.py
+     239 tldw_Server_API/app/core/MCP_unified/tests/test_tool_hook_manager.py
+     230 tldw_Server_API/app/core/MCP_unified/tests/test_command_runtime_presentation.py
+     220 tldw_Server_API/app/core/MCP_unified/tests/test_notes_crud_tags.py
+     217 tldw_Server_API/app/core/MCP_unified/tests/test_scope_and_fallbacks.py
+     205 tldw_Server_API/app/core/MCP_unified/tests/test_prometheus_validation_metrics.py
+     203 tldw_Server_API/app/core/MCP_unified/tests/test_tool_execution_outcomes.py
+     194 tldw_Server_API/app/core/MCP_unified/tests/test_protocol_scope_enforcement.py
+     175 tldw_Server_API/app/core/MCP_unified/tests/test_rag_module_registration.py
+     173 tldw_Server_API/app/core/MCP_unified/tests/test_server_batch_and_formatting.py
+     173 tldw_Server_API/app/core/MCP_unified/tests/test_mcp_discovery_module.py
+     173 tldw_Server_API/app/core/MCP_unified/tests/test_external_server_config_schema.py
+     173 tldw_Server_API/app/core/MCP_unified/tests/test_cooking_module.py
+     160 tldw_Server_API/app/core/MCP_unified/tests/test_prometheus_idempotency_metrics.py
+     159 tldw_Server_API/app/core/MCP_unified/tests/test_path_grant_authoring.py
+     150 tldw_Server_API/app/core/MCP_unified/tests/test_registry_iteration_race.py
+     144 tldw_Server_API/app/core/MCP_unified/tests/test_knowledge_get.py
+     138 tldw_Server_API/app/core/MCP_unified/tests/test_regression_behaviors.py
+     137 tldw_Server_API/app/core/MCP_unified/tests/test_jsonrpc_transport_helpers.py
+     130 tldw_Server_API/app/core/MCP_unified/tests/test_config_safe_defaults.py
+     128 tldw_Server_API/app/core/MCP_unified/tests/test_http_validation_bounds.py
+     127 tldw_Server_API/app/core/MCP_unified/tests/test_websocket_smoke.py
+     123 tldw_Server_API/app/core/MCP_unified/tests/test_tool_execution_coordinator.py
+     122 tldw_Server_API/app/core/MCP_unified/tests/test_git_module_registration.py
+     121 tldw_Server_API/app/core/MCP_unified/tests/test_knowledge_search_defaults.py
+     121 tldw_Server_API/app/core/MCP_unified/tests/test_external_credential_broker_runtime.py
+     118 tldw_Server_API/app/core/MCP_unified/tests/test_web_tool_base.py
+     115 tldw_Server_API/app/core/MCP_unified/tests/test_http_batch.py
+     113 tldw_Server_API/app/core/MCP_unified/tests/test_jsonrpc_notifications.py
+     111 tldw_Server_API/app/core/MCP_unified/tests/test_ws_per_ip_caps.py
+     110 tldw_Server_API/app/core/MCP_unified/tests/support.py
+     109 tldw_Server_API/app/core/MCP_unified/tests/test_external_federation_module.py
+     103 tldw_Server_API/app/core/MCP_unified/tests/mcp_unified_artifact_test_utils.py
+      97 tldw_Server_API/app/core/MCP_unified/tests/test_write_tools_validators.py
+      92 tldw_Server_API/app/core/MCP_unified/tests/test_chats_retrieval.py
+      89 tldw_Server_API/app/core/MCP_unified/tests/test_command_runtime_registry.py
+      82 tldw_Server_API/app/core/MCP_unified/tests/test_jsonrpc_batch.py
+      82 tldw_Server_API/app/core/MCP_unified/tests/test_docker_packaging_contract.py
+      80 tldw_Server_API/app/core/MCP_unified/tests/test_web_rate_limit.py
+      80 tldw_Server_API/app/core/MCP_unified/tests/test_web_cache.py
+      77 tldw_Server_API/app/core/MCP_unified/tests/test_file_policy_actions.py
+      76 tldw_Server_API/app/core/MCP_unified/tests/test_metrics_collector_regressions.py
+      75 tldw_Server_API/app/core/MCP_unified/tests/test_validation_and_sanitization.py
+      72 tldw_Server_API/app/core/MCP_unified/tests/test_command_runtime_parser.py
+      71 tldw_Server_API/app/core/MCP_unified/tests/test_browser_cdp_server_registration.py
+      65 tldw_Server_API/app/core/MCP_unified/tests/test_stage3_modules.py
+      58 tldw_Server_API/app/core/MCP_unified/tests/test_media_retrieval_db_error_fallback.py
+      57 tldw_Server_API/app/core/MCP_unified/tests/test_web_search_module_registration.py
+      57 tldw_Server_API/app/core/MCP_unified/tests/test_web_research_module_registration.py
+      57 tldw_Server_API/app/core/MCP_unified/tests/test_web_fetch_module_registration.py
+      39 tldw_Server_API/app/core/MCP_unified/tests/test_ws_exception_close_code.py
+      39 tldw_Server_API/app/core/MCP_unified/tests/conftest.py
+      37 tldw_Server_API/app/core/MCP_unified/tests/test_disk_space.py
+      33 tldw_Server_API/app/core/MCP_unified/tests/test_stage2_context_session.py
+      31 tldw_Server_API/app/core/MCP_unified/tests/test_workspace_root_resolver.py
+      29 tldw_Server_API/app/core/MCP_unified/tests/test_ws_parse_error_jsonrpc.py
+      21 tldw_Server_API/app/core/MCP_unified/tests/test_ws_no_pydantic_warning.py
+      19 tldw_Server_API/app/core/MCP_unified/tests/test_refresh_token.py
+       6 tldw_Server_API/app/core/MCP_unified/tests/fixtures/smoke_gateway_app.py
+
+## A1. In-app files importing the STANDALONE package (apps/mcp-unified/src/mcp_unified)
+test_external_federation_module.py
+test_federation_shell_contracts.py
+test_filesystem_module.py
+test_gateway_admin_auth.py
+test_gateway_cli_package.py
+test_gateway_config_snapshots.py
+test_gateway_credential_grants.py
+test_gateway_external_registry_management.py
+test_gateway_external_runtime_adapter.py
+test_gateway_external_runtime.py
+test_gateway_fastapi_package.py
+test_gateway_profile_management.py
+test_gateway_protocol_artifact_consumer.py
+test_gateway_protocol_connection.py
+test_gateway_protocol_contracts.py
+test_gateway_protocol_projection.py
+test_gateway_protocol_stdio.py
+test_gateway_protocol_validation.py
+test_gateway_remote_runtime_cli.py
+test_gateway_tool_discovery.py
+test_gateway_tool_use_reporting.py
+test_http_external_transport.py
+test_profile_permission_rules.py
+test_profile_policy_decisions.py
+test_profile_presets.py
+test_profile_registry_resolver.py
+test_profile_structured_resolution.py
+test_protocol_path_scope_candidates.py
+test_protocol_tool_hooks.py
+test_runtime_package_boundary.py
+test_stdio_external_transport.py
+test_tool_hook_manager.py
+test_tool_use_reporting_models.py
+test_tool_use_reporting_protocol.py
+test_tool_use_reporting_store.py
+
+## A2. In-app files importing core.MCP_unified
+conftest.py
+support.py
+test_basic_functionality.py
+test_browser_cdp_client.py
+test_browser_cdp_module.py
+test_browser_cdp_server_registration.py
+test_chats_retrieval.py
+test_codegraph_module.py
+test_command_runtime_execution.py
+test_command_runtime_parser.py
+test_command_runtime_presentation.py
+test_command_runtime_registry.py
+test_concurrency_and_breaker.py
+test_config_safe_defaults.py
+test_cooking_module.py
+test_disk_space.py
+test_dynamic_module_catalog.py
+test_external_credential_broker_runtime.py
+test_external_federation_integration.py
+test_external_federation_module.py
+test_external_server_config_schema.py
+test_external_server_manager.py
+test_external_stdio_adapter_integration.py
+test_external_stdio_adapter.py
+test_external_websocket_adapter.py
+test_extraction_contracts.py
+test_filesystem_lock_managers.py
+test_filesystem_module.py
+test_filesystem_notebook_tools.py
+test_filesystem_patch_parser.py
+test_flashcards_module.py
+test_git_module_registration.py
+test_git_module.py
+test_governance_module.py
+test_guarded_slides_websocket.py
+test_http_mapping.py
+test_http_security_guards.py
+test_http_validation_bounds.py
+test_idempotency_and_category.py
+test_idempotency_manager.py
+test_jsonrpc_batch.py
+test_jsonrpc_notifications.py
+test_jsonrpc_transport_helpers.py
+test_kanban_module.py
+test_knowledge_get.py
+test_knowledge_search_defaults.py
+test_log_redaction.py
+test_mcp_discovery_module.py
+test_media_retrieval_db_error_fallback.py
+test_media_retrieval.py
+test_metrics_collector_regressions.py
+test_mounted_jsonrpc_transport_contract.py
+test_notebook_files.py
+test_notes_crud_tags.py
+test_persona_scope_stage3.py
+test_persona_visuals_module.py
+test_prepared_execution_integrity.py
+test_prometheus_idempotency_metrics.py
+test_prometheus_validation_metrics.py
+test_prompts_catalog.py
+test_protocol_allowed_tools.py
+test_protocol_catalog_filter.py
+test_protocol_governance_preflight.py
+test_protocol_nested_tool_preparation.py
+test_protocol_path_scope_candidates.py
+test_protocol_preexec_validation.py
+test_protocol_prompts_catalog.py
+test_protocol_scope_enforcement.py
+test_protocol_tool_hooks.py
+test_quizzes_module.py
+test_rag_module_registration.py
+test_rag_module.py
+test_rate_limit_categories.py
+test_refresh_token.py
+test_registry_iteration_race.py
+test_regression_behaviors.py
+test_run_command_module.py
+test_runtime_package_boundary.py
+test_scope_and_fallbacks.py
+test_security_hardening.py
+test_server_batch_and_formatting.py
+test_skills_module.py
+test_slides_module.py
+test_stage2_context_session.py
+test_stage3_modules.py
+test_storage_contracts.py
+test_tool_execution_coordinator.py
+test_tool_execution_outcomes.py
+test_tool_observability.py
+test_tool_use_reporting_protocol.py
+test_validation_and_sanitization.py
+test_web_cache.py
+test_web_fetch_module_registration.py
+test_web_fetch_module.py
+test_web_rate_limit.py
+test_web_research_module_registration.py
+test_web_research_module.py
+test_web_search_module_registration.py
+test_web_search_module.py
+test_web_tool_base.py
+test_websocket_smoke.py
+test_write_tools_validators.py
+test_ws_exception_close_code.py
+test_ws_parse_error_jsonrpc.py
+test_ws_per_ip_caps.py
+
+## B. tldw_Server_API/tests files importing core.MCP_unified (import-grep, 63 files)
+tldw_Server_API/tests/Admin/test_admin_tools_endpoint.py
+tldw_Server_API/tests/Audio/test_speech_chat_service.py
+tldw_Server_API/tests/AuthNZ/integration/test_notes_graph_suggestion_permissions_postgres.py
+tldw_Server_API/tests/AuthNZ/unit/test_database_openai_credential_lock_pool.py
+tldw_Server_API/tests/CodeGraph/test_codegraph_workspace.py
+tldw_Server_API/tests/DB_Management/test_mcp_media_health.py
+tldw_Server_API/tests/DB_Management/test_media_db_api_imports.py
+tldw_Server_API/tests/DB_Management/test_media_db_legacy_document_version_imports.py
+tldw_Server_API/tests/DB_Management/test_media_db_legacy_maintenance_imports.py
+tldw_Server_API/tests/DB_Management/test_media_db_legacy_reads_imports.py
+tldw_Server_API/tests/Governance/test_governance_metrics_and_rollout.py
+tldw_Server_API/tests/integration/test_first_run_setup_flow.py
+tldw_Server_API/tests/MCP_unified/docs/test_docs_host_adapter.py
+tldw_Server_API/tests/MCP_unified/docs/test_docs_module_shim.py
+tldw_Server_API/tests/MCP_unified/test_authnz_rbac_sanitization.py
+tldw_Server_API/tests/MCP_unified/test_external_server_manager_sanitization.py
+tldw_Server_API/tests/MCP_unified/test_flashcards_module_sanitization.py
+tldw_Server_API/tests/MCP_unified/test_governance_pack_opa_bundle.py
+tldw_Server_API/tests/MCP_unified/test_governance_pack_validation.py
+tldw_Server_API/tests/MCP_unified/test_ip_filter_sanitization.py
+tldw_Server_API/tests/MCP_unified/test_jwt_manager_sanitization.py
+tldw_Server_API/tests/MCP_unified/test_mcp_config_sanitization.py
+tldw_Server_API/tests/MCP_unified/test_mcp_discovery_sanitization.py
+tldw_Server_API/tests/MCP_unified/test_mcp_http_auth_paths.py
+tldw_Server_API/tests/MCP_unified/test_mcp_hub_governance_pack_import.py
+tldw_Server_API/tests/MCP_unified/test_mcp_hub_tool_registry.py
+tldw_Server_API/tests/MCP_unified/test_mcp_knowledge_rbac.py
+tldw_Server_API/tests/MCP_unified/test_mcp_protocol_external_federation.py
+tldw_Server_API/tests/MCP_unified/test_mcp_protocol_path_scope.py
+tldw_Server_API/tests/MCP_unified/test_mcp_server_test_mode_truthiness.py
+tldw_Server_API/tests/MCP_unified/test_mcp_sessions.py
+tldw_Server_API/tests/MCP_unified/test_mcp_ws_workspace_context.py
+tldw_Server_API/tests/MCP_unified/test_metrics_monitoring_sanitization.py
+tldw_Server_API/tests/MCP_unified/test_module_registry_sanitization.py
+tldw_Server_API/tests/MCP_unified/test_notes_task_tools.py
+tldw_Server_API/tests/MCP_unified/test_packaging_shape.py
+tldw_Server_API/tests/MCP_unified/test_phase3_3_small_core_sanitizers.py
+tldw_Server_API/tests/MCP_unified/test_quizzes_module_sanitization.py
+tldw_Server_API/tests/MCP_unified/test_run_command_module.py
+tldw_Server_API/tests/MCP_unified/test_sandbox_module_auth_binding.py
+tldw_Server_API/tests/MCP_unified/test_sandbox_module_runtime_lima.py
+tldw_Server_API/tests/MCP_unified/test_slides_module_exports.py
+tldw_Server_API/tests/MCP_unified/test_slides_module_standalone_html.py
+tldw_Server_API/tests/MCP_unified/test_tool_catalogs_api.py
+tldw_Server_API/tests/MCP_unified/test_tool_catalogs_pg.py
+tldw_Server_API/tests/MCP/test_mcp_tools_execute_authz.py
+tldw_Server_API/tests/MCP/test_ws_metrics_mcp.py
+tldw_Server_API/tests/Notes_NEW/integration/test_notes_tasks_postgres_compatibility.py
+tldw_Server_API/tests/Notes/test_notes_organization_sync_surfaces.py
+tldw_Server_API/tests/Resource_Governance/test_rg_cutover_embeddings_mcp.py
+tldw_Server_API/tests/RPG/test_rpg_mcp_module.py
+tldw_Server_API/tests/sandbox/test_macos_runtime_surface_contract.py
+tldw_Server_API/tests/Services/test_drain_gate_middleware.py
+tldw_Server_API/tests/Services/test_shutdown_transport_registry.py
+tldw_Server_API/tests/Streaming/test_ws_pings_labels_multi.py
+tldw_Server_API/tests/unit/test_mcp_catalog_endpoints.py
+tldw_Server_API/tests/unit/test_mcp_catalog_loader.py
+tldw_Server_API/tests/unit/test_mcp_unified_error_mapping.py
+tldw_Server_API/tests/Workflows/adapters/test_integration_adapters.py
+tldw_Server_API/tests/Workflows/adapters/test_llm_adapters.py
+tldw_Server_API/tests/Workflows/test_mcp_tool_policy.py
+tldw_Server_API/tests/Workflows/test_workflows_api.py
+tldw_Server_API/tests/Workflows/test_workflows_extras.py
