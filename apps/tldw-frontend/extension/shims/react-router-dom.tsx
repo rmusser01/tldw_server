@@ -243,20 +243,17 @@ export { useUnstablePrompt as unstable_usePrompt }
 
 export const useLocation = () => {
   const router = useRouter()
-  const search =
-    typeof window === "undefined" ? "" : window.location.search || ""
-  const hash = typeof window === "undefined" ? "" : window.location.hash || ""
-  const pathname = router.asPath.split("?")[0].split("#")[0] || router.pathname
-  return React.useMemo(
-    () => ({
-      pathname,
-      search,
-      hash,
+  return React.useMemo(() => {
+    // Router and browser URLs can advance separately during a transition.
+    const url = new URL(router.asPath || router.pathname, "http://localhost")
+    return {
+      pathname: url.pathname,
+      search: url.search,
+      hash: url.hash,
       state: null,
       key: router.asPath
-    }),
-    [pathname, router.asPath, search, hash]
-  )
+    }
+  }, [router.asPath, router.pathname])
 }
 
 export const useParams = <

@@ -192,6 +192,26 @@ describe("react-router-dom Next.js shim transitions", () => {
     vi.restoreAllMocks()
   })
 
+  it.each([
+    ["/media?id=1", "/chat?media_handoff=owned-token#composer"],
+    ["/chat?media_handoff=owned-token#composer", "/media?id=1"],
+    ["/sources/source%2F42?q=a%3Fb#part?1", "/media?id=1"]
+  ])("keeps one location snapshot while router %s and browser %s differ", (route, browserUrl) => {
+    const previousUrl = window.location.href
+    mockRouter.asPath = route
+    window.history.replaceState(null, "", browserUrl)
+    const LocationReader = () => {
+      const location = routerShim.useLocation()
+      return <output aria-label="Current route">{location.pathname + location.search + location.hash}</output>
+    }
+    try {
+      render(<LocationReader />)
+      expect(screen.getByLabelText("Current route").textContent).toBe(route)
+    } finally {
+      window.history.replaceState(null, "", previousUrl)
+    }
+  })
+
   it("wraps useNavigate push updates in startTransition", async () => {
     const user = userEvent.setup()
     render(<NavigateButton to="/destination" />)
