@@ -247,7 +247,6 @@ async def handle_unified_websocket(*args, **kwargs):
 
 _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS = (
     ConflictError,
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,

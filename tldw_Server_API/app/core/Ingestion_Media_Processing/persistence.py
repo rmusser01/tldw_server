@@ -81,7 +81,6 @@ except AttributeError:  # Starlette < 0.27
     HTTP_413_TOO_LARGE = status.HTTP_413_REQUEST_ENTITY_TOO_LARGE
 
 _PERSISTENCE_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     AssertionError,
     AttributeError,
     ConnectionError,
@@ -5076,6 +5075,11 @@ async def process_document_like_item(
 
             final_result["processing_source"] = processing_source
 
+    except HTTPException:
+        # Deliberate client-facing failures (e.g. the 413 storage-quota rejection
+        # raised above) must reach the caller rather than be folded into the
+        # generic preparation-error path below. Same idiom as :2815, :2975, :3041.
+        raise
     except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as prep_err:
         error_detail = str(getattr(prep_err, "detail", prep_err))
         prep_error_type = type(prep_err).__name__

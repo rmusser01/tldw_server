@@ -114,7 +114,6 @@ from tldw_Server_API.app.core.testing import (
 from tldw_Server_API.app.core.Utils.path_utils import safe_join
 
 _SANDBOX_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     AttributeError,
     ConnectionError,
     FileNotFoundError,

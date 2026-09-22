@@ -45,7 +45,6 @@ from .security.request_guards import enforce_client_certificate_headers
 from .transport.guarded_slides_websocket import guarded_slides_websocket_metadata
 
 _MCP_SERVER_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,

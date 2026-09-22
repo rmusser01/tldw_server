@@ -83,7 +83,6 @@ _ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
 _METADATA_ORDER_KEY_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 
 _VECTORSTORE_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,
