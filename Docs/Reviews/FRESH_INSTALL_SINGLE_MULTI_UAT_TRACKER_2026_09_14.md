@@ -2,6 +2,12 @@
 
 - **Current tracker status: 414 findings / 400 verified / 14 open (261, 351, 352, 354, 356, 359–361, 365, 375, 390–392, 413).** All four configurations concluded with failures and limits recorded in the [frozen 365-finding matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_20.md). Targeted fresh SQLite and real PostgreSQL acceptance now verifies353/355/357/358/362/363/364/366–374/376–387. Remaining findings include application recovery/quality and newly confirmed test-coverage gaps. Counts describe findings, not UAT completion. Generated evidence remains local.
 
+### UAT413 output-limit repair verified; original failure remains open
+
+Committed74c62a9b0b passes live API error/retry on SQLite and official PostgreSQL. Captured128-token calls return upstream200 with no final answer and finish_reason length; the API now gives safe output-limit guidance and preserves exactly system/user. Explicit retry at2048tokens yields one real successful provider call, the correct three-dot image description and exactly one assistant row. Complete original system/user rows, exact PNG bytes and high/low ordering remain unchanged. SQLite conversation e9813796-40e8-4a61-aa01-e27905185275; PostgreSQL f0848eaf-a7e0-4526-bcd2-81f47500b34e. Source25258 entries SHA bb29b621f2dc741b3cb023677009114e5b62fab42aecec651771e9658b035a8c remains unchanged.
+
+Combined distinct backend regression scopes686pass/2inherited non-PostgreSQL skips; no new skip. Production Bandit0, touched lint0new findings. Root review completed; independent reviewer capacity unavailable. Evidence retained in ignored uat413-capture. API verification reused diagnostic state/dependencies; browser error presentation and full fresh-install qualification remain separate. TASK13260.278.11 stays open because the earlier uncaptured512-token failure is still unclassified; the bounded output-limit repair plan is complete.
+
 ### UAT413 controlled capture and bounded repair
 
 Pass-through capture identifies a concrete output-limit case: real llama.cpp at128tokens returns200, finish_reason length, empty final content and509reasoning characters; the application returns502 provider_unavailable and stores only system/user. The512-token control returns200 with87final characters and345completion tokens. The original uncaptured512 failure remains causally unproven. Captures are retained under ignored uat413-capture; no mock provider is involved.
