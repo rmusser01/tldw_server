@@ -842,38 +842,25 @@ class JobManager:
         try:
             from psycopg import sql as _sql  # type: ignore
 
-            is_admin = bool(JobManager._RLS_IS_ADMIN.get())
-            cur.execute(_sql.SQL("SET app.is_admin = {}").format(_sql.Literal("true" if is_admin else "false")))
+            def _set_local(name: str, value: str | None) -> None:
+                """Bind a tenant GUC for this transaction only.
 
-            def _set_or_reset(name: str, value: str | None) -> None:
-                if value:
-                    cur.execute(
-                        _sql.SQL("SET {} = {}").format(
-                            _sql.SQL(name),
-                            _sql.Literal(str(value)),
-                        )
+                SET LOCAL dies with the transaction, so a value cannot ride a
+                pooled connection into the next request. An absent value is
+                written as the empty string rather than RESET: the policies
+                NULLIF it and fail closed, so "unset" now means "no rows".
+                """
+                cur.execute(
+                    _sql.SQL("SET LOCAL {} = {}").format(
+                        _sql.SQL(name),
+                        _sql.Literal("" if value is None else str(value)),
                     )
-                    return
-                try:
-                    cur.execute(_sql.SQL("RESET {}").format(_sql.SQL(name)))
-                except _JOB_NONCRITICAL_EXCEPTIONS:
-                    with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
-                        conn.rollback()
-                    try:
-                        cur.execute(
-                            _sql.SQL("SET {} = {}").format(
-                                _sql.SQL(name),
-                                _sql.Literal(""),
-                            )
-                        )
-                    except _JOB_NONCRITICAL_EXCEPTIONS:
-                        with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
-                            conn.rollback()
+                )
 
-            dom = JobManager._RLS_DOMAIN_ALLOWLIST.get()
-            _set_or_reset("app.domain_allowlist", dom)
-            owner = JobManager._RLS_OWNER_USER_ID.get()
-            _set_or_reset("app.owner_user_id", owner)
+            is_admin = bool(JobManager._RLS_IS_ADMIN.get())
+            _set_local("app.is_admin", "true" if is_admin else "false")
+            _set_local("app.domain_allowlist", JobManager._RLS_DOMAIN_ALLOWLIST.get())
+            _set_local("app.owner_user_id", JobManager._RLS_OWNER_USER_ID.get())
             if JobManager._is_truthy(os.getenv("JOBS_PG_RLS_DEBUG", "")):
                 try:
                     cur.execute(
@@ -889,10 +876,12 @@ class JobManager:
         except _JOB_NONCRITICAL_EXCEPTIONS as exc:
             if _is_serialization_failure(exc):
                 raise
-            # Non-fatal: continue without RLS context if GUCs unavailable
+            # Non-fatal: continue without RLS context if GUCs unavailable.
             # Some Postgres installations reject unknown GUCs (custom parameters).
             # If any SET LOCAL fails, the transaction enters an aborted state.
             # Roll back to clear the error so subsequent statements can proceed.
+            # Safe to continue because the owner predicate is fail-closed: an
+            # unset app.owner_user_id yields no rows rather than every row.
             with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                 conn.rollback()
         return cur
@@ -4431,18 +4420,40 @@ class JobManager:
                 reconciled += 1
         return reconciled
 
-    def get_job(self, job_id: int) -> dict[str, Any] | None:
+    def get_job(
+        self, job_id: int, *, owner_user_id: str | None = None
+    ) -> dict[str, Any] | None:
         """Fetch a job by numeric id.
 
         Returns None if not found. JSON payload/result are normalized to dicts
         for SQLite; Postgres returns native JSON via the driver.
+
+        ``owner_user_id`` scopes the lookup to a single owner and is how
+        request-handling code must call this. Omitting it returns the job
+        regardless of owner, which is correct only for workers and schedulers
+        that process other users' jobs by design. A blank owner is rejected
+        rather than silently widening the query -- callers that cannot
+        establish an owner must not reach a scoped read.
         """
+        owner: str | None = None
+        if owner_user_id is not None:
+            owner = str(owner_user_id).strip()
+            if not owner:
+                raise ValueError(
+                    "owner_user_id must be a non-empty string when scoping get_job"
+                )
         # Read-only helper; no completion_token semantics apply
         conn = self._connect()
         try:
             if self.backend == "postgres":
                 with self._pg_cursor(conn) as cur:
-                    cur.execute("SELECT * FROM jobs WHERE id = %s", (int(job_id),))
+                    if owner is None:
+                        cur.execute("SELECT * FROM jobs WHERE id = %s", (int(job_id),))
+                    else:
+                        cur.execute(
+                            "SELECT * FROM jobs WHERE id = %s AND owner_user_id = %s",
+                            (int(job_id), owner),
+                        )
                     row = cur.fetchone()
                 if not row:
                     return None
@@ -4454,7 +4465,15 @@ class JobManager:
                     pass
                 return d
             else:
-                row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+                if owner is None:
+                    row = conn.execute(
+                        "SELECT * FROM jobs WHERE id = ?", (job_id,)
+                    ).fetchone()
+                else:
+                    row = conn.execute(
+                        "SELECT * FROM jobs WHERE id = ? AND owner_user_id = ?",
+                        (job_id, owner),
+                    ).fetchone()
                 if not row:
                     return None
                 d = dict(row)
