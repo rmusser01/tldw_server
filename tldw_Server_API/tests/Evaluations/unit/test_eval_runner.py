@@ -366,3 +366,96 @@ def test_cancel_run_keeps_task_registered_when_status_update_fails(monkeypatch, 
 
     assert task.cancel_called is True
     assert runner.running_tasks["run_db_error"] is task
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("case_sensitive", "output", "expected", "passed"), [
+    (True, "ORBIT-742", "orbit-742", False),
+    (True, "ORBIT-742", "ORBIT-742", True),
+    (False, "ORBIT-742", "orbit-742", True),
+    (False, "ORBIT-999", "ORBIT-742", False),
+    (None, "ORBIT-742", "orbit-742", True),
+    (True, " ORBIT-742 ", "ORBIT-742", True),
+])
+async def test_exact_match_honors_advertised_case_sensitivity(
+    tmp_path, case_sensitive, output, expected, passed
+):
+    """The UI's Case sensitive setting must alter comparison, not just saved metadata."""
+    runner = EvaluationRunner(db_path=str(tmp_path / "evals.db"))
+    spec = {} if case_sensitive is None else {"case_sensitive": case_sensitive}
+    result = await runner._eval_exact_match(
+        {"input": {"output": output}, "expected": {"output": expected}},
+        spec, {}, "sample_000000",
+    )
+    assert result["passed"] is passed
+    assert result["scores"]["exact_match"] == (1.0 if passed else 0.0)
+
+
+@pytest.mark.parametrize("case_sensitive", [True, False])
+@pytest.mark.parametrize("operation", ["create", "update"])
+def test_evaluation_schema_preserves_case_sensitive_setting(case_sensitive, operation):
+    """Both UI save paths must carry the option into the stored evaluation spec."""
+    from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import (
+        CreateEvaluationRequest,
+        UpdateEvaluationRequest,
+    )
+    payload = {"eval_spec": {"metrics": ["exact_match"], "case_sensitive": case_sensitive}}
+    if operation == "create":
+        request = CreateEvaluationRequest(name="case_test", eval_type="exact_match", **payload)
+    else:
+        request = UpdateEvaluationRequest(**payload)
+    assert request.eval_spec.model_dump().get("case_sensitive") is case_sensitive
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("case_sensitive", "score", "passed"), [(True, 0.5, False), (False, 1.0, True)])
+async def test_includes_honors_case_sensitivity_for_each_expected_item(tmp_path, case_sensitive, score, passed):
+    runner = EvaluationRunner(db_path=str(tmp_path / "evals.db"))
+    result = await runner._eval_includes(
+        {"input": {"output": "ORBIT-742 Cedar Ridge"}, "expected": {"includes": ["ORBIT-742", "cedar ridge"]}},
+        {"case_sensitive": case_sensitive, "threshold": 1.0}, {}, "sample_000000",
+    )
+    assert result["scores"]["includes"] == score
+    assert result["passed"] is passed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("case_sensitive", "second_output", "pass_rate"), [
+    (True, "orbit-742", 0.5),
+    (False, "orbit-742", 1.0),
+    (False, "ORBIT-999", 0.5),
+])
+async def test_two_row_exact_match_run_retains_scores_and_dataset(
+    tmp_path, case_sensitive, second_output, pass_rate
+):
+    """Exercise API validation, the actual runner, aggregation and saved result readback."""
+    from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import CreateEvaluationRequest
+
+    request = CreateEvaluationRequest(
+        name="two_rows", eval_type="exact_match",
+        eval_spec={"metrics": ["exact_match"], "case_sensitive": case_sensitive},
+        dataset=[
+            {"input": {"output": "ORBIT-742"}, "expected": {"output": "ORBIT-742"}},
+            {"input": {"output": second_output}, "expected": {"output": "ORBIT-742"}},
+        ],
+    )
+    runner = EvaluationRunner(db_path=str(tmp_path / "evals.db"))
+    samples = [sample.model_dump() for sample in request.dataset]
+    dataset_id = runner.db.create_dataset(name="two_rows", samples=samples, created_by="owner")
+    eval_id = runner.db.create_evaluation(
+        name=request.name, eval_type=request.eval_type,
+        eval_spec=request.eval_spec.model_dump(), dataset_id=dataset_id, created_by="owner",
+    )
+    run_id = runner.db.create_run(eval_id=eval_id, target_model="precomputed", config={})
+    results = await runner.run_evaluation(run_id, eval_id, {"created_by": "owner"}, background=False)
+    saved = runner.db.get_run(run_id, created_by="owner")
+    assert saved["status"] == "completed"
+    assert saved["eval_id"] == eval_id
+    assert saved["results"] == results
+    assert results["aggregate"]["total_samples"] == 2
+    assert results["aggregate"]["pass_rate"] == pass_rate
+    assert results["aggregate"]["mean_score"] == pass_rate
+    assert results["failed_samples"] == []
+    assert [item["sample_id"] for item in results["sample_results"]] == ["sample_000000", "sample_000001"]
+    assert [item["passed"] for item in results["sample_results"]] == [True, pass_rate == 1.0]
+    assert runner.db.get_dataset(dataset_id, include_samples=True, created_by="owner")["samples"] == samples

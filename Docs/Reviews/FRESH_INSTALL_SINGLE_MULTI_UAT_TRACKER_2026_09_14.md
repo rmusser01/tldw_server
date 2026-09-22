@@ -1,5 +1,25 @@
 # Fresh-install UAT: single-user and multi-user
 
+## UAT425 — Evaluation controls lack accessible names — 2026-09-22
+
+The C-03 implementation audit finds visible field text disconnected from the Case sensitive switch, numeric thresholds/slider handles and Advanced JSON switch. Three real component tests fail on missing accessible names. Existing labels now name the existing controls; all3tests verify keyboard changes and JSON editor activation. The slider test supplies the installed rc-slider legacy keyCode contract (user-event alone does not synthesize it). C-03 selects Case sensitive by accessible role/name. The bounded UI detector reports no findings; the review finds no actionable defect. Native/browser confirmation remains pending. Existing JsonEditor React key-spread warnings are retained in the verification receipt; these were observed on opening the unchanged editor, not introduced by naming its controls. TASK13260.278.5.2 owns this form repair.
+
+Current totals: **425 findings /405 verified /20 open**. Full/native UAT remains paused.
+
+## UAT424 — QA thread reload loses answer provider/model — 2026-09-22
+
+Critical CI35757714932 on5dc06 completes **43 passed /3 failed /0 skips /0 retries**; original traces and logs are retained privately before another push. Strict C-01 Prompt application/persistence and the Prompt legacy redirect now pass. Full/native UAT remains paused.
+
+The Rowan QA trace proves its initial request uses `openai/gpt-4.1-mini`, while reopening the saved thread omits both generation fields and uses the server fallback. Source tracing confirms that both the shared snapshot writer and restore normalizer exclude provider/model. TASK13260.278.19 preserves string or explicit null choices in the existing canonical and account-owned history snapshots. Four causal failures with24controls passing become102passes across persistence, history, streaming and account authority. Malformed/legacy fields remain safe. The real follow-up now explicitly asserts the selected outgoing provider/model; controlled response fixtures remain unchanged. Remote confirmation and fresh acceptance are pending; **UAT424 stays open**.
+
+The other CI failures are recorded separately under UAT419: Character actually returns and saves `BEEP BOOP.`, but its wait predicate rejects `complete-v2?scope_type=global`; the matcher now uses pathname and compares the exact numeric/string identity consistently. Wikipedia returns `source_access_denied` and no saved Media ID; the strict helper correctly fails. The evaluation engineering journey now uploads a literal TXT document through normal ingestion and checks exact saved text. External URL access remains unverified; no SSRF policy is weakened to permit a local HTTP fixture.
+
+Current totals: **424 findings /405 verified /19 open**. These counts do not certify the four-cell UAT matrix.
+
+## UAT423 — Evaluation case sensitivity ignored — 2026-09-22
+
+Engineering investigation while full/native UAT is paused confirms a wrong scoring result: the advertised Case sensitive exact-match setting treats `ORBIT-742` and `orbit-742` as a match. The actual CRUD EvaluationSpec drops the field, and both exact-match/includes runner methods lowercase unconditionally. The initial exact-match control fails with6controls passing; expanded create/update schema and evaluator boundaries produce6causal failures. The typed CRUD field and conditional normalization now pass44adjacent tests, including three actual completed two-row runs with saved scores and unchanged datasets. Bandit has zero production findings and15new test-assertion findings (35baseline to50); new test lint is clean. TASK13260.278.5.2 replaces the empty recipe click with actual UI evaluation creation, exact sample results, terminal run, saved identities and reload assertions. Browser confirmation remains pending, so UAT423 stays open. C-03 batch/export/foreign-owner variants and B-09 draft commit remain unqualified. Historical checkpoint totals were423/405/18.
+
 ## PR2979 compiled-browser follow-up — 2026-09-22
 
 Full/native UAT remains paused. First-attempt run35751990046 on47cdf completes **42passed /4failed /0skipped /0retries** in4.1minutes. Notification inbox, Character Phase7 recovery, Notes-to-study and the earlier Prompt smoke now pass. All traces, screenshots, JSON and backend/provider/build logs are retained outside Git. This is seeded SQLite engineering CI, not four-cell acceptance.
@@ -38,7 +58,7 @@ UAT419 first-attempt CI run 35741620414 finished with 40 passed, 6 failed and 0 
 
 Combined follow-up checks pass 175 backend/workflow/provider tests and 38 frontend navigation/fixture/guard tests. Character-specific checks pass 147 backend and 50 frontend cases; the backend cases are included in the combined 175. Static Chromium helper controls reproduce both responsive navigation failures before repair and pass afterward. Final frontend types and actionlint pass. No new lint diagnostics or production Bandit findings were added. Independent scoped reviews found no actionable issue. Remote browser confirmation remains required. This is engineering evidence, not a fresh-install acceptance pass. Current totals remain **421 findings / 405 verified / 16 open**.
 
-- **Current tracker status: 422 findings / 405 verified / 17 open (261, 351, 352, 354, 356, 359–361, 365, 375, 390–392, 413, 415, 419, 422).** All four configurations concluded with failures and limits recorded in the [frozen 365-finding matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_20.md). Targeted fresh SQLite and real PostgreSQL acceptance now verifies353/355/357/358/362/363/364/366–374/376–387. Remaining findings include application recovery/quality and newly confirmed test-coverage gaps. Counts describe findings, not UAT completion. Generated evidence remains local.
+- **Current tracker status: 425 findings / 405 verified / 20 open (261, 351, 352, 354, 356, 359–361, 365, 375, 390–392, 413, 415, 419, 422–425).** All four configurations concluded with failures and limits recorded in the [frozen 365-finding matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_20.md). Targeted fresh SQLite and real PostgreSQL acceptance now verifies353/355/357/358/362/363/364/366–374/376–387. Remaining findings include application recovery/quality and newly confirmed test-coverage gaps. Counts describe findings, not UAT completion. Generated evidence remains local.
 
 PR2979 CI follow-up (UAT419): run35695635379 failed provider readiness with401 because its request omitted Authorization and its synthetic backend key lacked the mock server required prefix. The probe and backend now share an accepted synthetic credential, with authentication retained. The actual HTTP regression and workflow/provider checks pass154 tests. Remote critical execution remains pending; no native/full UAT resumed.
 

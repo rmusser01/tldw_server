@@ -1469,6 +1469,10 @@ function createRestorableSettingsSnapshot(settings: RagSettings): Partial<RagSet
       typeof settings.enable_citations === "boolean" ? settings.enable_citations : undefined,
     enable_generation:
       typeof settings.enable_generation === "boolean" ? settings.enable_generation : undefined,
+    generation_provider:
+      typeof settings.generation_provider === "string" ? settings.generation_provider : null,
+    generation_model:
+      typeof settings.generation_model === "string" ? settings.generation_model : null,
     enable_web_fallback:
       typeof settings.enable_web_fallback === "boolean" ? settings.enable_web_fallback : undefined,
     web_fallback_threshold:
@@ -1538,6 +1542,12 @@ function normalizeRestorableSettingsSnapshot(
   }
   if (typeof candidate.enable_generation === "boolean") {
     normalized.enable_generation = candidate.enable_generation
+  }
+  if (candidate.generation_provider === null || typeof candidate.generation_provider === "string") {
+    normalized.generation_provider = typeof candidate.generation_provider === "string" ? candidate.generation_provider : null
+  }
+  if (candidate.generation_model === null || typeof candidate.generation_model === "string") {
+    normalized.generation_model = typeof candidate.generation_model === "string" ? candidate.generation_model : null
   }
   if (typeof candidate.enable_web_fallback === "boolean") {
     normalized.enable_web_fallback = candidate.enable_web_fallback

@@ -383,7 +383,12 @@ test.describe('Ingest -> Search -> Chat journey', () => {
         await qa.waitForResults();
         const searched = qa.waitForRagSearch();
         await qa.askFollowUp(PRICE_QUESTION);
-        expect((await searched).status).toBe(200);
+        const followUp = await searched;
+        expect(followUp.status).toBe(200);
+        expect(followUp.requestBody).toMatchObject({
+          generation_provider: provider!,
+          generation_model: model!,
+        });
         await qa.waitForResults(90_000);
         assertPriceAbstention(await qa.getAnswerText());
         evidence.priceAnswer = await qa.getAnswerText();
