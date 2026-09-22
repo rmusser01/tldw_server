@@ -61,3 +61,57 @@ def test_attribute_branch_still_wins(extract) -> None:
     exc = NetworkError("HTTP 429")
     exc.response = _Resp()  # type: ignore[attr-defined]
     assert extract(exc) == 503
+
+
+# --- after consolidation into core/Utils/http_status_extraction.py ---------------
+
+
+def test_every_entry_point_is_the_same_object() -> None:
+    """All former copies now resolve to one implementation, not four look-alikes."""
+    from tldw_Server_API.app.core.Embeddings.Embeddings_Server import Embeddings_Create
+    from tldw_Server_API.app.core.Local_LLM import http_utils as local_http
+    from tldw_Server_API.app.core.LLM_Calls import error_utils as llm_err
+    from tldw_Server_API.app.core.Utils.http_status_extraction import (
+        get_http_status_from_exception as canonical,
+    )
+
+    assert llm_err.get_http_status_from_exception is canonical
+    assert local_http.get_http_status_from_exception is canonical
+    assert Embeddings_Create._get_http_status_from_exception is canonical
+
+
+def test_is_http_status_error_recognises_requests_everywhere() -> None:
+    """The three TTS copies were httpx-only; the shared one also knows requests."""
+    from tldw_Server_API.app.core.TTS.adapters import (
+        elevenlabs_adapter,
+        openai_adapter,
+    )
+    from tldw_Server_API.app.core.Utils.http_status_extraction import (
+        is_http_status_error as canonical,
+    )
+
+    assert openai_adapter._is_http_status_error is canonical
+    assert elevenlabs_adapter._is_http_status_error is canonical
+
+    class _RequestsHTTPError(Exception):
+        pass
+
+    _RequestsHTTPError.__module__ = "requests.exceptions"
+    _RequestsHTTPError.__name__ = "HTTPError"
+    assert canonical(_RequestsHTTPError()) is True
+
+
+def test_qwen3_method_delegates_to_the_shared_classifier() -> None:
+    from tldw_Server_API.app.core.TTS.adapters.qwen3_runtime_remote import (
+        RemoteQwenRuntime,
+    )
+
+    class _HttpxStatusError(Exception):
+        pass
+
+    _HttpxStatusError.__module__ = "httpx"
+    _HttpxStatusError.__name__ = "HTTPStatusError"
+
+    runtime = RemoteQwenRuntime.__new__(RemoteQwenRuntime)
+    assert runtime._is_http_status_error(_HttpxStatusError()) is True
+    assert runtime._is_http_status_error(ValueError("nope")) is False

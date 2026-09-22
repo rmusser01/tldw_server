@@ -4,7 +4,7 @@ title: Fix double-escaped HTTP status regex misclassifying upstream 429 as 502
 status: In Progress
 assignee: []
 created_date: '2026-09-22 03:55'
-updated_date: '2026-09-22 14:29'
+updated_date: '2026-09-22 20:51'
 labels:
   - llm
   - bug
@@ -51,21 +51,23 @@ Source: comprehensive core-module review prompt smoke run, findings LLM_Calls-2 
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-STAGE 1 APPLIED. Three changes, all verified.
+STAGE 2 COMPLETE - the cluster is now one implementation.
 
-1) REGEX FIXED at core/LLM_Calls/error_utils.py:145 - r"HTTP\\s+(\\d{3})" -> r"HTTP\s+(\d{3})".
+NEW: core/Utils/http_status_extraction.py owns get_http_status_from_exception, get_http_error_text, is_http_status_error and is_chunked_encoding_error. It lives under core/Utils/ rather than core/LLM_Calls/ because TTS, Local_LLM and Embeddings all need it and none should depend on the LLM_Calls package to classify an HTTP error.
 
-2) COPY DELETED, NOT JUST FIXED. core/Chat/chat_orchestrator.py had a third full copy of the same walk; its body is gone and it is now a thin alias delegating to the LLM_Calls canonical (the file already imported from LLM_Calls at :73, and the private copy had exactly one in-module caller). That is the promote-one-and-delete this task specifies. The 4th copy, Embeddings_Create.py:174, is untouched - different implementation, different precedence, belongs with the Stage 2 destination module.
+ZERO CHURN FOR EXISTING CALLERS: error_utils.py re-exports all four names, so its 14 importing modules and ~77 call sites are untouched. Verified by the parity test continuing to pass through both import paths.
 
-3) THE COMPOUNDING DEFECT IS FIXED TOO, and this is the part the original ticket did not cover. NetworkError and RetryExhaustedError were absent from _CHAT_ORCHESTRATOR_PROVIDER_EXCEPTIONS, verified at runtime: "NetworkError in tuple: False, caught by tuple: False". So NetworkError escaped chat_api_call UNMAPPED and the ChatProviderError(504) branch was unreachable - fixing the regex alone would NOT have fixed the Chat path. Conclusive evidence it was an omission rather than a design choice: _is_network_exception:282 explicitly names both types, and the handler has a branch for them. Both added to the tuple.
+ALL FIVE remaining copies migrated:
+- Local_LLM/http_utils.py - had the only CORRECT regex; deleted, now imports the shared one under the same public name (0 external importers).
+- Embeddings_Create.py - the divergent fourth copy with NO message-text branch AND inverted attribute precedence (exc.status_code before exc.response, never exc.status), so an aiohttp ClientResponseError returned None there and the right status elsewhere. Deleted.
+- TTS openai_adapter and elevenlabs_adapter - httpx-only; now use the shared classifier which also recognises requests.HTTPError.
+- TTS qwen3_runtime_remote - kept as a method (called as self._is_http_status_error) delegating to the shared function.
 
-TESTS (both new, red before / green after):
-- tests/LLM_Calls/test_http_status_extraction_parity.py - 24 tests asserting all three extractor copies agree across 400/401/429/500/503, embedded text, absent status, and attribute-branch precedence. Was 12 failed / 12 passed (the exact 2-of-3 split), now 24 passed.
-- tests/Chat/unit/test_orchestrator_network_exception_routing.py - asserts the invariant that the tuple must catch everything _is_network_exception classifies. 3 passed.
+The only definitions left are two deliberate thin aliases that preserve call-site shapes: chat_orchestrator._get_http_status_from_exception and the qwen3 method.
 
-REGRESSION: tests/Chat/unit + tests/LLM_Calls went from 33 failed / 2259 passed to 18 failed / 2274 passed. Net 15 fixed, 0 broken. 14 of the 15 are the new tests; one pre-existing test was also repaired. The remaining 18 are pre-existing and unrelated (tabbyapi/vllm strict filters, plus 2 hypothesis collection errors from a missing declared dep).
+Tests: parity suite extended to 27 cases, including three asserting every former copy now resolves to THE SAME OBJECT (identity, not just equal behaviour) and one proving the shared classifier recognises requests.HTTPError where the TTS copies did not.
 
-Still open: the Stage 2 consolidation into core/Utils/http_status_extraction.py covering all four copies plus the is_http_status_error cluster.
+Regression: app imports; 4 suites touching the cluster give 53 passed. tests/Local_LLM/test_http_utils.py shows 4 failed / 11 passed BOTH with and without the change (stash-isolated) - pre-existing wait_for_http_ready failures, unrelated.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

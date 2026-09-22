@@ -26,6 +26,12 @@ import numpy as np
 from loguru import logger
 from prometheus_client import REGISTRY, Counter, Gauge  # Assuming these are defined elsewhere or used directly
 from pydantic import BaseModel, Field
+# Was a fourth copy with NO message-text branch and inverted attribute precedence
+# (exc.status_code before exc.response, never exc.status), so an aiohttp
+# ClientResponseError returned None here and the right status elsewhere.
+from tldw_Server_API.app.core.Utils.http_status_extraction import (  # noqa: F401
+    get_http_status_from_exception as _get_http_status_from_exception,
+)
 
 if TYPE_CHECKING:
     from transformers import AutoModel, AutoTokenizer
@@ -169,23 +175,6 @@ _allowlist_root_env = (os.environ.get(_ALLOWLIST_ENV_VAR) or "").strip()
 _EMBEDDINGS_STORAGE_ALLOWLIST_ROOT = Path(_allowlist_root_env or resolve_repo_relative_path("models")).resolve(
     strict=False
 )
-
-
-def _get_http_status_from_exception(exc: Exception) -> int | None:
-    direct_status = getattr(exc, "status_code", None)
-    try:
-        if direct_status is not None:
-            return int(direct_status)
-    except (TypeError, ValueError):
-        pass
-    response = getattr(exc, "response", None)
-    if response is None:
-        return None
-    status = getattr(response, "status_code", None)
-    try:
-        return int(status)
-    except (TypeError, ValueError):
-        return None
 
 
 def _get_explicit_openai_embeddings_batch(
