@@ -207,30 +207,15 @@ export class ChatPage {
    * Wait for the chat page to be ready
    */
   async waitForReady(): Promise<void> {
-    const waitForSurface = async () => {
-      await Promise.race([
-        this.page
-          .getByRole("button", { name: /start chatting/i })
-          .waitFor({ state: "visible", timeout: 20_000 }),
-        this.page
-          .getByPlaceholder(/type a message/i)
-          .waitFor({ state: "visible", timeout: 20_000 }),
-        this.messageList.waitFor({ state: "visible", timeout: 20_000 }),
-      ])
-    }
-
-    await waitForSurface().catch(() => {})
-    // Check for Next.js error overlay (e.g. rate_limited) and reload if found
-    const hasErrorOverlay = await this.page.locator("nextjs-portal").count().catch(() => 0)
-    if (hasErrorOverlay > 0) {
-      await this.page.reload({ waitUntil: "domcontentloaded" })
-    }
-    // Dismiss any blocking modals
-    await this.page.evaluate(() => {
-      document.querySelectorAll('.ant-modal-root, .ant-modal-wrap, .ant-modal-mask').forEach(el => el.remove());
-      document.querySelectorAll('nextjs-portal').forEach(el => { if (el.children.length > 0) el.remove(); });
-    }).catch(() => {})
-    await waitForSurface()
+    // Readiness must not reload an in-memory handoff or remove recovery UI.
+    // A Next.js development-tools portal is present on healthy pages too.
+    await this.page
+      .getByRole("button", { name: /start chatting/i })
+      .or(this.page.getByPlaceholder(/type a message/i))
+      .or(this.messageList)
+      .filter({ visible: true })
+      .first()
+      .waitFor({ state: "visible", timeout: 20_000 })
   }
 
   /**
