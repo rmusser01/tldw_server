@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -1141,6 +1141,23 @@ class _PostgresRecordingBackend:
         return SimpleNamespace(rowcount=0)
 
 
+def _record_postgres_coordinator(
+    monkeypatch: pytest.MonkeyPatch, backend: _PostgresRecordingBackend,
+) -> tuple[object, list[tuple[object, str]]]:
+    """Record the current session coordinator while retaining transaction rollback."""
+    migration_connection = SimpleNamespace(execute=backend.execute)
+    calls: list[tuple[object, str]] = []
+
+    @contextmanager
+    def coordinator(selected_backend: object, lock_timeout: str):
+        calls.append((selected_backend, lock_timeout))
+        with backend.transaction():
+            yield migration_connection
+
+    monkeypatch.setattr(schema_bootstrap, "postgres_schema_migration", coordinator)
+    return migration_connection, calls
+
+
 def _postgres_db(backend: _PostgresRecordingBackend) -> CharactersRAGDB:
     db = CharactersRAGDB.__new__(CharactersRAGDB)
     db._backend = backend
@@ -1802,13 +1819,14 @@ def test_postgres_v65_contract_has_matching_constraints_indexes_and_initializer_
 
     backend = _PostgresRecordingBackend()
     db = _postgres_db(backend)
-    # f5f5b63005 bootstraps on a pooled session this fake does not model.
-    monkeypatch.setattr(
-        schema_bootstrap,
-        "postgres_schema_migration",
-        lambda backend, _lock_timeout: backend.transaction(),
-    )
-    monkeypatch.setattr(db, "_get_schema_version_postgres", lambda conn, **kwargs: 64)
+    migration_connection, coordinator_calls = _record_postgres_coordinator(monkeypatch, backend)
+    version_reads: list[tuple[object, bool]] = []
+
+    def schema_version(connection: object, *, lock: bool = False) -> int:
+        version_reads.append((connection, lock))
+        return 64
+
+    monkeypatch.setattr(db, "_get_schema_version_postgres", schema_version)
     monkeypatch.setattr(db, "_verify_note_attachment_schema_postgres", lambda conn: None)
     monkeypatch.setattr(db, "_verify_note_task_schema_postgres", lambda conn: None)
     monkeypatch.setattr(db, "_verify_notes_moodboard_studio_schema_postgres", lambda conn: None)
@@ -1821,8 +1839,6 @@ def test_postgres_v65_contract_has_matching_constraints_indexes_and_initializer_
 
     def _record_migration(conn: object) -> None:
         applied.append("64-to-65")
-        # Pin the route only; the post-migration reconciliation needs the
-        # persona/study-pack stores this fake does not model.
         raise _ReachedV65
 
     monkeypatch.setattr(db, "_migrate_from_v64_to_v65_postgres", _record_migration)
@@ -1830,6 +1846,8 @@ def test_postgres_v65_contract_has_matching_constraints_indexes_and_initializer_
         db._initialize_schema_postgres()
 
     assert applied == ["64-to-65"]
+    assert coordinator_calls == [(backend, db._NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT)]
+    assert version_reads[:3] == [(backend, False), (migration_connection, False), (migration_connection, True)]
 
 
 @pytest.mark.integration
@@ -1912,13 +1930,14 @@ def test_postgres_v65_checkpoint_failure_uses_outer_transaction_rollback(
 ) -> None:
     backend = _PostgresRecordingBackend()
     db = _postgres_db(backend)
-    # f5f5b63005 bootstraps on a pooled session this fake does not model.
-    monkeypatch.setattr(
-        schema_bootstrap,
-        "postgres_schema_migration",
-        lambda backend, _lock_timeout: backend.transaction(),
-    )
-    monkeypatch.setattr(db, "_get_schema_version_postgres", lambda conn, **kwargs: 64)
+    migration_connection, coordinator_calls = _record_postgres_coordinator(monkeypatch, backend)
+    version_reads: list[tuple[object, bool]] = []
+
+    def schema_version(connection: object, *, lock: bool = False) -> int:
+        version_reads.append((connection, lock))
+        return 64
+
+    monkeypatch.setattr(db, "_get_schema_version_postgres", schema_version)
     monkeypatch.setattr(db, "_verify_note_attachment_schema_postgres", lambda conn: None)
     monkeypatch.setattr(db, "_verify_note_task_schema_postgres", lambda conn: None)
     monkeypatch.setattr(db, "_verify_notes_moodboard_studio_schema_postgres", lambda conn: None)
@@ -1933,10 +1952,10 @@ def test_postgres_v65_checkpoint_failure_uses_outer_transaction_rollback(
 
     assert backend.rolled_back is True
     assert backend.schema_version == 64
-    # Only the read-only readiness probe (f5f5b63005) commits; no migration write does.
-    assert backend.committed_statements
-    assert all(sql.lstrip().upper().startswith("SELECT") for sql in backend.committed_statements)
+    assert not any("conversation_behavior_snapshots" in sql for sql in backend.committed_statements)
     assert any("conversation_behavior_snapshots" in sql for sql in backend._pending) is False
+    assert coordinator_calls == [(backend, db._NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT)]
+    assert version_reads[:3] == [(backend, False), (migration_connection, False), (migration_connection, True)]
 
 
 class _PostgresAuthorityConnection:

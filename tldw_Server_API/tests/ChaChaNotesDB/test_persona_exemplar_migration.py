@@ -1,9 +1,11 @@
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.DB_Management.chacha import schema_bootstrap
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 pytestmark = pytest.mark.unit
@@ -132,32 +134,39 @@ def test_postgres_initializer_uses_postgres_safe_v33_migration(monkeypatch):
 
     applied_scripts: list[str] = []
 
-    # f5f5b63005 bootstraps on a pooled session this fake does not model.
-    from tldw_Server_API.app.core.DB_Management.chacha import schema_bootstrap
+    migration_connection = object()
+    coordinator_calls: list[tuple[object, str]] = []
+    version_reads: list[tuple[object, bool]] = []
 
-    monkeypatch.setattr(
-        schema_bootstrap,
-        "postgres_schema_migration",
-        lambda backend, _lock_timeout: backend.transaction(),
-    )
-    monkeypatch.setattr(db, "_get_schema_version_postgres", lambda conn, **_kwargs: 32)
+    @contextmanager
+    def coordinator(backend, lock_timeout):
+        coordinator_calls.append((backend, lock_timeout))
+        with backend.transaction():
+            yield migration_connection
+
+    def schema_version(conn, *, lock=False):
+        version_reads.append((conn, lock))
+        return 32
+
+    monkeypatch.setattr(schema_bootstrap, "postgres_schema_migration", coordinator)
+    monkeypatch.setattr(db, "_get_schema_version_postgres", schema_version)
     monkeypatch.setattr(db, "_ensure_postgres_fts", lambda conn: None)
 
-    class _StopAfterV35(Exception):
+    class _ReachedV35(Exception):
         pass
 
     def _record_script(script: str, conn, expected_version=None):
         applied_scripts.append(script)
-        # This pins the v33 step; later migrations verify catalogs this fake
-        # does not model, so stop once v35 is reached.
-        if script == CharactersRAGDB._MIGRATION_SQL_V34_TO_V35:
-            raise _StopAfterV35
+        if expected_version == 35:
+            raise _ReachedV35
 
     monkeypatch.setattr(db, "_apply_postgres_migration_script", _record_script)
 
-    with pytest.raises(_StopAfterV35):
+    with pytest.raises(_ReachedV35):
         db._initialize_schema_postgres()
 
     assert CharactersRAGDB._MIGRATION_SQL_V32_TO_V33_POSTGRES in applied_scripts
     assert CharactersRAGDB._MIGRATION_SQL_V34_TO_V35 in applied_scripts
     assert "PRAGMA foreign_keys" not in CharactersRAGDB._MIGRATION_SQL_V32_TO_V33_POSTGRES
+    assert coordinator_calls == [(db._backend, db._NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT)]
+    assert version_reads[:3] == [(db._backend, False), (migration_connection, False), (migration_connection, True)]

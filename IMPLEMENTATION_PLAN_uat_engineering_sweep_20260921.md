@@ -24,6 +24,8 @@ The next transaction/lock batch adds real PostgreSQL magic-link lock release and
 
 The follow-on budget/monitoring and PostgreSQL allowlist subgroups verify another51 adjacent and6 actual PostgreSQL checks, respectively. The latter also fixes two tests that swallowed assertions and crossed the PostgreSQL event loop; four forced forbidden responses now fail those assertions. Both stay within broad UAT451. BYOK PostgreSQL fixtures and remaining migration-routing doubles are tracked as unfinished children45/46, and an observed Windows SQL-migration encoding failure still needs its own bounded repair. The next PR commit contains completed reviewed units only.
 
+Children45–47 now have causal red/green evidence: the BYOK PostgreSQL module moves from18 guarded-user-write failures to19/19 actual PostgreSQL passes; four stale v33/v65/v67 coordinator fakes now pass with backend/lock/connection observability; and three Windows-codec BOM migration failures become55 adjacent passes after explicit UTF-8 loading. UAT451 and UAT457 remain open umbrellas; UAT465 is locally verified, with hosted Windows acceptance pending under UAT419. Full/native UAT remains paused. The published PR still precedes these local repairs while its earlier PostgreSQL Jobs shard remains queued.
+
 ## Global constraints
 
 - Four cells: sqlite-single, sqlite-multi, pg-single, pg-multi. Record each domain's actual database engine and normal actor role.
