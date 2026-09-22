@@ -1,6 +1,14 @@
 # Fresh-install UAT: single-user and multi-user
 
-- **Current tracker status: 405 findings / 388 verified / 17 open (261, 351, 352, 354, 356, 359–361, 365, 375, 388, 390–393, 400, 405).** All four configurations concluded with failures and limits recorded in the [frozen 365-finding matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_20.md). Targeted fresh SQLite and real PostgreSQL acceptance now verifies353/355/357/358/362/363/364/366–374/376–387. Remaining findings include application recovery/quality and newly confirmed test-coverage gaps. Counts describe findings, not UAT completion. Generated evidence remains local.
+- **Current tracker status: 406 findings / 389 verified / 17 open (261, 351, 352, 354, 356, 359–361, 365, 375, 388, 390–393, 400, 406).** All four configurations concluded with failures and limits recorded in the [frozen 365-finding matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_20.md). Targeted fresh SQLite and real PostgreSQL acceptance now verifies353/355/357/358/362/363/364/366–374/376–387. Remaining findings include application recovery/quality and newly confirmed test-coverage gaps. Counts describe findings, not UAT completion. Generated evidence remains local.
+
+### Diagnostic5 — Study follow-up verified; repeated ingestion fixture collision (UAT406)
+
+Unchanged production55db1bad2d, independently archived harnessdc848f0672 (sourceSHAab8442cf1dbca32e53ad7c29df38b210de793df59b26b3c2e3a4998a3aaaf456). These are stateful diagnostic follow-ups, not fresh installations. Each cell executes2cases with retries0/skips0/flaky0: SQLite1pass/1fail65.241s; official PostgreSQL1pass/1fail82.373s.
+
+The complete live Study journey passes SQLite58.944s and PostgreSQL75.261s: five supported distinct cards, edited saved content, canonical Note lineage, five Easy reviews, persisted schedules/history/session and analytics. UAT405 is verified and its task is Done. UAT391 remains open for the separate integrated controlled-provider gate.
+
+**UAT406 / TASK13260.278.3.1, open:** changing only the fixture filename leaves identical TXT content. Both real ingest jobs return media2 with an already-exists/overwrite-disabled result; canonical readback retains the preceding diagnostic4 filename. The existing Source belongs to another run assertion correctly fails. Include the run namespace in fixture bytes, preserving frozen facts, exact canonical ID/title/content checks and previous records. No product deduplication change or ownership-oracle relaxation. Native follow-up is pending. Original failures and trace evidence remain in private diagnostic5/{sqlite-single,pg-single}-attempt1.
 
 ### Diagnostic4 completed — Content Review accepted; journey follow-up required
 

@@ -57,11 +57,13 @@ test.describe('Ingest -> Search -> Chat journey', () => {
     };
     try {
       const owned: Array<{ id: string; title: string; text: string }> = [];
-      for (const [fixture, text] of [
+      for (const [fixture, fixtureText] of [
         ['F-SOURCE', ROWAN_SOURCE],
         ['F-DISTRACTOR', LARCH_SOURCE],
       ] as const) {
         await test.step(`Ingest and corroborate ${fixture}`, async () => {
+          // Ingestion deduplicates content even when the filename changes.
+          const text = `${fixtureText}\n\nFixture run: ${runId}\n`;
           const fileName = `${runId}-${fixture}.txt`;
           const filePath = testInfo.outputPath(fileName);
           await writeFile(filePath, text, 'utf8');
