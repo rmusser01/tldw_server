@@ -1,0 +1,84 @@
+# ADR-050: One ChatOps shell behind Discord and Slack
+
+**Status:** Accepted
+**Date:** 2026-09-22
+**Backfilled from:** not backfilled
+**Decision owner:** repository owner (decided 2026-09-22 during core-module review remediation)
+**Related task:** TASK-13326
+**Related spec/plan:** `Docs/superpowers/reviews/2026-09-21-core-module-duplication-synthesis.md` (F25)
+
+## Decision
+
+The transport-agnostic ChatOps shell lives in
+`tldw_Server_API/app/api/v1/endpoints/_chatops/`. Discord and Slack keep one module
+each, holding a `ChatOpsOAuthProvider` descriptor and thin wrappers; the flow itself
+is written once.
+
+Only two things stay genuinely per-protocol: the request **signature algorithm**
+(Ed25519 for Discord, HMAC-SHA256 `v0=` for Slack) and the **command parser**.
+
+Extraction is staged, smallest and highest-identity first:
+
+| Stage | Pair | Identity | State |
+| --- | --- | --- | --- |
+| 1 | `*_oauth_admin.py` | 90.9% | **done** (this ADR) |
+| 2 | `*_support.py` | 78.6% | pending |
+| 3 | `discord.py` / `slack.py` | 61.3% | pending |
+| 4 | the four test clone pairs | one at 100% | pending |
+
+## Context
+
+Measured by `difflib` after normalising `discord`/`slack` and `guild`/`team`:
+
+- `discord_oauth_admin.py` vs `slack_oauth_admin.py` — **370/407 = 90.9%**
+- `discord_support.py` vs `slack_support.py` — 533/677 = 78.6%, with `_error_response`
+  and `_metric_labels` byte-identical **at the same line numbers** (`:241`, `:248`)
+- `discord.py` vs `slack.py` — 368/600 = 61.3%
+
+The cost is not hypothetical. The IDOR fix on `GET /{discord|slack}/jobs/{job_id}` had
+to be written **four times** with byte-identical comment text. And the policy contract
+has already drifted into two vocabularies for the same concept:
+`team_quota_per_minute` against `workspace_quota_per_minute`; `status_scope` of
+`{team, team_and_user}` against `{workspace, workspace_and_user}`;
+`default_response_mode` gained a `thread` value on one side only.
+
+## What is genuinely different, and stays described rather than unified
+
+Stage 1 found five real differences, all carried by the descriptor:
+
+1. **Authorize query.** Discord sends `response_type=code` and an optional
+   `permissions`; Slack sends neither.
+2. **Token form.** Discord sends `grant_type=authorization_code`; Slack does not.
+3. **Success test.** Slack's token response carries an `ok` flag that must be true.
+4. **Installation record.** Discord keeps `refresh_token`; Slack keeps `enterprise_id`,
+   `bot_user_id` and `authed_user_id` (the last lifted from a nested object).
+5. **Missing-workspace status.** Discord answers **400** — its callback accepts
+   `guild_id` on the query, so absence is a bad request. Slack derives the workspace
+   solely from the token response, so absence is an upstream fault and it answers
+   **502**.
+
+Two further differences are **contracts, not drift to repair**:
+
+- Public key names `guild_id`/`guild_name` against `team_id`/`team_name`. Changing
+  either breaks clients.
+- The policy metric scope label: `guild` against `workspace`. Changing either breaks
+  existing dashboards and alerts.
+
+Both are expressed as descriptor fields so the shell can emit each provider's own
+vocabulary from one implementation.
+
+## Consequences
+
+- A fix to the OAuth install flow is written once. That is the whole point: the
+  four-times IDOR fix is what this prevents next time.
+- `discord_oauth_admin.py` and `slack_oauth_admin.py` keep their existing public
+  function names and keyword arguments, so `discord.py` and `slack.py` are untouched
+  by stage 1 and the blast radius is three files.
+- 814 lines across the pair become 417 of wrappers plus 526 shared. The line count
+  barely moves; the number of places a bug must be fixed halves, and for the test
+  clones it quarters.
+- The descriptor is additive: a third ChatOps provider is a descriptor and wrappers,
+  not a third copy.
+- The policy vocabulary drift (`team_*` vs `workspace_*`) is **not** addressed here —
+  it lives in `discord.py`/`slack.py` and belongs to stage 3. It remains a live
+  divergence until then.
