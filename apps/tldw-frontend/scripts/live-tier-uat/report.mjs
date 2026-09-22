@@ -63,9 +63,11 @@ export function assertProjectAccounting({
   results,
   allowSkips = false,
   requiredCases = undefined,
+  registeredCases = undefined,
   report = undefined,
   runContext = undefined,
 }) {
+  if (registeredCases !== undefined) assertRegisteredCases({ registeredCases, report, allowSkips })
   if (requiredCases !== undefined) assertRequiredCases({ requiredCases, report, runContext })
   for (const project of projects) {
     const expected = listed[project] ?? 0
@@ -138,7 +140,8 @@ export function renderMarkdownReport({
   inventory = [],
   health = {},
   artifacts = {},
-  certification = true,
+  certification = false,
+  report = undefined,
   skippedTests = [],
   error = null,
 }) {
@@ -204,6 +207,20 @@ export function renderMarkdownReport({
     }
   }
 
+  if (report) {
+    const cell = (value) => String(value ?? "").replaceAll("|", "\\|").replaceAll("\n", " ")
+    lines.push("", "## Individual attempts", "", "| Project | File / full title | Outcome | Attempt | Evidence |", "| --- | --- | --- | ---: | --- |")
+    visitSpecs(report, (spec, titlePath) => {
+      for (const test of spec.tests ?? []) {
+        const attempts = test.results?.length ? test.results : [{ status: "unrun", retry: 0 }]
+        for (const attempt of attempts) {
+          const evidence = (attempt.attachments ?? []).map(attachment => attachment.path ?? attachment.name).join(", ")
+          lines.push(`| ${cell(test.projectName)} | ${cell(spec.file)} / ${cell(titlePath.join(" > "))} | ${cell(attempt.status)} | ${attempt.retry ?? 0} | ${cell(evidence)} |`)
+        }
+      }
+    })
+  }
+
   if (error) lines.push("", "## Runner error", "", String(error))
   return `${lines.join("\n")}\n`
 }
@@ -246,20 +263,34 @@ function assertRequiredCases({ requiredCases, report, runContext }) {
       throw new Error(`Required project ${entry.project} must use retries0 and repeatEach1`)
     }
   }
+  assertRegisteredCases({ registeredCases: requiredCases, report, allowSkips: false })
+  if (stats.expected !== planned.size) throw new Error("Playwright statistics disagree with exact case results")
+}
+
+
+/** Compare actual first attempts to the exact collection; this does not certify a release. */
+function assertRegisteredCases({ registeredCases, report, allowSkips }) {
+  if (!Array.isArray(registeredCases) || !registeredCases.length) {
+    throw new Error("Registered case inventory must not be empty")
+  }
+  const planned = new Set(registeredCases.map(caseKey))
+  if (planned.size !== registeredCases.length) throw new Error("Duplicate registered case identity")
   const observed = new Set()
   visitSpecs(report, (spec, titlePath) => {
     for (const test of spec.tests ?? []) {
       const identity = caseKey({ project: test.projectName, file: spec.file, titlePath })
-      if (!planned.has(identity)) throw new Error(`Unexpected required-case result: ${identity}`)
-      if (observed.has(identity)) throw new Error(`Duplicate required-case result: ${identity}`)
+      if (!planned.has(identity)) throw new Error(`Unexpected registered-case result: ${identity}`)
+      if (observed.has(identity)) throw new Error(`Duplicate registered-case result: ${identity}`)
       observed.add(identity)
+      if (allowSkips && test.status === "skipped" &&
+          (!test.results?.length || (test.results.length === 1 && test.results[0].status === "skipped"))) continue
       if (test.status !== "expected" || test.expectedStatus !== "passed" || test.results?.length !== 1 ||
           test.results[0].status !== "passed" || test.results[0].retry !== 0) {
-        throw new Error(`Required case did not pass its first attempt: ${identity}`)
+        throw new Error(`Registered case did not pass its first attempt: ${identity}`)
       }
     }
   })
   const missing = [...planned].filter(identity => !observed.has(identity))
-  if (missing.length) throw new Error(`Missing required cases: ${missing.join(", ")}`)
-  if (stats.expected !== observed.size) throw new Error("Playwright statistics disagree with exact case results")
+  if (missing.length) throw new Error(`Missing registered cases: ${missing.join(", ")}`)
+  if (report.errors?.length) throw new Error("Playwright reported a global execution error")
 }

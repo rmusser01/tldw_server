@@ -146,3 +146,40 @@ describe("stable registered case identity", () => {
     expect(() => verify(report)).toThrow()
   })
 })
+
+
+describe("diagnostic runner registered-case accounting", () => {
+  const check = (report: Report, registrations = requiredCases) => assertProjectAccounting({
+    projects: ["chromium"], listed: { chromium: 2 },
+    results: summarizePlaywrightReport(report), registeredCases: registrations, report,
+  })
+  it("accepts the exact listed identities without claiming artifact provenance", () => {
+    expect(() => check(makeReport())).not.toThrow()
+  })
+  it.each([
+    ["substitution", (r: Report) => { r.suites[0].specs[1].title = "replacement" }],
+    ["duplicate", (r: Report) => { r.suites[0].specs[1].title = "saved" }],
+    ["concealed retry", (r: Report) => { r.suites[0].specs[0].tests[0].results[0].retry = 1 }],
+  ] as const)("rejects %s with unchanged project totals", (_name, mutate) => {
+    const report = makeReport()
+    mutate(report)
+    expect(() => check(report)).toThrow()
+  })
+  it("rejects duplicate listed identities", () => {
+    expect(() => check(makeReport(), [requiredCases[0], requiredCases[0]])).toThrow()
+  })
+})
+
+
+it("retains failed first attempts and unrun cases in the readable diagnostic report", async () => {
+  const { renderMarkdownReport } = await import("../live-tier-uat/report.mjs")
+  const report = makeReport()
+  report.suites[0].specs[0].tests[0].results.unshift({ status: "failed", retry: 0, duration: 1 })
+  report.suites[0].specs[0].tests[0].results[1].retry = 1
+  report.suites[0].specs[1].tests[0].results = []
+  const markdown = renderMarkdownReport({ runId: "diagnostic", report })
+  expect(markdown).toContain("Certification run: no")
+  expect(markdown).toContain("Chat > saved | failed | 0")
+  expect(markdown).toContain("Chat > saved | passed | 1")
+  expect(markdown).toContain("Chat > image retry | unrun | 0")
+})
