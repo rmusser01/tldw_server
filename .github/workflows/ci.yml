@@ -166,6 +166,103 @@ jobs:
         # skipped). Known-unshared backlog is tracked in
         # Helper_Scripts/ci/shard_coverage_baseline.txt; shrink it over time.
         run: python Helper_Scripts/ci/check_shard_coverage.py --ci-file .github/workflows/ci.yml
+  timezone-guard:
+    name: Timezone guard (non-UTC)
+    needs: [lint, syntax-check, changes]
+    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'workflow_run') || needs.changes.outputs.backend_changed == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Every other job runs UTC, where a naive-vs-aware datetime bug has a delta of
+      # exactly zero and is therefore invisible. task-13299 shipped a 7-hour error in
+      # OpenAI-compatible `created` timestamps for exactly that reason, on a product
+      # whose target deployment is a user's own machine. This job is the only place
+      # the timezone axis is exercised at all.
+      TZ: America/Los_Angeles
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Setup Python and deps (with uv)
+        uses: ./.github/actions/setup-python-deps
+        with:
+          python-version: '3.12'
+          use-uv: 'true'
+          enable-pip-cache: ${{ github.event_name != 'workflow_run' }}
+          cache-dependency-path: |
+            pyproject.toml
+            uv.lock
+          extras: dev,multiplayer
+
+      - name: Confirm the runner is not on UTC
+        shell: bash
+        run: |
+          set -euo pipefail
+          OFFSET="$(python -c 'import time; print(time.strftime("%z"))')"
+          echo "TZ=$TZ offset=$OFFSET"
+          if [ "$OFFSET" = "+0000" ]; then
+            echo "This job is pointless on a UTC offset -- TZ did not take effect." >&2
+            exit 1
+          fi
+
+      - name: Run timestamp-sensitive tests under a non-UTC timezone
+        # Seeded from the test files that assert on utcnow / timezone.utc /
+        # fromtimestamp / .timestamp(). Verified green under BOTH UTC and
+        # America/Los_Angeles before being gated (678 passed), so this starts as a
+        # pure regression guard rather than a backlog to work off.
+        #
+        # Five files are deliberately excluded because they fail identically under
+        # both timezones, i.e. they are pre-existing and unrelated to this axis:
+        #   tests/http_client/test_http_client_retry_after.py
+        #   tests/http_client/test_http_client_stream_timeouts.py
+        #   tests/Sharing/test_shared_workspace_clone_endpoints.py
+        #   tests/Sharing/test_shared_workspace_recipient_endpoints.py
+        #   tests/test_authnz_backends_improved.py
+        # Grow this list as timestamp coverage grows; shrink the exclusions as those
+        # five get fixed.
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pytest -q --timeout=300 \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_admin_endpoints_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_api_keys_repo_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_llm_provider_overrides_repo_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_mfa_repo_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_monitoring_repo_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_org_provider_secrets_repo_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_rate_limits_repo_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_sessions_repo_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_token_blacklist_repo_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_usage_repo_rollups_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_usage_repo_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_user_provider_secrets_repo_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_byok_endpoints_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_byok_oauth_state_repo_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_byok_rotation_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_byok_runtime_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_llm_budget_402_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_scheduler_auth_failure_monitor_sqlite.py \
+            tldw_Server_API/tests/Discord/test_discord_oauth_lifecycle.py \
+            tldw_Server_API/tests/Embeddings/test_request_signing_nonce_cleanup.py \
+            tldw_Server_API/tests/Flashcards/test_flashcards_endpoint_integration.py \
+            tldw_Server_API/tests/Flashcards/test_flashcards_timestamp_contract.py \
+            tldw_Server_API/tests/Flashcards/test_review_response_timestamp_contract.py \
+            tldw_Server_API/tests/Flashcards/test_source_review_plans_api.py \
+            tldw_Server_API/tests/Flashcards/test_study_response_timestamp_contract.py \
+            tldw_Server_API/tests/Media_DB/test_media_clone_snapshot_repository.py \
+            tldw_Server_API/tests/Personalization/test_companion_derivations.py \
+            tldw_Server_API/tests/Personalization/test_companion_proactive_policy.py \
+            tldw_Server_API/tests/Personalization/test_companion_reflection_jobs.py \
+            tldw_Server_API/tests/Personalization/test_personalization_endpoints.py \
+            tldw_Server_API/tests/Research/test_research_broker.py \
+            tldw_Server_API/tests/Research/test_research_discovery_legacy_execution_contract.py \
+            tldw_Server_API/tests/Sharing/test_shared_workspace_chat_endpoint.py \
+            tldw_Server_API/tests/Sharing/test_shared_workspace_clone_operations.py \
+            tldw_Server_API/tests/Sharing/test_shared_workspace_recipient_security_matrix.py
+
   quickstart-dry-run:
     name: Quickstart Dry-Run Smoke
     needs: admission
