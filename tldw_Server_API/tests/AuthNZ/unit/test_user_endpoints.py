@@ -68,42 +68,47 @@ class TestUserEndpoints:
         app.dependency_overrides.clear()
 
     @pytest.mark.asyncio
-    async def test_update_user_profile(self, mock_db_pool, test_user, valid_access_token):
+    async def test_update_user_profile(self, monkeypatch, test_db_pool, test_user, valid_access_token):
         """Test updating user profile."""
-        # Setup mock connection with proper transaction context
-        mock_conn = AsyncMock()
-        mock_conn.execute = AsyncMock()
-        mock_conn.fetchrow = AsyncMock(return_value={**test_user, "email": "newemail@example.com"})
-        mock_conn.commit = AsyncMock()
+        from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, get_db_transaction
+        from tldw_Server_API.app.api.v1.endpoints import users as users_endpoint
+        from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+        from tldw_Server_API.app.core.AuthNZ.repos import users_repo
 
-        # Mock the transaction context manager
-        mock_db_pool.transaction.return_value.__aenter__.return_value = mock_conn
-        mock_db_pool.transaction.return_value.__aexit__.return_value = None
+        assert test_db_pool.pool is not None
+        monkeypatch.setattr(users_repo, "get_db_pool", AsyncMock(return_value=test_db_pool))
+        monkeypatch.setattr(users_endpoint, "is_postgres_backend", AsyncMock(return_value=True))
 
-        from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_current_active_user, get_db_transaction
-
-        async def mock_get_current_active_user():
-            return test_user
-
-        app.dependency_overrides[get_current_active_user] = mock_get_current_active_user
-
-        async def mock_get_db_transaction():
-            yield mock_conn
-
-        app.dependency_overrides[get_db_transaction] = mock_get_db_transaction
-
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            response = await client.put(
-                "/api/v1/users/me",
-                headers={"Authorization": f"Bearer {valid_access_token}"},
-                json={"email": "newemail@example.com"},
+        async def current_principal():
+            return AuthPrincipal(
+                kind="user",
+                user_id=test_user["id"],
+                username=test_user["username"],
+                email=test_user["email"],
+                roles=[test_user["role"]],
             )
 
-        assert response.status_code == 200
-        data = response.json()
-        assert data["email"] == "newemail@example.com"
+        async def db_transaction():
+            async with test_db_pool.transaction() as conn:
+                yield conn
 
-        app.dependency_overrides.clear()
+        app.dependency_overrides[get_auth_principal] = current_principal
+        app.dependency_overrides[get_db_transaction] = db_transaction
+        try:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                response = await client.put(
+                    "/api/v1/users/me",
+                    headers={"Authorization": f"Bearer {valid_access_token}"},
+                    json={"email": "newemail@example.com"},
+                )
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["email"] == "newemail@example.com"
+            saved = await users_repo.AuthnzUsersRepo(test_db_pool).get_user_by_id(test_user["id"])
+            assert saved["email"] == "newemail@example.com"
+        finally:
+            app.dependency_overrides.clear()
 
     @pytest.mark.asyncio
     async def test_change_password(self, monkeypatch, mock_db_pool, password_service, test_user, valid_access_token):

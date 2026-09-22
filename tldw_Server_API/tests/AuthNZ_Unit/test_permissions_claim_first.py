@@ -3,10 +3,10 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
-from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ import permissions as perms_mod
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import require_permissions, require_roles
+from tldw_Server_API.app.core.AuthNZ import permissions as perms_mod
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 
 
 def test_permissions_module_no_legacy_require_role_helper():
@@ -93,8 +93,8 @@ def _make_principal(
 def test_check_permission_uses_claims_true(monkeypatch):
 
 
-    # Not in single-user mode
-    monkeypatch.setattr(perms_mod, "is_single_user_mode", lambda: False)
+    # Configure the canonical mode; authorization remains claim-first.
+    monkeypatch.setattr(perms_mod.get_settings(), "AUTH_MODE", "multi_user")
 
     fake_db = _FakeUserDB()
 
@@ -114,7 +114,7 @@ def test_check_permission_uses_claims_true(monkeypatch):
 def test_check_permission_uses_claims_false_without_db(monkeypatch):
 
 
-    monkeypatch.setattr(perms_mod, "is_single_user_mode", lambda: False)
+    monkeypatch.setattr(perms_mod.get_settings(), "AUTH_MODE", "multi_user")
 
     def _broken_get_user_database():
 
@@ -131,7 +131,7 @@ def test_check_permission_uses_claims_false_without_db(monkeypatch):
 def test_check_permission_uses_claims_even_if_db_unavailable(monkeypatch):
 
 
-    monkeypatch.setattr(perms_mod, "is_single_user_mode", lambda: False)
+    monkeypatch.setattr(perms_mod.get_settings(), "AUTH_MODE", "multi_user")
 
     def _broken_get_user_database():
 
@@ -147,7 +147,7 @@ def test_check_permission_uses_claims_even_if_db_unavailable(monkeypatch):
 def test_check_permission_falls_back_to_db_when_permissions_absent(monkeypatch):
 
 
-    monkeypatch.setattr(perms_mod, "is_single_user_mode", lambda: False)
+    monkeypatch.setattr(perms_mod.get_settings(), "AUTH_MODE", "multi_user")
 
     fake_db = _FakeUserDB()
     fake_db.set_permission_result(True)
@@ -168,7 +168,7 @@ def test_check_permission_falls_back_to_db_when_permissions_absent(monkeypatch):
 def test_check_role_uses_claims_true(monkeypatch):
 
 
-    monkeypatch.setattr(perms_mod, "is_single_user_mode", lambda: False)
+    monkeypatch.setattr(perms_mod.get_settings(), "AUTH_MODE", "multi_user")
 
     fake_db = _FakeUserDB()
 
@@ -187,7 +187,7 @@ def test_check_role_uses_claims_true(monkeypatch):
 def test_check_role_uses_claims_false_without_db(monkeypatch):
 
 
-    monkeypatch.setattr(perms_mod, "is_single_user_mode", lambda: False)
+    monkeypatch.setattr(perms_mod.get_settings(), "AUTH_MODE", "multi_user")
 
     def _broken_get_user_database():
 
@@ -204,7 +204,7 @@ def test_check_role_uses_claims_false_without_db(monkeypatch):
 def test_check_role_uses_claims_even_if_db_unavailable(monkeypatch):
 
 
-    monkeypatch.setattr(perms_mod, "is_single_user_mode", lambda: False)
+    monkeypatch.setattr(perms_mod.get_settings(), "AUTH_MODE", "multi_user")
 
     def _broken_get_user_database():
 
@@ -220,7 +220,7 @@ def test_check_role_uses_claims_even_if_db_unavailable(monkeypatch):
 def test_check_role_falls_back_to_db_when_roles_absent(monkeypatch):
 
 
-    monkeypatch.setattr(perms_mod, "is_single_user_mode", lambda: False)
+    monkeypatch.setattr(perms_mod.get_settings(), "AUTH_MODE", "multi_user")
 
     fake_db = _FakeUserDB()
     fake_db.set_role_result(True)
@@ -239,7 +239,7 @@ def test_check_role_falls_back_to_db_when_roles_absent(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_check_permission_single_user_mode_prefers_claims(monkeypatch):
-    monkeypatch.setattr(perms_mod, "is_single_user_mode", lambda: True)
+    monkeypatch.setattr(perms_mod.get_settings(), "AUTH_MODE", "single_user")
 
     def _fake_get_user_database():
 
@@ -257,7 +257,7 @@ async def test_check_permission_single_user_mode_prefers_claims(monkeypatch):
 def test_check_permission_single_user_mode_without_claims_falls_back_to_db(monkeypatch):
 
 
-    monkeypatch.setattr(perms_mod, "is_single_user_mode", lambda: True)
+    monkeypatch.setattr(perms_mod.get_settings(), "AUTH_MODE", "single_user")
 
     fake_db = _FakeUserDB()
     fake_db.set_permission_result(True)

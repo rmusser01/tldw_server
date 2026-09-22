@@ -10,6 +10,7 @@ import pytest
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 from tldw_Server_API.app.core.AuthNZ.exceptions import InvalidSessionError, SessionError
 from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService
+from tldw_Server_API.app.core.AuthNZ.profile_version import VersionedUserWriteGateway
 from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager
 from tldw_Server_API.app.core.AuthNZ.settings import Settings, reset_settings
 
@@ -431,15 +432,15 @@ async def test_refresh_session_concurrent_rotation_allows_single_winner(isolated
     try:
         # Ensure a user exists for FK constraints
         async with pool.transaction() as conn:
-            await conn.execute(
-                """
-                INSERT INTO users (id, username, email, password_hash, is_active)
-                VALUES ($1, $2, $3, $4, TRUE)
-                """,
-                1,
-                "concurrency-user",
-                "concurrency-user@example.com",
-                "hashed-password",
+            await VersionedUserWriteGateway("postgres").insert_user(
+                conn,
+                values={
+                    "id": 1,
+                    "username": "concurrency-user",
+                    "email": "concurrency-user@example.com",
+                    "password_hash": "hashed-password",  # nosec B105 # Inert fixture hash, never used for login
+                    "is_active": True,
+                },
             )
 
         jwt_service = JWTService(settings=settings)
@@ -608,15 +609,15 @@ async def test_refresh_session_survives_hmac_rotation(isolated_test_environment,
 
     # Ensure a user exists for FK constraints
     async with pool.transaction() as conn:
-        await conn.execute(
-            """
-            INSERT INTO users (id, username, email, password_hash, is_active)
-            VALUES ($1, $2, $3, $4, TRUE)
-            """,
-            1,
-            "alice",
-            "alice@example.com",
-            "hashed-password",
+        await VersionedUserWriteGateway("postgres").insert_user(
+            conn,
+            values={
+                "id": 1,
+                "username": "alice",
+                "email": "alice@example.com",
+                "password_hash": "hashed-password",  # nosec B105 # Inert fixture hash, never used for login
+                "is_active": True,
+            },
         )
 
     jwt_old = JWTService(settings=old_settings)
@@ -711,15 +712,15 @@ async def test_validate_session_persists_last_activity(isolated_test_environment
 
     # Ensure a user exists for FK constraints
     async with pool.transaction() as conn:
-        await conn.execute(
-            """
-            INSERT INTO users (id, username, email, password_hash, is_active)
-            VALUES ($1, $2, $3, $4, TRUE)
-            """,
-            1,
-            "bob",
-            "bob@example.com",
-            "bob-hashed-password",
+        await VersionedUserWriteGateway("postgres").insert_user(
+            conn,
+            values={
+                "id": 1,
+                "username": "bob",
+                "email": "bob@example.com",
+                "password_hash": "bob-hashed-password",  # nosec B105 # Inert fixture hash, never used for login
+                "is_active": True,
+            },
         )
 
     manager = SessionManager(db_pool=pool, settings=settings)

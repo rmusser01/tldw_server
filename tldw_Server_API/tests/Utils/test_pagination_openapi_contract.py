@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+from fastapi import FastAPI
+from fastapi.routing import APIRoute
+from pydantic import create_model
 
 MATRIX_PATH = Path("Docs/Design/Pagination_Completion_Matrix.md")
 UNRESOLVED_STATUSES = {"migration-candidate", "needs-confirmation"}
@@ -111,23 +115,91 @@ def test_openapi_exposes_canonical_pagination_components() -> None:
         assert fields <= set(components[component_name].get("properties", {}))
 
 
+def _pagination_mismatches(app: FastAPI, rows: list[dict[str, str]]) -> list[str]:
+    """Check advertised pagination paths against the application's public schemas."""
+    document = app.openapi()
+    components = document["components"]["schemas"]
+    response_schemas: dict[tuple[str, str, str], list[dict[str, object]]] = {}
+    for route in app.routes:
+        if not isinstance(route, APIRoute) or not route.include_in_schema:
+            continue
+        endpoint = f"{route.endpoint.__module__.replace('.', '/')}.py:{route.endpoint.__name__}"
+        model_name = getattr(route.response_model, "__name__", None)
+        if model_name is None:
+            continue
+        for method in route.methods:
+            operation = document["paths"].get(route.path_format, {}).get(method.lower())
+            if operation is None:
+                continue
+            response = operation["responses"][str(route.status_code or 200)]
+            schema = response.get("content", {}).get("application/json", {}).get("schema", {})
+            response_schemas.setdefault((endpoint, method, model_name), []).append(schema)
+
+    mismatches: list[str] = []
+    for row in rows:
+        if row["status"] != CANONICAL_STATUS:
+            continue
+        component_name = _component_name(row["response_model"])
+        if component_name is None:
+            continue
+        paths = _pagination_paths(row["response_fields"])
+        for schema in response_schemas.get((row["endpoint"], row["method"], component_name), []):
+            if not paths or not any(_has_property_path(schema, path, components) for path in paths):
+                mismatches.append(f"{row['endpoint']} -> {component_name}")
+
+    return mismatches
+
+
+@pytest.mark.parametrize(
+    ("include_legacy", "include_current", "endpoint_name", "missing_pagination"),
+    [
+        (False, True, "legacy_list", False),
+        (True, True, "legacy_list", False),
+        (True, True, "current_list", True),
+        (False, True, "current_list", True),
+        (True, False, "legacy_list", False),
+    ],
+)
+def test_matrix_resolves_colliding_models_by_endpoint(
+    include_legacy: bool,
+    include_current: bool,
+    endpoint_name: str,
+    missing_pagination: bool,
+) -> None:
+    app = FastAPI()
+    legacy_model = create_model(
+        "SharedResponse", __module__="legacy_models", pagination=(dict[str, int], ...)
+    )
+    current_model = create_model(
+        "SharedResponse", __module__="current_models", items=(list[str], ...)
+    )
+
+    def legacy_list():
+        return {"pagination": {"total": 0}}
+
+    def current_list():
+        return {"items": []}
+
+    if include_legacy:
+        app.add_api_route("/legacy", legacy_list, response_model=legacy_model)
+    if include_current:
+        app.add_api_route("/current", current_list, response_model=current_model)
+    endpoint = f"{__name__.replace('.', '/')}.py:{endpoint_name}"
+    rows = [{
+        "method": "GET",
+        "endpoint": endpoint,
+        "response_model": "SharedResponse",
+        "response_fields": "pagination",
+        "status": CANONICAL_STATUS,
+    }]
+
+    assert _pagination_mismatches(app, rows) == (
+        [f"{endpoint} -> SharedResponse"] if missing_pagination else []
+    )
+
+
 def test_canonical_matrix_response_models_expose_pagination_when_openapi_resolvable() -> None:
     """Canonical matrix rows should point at response models exposing their matrix path."""
     from tldw_Server_API.app.main import app
 
-    components = app.openapi()["components"]["schemas"]
-    mismatches: list[str] = []
-    for row in _matrix_rows():
-        if row["status"] != CANONICAL_STATUS:
-            continue
-        component_name = _component_name(row["response_model"])
-        if component_name is None or component_name not in components:
-            continue
-        paths = _pagination_paths(row["response_fields"])
-        if not paths or not any(
-            _has_property_path(components[component_name], path, components)
-            for path in paths
-        ):
-            mismatches.append(f"{row['endpoint']} -> {component_name}")
-
-    assert mismatches == []
+    assert _pagination_mismatches(app, _matrix_rows()) == []

@@ -462,4 +462,4 @@ async def test_notes_graph_delete_link_maps_db_error_to_500():
         resp = client.delete("/api/v1/notes/links/e:123e4567-e89b-12d3-a456-426614174000")
 
     assert resp.status_code == 500
-    assert resp.json()["detail"] == "Link deletion failed"
+    assert resp.json()["detail"] == "Notes link operation failed"

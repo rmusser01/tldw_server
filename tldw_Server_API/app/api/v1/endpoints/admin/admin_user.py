@@ -174,11 +174,12 @@ async def list_users(
             logger.debug("TEST_MODE header assignment failed")
         raise
     except Exception as e:
-        logger.exception(
-            "Failed to list users (principal={}, page={}, limit={})",
+        logger.error(
+            "Failed to list users (principal={}, page={}, limit={}, error_type={})",
             getattr(principal, "user_id", None),
             page,
             limit,
+            type(e).__name__,
         )
         try:
             if is_test_mode():

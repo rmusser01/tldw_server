@@ -19,6 +19,7 @@ async def test_monitoring_alerts_include_backend_overlay_and_authoritative_actio
 
     from tldw_Server_API.app.api.v1.endpoints import monitoring as monitoring_endpoints
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.profile_version import VersionedUserWriteGateway
     from tldw_Server_API.app.core.AuthNZ.repos.admin_monitoring_repo import (
         AuthnzAdminMonitoringRepo,
     )
@@ -62,17 +63,19 @@ async def test_monitoring_alerts_include_backend_overlay_and_authoritative_actio
         pool = await get_db_pool()
         repo = AuthnzAdminMonitoringRepo(pool)
         await repo.ensure_schema()
-        await pool.execute(
-            """
-            INSERT OR IGNORE INTO users (id, uuid, username, email, password_hash, is_active)
-            VALUES (?, ?, ?, ?, ?, 1)
-            """,
-            1,
-            "single-user-admin-uuid",
-            "single-user-admin",
-            "single-user-admin@example.com",
-            "x",
-        )
+        async with pool.transaction() as conn:
+            await VersionedUserWriteGateway("sqlite").insert_user(
+                conn,
+                values={
+                    "id": 1,
+                    "uuid": "single-user-admin-uuid",
+                    "username": "single-user-admin",
+                    "email": "single-user-admin@example.com",
+                    "password_hash": "x",  # nosec B105 # Inert fixture hash, never used for login
+                    "is_active": 1,
+                },
+                ignore_conflict=True,
+            )
         await repo.upsert_alert_state(
             alert_identity=f"alert:{alert_id}",
             assigned_to_user_id=1,

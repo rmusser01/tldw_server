@@ -482,6 +482,14 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                 expected_other_inputs = (
                     {"fetch-depth": 0} if (name, job_name) in FETCH_DEPTH_CHECKOUTS else {}
                 )
+                if name == "ci.yml" and job_name in {
+                    "full-suite-linux-312-shards",
+                    "full-suite-linux-313-shards",
+                }:
+                    expected_other_inputs = {
+                        "fetch-depth": "${{ contains(matrix.shard.paths, "
+                        "'tldw_Server_API/tests/Docs') && '0' || '1' }}"
+                    }
                 assert other_inputs == expected_other_inputs, (name, job_name)
 
     assert checkout_count == 55

@@ -18,6 +18,7 @@ def test_admin_monitoring_repo_coerces_iso_timestamp_strings_for_postgres() -> N
 @pytest.mark.asyncio
 async def test_admin_monitoring_repo_rule_state_and_event_round_trip_sqlite(tmp_path) -> None:
     from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+    from tldw_Server_API.app.core.AuthNZ.profile_version import VersionedUserWriteGateway
     from tldw_Server_API.app.core.AuthNZ.repos.admin_monitoring_repo import (
         AuthnzAdminMonitoringRepo,
     )
@@ -40,20 +41,21 @@ async def test_admin_monitoring_repo_rule_state_and_event_round_trip_sqlite(tmp_
         await repo.ensure_schema()
 
         async with pool.transaction() as conn:
-            await conn.execute(
-                """
-                INSERT INTO users (username, email, password_hash, role, is_active)
-                VALUES (?, ?, ?, ?, 1)
-                """,
-                ("admin-actor", "actor@example.com", "hashed", "admin"),
-            )
-            await conn.execute(
-                """
-                INSERT INTO users (username, email, password_hash, role, is_active)
-                VALUES (?, ?, ?, ?, 1)
-                """,
-                ("assignee-user", "assignee@example.com", "hashed", "admin"),
-            )
+            gateway = VersionedUserWriteGateway("sqlite")
+            for username, email in (
+                ("admin-actor", "actor@example.com"),
+                ("assignee-user", "assignee@example.com"),
+            ):
+                await gateway.insert_user(
+                    conn,
+                    values={
+                        "username": username,
+                        "email": email,
+                        "password_hash": "hashed",  # nosec B105 # Inert fixture hash, never used for login
+                        "role": "admin",
+                        "is_active": 1,
+                    },
+                )
             actor_cursor = await conn.execute(
                 "SELECT id FROM users WHERE username = ?",
                 ("admin-actor",),

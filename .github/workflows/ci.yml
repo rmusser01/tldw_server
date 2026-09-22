@@ -1919,6 +1919,8 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+          # Only the docs shard needs complete history for strict revision dates.
+          fetch-depth: ${{ contains(matrix.shard.paths, 'tldw_Server_API/tests/Docs') && '0' || '1' }}
 
       - name: Install FFmpeg and PortAudio (Linux)
         uses: ./.github/actions/setup-ffmpeg
@@ -3430,6 +3432,8 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+          # Only the docs shard needs complete history for strict revision dates.
+          fetch-depth: ${{ contains(matrix.shard.paths, 'tldw_Server_API/tests/Docs') && '0' || '1' }}
 
       - name: Install FFmpeg and PortAudio (Linux)
         uses: ./.github/actions/setup-ffmpeg

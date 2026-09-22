@@ -159,6 +159,36 @@ def test_status_schema_exposes_rollback_state_without_artifact_paths() -> None:
             "schema_ready": True,
             "key_state": "available",
             "delivery_capability_ready": False,
+            "delivery": {
+                "canonical_schema_version": 1,
+                "schema_ready": True,
+                "delivery_schema_ready": True,
+                "migration_complete": True,
+                "key_ready": True,
+                "key_primary_match": True,
+                "jobs_database_ready": True,
+                "queue_ready": True,
+                "job_type_ready": True,
+                "jobs_backend": "sqlite",
+                **{
+                    component: {
+                        "component": component,
+                        "ready": False,
+                        "reason_code": "mode_migrate",
+                    }
+                    for component in ("worker", "reconciler", "retention")
+                },
+                "backlog": {
+                    "pending": 0,
+                    "enqueue_claimed": 0,
+                    "queued": 0,
+                    "processing": 0,
+                    "retry_wait": 0,
+                },
+                "acquisition_ready": False,
+                "acquisition_reason_code": "mode_migrate",
+                "delivery_capability_ready": False,
+            },
             "limits": {
                 "registrations": 100,
                 "active_registrations": 25,

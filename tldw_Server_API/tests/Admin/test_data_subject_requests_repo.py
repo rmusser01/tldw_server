@@ -5,6 +5,8 @@ import uuid
 
 import pytest
 
+from tldw_Server_API.app.core.AuthNZ.profile_version import VersionedUserWriteGateway
+
 
 def _setup_env(tmp_path) -> None:
     os.environ["AUTH_MODE"] = "single_user"
@@ -29,32 +31,24 @@ async def test_repo_create_request_is_idempotent(tmp_path):
     reset_settings()
 
     pool = await get_db_pool()
-    await pool.execute(
-        """
-        INSERT INTO users (id, username, email, password_hash, role, is_active, uuid)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        1,
-        "admin_requester",
-        "admin_requester@example.com",
-        "hash",
-        "admin",
-        1,
-        str(uuid.uuid4()),
-    )
-    await pool.execute(
-        """
-        INSERT INTO users (id, username, email, password_hash, role, is_active, uuid)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        7,
-        "subject_user",
-        "subject_user@example.com",
-        "hash",
-        "user",
-        1,
-        str(uuid.uuid4()),
-    )
+    async with pool.transaction() as conn:
+        gateway = VersionedUserWriteGateway("sqlite")
+        for user_id, username, role in (
+            (1, "admin_requester", "admin"),
+            (7, "subject_user", "user"),
+        ):
+            await gateway.insert_user(
+                conn,
+                values={
+                    "id": user_id,
+                    "username": username,
+                    "email": f"{username}@example.com",
+                    "password_hash": "hash",  # nosec B105 # Inert fixture hash, never used for login
+                    "role": role,
+                    "is_active": 1,
+                    "uuid": str(uuid.uuid4()),
+                },
+            )
     repo = AuthnzDataSubjectRequestsRepo(db_pool=pool)
     await repo.ensure_schema()
 
@@ -137,45 +131,25 @@ async def test_repo_list_requests_scopes_by_org_ids(tmp_path):
     reset_settings()
 
     pool = await get_db_pool()
-    await pool.execute(
-        """
-        INSERT INTO users (id, username, email, password_hash, role, is_active, uuid)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        1,
-        "admin_requester",
-        "admin_requester@example.com",
-        "hash",
-        "admin",
-        1,
-        str(uuid.uuid4()),
-    )
-    await pool.execute(
-        """
-        INSERT INTO users (id, username, email, password_hash, role, is_active, uuid)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        7,
-        "subject_user_one",
-        "subject_user_one@example.com",
-        "hash",
-        "user",
-        1,
-        str(uuid.uuid4()),
-    )
-    await pool.execute(
-        """
-        INSERT INTO users (id, username, email, password_hash, role, is_active, uuid)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        8,
-        "subject_user_two",
-        "subject_user_two@example.com",
-        "hash",
-        "user",
-        1,
-        str(uuid.uuid4()),
-    )
+    async with pool.transaction() as conn:
+        gateway = VersionedUserWriteGateway("sqlite")
+        for user_id, username, role in (
+            (1, "admin_requester", "admin"),
+            (7, "subject_user_one", "user"),
+            (8, "subject_user_two", "user"),
+        ):
+            await gateway.insert_user(
+                conn,
+                values={
+                    "id": user_id,
+                    "username": username,
+                    "email": f"{username}@example.com",
+                    "password_hash": "hash",  # nosec B105 # Inert fixture hash, never used for login
+                    "role": role,
+                    "is_active": 1,
+                    "uuid": str(uuid.uuid4()),
+                },
+            )
 
     repo = AuthnzDataSubjectRequestsRepo(db_pool=pool)
     await repo.ensure_schema()
