@@ -1,0 +1,51 @@
+# LLM_Calls transport / error / config behavior matrix (2026-09-21)
+
+## Chat adapter transport strategy
+adapter | transport | egress-checked | configured_endpoint
+openai_adapter.py:322/338/364 | http_fetcher(strict) OR create_client().post/.stream | chat: yes when strict policy; else NO | chat only
+custom_openai_adapter.py:299/338 | _hc_fetch / _hc_stream_response | YES | yes
+local_adapters.py:295-298 | http_fetcher / http_client_factory injected + configured_endpoint_scope | YES | yes
+anthropic_adapter.py:403 | create_client().post/.stream | NO | no
+bedrock_adapter.py:600,621 | create_client().post/.stream | NO | no
+deepseek_adapter.py:279,309 | create_client().post/.stream | NO | no
+google_adapter.py:592,625 | create_client().post/.stream | NO | no
+groq_adapter.py:141,166 | create_client().post/.stream | NO | no
+huggingface_adapter.py:277,325 | create_client().post/.stream | NO | no
+mistral_adapter.py:238,263 | create_client().post/.stream | NO | no
+openrouter_adapter.py:201,227 | create_client().post/.stream | NO | no
+qwen_adapter.py:220,246 | create_client().post/.stream | NO | no
+cohere_adapter.py:259 | chat_calls.create_session_with_retries | partial (fetch) | no
+moonshot_adapter.py:205,232 | chat_calls.create_session_with_retries | partial (fetch) | no
+zai_adapter.py:129,192 | chat_calls.create_session_with_retries | partial (fetch) | no
+mlx_provider.py | local runtime, no shared factory | n/a | n/a
+
+## SSE stream loop implementation
+shared helper streaming.py:73 iter_sse_lines_requests -> moonshot_adapter.py:222 ONLY
+inline ~20-line copy: openai:368, groq:169, openrouter:230, qwen:249, mistral:267, deepseek:316, huggingface:280, bedrock:624, google:629 (variant)
+other shapes: zai:141, anthropic:463, custom_openai:344, local_adapters:474
+dead: streaming.py:280 aiter_normalized_sse (0 callers); streaming.py:120 aiter_sse_lines_httpx (tests only)
+
+## _resolve_timeout copies (hardcoded config section, 5 error shapes)
+groq:66 'groq_api' isinstance-guarded, no try, default 60
+mistral:118 'mistral_api' isinstance-guarded, no try, default 90
+openrouter:95 'openrouter_api' try/except _OPENROUTER_CONFIG_EXCEPTIONS, default 90
+deepseek:184 'deepseek_api' try/except _DEEPSEEK_CONFIG_EXCEPTIONS, default 90
+qwen:145 'qwen_api' bare except Exception + logger.debug, default 90
+openai:262 'openai_api' except (AttributeError, LookupError, TypeError)
+anthropic:113, google:199, huggingface:201 further variants
+canonical section map BYPASSED: adapter_utils.py:108 resolve_provider_section
+
+## truthy predicates inside LLM_Calls (4 disjoint sets)
+SET A {1,true,yes,on}: extra_body_compat_catalog.py:12, llamacpp_request_extensions.py:28, routing/candidate_pool.py:53, tokenizer_resolver.py:30
+SET B {1,true,yes,on,enabled}: adapter_registry.py:111, cache_intents.py:94, local_cache_diagnostics.py:107, provider_readiness.py:15
+SET C {1,true,yes,on,all}: providers/google_adapter.py:68, providers/mistral_adapter.py:33
+SET D not-in {0,false,no,off}: providers/{openai:160, groq:44, openrouter:73, bedrock:281, google:82}
+external SET E {1,true,yes,y,on}: core/MCP_unified/environment.py:4 is_truthy (imported by 3 embeddings adapters)
+external SET A': core/Setup/readiness_service.py:69 (rejects 'enabled')
+
+## tiktoken encoding_for_model -> cl100k_base fallback (11 sites, 5 except-filters)
+except KeyError: api/v1/endpoints/embeddings_v5_production_enhanced.py:1445; core/RAG/rag_service/utils.py:26; core/Workflows/adapters/evaluation/eval.py:459; core/Workflows/adapters/text/nlp.py:481
+except <named tuple>: api/v1/endpoints/evaluations/evaluations_unified.py:518; api/v1/endpoints/vector_stores_openai.py:222; core/Chunking/strategies/tokens.py:143; core/Workflows/adapters/rag/search.py:182
+bare except Exception: core/Chunking/strategies/semantic.py:418; core/RAG/rag_service/quick_wins.py:331; core/RAG/rag_service/web_fallback.py:67
+no encoding_for_model at all: core/VN_Assets/prompts.py:175
+canonical-but-NOT-equivalent: core/LLM_Calls/tokenizer_resolver.py:927/938 resolve_tiktoken_encoding raises TokenizerUnavailable (no fallback)

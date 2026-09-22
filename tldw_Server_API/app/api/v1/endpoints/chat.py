@@ -6485,7 +6485,20 @@ def _get_knowledge_qa_share_signing_key() -> bytes:
     try:
         return derive_hmac_key()
     except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
-        fallback = (os.getenv("JWT_SECRET_KEY") or "knowledge_qa_share_link_default")
+        # Fall back only to a real deployment secret. This previously ended with
+        # `or "knowledge_qa_share_link_default"` -- a constant published in this
+        # open-source repository -- so any deployment that reached this branch signed
+        # every share token with a key anybody could read, making share links
+        # forgeable. Fail closed instead: an unsigned-in-practice link is worse than
+        # an error. Note lru_cache does not memoize exceptions, so a transient
+        # derivation failure is retried on the next call rather than pinning a
+        # degraded key for the process lifetime.
+        fallback = (os.getenv("JWT_SECRET_KEY") or "").strip()
+        if not fallback:
+            raise RuntimeError(
+                "Cannot sign knowledge-QA share links: key derivation failed and "
+                "neither KNOWLEDGE_QA_SHARE_LINK_SECRET nor JWT_SECRET_KEY is set."
+            ) from None
         return fallback.encode("utf-8")
 
 
@@ -6522,7 +6535,17 @@ def _decode_knowledge_qa_share_token(token: str) -> dict[str, Any]:
         encoded_payload.encode("utf-8"),
         hashlib.sha256,
     ).digest()
-    provided_signature = _urlsafe_b64decode(encoded_signature)
+    # The signature decode must sit inside a guard: binascii.Error is a ValueError,
+    # but this call used to run *before* the try below, so a malformed signature
+    # segment escaped as an unhandled exception and the public, unauthenticated share
+    # route answered HTTP 500 where 400 is correct. The token is attacker-supplied by
+    # construction -- share links are meant to be pasted by third parties.
+    try:
+        provided_signature = _urlsafe_b64decode(encoded_signature)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Malformed share token"
+        ) from exc
     if not hmac.compare_digest(expected_signature, provided_signature):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid share token")
 
