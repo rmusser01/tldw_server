@@ -1016,3 +1016,20 @@ def test_helper_is_the_only_checked_out_program_and_owns_all_outputs() -> None:
     assert script.count('"${GITHUB_OUTPUT}"') == 1
     assert ">>" not in script
     assert _unquoted_shell_expansions(script) == []
+
+
+def test_frontend_critical_journeys_start_real_application_with_declared_provider() -> None:
+    """Critical journeys require a ready real backend and a controlled downstream provider."""
+    data = yaml.safe_load((REPO_ROOT / ".github/workflows/frontend-e2e-tiers.yml").read_text(encoding="utf-8"))
+    for name in ("critical", "features", "admin"):
+        job = data["jobs"][name]
+        assert "TEST_MODE" not in job["env"]
+        start = next(step for step in job["steps"] if step.get("name") == "Start backend server")
+        assert "exit 1" in start["run"], "Readiness exhaustion must fail before Playwright can skip unavailable APIs"
+    critical = data["jobs"]["critical"]
+    assert critical["env"]["TLDW_LIVE_TIER_UAT"] == "1"
+    assert critical["env"]["TLDW_UAT390_MODE"] == "deterministic"
+    assert critical["env"]["TLDW_UAT390_PROVIDER"] == critical["env"]["UAT_STUDY_PROVIDER"] == "openai"
+    assert critical["env"]["TLDW_UAT390_MODEL"] == critical["env"]["UAT_STUDY_MODEL"]
+    assert critical["env"]["OPENAI_API_BASE_URL"].startswith("http://127.0.0.1:")
+    assert any(step.get("name") == "Start deterministic downstream provider" for step in critical["steps"])

@@ -82,7 +82,6 @@ jobs:
           --health-retries 5
     env:
       AUTH_MODE: single_user
-      TEST_MODE: '1'
       SINGLE_USER_API_KEY: test-api-key-for-e2e-testing-12345
       REDIS_URL: redis://127.0.0.1:6379/0
       TLDW_WEB_AUTOSTART: 'true'
@@ -92,6 +91,16 @@ jobs:
       NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE: advanced
       NEXT_PUBLIC_API_URL: http://127.0.0.1:8000
       PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
+      # Real application APIs, with only downstream inference controlled in CI.
+      TLDW_LIVE_TIER_UAT: '1'
+      TLDW_UAT390_MODE: deterministic
+      TLDW_UAT390_PROVIDER: openai
+      TLDW_UAT390_MODEL: gpt-4.1-mini
+      UAT_STUDY_PROVIDER: openai
+      UAT_STUDY_MODEL: gpt-4.1-mini
+      DEFAULT_LLM_PROVIDER: openai
+      OPENAI_API_KEY: ci-controlled-downstream-key
+      OPENAI_API_BASE_URL: http://127.0.0.1:8101/v1
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
@@ -115,15 +124,44 @@ jobs:
             uv.lock
           extras: dev
 
+      - name: Start deterministic downstream provider
+        run: |
+          mkdir -p .tmp/frontend-e2e
+          python mock_openai_server/run_server.py \
+            --config apps/tldw-frontend/e2e/onboarding-uat/mock-openai/configs/ci-journeys.json \
+            --host 127.0.0.1 --port 8101 > .tmp/frontend-e2e/provider.log 2>&1 &
+          provider_pid=$!
+          for _ in $(seq 1 30); do
+            if ! kill -0 "$provider_pid" 2>/dev/null; then
+              cat .tmp/frontend-e2e/provider.log
+              exit 1
+            fi
+            if curl -sf http://127.0.0.1:8101/v1/models > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat .tmp/frontend-e2e/provider.log
+          exit 1
+
       - name: Start backend server
         run: |
+          mkdir -p .tmp/frontend-e2e
           python -m uvicorn tldw_Server_API.app.main:app \
-            --host 0.0.0.0 --port 8000 &
-          # Wait for server to be ready
-          for _ in $(seq 1 30); do
-            curl -sf http://127.0.0.1:8000/api/v1/health && break
+            --host 127.0.0.1 --port 8000 > .tmp/frontend-e2e/backend.log 2>&1 &
+          backend_pid=$!
+          for _ in $(seq 1 90); do
+            if ! kill -0 "$backend_pid" 2>/dev/null; then
+              tail -n 100 .tmp/frontend-e2e/backend.log
+              exit 1
+            fi
+            if curl -sf http://127.0.0.1:8000/api/v1/health > /dev/null; then
+              exit 0
+            fi
             sleep 2
           done
+          tail -n 100 .tmp/frontend-e2e/backend.log
+          exit 1
 
       - uses: actions/setup-node@v6
         with:
@@ -191,7 +229,6 @@ jobs:
           --health-retries 5
     env:
       AUTH_MODE: single_user
-      TEST_MODE: '1'
       SINGLE_USER_API_KEY: test-api-key-for-e2e-testing-12345
       REDIS_URL: redis://127.0.0.1:6379/0
       TLDW_WEB_AUTOSTART: 'true'
@@ -226,12 +263,22 @@ jobs:
 
       - name: Start backend server
         run: |
+          mkdir -p .tmp/frontend-e2e
           python -m uvicorn tldw_Server_API.app.main:app \
-            --host 0.0.0.0 --port 8000 &
-          for _ in $(seq 1 30); do
-            curl -sf http://127.0.0.1:8000/api/v1/health && break
+            --host 127.0.0.1 --port 8000 > .tmp/frontend-e2e/backend.log 2>&1 &
+          backend_pid=$!
+          for _ in $(seq 1 90); do
+            if ! kill -0 "$backend_pid" 2>/dev/null; then
+              tail -n 100 .tmp/frontend-e2e/backend.log
+              exit 1
+            fi
+            if curl -sf http://127.0.0.1:8000/api/v1/health > /dev/null; then
+              exit 0
+            fi
             sleep 2
           done
+          tail -n 100 .tmp/frontend-e2e/backend.log
+          exit 1
 
       - uses: actions/setup-node@v6
         with:
@@ -292,7 +339,6 @@ jobs:
           --health-retries 5
     env:
       AUTH_MODE: single_user
-      TEST_MODE: '1'
       SINGLE_USER_API_KEY: test-api-key-for-e2e-testing-12345
       REDIS_URL: redis://127.0.0.1:6379/0
       TLDW_WEB_AUTOSTART: 'true'
@@ -327,12 +373,22 @@ jobs:
 
       - name: Start backend server
         run: |
+          mkdir -p .tmp/frontend-e2e
           python -m uvicorn tldw_Server_API.app.main:app \
-            --host 0.0.0.0 --port 8000 &
-          for _ in $(seq 1 30); do
-            curl -sf http://127.0.0.1:8000/api/v1/health && break
+            --host 127.0.0.1 --port 8000 > .tmp/frontend-e2e/backend.log 2>&1 &
+          backend_pid=$!
+          for _ in $(seq 1 90); do
+            if ! kill -0 "$backend_pid" 2>/dev/null; then
+              tail -n 100 .tmp/frontend-e2e/backend.log
+              exit 1
+            fi
+            if curl -sf http://127.0.0.1:8000/api/v1/health > /dev/null; then
+              exit 0
+            fi
             sleep 2
           done
+          tail -n 100 .tmp/frontend-e2e/backend.log
+          exit 1
 
       - uses: actions/setup-node@v6
         with:
