@@ -32,6 +32,8 @@ The profile-version migration fixture subgroup moves from seven failures/one pas
 
 The adjacent candidate-schema fixture moves from one failure/two passes to three actual PostgreSQL passes. Its shadow-FK and missing-default DDL is confined to rolled-back transactions on a direct connection to the official isolated fixture DB; runtime validation and the production guard remain unchanged. TASK13260.278.17.51 is locally verified. Next focus is outstanding hosted AuthNZ, historical migration and Windows CI failures before resuming any full/native UAT.
 
+The complete AuthNZ PostgreSQL directory now passes 56/56 with no skips and normal exit on the local branch. Hosted PostgreSQL CI on the published older revision remains queued, so it is not counted as passing. Windows core-utils triage identifies UAT467 (missing `fchmod` and an owner-only security constraint) and UAT468 (portable forbidden-path and bind-mount parsing). A cross-platform drive-source test fails before UAT468's repair; the whole preflight module then passes 241 checks locally. UAT467 remains open because automatic security review rejected a chmod fallback that would not enforce owner-only access on Windows. Hosted Windows acceptance remains required; full/native UAT remains paused.
+
 ## Global constraints
 
 - Four cells: sqlite-single, sqlite-multi, pg-single, pg-multi. Record each domain's actual database engine and normal actor role.

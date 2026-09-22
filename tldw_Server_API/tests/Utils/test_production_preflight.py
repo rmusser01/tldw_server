@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import copy
+import ntpath
 import re
+import subprocess  # nosec B404
+import sys
 from pathlib import Path
 from urllib.parse import quote
 
@@ -37,7 +40,7 @@ def _valid_env(tmp_path: Path) -> dict[str, str]:
         "POSTGRES_USER": "tldw_app",
         "POSTGRES_DB": "tldw",
         "POSTGRES_PASSWORD": postgres_password,
-        "DATABASE_URL": ("postgresql://tldw_app:" f"{quote(postgres_password, safe='')}@postgres:5432/tldw"),
+        "DATABASE_URL": (f"postgresql://tldw_app:{quote(postgres_password, safe='')}@postgres:5432/tldw"),
         "REDIS_PASSWORD": redis_password,
         "REDIS_URL": f"redis://:{quote(redis_password, safe='')}@redis:6379/0",
         "ADMIN_USERNAME": "initial-admin",
@@ -106,8 +109,13 @@ def _rendered_compose_json(tmp_path: Path) -> tuple[dict, dict[str, str]]:
         if isinstance(service.get("volumes"), list):
             rendered_volumes = []
             for declaration in service["volumes"]:
-                source, target, *options = declaration.split(":")
-                is_bind = source.startswith((".", "/"))
+                source_target, _, option = declaration.rpartition(":")
+                if option in {"ro", "rw"}:
+                    source, target = source_target.rsplit(":", 1)
+                else:
+                    source, target = declaration.rsplit(":", 1)
+                    option = ""
+                is_bind = source.startswith((".", "/")) or ntpath.isabs(source)
                 if is_bind and source.startswith("."):
                     source = str((COMPOSE_PATH.parent / source).resolve())
                 mount = {
@@ -116,7 +124,7 @@ def _rendered_compose_json(tmp_path: Path) -> tuple[dict, dict[str, str]]:
                     "target": target,
                     "bind" if is_bind else "volume": {},
                 }
-                if "ro" in options:
+                if option == "ro":
                     mount["read_only"] = True
                 rendered_volumes.append(mount)
             service["volumes"] = rendered_volumes
@@ -913,6 +921,17 @@ def test_rendered_compose_matches_concrete_environment(tmp_path: Path) -> None:
     assert validate_rendered_compose(compose, values) == ()
 
 
+def test_rendered_compose_accepts_windows_drive_backup_source(tmp_path: Path) -> None:
+    compose, values = _rendered_compose(tmp_path)
+    values["TLDW_BACKUP_DIR"] = r"C:\operator\backups"
+    compose["services"]["preflight"]["volumes"][-1] = f"{values['TLDW_BACKUP_DIR']}:/backups:ro"
+
+    assert validate_rendered_compose(compose, values) == ()
+
+    compose["services"]["preflight"]["volumes"][-1] = r"C:\operator\other:/backups:ro"
+    assert "rendered_mounts" in _codes(validate_rendered_compose(compose, values))
+
+
 def test_rendered_compose_accepts_actual_json_shapes_and_injected_secrets(tmp_path: Path) -> None:
     compose, values = _rendered_compose_json(tmp_path)
 
@@ -1162,15 +1181,18 @@ def test_run_preflight_accepts_a_complete_offline_fixture(tmp_path: Path) -> Non
 def test_cli_accepts_compose_injected_environment_without_raw_file(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    capfd: pytest.CaptureFixture[str],
 ) -> None:
     values = _valid_env(tmp_path)
     (tmp_path / "backups").chmod(0o500)
     for name, value in values.items():
         monkeypatch.setenv(name, value)
 
-    exit_code = main(
-        [
+    # Exercise a fresh CLI process so Loguru binds to that process's stderr.
+    result = subprocess.run(  # nosec B603
+        (
+            sys.executable,
+            "-m",
+            "Helper_Scripts.Deployment.production_preflight",
             "--from-environment",
             "--compose-file",
             str(COMPOSE_PATH),
@@ -1178,13 +1200,15 @@ def test_cli_accepts_compose_injected_environment_without_raw_file(
             str(PROXY_PATH),
             "--runtime-backup-dir",
             str(tmp_path / "backups"),
-        ]
+        ),
+        capture_output=True,
+        check=False,
+        text=True,
     )
 
-    captured = capfd.readouterr()
-    assert exit_code == 0
-    assert captured.out == ""
-    assert "Production preflight passed" in captured.err
+    assert result.returncode == 0
+    assert result.stdout == ""
+    assert "Production preflight passed" in result.stderr
 
 
 def test_host_preflight_remains_authoritative_for_env_permissions(
