@@ -193,6 +193,12 @@ Create prerequisite resources per workflow when isolation is useful. Also run th
 
 When ingestion fails, downstream source cases are BLOCKED with the original issue ID. A separately seeded source can test a downstream component, but cannot turn the broken linked journey into PASS. Likewise, one manually reviewed card does not replace five generated cards. Continue independent cases after recording the failure.
 
+### Owned-runtime shutdown evidence
+
+Close only the run-owned browser contexts and finish active streaming requests before stopping their API. A released listening port alone does not prove worker or database-pool cleanup; retain process exit plus application teardown logs before reusing a profile or releasing its PostgreSQL fixture. A forced stop is recorded as forced, with cleanup unverified.
+
+UAT351 isolated a signal-order failure in the retained Uvicorn 0.35.0 runtime: TERM followed by INT can replay the original TERM before async cleanup runs. Do not use that mixed sequence as a graceful-cleanup check. The existing single-TERM controls completed application, auth/content-pool and registry teardown after the owned browser connections closed. Record the actual server version and graceful-shutdown timeout, and distinguish waiting for live responses from application teardown. Preserve incomplete attempts rather than interpreting an empty port as a successful shutdown.
+
 Capture a harness error separately from a product failure. Do not repeat a partially executed click sequence until the actual state and mutation count are known. A file-picker/dialog interruption may resume the remaining automation after the dialog is handled. After three failed attempts at an issue, stop repeating it, preserve evidence and investigate.
 
 ## Tier A: daily use
@@ -718,6 +724,25 @@ bun run e2e:chat-cockpit:real:focused
 ```
 
 `e2e:critical` currently means numeric tier1 + journeys; `e2e:features` means tier2 + tier3; `e2e:admin` means tier4 + tier5. None is a literal A/B/C mapping. The `uat:live-tiers` runner launches a mock OpenAI service despite its name. The `e2e:onboarding:uat` runner also uses mock downstream inference. `test:integration` points to a helper with an `admin-ui` frontend path and is not this playbook's release runner.
+
+### Catalog and receipt checks
+
+The versioned [catalog](../../apps/tldw-frontend/scripts/live-tier-uat/release-catalog-data.mjs) records all 43 families and their named variants, assertions, evidence modes and applicability. A release plan must declare every deployment cell, surface, phase, upgrade starting point and selected browser, with a reason for each exclusion. Each applicable variant/mode/context needs an explicit disposition. An automated mapping must name its exact registered project, file and complete title path, plus the assertions it claims to cover and the rationale. Review those assertions in the test; matching a title does not prove behavioral coverage.
+
+```sh
+# Collection only: no application services or browser execution.
+node scripts/list-release-tests.mjs > collection.json
+
+# Validate a complete explicit plan against registrations; no execution claim.
+node scripts/assert-release-uat.mjs --catalog planned-catalog.json collection.json
+
+# Validate first-attempt results for one context's exact required case manifest.
+node scripts/assert-release-uat.mjs required-cases.json playwright-results.json
+```
+
+Advertised format, source-type, workspace, connector and external-adapter variants use the catalog's six fixed instance inventories. Declare each named option in `scope.instances`; each expands into its own applicable context/mode/recovery requirements. An empty inventory requires an explicit exclusion or not-applicable reason. A single generic import test cannot silently stand for several declared formats.
+
+The catalog validator reports unique executions separately from mapped requirements, so a shared test cannot inflate execution counts. Human UX review is separate and can remain explicitly pending in the frozen plan. Unknown, omitted, duplicate or unregistered mappings fail validation; exclusions stay visible. These commands neither create missing workflow tests nor independently verify runtime artifacts. A complete production runner and actual candidate-bound evidence are still required before release certification. The existing `uat:live-tiers` development runner now labels its results diagnostic, compares exact collected cases and preserves individual attempts, including readable partial reports after cancellation.
 
 Use [package.json](../../apps/tldw-frontend/package.json) and [Playwright config](../../apps/tldw-frontend/playwright.config.ts) as the command authority. The current config can start/reuse a frontend server; disable auto-start or provide an explicit owned server configuration for release runs so an unrelated listener cannot be tested accidentally. Never treat `--allow-skips`, an empty selection or a narrowed grep as complete coverage.
 

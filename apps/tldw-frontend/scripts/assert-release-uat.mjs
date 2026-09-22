@@ -2,6 +2,7 @@
 
 import { readFileSync } from "node:fs"
 import { pathToFileURL } from "node:url"
+import { assertReleaseCatalog } from "./live-tier-uat/release-catalog.mjs"
 import { assertProjectAccounting, summarizePlaywrightReport } from "./live-tier-uat/report.mjs"
 
 export function assertReleaseUat(manifest, report) {
@@ -20,15 +21,28 @@ export function assertReleaseUat(manifest, report) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  if (process.argv.length !== 4) {
-    console.error("Usage: node scripts/assert-release-uat.mjs <required-manifest.json> <report.json>")
+  const args = process.argv.slice(2)
+  const catalogMode = args[0] === "--catalog"
+  const paths = catalogMode ? args.slice(1) : args
+  if (paths.length !== 2) {
+    console.error("Usage: node scripts/assert-release-uat.mjs [--catalog] <manifest.json> <report.json>")
     process.exitCode = 2
   } else {
     try {
-      const manifest = JSON.parse(readFileSync(process.argv[2], "utf8"))
-      const report = JSON.parse(readFileSync(process.argv[3], "utf8"))
-      assertReleaseUat(manifest, report)
-      console.log(`[release-uat] ${manifest.cases.length} exact required cases passed on their first attempt`)
+      const manifest = JSON.parse(readFileSync(paths[0], "utf8"))
+      const report = JSON.parse(readFileSync(paths[1], "utf8"))
+      if (catalogMode) {
+        const result = assertReleaseCatalog(manifest, report)
+        console.log(JSON.stringify({
+          kind: "catalog-plan", certifiesRelease: false,
+          requirements: result.requirements.length, executions: result.executions.length,
+          humanReviewsPending: result.humanReviews.filter(entry => entry.humanReview.status !== "completed").length,
+          exclusions: result.exclusions.length, scopeExclusions: result.scopeExclusions.length,
+        }))
+      } else {
+        assertReleaseUat(manifest, report)
+        console.log(`[release-uat] ${manifest.cases.length} exact required cases passed on their first attempt; runtime artifacts and whole-release coverage are not certified by this receipt check`)
+      }
     } catch (error) {
       console.error(`[release-uat] ${error.message}`)
       process.exitCode = 1
