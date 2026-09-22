@@ -1300,6 +1300,35 @@ class SyncRestorePreview:
     metadata_only_allowed: bool = True
 
 
+def _safe_pull_boundary(
+    *,
+    raw_envelopes: Sequence[Any],
+    page: Sequence[Any],
+    has_visible_lookahead: bool,
+    blocker_cursor: int | None,
+    restore_barrier: int | None,
+    default: int,
+) -> int:
+    """Highest server_sequence a pull cursor may advance to.
+
+    A cursor may never pass an envelope that was WITHHELD rather than delivered.
+    Advancing past an ordering blocker (ADR-034) or a restore barrier skips those
+    envelopes permanently while telling the client it is caught up.
+
+    Both pull paths derive their boundary here. The legacy adapter-v1 path previously
+    took ``max()`` over the raw list, which includes withheld envelopes.
+    """
+    safe = [
+        envelope
+        for envelope in raw_envelopes
+        if (blocker_cursor is None or envelope.server_sequence < blocker_cursor)
+        and (restore_barrier is None or envelope.server_sequence < restore_barrier)
+    ]
+    if has_visible_lookahead and page and restore_barrier is None:
+        return page[-1].server_sequence
+    return max((envelope.server_sequence for envelope in safe), default=default)
+
+
 class SyncV2Service:
     """Core Sync v2 service with injected persistence and adapter dependencies."""
 
@@ -5232,7 +5261,7 @@ class SyncV2Service:
                 personal_context_relay=relay_continuation,
                 personal_context_exchange=verified_exchange,
             )
-        raw_envelopes, visible = self._scan_pull_page(
+        raw_envelopes, visible, blocker_cursor = self._scan_pull_page(
             dataset_id=dataset_id,
             device_id=device_id,
             since_sequence=since_sequence,
@@ -5251,13 +5280,20 @@ class SyncV2Service:
         ]
         has_visible_lookahead = len(visible) > page_limit
         has_more = has_visible_lookahead or len(raw_envelopes) > page_limit
-        if has_visible_lookahead and page:
-            next_sequence = page[-1].server_sequence
-        else:
-            next_sequence = max(
-                (envelope.server_sequence for envelope in raw_envelopes),
-                default=since_sequence,
-            )
+        next_sequence = _safe_pull_boundary(
+            raw_envelopes=raw_envelopes,
+            page=page,
+            has_visible_lookahead=has_visible_lookahead,
+            blocker_cursor=blocker_cursor,
+            restore_barrier=None,
+            default=since_sequence,
+        )
+        if not page and next_sequence <= since_sequence:
+            # A blocker withheld everything past the boundary, so the cursor cannot
+            # advance. Reporting has_more here would livelock the client: it would
+            # re-request the same cursor forever. There is genuinely nothing more
+            # deliverable until the conflict is resolved, so stop and let it re-poll.
+            has_more = False
         if raw_envelopes:
             self._update_cursors(
                 dataset_id,
@@ -10253,22 +10289,13 @@ class SyncV2Service:
             or restore_barrier is not None
             or not source_exhausted
         )
-        safe_raw_envelopes = [
-            envelope
-            for envelope in raw_envelopes
-            if (blocker_cursor is None or envelope.server_sequence < blocker_cursor)
-            and (
-                restore_barrier is None
-                or envelope.server_sequence < restore_barrier
-            )
-        ]
-        boundary = (
-            page[-1].server_sequence
-            if has_visible_lookahead and page and restore_barrier is None
-            else max(
-                (envelope.server_sequence for envelope in safe_raw_envelopes),
-                default=0,
-            )
+        boundary = _safe_pull_boundary(
+            raw_envelopes=raw_envelopes,
+            page=page,
+            has_visible_lookahead=has_visible_lookahead,
+            blocker_cursor=blocker_cursor,
+            restore_barrier=restore_barrier,
+            default=0,
         )
         next_watermarks = dict(watermarks)
         for envelope in raw_envelopes:
@@ -10677,7 +10704,7 @@ class SyncV2Service:
         include_own_changes: bool,
         adapter_versions: Sequence[int] | None = None,
         personal_context_egress_authorized: bool = False,
-    ) -> tuple[list[SyncEnvelope], list[SyncEnvelope]]:
+    ) -> tuple[list[SyncEnvelope], list[SyncEnvelope], int | None]:
         raw = self.store.list_envelopes_after(
             dataset_id,
             since_sequence,
@@ -10708,7 +10735,9 @@ class SyncV2Service:
                 authorized=personal_context_egress_authorized,
             )
         ]
-        return raw, visible
+        # Returned, not discarded: the caller needs it to work out how far the
+        # cursor may safely advance.
+        return raw, visible, blocker_cursor
 
     def _expand_restore_mutation_groups(
         self,

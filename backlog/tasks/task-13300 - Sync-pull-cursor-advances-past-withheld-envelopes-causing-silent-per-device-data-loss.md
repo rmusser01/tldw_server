@@ -3,9 +3,10 @@ id: TASK-13300
 title: >-
   Sync pull cursor advances past withheld envelopes causing silent per-device
   data loss
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-09-22 04:52'
+updated_date: '2026-09-22 21:35'
 labels:
   - bug
   - sync
@@ -36,6 +37,23 @@ Source: Docs/superpowers/reviews/2026-09-21-core-module-duplication-synthesis.md
 - [ ] #2 Both pull paths share one watermark-advance helper
 - [ ] #3 Regression test added for adapter_version=1 mirroring the existing v2 test
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+FIXED. Both pull paths now derive their watermark from one helper, _safe_pull_boundary, at module level in core/Sync/v2/service.py.
+
+ROOT CAUSE was narrower than "the v1 branch takes max() over raw": _scan_pull_page ALREADY COMPUTED blocker_cursor and then DISCARDED it, returning only (raw, visible). Its sibling _scan_versioned_pull_page returns it. So the v1 caller had no way to know where the blocker was. It now returns (raw, visible, blocker_cursor) - it had exactly one caller.
+
+THE FIX IS TWO-SIDED, and the first attempt was wrong in an instructive way. Refusing to advance the cursor fixes the data loss but, on its own, turns it into a LIVELOCK: test_conflict_resolution_rebases_later_dependency_and_paginates_without_queued_history asserts inside its pagination loop that `page.next_cursor != cursor or not page.has_more` - a pull must either advance or declare itself finished. Stopping the cursor while has_more stayed True made the client re-request the same page forever. So pull() now also clears has_more when the boundary cannot advance and nothing was delivered: there is genuinely nothing more deliverable until the blocker is resolved, and the client re-polls later with the same cursor.
+
+The versioned path was migrated onto the same helper too, so there is ONE implementation rather than a correct one and a broken one.
+
+SECOND MISTAKE WORTH RECORDING: I first inserted the helper as a module-level def immediately before an INDENTED class method, which terminated the 9,740-line SyncV2Service class body and orphaned every method after it. ast.parse passed - it is syntactically valid - and only the test run caught it (46 failures). Reverted and redone with the helper placed above the class at line 1303. Parsing cleanly is not the same as being semantically correct.
+
+Tests: tests/Sync/test_pull_watermark_boundary.py, 8 cases - blocker, restore barrier, the page shortcut, barrier overriding the shortcut, everything-blocked, empty scan, and one documenting the liveness interaction.
+Regression: test_sync_v2_service.py back to 165 passed (the HEAD baseline). store/endpoints/conflicts show 6 failed / 389 passed BOTH with and without the change (stash-isolated) - pre-existing.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
