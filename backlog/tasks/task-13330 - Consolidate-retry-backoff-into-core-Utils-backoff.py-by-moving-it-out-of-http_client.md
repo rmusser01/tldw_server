@@ -3,9 +3,10 @@ id: TASK-13330
 title: >-
   Consolidate retry backoff into core/Utils/backoff.py by moving it out of
   http_client
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-09-22 04:58'
+updated_date: '2026-09-22 21:06'
 labels:
   - duplication
   - utils
@@ -39,6 +40,30 @@ Source: synthesis F30
 - [ ] #2 http_client imports from it rather than defining it
 - [ ] #3 ADR records the jitter algorithm choice
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+APPLIED, with the schedule decision recorded as ADR-047.
+
+DECISION (repository owner, 2026-09-22): decorrelated jitter for outbound HTTP only; in-process contention stays on short capped exponential. One algorithm is NOT imposed on both - HTTP retries cross a network to a shared endpoint where jitter de-synchronises a fleet, while SQLite lock contention is single-process with a millisecond window, and decorrelated jitter prev*3 grows faster than capped exponential so it would have lengthened lock retries to solve a problem those sites do not have.
+
+NEW: core/Utils/backoff.py - decorrelated_jitter_delay, capped_exponential_delay, parse_retry_after_seconds, is_sqlite_locked_error.
+
+MOVED OUT of core/http_client.py rather than copied, so that 6,600-line module SHRINKS: 6678 -> 6656 lines. It re-exports both under their original private names because two test files monkeypatch them; verified the names remain importable and callable.
+
+MIGRATED, all behaviour-preserving (jitter=False where that is the current behaviour):
+- transaction_utils.py - 0.1 * 2**n
+- Workflows_DB.py - FOUR sites, not the two the finding identified (1668, 1682, 2202, 2307). Also removed a hardcoded tries<4 in _sqlite_retry_commit that ignored its sibling max_tries parameter.
+
+Tests: tests/Utils/test_backoff_schedules.py, 12 cases pinning BOTH schedules against the sequences the existing call sites used - 0.05/0.1/0.2/0.4/0.8 for the SQLite loops, 0.2/0.4/0.8/1.6 for transaction_utils - plus the jitter band, the cap, the case-insensitive locked predicate, and Retry-After in both delta-seconds and HTTP-date forms. One test asserts decorrelated jitter grows FASTER than capped exponential, which is the reason the two stay separate.
+
+MISTAKE WORTH RECORDING: my first Workflows_DB edit corrupted indentation because the 20-space sleep pattern is a SUBSTRING of the 24-space lines, so str.replace matched inside them. Caught by ast.parse in the same command, file restored from git, redone with a line-anchored regex.
+
+Regression: app imports; backoff + lint suites green; 74 passed in the transaction/Workflows set. The one failure there (test_dlq_replay_real_allowed) is identical with and without the change (stash-isolated). tests/http_client has widespread PackageNotFoundError failures in this venv, also identical both ways - the package is not pip-installed here.
+
+STILL OPEN: the 28 inline loops in PromptStudioDatabase.py, deliberately left to the decomposition in TASK-13318 rather than edited in place. The shared helper now exists for them.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

@@ -35,6 +35,7 @@ from .backends.query_utils import (
     prepare_backend_statement,
 )
 from .sqlite_policy import configure_sqlite_connection
+from tldw_Server_API.app.core.Utils.backoff import capped_exponential_delay
 
 _WORKFLOWS_DB_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -1665,21 +1666,24 @@ class WorkflowsDatabase:
                 return
             except sqlite3.OperationalError as e:
                 if "locked" in str(e).lower() and tries < max_tries - 1:
-                    _time.sleep(0.05 * (2 ** tries))
+                    # Shared schedule; jitter=False preserves existing timing.
+                    _time.sleep(capped_exponential_delay(tries, base_s=0.05, jitter=False))
                     tries += 1
                     continue
                 raise
 
-    def _sqlite_retry_commit(self) -> None:
+    def _sqlite_retry_commit(self, *, max_tries: int = 5) -> None:
         import time as _time
+
         tries = 0
         while True:
             try:
                 self._conn.commit()
                 return
             except sqlite3.OperationalError as e:
-                if "locked" in str(e).lower() and tries < 4:
-                    _time.sleep(0.05 * (2 ** tries))
+                if "locked" in str(e).lower() and tries < max_tries - 1:
+                    # Shared schedule; jitter=False preserves existing timing.
+                    _time.sleep(capped_exponential_delay(tries, base_s=0.05, jitter=False))
                     tries += 1
                     continue
                 raise
@@ -2199,7 +2203,8 @@ class WorkflowsDatabase:
                     if "locked" in str(retry_error).lower() and tries < 4:
                         with contextlib.suppress(sqlite3.Error):
                             conn.rollback()
-                        _time.sleep(0.05 * (2 ** tries))
+                        # Shared schedule; jitter=False preserves existing timing.
+                        _time.sleep(capped_exponential_delay(tries, base_s=0.05, jitter=False))
                         tries += 1
                         continue
                     with contextlib.suppress(sqlite3.Error):
@@ -2304,7 +2309,8 @@ class WorkflowsDatabase:
                     if "locked" in str(e).lower() and tries < 4:
                         import time as _time
 
-                        _time.sleep(0.05 * (2 ** tries))
+                        # Shared schedule; jitter=False preserves existing timing.
+                        _time.sleep(capped_exponential_delay(tries, base_s=0.05, jitter=False))
                         tries += 1
                         continue
                     raise

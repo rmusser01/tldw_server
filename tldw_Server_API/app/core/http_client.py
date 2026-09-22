@@ -21,6 +21,14 @@ import json  # noqa: E402
 import logging  # noqa: E402
 import os  # noqa: E402
 import random  # noqa: E402
+
+# Retry delay computation moved to core/Utils/backoff.py so it is reusable and so
+# this module shrinks. Bound to the original private names: both are monkeypatched
+# by tests, and the call sites below resolve them as module globals.
+from tldw_Server_API.app.core.Utils.backoff import (  # noqa: E402,F401
+    decorrelated_jitter_delay as _decorrelated_jitter_sleep,
+    parse_retry_after_seconds as _parse_retry_after_delay_seconds,
+)
 import re  # noqa: E402
 import socket  # noqa: E402
 import ssl  # noqa: E402
@@ -2306,36 +2314,6 @@ def _build_aiohttp_form(data: Any | None, files: Any | None) -> aiohttp.FormData
             content_type=content_type,
         )
     return form
-
-
-def _decorrelated_jitter_sleep(prev: float, base_ms: int, cap_s: int) -> float:
-    base = max(0.001, base_ms / 1000.0)
-    cap = max(base, float(cap_s))
-    sleep = base if prev <= 0 else min(cap, random.uniform(base, prev * 3))  # nosec B311
-    return sleep
-
-
-def _parse_retry_after_delay_seconds(
-    retry_after: str | None,
-    *,
-    now: datetime | None = None,
-) -> float | None:
-    """Parse Retry-After as delta-seconds or HTTP-date and return seconds to wait."""
-    if not retry_after:
-        return None
-    try:
-        return max(0.0, float(retry_after.strip()))
-    except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
-        pass
-
-    try:
-        parsed = parsedate_to_datetime(retry_after.strip())
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        current = now or datetime.now(timezone.utc)
-        return max(0.0, (parsed - current).total_seconds())
-    except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
-        return None
 
 
 def _should_retry(method: str, status: int | None, exc: Exception | None, policy: RetryPolicy) -> tuple[bool, str]:
