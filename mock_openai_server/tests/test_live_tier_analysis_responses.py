@@ -84,3 +84,27 @@ def test_ci_journey_provider_uses_only_declared_source_fixtures(system: str, con
         cards = json.loads(response["choices"][0]["message"]["content"])
         assert len(cards) == 5
         assert all(card["front"] and card["back"] for card in cards)
+
+
+@pytest.mark.unit
+def test_ci_provider_accepts_workflow_credentials_and_requires_authenticated_readiness() -> None:
+    """The actual provider accepts the backend credential and the readiness probe uses it."""
+    import yaml
+    from fastapi.testclient import TestClient
+
+    from mock_openai_server.mock_openai.server import app, get_config_instance
+
+    root = Path(__file__).resolve().parents[2]
+    critical = yaml.safe_load((root / ".github/workflows/frontend-e2e-tiers.yml").read_text())["jobs"]["critical"]
+    config = MockConfig.from_file(root / "apps/tldw-frontend/e2e/onboarding-uat/mock-openai/configs/ci-journeys.json")
+    app.dependency_overrides[get_config_instance] = lambda: config
+    try:
+        with TestClient(app) as client:
+            assert client.get("/v1/models").status_code == 401
+            response = client.get("/v1/models", headers={"Authorization": f"Bearer {critical['env']['OPENAI_API_KEY']}"})
+            assert response.status_code == 200
+            assert critical["env"]["TLDW_UAT390_MODEL"] in [model["id"] for model in response.json()["data"]]
+    finally:
+        app.dependency_overrides.pop(get_config_instance, None)
+    readiness = next(step["run"] for step in critical["steps"] if step.get("name") == "Start deterministic downstream provider")
+    assert '-H "Authorization: Bearer $OPENAI_API_KEY"' in readiness

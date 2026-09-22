@@ -2,7 +2,9 @@
 
 - **Current tracker status: 421 findings / 400 verified / 21 open (261, 351, 352, 354, 356, 359–361, 365, 375, 390–392, 413, 415–421).** All four configurations concluded with failures and limits recorded in the [frozen 365-finding matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_20.md). Targeted fresh SQLite and real PostgreSQL acceptance now verifies353/355/357/358/362/363/364/366–374/376–387. Remaining findings include application recovery/quality and newly confirmed test-coverage gaps. Counts describe findings, not UAT completion. Generated evidence remains local.
 
-### PR2979 Qodo and CI repairs — UAT418–421
+#PR2979 CI follow-up (UAT419): run35695635379 failed provider readiness with401 because its request omitted Authorization and its synthetic backend key lacked the mock server required prefix. The probe and backend now share an accepted synthetic credential, with authentication retained. The actual HTTP regression and workflow/provider checks pass154 tests. Remote critical execution remains pending; no native/full UAT resumed.
+
+## PR2979 Qodo and CI repairs — UAT418–421
 
 Native/full UAT remains paused. TASK13260.278.16 owns Qodo findings; TASK13260.278.17 owns the newly exposed CI failures.
 
