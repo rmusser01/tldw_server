@@ -744,6 +744,15 @@ Advertised format, source-type, workspace, connector and external-adapter varian
 
 The catalog validator reports unique executions separately from mapped requirements, so a shared test cannot inflate execution counts. Human UX review is separate and can remain explicitly pending in the frozen plan. Unknown, omitted, duplicate or unregistered mappings fail validation; exclusions stay visible. These commands neither create missing workflow tests nor independently verify runtime artifacts. A complete production runner and actual candidate-bound evidence are still required before release certification. The existing `uat:live-tiers` development runner now labels its results diagnostic, compares exact collected cases and preserves individual attempts, including readable partial reports after cancellation.
 
+The existing receipt CLI can also seal and recheck an owned, quiescent source or build directory:
+
+```sh
+node scripts/assert-release-uat.mjs --seal-artifacts /path/to/artifact /path/to/evidence/seal.json
+node scripts/assert-release-uat.mjs --verify-artifacts /path/to/artifact /path/to/evidence/seal.json
+```
+
+The receipt must live outside the artifact directory; an existing receipt is never overwritten. The complete inventory includes hidden files, empty directories, permissions and symlink targets/referents. Added executable files, changed bytes, escapes and cycles fail verification. Keep the tree quiescent while inspecting it, and verify again after execution. The receipt is trusted local integrity evidence, not an atomic snapshot or signature. Output explicitly reports `artifact-integrity-only` and `certifiesRelease:false`: a retained `BUILD_ID`, a matching directory or this receipt alone cannot prove successful compilation, clean dependency installation, the serving process's imports/databases, or the assets a browser loaded. Those observations and the exact result binding remain required.
+
 Use [package.json](../../apps/tldw-frontend/package.json) and [Playwright config](../../apps/tldw-frontend/playwright.config.ts) as the command authority. The current config can start/reuse a frontend server; disable auto-start or provide an explicit owned server configuration for release runs so an unrelated listener cannot be tested accidentally. Never treat `--allow-skips`, an empty selection or a narrowed grep as complete coverage.
 
 ### Smallest useful automation implementation

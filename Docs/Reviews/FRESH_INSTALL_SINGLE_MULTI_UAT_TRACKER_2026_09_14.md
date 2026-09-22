@@ -26,6 +26,10 @@ UAT419 follow-up: real Chromium against a local static page confirms the old Cha
 
 UAT416/417/418/420/421 are verified within their stated engineering acceptance.27event-qualified workflow groups survive license follow-up completion; allfive matrices register the image suite, whose actual96SQLite/PostgreSQL cases pass with zero skips. Atomic retry and Buddy receipts, dismissed-wizard navigation and both sidepanel restoration failures have causal regressions, clean independent rereview and completed lint/type/security comparisons. All14Qodo replies are posted and their threads resolved. TASK13260.278.14/.15/.16 are Done. This closes5findings (405verified/16open); it does not imply full/native acceptance. Critical browser CI remains UAT419, and UAT354/392 and other native/causal gates remain open. Earlier paragraphs preserve the historical pending states at their checkpoints.
 
+### UAT392 artifact-integrity prerequisite — 2026-09-22
+
+The existing receipt CLI now seals and verifies a complete quiescent source/build tree, including added files, permission changes and symlink bytes/referents. It rejects escapes/cycles and preserves existing external receipts. All 130 artifact/catalog/accounting checks pass, including 27 artifact controls; lint/syntax and independent review pass. Output explicitly remains integrity-only with no release certification. Build, serving-process/database identity, loaded browser assets and audited workflow/result mappings remain open under AC3. No application runtime or native UAT ran for these checks. Counts remain unchanged.
+
 ## PR2979 root-cause follow-up — 2026-09-22
 
 Full/native UAT remains paused. Findings stay open until their stated acceptance is met; no tracker counts are promoted by diagnostic tests.
