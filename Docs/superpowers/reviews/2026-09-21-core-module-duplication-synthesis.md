@@ -180,7 +180,9 @@ Measured today: **157 import lines across 106 files** (the prompt said 161/107).
 
 The sharpest instance is `Ingestion_Media_Processing/persistence.py`, where **four of five imports exist only so tests can monkeypatch `endpoints.media.*`** — production resolves its file validator, temp-dir manager and template classifier via `getattr` on an API module at request time, and a stray attribute on `endpoints.media` silently reconfigures ingestion. The docstrings say so verbatim (`:1884-1886`, `:2693-2695`).
 
-A cheap sub-case: three `core/Chat` files import the **constant** `DEFAULT_CHARACTER_NAME` from `api/v1/API_Deps`; moving one constant clears 3 of the 20 files.
+~~A cheap sub-case: three `core/Chat` files import the **constant** `DEFAULT_CHARACTER_NAME` from `api/v1/API_Deps`; moving one constant clears 3 of the 20 files.~~
+
+**Corrected 2026-09-22 — this "cheap sub-case" is wrong and acting on it would be a defect.** There are *two* `DEFAULT_CHARACTER_NAME` constants with **different values**: `core/Character_Chat/modules/character_utils.py:16` is `"Character"`, while `api/v1/API_Deps/ChaCha_Notes_DB_Deps.py:350` is `"Helpful AI Assistant"`. The three `core/Chat` files import the API_Deps one, and `chat_history.py:112` passes it to `get_character_card_by_name(...)` — a database lookup on that exact string. Repointing them at the core constant would silently fetch the wrong character card. Consolidating the two constants is owner-only work (it must edit `app/api/v1/**`) and is a behaviour decision, not a mechanical move. The same-name/different-value pair across a layer boundary is itself worth a finding.
 
 **And the existing guard protects only one direction of a real cycle:** `tests/lint/test_endpoint_auth_deps_import_boundary.py:14-15` bans endpoints from importing `core.AuthNZ.User_DB_Handling`, while `core/AuthNZ/User_DB_Handling.py:20` imports `oauth2_scheme` **from** `api/v1/API_Deps/v1_endpoint_deps`.
 
