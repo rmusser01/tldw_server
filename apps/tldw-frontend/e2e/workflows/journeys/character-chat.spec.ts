@@ -62,13 +62,13 @@ test.describe("Create Character -> Chat journey", () => {
       await chat.selectCharacter(characterName)
       await chat.selectModel(model!)
       const completed = page.waitForResponse(response =>
-        response.request().method() === "POST" && /\/api\/v1\/chats\/[^/]+\/complete-v2$/.test(response.url())
+        response.request().method() === "POST" && /\/api\/v1\/chats\/[^/]+\/complete-v2$/.test(new URL(response.url()).pathname)
       )
       const [[chatCreation, completion]] = await Promise.all([
         Promise.all([createdChat, completed]), chat.sendMessage(QUESTION),
       ])
       expect(chatCreation.ok()).toBe(true)
-      expect(chatCreation.request().postDataJSON().character_id).toBe(character.id)
+      expect(String(chatCreation.request().postDataJSON().character_id)).toBe(String(character.id))
       const conversation = await chatCreation.json()
       const chatId = conversation.id
       expect(typeof chatId).toBe("string")
