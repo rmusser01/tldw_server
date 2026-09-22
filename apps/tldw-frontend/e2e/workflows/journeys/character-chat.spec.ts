@@ -1,133 +1,114 @@
 /**
- * Journey: Create Character -> Chat
- *
- * End-to-end workflow that creates a character, navigates to chat,
- * selects the character, and sends a message through the real character
- * chat complete-v2 backend path. When the real backend lacks provider
- * credentials, the journey verifies the visible recovery state instead of
- * treating catalog-only model inventory as a successful stream.
+ * Seeded engineering regression: create TestBot -> complete-v2 -> persisted reload.
+ * Controlled downstream inference does not certify real-model or fresh-install UAT.
+ * Provider/configuration recovery is exercised separately in Phase 7.
  */
-import { test, expect, skipIfServerUnavailable } from "../../utils/fixtures"
-import { captureAllApiCalls } from "../../utils/api-assertions"
+import { randomUUID } from "node:crypto"
+import { test, expect } from "../../utils/fixtures"
 import { CharactersPage, ChatPage } from "../../utils/page-objects"
 import { waitForStreamComplete } from "../../utils/journey-helpers"
+import { TEST_CONFIG, fetchWithApiKey, waitForConnection } from "../../utils/helpers"
 
-const getErrorCode = (body: unknown): string | null => {
-  if (!body || typeof body !== "object") return null
-  const record = body as Record<string, any>
-  return (
-    record.error_code ??
-    record.code ??
-    record.detail?.error_code ??
-    record.detail?.code ??
-    record.detail?.error?.code ??
-    null
-  )
-}
+const SYSTEM = "You are E2E-TestBot. Always respond with exactly: BEEP BOOP."
+const QUESTION = "Hello, who are you?"
+const ANSWER = "BEEP BOOP."
 
 test.describe("Create Character -> Chat journey", () => {
-  const characterName = `E2E-TestBot-${Date.now()}`
-  const systemPrompt = "You are E2E-TestBot. Always respond with exactly: BEEP BOOP."
-
-  test("create character, select in chat, verify complete-v2 character stream path", async ({
-    authedPage: page,
-    serverInfo,
-  }) => {
-    skipIfServerUnavailable(serverInfo)
-
-    await test.step("Create a new character", async () => {
-      const charactersPage = new CharactersPage(page)
-      await charactersPage.goto()
-      await charactersPage.assertPageReady()
-
-      // Wait for the page to be interactive
-      const newBtnVisible = await charactersPage.newButton.isVisible().catch(() => false)
-      if (!newBtnVisible) {
-        test.skip(true, "Characters page not available or new button not visible")
-        return
-      }
-
-      await charactersPage.createCharacter({
-        name: characterName,
-        systemPrompt,
-        description: "E2E test character for journey spec",
-      })
-
-      await expect
-        .poll(async () => await charactersPage.isCharacterVisible(characterName), {
-          timeout: 10_000,
-          message: "Timed out waiting for the created character to appear in the list",
-        })
-        .toBe(true)
-    })
-
-    await test.step("Navigate to chat and send a message", async () => {
-      // Navigate with absolute URL to escape any drawer state
-      const origin = new URL(page.url()).origin
-      await page.goto(`${origin}/chat`, { waitUntil: "load", timeout: 30_000 })
-      expect(page.url()).toContain("/chat")
-
-      const { waitForConnection } = await import("../../utils/helpers")
+  test("saves the selected character and its successful complete-v2 turn across reload", async ({
+    authedPage: page, serverInfo,
+  }, testInfo) => {
+    test.setTimeout(180_000)
+    expect(serverInfo.available, "The real application backend is required").toBe(true)
+    expect(process.env.UAT_CHARACTER_MODE).toBe("deterministic")
+    const provider = process.env.UAT_CHARACTER_PROVIDER
+    const model = process.env.UAT_CHARACTER_MODEL
+    expect(provider).toBeTruthy()
+    expect(model).toBeTruthy()
+    await page.unrouteAll({ behavior: "wait" })
+    const characterName = `E2E-TestBot-${randomUUID()}`
+    const evidence: Record<string, unknown> = { characterName, mode: "deterministic", auth: "seeded" }
+    const apiGet = async (path: string) => {
+      const response = await fetchWithApiKey(`${TEST_CONFIG.serverUrl}${path}`)
+      expect(response.ok, `Canonical GET ${path}: HTTP ${response.status}`).toBe(true)
+      return response.json()
+    }
+    try {
+      const characters = new CharactersPage(page)
+      await characters.goto()
+      await characters.assertPageReady()
+      await expect(characters.newButton).toBeVisible()
+      const createdCharacter = page.waitForResponse(response =>
+        response.request().method() === "POST" &&
+        /\/api\/v1\/characters\/?$/.test(response.url()) &&
+        response.request().postDataJSON().name === characterName
+      )
+      const [creation] = await Promise.all([
+        createdCharacter,
+        characters.createCharacter({ name: characterName, systemPrompt: SYSTEM, description: "E2E test character for journey spec" }),
+      ])
+      expect(creation.ok()).toBe(true)
+      const character = await creation.json()
+      expect(character).toMatchObject({ name: characterName, system_prompt: SYSTEM })
+      expect(Number.isInteger(character.id) && character.id > 0).toBe(true)
+      evidence.characterId = character.id
+      await expect.poll(() => characters.isCharacterVisible(characterName)).toBe(true)
+      await page.goto("/chat", { waitUntil: "domcontentloaded" })
       await waitForConnection(page)
-      const chatPage = new ChatPage(page)
-      await chatPage.waitForReady()
-
-      // Set up capture to verify the character chat backend path and payload.
-      const capture = captureAllApiCalls(page)
-
-      await chatPage.selectCharacter(characterName)
-      await chatPage.sendMessage("Hello, who are you?")
-
-      // Wait for the response
-      await waitForStreamComplete(page)
-      await chatPage.waitForResponse()
-
-      const calls = await capture.stop()
-
-      const chatCreateCall = calls.find((c) => {
-        const url = new URL(c.url)
-        return c.method === "POST" && url.pathname === "/api/v1/chats/"
-      })
-      const characterCompleteCall = calls.find((c) => {
-        const url = new URL(c.url)
-        return (
-          c.method === "POST" &&
-          /^\/api\/v1\/chats\/[^/]+\/complete-v2$/.test(url.pathname)
-        )
-      })
-
-      expect(chatCreateCall).toBeTruthy()
-      expect(chatCreateCall?.status).toBeGreaterThanOrEqual(200)
-      expect(chatCreateCall?.status).toBeLessThan(300)
-      expect(chatCreateCall?.requestBody).toEqual(
-        expect.objectContaining({
-          character_id: expect.anything(),
-        })
+      const chat = new ChatPage(page)
+      await chat.waitForReady()
+      const createdChat = page.waitForResponse(response =>
+        response.request().method() === "POST" && /\/api\/v1\/chats\/?$/.test(response.url())
       )
-
-      expect(characterCompleteCall).toBeTruthy()
-      expect(characterCompleteCall?.requestBody).toMatchObject(
-        expect.objectContaining({
-          include_character_context: true,
-          stream: true,
-        })
+      await chat.selectCharacter(characterName)
+      await chat.selectModel(model!)
+      const completed = page.waitForResponse(response =>
+        response.request().method() === "POST" && /\/api\/v1\/chats\/[^/]+\/complete-v2$/.test(response.url())
       )
-
-      const completeStatus = characterCompleteCall?.status ?? 0
-      expect(completeStatus).toBeGreaterThanOrEqual(200)
-
-      if (completeStatus >= 300) {
-        expect(getErrorCode(characterCompleteCall?.responseBody)).toBe(
-          "missing_provider_credentials"
-        )
-        await expect(
-          page.getByText(/something went wrong while talking to your tldw server/i)
-        ).toBeVisible()
-        await expect(page.getByRole("button", { name: /retry same model/i })).toBeVisible()
-        await expect(page.getByRole("button", { name: /switch model/i })).toBeVisible()
-      } else {
-        expect(completeStatus).toBeLessThan(300)
-      }
-    })
+      const [[chatCreation, completion]] = await Promise.all([
+        Promise.all([createdChat, completed]), chat.sendMessage(QUESTION),
+      ])
+      expect(chatCreation.ok()).toBe(true)
+      expect(chatCreation.request().postDataJSON().character_id).toBe(character.id)
+      const conversation = await chatCreation.json()
+      const chatId = conversation.id
+      expect(typeof chatId).toBe("string")
+      expect(chatId).not.toMatch(/^(?:local[-_]|$)/)
+      expect(conversation.character_id).toBe(character.id)
+      expect(completion.status()).toBe(200)
+      const sent = completion.request().postDataJSON()
+      expect(sent).toMatchObject({
+        include_character_context: true, stream: true, save_to_db: true,
+        model: `${provider}:${model}`, provider,
+      })
+      evidence.chatId = chatId
+      evidence.completionRequest = sent
+      await waitForStreamComplete(page, 90_000)
+      await chat.waitForResponse()
+      expect((await chat.getMessages()).filter(message => message.role === "assistant").at(-1)?.content).toBe(ANSWER)
+      const saved = await apiGet(`/api/v1/chats/${chatId}/messages?render_placeholders=false`)
+      expect(saved.messages).toHaveLength(2)
+      expect(saved.messages.map((message: { content: string }) => message.content.trim())).toEqual([QUESTION, ANSWER])
+      expect(saved.messages[0].sender.toLowerCase()).toBe("user")
+      expect(["assistant", characterName.toLowerCase()]).toContain(saved.messages[1].sender.toLowerCase())
+      expect(saved.messages.every((message: { id: string; conversation_id: string }) =>
+        typeof message.id === "string" && message.id.length > 0 && message.conversation_id === chatId
+      )).toBe(true)
+      expect(new Set(saved.messages.map((message: { id: string }) => message.id)).size).toBe(2)
+      evidence.messages = saved.messages
+      await page.goto(`/chat?settingsServerChatId=${encodeURIComponent(chatId)}`, { waitUntil: "domcontentloaded" })
+      await waitForConnection(page)
+      await chat.waitForReady()
+      await expect.poll(async () => (await chat.getMessages())
+        .filter(message => message.role === "assistant").at(-1)?.content).toBe(ANSWER)
+      expect((await apiGet(`/api/v1/chats/${chatId}`)).character_id).toBe(character.id)
+      expect((await apiGet(`/api/v1/chats/${chatId}/messages?render_placeholders=false`)).messages).toEqual(saved.messages)
+      expect(await apiGet(`/api/v1/characters/${character.id}`)).toMatchObject({
+        id: character.id, name: characterName, system_prompt: SYSTEM,
+      })
+    } finally {
+      await testInfo.attach("character-chat-evidence.json", {
+        body: JSON.stringify(evidence, null, 2), contentType: "application/json",
+      })
+    }
   })
 })

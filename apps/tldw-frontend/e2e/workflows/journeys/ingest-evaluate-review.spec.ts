@@ -6,7 +6,7 @@
  */
 import { test, expect, skipIfServerUnavailable, skipIfNoModels } from "../../utils/fixtures"
 import { EvaluationsPage, ContentReviewPage } from "../../utils/page-objects"
-import { ingestAndWaitForReady } from "../../utils/journey-helpers"
+import { dismissQuickIngest, ingestAndWaitForReady } from "../../utils/journey-helpers"
 
 test.describe("Ingest -> Evaluate -> Review journey", () => {
   test("ingest content, run evaluation, check content review", async ({
@@ -21,7 +21,8 @@ test.describe("Ingest -> Evaluate -> Review journey", () => {
 
     await test.step("Ingest content via URL", async () => {
       mediaId = await ingestAndWaitForReady(page, { url: testUrl })
-      expect(mediaId).toBeTruthy()
+      expect(mediaId).toMatch(/^[1-9]\d*$/)
+      await dismissQuickIngest(page)
     })
 
     await test.step("Navigate to evaluations and run an evaluation", async () => {

@@ -29,6 +29,66 @@
         {
           "match": {
             "model": "gpt-4.1-mini",
+            "system_prompt": "You are E2E-TestBot. Always respond with exactly: BEEP BOOP.",
+            "content_regex": "\\AHello, who are you\\?\\Z"
+          },
+          "response_file": "chat/ci-testbot.json",
+          "priority": 60
+        },
+        {
+          "match": {
+            "model": "gpt-4.1-mini",
+            "messages": [
+              {
+                "role": "system",
+                "content": "You are a pirate. Respond to everything in pirate speak. Always say ARRR at least once.",
+                "name": null,
+                "function_call": null,
+                "tool_calls": null
+              },
+              {
+                "role": "user",
+                "content": "Tell me about the weather today.",
+                "name": null,
+                "function_call": null,
+                "tool_calls": null
+              }
+            ]
+          },
+          "response_file": "chat/ci-pirate-weather.json",
+          "priority": 60
+        },
+        {
+          "match": {
+            "model": "gpt-4.1-mini",
+            "messages": [
+              {
+                "role": "system",
+                "content": "You are a pirate. Respond to everything in pirate speak. Always say ARRR at least once.",
+                "name": null,
+                "function_call": null,
+                "tool_calls": null
+              },
+              {
+                "role": "user",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "Tell me about the weather today."
+                  }
+                ],
+                "name": null,
+                "function_call": null,
+                "tool_calls": null
+              }
+            ]
+          },
+          "response_file": "chat/ci-pirate-weather.json",
+          "priority": 60
+        },
+        {
+          "match": {
+            "model": "gpt-4.1-mini",
             "system_prompt": "You are a precise fact-checking judge. Output strict JSON only.",
             "content_regex": "\\n\\nCLAIM: (?:Question\\: What is the powerhouse of the cell\\?\nAnswer\\: The mitochondria\\.|Question\\: What does DNA stand for\\?\nAnswer\\: Deoxyribonucleic acid\\.|Question\\: What does photosynthesis convert light energy into\\?\nAnswer\\: Chemical energy\\.|Question\\: How many bones does the human body have\\?\nAnswer\\: 206 bones\\.|Question\\: At what temperature does water boil at sea level\\?\nAnswer\\: 100 degrees Celsius\\.)\\n\\nEVIDENCE:\\n\\[doc:flashcards-source\\] The mitochondria is the powerhouse of the cell\\.\n\nDNA stands for deoxyribonucleic acid\\.\n\nPhotosynthesis converts light energy into chemical energy\\.\n\nThe human body has 206 bones\\.\n\nWater boils at 100 degrees Celsius at sea level\\.\\Z"
           },
