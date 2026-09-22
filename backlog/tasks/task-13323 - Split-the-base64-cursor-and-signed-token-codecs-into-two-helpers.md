@@ -1,9 +1,10 @@
 ---
 id: TASK-13323
 title: Split the base64 cursor and signed-token codecs into two helpers
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-09-22 04:56'
+updated_date: '2026-09-22 21:21'
 labels:
   - duplication
   - security
@@ -35,6 +36,32 @@ Source: synthesis F22
 - [ ] #2 api_key_crypto gains a length bound and alphabet validation
 - [ ] #3 Malformed cursors produce one documented status, not six
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+HELPERS LANDED, three sites migrated, 20 remain.
+
+NEW: core/Utils/base64url.py with TWO decode entry points, deliberately not one:
+  decode_opaque_cursor_segment - bounded, alphabet-validated (validate=True + altchars). Non-canonical encodings accepted; nothing keys off the cursor string.
+  decode_signed_token_segment - the same, PLUS canonical-form enforcement, so two distinct strings cannot decode to the same signed bytes.
+Neither verifies a signature; that stays with the caller holding the key. The naming is the guard: a caller cannot reach for the unsigned path by accident, which a single helper with a verify=False default would have allowed.
+Base64SegmentError subclasses ValueError, so existing except ValueError/binascii.Error handlers at the call sites still catch it - verified before migrating.
+
+SECURITY FIX AT THE SAME TIME (finding authnz-11). core/AuthNZ/api_key_crypto.py:
+- _b64decode now uses the strict signed decoder. It was a bare urlsafe_b64decode with NO validate and NO length bound, so a corrupted segment decoded to different valid bytes instead of raising.
+- verify_kdf_hash called pbkdf2_hmac(..., dklen=len(expected)) OUTSIDE its try. A stored hash of the form "scheme$iters$salt$" splits cleanly into four parts, decodes to b"", and dklen=0 RAISES - so the function escaped as an exception where both callers (key_resolution.py:93, api_key_manager.py:526) expect a bool, giving 500 instead of 401 for every request presenting that key. Now guarded explicitly and the KDF call is inside a try.
+- iterations are bounded (1..10M): an unbounded count was a hang rather than a False.
+Test: tests/AuthNZ/unit/test_api_key_kdf_hash_robustness.py, 11 cases. Red before (6 failed), green after. 111 passed across the 7 suites touching api_key_crypto.
+
+ALSO MIGRATED:
+- MCP prompts_catalog.py - was LAX; gains alphabet validation. 87 passed.
+- chacha shared_workspace_chat_store.py - was already strict; migrated for consistency.
+
+Tests: tests/Utils/test_base64url_codecs.py, 17 cases, including one that DEMONSTRATES the defect the 16 lax copies carry by calling the stdlib the way they do and showing it silently accepts a tampered segment.
+
+STILL OPEN: 20 of the 23 sites, 7 of them owner-only under app/api/v1/**. Two notational spellings exist in the wild, so a grep-based sweep will miss sites - enumerate by AST.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
