@@ -95,7 +95,6 @@ from tldw_Server_API.app.core.Usage.pricing_catalog import list_provider_models
 router = APIRouter()
 
 _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     AssertionError,
     AttributeError,
     ConnectionError,

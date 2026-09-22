@@ -257,7 +257,6 @@ from .llm_providers import get_configured_providers
 
 _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS = (
     ChatAPIError,
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,

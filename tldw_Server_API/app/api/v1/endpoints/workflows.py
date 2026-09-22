@@ -123,7 +123,6 @@ from tldw_Server_API.app.core.Workflows.investigation import list_step_attempts 
 from tldw_Server_API.app.core.Workflows.registry import StepTypeRegistry
 
 _WORKFLOWS_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,
