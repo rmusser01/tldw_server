@@ -68,11 +68,19 @@ export function assertPriceAbstention(answer: string): void {
     /not (?:provided|specified|stated|mentioned|given|available)|does(?:n't| not) (?:provide|specify|state|mention|give)|no (?:ticket )?price|cannot (?:determine|answer)/i,
     'Missing explicit source limitation'
   );
-  assert.doesNotMatch(
-    answer,
-    /[$€£]\s*\d|\d+(?:\.\d+)?\s*(?:dollars?|euros?|pounds?)|(?:ticket price|admission|tickets?|tours?)\s+(?:is|are|costs?)\s+(?:\d|zero|free)|free\s+(?:admission|entry|tickets?|tours?)/i,
-    'Unsupported ticket price'
+  // This English fixture oracle recognizes price claims, not unrelated number words.
+  const numberWord =
+    '(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million)';
+  const unsupportedPrice = new RegExp(
+    [
+      /[$€£]\s*\d|\d+(?:\.\d+)?\s*(?:dollars?|euros?|pounds?)|(?:ticket price|admission|tickets?|tours?)\s+(?:is|are|costs?)\s+(?:\d|zero|free|complimentary)|(?:free|complimentary)\s+(?:admission|entry|tickets?|tours?)/.source,
+      String.raw`\b${numberWord}\s+(?:dollars?|euros?|pounds?)\b`,
+      String.raw`\b(?:ticket price|admission price|entry fee)\s+(?:is|costs?)\s+${numberWord}\b`,
+      String.raw`\b(?:admission|entry|tickets?|tours?)\s+costs?\s+${numberWord}\b`,
+    ].join('|'),
+    'i'
   );
+  assert.doesNotMatch(answer, unsupportedPrice, 'Unsupported ticket price');
 }
 
 export function assertSavedTurn(messages: SavedMessage[], prompt: string, answer: string): void {
