@@ -1,6 +1,28 @@
 # Fresh-install UAT: single-user and multi-user
 
-- **Current tracker status: 403 findings / 382 verified / 21 open (261, 351, 352, 354, 356, 359–361, 365, 375, 388–393, 395, 399–401, 403).** All four configurations concluded with failures and limits recorded in the [frozen 365-finding matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_20.md). Targeted fresh SQLite and real PostgreSQL acceptance now verifies353/355/357/358/362/363/364/366–374/376–387. Remaining findings include application recovery/quality and newly confirmed test-coverage gaps. Counts describe findings, not UAT completion. Generated evidence remains local.
+- **Current tracker status: 405 findings / 388 verified / 17 open (261, 351, 352, 354, 356, 359–361, 365, 375, 388, 390–393, 400, 405).** All four configurations concluded with failures and limits recorded in the [frozen 365-finding matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_20.md). Targeted fresh SQLite and real PostgreSQL acceptance now verifies353/355/357/358/362/363/364/366–374/376–387. Remaining findings include application recovery/quality and newly confirmed test-coverage gaps. Counts describe findings, not UAT completion. Generated evidence remains local.
+
+### Diagnostic4 completed — Content Review accepted; journey follow-up required
+
+All6cases execute in each production55db1bad2d setup,0retries/skips/flaky cases. SQLite4pass/2fail464.548s; official PostgreSQL4pass/2fail697.578s. All four Content Review cases pass: required entry, real owned one/two-file handoff, exact edit/revision/Diff/reset, real AI Fix persisted with second draft unchanged, canonical add/db_id and reviewed PUT, original/reviewed versions, reload and original server source retained after local clear. UAT389/395/399/403 are verified; their tasks are Done. UAT396 was already closed on diagnostic3. These bounded successes do not certify other B09 variants, multi-user UAT400 or the full matrix.
+
+UAT390 both runs fail after successful two-source ingestion and Media search because the page object misses Open Knowledge QA settings and clicks global Open settings. Native snapshots show server Settings; absent RAG Settings consumes the360s bound. Scoped QA control plus required dialog readiness replaces the fallback chain. Causal tests reproduce two failures and preserve already-open control.
+
+UAT391 SQLite rejects a source-supported generated pair: What does photosynthesis convert light energy into? / chemical energy. Add only that exact question/answer pairing, retaining full conversion sentences and rejection of incomplete broad-question answers, wrong energy or appended claims. The original result remains failed; prior diagnostic3 complete Study acceptance remains separately valid.
+
+**UAT404 / TASK13260.278.4.1, verified:** broader contract guard still required the removed partial-save toast/global positive-count shortcut. It now guards exact five successful writes, canonical identities/readback, Note linkage and ratings. Combined45 guard/navigation/oracle checks pass0failed/pending. Existing partial-save UI controls3pass;45 unrelated cases deselected by the focused pattern. No partial-save behavior or assertion removed.
+
+**UAT405 / TASK13260.278.4.2, open:** PostgreSQL generates and saves the exact five supported cards, then the Study helper redundantly opens the already-selected deck and its option click waits on a moving/hidden dropdown until300s. Native state retains the correct deck/five-card queue. Helper uses the existing exact-selected-deck pattern, otherwise a normal visible selection and final selected-deck assertion. Causal1control/2failures become green; native follow-up remains pending. No hidden-option force click.
+
+Final harness-only scope:45tests pass; types pass; installed ESLint0errors/3 inherited KnowledgeQAPage warnings. Bandit does not apply to TypeScript. No application source changes after55db1bad2d; a new committed harness will run against unchanged owned diagnostic4 services with separate provenance. All prior failures remain private and immutable.
+
+### UAT401 — native production recovery verified
+
+Immutable aa45 production application/helper source, separate private probe hashes recorded in uat401-native/probe-source-hashes.json. Revised Chromium probe verifies exactly one controlled IndexedDB put failure, visible error, preserved unsaved text, unchanged stored content, and an enabled nonloading Save button. Normal retry persists edits; reload restores them. SQLite1pass2.556s and official PostgreSQL1pass2.787s, zero retries/skips. Earlier v1 failures at an exact error-text locator remain retained; the first probe did not independently assert its injection counter, so no application conclusion is drawn from those failures. TASK13260.278.9.4 Done. This is bounded local recovery acceptance, separate from multi-user account-boundary UAT400.
+
+### Diagnostic4 — immutable follow-up preparation
+
+Committed application and harness55db1bad2dd6ae990b6817b719aa7cb5343d22d3, separate fresh SQLite and official restricted-role PostgreSQL profiles. Each archive has25,246files/sourceSHAb72f7fb834570fcc322284ca26e42ecc093a55f0d123fd8880e9446b8c2aadd7. Both initialize and both production builds/token/budget checks pass; authenticated health confirms actual engine/single_user, page/models200. SQLite API18941/Web18942 artifactc1a48895240c8f4103c3a80c94abb297f6f493a50b0692127e5d9a064b24baab; PG API18943/Web18944 artifact92187a47ff41846647a8eabc80801e3e6a66ffd4fbf58890a5162dcd91155168. All6cases registered each, retries0, seeded same-origin auth and actual llama.cpp. Reused dependencies/next start are not clean-install or standalone qualification. Results will be recorded separately; full UAT remains pre-freeze.
 
 ### Diagnostic3 outcomes and UAT403 — server-default AI Fix selects the wrong provider
 

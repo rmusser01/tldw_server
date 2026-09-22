@@ -142,14 +142,15 @@ describe("e2e page object contracts", () => {
     expect(source).toContain("NotificationsPage")
   })
 
-  it("keeps the notes to flashcards journey aligned with the partial-save transfer contract", () => {
+  it("requires exact supported saves and source lineage in the notes to flashcards journey", () => {
     const source = readFileSync(notesFlashcardsJourneySpecPath, "utf8")
-
-    expect(source).toContain(
-      'page.getByText(/Saved \\d+ (?:generated )?cards(?:; \\d+ failed\\.)?/i)'
-    )
-    expect(source).toContain("toBeGreaterThan(initialCardCount)")
-    expect(source).not.toContain("Saved \\\\d+ generated cards/i")
+    expect(source).toContain("assertBiologyCardSet(generated.flashcards)")
+    expect(source).toContain("expect(saves).toHaveLength(5)")
+    expect(source).toContain("expect(new Set(savedCards.map((card) => card.uuid)).size).toBe(5)")
+    expect(source).toContain("expect(stored.items).toHaveLength(5)")
+    expect(source).toContain("source_ref_id: noteId")
+    expect(source).toContain("rating: 5")
+    expect(source).not.toContain("toBeGreaterThan(initialCardCount)")
     expect(source).not.toContain("manageTopBar")
   })
 })

@@ -34,6 +34,11 @@ const supportedPairs: Array<{ fact: string; question: RegExp; answer: RegExp }> 
   },
   {
     fact: 'photosynthesis',
+    question: /^what does photosynthesis convert light energy into$/,
+    answer: /^chemical energy$/,
+  },
+  {
+    fact: 'photosynthesis',
     question: /^(?:what|which) process converts light energy into chemical energy$/,
     answer: /^photosynthesis$/,
   },

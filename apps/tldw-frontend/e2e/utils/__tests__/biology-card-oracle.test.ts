@@ -20,6 +20,18 @@ describe('F-BIOLOGY card acceptance oracle', () => {
     ])).toEqual(['mitochondria', 'dna', 'photosynthesis', 'bones', 'water'])
   })
 
+  it('accepts the inspected native photosynthesis destination answer', () => {
+    const actual = { front: 'What does photosynthesis convert light energy into?', back: 'chemical energy' };
+    expect(assertBiologyCardSet(cards.map((card,index)=>index===2?actual:card))).toHaveLength(5);
+  });
+  it.each([
+    { front: 'What does photosynthesis convert?', back: 'chemical energy' },
+    { front: 'What does photosynthesis convert light energy into?', back: 'heat energy' },
+    { front: 'What does photosynthesis convert light energy into?', back: 'chemical energy, not light energy' },
+  ])('rejects mismatched or extended photosynthesis answers: $front / $back', invalid => {
+    expect(()=>assertBiologyCardSet(cards.map((card,index)=>index===2?invalid:card))).toThrow(/Unsupported/);
+  });
+
   it('accepts exactly one supported question and answer per source fact', () => {
     expect(assertBiologyCardSet(cards)).toEqual([
       'mitochondria',
