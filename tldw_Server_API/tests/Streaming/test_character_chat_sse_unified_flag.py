@@ -4,11 +4,13 @@ STREAMS_UNIFIED flag. This validates that the endpoint emits SSE lines and a
 single terminal [DONE] when a (stubbed) provider stream is used.
 """
 
-from contextlib import asynccontextmanager
+import json
 import os
 import shutil
 import tempfile
-from typing import Any, Iterator
+from collections.abc import Iterator
+from contextlib import asynccontextmanager
+from typing import Any
 
 import httpx
 import pytest
@@ -92,7 +94,7 @@ async def test_character_chat_streaming_unified_sse(monkeypatch):
                 # Header assertions
                 ct = resp.headers.get("content-type", "")
                 assert ct.lower().startswith("text/event-stream")
-                assert resp.headers.get("Cache-Control") == "no-cache"
+                assert resp.headers.get("Cache-Control") == "no-cache, no-transform"
                 assert resp.headers.get("X-Accel-Buffering") == "no"
 
                 lines = []
@@ -159,7 +161,7 @@ async def test_character_chat_streaming_unified_sse_slow_async_heartbeat(monkeyp
                 assert resp.status_code == 200
                 ct = resp.headers.get("content-type", "").lower()
                 assert ct.startswith("text/event-stream")
-                assert resp.headers.get("Cache-Control") == "no-cache"
+                assert resp.headers.get("Cache-Control") == "no-cache, no-transform"
                 assert resp.headers.get("X-Accel-Buffering") == "no"
 
                 lines = []
@@ -231,7 +233,7 @@ async def test_character_chat_streaming_unified_sse_provider_duplicate_done(monk
                 assert resp.status_code == 200
                 ct = resp.headers.get("content-type", "").lower()
                 assert ct.startswith("text/event-stream")
-                assert resp.headers.get("Cache-Control") == "no-cache"
+                assert resp.headers.get("Cache-Control") == "no-cache, no-transform"
                 assert resp.headers.get("X-Accel-Buffering") == "no"
 
                 done_count = 0
@@ -419,11 +421,25 @@ async def test_character_chat_streaming_unified_sse_provider_error_emits_done(mo
                     lines.append(ln)
                     if ln.strip().lower() == "data: [done]":
                         done_count += 1
-                        break
-                    if len(lines) >= 60:
-                        break
 
-        assert any("provider_error" in ln.lower() for ln in lines)
+        payloads = [
+            json.loads(line[5:].strip())
+            for line in lines
+            if line.startswith("data:") and line[5:].strip() != "[DONE]"
+        ]
+        assert [payload["error"] for payload in payloads if "error" in payload] == [
+            {
+                "code": "provider_unavailable",
+                "type": "provider_unavailable",
+                "message": "The chat service provider is currently unavailable.",
+            }
+        ]
+        assert any(
+            payload.get("choices", [{}])[0].get("delta", {}).get("content") == "partial"
+            for payload in payloads
+        )
+        assert "deepseek-chat" not in "\n".join(lines)
+        assert lines[-1] == "data: [DONE]"
         assert done_count == 1
     finally:
         for k in ("STREAM_HEARTBEAT_INTERVAL_S", "STREAM_HEARTBEAT_MODE", "STREAMS_UNIFIED"):
