@@ -152,3 +152,30 @@ it('rejects a hedged claim of free admission', () => {
     assertPriceAbstention('The source does not provide a price, but admission is free.')
   ).toThrow(/Unsupported/);
 });
+
+it.each([
+  'Tickets cost ten dollars.',
+  'Admission costs twenty-five euros.',
+  'Tickets cost one hundred pounds.',
+  'The ticket price is ten.',
+  'Tickets cost twenty.',
+  'Tours cost five.',
+  'Admission is free.',
+  'Tickets are complimentary.',
+  'Complimentary tours are available.',
+])('rejects an invented price after abstention: %s', (claim) => {
+  expect(() =>
+    assertPriceAbstention(`The source does not provide a ticket price. ${claim}`)
+  ).toThrow(/Unsupported/);
+});
+
+it.each([
+  'The observatory opened in 2019; tours begin Friday at 18:00.',
+  'The tour reference code is ORBIT-742. [1]',
+  'One source gives two facts about the tour schedule.',
+  'Tours require one reservation before arrival.',
+])('keeps unrelated numbers outside the price oracle: %s', (context) => {
+  expect(() =>
+    assertPriceAbstention(`The source does not provide a ticket price. ${context}`)
+  ).not.toThrow();
+});
