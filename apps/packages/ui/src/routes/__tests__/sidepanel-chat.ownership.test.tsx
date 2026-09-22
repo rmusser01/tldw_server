@@ -1,3 +1,4 @@
+import { buildQueuedRequest } from "@/utils/chat-request-queue"
 import { useSelectedModel } from "@/hooks/chat/useSelectedModel"
 import { useStoreChatModelSettings } from "@/store/model"
 import { useStoreMessageOption } from "@/store/option"
@@ -273,6 +274,23 @@ const switchAccount = (user: string) =>
     )
   })
 
+const completedReplyFixture = () => {
+  const saved = tabsState()
+  const stale = saved.snapshotsById["alice-one"]
+  stale.historyId = "owned-history"
+  stale.serverChatId = "owned-chat"
+  stale.messages = [{ id: "reply-id", isBot: true, role: "assistant", name: "Character",
+    message: "1\n2\n▋", sources: [], parentMessageId: "user-id" }]
+  stale.queuedMessages = [buildQueuedRequest({ id: "queue-id", clientRequestId: "client-id",
+    conversationId: "owned-chat", promptText: "Retained queued request" })]
+  const mirror = {
+    historyInfo: { id: "owned-history", server_chat_id: "owned-chat", server_scope_key: ownerKey("alice") },
+    messages: [{ id: "reply-id", history_id: "owned-history", role: "assistant", name: "Character",
+      content: "1\n2\n3\n4", parent_message_id: "user-id", createdAt: 1 }]
+  }
+  return { saved, stale, mirror }
+}
+
 describe.each([
   ["shared", SidepanelChat],
   ["legacy", LegacySidepanelChat]
@@ -298,6 +316,56 @@ describe.each([
     window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed"))
     useSidepanelChatTabsStore.getState().clear()
     useStoreChatModelSettings.getState().reset()
+  })
+
+  it("recovers a completed owned reply from its stale streaming snapshot", async () => {
+    const { saved, stale, mirror } = completedReplyFixture()
+    io.data.set(storedKey("alice"), saved)
+    io.local.mockResolvedValue(mirror)
+    render(<Route />)
+    await waitFor(() => expect(useStoreMessageOption.getState().messages[0]?.message).toBe("1\n2\n3\n4"))
+    expect(useStoreMessageOption.getState().messages[0]?.id).toBe("reply-id")
+    expect(useStoreMessageOption.getState().queuedMessages).toEqual(stale.queuedMessages)
+    expect(useStoreMessageOption.getState().history).toEqual(stale.history)
+    expect(useStoreChatModelSettings.getState().systemPrompt).toBe("ALICE PRIVATE PROMPT")
+  })
+
+  it.each(["foreign", "unowned", "history", "conversation", "row-history", "id", "parent", "prefix", "unfinished", "missing", "acknowledged", "offline"])("retains the original snapshot for %s local recovery", async reason => {
+    const { saved, stale, mirror } = completedReplyFixture()
+    if (reason === "foreign") mirror.historyInfo.server_scope_key = ownerKey("bob")
+    if (reason === "unowned") mirror.historyInfo.server_scope_key = ""
+    if (reason === "history") mirror.historyInfo.id = "another-history"
+    if (reason === "conversation") mirror.historyInfo.server_chat_id = "another-chat"
+    if (reason === "row-history") mirror.messages[0].history_id = "another-history"
+    if (reason === "id") mirror.messages[0].id = "another-reply"
+    if (reason === "parent") mirror.messages[0].parent_message_id = "another-user"
+    if (reason === "prefix") mirror.messages[0].content = "Changed saved content"
+    if (reason === "unfinished") mirror.messages[0].content = "1\n2\n3\n▋"
+    if (reason === "missing") mirror.messages = []
+    if (reason === "acknowledged") stale.messages[0].serverMessageId = "already-saved"
+    io.data.set(storedKey("alice"), saved)
+    if (reason === "offline") io.local.mockRejectedValue(new Error("Mirror unavailable"))
+    else io.local.mockResolvedValue(mirror)
+    render(<Route />)
+    await screen.findByRole("button", { name: "alice one" })
+    await act(async () => {})
+    expect(useStoreMessageOption.getState().messages).toEqual(stale.messages)
+    expect(useStoreMessageOption.getState().queuedMessages).toEqual(stale.queuedMessages)
+  })
+
+  it.each(["account", "unmount"])("rejects a completed local reply arriving after %s", async boundary => {
+    const { saved, mirror } = completedReplyFixture()
+    io.data.set(storedKey("alice"), saved)
+    let finish!: (value: typeof mirror) => void
+    io.local.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+    const mounted = render(<Route />)
+    await waitFor(() => expect(finish).toBeTypeOf("function"))
+    if (boundary === "account") switchAccount("bob")
+    else mounted.unmount()
+    const before = useStoreMessageOption.getState().messages
+    await act(async () => { finish(mirror) })
+    expect(useStoreMessageOption.getState().messages).toEqual(before)
+    expect(useStoreMessageOption.getState().messages.some(message => message.message === "1\n2\n3\n4")).toBe(false)
   })
 
   it("does not publish an unowned legacy snapshot or overwrite it", async () => {
