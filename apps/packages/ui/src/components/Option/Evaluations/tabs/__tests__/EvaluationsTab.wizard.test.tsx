@@ -65,12 +65,18 @@ describe("evaluation wizard preserved form state", () => {
     expect(await wizard.findByRole("switch", { name: "Case sensitive" })).toBeChecked()
   })
 
-  it("submits the name, description and type from earlier creation steps", async () => {
+  it("submits earlier-step identity together with the inline dataset", async () => {
     const { user, wizard } = await openExactMatch()
     await user.click(wizard.getByRole("button", { name: "Next" }))
+    const samples = [
+      { input: { output: "ORBIT-742" }, expected: { output: "ORBIT-742" } },
+      { input: { output: "ORBIT-999" }, expected: { output: "ORBIT-742" } },
+    ]
+    await user.click(wizard.getByRole("checkbox", { name: "Attach inline dataset instead of referencing dataset_id" }))
+    fireEvent.change(wizard.getByRole("textbox"), { target: { value: JSON.stringify(samples) } })
     await user.click(wizard.getByRole("button", { name: "Create", exact: true }))
     await waitFor(() => expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({
-      payload: expect.objectContaining({ name: "exact_run", description: "Two known outcomes", eval_type: "exact_match" }),
+      payload: expect.objectContaining({ name: "exact_run", description: "Two known outcomes", eval_type: "exact_match", dataset: samples }),
       idempotencyKey: expect.any(String),
     })))
   })
