@@ -36,6 +36,8 @@ The complete AuthNZ PostgreSQL directory now passes 56/56 with no skips and norm
 
 The hosted import-boundary failure is UAT469: six media endpoints used the core AuthNZ import path. Routing the exact re-exported `User` and `get_request_user` through `API_Deps.auth_deps` moves the boundary module from one failure to three passes; all six modules compile/import and 15 adjacent endpoint checks pass (two unchanged optional `pypff` skips). Hosted CI remains pending. A fresh fetch and explicit rebase onto dev `8045fa2` still show zero missing dev commits.
 
+The remaining UAT468 Windows host-permission fixture failures are test expectations around an intentionally fail-closed POSIX owner check: raw env preflight cannot attest owner-only mode without `geteuid`, while container-injected environment mode skips raw-file checks. Platform-aware assertions and `raising=False` for optional `geteuid` preserve both behaviors. The full preflight module remains 241/241 locally; native hosted Windows remains to verify.
+
 ## Global constraints
 
 - Four cells: sqlite-single, sqlite-multi, pg-single, pg-multi. Record each domain's actual database engine and normal actor role.
