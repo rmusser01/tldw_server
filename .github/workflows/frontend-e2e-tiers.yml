@@ -155,7 +155,7 @@ jobs:
               tail -n 100 .tmp/frontend-e2e/backend.log
               exit 1
             fi
-            if curl -sf http://127.0.0.1:8000/api/v1/health > /dev/null; then
+            if curl -sf -H "X-API-KEY: $SINGLE_USER_API_KEY" http://127.0.0.1:8000/api/v1/health > /dev/null; then
               exit 0
             fi
             sleep 2
@@ -272,7 +272,7 @@ jobs:
               tail -n 100 .tmp/frontend-e2e/backend.log
               exit 1
             fi
-            if curl -sf http://127.0.0.1:8000/api/v1/health > /dev/null; then
+            if curl -sf -H "X-API-KEY: $SINGLE_USER_API_KEY" http://127.0.0.1:8000/api/v1/health > /dev/null; then
               exit 0
             fi
             sleep 2
@@ -382,7 +382,7 @@ jobs:
               tail -n 100 .tmp/frontend-e2e/backend.log
               exit 1
             fi
-            if curl -sf http://127.0.0.1:8000/api/v1/health > /dev/null; then
+            if curl -sf -H "X-API-KEY: $SINGLE_USER_API_KEY" http://127.0.0.1:8000/api/v1/health > /dev/null; then
               exit 0
             fi
             sleep 2

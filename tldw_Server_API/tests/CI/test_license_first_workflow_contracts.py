@@ -1026,6 +1026,7 @@ def test_frontend_critical_journeys_start_real_application_with_declared_provide
         assert "TEST_MODE" not in job["env"]
         start = next(step for step in job["steps"] if step.get("name") == "Start backend server")
         assert "exit 1" in start["run"], "Readiness exhaustion must fail before Playwright can skip unavailable APIs"
+        assert '-H "X-API-KEY: $SINGLE_USER_API_KEY"' in start["run"], "Readiness must authenticate against the actual protected application health route"
     critical = data["jobs"]["critical"]
     assert critical["env"]["TLDW_LIVE_TIER_UAT"] == "1"
     assert critical["env"]["TLDW_UAT390_MODE"] == "deterministic"
