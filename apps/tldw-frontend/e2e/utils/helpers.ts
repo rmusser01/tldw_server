@@ -61,6 +61,10 @@ export async function seedAuth(
   const finalConfig = {
     ...TEST_CONFIG,
     ...config,
+    // Strict journeys must verify real credentials and health before private APIs run.
+    allowOffline: process.env.TLDW_LIVE_TIER_UAT === '1'
+      ? false
+      : (config.allowOffline ?? TEST_CONFIG.allowOffline),
     serverUrl: resolveSeedServerUrl(config),
   };
   await page.addInitScript((cfg) => {
@@ -272,6 +276,8 @@ export async function seedAuth(
     try {
       if (cfg.allowOffline) {
         localStorage.setItem('__tldw_allow_offline', 'true');
+      } else {
+        localStorage.removeItem('__tldw_allow_offline');
       }
     } catch {}
     try {

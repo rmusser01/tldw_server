@@ -717,6 +717,31 @@ describe("createCharacterChatMode contract", () => {
     })
   })
 
+  it.each([
+    "provider_authentication_failed",
+    "invalid_provider_credentials",
+    "missing_provider_credentials",
+    "provider_configuration_invalid"
+  ])("offers model settings for canonical credential failure %s", code => {
+    for (const error of [
+      Object.assign(new Error("Safe provider failure"), { code }),
+      { response: { data: { detail: { error_code: code, message: "Safe provider failure" } } } }
+    ]) {
+      expect(classifyCharacterChatFailureRecovery(error)).toMatchObject({
+        kind: "provider_unconfigured", action: "open-model-settings"
+      })
+    }
+  })
+
+  it.each([
+    "provider_unavailable", "credential_store_unavailable", "provider_error"
+  ])("keeps transient failure %s retryable", code => {
+    const error = Object.assign(new Error("Service temporarily unavailable"), { code })
+    expect(classifyCharacterChatFailureRecovery(error)).toMatchObject({
+      kind: "transient", action: "retry"
+    })
+  })
+
   it("bounds and redacts persisted character chat failure details", () => {
     const largeProviderBody = [
       "provider_not_configured",
@@ -776,7 +801,10 @@ describe("createCharacterChatMode contract", () => {
     )
   })
 
-  it("maps provider setup stream failures to model-settings recovery copy", async () => {
+  it.each(["legacy", "provider_authentication_failed", "provider_configuration_invalid"])(
+    "maps %s provider setup stream failures to model-settings recovery copy", async failureCode => {
+    const { consumeStreamingChunk } = await vi.importActual<typeof import("@/utils/streaming-chunks")>("@/utils/streaming-chunks")
+    mocks.consumeStreamingChunkMock.mockImplementation(consumeStreamingChunk)
     const setters = createSetterBundle()
     let messagesState: any[] = []
     setters.setMessages.mockImplementation((next) => {
@@ -796,7 +824,8 @@ describe("createCharacterChatMode contract", () => {
     )
     mocks.streamCharacterChatCompletionMock.mockImplementation(async function* () {
       yield* []
-      throw providerSetupError
+      if (failureCode === "legacy") throw providerSetupError
+      yield { error: { code: failureCode, type: failureCode, message: "Safe provider failure" } }
     })
     const saveMessageOnError = vi.fn(async () => "history-1")
     const controller = new AbortController()
@@ -862,7 +891,7 @@ describe("createCharacterChatMode contract", () => {
       recoveryLabel: "Open model settings"
     })
     expect(payload?.hint).toContain("Open model settings")
-    expect(payload?.detail).toContain("provider_not_configured")
+    expect(payload?.detail).toContain(failureCode === "legacy" ? "provider_not_configured" : failureCode)
     expect(saveMessageOnError).toHaveBeenCalledWith(
       expect.objectContaining({
         botMessage: assistantError?.message,

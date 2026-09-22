@@ -157,7 +157,7 @@ NavLink.displayName = "NavLink"
 
 export const useNavigate = () => {
   const router = useRouter()
-  return (to: NavigateTo, options?: NavigateOptions) => {
+  return React.useCallback((to: NavigateTo, options?: NavigateOptions) => {
     if (typeof to === "number") {
       if (to < 0) {
         runNavigationTransition(
@@ -199,7 +199,7 @@ export const useNavigate = () => {
       console.error("[useNavigate shim] Navigation failed:", err)
       doFallback()
     }
-  }
+  }, [router])
 }
 
 const useUnstablePrompt = ({ when, message }: PromptOptions): void => {

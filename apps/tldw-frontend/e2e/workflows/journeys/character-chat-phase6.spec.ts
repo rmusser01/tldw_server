@@ -44,9 +44,12 @@ async function openRolePlaySetup(page: Page): Promise<void> {
   }
 
   if (!openedDirectly) {
-    await page.getByRole("button", { name: "More options" }).first().click()
+    // Mobile cockpit deliberately hides the full toolbar. Its visible Buddy
+    // entry keeps conversation Persona and behavior settings reachable.
+    await page.getByRole("button", { name: "Buddy & Persona", exact: true }).click()
     await page
-      .getByRole("button", { name: "Role-play setup", exact: true })
+      .getByRole("dialog", { name: "Buddy & Persona Management" })
+      .getByRole("button", { name: "Edit conversation Persona & behavior", exact: true })
       .click()
   }
 
@@ -80,9 +83,16 @@ async function expectCharacterSessionsReachable(page: Page): Promise<void> {
     return
   }
 
-  const contextTab = page.getByRole("tab", { name: "Context" })
-  if (await contextTab.isVisible().catch(() => false)) {
-    await contextTab.click()
+  // Rail visibility is independent of focus mode and defaults to collapsed.
+  const restoreContext = page.getByRole("button", {
+    name: "Restore context sidechannel", exact: true,
+  })
+  if (await restoreContext.isVisible()) {
+    await restoreContext.click()
+  } else {
+    await page.getByRole("tab", {
+      name: /^(Context|Restore context sidechannel)$/,
+    }).click()
   }
 
   await expect(sessions).toBeVisible({ timeout: 30_000 })

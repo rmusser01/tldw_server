@@ -664,11 +664,35 @@ test.describe("Character Chat Phase 7 real-backend readiness", () => {
         completeV2CallPredicate(call.url, call.method),
       )
 
-      expect(response.status()).toBeGreaterThanOrEqual(400)
       expect(completeCall).toBeTruthy()
-      expect(JSON.stringify(completeCall?.responseBody ?? {}).toLowerCase()).toMatch(
-        /provider|credential|api key|configured|model/,
-      )
+      expect(completeCall?.requestBody).toEqual(expect.objectContaining({
+        include_character_context: true,
+        stream: true,
+      }))
+      let failurePayload: unknown
+      if (response.headers()["content-type"]?.includes("text/event-stream")) {
+        // Lazy provider failures arrive after the HTTP headers. Require an
+        // actual terminal error frame, not merely a successful stream status.
+        expect(response.status()).toBe(200)
+        const frames = (await response.text()).split(/\r?\n/)
+          .filter((line) => line.startsWith("data:"))
+          .map((line) => line.slice(5).trim())
+        expect(frames).toHaveLength(2)
+        expect(frames[1]).toBe("[DONE]")
+        failurePayload = JSON.parse(frames[0])
+      } else {
+        expect(response.status()).toBeGreaterThanOrEqual(400)
+        const body = await response.json()
+        failurePayload = body.detail ?? body
+      }
+      expect(failurePayload).toEqual({
+        error: expect.objectContaining({
+          code: expect.stringMatching(
+            /^(provider_authentication_failed|invalid_provider_credentials|missing_provider_credentials|provider_configuration_invalid)$/,
+          ),
+          message: expect.stringMatching(/provider|credential/i),
+        }),
+      })
 
       const banner = page.getByTestId("playground-chat-error-banner")
       await expect(banner).toBeVisible({ timeout: 30_000 })

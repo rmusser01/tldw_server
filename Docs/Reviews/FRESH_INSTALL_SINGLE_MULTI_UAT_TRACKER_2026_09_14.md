@@ -1,5 +1,19 @@
 # Fresh-install UAT: single-user and multi-user
 
+## PR2979 engineering checkpoint — 2026-09-22 15:03 UTC
+
+Native/full UAT remains paused under the requester’s PR-first direction. The isolated branch is rebased onto dev `8045fa2956f22a5bb95ccba113dc7236f17e62de`; all 33 patches survive unchanged, with recovery ref `codex/pr2979-pre-dev-8045fa2`. The rebase checks pass: 85 Chat/RAG/CI tests and 2 actual PostgreSQL tests with skipping disabled.
+
+UAT419 first-attempt CI run 35741620414 finished with 40 passed, 6 failed and 0 skipped. Failure traces and backend/provider logs remain outside Git. The follow-up addresses:
+
+- Strict fixtures incorrectly enabled offline bypass, so Notifications correctly refused inbox startup. Strict mode now requires real connection verification and clears stale bypass state.
+- The controlled provider omitted semantic claim-verification responses, so Notes correctly returned 422. A bounded fixture accepts only the five exact supported question/answer relationships with the complete source; altered answers, extra claims and missing evidence still fail verification.
+- Character SSE discarded provider/authentication classifications. All three error paths now reuse the existing safe error serializer, and the frontend recognizes its canonical recovery codes. Raw provider details remain excluded; transient failures remain retryable.
+- Phase 6 overlooked independently collapsed rails and mobile toolbar behavior. The journey follows the actual Restore Context and Buddy/Persona controls.
+- An unstable WebUI navigation callback replayed the Media permalink update during a pending Chat handoff. Its causal regression fails before memoization and passes afterward; independent review confirms the installed Next router lifecycle supports the fix.
+
+Combined follow-up checks pass 175 backend/workflow/provider tests and 38 frontend navigation/fixture/guard tests. Character-specific checks pass 147 backend and 50 frontend cases; the backend cases are included in the combined 175. Static Chromium helper controls reproduce both responsive navigation failures before repair and pass afterward. Final frontend types and actionlint pass. No new lint diagnostics or production Bandit findings were added. Independent scoped reviews found no actionable issue. Remote browser confirmation remains required. This is engineering evidence, not a fresh-install acceptance pass. Current totals remain **421 findings / 405 verified / 16 open**.
+
 - **Current tracker status: 421 findings / 405 verified / 16 open (261, 351, 352, 354, 356, 359–361, 365, 375, 390–392, 413, 415, 419).** All four configurations concluded with failures and limits recorded in the [frozen 365-finding matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_20.md). Targeted fresh SQLite and real PostgreSQL acceptance now verifies353/355/357/358/362/363/364/366–374/376–387. Remaining findings include application recovery/quality and newly confirmed test-coverage gaps. Counts describe findings, not UAT completion. Generated evidence remains local.
 
 PR2979 CI follow-up (UAT419): run35695635379 failed provider readiness with401 because its request omitted Authorization and its synthetic backend key lacked the mock server required prefix. The probe and backend now share an accepted synthetic credential, with authentication retained. The actual HTTP regression and workflow/provider checks pass154 tests. Remote critical execution remains pending; no native/full UAT resumed.

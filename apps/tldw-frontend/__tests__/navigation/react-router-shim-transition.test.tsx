@@ -212,6 +212,45 @@ describe("react-router-dom Next.js shim transitions", () => {
     }
   })
 
+  it("does not replay pending permalink synchronization after a Chat handoff", async () => {
+    const user = userEvent.setup()
+    mockRouter.asPath = "/media"
+    mockRouter.pathname = "/media"
+    const pending = new Promise<boolean>(() => undefined)
+    // Next leaves asPath on the source while destination modules are loading.
+    // A second replace during that interval cancels the user's pending push.
+    mockReplace.mockReturnValue(pending)
+    mockPush.mockReturnValue(pending)
+    const destinations: string[] = []
+    mockReplace.mockImplementation((href: string) => {
+      destinations.push(href)
+      return pending
+    })
+    mockPush.mockImplementation((href: string) => {
+      destinations.push(href)
+      return pending
+    })
+    const MediaPermalink = () => {
+      const navigate = useNavigate()
+      const location = routerShim.useLocation()
+      const [notice, setNotice] = React.useState("")
+      React.useEffect(() => {
+        if (!location.search) navigate("/media?id=7", { replace: true })
+      }, [location.search, navigate])
+      return <>
+        <button onClick={() => {
+          navigate("/chat?media_handoff=owned-token")
+          setNotice("Prepared source")
+        }}>Chat with source</button>
+        <output>{notice}</output>
+      </>
+    }
+    render(<MediaPermalink />)
+    await user.click(screen.getByRole("button", { name: "Chat with source" }))
+    expect(screen.getByText("Prepared source")).toBeVisible()
+    expect(destinations).toEqual(["/media?id=7", "/chat?media_handoff=owned-token"])
+  })
+
   it("wraps useNavigate push updates in startTransition", async () => {
     const user = userEvent.setup()
     render(<NavigateButton to="/destination" />)

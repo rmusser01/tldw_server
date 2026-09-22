@@ -28,6 +28,15 @@
       "patterns": [
         {
           "match": {
+            "model": "gpt-4.1-mini",
+            "system_prompt": "You are a precise fact-checking judge. Output strict JSON only.",
+            "content_regex": "\\n\\nCLAIM: (?:Question\\: What is the powerhouse of the cell\\?\nAnswer\\: The mitochondria\\.|Question\\: What does DNA stand for\\?\nAnswer\\: Deoxyribonucleic acid\\.|Question\\: What does photosynthesis convert light energy into\\?\nAnswer\\: Chemical energy\\.|Question\\: How many bones does the human body have\\?\nAnswer\\: 206 bones\\.|Question\\: At what temperature does water boil at sea level\\?\nAnswer\\: 100 degrees Celsius\\.)\\n\\nEVIDENCE:\\n\\[doc:flashcards-source\\] The mitochondria is the powerhouse of the cell\\.\n\nDNA stands for deoxyribonucleic acid\\.\n\nPhotosynthesis converts light energy into chemical energy\\.\n\nThe human body has 206 bones\\.\n\nWater boils at 100 degrees Celsius at sea level\\.\\Z"
+          },
+          "response_file": "chat/ci-biology-supported.json",
+          "priority": 50
+        },
+        {
+          "match": {
             "system_prompt": "Generate 5 flashcards",
             "content_regex": "DNA stands for deoxyribonucleic acid"
           },
@@ -62,10 +71,10 @@
           "model": "gpt-4.1-mini",
           "content_regex": "^Trigger the real provider configuration failure\\.$"
         },
-        "status_code": 404,
-        "message": "CI controlled provider model is unavailable for the configuration-recovery scenario",
-        "type": "invalid_request_error",
-        "code": "model_not_found",
+        "status_code": 401,
+        "message": "CI controlled provider rejected credentials for the configuration-recovery scenario",
+        "type": "authentication_error",
+        "code": "invalid_api_key",
         "times": -1
       }
     ]
