@@ -71,9 +71,12 @@ def test_discord_command_parse_rag_route(discord_client: tuple[TestClient, Ed255
     assert isinstance(job_id, int)
     assert data["response_mode"] == "ephemeral"
 
+    # The REST job lookup is an admin-only ops route: it reads the global jobs
+    # table with no tenant scope, so an unauthenticated caller used to be able
+    # to enumerate every tenant's jobs. Users get status from the signed
+    # in-band "status" command instead, which scopes by actor.
     job_status = client.get(f"/api/v1/discord/jobs/{job_id}")
-    assert job_status.status_code == 200
-    assert job_status.json()["job"]["id"] == job_id
+    assert job_status.status_code in (401, 403)
 
 
 def test_discord_command_status_queries_job(discord_client: tuple[TestClient, Ed25519PrivateKey]) -> None:
