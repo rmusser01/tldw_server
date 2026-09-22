@@ -8,14 +8,20 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha import schema_bootstrap
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
 class _FakeTransaction:
+    def __init__(self, connection: object) -> None:
+        self.connection = connection
+        self.exit_exception = None
+
     def __enter__(self) -> object:
-        return object()
+        return self.connection
 
     def __exit__(self, exc_type: object, exc: object, tb: object) -> bool:
+        self.exit_exception = exc_type
         return False
 
 
@@ -23,7 +29,7 @@ class _FakeBackend:
     backend_type = BackendType.POSTGRESQL
 
     def transaction(self) -> _FakeTransaction:
-        return _FakeTransaction()
+        return _FakeTransaction(self)
 
     def table_exists(self, _name: str, connection: object = None) -> bool:
         return True
@@ -86,7 +92,21 @@ def test_postgres_initializer_routes_schema_v66_through_v67(
     db._local = SimpleNamespace()
 
     monkeypatch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 67)
-    monkeypatch.setattr(db, "_get_schema_version_postgres", lambda _conn, lock=False: 66)
+    migration_transaction = _FakeTransaction(object())
+    coordinator_calls: list[tuple[object, str]] = []
+    version_reads: list[tuple[object, bool]] = []
+    migration_calls: list[object] = []
+
+    def coordinator(backend: object, lock_timeout: str) -> _FakeTransaction:
+        coordinator_calls.append((backend, lock_timeout))
+        return migration_transaction
+
+    def schema_version(connection: object, *, lock: bool = False) -> int:
+        version_reads.append((connection, lock))
+        return 66
+
+    monkeypatch.setattr(schema_bootstrap, "postgres_schema_migration", coordinator)
+    monkeypatch.setattr(db, "_get_schema_version_postgres", schema_version)
     monkeypatch.setattr(db, "_verify_note_attachment_schema_postgres", lambda _conn: None)
     monkeypatch.setattr(db, "_verify_note_task_schema_postgres", lambda _conn: None)
     monkeypatch.setattr(db, "_verify_notes_moodboard_studio_schema_postgres", lambda _conn: None)
@@ -97,13 +117,22 @@ def test_postgres_initializer_routes_schema_v66_through_v67(
         lambda _conn: None,
     )
 
-    def _reached_v67(_conn: object) -> None:
+    def _reached_v67(conn: object) -> None:
+        migration_calls.append(conn)
         raise RuntimeError("reached-v67")
 
     monkeypatch.setattr(db, "_migrate_from_v66_to_v67_postgres", _reached_v67, raising=False)
 
     with pytest.raises(RuntimeError, match="^reached-v67$"):
         db._initialize_schema_postgres()
+
+    assert migration_calls == [migration_transaction.connection]
+    assert coordinator_calls == [(db._backend, db._NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT)]
+    assert version_reads[:3] == [
+        (db._backend, False), (migration_transaction.connection, False),
+        (migration_transaction.connection, True),
+    ]
+    assert migration_transaction.exit_exception is RuntimeError
 
 
 @pytest.mark.unit

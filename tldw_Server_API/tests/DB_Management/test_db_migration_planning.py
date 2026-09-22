@@ -386,8 +386,9 @@ def test_migration_executes_statements_after_leading_comments(
 ])
 def test_migrate_bom_prefixed_wrapped_file_preserves_source_and_checksum(
     versioned_migration_db: tuple[Path, DatabaseMigrator], header: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A leading BOM permits legacy wrappers without changing recorded source integrity."""
+    """A Windows default codec must not corrupt the source or checksum."""
     db_path, migrator = versioned_migration_db
     source_sql = "\ufeff" + header + """BEGIN TRANSACTION;
 CREATE TABLE widgets (value TEXT);
@@ -398,6 +399,15 @@ PRAGMA foreign_keys(ON);
     source_path = Path(migrator.migrations_dir) / "001_widgets.sql"
     source_path.write_text(source_sql, encoding="utf-8")
     original = db_migration_module.Migration(1, "widgets", source_sql)
+
+    original_read_text = Path.read_text
+
+    def windows_default_read_text(path: Path, *args: Any, **kwargs: Any) -> str:
+        if path == source_path and not args and "encoding" not in kwargs:
+            return original_read_text(path, encoding="cp1252")
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", windows_default_read_text)
 
     result = migrator.migrate_to_version(1, create_backup=False)
 
