@@ -791,8 +791,13 @@ class BaseModule(ABC):
             for pattern in dangerous_patterns:
                 if pattern in ls:
                     raise ValueError(f"Potentially dangerous input detected: {pattern}")
-            # Strip NULs and control chars
-            return "".join(ch for ch in s if ch >= " " or ch == "\n")
+            # Strip NULs and control chars, but preserve the whitespace that is
+            # syntactically load-bearing in file content. Dropping \t silently
+            # corrupted every tab-significant file written through fs.write (a
+            # Makefile, a TSV) while reporting success, and made fs.edit's exact
+            # string replacement permanently unable to match a tab-indented file.
+            # Same class as filesystem_module._sanitize_patch_diff, deliberately.
+            return "".join(ch for ch in s if ch >= " " or ch in {"\n", "\r", "\t"})
 
         if isinstance(input_data, str):
             return _check_str(input_data)
