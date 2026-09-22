@@ -69,14 +69,54 @@ async def _fetch_user_and_memberships(db_name: str, email: str):
         await conn.close()
 
 
+@pytest.mark.parametrize("existing_user", [False, True], ids=["new", "existing-unverified"])
 @pytest.mark.asyncio
-async def test_magic_link_verify_creates_user_and_org(isolated_test_environment, monkeypatch):
+async def test_magic_link_verify_creates_user_and_org(
+    isolated_test_environment, monkeypatch: pytest.MonkeyPatch, existing_user: bool,
+) -> None:
     client, db_name = isolated_test_environment
     email = "magicuser@example.com"
 
     stub_email = _StubEmailService()
     import tldw_Server_API.app.api.v1.endpoints.auth as auth
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 
+    if existing_user:
+        from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
+
+        async def seed_unverified_user() -> None:
+            """Seed the existing account through the canonical writer on the app loop."""
+            users = UsersDB(await get_db_pool())
+            await users.initialize(ensure_schema=False)
+            await users.create_user(  # nosec B106 - inert fixture hash, never used for login
+                username="existing-magic", email=email, password_hash="test-hash", is_verified=False,
+            )
+
+        client.portal.call(seed_unverified_user)
+
+    original_ensure_membership = auth._ensure_user_org_membership
+    original_mark_verified = auth._mark_user_verified
+    verified_versions: dict[int, Any] = {}
+
+    async def mark_verified_and_record_version(db: Any, user_id: int, now_utc: Any) -> None:
+        """Read the actual version from the writer, including an already-verified user."""
+        await original_mark_verified(db, user_id, now_utc)
+        verified_versions[user_id] = await db.fetchval(
+            "SELECT profile_version FROM users WHERE id = $1", user_id,
+        )
+
+    monkeypatch.setattr(auth, "_mark_user_verified", mark_verified_and_record_version)
+
+    async def ensure_membership_after_verification(user_id: int, username: str | None = None) -> None:
+        """Independent auth services must see committed verification before FK writes."""
+        pool = await get_db_pool()
+        row = await pool.fetchrow(
+            "SELECT is_verified, profile_version FROM users WHERE id = ?", user_id,
+        )
+        assert (row["is_verified"], row["profile_version"]) == (True, verified_versions[user_id])
+        await original_ensure_membership(user_id, username)
+
+    monkeypatch.setattr(auth, "_ensure_user_org_membership", ensure_membership_after_verification)
     monkeypatch.setattr(auth, "_get_email_service", lambda: stub_email)
     monkeypatch.setattr(
         auth,
@@ -142,8 +182,9 @@ async def test_magic_link_verify_rejects_inactive_user(isolated_test_environment
         database=db_name,
     )
     try:
-        from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
         import uuid as uuid_lib
+
+        from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
 
         password_hash = PasswordService().hash_password("Inactive@Pass#2024!")
         await conn.execute(
@@ -187,3 +228,41 @@ async def test_magic_link_verify_rejects_inactive_user(isolated_test_environment
 
     _user, memberships = await _fetch_user_and_memberships(db_name, email)
     assert memberships == []
+
+
+@pytest.mark.parametrize("caller_transaction", [False, True])
+@pytest.mark.asyncio
+async def test_verification_profile_touch_failure_rolls_back_postgres_user(
+    isolated_test_environment, monkeypatch: pytest.MonkeyPatch, caller_transaction: bool,
+) -> None:
+    """Verification and its profile version roll back together for either transaction owner."""
+    from contextlib import nullcontext
+    from datetime import datetime, timezone
+
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+    from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
+    from tldw_Server_API.app.core.UserProfiles.version_gateway import ProfileVersionGateway
+    from tldw_Server_API.app.services.auth_service import mark_user_verified
+
+    pool = await get_db_pool()
+    users = UsersDB(pool)
+    await users.initialize(ensure_schema=False)
+    created = await users.create_user(  # nosec B106 - inert fixture hash, never used for login
+        username="verification-rollback", email="verify-rollback@example.test",
+        password_hash="test-hash", is_verified=False,
+    )
+    user_id = int(created["id"])
+    before = dict(await pool.fetchrow("SELECT * FROM users WHERE id = ?", user_id))
+
+    async def fail_profile_touch(*_args: Any, **_kwargs: Any) -> None:
+        """Fail after the real verified-field write, before its profile anchor persists."""
+        raise RuntimeError("injected profile touch failure")
+
+    monkeypatch.setattr(ProfileVersionGateway, "touch", fail_profile_touch)
+    with pytest.raises(RuntimeError, match="injected profile touch failure"):
+        async with pool.acquire_statement_autocommit() as connection:
+            async with (connection.transaction() if caller_transaction else nullcontext()):
+                await mark_user_verified(connection, user_id, datetime.now(timezone.utc))
+
+    after = dict(await pool.fetchrow("SELECT * FROM users WHERE id = ?", user_id))
+    assert after == before

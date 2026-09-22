@@ -1,26 +1,24 @@
-from typing import Any, Dict, Tuple
-
 import os
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
-from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal, AuthContext
-
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 
 pytestmark = pytest.mark.integration
 
 
-def _install_auth_capture(app: FastAPI) -> Tuple[Dict[str, Any], Any]:
+def _install_auth_capture(app: FastAPI) -> tuple[dict[str, Any], Any]:
     """
     Install a lightweight wrapper around get_auth_principal that records
     principal/state alignment for the last request, in the context of LLM
     budget enforcement.
     """
-    captured: Dict[str, Any] = {}
+    captured: dict[str, Any] = {}
     original_get_auth_principal = auth_deps.get_auth_principal
 
     async def _capturing_get_auth_principal(request: Request) -> AuthPrincipal:  # type: ignore[override]
@@ -86,9 +84,9 @@ async def test_llm_budget_guard_overage_preserves_principal_state_alignment(tmp_
     db_path = tmp_path / "users_budget_invariants.db"
     os.environ["DATABASE_URL"] = f"sqlite:///{db_path}"
 
-    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
     reset_settings()
     await reset_db_pool()
@@ -124,8 +122,8 @@ async def test_llm_budget_guard_overage_preserves_principal_state_alignment(tmp_
             await conn.execute("UPDATE api_keys SET scope = ? WHERE id = ?", ("write", key_id))
 
     # Remove LLMBudgetMiddleware so the dependency path handles the 402
-    from tldw_Server_API.app.main import app
     from tldw_Server_API.app.core.AuthNZ.llm_budget_middleware import LLMBudgetMiddleware
+    from tldw_Server_API.app.main import app
 
     original_middleware = list(getattr(app, "user_middleware", []))
     app.user_middleware = [m for m in original_middleware if getattr(m, "cls", None) is not LLMBudgetMiddleware]

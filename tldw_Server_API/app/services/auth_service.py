@@ -431,13 +431,14 @@ async def mark_user_verified(db: Any, user_id: int, now_utc: datetime) -> None:
             if gateway.backend == "postgres"
             else "UPDATE users SET is_verified = ?, updated_at = ? WHERE id = ?"
         )
-        await gateway.execute_update(
-            db,
-            user_id=user_id,
-            profile_visible_fields=("is_verified",),
-            statement=statement,
-            parameters=(True, now_utc, user_id),
-        )
+        async with _managed_profile_write_transaction(db, backend=gateway.backend):
+            await gateway.execute_update(
+                db,
+                user_id=user_id,
+                profile_visible_fields=("is_verified",),
+                statement=statement,
+                parameters=(True, now_utc, user_id),
+            )
         await _maybe_commit(db)
     except Exception as exc:
         logger.error(f"auth_service.mark_user_verified failed for user {user_id}: {exc}")

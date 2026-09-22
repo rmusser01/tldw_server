@@ -2,17 +2,19 @@ import pytest
 from fastapi.testclient import TestClient
 from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
 
+from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
+
 
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_llm_budget_middleware_returns_402_postgres(test_db_pool, monkeypatch):
-    from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
-    from tldw_Server_API.app.core.AuthNZ import api_key_manager as api_key_manager_module
-    from tldw_Server_API.app.core.AuthNZ import User_DB_Handling as user_db_handling
-    from tldw_Server_API.app.main import app
-    from tldw_Server_API.app.core.config import settings as app_settings
     from tldw_Server_API.app.api.v1.API_Deps import auth_deps
+    from tldw_Server_API.app.core.AuthNZ import User_DB_Handling as user_db_handling
+    from tldw_Server_API.app.core.AuthNZ import api_key_manager as api_key_manager_module
+    from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings as reset_auth_settings
+    from tldw_Server_API.app.core.config import settings as app_settings
+    from tldw_Server_API.app.main import app
 
     # Ensure multi-user mode for AuthNZ + budgets
     monkeypatch.setenv("AUTH_MODE", "multi_user")

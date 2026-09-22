@@ -1,5 +1,23 @@
 # Fresh-install UAT: single-user and multi-user
 
+## Transaction and lock repair checkpoint — 2026-09-22
+
+A fresh fetch confirms dev `8045fa2956f22a5bb95ccba113dc7236f17e62de` is fully included: zero missing commits. The original dirty checkout remains untouched. PR2979 remains a draft; full/native UAT is paused.
+
+| Finding | Cause, repair and verification |
+|---|---|
+| UAT451 — magic-link subgroup verified; umbrella open | The request-wide PostgreSQL transaction held the verified user's row lock while an independent organization INSERT waited on that transaction. Reuse the established sign-in connection lifetime and wrap the whole verification/profile-version write in the existing short atomic transaction helper. Real new/existing-user sign-ins verify committed profile-version visibility before the actual organization service. Injected profile-touch failures roll back both engines; setup keeps caller-owned commit/rollback. Combined 33 checks pass, including eight actual PostgreSQL, ten SQLite and fifteen service-unit cases, zero skips and normal exit. Sequential replay, inactive-user and rate controls remain; concurrent token redemption is outside this repair. Ruff clean; no new production Bandit findings; independent reviews clear. TASK13260.278.17.39 and .39.1. |
+| UAT451 — admin/budget subgroups verified; umbrella open | Canonical user seeding replaces guarded raw inserts in the HTTP budget/lockout pair and four PostgreSQL admin membership modules. Exact fixture roles, activity, hashes and verification flags are retained. The budget/adjacent SQLite run passes 22 checks; admin/helper runs pass 22, comprising ten actual PostgreSQL and twelve SQLite checks. Existing assertions remain, with additional helper idempotency and guard-rejection controls. Lint/security/review clear. TASK13260.278.17.37/.38. |
+| UAT457 — v53/v61 subgroup verified; umbrella open | Routing doubles now observe the real migration coordinator contract. PostgreSQL checks use the public sanitized error/unique subtype and complete rollback comparisons, retaining exact validated CHECK definitions and restricted-role controls. Build the actual v4-to-v60 prefix, prove checkout/advisory-lock cleanup, then migrate exact 60→61 and current head twice while preserving historical and shared rows and RLS policies. All 13 checks pass, zero skips/deselections, including seven actual PostgreSQL checks. Production unchanged; lint/security/review clear. TASK13260.278.17.40/.40.1. |
+| UAT450 — follow-up verified | One remaining exact list-schema oracle omitted the three canonical pagination fields introduced by this PR. Update that field set only; all nested delivery/attempt metadata restrictions remain. Four relevant modules pass 110 checks, zero skips. Lint/security/review clear. TASK13260.278.17.42. |
+| UAT464 — verified locally | A failed fallback system-log lock attempt unlinked another writer's held lock. Cleanup now requires an acquired descriptor. A real-file contender regression fails before the repair; owner release/reacquisition and the unchanged runtime timeout test pass afterward. Full Logging and admin consumer run: 59 passed, zero skips. All 49 original assertions retained; production Bandit zero and independent review clear. Hosted macOS 3.12 rerun remains under CI acceptance. TASK13260.278.17.41; job106936881510. |
+
+UAT451's budget/monitoring subgroup now replaces two further guarded user writes with canonical creation and soft deletion. The full affected and adjacent suite passes 51 cases, no skips, with every original assertion and non-assert security finding unchanged (TASK13260.278.17.43). Its Windows CI result remains unverified. The PostgreSQL allowlist/budget subgroup replaces six guarded inserts, preserving key identity/defaults. After the original six actual PostgreSQL setup failures, all six cases pass on the official fixture. Two malformed-body tests had swallowed their own assertions and initially returned 401 because a synchronous client crossed event loops with a PostgreSQL pool; the repaired async requests require authenticated non-401 responses and reject 402/403. Four forced-denial controls fail as intended. Ruff is clean, Bandit stays at 11 test assertions only, and original allowlist and budget assertions remain (TASK13260.278.17.44). Broader UAT451 remains open; neither local result proves hosted Windows.
+
+Hosted Jobs run35783110332 on `33e545ccd8` has passed SQLite; its PostgreSQL job106943608381 is queued. It is not counted as a PostgreSQL pass. Publication is held while useful local repair work continues so this queued run can advance. Windows job106936881001 exposes another guarded principal-budget fixture under UAT451; it is being repaired separately. Remaining AuthNZ, migration and CI groups stay open.
+
+Current totals: **464 findings /442 verified /22 open**: UAT261,351,352,354,356,359–361,365,375,390–392,413,415,419,422,424,430,441,451,457. These counts describe bounded finding scope, not complete fresh-install acceptance. Captures, private profiles, database files and logs remain excluded from Git.
+
 ## Repair checkpoint after publication — 2026-09-22
 
 PR2979 is published at `33e545ccd8`. A fresh fetch immediately before publication confirmed dev `8045fa2956f22a5bb95ccba113dc7236f17e62de`, with zero missing dev commits. The original dirty checkout is untouched. Qodo refreshed its review on this revision at 20:52:55 UTC: 12 resolved items and the same two source-backed recommendations; no new finding. Full/native UAT remains paused.
@@ -17,7 +35,7 @@ UAT451's registration subgroup also passes its actual PostgreSQL regression: rep
 
 The complete PR-scope pre-commit run passed across 523 changed/new paths, including the unchanged HTTP guard. Hooks excluded inapplicable TOML/wizard-only formatters by their configured filters; no applicable check was bypassed.
 
-Current totals: **463 findings /441 verified /22 open**: UAT261,351,352,354,356,359–361,365,375,390–392,413,415,419,422,424,430,441,451,457. Counts describe each finding's bounded engineering scope, not full fresh-install acceptance.
+Previous checkpoint totals: **463 findings /441 verified /22 open**: UAT261,351,352,354,356,359–361,365,375,390–392,413,415,419,422,424,430,441,451,457. Counts describe each finding's bounded engineering scope, not full fresh-install acceptance.
 
 
 ## Browser engineering acceptance passes; backend follow-ups — 2026-09-22

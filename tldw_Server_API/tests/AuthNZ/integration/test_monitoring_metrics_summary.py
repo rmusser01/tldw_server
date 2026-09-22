@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from tldw_Server_API.app.core.AuthNZ.monitoring import AuthNZMonitor
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
 from tldw_Server_API.app.core.AuthNZ.migrations import (
     ensure_authnz_tables,
@@ -13,6 +12,7 @@ from tldw_Server_API.app.core.AuthNZ.migrations import (
     migration_073_create_federated_identities_table,
     migration_074_create_federated_managed_grants_table,
 )
+from tldw_Server_API.app.core.AuthNZ.monitoring import AuthNZMonitor
 from tldw_Server_API.app.core.AuthNZ.scheduler import AuthNZScheduler
 from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
 from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
