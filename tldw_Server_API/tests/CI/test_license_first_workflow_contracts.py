@@ -1037,6 +1037,23 @@ def test_frontend_critical_journeys_start_real_application_with_declared_provide
     assert any(step.get("name") == "Start deterministic downstream provider" for step in critical["steps"])
 
 
+def test_frontend_critical_serves_a_completed_build_instead_of_compiling_routes() -> None:
+    """Browser timing must not include dev compilation or source watcher updates."""
+    data = yaml.safe_load((REPO_ROOT / ".github/workflows/frontend-e2e-tiers.yml").read_text(encoding="utf-8"))
+    critical = data["jobs"]["critical"]
+    command = critical["env"].get("TLDW_WEB_CMD", "")
+    assert "bun run start" in command
+    assert ".tmp/frontend-e2e/frontend.log" in command
+    steps = critical["steps"]
+    build = next(step for step in steps if step.get("name") == "Build frontend for browser tests")
+    execution = next(step for step in steps if step.get("name") == "Run critical E2E tests")
+    assert steps.index(build) < steps.index(execution)
+    assert "bun run build:dev" in build["run"]
+    assert "frontend-build.log" in build["run"]
+    assert build["shell"] == "bash", "GitHub explicit bash enables pipefail so tee cannot mask build failures"
+    assert not build.get("continue-on-error", False)
+
+
 def test_frontend_critical_keeps_first_attempt_evidence_within_job_deadline() -> None:
     """A failed first pass must report failure and upload its own retained evidence."""
     data = yaml.safe_load((REPO_ROOT / ".github/workflows/frontend-e2e-tiers.yml").read_text(encoding="utf-8"))

@@ -85,6 +85,7 @@ jobs:
       SINGLE_USER_API_KEY: test-api-key-for-e2e-testing-12345
       REDIS_URL: redis://127.0.0.1:6379/0
       TLDW_WEB_AUTOSTART: 'true'
+      TLDW_WEB_CMD: 'bun run start -- -p 8080 > ../../.tmp/frontend-e2e/frontend.log 2>&1'
       TLDW_WEB_URL: http://localhost:8080
       TLDW_SERVER_URL: http://127.0.0.1:8000
       TLDW_API_KEY: test-api-key-for-e2e-testing-12345
@@ -180,6 +181,11 @@ jobs:
       - name: Install Playwright browsers
         working-directory: apps/tldw-frontend
         run: bunx playwright install --with-deps chromium
+
+      - name: Build frontend for browser tests
+        shell: bash
+        working-directory: apps/tldw-frontend
+        run: bun run build:dev 2>&1 | tee ../../.tmp/frontend-e2e/frontend-build.log
 
       - name: Run critical E2E tests
         working-directory: apps/tldw-frontend

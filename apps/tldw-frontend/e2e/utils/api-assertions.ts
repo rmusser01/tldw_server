@@ -179,7 +179,8 @@ export function assertApiSequence(
 /* ------------------------------------------------------------------ */
 
 /**
- * Starts capturing all /api/ calls. Returns a handle to stop and retrieve.
+ * Captures metadata for all /api/ calls and bodies for JSON responses only.
+ * Returns a handle to stop and retrieve; open streams do not delay capture.
  *
  * @example
  * const capture = captureAllApiCalls(page);
@@ -202,7 +203,11 @@ export function captureAllApiCalls(page: Page): {
     try { requestBody = request.postDataJSON() } catch { /* no body */ }
 
     let responseBody: unknown = null
-    try { responseBody = await response.json() } catch { /* non-json */ }
+    const contentType = response.headers()["content-type"]?.split(";")[0].trim().toLowerCase()
+    // Event streams may stay open for the entire session; capture only JSON bodies.
+    if (contentType === "application/json" || contentType?.endsWith("+json")) {
+      try { responseBody = await response.json() } catch { /* invalid JSON or aborted response */ }
+    }
 
     calls.push({
       method: request.method(),
