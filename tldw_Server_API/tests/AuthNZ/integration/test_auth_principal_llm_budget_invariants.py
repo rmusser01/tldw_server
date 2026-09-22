@@ -114,19 +114,15 @@ async def test_llm_budget_guard_overage_preserves_principal_state_alignment(tmp_
     vk = await mgr.create_virtual_key(
         user_id=user_id,
         name="vk-budget-guard-invariants",
+        scope="write",
         allowed_endpoints=["chat.completions"],
         budget_day_tokens=0,
     )
     key_id = vk["id"]
     vkey = vk["key"]
 
-    # POST /chat/completions now enforces write scope even when scope="any".
-    # Virtual keys default to "read", so promote this test key explicitly.
-    async with pool.transaction() as conn:
-        if getattr(pool, "pool", None):
-            await conn.execute("UPDATE api_keys SET scope = $1 WHERE id = $2", "write", key_id)
-        else:
-            await conn.execute("UPDATE api_keys SET scope = ? WHERE id = ?", ("write", key_id))
+    # The endpoint requires write scope, so verify the canonical key writer stored it.
+    assert await pool.fetchval("SELECT scope FROM api_keys WHERE id = ?", key_id) == "write"
 
     # Remove LLMBudgetMiddleware so the dependency path handles the 402
     from tldw_Server_API.app.core.AuthNZ.llm_budget_middleware import LLMBudgetMiddleware

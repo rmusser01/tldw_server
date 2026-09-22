@@ -44,6 +44,8 @@ The UAT457 v57/v58 fixtures now build historical catalogs through numbered migra
 
 Five more UAT457 version oracles now distinguish the historical v63 migration boundary from the current SQLite68/PostgreSQL72 head. The Web Clipper v55 fixture uses numbered migrations and historical row inserts rather than a current schema relabel. Four full affected modules pass 174 checks with the official PostgreSQL fixture required and zero skips. The two Windows quiz migration failures are UAT471: `sqlite3.Connection` context management left file handles open until after temporary-directory cleanup. Explicit closure preserves transaction semantics; the entire quiz module passes 25 local checks. Hosted Windows acceptance remains open for UAT457 and UAT471; full/native UAT stays paused.
 
+The hosted Windows principal-budget invariant failed before its request assertions because test setup promoted a virtual key through a separate raw SQLite write transaction. The canonical key creator accepts explicit write scope, so UAT472 now creates and verifies that scope directly. Its focused 402/principal-state test passes locally with zero skips; hosted Windows acceptance remains pending. Full/native UAT remains paused.
+
 ## Global constraints
 
 - Four cells: sqlite-single, sqlite-multi, pg-single, pg-multi. Record each domain's actual database engine and normal actor role.
