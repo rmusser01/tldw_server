@@ -322,7 +322,7 @@ async def test_planned_observability_is_opaque_and_concurrency_isolated(
         "?api_key=private-token"
     )
     legacy_url = "http://93.184.216.35/legacy-visible"
-    # Both concurrent mock requests must reach the observability path.
+    # Both concurrent simulated calls must reach the observability path.
     monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWLIST", "93.184.216.34,93.184.216.35")
     arrived = 0
     both_arrived = asyncio.Event()

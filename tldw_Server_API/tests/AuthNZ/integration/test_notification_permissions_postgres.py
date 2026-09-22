@@ -6,7 +6,6 @@ from types import SimpleNamespace
 
 import pytest
 
-
 pytestmark = pytest.mark.integration
 
 _INTERACTIVE_ROLES = ("admin", "user", "moderator", "reviewer", "viewer")
@@ -40,9 +39,18 @@ async def test_postgres_fresh_initialization_grants_notifications_after_roles_ar
     from tldw_Server_API.app.core.AuthNZ.initialize import setup_database
 
     pool = await get_db_pool()
-    await pool.execute(
-        "TRUNCATE user_permissions, user_roles, role_permissions, permissions, roles RESTART IDENTITY CASCADE"
-    )
+    async with pool.transaction() as conn:
+        await conn.execute("DELETE FROM user_permissions")
+        await conn.execute("DELETE FROM user_roles")
+        await conn.execute("DELETE FROM role_permissions")
+        await conn.execute("DELETE FROM permissions")
+        await conn.execute("DELETE FROM roles")
+
+    assert await pool.fetchval("SELECT COUNT(*) FROM user_permissions") == 0
+    assert await pool.fetchval("SELECT COUNT(*) FROM user_roles") == 0
+    assert await pool.fetchval("SELECT COUNT(*) FROM role_permissions") == 0
+    assert await pool.fetchval("SELECT COUNT(*) FROM permissions") == 0
+    assert await pool.fetchval("SELECT COUNT(*) FROM roles") == 0
 
     await setup_database()
 
@@ -83,6 +91,7 @@ async def test_postgres_notification_backfill_is_idempotent_and_preserves_overri
     from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import (
         ensure_notification_permissions_pg,
     )
+    from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
 
     pool = await get_db_pool()
     for role_name, is_system in (
@@ -111,17 +120,29 @@ async def test_postgres_notification_backfill_is_idempotent_and_preserves_overri
         ("notification-custom", "notification-custom@example.test", "custom-auditor"),
         ("notification-missing", "notification-missing@example.test", "missing-role"),
     )
+    users = UsersDB(pool)
+    await users.initialize(ensure_schema=False)
     for username, email, role_name in legacy_users:
-        await pool.execute(
-            """
-            INSERT INTO users (username, email, password_hash, role)
-            VALUES (?, ?, ?, ?)
-            """,
-            username,
-            email,
-            "test-password-hash",
-            role_name,
+        await users.create_user(  # nosec B106 # Inert fixture hash, never used for login
+            username=username,
+            email=email,
+            password_hash="test-password-hash",
+            role=role_name,
         )
+
+    legacy_rows = await pool.fetch(
+        "SELECT username, email, role FROM users WHERE username LIKE ?",
+        "notification-%",
+    )
+    assert {tuple(row.values()) for row in legacy_rows} == set(legacy_users)
+    assert await pool.fetchval(
+        """
+        SELECT COUNT(*) FROM user_roles ur
+        JOIN users u ON u.id = ur.user_id
+        WHERE u.username LIKE ?
+        """,
+        "notification-%",
+    ) == 0
 
     await pool.execute(
         """
