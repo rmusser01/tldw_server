@@ -11,6 +11,7 @@ Note: This implementation requires psycopg (v3) to be installed:
     pip install psycopg-pool
 """
 
+import contextlib
 import os
 import threading
 import time
@@ -128,6 +129,16 @@ def _reset_pooled_connection(conn: Any) -> None:
                 cur.execute(statement)
         except Exception:  # noqa: BLE001 - best effort; pool discards on failure
             continue
+    # psycopg_pool requires the reset callback to hand back a connection that is
+    # NOT in a transaction, and discards it otherwise. Executing the statements
+    # above opens an implicit transaction, so it has to be closed here. It must
+    # be a commit, not a rollback: SET and RESET are transactional in
+    # PostgreSQL, so rolling back would undo the very reset we just performed.
+    try:
+        conn.commit()
+    except Exception:  # noqa: BLE001 - pool discards a connection it cannot reset
+        with contextlib.suppress(Exception):
+            conn.rollback()
 
 
 class PostgreSQLConnectionPool(ConnectionPool):

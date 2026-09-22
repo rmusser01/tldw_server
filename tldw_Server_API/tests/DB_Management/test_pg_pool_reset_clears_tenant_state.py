@@ -36,12 +36,35 @@ class _Cursor:
 
 
 class _Conn:
-    def __init__(self, failing=()):
+    """Tracks transaction state the way psycopg does.
+
+    Executing a statement opens an implicit transaction. psycopg_pool discards
+    any connection its reset callback hands back while still INTRANS, so the
+    callback has to close it -- and with a commit, since SET and RESET are
+    transactional in PostgreSQL and a rollback would undo the reset.
+    """
+
+    def __init__(self, failing=(), commit_fails=False):
         self.executed: list[str] = []
         self._failing = set(failing)
+        self.in_transaction = False
+        self.committed = False
+        self.rolled_back = False
+        self._commit_fails = commit_fails
 
     def cursor(self):
+        self.in_transaction = True
         return _Cursor(self.executed, self._failing)
+
+    def commit(self):
+        if self._commit_fails:
+            raise RuntimeError("commit refused")
+        self.in_transaction = False
+        self.committed = True
+
+    def rollback(self):
+        self.in_transaction = False
+        self.rolled_back = True
 
 
 def test_reset_clears_session_gucs_and_role():
@@ -70,3 +93,27 @@ def test_reset_never_raises_into_the_pool():
     _reset_pooled_connection(conn)
 
     assert conn.executed == []
+
+
+def test_reset_leaves_no_open_transaction():
+    """The regression: psycopg_pool discarded every connection we reset.
+
+    "connection left in status INTRANS by reset function ...: discarded".
+    A stub without transaction state cannot catch this, which is why it only
+    surfaced once psycopg was actually installed and the pool ran for real.
+    """
+    conn = _Conn()
+
+    _reset_pooled_connection(conn)
+
+    assert conn.in_transaction is False
+    assert conn.committed is True, "must commit: rollback would undo the RESET"
+
+
+def test_reset_falls_back_to_rollback_when_commit_fails():
+    conn = _Conn(commit_fails=True)
+
+    _reset_pooled_connection(conn)
+
+    assert conn.in_transaction is False
+    assert conn.rolled_back is True
