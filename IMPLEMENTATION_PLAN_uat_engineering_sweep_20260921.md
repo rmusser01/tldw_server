@@ -16,7 +16,9 @@ The requester now requires a PR for this task's work missing from dev, followed 
 
 ## Latest checkpoint — 2026-09-22
 
-PR2979 published ddcb99d988 includes current dev8045fa2 (zero commits behind at publication). Exact frontend engineering run35779395002 passes46/46 withoutskips/retries and retains canonical C03two-sample scores/reload evidence. Further reviewed local repairs cover rotation404/rollback, extractioncleanup, genuine historical fixtures and currenttestcontracts. Canonical webhook pagination now passes 189 checks with an exact two-schema OpenAPI delta. Tracker 462/437/25 open; full/nativeUAT and merge remain gated on remaining backendrepairs, CI/reviews and finalrequester-ownedsummary.
+PR2979 is published at `33e545ccd8`, including current dev `8045fa2` (zero missing commits at publication). The earlier exact frontend engineering run on `ddcb99d988` passes 46/46 without skips/retries, including canonical C03 two-sample scores and reload.
+
+The next reviewed batch repairs stale Character ownership/random-selection fixtures (251 checks), request-time summary configuration fixtures (136), Slides winner clocks (113), historical migration fixtures (21, including four actual PostgreSQL checks), notification permissions (three actual PostgreSQL checks), registration rollback (one actual PostgreSQL check) and the comment-only HTTP guard false positive. Tracker: 463 findings /441 verified /22 open. Full/native UAT remains paused while remaining AuthNZ/migration causes, CI and review gates are handled. The final requester-owned change summary remains pending.
 
 ## Global constraints
 
