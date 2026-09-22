@@ -675,16 +675,16 @@ class ElevenLabsAdapter(TTSAdapter):
 
     async def _cleanup_resources(self):
         """Clean up ElevenLabs adapter resources"""
-        if self.client:
-            try:
-                await self.client.aclose()
-                self.client = None
-                logger.debug(f"{self.provider_name}: HTTP client closed")
-            except (AttributeError, OSError, RuntimeError) as e:
-                logger.warning(
-                    f"{self.provider_name}: Error closing HTTP client; "
-                    f"exception_type={_safe_exception_label(e)}"
-                )
+        # HTTP clients are owned by tts_resource_manager.ConnectionPool, which caches
+        # one client per provider and hands the same object to every later borrower.
+        # Calling aclose() here closed that shared client without evicting it from
+        # _pools, so the next request received a closed client and the provider stayed
+        # dead until process restart -- defeating the retry-after-cooldown behaviour
+        # ADR-011 requires. Only the pool may tear a client down, via close_pool().
+        # Release our reference and leave the client to its owner, matching
+        # OpenAIAdapter._cleanup_resources.
+        self.client = None
+        logger.debug(f"{self.provider_name}: Resources cleaned up")
 
     def map_voice(self, voice_id: str) -> str:
         """Map generic voice ID to ElevenLabs voice"""
