@@ -1247,6 +1247,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_payload_exemplars*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_security_filters_sanitizers.py
               tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_retrieval_hardening.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_sql_interpolation.py
               tldw_Server_API/tests/RAG_NEW/unit/test_source*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_strict_extractive_and_citations.py
           - name: rag-new-unit-media-ingest
@@ -2751,6 +2752,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_payload_exemplars*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_security_filters_sanitizers.py
               tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_retrieval_hardening.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_sql_interpolation.py
               tldw_Server_API/tests/RAG_NEW/unit/test_source*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_strict_extractive_and_citations.py
           - name: rag-new-unit-media-ingest
@@ -4126,6 +4128,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_payload_exemplars*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_security_filters_sanitizers.py
               tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_retrieval_hardening.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_sql_interpolation.py
               tldw_Server_API/tests/RAG_NEW/unit/test_source*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_strict_extractive_and_citations.py
           - name: rag-new-unit-media-ingest
@@ -5424,6 +5427,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_payload_exemplars*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_security_filters_sanitizers.py
               tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_retrieval_hardening.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_sql_interpolation.py
               tldw_Server_API/tests/RAG_NEW/unit/test_source*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_strict_extractive_and_citations.py
           - name: rag-new-unit-media-ingest
@@ -6728,6 +6732,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_payload_exemplars*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_security_filters_sanitizers.py
               tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_retrieval_hardening.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_sql_interpolation.py
               tldw_Server_API/tests/RAG_NEW/unit/test_source*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_strict_extractive_and_citations.py
           - name: rag-new-unit-media-ingest
