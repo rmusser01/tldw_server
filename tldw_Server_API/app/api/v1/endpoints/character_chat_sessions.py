@@ -6594,7 +6594,7 @@ async def character_chat_completion(
                     raise_detached_error(
                         HTTPException(
                             status_code=provider_status_code,
-                            detail="Chat provider error",
+                            detail=provider_stream_error_payload(e),
                         )
                     )
                 except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as e:
@@ -6909,7 +6909,9 @@ async def character_chat_completion(
                             "Character stream provider failure error_type={}",
                             type(exc).__name__,
                         )
-                        await stream.error("provider_error", "Chat provider error")
+                        payload = provider_stream_error_payload(exc)
+                        await stream.send_raw_sse_line(f"data: {json.dumps(payload)}")
+                        await stream.done()
                     except Exception as exc:  # noqa: BLE001 - lazy adapter failures are terminal frames
                         stream_success_state["successful"] = False
                         logger.debug(
@@ -7002,7 +7004,8 @@ async def character_chat_completion(
                         "Character stream provider failure error_type={}",
                         type(exc).__name__,
                     )
-                    yield f"data: {json.dumps({'error': 'Chat provider error'})}\n\n"
+                    payload = provider_stream_error_payload(exc)
+                    yield f"data: {json.dumps(payload)}\n\n"
                 except Exception as exc:  # noqa: BLE001 - lazy adapter failures are terminal frames
                     stream_success_state["successful"] = False
                     logger.debug(

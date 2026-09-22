@@ -93,6 +93,7 @@ jobs:
       PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
       # Real application APIs, with only downstream inference controlled in CI.
       TLDW_LIVE_TIER_UAT: '1'
+      TLDW_E2E_ALLOW_OFFLINE: '0'
       TLDW_UAT390_MODE: deterministic
       TLDW_UAT390_PROVIDER: openai
       TLDW_UAT390_MODEL: gpt-4.1-mini

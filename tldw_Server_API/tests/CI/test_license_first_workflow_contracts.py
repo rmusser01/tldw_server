@@ -1029,6 +1029,7 @@ def test_frontend_critical_journeys_start_real_application_with_declared_provide
         assert '-H "X-API-KEY: $SINGLE_USER_API_KEY"' in start["run"], "Readiness must authenticate against the actual protected application health route"
     critical = data["jobs"]["critical"]
     assert critical["env"]["TLDW_LIVE_TIER_UAT"] == "1"
+    assert critical["env"]["TLDW_E2E_ALLOW_OFFLINE"] == "0", "Notification journeys require a verified connection, not offline bypass"
     assert critical["env"]["TLDW_UAT390_MODE"] == "deterministic"
     assert critical["env"]["TLDW_UAT390_PROVIDER"] == critical["env"]["UAT_STUDY_PROVIDER"] == "openai"
     assert critical["env"]["TLDW_UAT390_MODEL"] == critical["env"]["UAT_STUDY_MODEL"]

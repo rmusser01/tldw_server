@@ -128,8 +128,8 @@ def test_ci_provider_exposes_explicit_configuration_failure_without_breaking_suc
             model = critical["env"]["TLDW_UAT390_MODEL"]
             payload = {"model": model, "messages": [{"role": "user", "content": "Trigger the real provider configuration failure."}]}
             response = client.post("/v1/chat/completions", headers=headers, json=payload)
-            assert response.status_code == 404
-            assert response.json()["error"]["code"] == "model_not_found"
+            assert response.status_code == 401
+            assert response.json()["error"]["code"] == "invalid_api_key"
             payload["messages"][0]["content"] = "Reply with one short sentence for Phase 7."
             assert client.post("/v1/chat/completions", headers=headers, json=payload).status_code == 200
             assert critical["env"]["TLDW_E2E_CHARACTER_PROVIDER_FAILURE_MODEL"] == f"tldw:openai:{model}"

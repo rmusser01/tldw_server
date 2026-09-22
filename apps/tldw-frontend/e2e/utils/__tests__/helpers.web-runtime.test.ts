@@ -23,6 +23,32 @@ describe('seedAuth WebUI runtime identity (UAT397)', () => {
   });
 
   it.each([
+    { name: 'strict live default', live: '1', allowOffline: undefined, stale: false, expected: null },
+    { name: 'strict live explicit bypass', live: '1', allowOffline: true, stale: false, expected: null },
+    { name: 'strict live stale bypass', live: '1', allowOffline: undefined, stale: true, expected: null },
+    { name: 'isolated verified connection', live: '0', allowOffline: false, stale: true, expected: null },
+    { name: 'deliberate isolated offline mode', live: '0', allowOffline: true, stale: false, expected: 'true' },
+  ])('seeds the connection policy for $name', async ({ live, allowOffline, stale, expected }) => {
+    vi.stubEnv('TLDW_LIVE_TIER_UAT', live);
+    vi.stubGlobal('chrome', undefined);
+    vi.stubGlobal('browser', {});
+    if (stale) localStorage.setItem('__tldw_allow_offline', 'true');
+    const page = {
+      addInitScript: async (
+        init: (config: typeof TEST_CONFIG) => void,
+        config: typeof TEST_CONFIG
+      ) => init(config),
+      route: vi.fn(),
+    } as unknown as Page;
+
+    await seedAuth(page, allowOffline === undefined ? {} : { allowOffline });
+
+    // This flag makes the real connection store bypass its credential/health check,
+    // which correctly prevents NotificationLifecycleProvider from requesting inbox data.
+    expect(localStorage.getItem('__tldw_allow_offline')).toBe(expected);
+  });
+
+  it.each([
     { name: 'no chrome runtime', chrome: undefined, id: undefined },
     { name: 'an empty chrome runtime', chrome: { runtime: {} }, id: undefined },
     {
