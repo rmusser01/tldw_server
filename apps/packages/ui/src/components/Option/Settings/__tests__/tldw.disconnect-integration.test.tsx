@@ -4,6 +4,13 @@ import { App, ConfigProvider } from "antd"
 import { Storage } from "@plasmohq/storage"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 
+// Enable the real motion state machine. JSDOM does not emit transitionend,
+// which models an interrupted browser transition without mocking Ant's icon.
+vi.hoisted(() => {
+  vi.stubGlobal("AnimationEvent", Event)
+  vi.stubGlobal("TransitionEvent", Event)
+})
+
 vi.mock("@plasmohq/storage", async () =>
   import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage")
 )
@@ -65,8 +72,9 @@ it.each(["device", "session"] as const)("settles the real %s credential Disconne
     await waitFor(() => expect(screen.getByLabelText("API Key")).toHaveValue("synthetic-disconnect-key"))
     fireEvent.click(disconnect)
     await waitFor(() => expect(screen.getByLabelText("API Key")).toHaveValue(""))
-    await waitFor(() => expect(disconnect).not.toHaveClass("ant-btn-loading"))
-    expect(disconnect.querySelector('[aria-label="loading"]')).toBeNull()
+    await waitFor(() => expect(disconnect).toHaveAttribute("aria-busy", "false"))
+    expect(disconnect).toBeEnabled()
+    expect(disconnect.querySelector("svg")).toBeNull()
     expect(await screen.findByText("Logged out successfully")).toBeInTheDocument()
     expect(screen.getByRole("textbox", { name: "Server URL" })).toHaveValue(serverUrl)
     expect((await tldwClient.getConfig())?.apiKey).toBeUndefined()
@@ -111,4 +119,42 @@ it.each([false, true])("settles cookie logout with remote failure=%s", async (fa
     expect(await storage.get(COOKIE_SESSION_CONFIG_KEY)).toBeUndefined()
   }
   expect(errors.mock.calls.length).toBe(fail ? 1 : 0)
+})
+
+it.each([false, true])("removes the settled Disconnect indicator with transition-end delivered=%s", async (deliverTransitionEnd) => {
+  await tldwClient.saveManualSingleUserCredential({
+    serverUrl: "https://disconnect.example.test",
+    apiKey: "synthetic-disconnect-key",
+    persistence: "device"
+  })
+  render(<ConfigProvider><App><TldwSettings /></App></ConfigProvider>)
+  const disconnect = await screen.findByRole("button", { name: "Disconnect" })
+  await waitFor(() => expect(screen.getByLabelText("API Key")).toHaveValue("synthetic-disconnect-key"))
+
+  let release!: () => void
+  const held = navigator.locks.request("tldw:manual-session-credential", () =>
+    new Promise<void>(resolve => { release = resolve })
+  )
+  await waitFor(() => expect(release).toBeDefined())
+  try {
+    fireEvent.click(disconnect)
+    await waitFor(() => expect(disconnect.querySelector("svg")).not.toBeNull())
+    expect(disconnect).toHaveAttribute("aria-busy", "true")
+    expect(disconnect).toBeDisabled()
+    expect(screen.getByLabelText("API Key")).toHaveValue("synthetic-disconnect-key")
+  } finally {
+    await act(async () => { release(); await held })
+  }
+
+  await screen.findByText("Logged out successfully")
+  await waitFor(() => expect(screen.getByLabelText("API Key")).toHaveValue(""))
+  await waitFor(() => expect(disconnect).toHaveAttribute("aria-busy", "false"))
+  expect(disconnect).toBeEnabled()
+  if (deliverTransitionEnd && disconnect.querySelector("svg")) {
+    // Positive control for the original Ant icon: the same completed logout
+    // does remove it when the browser delivers the transition's end event.
+    await waitFor(() => expect(disconnect.querySelector(".ant-btn-loading-icon-motion-leave-active")).not.toBeNull())
+    fireEvent.transitionEnd(disconnect.querySelector(".ant-btn-loading-icon")!)
+  }
+  await waitFor(() => expect(disconnect.querySelector("svg")).toBeNull())
 })

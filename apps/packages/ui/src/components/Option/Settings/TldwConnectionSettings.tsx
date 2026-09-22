@@ -14,6 +14,7 @@ import type { TFunction } from "i18next"
 import { isFirefoxTarget } from "@/config/platform"
 import { isExtensionRuntime } from "@/utils/browser-runtime"
 import { Alert } from "@/components/ui/primitives"
+import { Button as AuthButton } from "@/components/Common/Button"
 import { useAntdModal } from "@/hooks/useAntdModal"
 import { shouldClearManualApiKeyForServerChange } from "@/components/Option/Onboarding/validation"
 import {
@@ -265,9 +266,9 @@ export const TldwConnectionSettings = ({
                 )}
           </p>
           {configuredServerUrl && (
-            <Button onClick={onLogout} loading={logoutLoading} className="mb-4">
+            <AuthButton onClick={onLogout} loading={logoutLoading} variant="outline" className="mb-4">
               {t('settings:tldw.buttons.disconnect', 'Disconnect')}
-            </Button>
+            </AuthButton>
           )}
         </>
       )}
