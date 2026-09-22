@@ -1904,8 +1904,6 @@ class ChromaDBManager:
 
 # Compatibility layer for legacy code expecting module-level functions
 # This creates a default instance for single-user mode or tests
-_default_chroma_manager = None
-_manager_lock = threading.Lock()
 _TEST_FALLBACK_DIRS: dict[str, Path] = {}
 _TEST_STUB_CLIENTS: dict[str, Any] = {}
 _TEST_STUB_CLIENTS_LOCK = threading.Lock()
@@ -2093,27 +2091,3 @@ class _InMemoryChromaClient:
             col._deleted = True
         return None
 
-def get_default_chroma_manager():
-    """Get or create the default ChromaDB manager for backward compatibility."""
-    global _default_chroma_manager
-    with _manager_lock:
-        if _default_chroma_manager is None:
-            # Use default user ID 1 for single-user mode
-            from tldw_Server_API.app.core.config import settings
-            user_id = str(settings.get("SINGLE_USER_FIXED_ID", "1"))
-            # Get the embedding config and add USER_DB_BASE_DIR from main settings
-            embedding_config = settings.get("EMBEDDING_CONFIG", {}).copy()
-            embedding_config["USER_DB_BASE_DIR"] = settings.get("USER_DB_BASE_DIR")
-            _default_chroma_manager = ChromaDBManager(user_id=user_id, user_embedding_config=embedding_config)
-        return _default_chroma_manager
-
-# Legacy function exports for backward compatibility
-def store_in_chroma(texts, embeddings, ids, metadatas, collection_name="default_collection"):
-    """Legacy function for storing embeddings in ChromaDB."""
-    manager = get_default_chroma_manager()
-    return manager.store_in_chroma(collection_name, texts, embeddings, ids, metadatas)
-
-def get_default_chroma_client():
-    """Return the default manager's underlying Chroma client instance."""
-    manager = get_default_chroma_manager()
-    return getattr(manager, "client", None)
