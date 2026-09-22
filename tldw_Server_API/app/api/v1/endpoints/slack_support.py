@@ -27,6 +27,8 @@ from tldw_Server_API.app.core.http_client import RetryPolicy as _RetryPolicy
 from tldw_Server_API.app.core.http_client import afetch as _http_afetch
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter
 
+from ._chatops import policy as _chatops_policy
+
 _EVENT_RECEIPTS = TTLReceiptStore()
 _COMMAND_RECEIPTS = TTLReceiptStore()
 _RATE_LIMITER = SlidingWindowLimiter()
@@ -238,20 +240,8 @@ async def _slack_oauth_token_exchange(*, token_url: str, form_data: dict[str, An
         await _close_http_response(response)
 
 
-def _error_response(status_code: int, error: str, message: str) -> JSONResponse:
-    return JSONResponse(
-        status_code=status_code,
-        content={"ok": False, "error": error, "message": message},
-    )
-
-
-def _metric_labels(**labels: Any) -> dict[str, str]:
-    normalized: dict[str, str] = {}
-    for key, value in labels.items():
-        if value is None:
-            continue
-        normalized[str(key)] = str(value)
-    return normalized
+_error_response = _chatops_policy.error_response
+_metric_labels = _chatops_policy.metric_labels
 
 
 def _emit_slack_counter(metric_name: str, **labels: Any) -> None:
@@ -333,29 +323,21 @@ def _slack_usage_text() -> str:
 
 
 def _normalize_string_list(raw: Any) -> list[str]:
-    if not isinstance(raw, list):
-        return []
-    values: list[str] = []
-    for item in raw:
-        cleaned = _coerce_nonempty_string(item)
-        if cleaned and cleaned not in values:
-            values.append(cleaned)
-    return values
+    return _chatops_policy.normalize_string_list(raw, coerce=_coerce_nonempty_string)
+
+
+_SLACK_POLICY_SPEC = _chatops_policy.ChatOpsPolicySpec(
+    supported_actions=_SUPPORTED_SLACK_ACTIONS,
+    scope_quota_field="workspace_quota_per_minute",
+    scope_quota_default=_policy_workspace_quota_per_minute,
+    user_quota_default=_policy_user_quota_per_minute,
+    status_scope_values=("workspace", "workspace_and_user"),
+    response_modes=("ephemeral", "thread", "channel"),
+)
 
 
 def _default_slack_policy() -> dict[str, Any]:
-    return {
-        "allowed_commands": list(_SUPPORTED_SLACK_ACTIONS),
-        "channel_allowlist": [],
-        "channel_denylist": [],
-        "default_response_mode": "ephemeral",
-        "strict_user_mapping": False,
-        "service_user_id": None,
-        "user_mappings": {},
-        "workspace_quota_per_minute": _policy_workspace_quota_per_minute(),
-        "user_quota_per_minute": _policy_user_quota_per_minute(),
-        "status_scope": "workspace",
-    }
+    return _chatops_policy.default_policy(_SLACK_POLICY_SPEC)
 
 
 def _normalize_slack_policy_payload(
@@ -363,56 +345,13 @@ def _normalize_slack_policy_payload(
     *,
     base: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    merged = dict(base or _default_slack_policy())
-    data = payload if isinstance(payload, dict) else {}
-
-    if "allowed_commands" in data:
-        allowed: list[str] = []
-        for candidate in _normalize_string_list(data.get("allowed_commands")):
-            lowered = candidate.lower()
-            if lowered in _SUPPORTED_SLACK_ACTIONS and lowered not in allowed:
-                allowed.append(lowered)
-        merged["allowed_commands"] = allowed or list(_SUPPORTED_SLACK_ACTIONS)
-
-    if "channel_allowlist" in data:
-        merged["channel_allowlist"] = _normalize_string_list(data.get("channel_allowlist"))
-    if "channel_denylist" in data:
-        merged["channel_denylist"] = _normalize_string_list(data.get("channel_denylist"))
-
-    if "default_response_mode" in data:
-        mode = _coerce_nonempty_string(data.get("default_response_mode"))
-        if mode and mode.lower() in {"ephemeral", "thread", "channel"}:
-            merged["default_response_mode"] = mode.lower()
-
-    if "strict_user_mapping" in data:
-        merged["strict_user_mapping"] = bool(data.get("strict_user_mapping"))
-    if "service_user_id" in data:
-        merged["service_user_id"] = _coerce_nonempty_string(data.get("service_user_id"))
-
-    if "user_mappings" in data and isinstance(data.get("user_mappings"), dict):
-        normalized_mappings: dict[str, str] = {}
-        for raw_key, raw_value in dict(data.get("user_mappings") or {}).items():
-            key = _coerce_nonempty_string(raw_key)
-            value = _coerce_nonempty_string(raw_value)
-            if key and value:
-                normalized_mappings[key] = value
-        merged["user_mappings"] = normalized_mappings
-
-    if "workspace_quota_per_minute" in data:
-        value = _safe_int(data.get("workspace_quota_per_minute"))
-        if value is not None and value > 0:
-            merged["workspace_quota_per_minute"] = value
-    if "user_quota_per_minute" in data:
-        value = _safe_int(data.get("user_quota_per_minute"))
-        if value is not None and value > 0:
-            merged["user_quota_per_minute"] = value
-
-    if "status_scope" in data:
-        scope = _coerce_nonempty_string(data.get("status_scope"))
-        if scope and scope.lower() in {"workspace", "workspace_and_user"}:
-            merged["status_scope"] = scope.lower()
-
-    return merged
+    return _chatops_policy.normalize_policy_payload(
+        _SLACK_POLICY_SPEC,
+        payload,
+        base=base,
+        coerce=_coerce_nonempty_string,
+        safe_int=_safe_int,
+    )
 
 
 def _policy_key(workspace_id: str | None) -> str:
