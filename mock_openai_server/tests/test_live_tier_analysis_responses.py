@@ -135,3 +135,46 @@ def test_ci_provider_exposes_explicit_configuration_failure_without_breaking_suc
             assert critical["env"]["TLDW_E2E_CHARACTER_PROVIDER_FAILURE_MODEL"] == f"tldw:openai:{model}"
     finally:
         app.dependency_overrides.pop(get_config_instance, None)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("text", [
+    "Rowan Observatory: Mira Vale, Cedar Ridge, Friday 18:00. Who directs it?",
+    "What is the ticket price at Rowan Observatory?",
+])
+def test_ci_rowan_fixture_accepts_actual_chat_prompt_templating(text: str) -> None:
+    """Primary Chat sends text blocks after templating, while RAG sends strings."""
+    from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import ChatCompletionRequest
+    from tldw_Server_API.app.core.Chat.chat_service import apply_prompt_templating
+    from tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter import OpenAIAdapter
+
+    root = Path(__file__).resolve().parents[2]
+    config = MockConfig.from_file(root / "apps/tldw-frontend/e2e/onboarding-uat/mock-openai/configs/ci-journeys.json")
+    messages = [{"role": "user", "content": text}]
+    request = ChatCompletionRequest(model="gpt-4.1-mini", messages=messages, api_provider="openai")
+    system, payload = apply_prompt_templating(request, {}, messages)
+    outbound = OpenAIAdapter()._build_openai_payload({
+        "model": request.model, "messages": payload, "system_message": system,
+    })
+    expected = "chat/ci-rowan-price.json" if "ticket price" in text else "chat/ci-rowan-facts.json"
+    assert config.responses["chat_completions"].find_matching_response(outbound) == expected
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(("content", "matches"), [
+    ("alpha beta", True),
+    ([{"type": "text", "text": "alpha beta"}], True),
+    ([{"type": "text", "text": "alpha"}, {"type": "text", "text": "beta"}], True),
+    ([{"type": "text", "text": "unrelated"}], False),
+    ([{"type": "image_url", "text": "alpha beta"}], False),
+    ([{"type": "text", "text": "alpha beta"}, {"type": "image_url", "image_url": {"url": "https://example.test/image"}}], False),
+    ([{"type": "text", "text": 123}], False),
+    (["alpha beta"], False),
+    ([], False),
+])
+def test_ci_content_patterns_match_only_valid_text(content: object, matches: bool) -> None:
+    """Text fixtures must not qualify malformed or multimodal content."""
+    from mock_openai_server.mock_openai.config import ResponsePattern
+
+    pattern = ResponsePattern(match={"content_regex": r"^alpha\s+beta$"}, response_file="unused")
+    assert pattern.matches({"messages": [{"role": "user", "content": content}]}) is matches

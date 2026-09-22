@@ -99,6 +99,14 @@ jobs:
       TLDW_UAT390_PROVIDER: openai
       TLDW_UAT390_MODEL: gpt-4.1-mini
       TLDW_E2E_CHARACTER_PROVIDER_FAILURE_MODEL: tldw:openai:gpt-4.1-mini
+      # Parallel journeys share one principal; retain a finite CI-only budget.
+      RG_POLICY_PATH: .tmp/frontend-e2e/resource-governor-policies.yaml
+      UAT_CHARACTER_MODE: deterministic
+      UAT_CHARACTER_PROVIDER: openai
+      UAT_CHARACTER_MODEL: gpt-4.1-mini
+      UAT_PROMPT_MODE: deterministic
+      UAT_PROMPT_PROVIDER: openai
+      UAT_PROMPT_MODEL: gpt-4.1-mini
       UAT_STUDY_PROVIDER: openai
       UAT_STUDY_MODEL: gpt-4.1-mini
       DEFAULT_LLM_PROVIDER: openai
@@ -147,6 +155,18 @@ jobs:
           cat .tmp/frontend-e2e/provider.log
           exit 1
 
+      - name: Configure shared browser-test request budget
+        run: |
+          mkdir -p .tmp/frontend-e2e
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import yaml
+          policies = yaml.safe_load(Path("tldw_Server_API/Config_Files/resource_governor_policies.yaml").read_text())
+          policies["policies"]["character_chat.default"]["requests"]["rpm"] = 600
+          Path(os.environ["RG_POLICY_PATH"]).write_text(yaml.safe_dump(policies))
+          PY
+
       - name: Start backend server
         run: |
           mkdir -p .tmp/frontend-e2e
@@ -180,7 +200,9 @@ jobs:
 
       - name: Install Playwright browsers
         working-directory: apps/tldw-frontend
-        run: bunx playwright install --with-deps chromium
+        run: |
+          bunx playwright install --with-deps chromium
+          python -m playwright install --with-deps chromium
 
       - name: Build frontend for browser tests
         shell: bash

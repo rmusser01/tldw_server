@@ -794,13 +794,6 @@ export const PromptBody = () => {
     .filter(Boolean)
     .join(" ")
 
-  React.useEffect(() => {
-    // Only redirect from copilot/studio tab when offline (trash is local-only so always available)
-    if (!isOnline && (selectedSegment === "copilot" || selectedSegment === "studio")) {
-      setSelectedSegment("custom")
-    }
-  }, [isOnline, selectedSegment])
-
   // Handle ?edit=<id> and ?new=1 URL params for full editor
   const handledEditorIntentRef = React.useRef<string | null>(null)
   useEffect(() => {
