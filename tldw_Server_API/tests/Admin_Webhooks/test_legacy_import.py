@@ -10,10 +10,12 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import pytest_asyncio
 
+from tldw_Server_API.app.core.Admin_Webhooks import legacy_import as legacy_import_module
 from tldw_Server_API.app.core.Admin_Webhooks.audit import OperationalAudit
 from tldw_Server_API.app.core.Admin_Webhooks.catalog import EVENT_CATALOG
 from tldw_Server_API.app.core.Admin_Webhooks.config import (
@@ -726,6 +728,42 @@ async def test_extract_failure_cleanup_preserves_replaced_output_inode(
         )
 
     assert output.read_bytes() == replacement
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("change", ["unchanged", "replaced", "modified"])
+def test_output_cleanup_requires_unchanged_file_even_when_inode_is_reused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str,
+) -> None:
+    output = tmp_path / "owned-output.json"
+    output.write_bytes(b"owned plaintext")
+    output.chmod(0o600)
+    evidence = legacy_import_module._file_evidence(output)
+    original_stat = output.lstat()
+    if change == "replaced":
+        output.unlink()
+    if change != "unchanged":
+        output.write_bytes(b"content owned by another operation")
+        output.chmod(0o600)
+
+    # Model a filesystem reusing the original inode with changed creation/status time.
+    reused_inode_stat = SimpleNamespace(
+        st_mode=original_stat.st_mode,
+        st_uid=original_stat.st_uid,
+        st_gid=original_stat.st_gid,
+        st_dev=original_stat.st_dev,
+        st_ino=original_stat.st_ino,
+        st_ctime_ns=original_stat.st_ctime_ns + (change != "unchanged"),
+    )
+    local_os = SimpleNamespace(**{**vars(os), "lstat": lambda path: reused_inode_stat})
+    monkeypatch.setattr(legacy_import_module, "os", local_os)
+
+    legacy_import_module._remove_published_output_if_same(output, evidence)
+
+    if change == "unchanged":
+        assert not output.exists()
+    else:
+        assert output.read_bytes() == b"content owned by another operation"
 
 
 @pytest.mark.parametrize("closing_action", ["activity", "retirement"])

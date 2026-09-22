@@ -1,4 +1,3 @@
-import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -7,7 +6,6 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
-
 
 pytestmark = pytest.mark.unit
 
@@ -46,47 +44,64 @@ def _create_persona_and_pack(
     return persona_id, pack
 
 
-def test_migration_v45_to_latest_creates_persona_visual_library_table(db_path: Path) -> None:
-    seeded = CharactersRAGDB(db_path, "persona-visual-library-seed")
-    seeded.close_connection()
+def test_migration_v45_to_latest_creates_persona_visual_library_table(db_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def initialize_historical(db: CharactersRAGDB) -> None:
+        with db.transaction() as conn:
+            db._apply_schema_v4(conn)
+            steps = db._sqlite_linear_migration_steps()
+            for version in range(4, 45):
+                steps[version](conn)
+                assert db._get_db_version(conn) == version + 1
 
-    with sqlite3.connect(str(db_path)) as conn:
-        conn.execute("PRAGMA foreign_keys = OFF")
-        conn.execute(
-            "UPDATE db_schema_version SET version = ? WHERE schema_name = ?",
-            (45, CharactersRAGDB._SCHEMA_NAME),
-        )
-        conn.execute("DROP TABLE IF EXISTS persona_visual_library_items")
-        conn.commit()
+    with monkeypatch.context() as patch:
+        patch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 45)
+        patch.setattr(CharactersRAGDB, "_initialize_schema", initialize_historical)
+        seed = CharactersRAGDB(db_path, "historical-fixture")
+    try:
+        with seed.transaction() as conn:
+            assert seed._get_db_version(conn) == 45
+            tables = seed._sqlite_table_names(conn)
+            assert {"persona_visual_library_items", "note_attachments"}.isdisjoint(tables)
+            conn.execute(
+                "INSERT INTO persona_profiles (id, user_id, name, system_prompt) VALUES (?, ?, ?, ?)",
+                ("retained-persona", "user-1", "Historical persona", "Retained prompt"),
+            )
+            before = dict(conn.execute("SELECT * FROM persona_profiles").fetchone())
+    finally:
+        seed.close_all_connections()
 
     migrated = CharactersRAGDB(db_path, "persona-visual-library-migration")
-    conn = migrated.get_connection()
+    try:
+        conn = migrated.get_connection()
 
-    version = conn.execute(
-        "SELECT version FROM db_schema_version WHERE schema_name = ?",
-        (CharactersRAGDB._SCHEMA_NAME,),
-    ).fetchone()["version"]
-    assert version == CharactersRAGDB._CURRENT_SCHEMA_VERSION
+        version = conn.execute(
+            "SELECT version FROM db_schema_version WHERE schema_name = ?",
+            (CharactersRAGDB._SCHEMA_NAME,),
+        ).fetchone()["version"]
+        assert version == CharactersRAGDB._CURRENT_SCHEMA_VERSION
 
-    tables = {
-        row["name"]
-        for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
-    }
-    assert "persona_visual_library_items" in tables
+        tables = {
+            row["name"]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+        }
+        assert "persona_visual_library_items" in tables
 
-    indexes = {
-        row["name"]
-        for row in conn.execute("PRAGMA index_list('persona_visual_library_items')").fetchall()
-    }
-    assert "idx_persona_visual_library_items_user_time" in indexes
-    assert "idx_persona_visual_library_items_live_source" in indexes
-    columns = {
-        row["name"]
-        for row in conn.execute("PRAGMA table_info('persona_visual_library_items')").fetchall()
-    }
-    assert "source_persona_name_snapshot" not in columns
-    assert "source_pack_title_snapshot" not in columns
-    migrated.close_connection()
+        indexes = {
+            row["name"]
+            for row in conn.execute("PRAGMA index_list('persona_visual_library_items')").fetchall()
+        }
+        assert "idx_persona_visual_library_items_user_time" in indexes
+        assert "idx_persona_visual_library_items_live_source" in indexes
+        columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info('persona_visual_library_items')").fetchall()
+        }
+        assert "source_persona_name_snapshot" not in columns
+        assert "source_pack_title_snapshot" not in columns
+        after = dict(conn.execute("SELECT * FROM persona_profiles WHERE id = ?", (before["id"],)).fetchone())
+        assert all(after[key] == value for key, value in before.items())
+    finally:
+        migrated.close_all_connections()
 
 
 def test_upsert_and_list_persona_visual_library_item_with_source_status(

@@ -266,3 +266,20 @@ def test_canonical_models_do_not_rename_evaluation_webhook_schemas() -> None:
     ]["schema"] == {
         "$ref": "#/components/schemas/WebhookRegistrationResponse"
     }
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("name", ["WebhookListResponse", "WebhookDeliveryListResponse"])
+def test_webhook_list_openapi_preserves_required_fields_and_canonical_pagination(name: str) -> None:
+    schema = _openapi()["components"]["schemas"][name]
+
+    assert set(schema["required"]) == {"items", "total", "limit", "offset", "pagination"}
+    assert set(schema["properties"]) == {
+        "items", "total", "limit", "offset", "pagination", "has_more", "next_offset",
+    }
+    assert schema["properties"]["pagination"] == {"$ref": "#/components/schemas/OffsetPaginationMeta"}
+    assert schema["properties"]["limit"]["minimum"] == 1
+    assert schema["properties"]["limit"]["maximum"] == 100
+    assert schema["properties"]["offset"]["minimum"] == 0
+    assert schema["properties"]["offset"]["maximum"] == 1_000
+    assert schema["additionalProperties"] is False

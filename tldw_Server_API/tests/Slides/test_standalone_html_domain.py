@@ -1051,9 +1051,10 @@ def test_malformed_snapshot_failure_retains_no_source_exception_context(tmp_path
 
 
 def test_recursive_snapshot_decoder_uses_fixed_source_free_error():
+    # Python 3.12 and 3.13 accept 1100 levels; exceed their parser limits.
     sentinel = "SECRET-RECURSIVE-SNAPSHOT"
-    payload_json = '{"html_document":"' + sentinel + '","nested":' + "[" * 1100 + "0" + "]" * 1100 + "}"
-    assert len(payload_json.encode("utf-8")) < 4096
+    payload_json = '{"html_document":"' + sentinel + '","nested":' + "[" * 10_000 + "0" + "]" * 10_000 + "}"
+    assert len(payload_json.encode("utf-8")) < 32_768
 
     with pytest.raises(InputError, match="^version_payload_invalid$") as exc_info:
         decode_presentation_version_payload(payload_json)

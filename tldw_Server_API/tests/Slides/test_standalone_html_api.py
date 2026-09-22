@@ -1663,9 +1663,10 @@ def test_recursive_snapshot_matches_fixed_malformed_payload_mapping(
     _replace_snapshot('{"html_document":"malformed')
     baseline = client.request(method, path, headers={**_BOTH, **extra_headers})
 
+    # Python 3.12 and 3.13 accept 1100 levels; exceed their parser limits.
     sentinel = "SECRET-RECURSIVE-SNAPSHOT"
-    recursive = '{"html_document":"' + sentinel + '","nested":' + "[" * 1100 + "0" + "]" * 1100 + "}"
-    assert len(recursive.encode("utf-8")) < 4096
+    recursive = '{"html_document":"' + sentinel + '","nested":' + "[" * 10_000 + "0" + "]" * 10_000 + "}"
+    assert len(recursive.encode("utf-8")) < 32_768
     _replace_snapshot(recursive)
 
     response = client.request(method, path, headers={**_BOTH, **extra_headers})

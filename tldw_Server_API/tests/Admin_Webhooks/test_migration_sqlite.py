@@ -315,17 +315,18 @@ def test_sqlite_096_is_additive_across_supported_upgrade_points(
                 "SELECT * FROM admin_webhooks WHERE id = 44"
             ).fetchone()
 
-    apply_authnz_migrations(db_path)
-
-    with sqlite3.connect(db_path) as conn:
-        names = _table_names(conn)
-        assert names >= CANONICAL_TABLES
-        assert names >= {"admin_webhooks", "admin_webhooks_delivery_log"}
-        assert _current_schema_version(conn) == 96
-        if legacy_row is not None:
-            assert conn.execute(
-                "SELECT * FROM admin_webhooks WHERE id = 44"
-            ).fetchone() == legacy_row
+    latest_version = max(migration.version for migration in migrations.get_authnz_migrations())
+    for target_version, expected_version in ((96, 96), (None, latest_version)):
+        apply_authnz_migrations(db_path, target_version=target_version)
+        with sqlite3.connect(db_path) as conn:
+            names = _table_names(conn)
+            assert names >= CANONICAL_TABLES
+            assert names >= {"admin_webhooks", "admin_webhooks_delivery_log"}
+            assert _current_schema_version(conn) == expected_version
+            if legacy_row is not None:
+                assert conn.execute(
+                    "SELECT * FROM admin_webhooks WHERE id = 44"
+                ).fetchone() == legacy_row
 
 
 @pytest.mark.unit
