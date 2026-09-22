@@ -1462,20 +1462,6 @@ class FilesystemModule(BaseModule):
                 )
         return candidates
 
-    def sanitize_input(self, input_data: Any, _depth: int = 0) -> Any:
-        """Sanitize filesystem inputs while allowing portable glob syntax."""
-
-        if _depth > 20:
-            raise ValueError("Input too deeply nested")
-
-        if isinstance(input_data, str):
-            return "".join(ch for ch in input_data if ch >= " " or ch == "\n")
-        if isinstance(input_data, dict):
-            return {k: self.sanitize_input(v, _depth + 1) for k, v in input_data.items()}
-        if isinstance(input_data, list):
-            return [self.sanitize_input(v, _depth + 1) for v in input_data]
-        return input_data
-
     @staticmethod
     def _sanitize_patch_diff(input_data: Any) -> Any:
         """Sanitize diff text while preserving unified-diff tabs and newlines."""

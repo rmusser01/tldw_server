@@ -256,28 +256,6 @@ class SandboxModule(BaseModule):
             decoded.append((path, data))
         return decoded
 
-    def sanitize_input(self, input_data: Any, _depth: int = 0) -> Any:
-        """
-        Relaxed sanitizer for sandbox payloads.
-
-        Allows CLI-style args and comment tokens while still stripping control chars
-        and guarding against overly deep payloads.
-        """
-        if _depth > 20:
-            raise ValueError("Input too deeply nested")
-
-        def _clean_str(s: str) -> str:
-            # Strip NULs and control chars only.
-            return "".join(ch for ch in s if ch >= " " or ch == "\n")
-
-        if isinstance(input_data, str):
-            return _clean_str(input_data)
-        if isinstance(input_data, dict):
-            return {k: self.sanitize_input(v, _depth + 1) for k, v in input_data.items()}
-        if isinstance(input_data, list):
-            return [self.sanitize_input(v, _depth + 1) for v in input_data]
-        return input_data
-
     def validate_tool_arguments(self, tool_name: str, arguments: dict[str, Any]):
         # Enforce PRD oneOf and types
         cmd = arguments.get("command")

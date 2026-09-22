@@ -62,14 +62,35 @@ async def test_tool_name_strict_regex_blocks_invalid():
 
 
 @pytest.mark.asyncio
-async def test_deep_argument_sanitization_blocks_nested_patterns():
+async def test_deep_argument_sanitization_recurses_into_nested_values():
+    """Sanitization must reach values nested inside dicts and lists.
+
+    This test previously asserted that a nested "/* injected */" raised ValueError.
+    That denylist was removed from BaseModule.sanitize_input (see its docstring): it
+    rejected ordinary content -- a Markdown "---", a git pathspec "-- src/app.py", the
+    glob "src/*.py" -- with a security-flavoured error, while buying no real injection
+    protection, since these values are passed to parameterised queries. The property
+    worth keeping is the recursion itself, so it is asserted here against the surviving
+    behaviour: control characters are stripped at every depth.
+    """
     mod = InlineSanitizeModule(ModuleConfig(name="inline"))
-    # Safe case
+    # Safe case round-trips unchanged
     msg = os.urandom(4).hex()
     out = await mod.execute_tool("echo_sanitize", {"message": msg})
     assert out == msg  # nosec B101
-    # Nested dangerous pattern should raise
+
+    # Nested values are reached, at dict and list depth
+    cleaned = mod.sanitize_input({"a": {"b": ["x\x07y", {"c": "p\x00q"}]}})
+    assert cleaned == {"a": {"b": ["xy", {"c": "pq"}]}}  # nosec B101
+
+    # Tabs/newlines inside nested values survive -- they are data, not control chars
+    assert mod.sanitize_input({"f": {"body": "line\n\tindented"}}) == {  # nosec B101
+        "f": {"body": "line\n\tindented"}
+    }
+
+    # The depth guard still rejects abusive nesting
+    deep: Any = "leaf"
+    for _ in range(25):
+        deep = {"n": deep}
     with pytest.raises(ValueError):
-        await (
-            mod.execute_tool("echo_sanitize", {"message": "ok", "nested": {"bad": "/* injected */"}})
-        )
+        mod.sanitize_input(deep)
