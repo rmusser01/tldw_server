@@ -1,20 +1,20 @@
-import os
-import uuid as _uuid
 
 import pytest
 from fastapi.testclient import TestClient
 from starlette.requests import Request
-from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal, AuthContext
+
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
+from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_role_effective_permissions_postgres(test_db_pool):
-    from tldw_Server_API.app.main import app
     from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 
     # Disable CSRF for test client
     from tldw_Server_API.app.core.config import settings as app_settings
+    from tldw_Server_API.app.main import app
     app_settings['CSRF_ENABLED'] = False
 
     pool = test_db_pool
@@ -51,11 +51,7 @@ async def test_role_effective_permissions_postgres(test_db_pool):
     )
 
     # Insert admin user for override
-    await pool.execute(
-        "INSERT INTO users (uuid, username, email, password_hash, is_active) VALUES ($1, $2, $3, $4, TRUE)",
-        str(_uuid.uuid4()), "pgadmin2", "pgadmin2@example.com", "x",
-    )
-    admin_user_id = await pool.fetchval("SELECT id FROM users WHERE username = $1", "pgadmin2")
+    admin_user_id = await ensure_test_user(pool, "pgadmin2", "pgadmin2@example.com")
 
     # Create role and permissions
     role_name = "test_role_eff"

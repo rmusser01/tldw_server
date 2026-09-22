@@ -26,6 +26,8 @@ The follow-on budget/monitoring and PostgreSQL allowlist subgroups verify anothe
 
 Children45–47 now have causal red/green evidence: the BYOK PostgreSQL module moves from18 guarded-user-write failures to19/19 actual PostgreSQL passes; four stale v33/v65/v67 coordinator fakes now pass with backend/lock/connection observability; and three Windows-codec BOM migration failures become55 adjacent passes after explicit UTF-8 loading. UAT451 and UAT457 remain open umbrellas; UAT465 is locally verified, with hosted Windows acceptance pending under UAT419. Full/native UAT remains paused. The published PR still precedes these local repairs while its earlier PostgreSQL Jobs shard remains queued.
 
+The next PostgreSQL AuthNZ checkpoint repairs seven more guarded-user fixture modules (eight actual PostgreSQL passes) and exposes UAT466: the auth service passed a pool rather than its active transaction connection into the profile-version gateway. Binding that connection through the write transaction passes two actual PostgreSQL service checks, one real SQLite pool check,26adjacent service checks and six caller-owned PostgreSQL magic-link checks. The UAT451 umbrella and hosted CI acceptance remain open; no full/native UAT has resumed. A fresh fetch and explicit rebase after local commit7f18655aad report zero missing dev commits.
+
 ## Global constraints
 
 - Four cells: sqlite-single, sqlite-multi, pg-single, pg-multi. Record each domain's actual database engine and normal actor role.
