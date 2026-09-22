@@ -1,7 +1,8 @@
 import { browser } from "wxt/browser"
 
 import {
-  getRecentChatFromCopilot
+  getRecentChatFromCopilot,
+  getFullChatData
 } from "@/db/dexie/helpers"
 import { copilotResumeLastChat } from "@/services/app"
 import {
@@ -29,6 +30,40 @@ export type SidepanelTabsState = {
 export const getTabsStorageKey = (id: number | null | undefined, ownerKey: string) =>
   `sidepanelChatTabsState:v2:${encodeURIComponent(ownerKey)}:${id != null ? `tab-${id}` : "global"}`
 
+/** Recover a completed durable reply when its tab snapshot still has a stream cursor. */
+const recoverCompletedSnapshotReplies = async (
+  snapshot: SidepanelChatSnapshot,
+  ownerKey: string,
+  isCurrent: () => boolean
+): Promise<SidepanelChatSnapshot> => {
+  const pending = snapshot.messages?.filter(message => message.isBot && message.id &&
+    !message.serverMessageId && message.message.endsWith("▋")) || []
+  if (!snapshot.historyId || pending.length === 0 || !isCurrent()) return snapshot
+  try {
+    const saved = await getFullChatData(snapshot.historyId)
+    if (!isCurrent() || !saved || saved.historyInfo.id !== snapshot.historyId ||
+        saved.historyInfo.server_scope_key !== ownerKey ||
+        (saved.historyInfo.server_chat_id ?? null) !== snapshot.serverChatId) return snapshot
+    const messages = snapshot.messages.map(message => {
+      if (!pending.includes(message)) return message
+      const matches = saved.messages.filter(row => row.id === message.id &&
+        row.history_id === snapshot.historyId && row.role === "assistant" &&
+        (row.parent_message_id ?? null) === (message.parentMessageId ?? null))
+      const completed = matches.length === 1 ? matches[0] : undefined
+      if (!completed || !completed.content.trim() || completed.content.endsWith("▋") ||
+          !completed.content.startsWith(message.message.slice(0, -1))) return message
+      return { ...message, message: completed.content,
+        reasoning_time_taken: completed.reasoning_time_taken ?? message.reasoning_time_taken,
+        serverMessageId: completed.serverMessageId ?? message.serverMessageId,
+        serverMessageVersion: completed.serverMessageVersion ?? message.serverMessageVersion }
+    })
+    return { ...snapshot, messages }
+  } catch {
+    // The recoverable tab snapshot remains usable if the local mirror is unavailable.
+    return snapshot
+  }
+}
+
 /** Ownerless legacy keys are deliberately left untouched and never adopted. */
 export const readSidepanelTabs = async (
   storage: Pick<ReturnType<typeof createSafeStorage>, "get">,
@@ -45,7 +80,15 @@ export const readSidepanelTabs = async (
     if (candidate?.version === 2 && candidate.ownerKey === ownerKey &&
         Array.isArray(candidate.tabs) && candidate.snapshotsById &&
         typeof candidate.snapshotsById === "object" &&
-        candidate.tabs.every(tab => typeof tab?.id === "string")) return candidate
+        candidate.tabs.every(tab => typeof tab?.id === "string")) {
+      const snapshotsById = { ...candidate.snapshotsById }
+      for (const tab of candidate.tabs) {
+        if (!isCurrent()) return null
+        const snapshot = snapshotsById[tab.id]
+        if (snapshot) snapshotsById[tab.id] = await recoverCompletedSnapshotReplies(snapshot, ownerKey, isCurrent)
+      }
+      return isCurrent() ? { ...candidate, snapshotsById } : null
+    }
   }
   return null
 }
