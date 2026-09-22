@@ -3,9 +3,10 @@ id: TASK-13305
 title: >-
   Unkeyed MLX model cache returns the wrong model while reporting the requested
   name
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-22 04:52'
+updated_date: '2026-09-22 14:28'
 labels:
   - bug
   - audio
@@ -53,6 +54,12 @@ Found by the comprehensive core-module review; independently verified by the orc
 - [ ] #4 The keyed-but-unlocked Nemo and Parakeet_ONNX caches gain a lock so concurrent loads cannot double-resident
 - [ ] #5 Cache eviction still works with the keyed structure
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Fixed test-first and merged to dev in PR #2980 (merge commit 8045fa2956). A failing test reproduced the defect before any code changed, with controls pinning the behaviour that had to stay unchanged. Qodo review then found follow-on defects in three of this batch's fixes; those were corrected in the same PR before merge.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

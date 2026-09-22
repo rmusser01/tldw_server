@@ -1,9 +1,10 @@
 ---
 id: TASK-13342
 title: Consolidate scalar and environment coercion behind one contract
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-22 05:10'
+updated_date: '2026-09-22 14:28'
 labels:
   - refactor
   - security

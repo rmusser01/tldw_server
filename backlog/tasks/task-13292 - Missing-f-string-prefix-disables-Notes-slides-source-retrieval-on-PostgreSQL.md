@@ -1,9 +1,10 @@
 ---
 id: TASK-13292
 title: Missing f-string prefix disables Notes slides-source retrieval on PostgreSQL
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-22 04:36'
+updated_date: '2026-09-22 14:28'
 labels:
   - bug
   - rag
@@ -47,6 +48,12 @@ Found by the comprehensive core-module review (RAG reviewer); independently veri
 - [ ] #5 dual_backend_env coverage is extended to the Notes slides-source path so this class of divergence fails loudly next time
 - [ ] #6 Bandit run for touched scope
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Fixed test-first and merged to dev in PR #2980 (merge commit 8045fa2956). A failing test reproduced the defect before any code changed, with controls pinning the behaviour that had to stay unchanged. Qodo review then found follow-on defects in three of this batch's fixes; those were corrected in the same PR before merge.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

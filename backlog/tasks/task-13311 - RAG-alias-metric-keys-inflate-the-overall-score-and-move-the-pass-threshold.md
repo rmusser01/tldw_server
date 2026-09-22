@@ -1,9 +1,10 @@
 ---
 id: TASK-13311
 title: RAG alias metric keys inflate the overall score and move the pass threshold
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-22 04:54'
+updated_date: '2026-09-22 14:28'
 labels:
   - bug
   - evaluations
@@ -51,6 +52,12 @@ Found by the comprehensive core-module review; independently reproduced by the o
 - [ ] #4 avg_score, mean_score and the 0.7 pass-threshold decision are verified against the corrected score
 - [ ] #5 Alias keys remain present in the response for OpenAI-style compatibility
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Fixed test-first and merged to dev in PR #2980 (merge commit 8045fa2956). A failing test reproduced the defect before any code changed, with controls pinning the behaviour that had to stay unchanged. Qodo review then found follow-on defects in three of this batch's fixes; those were corrected in the same PR before merge.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

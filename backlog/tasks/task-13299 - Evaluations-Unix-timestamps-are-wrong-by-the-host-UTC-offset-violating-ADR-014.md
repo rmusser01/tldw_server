@@ -3,9 +3,10 @@ id: TASK-13299
 title: >-
   Evaluations Unix timestamps are wrong by the host UTC offset, violating
   ADR-014
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-22 04:51'
+updated_date: '2026-09-22 14:28'
 labels:
   - bug
   - evaluations
@@ -60,6 +61,12 @@ Found by the comprehensive core-module review; independently reproduced by the o
 - [ ] #5 One CI shard runs under a non-UTC TZ so this class of defect is visible -- this is the durable fix
 - [ ] #6 Conformance with ADR-014's Unix created convention is asserted by test
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Fixed test-first and merged to dev in PR #2980 (merge commit 8045fa2956). A failing test reproduced the defect before any code changed, with controls pinning the behaviour that had to stay unchanged. Qodo review then found follow-on defects in three of this batch's fixes; those were corrected in the same PR before merge.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

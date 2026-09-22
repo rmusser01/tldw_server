@@ -1,9 +1,10 @@
 ---
 id: TASK-13312
 title: ElevenLabs cleanup closes the process-wide shared pooled HTTP client
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-22 04:54'
+updated_date: '2026-09-22 14:28'
 labels:
   - bug
   - tts
@@ -53,6 +54,12 @@ Found by the comprehensive core-module review; independently verified by the orc
 - [ ] #4 The existing test that pins the current behaviour is updated rather than left asserting the defect
 - [ ] #5 ADR-011's retry-after-cooldown property holds for ElevenLabs after the fix
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Fixed test-first and merged to dev in PR #2980 (merge commit 8045fa2956). A failing test reproduced the defect before any code changed, with controls pinning the behaviour that had to stay unchanged. Qodo review then found follow-on defects in three of this batch's fixes; those were corrected in the same PR before merge.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

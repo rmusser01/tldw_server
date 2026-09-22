@@ -1,10 +1,10 @@
 ---
 id: TASK-13296
 title: Remove unreachable unscoped webhook query before a refactor activates it
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-22 04:45'
-updated_date: '2026-09-22 05:19'
+updated_date: '2026-09-22 14:28'
 labels:
   - security
   - evaluations
@@ -65,6 +65,12 @@ What remains true and why this is still worth doing: an unscoped 'SELECT id, url
 
 Severity corrected High -> Medium: latent hazard and dead code, not a live disclosure. The is_test_mode-reads-an-env-var observation still stands as a general concern (see AUTHNZ-1, which documents four strictness levels for test-context detection), but it is not exploitable here.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Fixed test-first and merged to dev in PR #2980 (merge commit 8045fa2956). A failing test reproduced the defect before any code changed, with controls pinning the behaviour that had to stay unchanged. Qodo review then found follow-on defects in three of this batch's fixes; those were corrected in the same PR before merge.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
