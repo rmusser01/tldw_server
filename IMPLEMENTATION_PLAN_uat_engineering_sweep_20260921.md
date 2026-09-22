@@ -42,6 +42,8 @@ UAT470 addresses four Windows release-soak failures caused by exact poll counts 
 
 The UAT457 v57/v58 fixtures now build historical catalogs through numbered migrations instead of relabeling today's v68 schema. Historical note rows are inserted without the later graph-dependent note API, and the v59 tests stop at their own migration boundary. PostgreSQL doubles observe the coordinator transaction boundary for missing-index, version-lock and rollback checks. The complete v58/v59 modules pass 84 checks locally, zero skips; Ruff is clean and Bandit has only test assertions. Hosted Windows and the remaining historical fixture groups are still open.
 
+Five more UAT457 version oracles now distinguish the historical v63 migration boundary from the current SQLite68/PostgreSQL72 head. The Web Clipper v55 fixture uses numbered migrations and historical row inserts rather than a current schema relabel. Four full affected modules pass 174 checks with the official PostgreSQL fixture required and zero skips. The two Windows quiz migration failures are UAT471: `sqlite3.Connection` context management left file handles open until after temporary-directory cleanup. Explicit closure preserves transaction semantics; the entire quiz module passes 25 local checks. Hosted Windows acceptance remains open for UAT457 and UAT471; full/native UAT stays paused.
+
 ## Global constraints
 
 - Four cells: sqlite-single, sqlite-multi, pg-single, pg-multi. Record each domain's actual database engine and normal actor role.

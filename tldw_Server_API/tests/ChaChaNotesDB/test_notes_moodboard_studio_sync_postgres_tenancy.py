@@ -225,7 +225,7 @@ def test_postgres_v63_migration_contract_is_bounded_and_version_last() -> None:
     )
     initializer_source = inspect.getsource(CharactersRAGDB._initialize_schema_postgres)
 
-    assert CharactersRAGDB._POSTGRES_SCHEMA_VERSION == 63
+    assert CharactersRAGDB._POSTGRES_SCHEMA_VERSION >= 63
     assert "lock_timeout" in configure_source
     assert "statement_timeout" in configure_source
     assert "lock=True" in begin_source
@@ -359,7 +359,7 @@ def test_fresh_postgres_schema_is_exact_v63_with_forced_rls(
     backend, db = _open_db(pg_database_config)
     try:
         with db.transaction() as conn:
-            assert db._get_schema_version_postgres(conn) == 63
+            assert db._get_schema_version_postgres(conn) == CharactersRAGDB._POSTGRES_SCHEMA_VERSION
             db._verify_notes_moodboard_studio_schema_postgres(conn)
             rows = conn.execute(
                 "SELECT c.relname,c.relrowsecurity,c.relforcerowsecurity,"

@@ -630,7 +630,7 @@ def test_quiz_schema_migration_v23_to_v24_supports_matching():
         )
         _close_temp_chacha_db(seed_db, db_path)
 
-        with sqlite3.connect(db_path) as conn:
+        with contextlib.closing(sqlite3.connect(db_path)) as conn, conn:
             conn.executescript(
                 """
                 DROP TRIGGER IF EXISTS quiz_questions_ai;
@@ -673,7 +673,7 @@ def test_quiz_schema_migration_v23_to_v24_supports_matching():
 
         migrator = object.__new__(CharactersRAGDB)
         migrator.db_path_str = db_path
-        with sqlite3.connect(db_path) as conn:
+        with contextlib.closing(sqlite3.connect(db_path)) as conn, conn:
             conn.row_factory = sqlite3.Row
             migrator._migrate_from_v23_to_v24(conn)
             version_row = conn.execute(
@@ -714,7 +714,7 @@ def test_quiz_schema_migration_v24_to_v25_supports_hint_metadata():
         )
         _close_temp_chacha_db(seed_db, db_path)
 
-        with sqlite3.connect(db_path) as conn:
+        with contextlib.closing(sqlite3.connect(db_path)) as conn, conn:
             conn.executescript(
                 """
                 DROP TRIGGER IF EXISTS quiz_questions_ai;
@@ -788,7 +788,7 @@ def test_quiz_schema_migration_v24_to_v25_supports_hint_metadata():
 
         migrator = object.__new__(CharactersRAGDB)
         migrator.db_path_str = db_path
-        with sqlite3.connect(db_path) as conn:
+        with contextlib.closing(sqlite3.connect(db_path)) as conn, conn:
             conn.row_factory = sqlite3.Row
             migrator._migrate_from_v24_to_v25(conn)
             version_row = conn.execute(
