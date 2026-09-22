@@ -1,10 +1,24 @@
 # Fresh-install UAT: single-user and multi-user
 
+## UAT429 — Evaluation recovery assertions lag the shared classifier — 2026-09-22
+
+The broader evaluation UI check initially passes87/fails5: five tests expect Unavailable for HTTP503, although upstream50f7a2e1b3 and TASK12044 deliberately classify generic server failures as Error. TASK13260.278.5.2.3 corrects only those label assertions. Webhooks scopes its assertion to the recovery panel because its header also has an Error badge. Exact endpoint diagnostics and retained form/action assertions remain. Final18files/92tests pass with0failures/skips, including the three causal UAT428 wizard tests; frontend types pass. Lint retains37test and21production warnings with0additions. Independent reviews are clear. UAT429 is verified within this test-contract scope; no production classification change was needed.
+
+Current totals: **429 findings /407 verified /22 open**: UAT261,351,352,354,356,359–361,365,375,390–392,413,415,419,422–425,427–428. Full/native UAT remains paused; remote C-03 confirmation is still required.
+
+## UAT428 — Evaluation wizard loses values between steps — 2026-09-22
+
+Critical browser run35764582235 onb41461 completes **45 passed /1 failed /0 skipped /0 retries**. The complete source → QA → Chat journey now passes, including the strict absent-price response and persisted reload. The evaluation list loads, but C-03 stops on Configuration because exact_match becomes response-quality controls. The selected type field unmounts after Next, and the default Form watcher ignores preserved unregistered fields. Actual-component regressions also prove final validateFields returns only mounted fields, dropping earlier name/type/description and saved metadata. TASK13260.278.5.2.2 uses the existing preserve:true watcher and getFieldsValue(true) after validation. All three causal regressions pass; first-step required-field validation and JSON validation remain intact. Frontend types pass; source lint stays at21inherited warnings with no additions, and the new test is clean. Focused independent review is clear. Remote creation/run/readback remains pending, so UAT428 is open. Full/native UAT remains paused.
+
+Current totals: **428 findings /406 verified /22 open**: UAT261,351,352,354,356,359–361,365,375,390–392,413,415,419,422–425,427–428. Generated browser evidence remains private.
+
 ## UAT427 — Evaluation list/create requests hit rejected redirects — 2026-09-22
 
 Retained CI5bc87 shows the Evaluations page reports “Unable to load evaluations”: the browser request fails with net::ERR_FAILED and the backend records307 for GET /api/v1/evaluations?limit=20. Both listEvaluations and createEvaluation omit the registered collection route’s trailing slash. The shared transport intentionally rejects redirects. TASK13260.278.5.2.1 changes only those two service URLs; three causal failures become16passing service/transport controls, preserving filters, creation body and idempotency headers. The redirect policy is unchanged. Types pass; source lint retains74inherited warnings with no additions. Independent review is clean. Browser create/run/reload confirmation remains pending, so UAT427 is open.
 
 ### PR2979 engineering checkpoint
+
+UAT423 database follow-up: the existing three saved two-row cases now execute on both SQLite and the official per-test PostgreSQL fixture. All6cases pass with PostgreSQL required and Docker auto-start disabled, and the full adjacent suite passes47tests with0skips. Backend identity rules out accidental SQLite fallback; exact dataset, samples, scores and terminal results remain required. Real production database operations run with the owned pool closed in finally. Ruff is clean; Bandit adds only the backend-identity assertion (50to51B101); independent review is clean. Existing pytest cleanup warnings for unrelated old temporary directories remain disclosed. CI backend-required onb41461 now passes; browser confirmation is still pending.
 
 Critical run35761402917 on5bc87 finishes **44 passed /2 failed /0 skipped /0 retries**. Complete browser traces, screenshots and backend/provider/build logs are retained privately. Character canonical completion/reload now passes, as do Prompt application and legacy redirect. UAT424 outgoing QA provider/model restoration passes; fresh native acceptance is separate. Full/native UAT remains paused.
 
@@ -83,7 +97,7 @@ UAT419 first-attempt CI run 35741620414 finished with 40 passed, 6 failed and 0 
 
 Combined follow-up checks pass 175 backend/workflow/provider tests and 38 frontend navigation/fixture/guard tests. Character-specific checks pass 147 backend and 50 frontend cases; the backend cases are included in the combined 175. Static Chromium helper controls reproduce both responsive navigation failures before repair and pass afterward. Final frontend types and actionlint pass. No new lint diagnostics or production Bandit findings were added. Independent scoped reviews found no actionable issue. Remote browser confirmation remains required. This is engineering evidence, not a fresh-install acceptance pass. Current totals remain **421 findings / 405 verified / 16 open**.
 
-- **Current tracker status: 426 findings / 406 verified / 20 open (261, 351, 352, 354, 356, 359–361, 365, 375, 390–392, 413, 415, 419, 422–425).** All four configurations concluded with failures and limits recorded in the [frozen 365-finding matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_20.md). Targeted fresh SQLite and real PostgreSQL acceptance now verifies353/355/357/358/362/363/364/366–374/376–387. Remaining findings include application recovery/quality and newly confirmed test-coverage gaps. Counts describe findings, not UAT completion. Generated evidence remains local.
+- **Current tracker status: 429 findings / 407 verified / 22 open (261, 351, 352, 354, 356, 359–361, 365, 375, 390–392, 413, 415, 419, 422–425, 427–428).** All four configurations concluded with failures and limits recorded in the [frozen 365-finding matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_20.md). Targeted fresh SQLite and real PostgreSQL acceptance now verifies353/355/357/358/362/363/364/366–374/376–387. Remaining findings include application recovery/quality and newly confirmed test-coverage gaps. Counts describe findings, not UAT completion. Generated evidence remains local.
 
 PR2979 CI follow-up (UAT419): run35695635379 failed provider readiness with401 because its request omitted Authorization and its synthetic backend key lacked the mock server required prefix. The probe and backend now share an accepted synthetic credential, with authentication retained. The actual HTTP regression and workflow/provider checks pass154 tests. Remote critical execution remains pending; no native/full UAT resumed.
 
