@@ -34,6 +34,8 @@ The adjacent candidate-schema fixture moves from one failure/two passes to three
 
 The complete AuthNZ PostgreSQL directory now passes 56/56 with no skips and normal exit on the local branch. Hosted PostgreSQL CI on the published older revision remains queued, so it is not counted as passing. Windows core-utils triage identifies UAT467 (missing `fchmod` and an owner-only security constraint) and UAT468 (portable forbidden-path and bind-mount parsing). A cross-platform drive-source test fails before UAT468's repair; the whole preflight module then passes 241 checks locally. UAT467 remains open because automatic security review rejected a chmod fallback that would not enforce owner-only access on Windows. Hosted Windows acceptance remains required; full/native UAT remains paused.
 
+The hosted import-boundary failure is UAT469: six media endpoints used the core AuthNZ import path. Routing the exact re-exported `User` and `get_request_user` through `API_Deps.auth_deps` moves the boundary module from one failure to three passes; all six modules compile/import and 15 adjacent endpoint checks pass (two unchanged optional `pypff` skips). Hosted CI remains pending. A fresh fetch and explicit rebase onto dev `8045fa2` still show zero missing dev commits.
+
 ## Global constraints
 
 - Four cells: sqlite-single, sqlite-multi, pg-single, pg-multi. Record each domain's actual database engine and normal actor role.
