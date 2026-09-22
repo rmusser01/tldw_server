@@ -156,8 +156,13 @@ export const NavLink = React.forwardRef<HTMLAnchorElement, NavLinkProps>(
 NavLink.displayName = "NavLink"
 
 export const useNavigate = () => {
-  const router = useRouter()
+  const currentRouter = useRouter()
+  const routerRef = React.useRef(currentRouter)
+  routerRef.current = currentRouter
+  // Next republishes its public router during hydration/Fast Refresh. Keep
+  // effect dependencies stable without retaining an obsolete router snapshot.
   return React.useCallback((to: NavigateTo, options?: NavigateOptions) => {
+    const router = routerRef.current
     if (typeof to === "number") {
       if (to < 0) {
         runNavigationTransition(
@@ -199,7 +204,7 @@ export const useNavigate = () => {
       console.error("[useNavigate shim] Navigation failed:", err)
       doFallback()
     }
-  }, [router])
+  }, [])
 }
 
 const useUnstablePrompt = ({ when, message }: PromptOptions): void => {

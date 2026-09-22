@@ -1,5 +1,5 @@
 import React from "react"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, renderHook, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import * as routerShim from "@web/extension/shims/react-router-dom"
@@ -48,8 +48,10 @@ const mockRouter = {
   events: mockRouterEvents
 }
 
+let mockCurrentRouter = mockRouter
+
 vi.mock("next/router", () => ({
-  useRouter: () => mockRouter
+  useRouter: () => mockCurrentRouter
 }))
 
 const NavigateButton = ({
@@ -145,6 +147,7 @@ describe("react-router-dom Next.js shim transitions", () => {
     mockRouter.asPath = "/current?tab=one"
     mockRouter.pathname = "/current"
     mockRouter.query = {}
+    mockCurrentRouter = mockRouter
     beforePopStateHandler = () => true
     mockBeforePopState.mockImplementation((handler) => {
       beforePopStateHandler = handler
@@ -249,6 +252,42 @@ describe("react-router-dom Next.js shim transitions", () => {
     await user.click(screen.getByRole("button", { name: "Chat with source" }))
     expect(screen.getByText("Prepared source")).toBeVisible()
     expect(destinations).toEqual(["/media?id=7", "/chat?media_handoff=owned-token"])
+  })
+
+  it("keeps a pending handoff when Next republishes its public router", async () => {
+    const user = userEvent.setup()
+    mockRouter.asPath = "/media"
+    mockRouter.pathname = "/media"
+    const pending = new Promise<boolean>(() => undefined)
+    mockPush.mockReturnValue(pending)
+    mockReplace.mockReturnValue(pending)
+    const Source = () => {
+      const navigate = useNavigate()
+      const location = routerShim.useLocation()
+      React.useEffect(() => {
+        if (!location.search) navigate("/media?id=7", { replace: true })
+      }, [location.search, navigate])
+      return <button onClick={() => navigate("/chat?media_handoff=owned-token")}>Handoff</button>
+    }
+    const view = render(<Source />)
+    await user.click(screen.getByRole("button", { name: "Handoff" }))
+    // Next's AppContainer republishes its public router on root renders,
+    // including hydration/Fast Refresh while a destination is still loading.
+    mockCurrentRouter = { ...mockRouter }
+    view.rerender(<Source />)
+    expect(mockPush).toHaveBeenCalledExactlyOnceWith("/chat?media_handoff=owned-token")
+    expect(mockReplace).toHaveBeenCalledExactlyOnceWith("/media?id=7")
+  })
+
+  it("uses the latest published router in a retained navigation callback", () => {
+    const { result, rerender } = renderHook(() => useNavigate())
+    const retainedNavigate = result.current
+    const latestPush = vi.fn().mockResolvedValue(true)
+    mockCurrentRouter = { ...mockRouter, asPath: "/latest?tab=two", push: latestPush }
+    rerender()
+    retainedNavigate({})
+    expect(latestPush).toHaveBeenCalledExactlyOnceWith("/latest?tab=two")
+    expect(mockPush).not.toHaveBeenCalled()
   })
 
   it("wraps useNavigate push updates in startTransition", async () => {

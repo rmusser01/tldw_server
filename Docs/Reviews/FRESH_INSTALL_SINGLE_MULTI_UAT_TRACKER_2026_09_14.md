@@ -1,5 +1,15 @@
 # Fresh-install UAT: single-user and multi-user
 
+## PR2979 first-attempt CI follow-up — 2026-09-22
+
+Native/full UAT remains paused. Run 35745724724 on 09d83 finishes **41 passed, 5 failed, 0 skipped, 0 retries**; traces, screenshots and application/provider logs are retained outside Git. Notes-to-study and both responsive Character cases now pass. The remaining failures exposed two more destructive/blocking test helpers, cancelled-stream body inspection, router-snapshot invalidation and an unfinished development route bundle.
+
+The readiness helper now dismisses only the connection toast, preserving inbox actions and feature dialogs. API capture records stream metadata without awaiting JSON from open SSE subscriptions. Character acceptance checks the exact consumed safe error and exercises the actual provider-settings action while preserving the draft and character. The navigation callback remains stable when Next republishes its router and reads the latest snapshot. Critical CI now runs the existing optimized advanced-profile build/start commands, with build/server logs retained and build failures propagated through explicit bash pipefail. No test timeout or retry budget was increased.
+
+Verification: 82focused tests, 101neighboring helper/lifecycle checks, 45Character controls and 17workflow contracts pass (overlapping scopes, not an additive total). Frontend types pass; lint has 0 errors / 8 existing warnings. Bandit adds 7 test assertions and no production finding. The optimized build passes token synchronization and the 577.8 KB / 600 KB bundle budget. Independent review caught the pipefail requirement; its correction passes. Further independent review was interrupted, so no completed reviewer approval is claimed. Remote execution on the next head remains required. The separate backend CI change-detection job timed out during GitHub checkout; its dependent suites were not executed and must succeed on a later run.
+
+The coverage audit also found that an absent-price disclaimer followed by a spelled-out invented price passed the existing oracle. Eight causal failures now pass within 43 grounding checks, including free/complimentary amounts and unrelated-number controls. UAT390 remains subject to its integrated acceptance. UAT392 still requires actual audited mappings and runtime proof; a completed build alone does not establish those. Totals remain **421 findings / 405 verified / 16 open**.
+
 ## PR2979 engineering checkpoint — 2026-09-22 15:03 UTC
 
 Native/full UAT remains paused under the requester’s PR-first direction. The isolated branch is rebased onto dev `8045fa2956f22a5bb95ccba113dc7236f17e62de`; all 33 patches survive unchanged, with recovery ref `codex/pr2979-pre-dev-8045fa2`. The rebase checks pass: 85 Chat/RAG/CI tests and 2 actual PostgreSQL tests with skipping disabled.
