@@ -18,6 +18,8 @@ UAT427 follow-up: retained CI307/ERR_FAILED proves list/create collection paths 
 
 UAT428 follow-up: b41461 reaches Configuration but unmounted form fields lose their watcher/submission values. TASK13260.278.5.2.2 retains preserved values through the existing Form APIs; three actual-component regressions prove both causes. The unchanged strict C-03 browser run must confirm create/run/readback on the repaired head.
 
+UAT431 follow-up: the repaired wizard reaches Dataset in94d7db, but JsonEditor mounts its preview on blur and moves Create between pointer-down/up. TASK13260.278.5.2.4 removes focus-based mounting so the preview remains stable; preserve the unchanged single-click C-03 request and canonical results assertions.
+
 ## Stage 3: Review and publish
 **Goal**: Record exact execution evidence and remaining C-03/B-09 coverage limits.
 **Success Criteria**: Scoped checks and security review; retained first-attempt CI; no generated captures in Git.
