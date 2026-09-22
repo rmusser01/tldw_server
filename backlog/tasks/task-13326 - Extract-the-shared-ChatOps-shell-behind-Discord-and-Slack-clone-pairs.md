@@ -1,7 +1,7 @@
 ---
 id: TASK-13326
 title: Extract the shared ChatOps shell behind Discord and Slack clone pairs
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-22 04:56'
 updated_date: '2026-09-22 23:52'
@@ -75,12 +75,18 @@ STILL OPEN:
 Verification throughout: Discord + Slack + Integrations suites 68 passed, 0 failed, at every commit (baseline 68 passed). Bandit clean on every touched file. One bandit note: the descriptor field was named token_entity_field, which B106 flagged because it reads any kwarg name containing "token" as a credential; renamed to response_entity_field, which is also more accurate -- a rename beat a suppression.
 <!-- SECTION:NOTES:END -->
 
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+All four acceptance criteria met across four commits: the 90.9% oauth_admin pair extracted behind a provider descriptor, one policy schema and normaliser with the public vocabulary divergence declared where it is used, the identical policy evaluator shared, and both test clone pairs collapsed. Every extraction was differential-tested against the pre-refactor modules loaded from git rather than trusted to the suite. Stages 2c and 3 (the support-module residue and the discord.py/slack.py pair) are tracked separately; ADR-050 carries the staging table.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

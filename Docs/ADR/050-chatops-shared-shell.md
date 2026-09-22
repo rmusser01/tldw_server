@@ -24,9 +24,9 @@ Extraction is staged, smallest and highest-identity first:
 | 1 | `*_oauth_admin.py` | 90.9% | **done** — flow extracted to `_chatops/oauth_admin.py` |
 | 2a | `*_support.py` policy schema + normaliser + envelope | 81.9% (pair) | **done** — `_chatops/policy.py` |
 | 2b | `*_support.py` policy store + evaluator + routes | — | **done** — pair now 78.2%, largest identical run 187 → 123 lines |
-| 2c | `*_support.py` env accessors, OAuth config getters, installation-record shape | — | pending |
-| 3 | `discord.py` / `slack.py` | 61.3% | pending |
-| 4 | the four test clone pairs | one at 100% | pending |
+| 2c | `*_support.py` env accessors, OAuth config getters, installation-record shape | — | pending — TASK-13347 |
+| 3 | `discord.py` / `slack.py` | 61.3% | pending — TASK-13347 |
+| 4 | the test clone pairs | one at 100% | **done** — 100% pair collapsed to one parametrised suite; the lifecycle pair's byte-identical fakes moved to `tests/_chatops_helpers/` |
 
 Stage 2a settles the policy vocabulary question (AC2 of TASK-13326): one schema and
 one normaliser, with each provider's public spelling declared beside the reason it
