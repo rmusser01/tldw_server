@@ -442,6 +442,19 @@ describe('ViewMediaPage Stage 3 permalinks', () => {
     })
   })
 
+  it('retains the incoming source permalink throughout initial hydration', async () => {
+    const observedSearches: string[] = []
+    const HydratingMediaPage = () => {
+      const location = useLocation()
+      React.useEffect(() => { observedSearches.push(location.search) }, [location.search])
+      return <ViewMediaPage />
+    }
+    render(<MemoryRouter initialEntries={['/media?id=1']}><HydratingMediaPage /></MemoryRouter>)
+    await waitFor(() => expect(screen.getByTestId('selected-media-id')).toHaveTextContent('1'))
+    expect(observedSearches.length).toBeGreaterThan(0)
+    expect(observedSearches.every(search => new URLSearchParams(search).get('id') === '1')).toBe(true)
+  })
+
   it('shows a newly ingested deep link even when the cached library is empty', async () => {
     mocks.queryData = []
     mocks.detailById['1'] = { media_id: 1, source: { title: 'First source' }, content: { text: 'Cedar source' } }
