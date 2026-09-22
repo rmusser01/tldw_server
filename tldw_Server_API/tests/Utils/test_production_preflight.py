@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import ntpath
+import os
 import re
 import subprocess  # nosec B404
 import sys
@@ -1174,8 +1175,12 @@ def test_run_preflight_accepts_a_complete_offline_fixture(tmp_path: Path) -> Non
 
     report = run_preflight(env_file, COMPOSE_PATH, PROXY_PATH)
 
-    assert report.ok
-    assert report.issues == ()
+    if os.name == "nt":
+        # Host preflight cannot verify POSIX owner-only permissions on Windows.
+        assert _codes(report.issues) == {"env_permissions"}
+    else:
+        assert report.ok
+        assert report.issues == ()
 
 
 def test_cli_accepts_compose_injected_environment_without_raw_file(
@@ -1246,6 +1251,7 @@ def test_host_preflight_requires_env_owner_to_match_effective_uid(
     monkeypatch.setattr(
         "Helper_Scripts.Deployment.production_preflight.os.geteuid",
         lambda: env_file.stat().st_uid + 1,
+        raising=False,
     )
 
     report = run_preflight(env_file, COMPOSE_PATH, PROXY_PATH)
@@ -1273,6 +1279,7 @@ def test_container_environment_mode_skips_raw_file_permissions(
     monkeypatch.setattr(
         "Helper_Scripts.Deployment.production_preflight.os.geteuid",
         lambda: -1,
+        raising=False,
     )
 
     issues = validate_environment(values, env_path=None)
