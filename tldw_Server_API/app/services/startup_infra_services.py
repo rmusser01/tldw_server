@@ -121,23 +121,55 @@ async def start_connectors_startup(
     )
 
 
-async def _maybe_ensure_pg_rls(run_pg_rls_auto_ensure: Callable[[Any], Any]) -> None:
-    """Apply optional PostgreSQL RLS policies when enabled by env."""
+def _postgres_content_mode_active() -> bool:
+    """True when user content shares one PostgreSQL database across accounts."""
     try:
-        if not _env_flag_enabled("RAG_ENSURE_PG_RLS"):
-            logger.info("PG RLS auto-ensure disabled (set RAG_ENSURE_PG_RLS=true to enable)")
-            return
+        from tldw_Server_API.app.core.DB_Management.media_db.runtime.defaults import (
+            build_media_runtime_config,
+        )
 
-        from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig, DatabaseError
-        from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+        return bool(build_media_runtime_config().postgres_content_mode)
+    except _STARTUP_GUARD_EXCEPTIONS as exc:
+        logger.debug("Could not determine content backend mode: {}", exc)
+        return False
 
+
+async def _maybe_ensure_pg_rls(run_pg_rls_auto_ensure: Callable[[Any], Any]) -> None:
+    """Apply PostgreSQL RLS policies.
+
+    In PostgreSQL content mode every account's rows share the same tables, so
+    these policies are the only database-level thing keeping one account out of
+    another's data. They are therefore applied unconditionally and a failure
+    aborts startup: a server that cannot isolate accounts should not serve them.
+
+    On SQLite, per-user database files provide the boundary and there is nothing
+    to apply, so this stays opt-in via RAG_ENSURE_PG_RLS for operators who want
+    the policies installed ahead of a migration.
+    """
+    required = _postgres_content_mode_active()
+
+    if not required and not _env_flag_enabled("RAG_ENSURE_PG_RLS"):
+        logger.info(
+            "PG RLS auto-ensure skipped: content backend is not PostgreSQL "
+            "(set RAG_ENSURE_PG_RLS=true to install policies anyway)"
+        )
+        return
+
+    from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
+    from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+
+    try:
         config = DatabaseConfig.from_env()
         backend = DatabaseBackendFactory.create_backend(config)
-        try:
-            run_pg_rls_auto_ensure(backend)
-        except DatabaseError as exc:
-            logger.warning(f"Failed to apply PG RLS policies automatically: {exc}")
-    except _STARTUP_GUARD_EXCEPTIONS as exc:
+        run_pg_rls_auto_ensure(backend)
+    except Exception as exc:
+        if required:
+            raise RuntimeError(
+                "Failed to apply PostgreSQL RLS policies, and the content backend "
+                "is PostgreSQL, where every account shares the same tables. "
+                "Refusing to start without tenant isolation policies in place. "
+                f"Cause: {exc}"
+            ) from exc
         logger.warning(f"Failed to apply PG RLS policies automatically: {exc}")
 
 

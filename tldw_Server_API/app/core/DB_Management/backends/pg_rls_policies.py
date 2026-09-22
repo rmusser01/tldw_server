@@ -174,7 +174,9 @@ def build_prompt_studio_rls_sql() -> list[str]:
         CREATE POLICY ps_idem_tenant_isolation ON prompt_studio_idempotency
           USING (
             user_id = current_setting('app.current_user_id', true)
-            OR user_id IS NULL
+          )
+          WITH CHECK (
+            user_id = current_setting('app.current_user_id', true)
           );
         """
     )
