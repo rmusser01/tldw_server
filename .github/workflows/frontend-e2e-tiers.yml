@@ -99,7 +99,7 @@ jobs:
       UAT_STUDY_PROVIDER: openai
       UAT_STUDY_MODEL: gpt-4.1-mini
       DEFAULT_LLM_PROVIDER: openai
-      OPENAI_API_KEY: ci-controlled-downstream-key
+      OPENAI_API_KEY: sk-ci-controlled-downstream-key
       OPENAI_API_BASE_URL: http://127.0.0.1:8101/v1
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -136,7 +136,7 @@ jobs:
               cat .tmp/frontend-e2e/provider.log
               exit 1
             fi
-            if curl -sf http://127.0.0.1:8101/v1/models > /dev/null; then
+            if curl -sf -H "Authorization: Bearer $OPENAI_API_KEY" http://127.0.0.1:8101/v1/models > /dev/null; then
               exit 0
             fi
             sleep 1
