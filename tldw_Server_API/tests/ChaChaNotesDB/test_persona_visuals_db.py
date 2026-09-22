@@ -13,7 +13,6 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 )
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -42,28 +41,43 @@ def test_user_persona_visuals_dir_is_created_under_user_base(
     assert visuals_dir.is_dir()
 
 
-def test_migration_v44_to_latest_creates_persona_visual_tables(
-    db_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Verify v44 migration recreates persona visual tables and indexes."""
-    with monkeypatch.context() as version_patch:
-        version_patch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 44)
-        seeded = CharactersRAGDB(db_path, "persona-visuals-v44-seed")
-        try:
-            assert seeded._get_db_version(seeded.get_connection()) == 44
-        finally:
-            seeded.close_connection()
+def _seed_historical_v44(db_path: Path, monkeypatch: pytest.MonkeyPatch) -> CharactersRAGDB:
+    """Build v44 without current compatibility repairs or later registry tables."""
+    def initialize_historical(db: CharactersRAGDB) -> None:
+        with db.transaction() as conn:
+            db._apply_schema_v4(conn)
+            steps = db._sqlite_linear_migration_steps()
+            for version in range(4, 44):
+                steps[version](conn)
+                assert db._get_db_version(conn) == version + 1
 
-    CharactersRAGDB._prepare_sqlite_schema_drift_fixture(
-        db_path,
-        version=44,
-        drop_tables=(
-            "persona_visual_candidates",
-            "persona_visual_assets",
-            "persona_visual_packs",
-        ),
-    )
+    with monkeypatch.context() as patch:
+        patch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 44)
+        patch.setattr(CharactersRAGDB, "_initialize_schema", initialize_historical)
+        seed = CharactersRAGDB(db_path, "historical-fixture")
+    assert seed._get_db_version(seed.get_connection()) == 44
+    tables = seed._sqlite_table_names(seed.get_connection())
+    assert {
+        "persona_visual_candidates", "persona_visual_assets", "persona_visual_packs", "note_attachments",
+    }.isdisjoint(tables)
+    return seed
+
+
+def test_migration_v44_to_latest_creates_persona_visual_tables(db_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify v44 migration creates persona visual tables and indexes."""
+    seed = _seed_historical_v44(db_path, monkeypatch)
+    try:
+        with seed.transaction() as conn:
+            assert seed._get_db_version(conn) == 44
+            tables = seed._sqlite_table_names(conn)
+            assert {"persona_visual_packs", "note_attachments"}.isdisjoint(tables)
+            conn.execute(
+                "INSERT INTO persona_profiles (id, user_id, name, system_prompt) VALUES (?, ?, ?, ?)",
+                ("retained-persona", "user-1", "Historical persona", "Retained prompt"),
+            )
+            before = dict(conn.execute("SELECT * FROM persona_profiles").fetchone())
+    finally:
+        seed.close_all_connections()
 
     migrated = CharactersRAGDB(db_path, "persona-visuals-migration")
     try:
@@ -84,8 +98,10 @@ def test_migration_v44_to_latest_creates_persona_visual_tables(
         assert "idx_persona_visual_packs_one_active" in pack_indexes
         assert "idx_persona_visual_packs_persona" in pack_indexes
         assert "idx_persona_visual_assets_pack" in asset_indexes
+        after = dict(conn.execute("SELECT * FROM persona_profiles WHERE id = ?", (before["id"],)).fetchone())
+        assert all(after[key] == value for key, value in before.items())
     finally:
-        migrated.close_connection()
+        migrated.close_all_connections()
 
 
 def test_migration_v44_to_v45_creates_persona_visual_tables(
@@ -271,17 +287,19 @@ def test_sqlite_linear_migration_rejects_skipped_versions(
 
 
 def test_migration_v44_to_latest_repairs_missing_persona_tables(
-    db_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    db_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify drifted v44 databases repair missing persona schema artifacts."""
-    with monkeypatch.context() as version_patch:
-        version_patch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 44)
-        seeded = CharactersRAGDB(db_path, "persona-visuals-missing-persona-v44-seed")
-        try:
-            assert seeded._get_db_version(seeded.get_connection()) == 44
-        finally:
-            seeded.close_connection()
+    seed = _seed_historical_v44(db_path, monkeypatch)
+    try:
+        with seed.transaction() as conn:
+            conn.execute(
+                "INSERT INTO character_cards (name, description, client_id) VALUES (?, ?, ?)",
+                ("Retained character", "Historical content", seed.client_id),
+            )
+            before = dict(conn.execute("SELECT * FROM character_cards").fetchone())
+    finally:
+        seed.close_all_connections()
 
     CharactersRAGDB._prepare_sqlite_schema_drift_fixture(
         db_path,
@@ -339,8 +357,10 @@ def test_migration_v44_to_latest_repairs_missing_persona_tables(
 
         memory_indexes = migrated._sqlite_index_names(conn, "persona_memory_entries")
         assert {"idx_persona_memory_scope", "idx_persona_memory_session"}.issubset(memory_indexes)
+        after = dict(conn.execute("SELECT * FROM character_cards WHERE id = ?", (before["id"],)).fetchone())
+        assert all(after[key] == value for key, value in before.items())
     finally:
-        migrated.close_connection()
+        migrated.close_all_connections()
 
 
 def test_postgres_v45_migration_does_not_define_candidate_provenance_column() -> None:

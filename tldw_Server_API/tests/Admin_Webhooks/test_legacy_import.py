@@ -10,10 +10,12 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import pytest_asyncio
 
+from tldw_Server_API.app.core.Admin_Webhooks import legacy_import as legacy_import_module
 from tldw_Server_API.app.core.Admin_Webhooks.audit import OperationalAudit
 from tldw_Server_API.app.core.Admin_Webhooks.catalog import EVENT_CATALOG
 from tldw_Server_API.app.core.Admin_Webhooks.config import (
@@ -729,16 +731,22 @@ async def test_extract_failure_cleanup_preserves_replaced_output_inode(
 
 
 @pytest.mark.unit
-def test_output_cleanup_preserves_replacement_that_reused_the_inode(tmp_path: Path) -> None:
+def test_output_cleanup_preserves_replacement_that_reused_the_inode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Linux reuses a freed inode at once; identity alone must not authorize unlink."""
     from tldw_Server_API.app.core.Admin_Webhooks import legacy_import as legacy_import_module
 
     output = tmp_path / "extraction.json"
     evidence = legacy_import_module._publish_exclusive_output(output, b"extracted-by-us")
+    original_stat = output.lstat()
     # Stand-in for an unlink + recreate that got the same dev:inode back.
     os.chmod(output, 0o600)
     output.write_bytes(b"replacement-owned-by-another-process")
     assert f"{output.stat().st_dev}:{output.stat().st_ino}" == evidence.identity
+
+    local_os = SimpleNamespace(**{**vars(os), "lstat": lambda path: original_stat})
+    monkeypatch.setattr(legacy_import_module, "os", local_os)
 
     legacy_import_module._remove_published_output_if_same(
         output,
@@ -747,13 +755,43 @@ def test_output_cleanup_preserves_replacement_that_reused_the_inode(tmp_path: Pa
     )
     assert output.read_bytes() == b"replacement-owned-by-another-process"
 
-    output.write_bytes(b"extracted-by-us")
-    legacy_import_module._remove_published_output_if_same(
-        output,
-        evidence,
-        expected_payload=b"extracted-by-us",
+
+@pytest.mark.unit
+@pytest.mark.parametrize("change", ["unchanged", "replaced", "modified"])
+def test_output_cleanup_requires_unchanged_file_even_when_inode_is_reused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str,
+) -> None:
+    output = tmp_path / "owned-output.json"
+    output.write_bytes(b"owned plaintext")
+    output.chmod(0o600)
+    evidence = legacy_import_module._file_evidence(output)
+    original_stat = output.lstat()
+    if change == "replaced":
+        output.unlink()
+    if change != "unchanged":
+        output.write_bytes(b"owned plaintext")
+        output.chmod(0o600)
+
+    # Model a filesystem reusing the original inode with changed creation/status time.
+    reused_inode_stat = SimpleNamespace(
+        st_mode=original_stat.st_mode,
+        st_uid=original_stat.st_uid,
+        st_gid=original_stat.st_gid,
+        st_dev=original_stat.st_dev,
+        st_ino=original_stat.st_ino,
+        st_ctime_ns=original_stat.st_ctime_ns + (change != "unchanged"),
     )
-    assert not output.exists()
+    local_os = SimpleNamespace(**{**vars(os), "lstat": lambda path: reused_inode_stat})
+    monkeypatch.setattr(legacy_import_module, "os", local_os)
+
+    legacy_import_module._remove_published_output_if_same(
+        output, evidence, expected_payload=b"owned plaintext",
+    )
+
+    if change == "unchanged":
+        assert not output.exists()
+    else:
+        assert output.read_bytes() == b"owned plaintext"
 
 
 @pytest.mark.parametrize("closing_action", ["activity", "retirement"])

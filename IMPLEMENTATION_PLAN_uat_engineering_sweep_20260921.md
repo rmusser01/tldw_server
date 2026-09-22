@@ -14,6 +14,10 @@
 
 The requester now requires a PR for this task's work missing from dev, followed by root-cause disposition, repairs and PR review resolution for all identified findings before any additional UAT. Native/full UAT stages below remain planned and are suspended until that repair/review work is handled. Focused causal unit/integration verification remains part of each repair. Do not launch the already-built UAT415 native package in the meantime. Create the PR as a draft while investigation or engineering gates remain incomplete. Keep existing acceptance gaps and provider-quality exceptions explicit; do not relabel them as verified.
 
+## Latest checkpoint — 2026-09-22
+
+PR2979 published ddcb99d988 includes current dev8045fa2 (zero commits behind at publication). Exact frontend engineering run35779395002 passes46/46 withoutskips/retries and retains canonical C03two-sample scores/reload evidence. Further reviewed local repairs cover rotation404/rollback, extractioncleanup, genuine historical fixtures and currenttestcontracts. Canonical webhook pagination now passes 189 checks with an exact two-schema OpenAPI delta. Tracker 462/437/25 open; full/nativeUAT and merge remain gated on remaining backendrepairs, CI/reviews and finalrequester-ownedsummary.
+
 ## Global constraints
 
 - Four cells: sqlite-single, sqlite-multi, pg-single, pg-multi. Record each domain's actual database engine and normal actor role.

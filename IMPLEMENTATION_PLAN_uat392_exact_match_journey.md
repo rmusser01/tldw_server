@@ -12,7 +12,7 @@ Task: TASK-13260.278.5.2. PR #2979. Full/native UAT remains paused.
 **Goal**: Replace the empty recipe click with UI-created exact-match evaluation and canonical completed run.
 **Success Criteria**: Input/expected values, two sample identities, scores, aggregate and saved IDs survive reload; failed or unavailable execution fails.
 **Tests**: Focused result-oracle controls and strict existing journey; types and lint.
-**Status**: In Progress
+**Status**: Complete
 
 UAT427 follow-up: retained CI307/ERR_FAILED proves list/create collection paths omit the canonical trailing slash. Keep request-core redirect rejection and fix those two service paths with filter/body/idempotency regression controls. TASK13260.278.5.2.1 owns this repair. Ant Select virtual options also require selecting the visible exact_match title in the journey.
 
@@ -24,4 +24,6 @@ UAT431 follow-up: the repaired wizard reaches Dataset in94d7db, but JsonEditor m
 **Goal**: Record exact execution evidence and remaining C-03/B-09 coverage limits.
 **Success Criteria**: Scoped checks and security review; retained first-attempt CI; no generated captures in Git.
 **Tests**: Remote browser check; export/batch/foreign-owner and B-09 draft commit remain separately accounted variants until implemented and executed.
-**Status**: In Progress
+**Status**: Complete
+
+Completion receipt: Frontend E2E Tiers35779395002 on ddcb99d988 verifies46passes/0skips/0retries and the exact2sample saved result plus reload. Canonical attachment retained outsideGit. Full/native matrix and listed batch/export/foreign-owner/B09 variants remain under the broader sweep plan.

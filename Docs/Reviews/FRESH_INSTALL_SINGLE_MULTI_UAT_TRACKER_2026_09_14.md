@@ -1,5 +1,74 @@
 # Fresh-install UAT: single-user and multi-user
 
+## Browser engineering acceptance passes; backend follow-ups — 2026-09-22
+
+The exact **Frontend E2E Tiers** run35779395002/job106920704720 on published ddcb99d988 finishes **46passed,0skipped,0unexpected,0flaky; every result retry0**. The retained results.json attachment proves C03 eval_3148ecd11662, dataset_d2b35777a036 and run_c0fda142bfc8:2saved samples,completed,per-sample exact-match1/0,aggregate mean/pass-rate0.5. The unchanged journey verifies actual UI creation/run, visible result equality, canonical evaluation/dataset/run identity and reload. Source-to-QA-to-Chat, exact Prompt/Character outcomes and five-card Study also pass in this same run.
+
+This closes bounded engineering findings **UAT423,425,427,428,433** and their linked evaluation tasks. C03 export/batch/foreign-owner variants, B09draft commit and the complete fresh-install/native matrix remain under UAT392 and the main sweep. Full/native UAT remains paused. All captures, source uploads and application/provider logs are retained in ignored .tmp/uat419-ci-repair/artifacts-ddcb; none enter the PR.
+
+Do not confuse that browser result with **E2E Critical Smoke (In-Process)** run35779395399, whose separate backend job reports18passed/277skipped. That run is not browser acceptance or a full backend pass. Jobs PostgreSQL remains a distinct hosted gate.
+
+Additional local closures awaiting publication:
+
+| Finding | Final evidence and bounded conclusion |
+|---|---|
+| UAT448 | Two moved Media routes retain canonical permission/rate-limit factories and real403denial. Both delegated realtime handlers use actual shared auth and reject absent credentials/untrustedcookieorigin before protocol reads or pipeline startup.77owned+58adjacent tests pass with normal exits; no production edits. Ruffclean; only7added testassertions. The owned run's slow finalization was sampled as CPU-bound interpreterGC and completed normally. |
+| UAT450 | The two canonical webhook responses omitted advertised pagination metadata. Reuse the existing offset metadata builder and alias validator, preserving required fields and the maximum offset. 189 affected/adjacent checks pass. The CI-equivalent exporter confirms only these two schemas change, with 2,097 paths and 3,209 schemas unchanged; types regenerate and the fingerprint check passes. Ruff clean, no new production Bandit findings, independent review clear. |
+| UAT452 | Python3.12/3.13 accept the old1100-level JSON fixture, so it never enters the expected parser-error branch. The exact new20,056-byte fixtures raise RecursionError on3.11,3.12,3.13. Four domain/GET/restore/privacy checks pass; production limits/decoder unchanged. Lint/security/independentreview clear. |
+| UAT454 | Require the shared sanitized transaction error while preserving injected VN version-write failure and persisted-profile rollback assertion.38VNchecks pass, no production change. Lint/security clear. |
+| UAT458 | Explicit read_only mock parameter lets all three PostgreSQL SQL-shape/boolean-binding assertions execute; new assertion requires read_only=True.11module checks pass; this is SQL-shaping evidence, not actualPGexecution. Production unchanged; lintclean, oneaddedtestassertion. |
+| UAT461 | WorldBook test doubles now model transactioncommit/rollback, ownerbinding and read-only ownerlookup.11recordingchecks plus13actualSQLite and14officialPostgreSQL checks pass,0skips/deselection. No production changes, Ruffclean, assertion-onlysecuritydelta, reviewclear. |
+| UAT462 | Narrow domain catches map missing/foreign/revoked rotation keys to the same404 for both self/admin routes, preserving audit503 and unrelatedstorage500.12causal failures become38real-router/adjacent passes acrossSQLite/PostgreSQL,0skips. No owner/scope/auth bypass; productionBandit0 and reviewclear. |
+
+UAT451 remains open: its first5PostgreSQL repository fixture files are repaired and8actualPGtests pass,0skips, with all95assertionASTs unchanged. Further AuthNZ/PostgreSQL fixtures and wrapped failures remain. UAT457 remains open:7historical-fixture cases across6files are repaired; selectedadjacentrun95pass/1knownPGfakecase deselected, not a full-module pass. Remaining DBfixtures, PGfakes and hardcodedversions are not waived. UAT450 is now verified within the bounded API/schema scope above.
+
+Qodo summary updated20:18:30UTC retains12resolved findings and2source-dispositioned recommendations; no new bot finding was inferred from its success status. Fresh review after the next published batch remains required.
+
+Current totals: **462 findings /437 verified /25 open**: UAT261,351,352,354,356,359–361,365,375,390–392,413,415,419,422,424,430,441,451,453,457,459–460. Verified remains eachfinding's stated engineering scope; release/four-cell acceptance is not complete.
+
+
+## Root-cause repair checkpoint: UAT447,449,455–456 and new UAT462 — 2026-09-22
+
+Full/native UAT remains paused. Published PR2979 remains ddcb99d988; the following repairs are local follow-ups awaiting the next reviewed commit.
+
+- **UAT447 verified, TASK13260.278.17.19:** key rotation validation raised ValueError inside a managed transaction, which converted it into a database error. A narrow domain exception retains ValueError compatibility and the existing transaction-passthrough marker; validation and conditional revocation remain inside the same transaction.24real SQLite/PostgreSQL and existing audit checks pass,0skips. Rejection and mandatory-audit failures retain exact key rows/audit receipts; success persists links and audit. Production Bandit remains0, lint adds no findings, root review clear.
+- **UAT449 verified, TASK13260.278.17.18:** replace two partial current-schema downgrades with genuine historical31/35 construction through existing numbered migrations. Exact31→32 identity backfill, retained rows and current list-index columns/directions are asserted.2causal failures become4passes;103adjacent checks pass. Production migrations unchanged; independent review clear.
+- **UAT455 verified, TASK13260.278.17.21:** failed extraction cleanup trusted an inode that can be reused. Capture ephemeral file change time and require it unchanged alongside owner/group/mode/dev/inode before removal. Persisted artifact identity format remains unchanged.2deterministic failures/1control become39SQLite passes;6officialPostgreSQL cases pass with0skips. Ruff/security/review clear. This strengthens ownership evidence; it does not claim atomic compare-and-unlink or finer timestamps than the filesystem supplies.
+- **UAT456 verified, TASK13260.278.17.23:** six historical upgrade checks ran to latest98 while asserting96. Explicitly verify96 first, then normal current upgrade, preserving table and saved-row assertions at both stages.6red→20module passes; lint/security/review clear. Production migrations unchanged.
+- **UAT450 expanded:** correcting canonical webhook response model names makes the OpenAPI contract check fail for both real routes. Their current response models omit the advertised canonical pagination metadata. Repair is being designed against existing bounded offset behavior; the failing documentation correction is retained as causal evidence, not marked complete.
+- **UAT462 open, TASK13260.278.17.24:** user and admin rotation routes fail to map the sanitized domain rejection and return500 for missing/foreign/revoked keys. Caller tracing confirms no earlier key lookup. Reuse sibling deletion routes' non-enumerating404 response for only the rotation-domain exception; real-router regression work is in progress.
+
+Several concurrent local test subprocesses received unexplainedSIGTERM. Neither root nor active agents terminated them; source inspection of selected transaction-signal tests found no kill call. Partial runs are retained and excluded from passing totals. Bounded UAT447 and455 reruns completed normally; UAT448 reruns remain in progress. This interruption is an evidence limitation, not a waiver or successful test result.
+
+Current totals: **462 findings /425 verified /37 open**: UAT261,351,352,354,356,359–361,365,375,390–392,413,415,419,422–425,427–428,430,433,441,448,450–454,457–462. Counts remain bounded to each finding's stated engineering scope.
+
+
+## Published repair batch and remaining CI triage — 2026-09-22
+
+Commit ddcb99d988 publishes the verified UAT432–446 repairs and their regression records to [PR2979](https://github.com/rmusser01/tldw_server/pull/2979). A fresh fetch immediately before push still reports dev8045fa2956f22a5bb95ccba113dc7236f17e62de, zero commits behind and47 ahead. Full/native UAT remains paused. New hosted runs are queued; no new CI pass is inferred from publication.
+
+Additional failures from the previously running cec0 matrix are retained under UAT419. These are observed failures, not yet confirmed production defects; attribution must precede repair. Duplicate platform failures share one finding.
+
+| Finding | Observed failure / investigation scope | Retained evidence |
+|---|---|---|
+| UAT450 | Two canonical webhook pagination matrix entries name legacy response models. Correct the exact documentation cells after checking current route schemas. | UAT442 source-identity diagnostic. |
+| UAT451 | Further AuthNZ integration/PostgreSQL fixtures hit the canonical user-write guard; wrapped transaction, registration query-wrapper and magic-link failures also require separate attribution within this group. Preserve authorization, versioning and actual PostgreSQL execution. | Jobs106889493970,106889494007,106889493922. |
+| UAT452 | Recursive standalone HTML snapshots no longer produce the expected fixed domain/API errors. Check decoding behavior and sanitization before altering assertions. | Job106889493362, three cases. |
+| UAT453 | Standalone HTML generation loses a compare-and-swap and fails to reload the completed winner, returning generation_store_unavailable. | Job106889493362, two cases. |
+| UAT454 | VN global profile rollback raises a different bounded error than the expected message. Verify atomic rollback and current error contract. | Job106889493493. |
+| UAT455 | Legacy webhook extraction failure cleanup deletes a replaced output path; inode reuse versus ownership handling requires causal investigation. | Job106889493847, test_extract_failure_cleanup_preserves_replaced_output_inode. |
+| UAT456 | Webhook migration96 tests expect final version96 although current initialization reaches98. Preserve additive upgrade data/schema checks. | Job106889493847, six upgrade points. |
+| UAT457 | Additional ChaCha/Writing historical migration fixtures fail with attachment-registry collisions, source-catalog drift or missing prior structures. Determine valid historical inputs and retain fail-closed migration checks. | Jobs106889493372,106889492421,106889492220. |
+| UAT458 | Flashcard template PostgreSQL SQL mock rejects the current read_only keyword before checking SQL semantics. | Job106889492421. |
+| UAT459 | Five Character greeting/message-list API cases receive400 instead of201. Inspect validation and account-owned character fixtures. | Job106889499135. |
+| UAT460 | Email/video summary tests receive configured provider/model values instead of their fixture values. Trace effective settings and credentials; do not weaken owner prompt assertions. | Job106889499880, four cases. |
+| UAT461 | Three World Book PostgreSQL unit doubles lack the transaction interface required by current initialization. Preserve actual transactional/RETURNING guarantees. | Job106889500165. |
+
+The three UAT447–449 repairs continue in bounded tasks. Existing Windows admin failures in jobs106889491976,106889491987 and106889492039 share UAT441; they do not represent additional findings. Raw logs, failed test attempts and generated captures remain ignored.
+
+Current totals: **461 findings /421 verified /40 open**: UAT261,351,352,354,356,359–361,365,375,390–392,413,415,419,422–425,427–428,430,433,441,447–461. Verified counts retain each finding's stated engineering scope and do not certify the four-cell fresh-install matrix.
+
+
 
 ## PR repair checkpoint: current dev and UAT442–449 — 2026-09-22
 
