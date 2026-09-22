@@ -3257,13 +3257,45 @@ def _nonstream_provider_result_is_usable(result: Any) -> bool:
     return True
 
 
+def _nonstream_reasoning_exhausted_output_limit(result: Any) -> bool:
+    """Recognize valid hidden-only output stopped by the provider token limit."""
+    if not isinstance(result, dict) or provider_payload_has_structural_error(result):
+        return False
+    choices = result.get("choices")
+    if not isinstance(choices, list) or len(choices) != 1:
+        return False
+    choice = choices[0]
+    if not isinstance(choice, dict) or choice.get("finish_reason") != "length":
+        return False
+    message = choice.get("message")
+    if not isinstance(message, dict) or message.get("content") not in (None, ""):
+        return False
+    if any(
+        message.get(field) is not None
+        for field in ("tool_calls", "function_call", "refusal")
+    ):
+        return False
+    reasoning_seen = False
+    for field in _NONSTREAM_REASONING_FIELDS:
+        if field not in message:
+            continue
+        has_text, rejected = _inspect_nonstream_reasoning_output(message[field])
+        if rejected:
+            return False
+        reasoning_seen = reasoning_seen or has_text
+    return reasoning_seen
+
+
 def _require_usable_nonstream_provider_result(result: Any) -> None:
     """Raise one bounded, non-replayable error for an invalid provider result."""
 
     if not _nonstream_provider_result_is_usable(result):
-        raise_detached_error(
-            sanitized_provider_stream_exception("provider_unavailable")
+        code = (
+            "provider_output_limit"
+            if _nonstream_reasoning_exhausted_output_limit(result)
+            else "provider_unavailable"
         )
+        raise_detached_error(sanitized_provider_stream_exception(code))
 
 
 def _apply_redaction_to_content(content: Any, moderation: Any, policy: Any) -> Any:

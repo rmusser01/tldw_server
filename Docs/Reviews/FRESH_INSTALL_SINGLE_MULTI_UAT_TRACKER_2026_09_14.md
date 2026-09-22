@@ -2,6 +2,12 @@
 
 - **Current tracker status: 414 findings / 400 verified / 14 open (261, 351, 352, 354, 356, 359–361, 365, 375, 390–392, 413).** All four configurations concluded with failures and limits recorded in the [frozen 365-finding matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_20.md). Targeted fresh SQLite and real PostgreSQL acceptance now verifies353/355/357/358/362/363/364/366–374/376–387. Remaining findings include application recovery/quality and newly confirmed test-coverage gaps. Counts describe findings, not UAT completion. Generated evidence remains local.
 
+### UAT413 controlled capture and bounded repair
+
+Pass-through capture identifies a concrete output-limit case: real llama.cpp at128tokens returns200, finish_reason length, empty final content and509reasoning characters; the application returns502 provider_unavailable and stores only system/user. The512-token control returns200 with87final characters and345completion tokens. The original uncaptured512 failure remains causally unproven. Captures are retained under ignored uat413-capture; no mock provider is involved.
+
+A narrow shared classifier now returns a safe output-limit message for valid hidden-only length termination. Malformed/error envelopes keep existing sanitization, and visible partial answers/tool calls remain usable. Five real-adapter causal failures become10passing cases; full fallback suite372passes. Shared streaming/error regressions97pass with one inherited skipped async-coordination case; no PostgreSQL check is skipped. Ruff0findings, production Bandit0findings; test findings are ordinary assertions only. Native acceptance of this repair remains required before closing TASK13260.278.11.
+
 ### UAT414 native verification complete
 
 Diagnostic11 verifies the committed c2230dfdf86b743618a3f5ab976d9a1b0b3ec06a production extension in fresh SQLite/PostgreSQL Chromium profiles using normal connection forms. Text → reload → real PNG-only Character turn → save200 → reload retains exactly four visible messages and canonical five rows including system. Original message IDs, image bytes and real final replies match saved readback; no fallback greeting appears. SQLite chat17db2426-0241-4d59-a1e0-7776df2a275b; PostgreSQL c3ca6354-4f0d-4d24-9ff9-4bf066fb8339. TASK13260.278.12 Done.
