@@ -34,6 +34,10 @@ from fastapi.responses import JSONResponse
 
 __all__ = [
     "ChatOpsPolicySpec",
+    "ChatOpsPolicyRuntime",
+    "evaluate_policy",
+    "policy_error_response",
+    "action_route",
     "default_policy",
     "normalize_policy_payload",
     "error_response",
@@ -178,3 +182,154 @@ def metric_labels(**labels: Any) -> dict[str, str]:
             continue
         normalized[str(key)] = str(value)
     return normalized
+
+
+@dataclass(frozen=True)
+class ChatOpsPolicyRuntime:
+    """The provider-facing strings and collaborators the evaluator needs.
+
+    ``_evaluate_*_policy``, ``_*_policy_error_response`` and ``_*_action_route`` were
+    identical across the two support modules once the provider vocabulary was
+    normalised away -- 103 lines, character for character. What varies is only the
+    public vocabulary, all of which is API or metric contract: the rate-limiter key
+    prefix, the quota error code and message, and the metric label names.
+    """
+
+    #: "discord" / "slack" -- rate limiter key prefix and route namespace.
+    name: str
+    #: "guild" / "workspace" -- the scope word in keys, codes and messages.
+    scope_word: str
+    #: Public field holding the per-workspace quota.
+    scope_quota_field: str
+    #: Callable returning the configured default for that quota.
+    scope_quota_default: Callable[[], int]
+    #: Callable returning the configured default per-user quota.
+    user_quota_default: Callable[[], int]
+    #: Metric label naming the scope, e.g. "guild_id" / "team_id".
+    scope_label_field: str
+    #: Counter emitted when a request is rejected for exceeding a quota.
+    quota_rejection_counter: str
+    #: Counter emitted for any other policy denial.
+    denial_counter: str
+
+
+def evaluate_policy(
+    runtime: ChatOpsPolicyRuntime,
+    *,
+    policy: dict[str, Any],
+    scope_id: str | None,
+    channel_id: str | None,
+    actor_user_id: str | None,
+    action: str,
+    rate_limiter: Any,
+    coerce: Callable[[Any], str | None],
+    safe_int: Callable[[Any], int | None],
+    http_status: Any,
+) -> dict[str, Any] | None:
+    """Return a denial dict, or None when the request is allowed."""
+    allowed_commands = policy.get("allowed_commands")
+    if isinstance(allowed_commands, list) and allowed_commands:
+        if action not in {str(item).lower() for item in allowed_commands}:
+            return {
+                "status_code": http_status.HTTP_403_FORBIDDEN,
+                "error": "command_blocked_by_policy",
+                "message": f"Command '{action}' is not allowed for this {runtime.scope_word}",
+            }
+
+    deny_channels = set(normalize_string_list(policy.get("channel_denylist"), coerce=coerce))
+    allow_channels = set(normalize_string_list(policy.get("channel_allowlist"), coerce=coerce))
+    if channel_id and channel_id in deny_channels:
+        return {
+            "status_code": http_status.HTTP_403_FORBIDDEN,
+            "error": "channel_blocked_by_policy",
+            "message": f"Channel '{channel_id}' is blocked by policy",
+        }
+    if allow_channels and channel_id and channel_id not in allow_channels:
+        return {
+            "status_code": http_status.HTTP_403_FORBIDDEN,
+            "error": "channel_not_allowed_by_policy",
+            "message": f"Channel '{channel_id}' is not in the allowlist",
+        }
+
+    scope_limit = safe_int(policy.get(runtime.scope_quota_field)) or runtime.scope_quota_default()
+    scope_key = coerce(scope_id) or "unknown"
+    allowed_scope, retry_after_scope = rate_limiter.allow(
+        f"{runtime.name}:{runtime.scope_word}:{scope_key}",
+        max(1, scope_limit),
+    )
+    if not allowed_scope:
+        return {
+            "status_code": http_status.HTTP_429_TOO_MANY_REQUESTS,
+            "error": f"{runtime.scope_word}_quota_exceeded",
+            "message": f"{runtime.scope_word.capitalize()} command quota exceeded",
+            "retry_after_seconds": retry_after_scope,
+        }
+
+    if actor_user_id:
+        user_limit = safe_int(policy.get("user_quota_per_minute")) or runtime.user_quota_default()
+        allowed_user, retry_after_user = rate_limiter.allow(
+            f"{runtime.name}:user:{scope_key}:{actor_user_id}",
+            max(1, user_limit),
+        )
+        if not allowed_user:
+            return {
+                "status_code": http_status.HTTP_429_TOO_MANY_REQUESTS,
+                "error": "user_quota_exceeded",
+                "message": "User command quota exceeded",
+                "retry_after_seconds": retry_after_user,
+            }
+
+    return None
+
+
+def policy_error_response(
+    runtime: ChatOpsPolicyRuntime,
+    policy_error: dict[str, Any],
+    *,
+    scope_id: str | None,
+    action: str | None,
+    emit_counter: Callable[..., None],
+    log: Any,
+    safe_int: Callable[[Any], int | None],
+    http_status: Any,
+) -> JSONResponse:
+    """Render a denial, emitting the quota or generic counter and a warning."""
+    status_code = int(policy_error.get("status_code") or http_status.HTTP_403_FORBIDDEN)
+    response_payload = {k: v for k, v in policy_error.items() if k != "status_code"}
+    headers: dict[str, str] = {}
+    retry_after = safe_int(policy_error.get("retry_after_seconds"))
+    counter = runtime.denial_counter
+    if retry_after is not None and retry_after > 0:
+        headers["Retry-After"] = str(retry_after)
+        counter = runtime.quota_rejection_counter
+    emit_counter(
+        counter,
+        **{runtime.scope_label_field: scope_id or "na"},
+        action=action or "na",
+        error=response_payload.get("error"),
+    )
+    log.warning(
+        "{} policy denied request: {}={} action={} error={}",
+        runtime.name.capitalize(),
+        runtime.scope_label_field,
+        scope_id or "na",
+        action or "na",
+        response_payload.get("error"),
+    )
+    return JSONResponse(
+        status_code=status_code,
+        headers=headers,
+        content={"ok": False, **response_payload},
+    )
+
+
+def action_route(runtime: ChatOpsPolicyRuntime, action: str) -> str:
+    """Map a ChatOps command to its internal route."""
+    routes = {
+        "help": f"{runtime.name}.help",
+        "ask": "chat.ask",
+        "rag": "rag.search",
+        "summarize": "summarize.run",
+        "status": "jobs.status",
+    }
+    return routes.get(action, "chat.ask")

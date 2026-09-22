@@ -407,6 +407,18 @@ def _resolve_discord_actor_id(
     return requested_user_id or service_user_id, None
 
 
+_DISCORD_POLICY_RUNTIME = _chatops_policy.ChatOpsPolicyRuntime(
+    name="discord",
+    scope_word="guild",
+    scope_quota_field="guild_quota_per_minute",
+    scope_quota_default=_policy_guild_quota_per_minute,
+    user_quota_default=_policy_user_quota_per_minute,
+    scope_label_field="guild_id",
+    quota_rejection_counter="discord_policy_quota_rejections_total",
+    denial_counter="discord_policy_denied_total",
+)
+
+
 def _evaluate_discord_policy(
     *,
     policy: dict[str, Any],
@@ -415,101 +427,37 @@ def _evaluate_discord_policy(
     actor_user_id: str | None,
     action: str,
 ) -> dict[str, Any] | None:
-    allowed_commands = policy.get("allowed_commands")
-    if isinstance(allowed_commands, list) and allowed_commands:
-        if action not in {str(item).lower() for item in allowed_commands}:
-            return {
-                "status_code": status.HTTP_403_FORBIDDEN,
-                "error": "command_blocked_by_policy",
-                "message": f"Command '{action}' is not allowed for this guild",
-            }
-
-    deny_channels = set(_normalize_string_list(policy.get("channel_denylist")))
-    allow_channels = set(_normalize_string_list(policy.get("channel_allowlist")))
-    if channel_id and channel_id in deny_channels:
-        return {
-            "status_code": status.HTTP_403_FORBIDDEN,
-            "error": "channel_blocked_by_policy",
-            "message": f"Channel '{channel_id}' is blocked by policy",
-        }
-    if allow_channels and channel_id and channel_id not in allow_channels:
-        return {
-            "status_code": status.HTTP_403_FORBIDDEN,
-            "error": "channel_not_allowed_by_policy",
-            "message": f"Channel '{channel_id}' is not in the allowlist",
-        }
-
-    guild_limit = _safe_int(policy.get("guild_quota_per_minute")) or _policy_guild_quota_per_minute()
-    guild_key = _coerce_nonempty_string(guild_id) or "unknown"
-    allowed_guild, retry_after_guild = _POLICY_RATE_LIMITER.allow(
-        f"discord:guild:{guild_key}",
-        max(1, guild_limit),
+    return _chatops_policy.evaluate_policy(
+        _DISCORD_POLICY_RUNTIME,
+        policy=policy,
+        scope_id=guild_id,
+        channel_id=channel_id,
+        actor_user_id=actor_user_id,
+        action=action,
+        rate_limiter=_POLICY_RATE_LIMITER,
+        coerce=_coerce_nonempty_string,
+        safe_int=_safe_int,
+        http_status=status,
     )
-    if not allowed_guild:
-        return {
-            "status_code": status.HTTP_429_TOO_MANY_REQUESTS,
-            "error": "guild_quota_exceeded",
-            "message": "Guild command quota exceeded",
-            "retry_after_seconds": retry_after_guild,
-        }
-
-    if actor_user_id:
-        user_limit = _safe_int(policy.get("user_quota_per_minute")) or _policy_user_quota_per_minute()
-        allowed_user, retry_after_user = _POLICY_RATE_LIMITER.allow(
-            f"discord:user:{guild_key}:{actor_user_id}",
-            max(1, user_limit),
-        )
-        if not allowed_user:
-            return {
-                "status_code": status.HTTP_429_TOO_MANY_REQUESTS,
-                "error": "user_quota_exceeded",
-                "message": "User command quota exceeded",
-                "retry_after_seconds": retry_after_user,
-            }
-
-    return None
 
 
 def _discord_policy_error_response(
     policy_error: dict[str, Any], *, guild_id: str | None, action: str | None
 ) -> JSONResponse:
-    status_code = int(policy_error.get("status_code") or status.HTTP_403_FORBIDDEN)
-    response_payload = {k: v for k, v in policy_error.items() if k != "status_code"}
-    headers: dict[str, str] = {}
-    retry_after = _safe_int(policy_error.get("retry_after_seconds"))
-    if retry_after is not None and retry_after > 0:
-        headers["Retry-After"] = str(retry_after)
-        _emit_discord_counter(
-            "discord_policy_quota_rejections_total",
-            guild_id=guild_id or "na",
-            action=action or "na",
-            error=response_payload.get("error"),
-        )
-    else:
-        _emit_discord_counter(
-            "discord_policy_denied_total",
-            guild_id=guild_id or "na",
-            action=action or "na",
-            error=response_payload.get("error"),
-        )
-    logger.warning(
-        "Discord policy denied request: guild_id={} action={} error={}",
-        guild_id or "na",
-        action or "na",
-        response_payload.get("error"),
+    return _chatops_policy.policy_error_response(
+        _DISCORD_POLICY_RUNTIME,
+        policy_error,
+        scope_id=guild_id,
+        action=action,
+        emit_counter=_emit_discord_counter,
+        log=logger,
+        safe_int=_safe_int,
+        http_status=status,
     )
-    return JSONResponse(status_code=status_code, headers=headers, content={"ok": False, **response_payload})
 
 
 def _discord_action_route(action: str) -> str:
-    routes = {
-        "help": "discord.help",
-        "ask": "chat.ask",
-        "rag": "rag.search",
-        "summarize": "summarize.run",
-        "status": "jobs.status",
-    }
-    return routes.get(action, "chat.ask")
+    return _chatops_policy.action_route(_DISCORD_POLICY_RUNTIME, action)
 
 
 def _parse_discord_interaction_command(payload: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
