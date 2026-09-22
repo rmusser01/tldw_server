@@ -2,6 +2,10 @@
 
 - **Current tracker status: 406 findings / 389 verified / 17 open (261, 351, 352, 354, 356, 359–361, 365, 375, 388, 390–393, 400, 406).** All four configurations concluded with failures and limits recorded in the [frozen 365-finding matrix](FRESH_INSTALL_UAT_MATRIX_2026_09_20.md). Targeted fresh SQLite and real PostgreSQL acceptance now verifies353/355/357/358/362/363/364/366–374/376–387. Remaining findings include application recovery/quality and newly confirmed test-coverage gaps. Counts describe findings, not UAT completion. Generated evidence remains local.
 
+### Diagnostic6 — UAT406 ownership succeeds; fixture separator corrected
+
+Harness2ec6ede03b against unchanged production55: SQLite0pass/1fail6.479s, PostgreSQL0pass/1fail5.653s, retries0/skips0. Both create a new run-owned source, so the deduplication collision is removed. Exact-content comparison then rejects one extra fixture blank line: ROWAN_SOURCE already ends with a newline, and appending two more creates three consecutive newlines, while extraction stores two. Trim only the frozen fixture trailing whitespace before appending the run-provenance paragraph. Exact saved-content and ownership oracles remain unchanged; original results retained. The integrated QA/Chat journey is still unverified.
+
 ### Diagnostic5 — Study follow-up verified; repeated ingestion fixture collision (UAT406)
 
 Unchanged production55db1bad2d, independently archived harnessdc848f0672 (sourceSHAab8442cf1dbca32e53ad7c29df38b210de793df59b26b3c2e3a4998a3aaaf456). These are stateful diagnostic follow-ups, not fresh installations. Each cell executes2cases with retries0/skips0/flaky0: SQLite1pass/1fail65.241s; official PostgreSQL1pass/1fail82.373s.
