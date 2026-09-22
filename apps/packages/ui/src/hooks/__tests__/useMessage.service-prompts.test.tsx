@@ -200,6 +200,7 @@ const mocks = vi.hoisted(() => {
 
   return {
     useRealQueueState: false,
+    selectedCharacter: null as { id: number; name: string; greeting: string } | null,
     selectedAssistant: null as AssistantSelection | null,
     effectiveAssistantState: null as EffectiveAssistantState | null,
     createChat: vi.fn(),
@@ -317,7 +318,7 @@ vi.mock("@/store/model", () => ({
 }))
 
 vi.mock("@/hooks/useSelectedCharacter", () => ({
-  useSelectedCharacter: () => [null, vi.fn()]
+  useSelectedCharacter: () => [mocks.selectedCharacter, vi.fn()]
 }))
 
 vi.mock("@/hooks/useSelectedAssistant", () => ({
@@ -1491,6 +1492,43 @@ describe("Character live attachments in the legacy caller", () => {
     } finally {
       hook.unmount()
       Object.assign(mocks.storeState, previous)
+      mocks.effectiveAssistantState = null
+      mocks.setMessages.mockImplementation(() => {})
+    }
+  })
+})
+
+
+describe("Character greeting continuity in the sidebar caller", () => {
+  it.each(["messages", "history", "saved-greeting", "new-chat"] as const)("preserves greeting provenance for %s", async kind => {
+    vi.clearAllMocks()
+    const previousStore = { ...mocks.storeState }
+    const previousBase = { ...mocks.chatBaseState }
+    const greeting = "Welcome from the Character default"
+    const user = { id: "earlier-user", isBot: false, name: "You", message: "Earlier question", images: [], sources: [], createdAt: 1 }
+    const savedGreeting = { id: "saved-greeting", isBot: true, name: "Mira", message: greeting, messageType: "character:greeting", images: [], sources: [], createdAt: 0 }
+    const initial = kind === "new-chat" || kind === "history" ? [] : kind === "saved-greeting" ? [savedGreeting, user] : [user]
+    let visible: Message[] = initial
+    mocks.selectedCharacter = { id: 42, name: "Mira", greeting }
+    mocks.effectiveAssistantState = { mode: "tracked_character", kind: "character", id: "42", displayName: "Mira", avatarUrl: null, systemPromptSnapshot: null, source: "tracked" }
+    mocks.loadServicePromptSnapshot.mockResolvedValue(mocks.makeSnapshot())
+    mocks.createChat.mockResolvedValue({ id: "created-character-chat", character_id: 42 })
+    Object.assign(mocks.storeState, { messages: initial, serverChatId: kind === "new-chat" ? null : "character-chat", serverChatCharacterId: 42, serverChatMetaLoaded: true })
+    mocks.chatBaseState.history = kind === "history" ? [{ role: "user", content: "Earlier question" }] : []
+    mocks.setMessages.mockImplementation(next => { visible = typeof next === "function" ? next(visible) : next })
+    const hook = renderHook(() => useMessage())
+    try {
+      await act(async () => { await hook.result.current.onSubmit({ message: "Follow-up", image: "", requestOverrides: { chatMode: "normal" } }) })
+      const expected = kind === "saved-greeting" || kind === "new-chat" ? 1 : 0
+      expect(visible.filter(row => row.messageType === "character:greeting")).toHaveLength(expected)
+      expect(mocks.saveMessageOnSuccess).toHaveBeenCalled()
+      const savedHistory = mocks.setHistory.mock.calls.at(-1)?.[0]
+      expect(savedHistory.filter((row: { content: string }) => row.content === greeting)).toHaveLength(expected)
+    } finally {
+      hook.unmount()
+      Object.assign(mocks.storeState, previousStore)
+      Object.assign(mocks.chatBaseState, previousBase)
+      mocks.selectedCharacter = null
       mocks.effectiveAssistantState = null
       mocks.setMessages.mockImplementation(() => {})
     }

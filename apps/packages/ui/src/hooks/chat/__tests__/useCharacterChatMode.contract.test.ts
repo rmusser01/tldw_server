@@ -147,6 +147,35 @@ describe("createCharacterChatMode contract", () => {
     })
   })
 
+  it.each(["messages", "history", "saved-greeting", "new-chat"] as const)("preserves existing greeting provenance for %s", async kind => {
+    const setters = createSetterBundle()
+    const greeting = "Welcome from the Character default"
+    const user = { id: "earlier-user", isBot: false, role: "user", message: "Earlier question", sources: [] }
+    const savedGreeting = { id: "saved-greeting", isBot: true, role: "assistant", message: greeting, messageType: "character:greeting", sources: [] }
+    const initial = kind === "new-chat" || kind === "history" ? [] : kind === "saved-greeting" ? [savedGreeting, user] : [user]
+    let visible: typeof initial = initial
+    setters.setMessages.mockImplementation(next => { visible = typeof next === "function" ? next(visible) : next })
+    const save = vi.fn(async (_payload: { history: Array<{ content: string }> }) => "history-1")
+    const mode = createCharacterChatMode({ ...setters, t: translate, notification: { error: vi.fn() },
+      selectedCharacter: { id: 42, name: "Mira", greeting }, temporaryChat: false, historyId: "history-1",
+      serverChatId: kind === "new-chat" ? null : "chat-77", serverChatCharacterId: 42,
+      currentChatModelSettings: { apiProvider: "openai", setSystemPrompt: vi.fn() }, invalidateServerChatHistory: vi.fn(),
+      greetingEnabled: true, greetingSelectionId: null, greetingsChecksum: null, useCharacterDefault: true,
+      directedCharacterId: null, resolvedMessageSteeringPrompts: null, getEffectiveSelectedModel: () => "test-model",
+      saveMessageOnSuccess: save, saveMessageOnError: vi.fn(), discardCurrentTurnOnAbortRef: { current: false }
+    } as unknown as Parameters<typeof createCharacterChatMode>[0])
+    const controller = new AbortController()
+    await mode({ message: "Follow-up", image: "", isRegenerate: false, messages: initial,
+      history: kind === "history" ? [{ role: "user", content: "Earlier question" }] : [],
+      signal: controller.signal, model: "test-model", controller,
+      messageSteering: { continueAsUser: false, impersonateUser: false, forceNarrate: false } } as unknown as Parameters<typeof mode>[0])
+    const expected = kind === "saved-greeting" || kind === "new-chat" ? 1 : 0
+    expect(visible.filter(row => "messageType" in row && row.messageType === "character:greeting")).toHaveLength(expected)
+    expect(save).toHaveBeenCalled()
+    const savedHistory = setters.setHistory.mock.calls.at(-1)?.[0] as Array<{ content: string }>
+    expect(savedHistory.filter(row => row.content === greeting)).toHaveLength(expected)
+  })
+
   it.each(["", "data:image/png;base64,aW1hZ2U="])("creates a character chat and preserves attachment %s", async image => {
     const setters = createSetterBundle()
     let messagesState: unknown[] = []
