@@ -239,7 +239,7 @@ describe("SyntheticReviewTab", () => {
 
     render(<SyntheticReviewTab />)
 
-    expect(screen.getByText("Unavailable")).toBeInTheDocument()
+    expect(screen.getByText("Error")).toBeInTheDocument()
     expect(screen.getByText("Unable to load synthetic review queue")).toBeInTheDocument()
     expect(screen.getByLabelText("Diagnostics")).toHaveTextContent(
       "/api/v1/evaluations/synthetic/queue"

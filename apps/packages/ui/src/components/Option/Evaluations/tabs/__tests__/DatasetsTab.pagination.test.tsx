@@ -203,7 +203,7 @@ describe("DatasetsTab sample pagination", () => {
 
     render(<DatasetsTab />)
 
-    expect(screen.getByText("Unavailable")).toBeInTheDocument()
+    expect(screen.getByText("Error")).toBeInTheDocument()
     expect(screen.getByText("Unable to load datasets")).toBeInTheDocument()
     expect(screen.getByLabelText("Diagnostics")).toHaveTextContent(
       "/api/v1/evaluations/datasets"

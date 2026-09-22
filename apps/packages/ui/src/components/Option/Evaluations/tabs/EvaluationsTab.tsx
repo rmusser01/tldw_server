@@ -188,7 +188,8 @@ export const EvaluationsTab: React.FC = () => {
   const handleSubmit = async () => {
     setEvalSpecError(null)
     try {
-      const values = await form.validateFields()
+      await form.validateFields()
+      const values = form.getFieldsValue(true)
       let spec: any
       try {
         spec = JSON.parse(evalSpecText || "{}")

@@ -420,18 +420,20 @@ async def test_includes_honors_case_sensitivity_for_each_expected_item(tmp_path,
 
 
 @pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize("backend_kind", ["sqlite", "postgresql"])
 @pytest.mark.parametrize(("case_sensitive", "second_output", "pass_rate"), [
     (True, "orbit-742", 0.5),
     (False, "orbit-742", 1.0),
     (False, "ORBIT-999", 0.5),
 ])
 async def test_two_row_exact_match_run_retains_scores_and_dataset(
-    tmp_path, case_sensitive, second_output, pass_rate
+    tmp_path, monkeypatch, request, backend_kind, case_sensitive, second_output, pass_rate
 ):
     """Exercise API validation, the actual runner, aggregation and saved result readback."""
     from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import CreateEvaluationRequest
 
-    request = CreateEvaluationRequest(
+    evaluation_request = CreateEvaluationRequest(
         name="two_rows", eval_type="exact_match",
         eval_spec={"metrics": ["exact_match"], "case_sensitive": case_sensitive},
         dataset=[
@@ -439,23 +441,40 @@ async def test_two_row_exact_match_run_retains_scores_and_dataset(
             {"input": {"output": second_output}, "expected": {"output": "ORBIT-742"}},
         ],
     )
-    runner = EvaluationRunner(db_path=str(tmp_path / "evals.db"))
-    samples = [sample.model_dump() for sample in request.dataset]
-    dataset_id = runner.db.create_dataset(name="two_rows", samples=samples, created_by="owner")
-    eval_id = runner.db.create_evaluation(
-        name=request.name, eval_type=request.eval_type,
-        eval_spec=request.eval_spec.model_dump(), dataset_id=dataset_id, created_by="owner",
-    )
-    run_id = runner.db.create_run(eval_id=eval_id, target_model="precomputed", config={})
-    results = await runner.run_evaluation(run_id, eval_id, {"created_by": "owner"}, background=False)
-    saved = runner.db.get_run(run_id, created_by="owner")
-    assert saved["status"] == "completed"
-    assert saved["eval_id"] == eval_id
-    assert saved["results"] == results
-    assert results["aggregate"]["total_samples"] == 2
-    assert results["aggregate"]["pass_rate"] == pass_rate
-    assert results["aggregate"]["mean_score"] == pass_rate
-    assert results["failed_samples"] == []
-    assert [item["sample_id"] for item in results["sample_results"]] == ["sample_000000", "sample_000001"]
-    assert [item["passed"] for item in results["sample_results"]] == [True, pass_rate == 1.0]
-    assert runner.db.get_dataset(dataset_id, include_samples=True, created_by="owner")["samples"] == samples
+    # Reuse the official per-test database and real backend; no SQL or results are mocked.
+    from functools import partial
+
+    from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+    from tldw_Server_API.app.core.DB_Management.DB_Manager import create_evaluations_database
+    from tldw_Server_API.app.core.Evaluations import eval_runner
+
+    backend = None
+    monkeypatch.setenv("EVALS_ABTEST_PERSISTENCE", "off")
+    if backend_kind == "postgresql":
+        backend = DatabaseBackendFactory.create_backend(request.getfixturevalue("pg_database_config"))
+        monkeypatch.setattr(eval_runner, "_create_evals_db", partial(create_evaluations_database, backend=backend))
+    try:
+        runner = EvaluationRunner(db_path=str(tmp_path / "evals.db"))
+        assert runner.db.backend_type.value == backend_kind
+        samples = [sample.model_dump() for sample in evaluation_request.dataset]
+        dataset_id = runner.db.create_dataset(name="two_rows", samples=samples, created_by="owner")
+        eval_id = runner.db.create_evaluation(
+            name=evaluation_request.name, eval_type=evaluation_request.eval_type,
+            eval_spec=evaluation_request.eval_spec.model_dump(), dataset_id=dataset_id, created_by="owner",
+        )
+        run_id = runner.db.create_run(eval_id=eval_id, target_model="precomputed", config={})
+        results = await runner.run_evaluation(run_id, eval_id, {"created_by": "owner"}, background=False)
+        saved = runner.db.get_run(run_id, created_by="owner")
+        assert saved["status"] == "completed"
+        assert saved["eval_id"] == eval_id
+        assert saved["results"] == results
+        assert results["aggregate"]["total_samples"] == 2
+        assert results["aggregate"]["pass_rate"] == pass_rate
+        assert results["aggregate"]["mean_score"] == pass_rate
+        assert results["failed_samples"] == []
+        assert [item["sample_id"] for item in results["sample_results"]] == ["sample_000000", "sample_000001"]
+        assert [item["passed"] for item in results["sample_results"]] == [True, pass_rate == 1.0]
+        assert runner.db.get_dataset(dataset_id, include_samples=True, created_by="owner")["samples"] == samples
+    finally:
+        if backend is not None:
+            backend.get_pool().close_all()

@@ -16,6 +16,8 @@ Task: TASK-13260.278.5.2. PR #2979. Full/native UAT remains paused.
 
 UAT427 follow-up: retained CI307/ERR_FAILED proves list/create collection paths omit the canonical trailing slash. Keep request-core redirect rejection and fix those two service paths with filter/body/idempotency regression controls. TASK13260.278.5.2.1 owns this repair. Ant Select virtual options also require selecting the visible exact_match title in the journey.
 
+UAT428 follow-up: b41461 reaches Configuration but unmounted form fields lose their watcher/submission values. TASK13260.278.5.2.2 retains preserved values through the existing Form APIs; three actual-component regressions prove both causes. The unchanged strict C-03 browser run must confirm create/run/readback on the repaired head.
+
 ## Stage 3: Review and publish
 **Goal**: Record exact execution evidence and remaining C-03/B-09 coverage limits.
 **Success Criteria**: Scoped checks and security review; retained first-attempt CI; no generated captures in Git.
