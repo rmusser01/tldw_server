@@ -33,6 +33,9 @@ from tldw_Server_API.app.core.DB_Management.media_db.api import (
     search_media,
 )
 from tldw_Server_API.app.core.Embeddings.vector_store_batches_db import (
+    count_batches,
+)
+from tldw_Server_API.app.core.Embeddings.vector_store_batches_db import (
     create_batch as db_create_batch,
 )
 from tldw_Server_API.app.core.Embeddings.vector_store_batches_db import (
@@ -535,16 +538,7 @@ async def list_vector_store_users(current_user: User = Depends(get_request_user)
                     store_count = 0
                 # Count batches
                 try:
-                    init_batches_db(uid)
-                    from tldw_Server_API.app.core.Embeddings.vector_store_batches_db import _connect as batches_conn
-                    with batches_conn(uid) as conn:
-                        try:
-                            cur = conn.execute("SELECT COUNT(1) FROM vector_store_batches")
-                            row = cur.fetchone()
-                            if row and row[0] is not None:
-                                batch_count = int(row[0])
-                        except _VECTORSTORE_NONCRITICAL_EXCEPTIONS:
-                            batch_count = 0
+                    batch_count = count_batches(uid)
                 except _VECTORSTORE_NONCRITICAL_EXCEPTIONS:
                     batch_count = 0
             users.append({
