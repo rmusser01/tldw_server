@@ -52,7 +52,6 @@ CORE_TO_API_BASELINE = frozenset({
     "tldw_Server_API/app/core/Buddy/turns.py",
     "tldw_Server_API/app/core/Chat/chat_helpers.py",
     "tldw_Server_API/app/core/Chat/chat_loop_store.py",
-    "tldw_Server_API/app/core/Chat/chat_orchestrator.py",
     "tldw_Server_API/app/core/Chat/chat_service.py",
     "tldw_Server_API/app/core/Chat/chat_target_resolution.py",
     "tldw_Server_API/app/core/Chat/command_router.py",
