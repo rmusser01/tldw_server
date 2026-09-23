@@ -36,6 +36,7 @@ from .backends.base import (
 from .backends.base import (
     DatabaseError as BackendDatabaseError,
 )
+from .backends.base import UniqueConstraintError
 from .backends.fts_translator import FTSQueryTranslator
 from .backends.query_utils import (
     prepare_backend_many_statement,
@@ -48,6 +49,7 @@ from .backends.query_utils import (
 from .Prompts_DB import ConflictError, DatabaseError, InputError, PromptsDatabase, SchemaError
 from .prompt_studio_db.prompt_fields import _prepare_prompt_record_fields
 from .prompt_studio_db.repositories.evaluations import EvaluationsRepository
+from .prompt_studio_db.repositories.signatures import SignaturesRepository
 from .prompt_studio_db.repositories.prompt_versions import PromptVersionsRepository
 from .prompt_studio_db.repositories.test_runs import TestRunsRepository
 
@@ -300,6 +302,11 @@ class PromptStudioBackendCursorWrapper:
             )
         except BackendDatabaseError as exc:
             msg = str(exc)
+            # The backend redacts driver messages, so the type is what identifies a
+            # uniqueness conflict. ConflictError is a DatabaseError, so existing
+            # handlers still catch it; the message carries no data.
+            if isinstance(exc, UniqueConstraintError):
+                raise ConflictError("UNIQUE constraint failed") from exc
             if "duplicate" in msg.lower() or "unique constraint" in msg.lower():
                 raise sqlite3.IntegrityError(msg)  # noqa: B904
             raise DatabaseError(f"Backend query execution failed: {msg}") from exc  # noqa: TRY003
@@ -323,6 +330,11 @@ class PromptStudioBackendCursorWrapper:
             )
         except BackendDatabaseError as exc:
             msg = str(exc)
+            # The backend redacts driver messages, so the type is what identifies a
+            # uniqueness conflict. ConflictError is a DatabaseError, so existing
+            # handlers still catch it; the message carries no data.
+            if isinstance(exc, UniqueConstraintError):
+                raise ConflictError("UNIQUE constraint failed") from exc
             if "duplicate" in msg.lower() or "unique constraint" in msg.lower():
                 raise sqlite3.IntegrityError(msg)  # noqa: B904
             raise DatabaseError(f"Backend batch execution failed: {msg}") from exc  # noqa: TRY003
@@ -1467,241 +1479,6 @@ class _BackendPromptStudioDatabase(BackendPromptStudioDatabaseBase):
             raise DatabaseError(f"Failed to delete prompt studio project {project_id}: {exc}") from exc  # noqa: TRY003
 
     # --- Signature helpers -----------------------------------------------
-
-    def create_signature(
-        self,
-        project_id: int,
-        name: str,
-        *,
-        input_schema: Iterable[Any],
-        output_schema: Iterable[Any],
-        constraints: Optional[Any] = None,
-        validation_rules: Optional[Any] = None,
-        client_id: Optional[str] = None,
-    ) -> dict[str, Any]:
-        if not name or not str(name).strip():
-            raise InputError("Signature name cannot be empty")  # noqa: TRY003
-
-        signature_uuid = str(uuid.uuid4())
-        payload = (
-            signature_uuid,
-            project_id,
-            str(name).strip(),
-            json.dumps(list(input_schema) if input_schema is not None else []),
-            json.dumps(list(output_schema) if output_schema is not None else []),
-            json.dumps(constraints) if constraints is not None else None,
-            json.dumps(validation_rules) if validation_rules is not None else None,
-            client_id or self.client_id,
-        )
-
-        insert_sql = """
-            INSERT INTO prompt_studio_signatures (
-                uuid, project_id, name, input_schema, output_schema,
-                constraints, validation_rules, client_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            RETURNING *
-        """
-
-        try:
-            with self._write_lock, self.transaction() as conn:
-                cursor = self._cursor_exec(conn, insert_sql, payload)
-                row = cursor.fetchone()
-                signature = self._row_to_dict(row)
-
-            self._log_sync_event(
-                "prompt_studio_signature",
-                signature_uuid,
-                "create",
-                {
-                    "project_id": project_id,
-                    "name": name,
-                },
-            )
-            return signature or {}  # noqa: TRY300
-        except BackendDatabaseError as exc:
-            message = str(exc).lower()
-            if "duplicate" in message and "prompt_studio_signatures" in message:
-                raise ConflictError(  # noqa: TRY003
-                    f"Signature with name '{name}' already exists for project {project_id}"
-                ) from exc
-            raise DatabaseError(f"Failed to create prompt studio signature: {exc}") from exc  # noqa: TRY003
-
-    def get_signature(
-        self,
-        signature_id: int,
-        *,
-        include_deleted: bool = False,
-    ) -> Optional[dict[str, Any]]:
-        clauses = ["id = ?"]
-        params: list[Any] = [signature_id]
-        if not include_deleted:
-            clauses.append("deleted = FALSE")
-
-        query = "SELECT * FROM prompt_studio_signatures WHERE " + " AND ".join(clauses) + " LIMIT 1"  # nosec B608
-
-        try:
-            cursor = self._execute(query, params)
-            row = cursor.fetchone()
-            return self._row_to_dict(cursor, row)
-        except BackendDatabaseError as exc:
-            raise DatabaseError(f"Failed to fetch signature {signature_id}: {exc}") from exc  # noqa: TRY003
-
-    def list_signatures(
-        self,
-        project_id: int,
-        *,
-        include_deleted: bool = False,
-        search: Optional[str] = None,
-        page: int = 1,
-        per_page: int = 20,
-        return_pagination: bool = False,
-    ) -> Union[dict[str, Any], list[dict[str, Any]]]:
-        if page < 1:
-            raise InputError("Page index must be >= 1")  # noqa: TRY003
-        if per_page < 1:
-            raise InputError("Items per page must be >= 1")  # noqa: TRY003
-
-        conditions = ["project_id = ?"]
-        params: list[Any] = [project_id]
-
-        if not include_deleted:
-            conditions.append("deleted = FALSE")
-
-        if search:
-            comparator = "ILIKE" if self.backend_type == BackendType.POSTGRESQL else "LIKE"
-            conditions.append(f"name {comparator} ?")
-            params.append(f"%{search}%")
-
-        where_clause = " WHERE " + " AND ".join(conditions) if conditions else ""
-
-        count_sql = f"SELECT COUNT(*) FROM prompt_studio_signatures{where_clause}"  # nosec B608
-        try:
-            count_cursor = self._execute(count_sql, params)
-            total_row = count_cursor.fetchone()
-            total = int(total_row[0]) if total_row and total_row[0] is not None else 0
-        except BackendDatabaseError as exc:
-            raise DatabaseError(f"Failed counting signatures for project {project_id}: {exc}") from exc  # noqa: TRY003
-
-        offset = max(page - 1, 0) * per_page
-        list_sql = """
-            SELECT *
-            FROM prompt_studio_signatures
-            {where_clause}
-            ORDER BY updated_at DESC, id DESC
-            LIMIT ? OFFSET ?
-        """.format_map(locals())  # nosec B608
-        params_with_pagination = params + [per_page, offset]
-
-        try:
-            cursor = self._execute(list_sql, params_with_pagination)
-            rows = cursor.fetchall()
-            signatures = [self._row_to_dict(row) for row in rows if row]
-        except BackendDatabaseError as exc:
-            raise DatabaseError(f"Failed listing signatures for project {project_id}: {exc}") from exc  # noqa: TRY003
-
-        if return_pagination:
-            return {
-                "signatures": signatures,
-                "pagination": {
-                    "page": page,
-                    "per_page": per_page,
-                    "total": total,
-                    "total_pages": (total + per_page - 1) // per_page if per_page else 0,
-                },
-            }
-        return signatures
-
-    def update_signature(self, signature_id: int, updates: dict[str, Any]) -> dict[str, Any]:
-        allowed_fields = {
-            "name",
-            "input_schema",
-            "output_schema",
-            "constraints",
-            "validation_rules",
-        }
-
-        set_clauses: list[str] = []
-        params: list[Any] = []
-
-        for field, value in updates.items():
-            if field not in allowed_fields:
-                continue
-
-            if field in {"input_schema", "output_schema", "constraints", "validation_rules"} and value is not None:
-                params.append(json.dumps(value))
-            else:
-                params.append(value)
-            set_clauses.append(f"{field} = ?")
-
-        if not set_clauses:
-            signature = self.get_signature(signature_id, include_deleted=True)
-            if signature is None:
-                raise InputError(f"Signature {signature_id} not found or already deleted")  # noqa: TRY003
-            return signature
-
-        set_clauses.append("updated_at = CURRENT_TIMESTAMP")
-        params.append(signature_id)
-
-        update_sql = (
-            "UPDATE prompt_studio_signatures SET "  # nosec B608
-            + ", ".join(set_clauses)
-            + " WHERE id = ? AND deleted = FALSE RETURNING *"
-        )
-
-        try:
-            with self._write_lock, self.transaction() as conn:
-                cursor = self._cursor_exec(conn, update_sql, params)
-                row = cursor.fetchone()
-                if not row:
-                    raise InputError(f"Signature {signature_id} not found or already deleted")  # noqa: TRY003
-                signature = self._row_to_dict(row)
-            self._log_sync_event(
-                "prompt_studio_signature",
-                signature.get("uuid", ""),
-                "update",
-                {key: updates[key] for key in updates if key in allowed_fields},
-            )
-            return signature or {}  # noqa: TRY300
-        except BackendDatabaseError as exc:
-            message = str(exc).lower()
-            if "duplicate" in message and "prompt_studio_signatures" in message:
-                raise ConflictError(  # noqa: TRY003
-                    "Signature update conflicts with an existing record"
-                ) from exc
-            raise DatabaseError(f"Failed to update signature {signature_id}: {exc}") from exc  # noqa: TRY003
-
-    def delete_signature(self, signature_id: int, *, hard_delete: bool = False) -> bool:
-        try:
-            with self._write_lock, self.transaction() as conn:
-                if hard_delete:
-                    cursor = self._cursor_exec(
-                        conn,
-                        "DELETE FROM prompt_studio_signatures WHERE id = ? RETURNING uuid",
-                        (signature_id,),
-                    )
-                else:
-                    cursor = self._cursor_exec(
-                        conn,
-                        """
-                            UPDATE prompt_studio_signatures
-                            SET deleted = TRUE, deleted_at = CURRENT_TIMESTAMP
-                            WHERE id = ? AND deleted = FALSE
-                            RETURNING uuid
-                            """,
-                        (signature_id,),
-                    )
-                row = cursor.fetchone()
-                success = row is not None
-            if success and row:
-                self._log_sync_event(
-                    "prompt_studio_signature",
-                    row.get("uuid", ""),
-                    "delete",
-                    {"hard": hard_delete},
-                )
-            return success  # noqa: TRY300
-        except BackendDatabaseError as exc:
-            raise DatabaseError(f"Failed to delete signature {signature_id}: {exc}") from exc  # noqa: TRY003
 
     # --- Test run helpers ------------------------------------------------
 
@@ -3833,352 +3610,6 @@ class _SQLitePromptStudioDatabase(PromptsDatabase):
     ####################################################################################################################
     # Signature Management
 
-    def create_signature(
-        self,
-        project_id: int,
-        name: str,
-        *,
-        input_schema: Iterable[Any],
-        output_schema: Iterable[Any],
-        constraints: Optional[Any] = None,
-        validation_rules: Optional[Any] = None,
-        client_id: Optional[str] = None,
-    ) -> dict[str, Any]:
-        import random
-        import sqlite3
-        import time
-
-        if not name or not str(name).strip():
-            raise InputError("Signature name cannot be empty")  # noqa: TRY003
-
-        conn = self.get_connection()
-        signature_uuid = str(uuid.uuid4())
-        payload = (
-            signature_uuid,
-            project_id,
-            str(name).strip(),
-            json.dumps(list(input_schema) if input_schema is not None else []),
-            json.dumps(list(output_schema) if output_schema is not None else []),
-            json.dumps(constraints) if constraints is not None else None,
-            json.dumps(validation_rules) if validation_rules is not None else None,
-            client_id or self.client_id,
-        )
-
-        insert_sql = """
-            INSERT INTO prompt_studio_signatures (
-                uuid, project_id, name, input_schema, output_schema,
-                constraints, validation_rules, client_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """
-
-        max_retries = 5
-        base_delay = 0.05
-
-        for attempt in range(max_retries):
-            should_retry = False
-            with self._write_lock:
-                try:
-                    cursor = conn.cursor()
-                    cursor.execute(insert_sql, payload)
-                    signature_id = cursor.lastrowid
-                    conn.commit()
-
-                    cursor.execute(
-                        "SELECT * FROM prompt_studio_signatures WHERE id = ?",
-                        (signature_id,),
-                    )
-                    row = cursor.fetchone()
-                    signature = self._row_to_dict(cursor, row) if row else {}
-
-                    self._log_sync_event(
-                        "prompt_studio_signature",
-                        signature_uuid,
-                        "create",
-                        {
-                            "project_id": project_id,
-                            "name": name,
-                        },
-                    )
-                    return signature  # noqa: TRY300
-                except sqlite3.IntegrityError as exc:
-                    message = str(exc)
-                    if "UNIQUE" in message:
-                        raise ConflictError(  # noqa: B904, TRY003
-                            f"Signature with name '{name}' already exists for project {project_id}"
-                        )
-                    raise DatabaseError(f"Failed to create signature: {exc}") from exc  # noqa: TRY003
-                except sqlite3.OperationalError as exc:
-                    if "database is locked" in str(exc).lower() and attempt < max_retries - 1:
-                        should_retry = True
-                        delay = base_delay * (2 ** attempt) * (0.5 + random.random())
-                    else:
-                        raise DatabaseError(f"Failed to create signature: {exc}") from exc  # noqa: TRY003
-                except sqlite3.Error as exc:  # noqa: BLE001
-                    raise DatabaseError(f"Failed to create signature: {exc}") from exc  # noqa: TRY003
-
-            if should_retry:
-                time.sleep(delay)
-
-        raise DatabaseError("Failed to create signature due to database locks")  # noqa: TRY003
-
-    def get_signature(
-        self,
-        signature_id: int,
-        *,
-        include_deleted: bool = False,
-    ) -> Optional[dict[str, Any]]:
-        import random
-        import sqlite3
-        import time
-
-        conn = self.get_connection()
-        cursor = conn.cursor()
-
-        query = "SELECT * FROM prompt_studio_signatures WHERE id = ?"
-        params: list[Any] = [signature_id]
-        if not include_deleted:
-            query += " AND deleted = 0"
-
-        max_retries = 5
-        base_delay = 0.05
-        for attempt in range(max_retries):
-            try:
-                cursor.execute(query, params)
-                row = cursor.fetchone()
-                return self._row_to_dict(cursor, row) if row else None
-            except sqlite3.OperationalError as exc:
-                if "database is locked" in str(exc).lower() and attempt < max_retries - 1:
-                    delay = base_delay * (2 ** attempt) * (0.5 + random.random())
-                    time.sleep(delay)
-                    continue
-                raise DatabaseError(f"Failed to fetch signature {signature_id}: {exc}") from exc  # noqa: TRY003
-            except sqlite3.Error as exc:  # noqa: BLE001
-                raise DatabaseError(f"Failed to fetch signature {signature_id}: {exc}") from exc  # noqa: TRY003
-
-        return None
-
-    def list_signatures(
-        self,
-        project_id: int,
-        *,
-        include_deleted: bool = False,
-        search: Optional[str] = None,
-        page: int = 1,
-        per_page: int = 20,
-        return_pagination: bool = False,
-    ) -> Union[dict[str, Any], list[dict[str, Any]]]:
-        import random
-        import sqlite3
-        import time
-
-        if page < 1:
-            raise InputError("Page index must be >= 1")  # noqa: TRY003
-        if per_page < 1:
-            raise InputError("Items per page must be >= 1")  # noqa: TRY003
-
-        conn = self.get_connection()
-        cursor = conn.cursor()
-
-        conditions = ["project_id = ?"]
-        params: list[Any] = [project_id]
-        if not include_deleted:
-            conditions.append("deleted = 0")
-        if search:
-            conditions.append("name LIKE ?")
-            params.append(f"%{search}%")
-
-        where_clause = " WHERE " + " AND ".join(conditions) if conditions else ""
-
-        count_sql = f"SELECT COUNT(*) FROM prompt_studio_signatures{where_clause}"  # nosec B608
-
-        max_retries = 5
-        base_delay = 0.05
-
-        for attempt in range(max_retries):
-            try:
-                cursor.execute(count_sql, params)
-                total_row = cursor.fetchone()
-                total = int(total_row[0]) if total_row else 0
-                break
-            except sqlite3.OperationalError as exc:
-                if "database is locked" in str(exc).lower() and attempt < max_retries - 1:
-                    time.sleep(base_delay * (2 ** attempt) * (0.5 + random.random()))
-                    continue
-                raise DatabaseError(f"Failed to count signatures: {exc}") from exc  # noqa: TRY003
-            except sqlite3.Error as exc:  # noqa: BLE001
-                raise DatabaseError(f"Failed to count signatures: {exc}") from exc  # noqa: TRY003
-        else:
-            raise DatabaseError("Failed to count signatures due to database locks")  # noqa: TRY003
-
-        offset = max(page - 1, 0) * per_page
-        list_sql = (
-            f"SELECT * FROM prompt_studio_signatures{where_clause} "  # nosec B608
-            "ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?"
-        )
-        params_with_pagination = params + [per_page, offset]
-
-        for attempt in range(max_retries):
-            try:
-                cursor.execute(list_sql, params_with_pagination)
-                rows = cursor.fetchall()
-                signatures = [self._row_to_dict(cursor, row) for row in rows if row]
-                break
-            except sqlite3.OperationalError as exc:
-                if "database is locked" in str(exc).lower() and attempt < max_retries - 1:
-                    time.sleep(base_delay * (2 ** attempt) * (0.5 + random.random()))
-                    continue
-                raise DatabaseError(f"Failed to list signatures: {exc}") from exc  # noqa: TRY003
-            except sqlite3.Error as exc:  # noqa: BLE001
-                raise DatabaseError(f"Failed to list signatures: {exc}") from exc  # noqa: TRY003
-        else:
-            raise DatabaseError("Failed to list signatures due to database locks")  # noqa: TRY003
-
-        if return_pagination:
-            return {
-                "signatures": signatures,
-                "pagination": {
-                    "page": page,
-                    "per_page": per_page,
-                    "total": total,
-                    "total_pages": (total + per_page - 1) // per_page if per_page else 0,
-                },
-            }
-        return signatures
-
-    def update_signature(self, signature_id: int, updates: dict[str, Any]) -> dict[str, Any]:
-        import sqlite3
-
-        allowed_fields = {
-            "name",
-            "input_schema",
-            "output_schema",
-            "constraints",
-            "validation_rules",
-        }
-
-        set_clauses: list[str] = []
-        params: list[Any] = []
-
-        for field, value in updates.items():
-            if field not in allowed_fields:
-                continue
-
-            if field in {"input_schema", "output_schema", "constraints", "validation_rules"} and value is not None:
-                params.append(json.dumps(value))
-            else:
-                params.append(value)
-            set_clauses.append(f"{field} = ?")
-
-        if not set_clauses:
-            signature = self.get_signature(signature_id, include_deleted=True)
-            if signature is None:
-                raise InputError(f"Signature {signature_id} not found or already deleted")  # noqa: TRY003
-            return signature
-
-        set_clauses.append("updated_at = CURRENT_TIMESTAMP")
-        params.append(signature_id)
-
-        update_sql = (
-            "UPDATE prompt_studio_signatures SET "  # nosec B608
-            + ", ".join(set_clauses)
-            + " WHERE id = ? AND deleted = 0"
-        )
-
-        conn = self.get_connection()
-
-        with self._write_lock:
-            try:
-                cursor = conn.cursor()
-                cursor.execute(update_sql, params)
-                if cursor.rowcount == 0:
-                    raise InputError(f"Signature {signature_id} not found or already deleted")  # noqa: TRY003
-                conn.commit()
-                cursor.execute(
-                    "SELECT * FROM prompt_studio_signatures WHERE id = ?",
-                    (signature_id,),
-                )
-                row = cursor.fetchone()
-                if not row:
-                    raise DatabaseError(f"Failed to fetch updated signature {signature_id}")  # noqa: TRY003
-                signature = self._row_to_dict(cursor, row)
-            except sqlite3.IntegrityError as exc:
-                message = str(exc)
-                if "UNIQUE" in message:
-                    raise ConflictError("Signature update conflicts with existing record") from exc  # noqa: TRY003
-                raise DatabaseError(f"Failed to update signature: {exc}") from exc  # noqa: TRY003
-            except sqlite3.Error as exc:  # noqa: BLE001
-                raise DatabaseError(f"Failed to update signature: {exc}") from exc  # noqa: TRY003
-
-        self._log_sync_event(
-            "prompt_studio_signature",
-            signature.get("uuid", ""),
-            "update",
-            {key: updates[key] for key in updates if key in allowed_fields},
-        )
-        return signature
-
-    def delete_signature(self, signature_id: int, *, hard_delete: bool = False) -> bool:
-        import sqlite3
-        import time
-
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        max_retries = 5
-        base_delay = 0.05
-
-        for attempt in range(max_retries):
-            try:
-                if hard_delete:
-                    cursor.execute(
-                        "SELECT uuid FROM prompt_studio_signatures WHERE id = ?",
-                        (signature_id,),
-                    )
-                    row = cursor.fetchone()
-                    if not row:
-                        return False
-                    signature_uuid = row[0]
-                    cursor.execute(
-                        "DELETE FROM prompt_studio_signatures WHERE id = ?",
-                        (signature_id,),
-                    )
-                else:
-                    cursor.execute(
-                        "SELECT uuid FROM prompt_studio_signatures WHERE id = ? AND deleted = 0",
-                        (signature_id,),
-                    )
-                    row = cursor.fetchone()
-                    if not row:
-                        return False
-                    signature_uuid = row[0]
-                    cursor.execute(
-                        """
-                        UPDATE prompt_studio_signatures
-                        SET deleted = 1, deleted_at = CURRENT_TIMESTAMP
-                        WHERE id = ? AND deleted = 0
-                        """,
-                        (signature_id,),
-                    )
-
-                if cursor.rowcount > 0:
-                    conn.commit()
-                    self._log_sync_event(
-                        "prompt_studio_signature",
-                        signature_uuid,
-                        "delete",
-                        {"hard": hard_delete},
-                    )
-                    return True
-                return False  # noqa: TRY300
-            except sqlite3.OperationalError as exc:
-                if "database is locked" in str(exc).lower() and attempt < max_retries - 1:
-                    time.sleep(base_delay * (2 ** attempt))
-                    continue
-                raise DatabaseError(f"Failed to delete signature {signature_id}: {exc}") from exc  # noqa: TRY003
-            except sqlite3.Error as exc:  # noqa: BLE001
-                raise DatabaseError(f"Failed to delete signature {signature_id}: {exc}") from exc  # noqa: TRY003
-
-        raise DatabaseError("Failed to delete signature due to database locks")  # noqa: TRY003
-
     ####################################################################################################################
     # Test Run Management
 
@@ -6143,19 +5574,19 @@ class PromptStudioDatabase:
     # Signature delegation ------------------------------------------------
 
     def create_signature(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return self._impl.create_signature(*args, **kwargs)
+        return SignaturesRepository(self._impl).create(*args, **kwargs)
 
     def get_signature(self, *args: Any, **kwargs: Any) -> Optional[dict[str, Any]]:
-        return self._impl.get_signature(*args, **kwargs)
+        return SignaturesRepository(self._impl).get(*args, **kwargs)
 
     def list_signatures(self, *args: Any, **kwargs: Any) -> Union[dict[str, Any], list[dict[str, Any]]]:
-        return self._impl.list_signatures(*args, **kwargs)
+        return SignaturesRepository(self._impl).list(*args, **kwargs)
 
     def update_signature(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return self._impl.update_signature(*args, **kwargs)
+        return SignaturesRepository(self._impl).update(*args, **kwargs)
 
     def delete_signature(self, *args: Any, **kwargs: Any) -> bool:
-        return self._impl.delete_signature(*args, **kwargs)
+        return SignaturesRepository(self._impl).delete(*args, **kwargs)
 
     def create_prompt(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         return self._impl.create_prompt(*args, **kwargs)

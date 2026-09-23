@@ -2,18 +2,12 @@
 
 from __future__ import annotations
 
-import json
-import sqlite3
 import uuid
 from typing import Any, Optional
 
-from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError as BackendDatabaseError
+from tldw_Server_API.app.core.DB_Management.prompt_studio_db.repositories._common import DB_ERRORS, json_or_none
 from tldw_Server_API.app.core.DB_Management.Prompts_DB import DatabaseError
 from tldw_Server_API.app.core.DB_Management.retry_policy import run_with_contention_retry
-
-
-def _json_or_none(value: Any) -> Optional[str]:
-    return json.dumps(value) if value is not None else None
 
 
 class TestRunsRepository:
@@ -47,11 +41,11 @@ class TestRunsRepository:
             prompt_id,
             test_case_id,
             model_name,
-            _json_or_none(model_params),
-            _json_or_none(inputs),
-            _json_or_none(outputs),
-            _json_or_none(expected_outputs),
-            _json_or_none(scores),
+            json_or_none(model_params),
+            json_or_none(inputs),
+            json_or_none(outputs),
+            json_or_none(expected_outputs),
+            json_or_none(scores),
             execution_time_ms,
             tokens_used,
             cost_estimate,
@@ -76,5 +70,5 @@ class TestRunsRepository:
 
         try:
             return run_with_contention_retry(_insert)
-        except (BackendDatabaseError, sqlite3.Error) as exc:
+        except DB_ERRORS as exc:
             raise DatabaseError(f"Failed to create test run: {exc}") from exc  # noqa: TRY003

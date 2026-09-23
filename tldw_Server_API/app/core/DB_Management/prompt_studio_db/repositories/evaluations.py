@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 import uuid
 from collections.abc import Iterable
 from typing import Any, Optional
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
-from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError as BackendDatabaseError
+from tldw_Server_API.app.core.DB_Management.prompt_studio_db.repositories._common import DB_ERRORS
 from tldw_Server_API.app.core.DB_Management.Prompts_DB import DatabaseError, InputError
 from tldw_Server_API.app.core.DB_Management.retry_policy import run_with_contention_retry
 
@@ -19,7 +18,6 @@ _UPDATABLE_FIELDS = _JSON_FIELDS | {
     "project_id", "prompt_id", "name", "description", "total_tokens", "total_cost",
     "status", "error_message", "client_id", "started_at", "completed_at",
 }
-_DB_ERRORS = (BackendDatabaseError, sqlite3.Error)
 
 
 class EvaluationsRepository:
@@ -62,7 +60,7 @@ class EvaluationsRepository:
 
         try:
             return run_with_contention_retry(_insert)
-        except _DB_ERRORS as exc:
+        except DB_ERRORS as exc:
             raise DatabaseError(f"Failed to create evaluation: {exc}") from exc  # noqa: TRY003
 
     def update(self, evaluation_id: int, updates: dict[str, Any]) -> dict[str, Any]:
@@ -103,7 +101,7 @@ class EvaluationsRepository:
 
         try:
             return run_with_contention_retry(_update)
-        except _DB_ERRORS as exc:
+        except DB_ERRORS as exc:
             raise DatabaseError(f"Failed to update evaluation {evaluation_id}: {exc}") from exc  # noqa: TRY003
 
     def get(self, evaluation_id: int) -> Optional[dict[str, Any]]:
@@ -111,7 +109,7 @@ class EvaluationsRepository:
         try:
             cursor = db._execute("SELECT * FROM prompt_studio_evaluations WHERE id = ?", (evaluation_id,))
             row = cursor.fetchone()
-        except _DB_ERRORS as exc:
+        except DB_ERRORS as exc:
             raise DatabaseError(f"Failed to fetch evaluation {evaluation_id}: {exc}") from exc  # noqa: TRY003
         return db._row_to_dict(cursor, row) if row else None
 
@@ -153,7 +151,7 @@ class EvaluationsRepository:
 
         try:
             total, evaluations = run_with_contention_retry(_read)
-        except _DB_ERRORS as exc:
+        except DB_ERRORS as exc:
             raise DatabaseError(f"Failed to list evaluations: {exc}") from exc  # noqa: TRY003
 
         return {

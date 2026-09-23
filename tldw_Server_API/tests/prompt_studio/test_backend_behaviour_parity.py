@@ -33,6 +33,14 @@ def _normalise(value: Any) -> Any:
     return value
 
 
+def _outcome(fn: Callable[[], Any]) -> Any:
+    """The result, or the exception type: error behaviour must match too."""
+    try:
+        return fn()
+    except Exception as exc:  # noqa: BLE001
+        return {"raises": type(exc).__name__}
+
+
 def _seed(db: PromptStudioDatabase) -> dict[str, int]:
     project = db.create_project(name="parity", description="d", user_id="u1")
     prompt = db.create_prompt(project["id"], "p", system_prompt="s", user_prompt="u {x}")
@@ -85,6 +93,33 @@ def _evaluations(db: PromptStudioDatabase) -> dict[str, Any]:
     }
 
 
+def _signatures(db: PromptStudioDatabase) -> dict[str, Any]:
+    ids = _seed(db)
+    project = ids["project"]
+    a = db.create_signature(project, "alpha", input_schema=[{"name": "x"}], output_schema=[{"name": "y"}])
+    b = db.create_signature(project, "beta", input_schema=[], output_schema=[], constraints={"max": 1})
+    return {
+        "create": a,
+        "create_duplicate": _outcome(lambda: db.create_signature(project, "alpha", input_schema=[], output_schema=[])),
+        "create_blank": _outcome(lambda: db.create_signature(project, " ", input_schema=[], output_schema=[])),
+        "get": db.get_signature(a["id"]),
+        "update": db.update_signature(b["id"], {"output_schema": [{"name": "z"}], "ignored": 1}),
+        "update_noop": db.update_signature(b["id"], {"ignored": 1}),
+        "update_rename_to_duplicate": _outcome(lambda: db.update_signature(b["id"], {"name": "alpha"})),
+        "list_search": db.list_signatures(project, search="ALP"),
+        "list_paged": db.list_signatures(project, page=1, per_page=1, return_pagination=True)["pagination"],
+        "soft_delete": db.delete_signature(a["id"]),
+        "soft_delete_again": db.delete_signature(a["id"]),
+        "get_deleted": _outcome(lambda: db.get_signature(a["id"])),
+        "get_deleted_included": db.get_signature(a["id"], include_deleted=True) is not None,
+        "update_deleted": _outcome(lambda: db.update_signature(a["id"], {"name": "gamma"})),
+        "list_after_delete": [s["name"] for s in db.list_signatures(project)],
+        "list_including_deleted": sorted(s["name"] for s in db.list_signatures(project, include_deleted=True)),
+        "hard_delete": db.delete_signature(b["id"], hard_delete=True),
+        "hard_delete_missing": db.delete_signature(b["id"], hard_delete=True),
+    }
+
+
 def _reads(db: PromptStudioDatabase) -> dict[str, Any]:
     # Read paths shared by the later aggregates; pins that PostgreSQL does not leak
     # its tsvector columns through `SELECT *` / `RETURNING *`.
@@ -104,6 +139,7 @@ SCENARIOS: dict[str, Callable[[PromptStudioDatabase], dict[str, Any]]] = {
     "prompt_versions": _prompt_versions,
     "evaluations": _evaluations,
     "reads": _reads,
+    "signatures": _signatures,
 }
 
 
@@ -123,8 +159,12 @@ def test_backends_return_the_same_results(aggregate, both_backends):
     sqlite_db, pg_db = both_backends
     on_sqlite = _normalise(SCENARIOS[aggregate](sqlite_db))
     on_postgres = _normalise(SCENARIOS[aggregate](pg_db))
-    for step in on_sqlite:
-        assert on_sqlite[step] == on_postgres[step], f"{aggregate}.{step} differs between backends"
+    diffs = [
+        f"{step}: sqlite={on_sqlite[step]!r} postgres={on_postgres[step]!r}"
+        for step in on_sqlite
+        if on_sqlite[step] != on_postgres[step]
+    ]
+    assert not diffs, f"{aggregate} differs between backends:\n" + "\n".join(diffs)
 
 
 def test_moved_writes_retry_transient_contention(tmp_path, monkeypatch):

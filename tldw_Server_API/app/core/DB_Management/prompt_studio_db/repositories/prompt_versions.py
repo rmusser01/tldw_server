@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-import json
-import sqlite3
 import uuid
 from typing import Any, Optional
 
-from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError as BackendDatabaseError
-from tldw_Server_API.app.core.DB_Management.Prompts_DB import DatabaseError, InputError
-from tldw_Server_API.app.core.DB_Management.retry_policy import run_with_contention_retry
 from tldw_Server_API.app.core.DB_Management.prompt_studio_db.prompt_fields import (
     _prepare_prompt_record_fields as prepare_prompt_record_fields,
 )
+from tldw_Server_API.app.core.DB_Management.prompt_studio_db.repositories._common import DB_ERRORS, json_or_none
+from tldw_Server_API.app.core.DB_Management.Prompts_DB import DatabaseError, InputError
+from tldw_Server_API.app.core.DB_Management.retry_policy import run_with_contention_retry
 
 _INSERT_VERSION_SQL = """
     INSERT INTO prompt_studio_prompts (
@@ -25,10 +23,6 @@ _INSERT_VERSION_SQL = """
 """
 
 _SELECT_LIVE_PROMPT_SQL = "SELECT * FROM prompt_studio_prompts WHERE id = ? AND deleted = FALSE LIMIT 1"
-
-
-def _json_or_none(value: Any) -> Optional[str]:
-    return json.dumps(value) if value is not None else None
 
 
 class PromptVersionsRepository:
@@ -60,9 +54,9 @@ class PromptVersionsRepository:
                 fields["user_prompt"],
                 fields["prompt_format"],
                 fields["prompt_schema_version"],
-                _json_or_none(fields["prompt_definition"]),
-                _json_or_none(few_shot_examples),
-                _json_or_none(modules_config),
+                json_or_none(fields["prompt_definition"]),
+                json_or_none(few_shot_examples),
+                json_or_none(modules_config),
                 parent_id,
                 change_description,
                 client_id,
@@ -73,7 +67,7 @@ class PromptVersionsRepository:
     def _run(self, fn: Any, failure: str) -> dict[str, Any]:
         try:
             return run_with_contention_retry(fn)
-        except (BackendDatabaseError, sqlite3.Error) as exc:
+        except DB_ERRORS as exc:
             raise DatabaseError(f"{failure}: {exc}") from exc  # noqa: TRY003
 
     def create(
@@ -211,7 +205,7 @@ class PromptVersionsRepository:
         try:
             cursor = db._execute(query, (project_id, prompt_name))
             return [db._row_to_dict(cursor, row) for row in cursor.fetchall() if row]
-        except (BackendDatabaseError, sqlite3.Error) as exc:
+        except DB_ERRORS as exc:
             raise DatabaseError(  # noqa: TRY003
                 f"Failed to list versions for prompt '{prompt_name}' in project {project_id}: {exc}"
             ) from exc
