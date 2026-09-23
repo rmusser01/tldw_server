@@ -414,6 +414,110 @@ def build_shared_workspace_chat_rls_sql() -> list[str]:
     ]
 
 
+def build_core_chat_rls_sql() -> list[str]:
+    """Tenant isolation for the conversation and keyword tables.
+
+    These are the most-read tables in the product and had no policy at all,
+    while sitting next to `notes`, which has had one since the beginning. They
+    were not overlooked for lack of a tenant column: `conversations` and
+    `messages` are already referenced *inside* other tables' policies, so their
+    ownership was understood. They simply never got policies of their own.
+
+    On SQLite this changes nothing, because each account holds its own database
+    file. On PostgreSQL the whole ChaCha schema is transpiled into one shared
+    database, so until now the only thing separating one account's chat history
+    from another's was whichever WHERE clause a query happened to carry.
+
+    `messages` is scoped through its conversation as well as its own client_id,
+    matching how note_attachments is scoped through its note: a row must belong
+    to the caller *and* hang off a parent that does, so a mismatched pair
+    cannot be read or written by either side.
+    """
+    stmts: list[str] = []
+
+    def add(sql: str) -> None:
+        stmts.append(sql.strip())
+
+    # Written out per table rather than generated from a loop variable. The RLS
+    # coverage ratchet scans source text, so DDL assembled from an f-string is
+    # invisible to it and the table would still read as unprotected.
+    tenant = "client_id = current_setting('app.current_user_id', true)"
+
+    add("ALTER TABLE IF EXISTS conversations ENABLE ROW LEVEL SECURITY;")
+    add("ALTER TABLE IF EXISTS conversations FORCE ROW LEVEL SECURITY;")
+    add("DROP POLICY IF EXISTS conversations_tenant_isolation ON conversations;")
+    add(
+        f"""
+        CREATE POLICY conversations_tenant_isolation ON conversations
+          USING ({tenant})
+          WITH CHECK ({tenant});
+        """
+    )
+
+    # chacha_keywords, not keywords. PostgreSQL creates this relation under the
+    # namespaced name and renames any legacy `keywords` into it during the v55
+    # migration; plain `keywords` only exists on SQLite, which needs no policy.
+    # Targeting the wrong name is not a no-op: DROP POLICY has no IF EXISTS for
+    # the *table*, so an undefined relation aborts the transaction and rolls back
+    # every policy installed before it, including conversations and messages.
+    add("ALTER TABLE IF EXISTS chacha_keywords ENABLE ROW LEVEL SECURITY;")
+    add("ALTER TABLE IF EXISTS chacha_keywords FORCE ROW LEVEL SECURITY;")
+    add("DROP POLICY IF EXISTS chacha_keywords_tenant_isolation ON chacha_keywords;")
+    add(
+        f"""
+        CREATE POLICY chacha_keywords_tenant_isolation ON chacha_keywords
+          USING ({tenant})
+          WITH CHECK ({tenant});
+        """
+    )
+
+    add("ALTER TABLE IF EXISTS keyword_collections ENABLE ROW LEVEL SECURITY;")
+    add("ALTER TABLE IF EXISTS keyword_collections FORCE ROW LEVEL SECURITY;")
+    add(
+        "DROP POLICY IF EXISTS keyword_collections_tenant_isolation "
+        "ON keyword_collections;"
+    )
+    add(
+        f"""
+        CREATE POLICY keyword_collections_tenant_isolation ON keyword_collections
+          USING ({tenant})
+          WITH CHECK ({tenant});
+        """
+    )
+
+    add("ALTER TABLE IF EXISTS sync_log ENABLE ROW LEVEL SECURITY;")
+    add("ALTER TABLE IF EXISTS sync_log FORCE ROW LEVEL SECURITY;")
+    add("DROP POLICY IF EXISTS sync_log_tenant_isolation ON sync_log;")
+    add(
+        f"""
+        CREATE POLICY sync_log_tenant_isolation ON sync_log
+          USING ({tenant})
+          WITH CHECK ({tenant});
+        """
+    )
+
+    message_owner = """
+    messages.client_id = current_setting('app.current_user_id', true)
+    AND EXISTS (
+      SELECT 1 FROM conversations AS parent
+      WHERE parent.id = messages.conversation_id
+        AND parent.client_id = current_setting('app.current_user_id', true)
+        AND parent.client_id = messages.client_id
+    )
+    """.strip()
+    add("ALTER TABLE IF EXISTS messages ENABLE ROW LEVEL SECURITY;")
+    add("ALTER TABLE IF EXISTS messages FORCE ROW LEVEL SECURITY;")
+    add("DROP POLICY IF EXISTS messages_tenant_isolation ON messages;")
+    add(
+        f"""
+        CREATE POLICY messages_tenant_isolation ON messages
+          USING ({message_owner})
+          WITH CHECK ({message_owner});
+        """
+    )
+    return stmts
+
+
 def build_chacha_rls_sql() -> list[str]:
     """RLS for ChaChaNotes (notes, character_cards) using client_id scoping."""
     stmts: list[str] = []
@@ -820,6 +924,7 @@ def build_chacha_rls_sql() -> list[str]:
     stmts.extend(build_source_review_rls_sql())
     stmts.extend(build_workspace_source_saved_view_rls_sql())
     stmts.extend(build_shared_workspace_chat_rls_sql())
+    stmts.extend(build_core_chat_rls_sql())
     return stmts
 
 
