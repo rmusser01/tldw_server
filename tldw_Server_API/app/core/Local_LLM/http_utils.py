@@ -58,6 +58,19 @@ def get_http_status_from_exception(exc: Exception) -> int | None:
 
     This module held the only correct regex of the four copies, which is why its
     behaviour is what the shared implementation now has. See TASK-13287.
+
+    Args:
+        exc: Any exception that may carry an HTTP status. Checked in precedence order:
+            ``exc.response.status_code``/``.status`` (the status on the wire), then
+            ``exc.status_code``/``.status``, then -- for a ``NetworkError`` only -- an
+            ``HTTP <code>`` prefix parsed from ``str(exc)``. Present-but-uncoercible
+            values are skipped rather than raising.
+
+    Returns:
+        The status as an ``int``, or ``None`` when no shape carries one. ``None`` means
+        "unknown" to callers and must not be replaced with a sentinel status.
+
+    The full contract lives on ``LLM_Calls.error_utils.get_http_status_from_exception``.
     """
     return _canonical_get_http_status_from_exception(exc)
 
