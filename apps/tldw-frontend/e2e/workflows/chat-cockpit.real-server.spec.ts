@@ -3015,7 +3015,7 @@ test.describe('/chat cockpit real-server parity', () => {
     apiTracker.dispose();
   });
 
-  test('captures streaming stop and regenerate controls through the real cockpit', async ({
+  test('captures streaming stop and the selected-history regeneration gate through the real cockpit', async ({
     page,
     request,
   }, testInfo) => {
@@ -3089,32 +3089,10 @@ test.describe('/chat cockpit real-server parity', () => {
       await assertProviderQualifiedPayload(page, completionResponse);
     }
 
-    if (!(await regenerateControl.isEnabled())) {
-      const followUpAttempt = waitForChatCompletionAttempt(page, 90_000).catch(() => null);
-      await page.getByTestId('chat-input').fill('Reply with one short sentence.');
-      await page.getByRole('button', { name: /send message/i }).click();
-      const followUpResponse = await followUpAttempt;
-      expect(followUpResponse).toBeTruthy();
-      await assertChatCompletionRenderedOrRecoverable(page, followUpResponse);
-      await assertProviderQualifiedPayload(page, followUpResponse!);
-    }
-
-    await expect(regenerateControl).toBeEnabled({ timeout: 30_000 });
+    await expect(regenerateControl).toBeDisabled({ timeout: 30_000 });
+    await expect(runtimeInspector.getByText('Regeneration is unavailable for selected history.')).toBeVisible();
     await page.screenshot({
-      path: testInfo.outputPath('chat-cockpit-regenerate-ready.png'),
-      fullPage: true,
-    });
-
-    const regenerateAttempt = waitForChatCompletionAttempt(page, 90_000).catch(() => null);
-    await regenerateControl.click();
-    const regenerateResponse = await regenerateAttempt;
-    expect(regenerateResponse).toBeTruthy();
-    await assertChatCompletionRenderedOrRecoverable(page, regenerateResponse);
-    if (regenerateResponse) {
-      await assertProviderQualifiedPayload(page, regenerateResponse);
-    }
-    await page.screenshot({
-      path: testInfo.outputPath('chat-cockpit-regenerated-response.png'),
+      path: testInfo.outputPath('chat-cockpit-regenerate-selected-history-gated.png'),
       fullPage: true,
     });
   });

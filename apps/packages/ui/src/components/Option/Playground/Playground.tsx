@@ -2946,7 +2946,12 @@ const PlaygroundContent = () => {
     }
     return null;
   }, [messages]);
-  const canRegenerateLastResponse = Boolean(latestAssistantMessage);
+  const regenerateSelectionState = historySelection.getCurrent();
+  const selectedHistoryBlocksRegeneration =
+    regenerateSelectionState.status !== "idle" &&
+    !(temporaryChat && !regenerateSelectionState.owner);
+  const canRegenerateLastResponse =
+    Boolean(latestAssistantMessage) && !selectedHistoryBlocksRegeneration;
   const emptyAssistantResponse = React.useMemo(() => {
     if (!latestAssistantMessage || streaming || isProcessing) return false;
     return !hasVisibleAssistantResponse(latestAssistantMessage);
@@ -3791,6 +3796,16 @@ const PlaygroundContent = () => {
       onStopStreaming={() => stopStreamingRequest()}
       canRegenerate={canRegenerateLastResponse}
       onRegenerate={() => regenerateLastMessage()}
+      regenerateUnavailableReason={
+        selectedHistoryBlocksRegeneration && latestAssistantMessage
+          ? toText(
+              t(
+                "playground:cockpit.regenerateUnavailableSelectedHistory",
+                "Regeneration is unavailable for selected history.",
+              ),
+            )
+          : null
+      }
       emptyAssistantResponse={emptyAssistantResponse}
       emptyAssistantResponseRouteLabel={emptyAssistantResponseRouteLabel}
       settingSummaries={runtimeSettingSummaries}

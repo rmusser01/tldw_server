@@ -81,6 +81,7 @@ export type PlaygroundRuntimeInspectorProps = {
   onStopStreaming?: () => void;
   canRegenerate?: boolean;
   onRegenerate?: () => void;
+  regenerateUnavailableReason?: string | null;
   emptyAssistantResponse?: boolean;
   emptyAssistantResponseRouteLabel?: string | null;
   settingSummaries?: RuntimeSettingSummary[];
@@ -121,6 +122,7 @@ export const PlaygroundRuntimeInspector = ({
   onStopStreaming,
   canRegenerate = false,
   onRegenerate,
+  regenerateUnavailableReason = null,
   emptyAssistantResponse = false,
   emptyAssistantResponseRouteLabel = null,
   settingSummaries = [],
@@ -280,6 +282,8 @@ export const PlaygroundRuntimeInspector = ({
           "cockpit.regenerateUnavailableStreaming",
           "Wait for the current turn to finish before regenerating.",
         )
+      : regenerateUnavailableReason
+        ? regenerateUnavailableReason
       : t(
           "cockpit.regenerateUnavailableNoAssistant",
           "Regenerate becomes available after an assistant response.",
