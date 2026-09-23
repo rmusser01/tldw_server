@@ -64,7 +64,7 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import (
     StorageError,
     WeakPasswordError,
 )
-from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
+from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService, fetch_password_hash
 from tldw_Server_API.app.core.AuthNZ.permissions import NOTIFICATIONS_READ, SYSTEM_LOGS, TASKS_READ
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal, is_single_user_principal
 from tldw_Server_API.app.core.AuthNZ.profile_version import (
@@ -232,28 +232,7 @@ async def _fetch_password_hash_for_user(db: Any, user_id: int) -> str | None:
     """
     Compatibility helper retained for backend-selection unit tests.
     """
-    if await is_postgres_backend():
-        value = await db.fetchval(
-            "SELECT password_hash FROM users WHERE id = $1",
-            user_id,
-        )
-        return str(value) if value else None
-
-    cursor = await db.execute(
-        "SELECT password_hash FROM users WHERE id = ?",
-        (user_id,),
-    )
-    row = await cursor.fetchone()
-    if not row:
-        return None
-    if isinstance(row, dict):
-        value = row.get("password_hash")
-        return str(value) if value else None
-    try:
-        value = row[0]
-    except (IndexError, KeyError, TypeError):
-        value = None
-    return str(value) if value else None
+    return await fetch_password_hash(db, user_id, is_postgres=await is_postgres_backend())
 
 
 def _require_active_verified_user(user_context: dict[str, Any]) -> None:
@@ -724,22 +703,7 @@ async def change_password(
         new_hash = password_service.hash_password(request.new_password)
 
         # Update password in database
-        await db.execute(
-            """
-            UPDATE users
-            SET password_hash = $1,
-                password_changed_at = CURRENT_TIMESTAMP,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id = $2
-            """,
-            new_hash,
-            user_id,
-        )
-        await db.execute(
-            "INSERT INTO password_history (user_id, password_hash) VALUES ($1, $2)",
-            user_id,
-            new_hash,
-        )
+        await password_service.set_password(user_id, new_hash, db, is_postgres=await is_postgres_backend())
 
         logger.info(f"Password changed for user {username} (ID: {user_id})")
 

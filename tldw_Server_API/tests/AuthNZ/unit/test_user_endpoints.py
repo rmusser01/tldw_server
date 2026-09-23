@@ -530,6 +530,9 @@ async def test_change_password_repo_lookup_log_is_sanitized(monkeypatch):
             assert new_password == "Changed@Pass#2024"
             return "new-hash"
 
+        async def set_password(self, user_id: int, new_hash: str, db_connection, *, is_postgres=None) -> None:
+            db_connection.statements.append(("set_password", (user_id, new_hash)))
+
     class _Db:
         def __init__(self) -> None:
             self.statements: list[tuple[str, tuple[object, ...]]] = []
@@ -551,6 +554,11 @@ async def test_change_password_repo_lookup_log_is_sanitized(monkeypatch):
     monkeypatch.setattr(users, "AuthnzUsersRepo", _FailingUsersRepo)
     monkeypatch.setattr(users, "logger", logger_stub)
 
+    async def _sqlite_backend() -> bool:
+        return False
+
+    monkeypatch.setattr(users, "is_postgres_backend", _sqlite_backend)
+
     response = await users.change_password(
         request=PasswordChangeRequest(
             current_password="Current@Pass#2024",
@@ -563,7 +571,8 @@ async def test_change_password_repo_lookup_log_is_sanitized(monkeypatch):
 
     assert response.message == "Password changed successfully"
     assert response.details == {"user_id": 7}
-    assert len(db.statements) == 2
+    # The password write and its history entry are PasswordService.set_password's job.
+    assert db.statements == [("set_password", (7, "new-hash"))]
     assert logger_stub.debugs == ["User repo lookup skipped for password change"]
     assert "repo lookup exploded" not in str(logger_stub.debugs)
     assert "/private/users.db" not in str(logger_stub.debugs)
