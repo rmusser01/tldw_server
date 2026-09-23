@@ -551,6 +551,32 @@ def _allocate_slides_source_projection_caps(
     return selected, caps
 
 
+def _slides_source_db_error(
+    message: str,
+    *,
+    database_name: str,
+    db: Any,
+    exc: BaseException,
+) -> RAGDatabaseError:
+    """Normalize a slides-source DB failure, naming the backend and the cause type.
+
+    Only the exception class is included: driver messages can echo SQL or params.
+
+    SQL splicing convention for the slides-source methods (media, notes, chats):
+    ``retrieve_slides_source_candidates_v1`` writes one SQL string per backend, so
+    each branch is an f-string; ``project_slides_source_documents_v1`` shares one
+    template across backends and fills the backend-specific fragments with
+    ``str.format``. Every splice is a fixed expression, never user input, and a
+    template left un-interpolated reaches PostgreSQL as a literal ``{`` (TASK-13292).
+    """
+    backend = getattr(getattr(db, "backend_type", None), "value", "unknown")
+    return RAGDatabaseError(
+        f"{message} (backend={backend}, cause={type(exc).__name__})",
+        database_name=database_name,
+        operation_type="slides_source_retrieval",
+    )
+
+
 def _slides_source_requested_values(count: int) -> str:
     """Return a fixed-placeholder derived table for at most 100 candidates."""
     if not 1 <= count <= 100:
@@ -1058,11 +1084,12 @@ class MediaDBRetriever(BaseRetriever):
                 log_errors=False,
             )
             rows = _read_slides_source_candidate_rows(cursor)
-        except Exception:  # noqa: BLE001 - closed boundary normalizes DB failures
-            raise RAGDatabaseError(
+        except Exception as exc:  # noqa: BLE001 - closed boundary normalizes DB failures
+            raise _slides_source_db_error(
                 "Media source candidate retrieval failed.",
                 database_name="media",
-                operation_type="slides_source_retrieval",
+                db=self.media_db,
+                exc=exc,
             ) from None
 
         raw_ranks: list[float] = []
@@ -1172,11 +1199,12 @@ class MediaDBRetriever(BaseRetriever):
                 cursor,
                 max_materialized_chars=sum(cap for _, cap in projections),
             )
-        except Exception:  # noqa: BLE001 - closed boundary normalizes DB failures
-            raise RAGDatabaseError(
+        except Exception as exc:  # noqa: BLE001 - closed boundary normalizes DB failures
+            raise _slides_source_db_error(
                 "Bounded media source projection failed.",
                 database_name="media",
-                operation_type="slides_source_retrieval",
+                db=self.media_db,
+                exc=exc,
             ) from None
 
         documents: list[Document] = []
@@ -2766,11 +2794,12 @@ class NotesDBRetriever(BaseRetriever):
                 log_errors=False,
             )
             rows = _read_slides_source_candidate_rows(cursor)
-        except Exception:  # noqa: BLE001 - closed boundary normalizes DB failures
-            raise RAGDatabaseError(
+        except Exception as exc:  # noqa: BLE001 - closed boundary normalizes DB failures
+            raise _slides_source_db_error(
                 "Note source candidate retrieval failed.",
                 database_name="notes",
-                operation_type="slides_source_retrieval",
+                db=self.chacha_db,
+                exc=exc,
             ) from None
 
         raw_ranks: list[float] = []
@@ -2870,11 +2899,12 @@ class NotesDBRetriever(BaseRetriever):
                 cursor,
                 max_materialized_chars=sum(cap for _, cap in projections),
             )
-        except Exception:  # noqa: BLE001 - closed boundary normalizes DB failures
-            raise RAGDatabaseError(
+        except Exception as exc:  # noqa: BLE001 - closed boundary normalizes DB failures
+            raise _slides_source_db_error(
                 "Bounded note source projection failed.",
                 database_name="notes",
-                operation_type="slides_source_retrieval",
+                db=self.chacha_db,
+                exc=exc,
             ) from None
 
         documents: list[Document] = []
@@ -3754,11 +3784,12 @@ class ChatHistoryRetriever(BaseRetriever):
                 log_errors=False,
             )
             rows = _read_slides_source_candidate_rows(cursor)
-        except Exception:  # noqa: BLE001 - closed boundary normalizes DB failures
-            raise RAGDatabaseError(
+        except Exception as exc:  # noqa: BLE001 - closed boundary normalizes DB failures
+            raise _slides_source_db_error(
                 "Chat source candidate retrieval failed.",
                 database_name="chats",
-                operation_type="slides_source_retrieval",
+                db=self.chacha_db,
+                exc=exc,
             ) from None
 
         raw_ranks: list[float] = []
@@ -3865,11 +3896,12 @@ class ChatHistoryRetriever(BaseRetriever):
                 cursor,
                 max_materialized_chars=sum(cap for _, cap in projections),
             )
-        except Exception:  # noqa: BLE001 - closed boundary normalizes DB failures
-            raise RAGDatabaseError(
+        except Exception as exc:  # noqa: BLE001 - closed boundary normalizes DB failures
+            raise _slides_source_db_error(
                 "Bounded chat source projection failed.",
                 database_name="chats",
-                operation_type="slides_source_retrieval",
+                db=self.chacha_db,
+                exc=exc,
             ) from None
 
         documents: list[Document] = []
