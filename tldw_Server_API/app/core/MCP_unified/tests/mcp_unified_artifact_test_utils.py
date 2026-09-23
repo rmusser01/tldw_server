@@ -7,10 +7,14 @@ import os
 import shutil
 import subprocess
 import sys
-import tomllib
 from pathlib import Path
 
 import pytest
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility.
+    import tomli as tomllib
 
 REPO_ROOT = Path(__file__).resolve().parents[5]
 STANDALONE_PROJECT_ROOT = REPO_ROOT / "apps" / "mcp-unified"
