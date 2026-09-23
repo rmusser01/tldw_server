@@ -1014,10 +1014,10 @@ async def list_optimizations(
         )
 
     except DatabaseError as exc:
-        logger.error("Database error listing optimizations")
+        logger.error("Database error listing optimizations: {}", type(exc).__name__)
         raise map_db_error_to_http(exc, default_detail="Failed to list optimizations") from exc
     except _OPTIMIZATION_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error("Unexpected error listing optimizations")
+        logger.error("Unexpected error listing optimizations: {}", type(exc).__name__)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to list optimizations",

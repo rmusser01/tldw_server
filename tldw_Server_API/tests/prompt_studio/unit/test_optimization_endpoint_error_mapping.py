@@ -24,6 +24,7 @@ from tldw_Server_API.app.api.v1.schemas.prompt_studio_optimization_requests impo
 )
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import DatabaseError
 from tldw_Server_API.app.core.Logging import log_context as log_context_module
+from tldw_Server_API.tests.prompt_studio.db_stub_contract import unservable_stub_methods
 
 pytestmark = pytest.mark.unit
 
@@ -265,16 +266,25 @@ class _EndpointLoggerStub:
         self.errors.append((args, kwargs))
 
 
+def test_db_stubs_only_define_methods_the_real_db_serves():
+    """A stub method the real DB lacks on one backend masks that backend's 500 (TASK-13290)."""
+    stubs = [obj for name, obj in globals().items() if isinstance(obj, type) and name.endswith("Db")]
+    assert stubs
+    offenders = {stub.__name__: unservable_stub_methods(stub) for stub in stubs}
+    assert not {name: methods for name, methods in offenders.items() if methods}
+
+
 def _assert_sanitized_endpoint_error_log(
     logger_stub: _EndpointLoggerStub,
     expected_message: str,
     raw_marker: str,
+    *expected_format_args: object,
 ) -> None:
     assert logger_stub.errors
     args, kwargs = logger_stub.errors[-1]
     rendered = " ".join(str(arg) for arg in args)
 
-    assert args == (expected_message,)
+    assert args == (expected_message, *expected_format_args)
     assert raw_marker not in rendered
     assert "/private/" not in rendered
     assert raw_marker not in str(kwargs)
@@ -358,8 +368,9 @@ async def test_list_optimizations_database_error_log_is_sanitized(monkeypatch):
     assert exc_info.value.detail == "Failed to list optimizations"
     _assert_sanitized_endpoint_error_log(
         logger_stub,
-        "Database error listing optimizations",
+        "Database error listing optimizations: {}",
         "driver failed",
+        DatabaseError.__name__,
     )
 
 
@@ -382,8 +393,9 @@ async def test_list_optimizations_unexpected_error_log_is_sanitized(monkeypatch)
     assert exc_info.value.detail == "Failed to list optimizations"
     _assert_sanitized_endpoint_error_log(
         logger_stub,
-        "Unexpected error listing optimizations",
+        "Unexpected error listing optimizations: {}",
         "prompt studio backend exploded",
+        "ValueError",
     )
 
 
