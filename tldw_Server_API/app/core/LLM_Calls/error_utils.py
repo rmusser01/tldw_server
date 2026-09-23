@@ -124,7 +124,35 @@ def build_sanitized_chat_error(
 
 
 def get_http_status_from_exception(exc: Exception) -> int | None:
-    """Best-effort extraction of an HTTP status code from common exception shapes."""
+    """Best-effort extraction of an HTTP status code from common exception shapes.
+
+    The single implementation behind the re-exports in ``Local_LLM/http_utils``,
+    ``Chat/chat_orchestrator`` and ``Embeddings_Create`` (TASK-13287).
+
+    Args:
+        exc: Any exception that may carry a status. Three shapes are recognised, in
+            this order of precedence:
+
+            1. ``exc.response.status_code`` or ``exc.response.status`` -- the status
+               actually returned on the wire, so it wins over anything set locally.
+            2. ``exc.status_code`` or ``exc.status`` on the exception itself, which a
+               wrapper further up may have set.
+            3. For a :class:`NetworkError` only, an ``HTTP <code>`` prefix parsed out
+               of ``str(exc)``. This is the fallback for
+               ``http_client._AiohttpResponse.raise_for_status``, which raises
+               ``NetworkError(f"HTTP {status}")`` with no status attribute.
+
+            A value that is present but not coercible to ``int`` is skipped rather
+            than raising, and the next shape is tried.
+
+    Returns:
+        The status as an ``int``, or ``None`` when the exception carries no status in
+        any of those shapes. ``None`` is meaningful and must stay distinguishable from
+        a parsed value: callers such as ``build_sanitized_chat_error`` treat it as
+        "unknown", and ``core/exceptions.py`` then defaults the response to 502. Do not
+        substitute a sentinel status here -- that is what made an upstream 429 reach
+        the client as 502 with no Retry-After.
+    """
     response = getattr(exc, "response", None)
     if response is not None:
         for attr in ("status_code", "status"):

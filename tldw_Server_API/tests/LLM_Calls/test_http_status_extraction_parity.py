@@ -52,7 +52,8 @@ def _extractors():
     }
 
 
-def test_response_status_wins_over_an_exception_attribute() -> None:
+@pytest.mark.parametrize("name", list(_extractors()))
+def test_response_status_wins_over_an_exception_attribute(name: str) -> None:
     """Pin the precedence, because the four copies did not agree on it.
 
     `Embeddings_Create` checked `exc.status_code` before `exc.response.status_code`;
@@ -62,20 +63,29 @@ def test_response_status_wins_over_an_exception_attribute() -> None:
 
     The response wins: it is the status actually returned on the wire, whereas an
     attribute on the exception may have been set by a wrapper further up.
+
+    One case per copy: a single diverging copy must not stop the other three being
+    reported.
     """
 
     class _Response:
+        """Minimal response double carrying only the wire status."""
+
         status_code = 429
 
     class _Both(Exception):
+        """Exception carrying a status on itself AND on its response, disagreeing.
+
+        The only shape where the precedence is observable.
+        """
+
         status_code = 500
         response = _Response()
 
-    for name, fn in _extractors().items():
-        assert fn(_Both("upstream")) == 429, (
-            f"{name} preferred the exception attribute (500) over the response status "
-            "(429); the four copies disagreed on this and it is now pinned"
-        )
+    assert _extractors()[name](_Both("upstream")) == 429, (
+        f"{name} preferred the exception attribute (500) over the response status "
+        "(429); the four copies disagreed on this and it is now pinned"
+    )
 
 
 @pytest.mark.parametrize("name", list(_extractors()))
@@ -116,22 +126,24 @@ def test_all_copies_agree() -> None:
         )
 
 
-def test_explicit_status_attributes_still_win() -> None:
+@pytest.mark.parametrize("name", list(_extractors()))
+def test_explicit_status_attributes_still_win(name: str) -> None:
     """Control: message parsing is the fallback, not the primary path."""
 
     class _WithStatus(Exception):
+        """Exception whose own status disagrees with the HTTP code in its message."""
+
         status_code = 418
 
-    for name, fn in _extractors().items():
-        assert fn(_WithStatus("HTTP 429 in the text")) == 418, (
-            f"{name} preferred the message over an explicit status_code attribute"
-        )
+    assert _extractors()[name](_WithStatus("HTTP 429 in the text")) == 418, (
+        f"{name} preferred the message over an explicit status_code attribute"
+    )
 
 
-def test_no_status_returns_none() -> None:
+@pytest.mark.parametrize("name", list(_extractors()))
+def test_no_status_returns_none(name: str) -> None:
     """Control: absence must stay distinguishable from a parsed value."""
-    for name, fn in _extractors().items():
-        assert fn(NetworkError("connection reset by peer")) is None, name
+    assert _extractors()[name](NetworkError("connection reset by peer")) is None, name
 
 
 def test_chat_orchestrator_cannot_yet_reach_this_path() -> None:
