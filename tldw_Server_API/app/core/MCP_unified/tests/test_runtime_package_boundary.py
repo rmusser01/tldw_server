@@ -884,6 +884,7 @@ def test_host_mcp_import_bootstraps_standalone_src_for_source_checkout() -> None
     assert payload["paths"] == [str(STANDALONE_SRC_ROOT)]  # nosec B101
 
 
+@pytest.mark.packaging  # builds a wheel and sdist, then shells out
 def test_mcp_unified_standalone_distribution_metadata_matches_extras(
     standalone_distributions: tuple[Path, Path],
 ) -> None:
@@ -929,6 +930,7 @@ def test_mcp_unified_standalone_distribution_metadata_matches_extras(
     )  # nosec B101
 
 
+@pytest.mark.packaging  # builds a wheel and sdist, then shells out
 def test_mcp_unified_artifacts_declare_bounded_jsonschema_base_dependency(
     standalone_distributions: tuple[Path, Path],
 ) -> None:
@@ -943,6 +945,7 @@ def test_mcp_unified_artifacts_declare_bounded_jsonschema_base_dependency(
         assert str(requirement.specifier) == "<5,>=4.23"  # nosec B101
 
 
+@pytest.mark.packaging  # builds a wheel and sdist, then shells out
 def test_mcp_unified_standalone_sdist_contains_only_package_boundary(
     standalone_distributions: tuple[Path, Path],
 ) -> None:
@@ -990,6 +993,7 @@ def test_mcp_unified_standalone_sdist_contains_only_package_boundary(
     assert "src/mcp_unified/gateway/cli.py" in members  # nosec B101
 
 
+@pytest.mark.packaging  # builds a wheel and sdist, then shells out
 def test_mcp_unified_standalone_artifacts_include_typed_marker(
     standalone_distributions: tuple[Path, Path],
 ) -> None:
@@ -1003,6 +1007,7 @@ def test_mcp_unified_standalone_artifacts_include_typed_marker(
     assert "src/mcp_unified/py.typed" in sdist_members  # nosec B101
 
 
+@pytest.mark.packaging  # builds a wheel and sdist, then shells out
 def test_mcp_unified_standalone_artifacts_include_package_docs(
     standalone_distributions: tuple[Path, Path],
 ) -> None:

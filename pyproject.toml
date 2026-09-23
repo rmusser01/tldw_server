@@ -585,6 +585,7 @@ filterwarnings = [
 markers = [
     "asyncio: mark test as async",
     "unit: marks tests as unit tests",
+    "packaging: marks tests that build distribution artifacts and shell out",
     "integration: marks tests as integration tests",
     "postgres: marks tests that require PostgreSQL",
     "e2e: marks end-to-end UI tests",
