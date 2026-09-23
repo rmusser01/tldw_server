@@ -3,9 +3,10 @@ id: TASK-13347
 title: >-
   Finish the ChatOps shell: support-module residue and the discord.py/slack.py
   pair
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-22 23:52'
+updated_date: '2026-09-23 18:06'
 labels:
   - duplication
   - api
@@ -30,17 +31,29 @@ Source: TASK-13326, synthesis F25.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 support pair residue extracted: env accessors, OAuth config getters, installation-record shape
-- [ ] #2 discord.py/slack.py share the receipt, dedupe, rate-limit and job-submission path
-- [ ] #3 signature algorithm and command parser remain injected, not shared
+- [x] #1 support pair residue extracted: env accessors, OAuth config getters, installation-record shape
+- [x] #2 discord.py/slack.py share the receipt, dedupe, rate-limit and job-submission path
+- [x] #3 signature algorithm and command parser remain injected, not shared
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-09-23: 3cbee3a79a stage 2c (_chatops/settings.py; PolicyStore/resolve_actor_id); e3c31fc40b stage 3 (_chatops/ingress.py). Signature verification and command parsing remain per protocol. ADR-050 table updated.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Stages 2c and 3 done. Support pair 78.2% -> 74.4% (largest identical run 123 -> 100: remaining run is HTTP/metric/crypto plumbing tests patch per module, kept local deliberately). Endpoint pair 61.3% -> 56.2% (remaining longest run is per-router OAuth/admin route declarations). Shared: env/OAuth settings, installation record, policy store, actor mapping, ingress responses, job submission, status-command scoping, job-status route, org resolution. Per protocol: signature algorithm, command parser, tenant fields. Tests: 732 passed; 14 failures identical on HEAD (router_groups_contract, auth_dependency_contract). Finding filed separately: the job-status HTTP route is unauthenticated.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
