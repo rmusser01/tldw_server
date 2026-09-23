@@ -10684,14 +10684,22 @@ class SyncV2Service:
             != SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION
             else None
         )
+        if blocker_cursor is not None:
+            # End the scan at the blocker rather than filtering around it, matching how
+            # _scan_pull_page_versioned breaks out of its merge loop. The caller derives
+            # both `has_more` and the next watermark from `raw`, so leaving withheld
+            # envelopes in it advanced the device cursor past rows this function refused
+            # to deliver -- they were then never sent again, and the device was told it
+            # was caught up. Silent, permanent, per-device data loss.
+            raw = [
+                envelope
+                for envelope in raw
+                if envelope.server_sequence < blocker_cursor
+            ]
         visible = [
             envelope
             for envelope in raw
             if envelope.apply_status not in {"conflict", "superseded"}
-            and (
-                blocker_cursor is None
-                or envelope.server_sequence < blocker_cursor
-            )
             and _personal_context_pull_visible(
                 envelope,
                 authorized=personal_context_egress_authorized,

@@ -349,7 +349,6 @@ from . import chat_dictionaries, chat_documents, chat_grammars
 from .llm_providers import get_configured_providers
 
 _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,

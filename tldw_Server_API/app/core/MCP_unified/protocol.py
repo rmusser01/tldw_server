@@ -117,7 +117,6 @@ class ErrorCode(IntEnum):
 
 
 _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,

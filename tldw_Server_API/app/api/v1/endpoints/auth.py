@@ -166,7 +166,6 @@ from tldw_Server_API.app.services.auth_service import (
 from tldw_Server_API.app.services.registration_service import RegistrationService
 
 _AUTH_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     AssertionError,
     AttributeError,
     ConnectionError,

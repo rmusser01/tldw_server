@@ -9368,3 +9368,115 @@ def test_store_attachment_rejects_before_domain_size_and_policy_checks_in_m1(
             payload_hash="sha256:forbidden",
             encryption_policy="client_private_v1",
         )
+
+
+def test_legacy_pull_does_not_advance_past_unresolved_conflict(
+    sync_store: SyncV2Store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression guard for TASK-13298 -- the v1 mirror of the versioned test above.
+
+    The legacy adapter-v1 pull path derived its next cursor from the UNFILTERED
+    envelope list, while the versioned path derives it from `safe_raw_envelopes`
+    (filtered by the blocker cursor). A device that never negotiated
+    `supported_adapter_versions` -- the default -- therefore had its watermark advanced
+    past envelopes withheld behind an unresolved conflict, and was told it was caught
+    up. Silent, permanent, per-device data loss on the default path.
+
+    `test_versioned_pull_does_not_advance_past_unresolved_conflict` proved the v2 path
+    correct; no v1 equivalent existed, which is why this survived.
+    """
+    registry = SyncAdapterRegistry(
+        [StaticSyncAdapter(domain="notes.note", supported_adapter_versions={1})]
+    )
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        clock=_clock,
+        settings=SyncV2Settings(
+            max_pull_page_size=10,
+            pull_token_signing_secret="test-only-pull-secret",
+            server_trusted_encryption=_ready_encryption(),
+        ),
+    )
+    # No supported_adapter_versions: the un-negotiated default, which routes through
+    # the legacy pull path.
+    service.register_device(
+        user_id="user-1",
+        display_name="Laptop",
+        client_type="chatbook",
+        device_id="device-1",
+        capabilities={"requested_domains": ["notes.note"]},
+    )
+    service.enroll_dataset(
+        user_id="user-1", dataset_id="dataset-1", domains=["notes.note"]
+    )
+
+    blocked = sync_store.insert_envelope(
+        _envelope(
+            client_envelope_id="blocked-v1",
+            adapter_version=1,
+            schema_version=1,
+            status="accepted",
+            apply_status="applied",
+        )
+    )
+    later = sync_store.insert_envelope(
+        _envelope(
+            client_envelope_id="later-v1",
+            entity_id="note-later-v1",
+            stable_key="note:later-v1",
+            payload_hash="sha256:later-v1",
+            adapter_version=1,
+            schema_version=1,
+            status="accepted",
+            apply_status="applied",
+        )
+    )
+    blocked = sync_store.mark_envelope_apply_status(
+        blocked.server_sequence,
+        apply_status="conflict",
+        apply_error_code="projection_conflict",
+    )
+    conflict = sync_store.insert_conflict(
+        SyncConflictCreate(
+            conflict_id="conflict-blocked-v1",
+            dataset_id="dataset-1",
+            domain="notes.note",
+            object_id=blocked.object_id,
+            conflict_type="projection_conflict",
+            local_envelope_id=blocked.client_envelope_id,
+            server_cursor=blocked.server_sequence,
+        )
+    )
+
+    first = service.pull(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        include_own_changes=True,
+    )
+    assert conflict.server_sequence == blocked.server_sequence
+    assert first.envelopes == [], "the blocked envelope must not be delivered"
+
+    # Clear the blocker, then resume from the cursor the first pull handed back.
+    monkeypatch.setattr(
+        sync_store,
+        "get_unresolved_materialization_conflict",
+        lambda _dataset_id: None,
+    )
+    second = service.pull(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        cursor=first.next_cursor,
+        include_own_changes=True,
+    )
+
+    assert [item.client_envelope_id for item in second.envelopes] == [
+        later.client_envelope_id
+    ], (
+        "the deliverable envelope behind the blocker was skipped: the legacy pull "
+        "advanced its watermark past withheld envelopes, so this device never "
+        "receives it and was told it was caught up"
+    )

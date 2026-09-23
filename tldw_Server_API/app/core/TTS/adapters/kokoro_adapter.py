@@ -50,7 +50,6 @@ from .base import AudioFormat, ProviderStatus, TTSAdapter, TTSCapabilities, TTSR
 # Kokoro TTS Adapter Implementation
 
 _KOKORO_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,

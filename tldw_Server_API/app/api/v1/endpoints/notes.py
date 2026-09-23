@@ -226,7 +226,6 @@ from tldw_Server_API.app.core.Writing.note_title import TitleGenOptions, generat
 # Functions:
 
 _NOTES_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     AssertionError,
     AttributeError,
     ConnectionError,

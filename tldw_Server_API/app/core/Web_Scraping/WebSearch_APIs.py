@@ -48,7 +48,6 @@ from tldw_Server_API.app.core.Web_Scraping.ua_profiles import (
 )
 
 _WEBSEARCH_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,

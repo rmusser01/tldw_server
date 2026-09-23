@@ -63,7 +63,6 @@ _ADMIN_DEPS = [
 ]
 
 _AUDIO_JOBS_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,
