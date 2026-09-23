@@ -17,6 +17,8 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatProviderError,
     ChatRateLimitError,
 )
+from tldw_Server_API.app.core.exceptions import raise_detached_error
+
 # Transport-exception classification now lives in core/Utils/http_status_extraction.py
 # so TTS, Local_LLM and Embeddings can use it without depending on LLM_Calls.
 # Re-exported here because 14 modules already import these names from this module.
@@ -25,11 +27,7 @@ from tldw_Server_API.app.core.Utils.http_status_extraction import (  # noqa: F40
     get_http_status_from_exception,
     is_chunked_encoding_error,
     is_http_status_error,
-)
-from tldw_Server_API.app.core.exceptions import (
-    NetworkError,
-    RetryExhaustedError,
-    raise_detached_error,
+    is_network_error,
 )
 
 _ERROR_UTILS_NONCRITICAL_EXCEPTIONS = (
@@ -333,17 +331,3 @@ def raise_chat_error_from_http(
             treat_other_4xx_as_bad_request=treat_other_4xx_as_bad_request,
         )
     )
-
-
-def is_network_error(exc: Exception) -> bool:
-    if isinstance(exc, (NetworkError, RetryExhaustedError)):
-        return True
-    module = getattr(exc.__class__, "__module__", "")
-    name = exc.__class__.__name__
-    if module.startswith("requests"):
-        return "RequestException" in name or "ConnectionError" in name or "Timeout" in name
-    if module.startswith("httpx"):
-        return "RequestError" in name or "Connect" in name or "Timeout" in name
-    return False
-
-

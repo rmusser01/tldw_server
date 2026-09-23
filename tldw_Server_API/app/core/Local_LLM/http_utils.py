@@ -7,17 +7,12 @@ readiness polling, and command redaction for safer logging.
 from __future__ import annotations
 
 import asyncio
-import re
 from collections.abc import Iterable
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from loguru import logger
 
-from tldw_Server_API.app.core.exceptions import NetworkError, RetryExhaustedError
-# Shared transport-exception classification; this module previously carried the
-# only CORRECT copy of the status regex while two siblings carried a broken one.
-from tldw_Server_API.app.core.Utils.http_status_extraction import get_http_status_from_exception  # noqa: F401
 from tldw_Server_API.app.core.http_client import (
     RetryPolicy,
     adownload,
@@ -26,6 +21,14 @@ from tldw_Server_API.app.core.http_client import (
 )
 from tldw_Server_API.app.core.http_client import (
     create_async_client as _create_async_client,
+)
+
+# Shared transport-exception classification, re-exported under this module's names
+# (handlers call http_utils.get_http_error_text / is_network_error).
+from tldw_Server_API.app.core.Utils.http_status_extraction import (  # noqa: F401
+    get_http_error_text,
+    get_http_status_from_exception,
+    is_network_error,
 )
 
 DEFAULT_TIMEOUT: float = 120.0
@@ -52,30 +55,6 @@ _SECRET_QUERY_KEYS = {
 def _is_httpx_async_client(client: Any) -> bool:
     module = getattr(client.__class__, "__module__", "")
     return module.startswith("httpx") and client.__class__.__name__ == "AsyncClient"
-
-
-def get_http_error_text(exc: Exception) -> str:
-    resp = getattr(exc, "response", None)
-    if resp is not None:
-        text = getattr(resp, "text", None)
-        if text is not None:
-            return str(text)
-    response_text = getattr(exc, "response_text", None)
-    if response_text:
-        return str(response_text)
-    return str(exc)
-
-
-def is_network_error(exc: Exception) -> bool:
-    if isinstance(exc, (NetworkError, RetryExhaustedError)):
-        return True
-    module = getattr(exc.__class__, "__module__", "")
-    name = exc.__class__.__name__
-    if module.startswith("httpx"):
-        return "RequestError" in name or "Timeout" in name or "Connect" in name
-    if module.startswith("requests"):
-        return "RequestException" in name or "Timeout" in name or "ConnectionError" in name
-    return False
 
 
 def redacted_url(url: str) -> str:

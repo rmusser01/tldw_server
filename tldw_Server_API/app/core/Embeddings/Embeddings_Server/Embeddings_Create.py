@@ -290,6 +290,12 @@ def _get_explicit_local_api_embeddings_batch(
 
 
 def _is_probable_network_error(exc: Exception) -> bool:
+    """Broader than Utils.http_status_extraction.is_network_error on purpose.
+
+    Embedding backends include SDKs and local servers whose transport errors are not
+    httpx/requests types, so this also matches builtin Timeout/ConnectionError and
+    message text to decide whether a retry is worthwhile.
+    """
     if isinstance(exc, (NetworkError, TimeoutError, ConnectionError)):
         return True
     name = type(exc).__name__

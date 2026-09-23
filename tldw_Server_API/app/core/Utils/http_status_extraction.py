@@ -21,14 +21,15 @@ are unaffected.
 """
 
 import re
-from typing import Any
 
-from tldw_Server_API.app.core.exceptions import NetworkError
+from tldw_Server_API.app.core.exceptions import NetworkError, RetryExhaustedError
 
 # Failures while *inspecting* an exception must never mask the exception itself.
+# RuntimeError covers httpx.ResponseNotRead, which get_http_error_text recovers from.
 _HTTP_STATUS_NONCRITICAL_EXCEPTIONS = (
     AttributeError,
     LookupError,
+    RuntimeError,
     TypeError,
     ValueError,
     OSError,
@@ -40,6 +41,7 @@ __all__ = [
     "get_http_status_from_exception",
     "is_chunked_encoding_error",
     "is_http_status_error",
+    "is_network_error",
 ]
 
 
@@ -123,3 +125,15 @@ def is_chunked_encoding_error(exc: Exception) -> bool:
     module = getattr(exc.__class__, "__module__", "")
     name = exc.__class__.__name__
     return module.startswith("requests") and name == "ChunkedEncodingError"
+
+
+def is_network_error(exc: Exception) -> bool:
+    if isinstance(exc, (NetworkError, RetryExhaustedError)):
+        return True
+    module = getattr(exc.__class__, "__module__", "")
+    name = exc.__class__.__name__
+    if module.startswith("requests"):
+        return "RequestException" in name or "ConnectionError" in name or "Timeout" in name
+    if module.startswith("httpx"):
+        return "RequestError" in name or "Connect" in name or "Timeout" in name
+    return False

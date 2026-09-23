@@ -69,8 +69,8 @@ def test_attribute_branch_still_wins(extract) -> None:
 def test_every_entry_point_is_the_same_object() -> None:
     """All former copies now resolve to one implementation, not four look-alikes."""
     from tldw_Server_API.app.core.Embeddings.Embeddings_Server import Embeddings_Create
-    from tldw_Server_API.app.core.Local_LLM import http_utils as local_http
     from tldw_Server_API.app.core.LLM_Calls import error_utils as llm_err
+    from tldw_Server_API.app.core.Local_LLM import http_utils as local_http
     from tldw_Server_API.app.core.Utils.http_status_extraction import (
         get_http_status_from_exception as canonical,
     )
@@ -115,3 +115,52 @@ def test_qwen3_method_delegates_to_the_shared_classifier() -> None:
     runtime = RemoteQwenRuntime.__new__(RemoteQwenRuntime)
     assert runtime._is_http_status_error(_HttpxStatusError()) is True
     assert runtime._is_http_status_error(ValueError("nope")) is False
+
+
+def test_error_text_and_network_classifier_have_one_implementation() -> None:
+    """get_http_error_text and is_network_error were also copied into Local_LLM."""
+    from tldw_Server_API.app.core.LLM_Calls import error_utils as llm_err
+    from tldw_Server_API.app.core.Local_LLM import http_utils as local_http
+    from tldw_Server_API.app.core.Utils import http_status_extraction as canonical
+
+    assert llm_err.get_http_error_text is canonical.get_http_error_text
+    assert local_http.get_http_error_text is canonical.get_http_error_text
+    assert llm_err.is_network_error is canonical.is_network_error
+    assert local_http.is_network_error is canonical.is_network_error
+
+
+def test_error_text_reads_an_unread_streaming_body() -> None:
+    """httpx raises ResponseNotRead (a RuntimeError) on .text of an unread stream.
+
+    The helper's read-then-retry branch only runs if that exception is caught;
+    dropping RuntimeError from the noncritical tuple made it dead code and let
+    ResponseNotRead escape from inside callers' error handlers.
+    """
+    import httpx
+
+    from tldw_Server_API.app.core.Utils.http_status_extraction import get_http_error_text
+
+    request = httpx.Request("POST", "http://upstream.invalid/v1/chat")
+    response = httpx.Response(429, request=request, stream=httpx.ByteStream(b"slow down"))
+    exc = httpx.HTTPStatusError("429", request=request, response=response)
+    assert get_http_error_text(exc) == "slow down"
+
+
+@pytest.mark.parametrize(
+    ("module", "name", "expected"),
+    [
+        ("httpx", "ConnectTimeout", True),
+        ("httpx", "RequestError", True),
+        ("httpx", "HTTPStatusError", False),
+        ("requests.exceptions", "ConnectionError", True),
+        ("requests.exceptions", "HTTPError", False),
+        ("builtins", "ValueError", False),
+    ],
+)
+def test_is_network_error_classification(module: str, name: str, expected: bool) -> None:
+    from tldw_Server_API.app.core.Utils.http_status_extraction import is_network_error
+
+    cls = type(name, (Exception,), {})
+    cls.__module__ = module
+    assert is_network_error(cls()) is expected
+    assert is_network_error(NetworkError("down")) is True
