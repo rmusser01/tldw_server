@@ -383,7 +383,6 @@ class BufferedTranscriber:
         # Resample if needed
         if sample_rate != 16000:
             audio_data = self._resample(audio_data, sample_rate, 16000)
-            sample_rate = 16000
 
         # Precompute file-specific expected/allowed chunk counts
         padding_samples_pre = self.buffer_samples_at_16k - self.chunk_samples_at_16k
@@ -766,7 +765,6 @@ def transcribe_long_audio(
     if variant == "mlx" and return_structured:
         if sample_rate != 16000:
             audio_data = transcriber._resample(audio_data, sample_rate, 16000)
-            sample_rate = 16000
 
         chunks = transcriber._create_chunks(audio_data)
         total_chunks = len(chunks)
