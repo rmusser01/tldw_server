@@ -47,8 +47,9 @@ from .backends.query_utils import (
 
 # Local imports
 from .Prompts_DB import ConflictError, DatabaseError, InputError, PromptsDatabase, SchemaError
-from .prompt_studio_db.prompt_fields import _prepare_prompt_record_fields
+from .prompt_studio_db.prompt_fields import _prepare_prompt_record_fields  # noqa: F401 - re-exported for endpoints
 from .prompt_studio_db.repositories.evaluations import EvaluationsRepository
+from .prompt_studio_db.repositories.prompts import PromptsRepository
 from .prompt_studio_db.repositories.projects import ProjectsRepository
 from .prompt_studio_db.repositories.signatures import SignaturesRepository
 from .prompt_studio_db.repositories.prompt_versions import PromptVersionsRepository
@@ -1148,96 +1149,6 @@ class _BackendPromptStudioDatabase(BackendPromptStudioDatabaseBase):
     # --- Core API ---
     # Project name constraints
 
-    def create_prompt(
-        self,
-        project_id: int,
-        name: str,
-        *,
-        signature_id: Optional[int] = None,
-        version_number: int = 1,
-        system_prompt: Optional[str] = None,
-        user_prompt: Optional[str] = None,
-        prompt_format: str = "legacy",
-        prompt_schema_version: Optional[int] = None,
-        prompt_definition: Optional[Any] = None,
-        few_shot_examples: Optional[Any] = None,
-        modules_config: Optional[Any] = None,
-        parent_version_id: Optional[int] = None,
-        change_description: Optional[str] = None,
-        client_id: Optional[str] = None,
-    ) -> dict[str, Any]:
-        normalized_prompt_fields = _prepare_prompt_record_fields(
-            prompt_format=prompt_format,
-            prompt_schema_version=prompt_schema_version,
-            prompt_definition=prompt_definition,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-        )
-        prompt_uuid = str(uuid.uuid4())
-        payload = (
-            prompt_uuid,
-            project_id,
-            signature_id,
-            version_number,
-            name,
-            normalized_prompt_fields["system_prompt"],
-            normalized_prompt_fields["user_prompt"],
-            normalized_prompt_fields["prompt_format"],
-            normalized_prompt_fields["prompt_schema_version"],
-            json.dumps(normalized_prompt_fields["prompt_definition"])
-            if normalized_prompt_fields["prompt_definition"] is not None
-            else None,
-            json.dumps(few_shot_examples) if few_shot_examples is not None else None,
-            json.dumps(modules_config) if modules_config is not None else None,
-            parent_version_id,
-            change_description,
-            client_id or self.client_id,
-        )
-
-        insert_sql = """
-            INSERT INTO prompt_studio_prompts (
-                uuid, project_id, signature_id, version_number, name, system_prompt,
-                user_prompt, prompt_format, prompt_schema_version, prompt_definition,
-                few_shot_examples, modules_config, parent_version_id,
-                change_description, client_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            RETURNING id, uuid, project_id, signature_id, version_number, name,
-                      system_prompt, user_prompt, prompt_format, prompt_schema_version,
-                      prompt_definition, few_shot_examples, modules_config, parent_version_id, change_description, client_id, deleted,
-                      deleted_at, created_at, updated_at
-        """
-
-        try:
-            with self._write_lock, self.transaction() as conn:
-                cursor = self._cursor_exec(conn, insert_sql, payload)
-                row = cursor.fetchone()
-                prompt = self._row_to_dict(row)
-            self._log_sync_event(
-                "prompt_studio_prompt",
-                prompt_uuid,
-                "create",
-                {
-                    "project_id": project_id,
-                    "name": name,
-                    "version_number": version_number,
-                },
-            )
-            return prompt or {}  # noqa: TRY300
-        except BackendDatabaseError as exc:
-            message = str(exc).lower()
-            if 'duplicate' in message and 'prompt_studio_prompts' in message and 'name' in message:
-                raise ConflictError(  # noqa: TRY003
-                    f"Prompt with name '{name}' already exists in project {project_id}"
-                ) from exc
-            raise DatabaseError(f"Failed to create prompt studio prompt: {exc}") from exc  # noqa: TRY003
-        except _PROMPT_STUDIO_NONCRITICAL_EXCEPTIONS as exc:
-            msg = str(exc).lower()
-            if 'duplicate' in msg or 'unique constraint' in msg or 'unique violation' in msg:
-                raise ConflictError(  # noqa: TRY003
-                    f"Prompt with name '{name}' already exists in project {project_id}"
-                ) from exc
-            raise
-
     # --- Signature helpers -----------------------------------------------
 
     # --- Test run helpers ------------------------------------------------
@@ -1755,123 +1666,6 @@ class _BackendPromptStudioDatabase(BackendPromptStudioDatabaseBase):
 
     # --- Prompt helpers ---
 
-    def get_prompt(self, prompt_id: int, include_deleted: bool = False) -> Optional[dict[str, Any]]:
-        clauses = ["id = ?"]
-        params: list[Any] = [prompt_id]
-        if not include_deleted:
-            clauses.append("deleted = FALSE")
-
-        query = (
-            "SELECT * FROM prompt_studio_prompts WHERE " + " AND ".join(clauses) + " LIMIT 1"  # nosec B608
-        )
-
-        try:
-            cursor = self._execute(query, params)
-            row = cursor.fetchone()
-            return self._row_to_dict(cursor, row)
-        except BackendDatabaseError as exc:
-            raise DatabaseError(f"Failed to fetch prompt {prompt_id}: {exc}") from exc  # noqa: TRY003
-
-    def list_prompts(
-        self,
-        project_id: int,
-        *,
-        page: int = 1,
-        per_page: int = 20,
-        include_deleted: bool = False,
-    ) -> dict[str, Any]:
-        if page < 1:
-            raise InputError("Page index must be >= 1")  # noqa: TRY003
-        if per_page < 1:
-            raise InputError("Items per page must be >= 1")  # noqa: TRY003
-
-        base_conditions = ["project_id = ?"]
-        params: list[Any] = [project_id]
-        if not include_deleted:
-            base_conditions.append("deleted = FALSE")
-
-        where_clause = " WHERE " + " AND ".join(base_conditions)
-
-        count_sql = f"SELECT COUNT(*) FROM prompt_studio_prompts{where_clause}"  # nosec B608
-        try:
-            count_cursor = self._execute(count_sql, params)
-            total_row = count_cursor.fetchone()
-            total = int(total_row[0]) if total_row and total_row[0] is not None else 0
-
-            offset = (page - 1) * per_page
-            list_sql = """
-                SELECT *
-                FROM prompt_studio_prompts
-                {where_clause}
-                ORDER BY updated_at DESC, version_number DESC
-                LIMIT ? OFFSET ?
-            """.format_map(locals())  # nosec B608
-            list_params = list(params) + [per_page, offset]
-            list_cursor = self._execute(list_sql, list_params)
-            rows = list_cursor.fetchall()
-            prompts = [self._row_to_dict(list_cursor, row) for row in rows if row]
-
-            return {
-                "prompts": prompts,
-                "pagination": {
-                    "page": page,
-                    "per_page": per_page,
-                    "total": total,
-                    "total_pages": (total + per_page - 1) // per_page if per_page else 0,
-                },
-            }
-        except BackendDatabaseError as exc:
-            raise DatabaseError(  # noqa: TRY003
-                f"Failed to list prompts for project {project_id}: {exc}"
-            ) from exc
-
-    def ensure_prompt_stub(
-        self,
-        *,
-        prompt_id: int,
-        project_id: int,
-        name: Optional[str] = None,
-        client_id: Optional[str] = None,
-    ) -> None:
-        """Ensure a placeholder prompt exists for the given identifiers."""
-
-        if not prompt_id or not project_id:
-            return
-
-        try:
-            cursor = self._execute(
-                "SELECT 1 FROM prompt_studio_prompts WHERE id = ?",
-                [prompt_id],
-            )
-            if cursor.fetchone() is not None:
-                return
-        except BackendDatabaseError as exc:
-            raise DatabaseError(  # noqa: TRY003
-                f"Failed to verify prompt {prompt_id} existence: {exc}"
-            ) from exc
-
-        stub_name = name or f"Auto-Created Prompt {prompt_id}"
-        params = (
-            prompt_id,
-            project_id,
-            stub_name,
-            client_id or self.client_id,
-        )
-
-        insert_sql = """
-            INSERT OR IGNORE INTO prompt_studio_prompts (
-                id, uuid, project_id, version_number, name, client_id
-            ) VALUES (?, lower(hex(randomblob(16))), ?, 1, ?, ?)
-        """
-
-        try:
-            with self._write_lock, self.transaction() as conn:
-                _ = self._cursor_exec(conn, insert_sql, params)
-        except BackendDatabaseError as exc:
-            raise DatabaseError(  # noqa: TRY003
-                f"Failed to create placeholder prompt {prompt_id}: {exc}"
-            ) from exc
-
     # --- Job queue helpers ---
 
     def create_job(
@@ -2338,30 +2132,6 @@ class _BackendPromptStudioDatabase(BackendPromptStudioDatabaseBase):
             raise DatabaseError(  # noqa: TRY003
                 f"Failed listing jobs for entity {entity_id}: {exc}"
             ) from exc
-
-    def get_prompt_with_project(
-        self,
-        prompt_id: int,
-        *,
-        include_deleted: bool = False,
-    ) -> Optional[dict[str, Any]]:
-        clauses = ["p.id = ?"]
-        if not include_deleted:
-            clauses.append("p.deleted = FALSE")
-        where_sql = ' AND '.join(clauses)
-        query = """
-            SELECT p.*, proj.user_id AS project_user_id
-            FROM prompt_studio_prompts p
-            JOIN prompt_studio_projects proj ON p.project_id = proj.id
-            WHERE {where_sql}
-            LIMIT 1
-        """.format_map(locals())  # nosec B608
-        try:
-            cursor = self._execute(query, [prompt_id])
-            row = cursor.fetchone()
-            return self._row_to_dict(cursor, row) if row else None
-        except BackendDatabaseError as exc:
-            raise DatabaseError(f"Failed to fetch prompt {prompt_id}: {exc}") from exc  # noqa: TRY003
 
     def get_golden_test_cases(
         self,
@@ -3095,106 +2865,6 @@ class _SQLitePromptStudioDatabase(PromptsDatabase):
     ####################################################################################################################
     # Evaluation Management
 
-    def create_prompt(
-        self,
-        project_id: int,
-        name: str,
-        *,
-        signature_id: Optional[int] = None,
-        version_number: int = 1,
-        system_prompt: Optional[str] = None,
-        user_prompt: Optional[str] = None,
-        prompt_format: str = "legacy",
-        prompt_schema_version: Optional[int] = None,
-        prompt_definition: Optional[Any] = None,
-        few_shot_examples: Optional[Any] = None,
-        modules_config: Optional[Any] = None,
-        parent_version_id: Optional[int] = None,
-        change_description: Optional[str] = None,
-        client_id: Optional[str] = None,
-    ) -> dict[str, Any]:
-        import random
-        import time
-
-        normalized_prompt_fields = _prepare_prompt_record_fields(
-            prompt_format=prompt_format,
-            prompt_schema_version=prompt_schema_version,
-            prompt_definition=prompt_definition,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-        )
-        prompt_uuid = str(uuid.uuid4())
-        payload = (
-            prompt_uuid,
-            project_id,
-            signature_id,
-            version_number,
-            name,
-            normalized_prompt_fields["system_prompt"],
-            normalized_prompt_fields["user_prompt"],
-            normalized_prompt_fields["prompt_format"],
-            normalized_prompt_fields["prompt_schema_version"],
-            json.dumps(normalized_prompt_fields["prompt_definition"])
-            if normalized_prompt_fields["prompt_definition"] is not None
-            else None,
-            json.dumps(few_shot_examples) if few_shot_examples is not None else None,
-            json.dumps(modules_config) if modules_config is not None else None,
-            parent_version_id,
-            change_description,
-            client_id or self.client_id,
-        )
-
-        insert_sql = """
-            INSERT INTO prompt_studio_prompts (
-                uuid, project_id, signature_id, version_number, name, system_prompt,
-                user_prompt, prompt_format, prompt_schema_version, prompt_definition,
-                few_shot_examples, modules_config, parent_version_id,
-                change_description, client_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """
-
-        conn = self.get_connection()
-        max_retries = 5
-        base_delay = 0.05
-
-        for attempt in range(max_retries):
-            should_retry = False
-            with self._write_lock:
-                try:
-                    cursor = conn.cursor()
-                    cursor.execute(insert_sql, payload)
-                    prompt_id = cursor.lastrowid
-                    conn.commit()
-                    prompt = self.get_prompt(prompt_id)
-                    self._log_sync_event(
-                        "prompt_studio_prompt",
-                        prompt_uuid,
-                        "create",
-                        {
-                            "project_id": project_id,
-                            "name": name,
-                            "version_number": version_number,
-                        },
-                    )
-                    return prompt or {}  # noqa: TRY300
-                except sqlite3.OperationalError as exc:
-                    if "database is locked" in str(exc).lower() and attempt < max_retries - 1:
-                        should_retry = True
-                        delay = base_delay * (2 ** attempt) * (0.5 + random.random())
-                    else:
-                        raise DatabaseError(f"Failed to create prompt: {exc}") from exc  # noqa: TRY003
-                except sqlite3.IntegrityError as exc:
-                    if "UNIQUE" in str(exc).upper():
-                        raise ConflictError(  # noqa: TRY003
-                            f"Prompt with name '{name}' already exists in project {project_id}"
-                        ) from exc
-                    raise DatabaseError(f"Failed to create prompt: {exc}") from exc  # noqa: TRY003
-
-            if should_retry:
-                time.sleep(delay)
-
-        raise DatabaseError("Failed to create prompt after multiple retries")  # noqa: TRY003
-
     ####################################################################################################################
     # Helper Methods
 
@@ -3292,59 +2962,6 @@ class _SQLitePromptStudioDatabase(PromptsDatabase):
 
     ####################################################################################################################
     # Prompt Accessors (Prompt Studio tables)
-
-    def get_prompt(self, prompt_id: int, include_deleted: bool = False) -> Optional[dict[str, Any]]:
-        """
-        Fetch a prompt-studio prompt by id from the prompt_studio_prompts table.
-
-        Args:
-            prompt_id: ID of the prompt (prompt_studio_prompts.id)
-            include_deleted: Also return soft-deleted prompts.
-
-        Returns:
-            A dictionary representing the prompt or None if not found.
-        """
-        try:
-            conn = self.get_connection()
-            cursor = conn.cursor()
-            query = "SELECT * FROM prompt_studio_prompts WHERE id = ?"
-            if not include_deleted:
-                query += " AND deleted = 0"
-            cursor.execute(query, (prompt_id,))
-            row = cursor.fetchone()
-            if not row:
-                return None
-            return self._row_to_dict(cursor, row)
-        except _PROMPT_STUDIO_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Failed to get prompt {prompt_id}: {e}")
-            return None
-
-    def get_prompt_with_project(
-        self,
-        prompt_id: int,
-        *,
-        include_deleted: bool = False,
-    ) -> Optional[dict[str, Any]]:
-        try:
-            conn = self.get_connection()
-            cursor = conn.cursor()
-            clause = "" if include_deleted else "AND p.deleted = 0"
-            cursor.execute(
-                """
-                SELECT p.*, proj.user_id AS project_user_id
-                FROM prompt_studio_prompts p
-                JOIN prompt_studio_projects proj ON p.project_id = proj.id
-                WHERE p.id = ? {clause}
-                """.format_map(locals()),  # nosec B608
-                (prompt_id,),
-            )
-            row = cursor.fetchone()
-            if not row:
-                return None
-            return self._row_to_dict(cursor, row)
-        except _PROMPT_STUDIO_NONCRITICAL_EXCEPTIONS as exc:  # noqa: BLE001
-            logger.error(f"Failed to fetch prompt {prompt_id}: {exc}")
-            return None
 
     # --- Optimization helpers -------------------------------------------------
 
@@ -4247,103 +3864,6 @@ class _SQLitePromptStudioDatabase(PromptsDatabase):
                 time.sleep(delay)
         raise DatabaseError("Failed to renew job lease due to database locks")  # noqa: TRY003
 
-    def list_prompts(
-        self,
-        project_id: int,
-        *,
-        page: int = 1,
-        per_page: int = 20,
-        include_deleted: bool = False,
-    ) -> dict[str, Any]:
-        import sqlite3
-
-        if page < 1:
-            raise InputError("Page index must be >= 1")  # noqa: TRY003
-        if per_page < 1:
-            raise InputError("Items per page must be >= 1")  # noqa: TRY003
-
-        try:
-            conn = self.get_connection()
-            cursor = conn.cursor()
-
-            base_clause = "FROM prompt_studio_prompts WHERE project_id = ?"
-            params: list[Any] = [project_id]
-            if not include_deleted:
-                base_clause += " AND deleted = 0"
-
-            cursor.execute(f"SELECT COUNT(*) {base_clause}", params)
-            total_row = cursor.fetchone()
-            total = int(total_row[0]) if total_row and total_row[0] is not None else 0
-
-            offset = (page - 1) * per_page
-            list_query = (
-                f"SELECT * {base_clause} "
-                "ORDER BY updated_at DESC, version_number DESC LIMIT ? OFFSET ?"
-            )
-            cursor.execute(list_query, params + [per_page, offset])
-            prompts = [self._row_to_dict(cursor, row) for row in cursor.fetchall()]
-
-            return {
-                "prompts": prompts,
-                "pagination": {
-                    "page": page,
-                    "per_page": per_page,
-                    "total": total,
-                    "total_pages": (total + per_page - 1) // per_page if per_page else 0,
-                },
-            }
-        except sqlite3.Error as exc:  # noqa: BLE001
-            raise DatabaseError(f"Failed to list prompts: {exc}") from exc  # noqa: TRY003
-
-    def ensure_prompt_stub(
-        self,
-        *,
-        prompt_id: int,
-        project_id: int,
-        name: Optional[str] = None,
-        client_id: Optional[str] = None,
-    ) -> None:
-        import sqlite3
-
-        if not prompt_id or not project_id:
-            return
-
-        conn = self.get_connection()
-        cursor = conn.cursor()
-
-        try:
-            cursor.execute(
-                "SELECT 1 FROM prompt_studio_prompts WHERE id = ?",
-                (prompt_id,),
-            )
-            if cursor.fetchone() is not None:
-                return
-        except sqlite3.Error as exc:  # noqa: BLE001
-            raise DatabaseError(  # noqa: TRY003
-                f"Failed to verify prompt {prompt_id} existence: {exc}"
-            ) from exc
-
-        stub_name = name or f"Auto-Created Prompt {prompt_id}"
-        try:
-            cursor.execute(
-                """
-                INSERT OR IGNORE INTO prompt_studio_prompts (
-                    id, uuid, project_id, version_number, name, client_id
-                ) VALUES (?, lower(hex(randomblob(16))), ?, 1, ?, ?)
-                """,
-                (
-                    prompt_id,
-                    project_id,
-                    stub_name,
-                    client_id or self.client_id,
-                ),
-            )
-            conn.commit()
-        except sqlite3.Error as exc:  # noqa: BLE001
-            raise DatabaseError(  # noqa: TRY003
-                f"Failed to create placeholder prompt {prompt_id}: {exc}"
-            ) from exc
-
     ####################################################################################################################
     # Test Case Methods
 
@@ -4977,6 +4497,15 @@ class PromptStudioDatabase:
     def delete_project(self, *args: Any, **kwargs: Any) -> bool:
         return ProjectsRepository(self._impl).delete(*args, **kwargs)
 
+    def get_prompt(self, *args: Any, **kwargs: Any) -> Optional[dict[str, Any]]:
+        return PromptsRepository(self._impl).get(*args, **kwargs)
+
+    def get_prompt_with_project(self, *args: Any, **kwargs: Any) -> Optional[dict[str, Any]]:
+        return PromptsRepository(self._impl).get_with_project(*args, **kwargs)
+
+    def list_prompts(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return PromptsRepository(self._impl).list(*args, **kwargs)
+
     # Signature delegation ------------------------------------------------
 
     def create_signature(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
@@ -4995,10 +4524,10 @@ class PromptStudioDatabase:
         return SignaturesRepository(self._impl).delete(*args, **kwargs)
 
     def create_prompt(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return self._impl.create_prompt(*args, **kwargs)
+        return PromptsRepository(self._impl).create(*args, **kwargs)
 
     def ensure_prompt_stub(self, *args: Any, **kwargs: Any) -> None:
-        return self._impl.ensure_prompt_stub(*args, **kwargs)
+        return PromptsRepository(self._impl).ensure_stub(*args, **kwargs)
 
     # Job queue delegation -------------------------------------------------
 

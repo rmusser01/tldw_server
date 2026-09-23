@@ -155,6 +155,42 @@ def _projects(db: PromptStudioDatabase) -> dict[str, Any]:
     }
 
 
+def _prompts(db: PromptStudioDatabase) -> dict[str, Any]:
+    ids = _seed(db)
+    project = ids["project"]
+    structured = {
+        "schema_version": 1,
+        "blocks": [{"id": "b1", "name": "sys", "role": "system", "kind": "instructions", "content": "Be brief", "enabled": True, "order": 0}],
+        "variables": [],
+    }
+    second = db.create_prompt(project, "second", system_prompt="s2", few_shot_examples=[{"q": 1}], modules_config={"m": True})
+    stub_id = second["id"] + 5
+    db.ensure_prompt_stub(prompt_id=stub_id, project_id=project)
+    return {
+        "create": second,
+        "create_duplicate": _outcome(lambda: db.create_prompt(project, "second")),
+        # ids are left out below: PostgreSQL burns a sequence value on each failed insert.
+        "create_structured": _outcome(
+            lambda: {
+                k: v
+                for k, v in db.create_prompt(
+                    project, "structured", prompt_format="structured", prompt_schema_version=1, prompt_definition=structured
+                ).items()
+                if k != "id"
+            }
+        ),
+        "create_legacy_with_definition": _outcome(lambda: db.create_prompt(project, "bad", prompt_definition=structured)),
+        "get_missing": _outcome(lambda: db.get_prompt(99999)),
+        "get_with_project": db.get_prompt_with_project(second["id"]),
+        "get_with_project_missing": _outcome(lambda: db.get_prompt_with_project(99999)),
+        "list_paged": [p["name"] for p in db.list_prompts(project, page=1, per_page=2)["prompts"]],
+        "stub": db.get_prompt(stub_id),
+        "stub_again_is_noop": db.ensure_prompt_stub(prompt_id=stub_id, project_id=project, name="other"),
+        # A stub inserts an explicit id; creates after it must not collide with it.
+        "create_after_stub": [_outcome(lambda n=n: db.create_prompt(project, f"after-{n}")["name"]) for n in range(8)],
+    }
+
+
 def _reads(db: PromptStudioDatabase) -> dict[str, Any]:
     # Read paths shared by the later aggregates; pins that PostgreSQL does not leak
     # its tsvector columns through `SELECT *` / `RETURNING *`.
@@ -174,6 +210,7 @@ SCENARIOS: dict[str, Callable[[PromptStudioDatabase], dict[str, Any]]] = {
     "prompt_versions": _prompt_versions,
     "evaluations": _evaluations,
     "projects": _projects,
+    "prompts": _prompts,
     "reads": _reads,
     "signatures": _signatures,
 }
