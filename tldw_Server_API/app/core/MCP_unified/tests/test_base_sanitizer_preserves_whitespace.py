@@ -152,7 +152,7 @@ def test_filesystem_override_preserves_whitespace_too() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _base_sanitizer():
+def _base_sanitizer() -> Any:
     """A concrete BaseModule just for sanitize_input.
 
     Calling it unbound as `BaseModule.sanitize_input(None, x)` works for a plain
@@ -162,19 +162,26 @@ def _base_sanitizer():
     from tldw_Server_API.app.core.MCP_unified.modules.base import BaseModule
 
     class _Probe(BaseModule):
-        async def on_initialize(self):  # pragma: no cover - never called
+        """Minimal concrete BaseModule; only sanitize_input is exercised."""
+
+        async def on_initialize(self) -> None:  # pragma: no cover - never called
+            """Unused abstract-method stub."""
             return None
 
-        async def on_shutdown(self):  # pragma: no cover - never called
+        async def on_shutdown(self) -> None:  # pragma: no cover - never called
+            """Unused abstract-method stub."""
             return None
 
-        async def check_health(self):  # pragma: no cover - never called
+        async def check_health(self) -> None:  # pragma: no cover - never called
+            """Unused abstract-method stub."""
             return None
 
-        def get_tools(self):  # pragma: no cover - never called
+        def get_tools(self) -> list[Any]:  # pragma: no cover - never called
+            """Unused abstract-method stub."""
             return []
 
-        async def execute_tool(self, *args, **kwargs):  # pragma: no cover
+        async def execute_tool(self, *args: Any, **kwargs: Any) -> None:  # pragma: no cover
+            """Unused abstract-method stub."""
             return None
 
     return _Probe.__new__(_Probe)
@@ -288,12 +295,18 @@ _OVERRIDE_MODULES = [
 
 
 def _module_class(module_path: str, class_name: str) -> type:
+    """Import `module_path` and return its `class_name` attribute."""
     import importlib
 
     return getattr(importlib.import_module(module_path), class_name)
 
 
-def _sanitizer_for(cls: type):
+def _abstract_stub(self: Any, *args: Any, **kwargs: Any) -> None:
+    """Stand-in for an abstract method; sanitize_input never calls one."""
+    return None
+
+
+def _sanitizer_for(cls: type) -> Any:
     """An instance of `cls` good enough to call sanitize_input on.
 
     WebToolBase is itself abstract, so it needs a trivial concrete subclass; the
@@ -304,7 +317,7 @@ def _sanitizer_for(cls: type):
         concrete = type(
             f"_Concrete{cls.__name__}",
             (cls,),
-            {name: (lambda self, *a, **k: None) for name in cls.__abstractmethods__},
+            dict.fromkeys(cls.__abstractmethods__, _abstract_stub),
         )
         return concrete.__new__(concrete)
     return cls.__new__(cls)

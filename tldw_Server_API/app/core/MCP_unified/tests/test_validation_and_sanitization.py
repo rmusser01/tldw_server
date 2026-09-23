@@ -61,8 +61,9 @@ async def test_tool_name_strict_regex_blocks_invalid():
     assert "Invalid tool name" in (resp.error.message or "")  # nosec B101
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
-async def test_deep_argument_sanitization_reaches_nested_values():
+async def test_deep_argument_sanitization_reaches_nested_values() -> None:
     """Sanitization recurses, and what it does at depth is strip control characters.
 
     This previously asserted that a nested "/* injected */" raised ValueError, which
