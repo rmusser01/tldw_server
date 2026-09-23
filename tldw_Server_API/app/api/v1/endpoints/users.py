@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     RequirePermission,
+    RequireRole,
     get_auth_principal,
     get_db_transaction,
     get_password_service_dep,
@@ -377,7 +378,7 @@ async def get_current_user_capabilities(
     response: Response,
     principal: AuthPrincipal = Depends(get_auth_principal),
 ) -> UserCapabilities:
-    """Report only this authenticated caller's optional-read permission decisions."""
+    """Report this authenticated caller's effective capability decisions."""
     decisions: dict[str, bool] = {}
     for field, permission in (
         ("can_read_scheduled_tasks", TASKS_READ),
@@ -392,6 +393,14 @@ async def get_current_user_capabilities(
             decisions[field] = False
         else:
             decisions[field] = True
+    try:
+        await RequireRole("admin")(principal)
+    except HTTPException as exc:
+        if exc.status_code != status.HTTP_403_FORBIDDEN:
+            raise
+        decisions["can_run_audio_diagnostics"] = False
+    else:
+        decisions["can_run_audio_diagnostics"] = True
     response.headers["Cache-Control"] = "no-store"
     return UserCapabilities(user_id=principal.user_id, **decisions)
 

@@ -29,6 +29,14 @@ button now reflects the same selection condition and shows a specific reason.
 The focused real-server gate still selects five tests and verifies the visible
 boundary after a real send.
 
+The cross-repository audio finding also exposed a role-only Chatbook gate that
+would reject wildcard-authorized server principals. The existing current-user
+capabilities route now evaluates the same `RequireRole("admin")` guard as both
+diagnostic endpoints and reports `can_run_audio_diagnostics`. Seventeen focused
+server capability tests, Ruff, touched-source Bandit, and diff checks pass.
+Chatbook PR #2822 consumes this decision; its focused tests cover wildcard,
+older-server fallback, and post-check 403 behavior.
+
 ## Stage 4: Verify and integrate
 **Goal:** Recheck latest `origin/dev`, required CI and PR review status, then merge H1 followed by H2 only when both are qualified.
 **Success Criteria:** PR heads and ancestry are verified, required checks pass, human-written Change summaries remain intact, and GitHub confirms both merge commits.
