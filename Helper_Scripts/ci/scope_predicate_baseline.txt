@@ -1,0 +1,37 @@
+# Queries whose tenant predicate is applied only when the scope is truthy.
+#
+# A falsy scope drops the predicate instead of raising. Harmless on
+# SQLite (one file per user), a full-table read on shared PostgreSQL.
+#
+# Some entries are correct: an explicitly named unscoped read for a
+# system worker, such as list_all_schedules(user_id=None), is the shape
+# to prefer when an unscoped read is genuinely needed.
+#
+# Line numbers move, so regenerate when you touch a listed file:
+#   python Helper_Scripts/ci/scope_predicate_ratchet.py --write-baseline
+tldw_Server_API/app/core/AuthNZ/repos/token_blacklist_repo.py:286 if user_id
+tldw_Server_API/app/core/Character_Chat/chat_dictionary.py:1729 if client_id
+tldw_Server_API/app/core/DB_Management/PromptStudioDatabase.py:1331 if user_id
+tldw_Server_API/app/core/DB_Management/PromptStudioDatabase.py:4254 if user_id
+tldw_Server_API/app/core/DB_Management/Workflows_DB.py:1785 if tenant_id
+tldw_Server_API/app/core/DB_Management/Workflows_DB.py:1788 if owner_id
+tldw_Server_API/app/core/DB_Management/Workflows_DB.py:1937 if user_id
+tldw_Server_API/app/core/DB_Management/Workflows_Scheduler_DB.py:409 if user_id
+tldw_Server_API/app/core/DB_Management/Workflows_Scheduler_DB.py:442 if user_id
+tldw_Server_API/app/core/DB_Management/media_db/api.py:989 if user_id
+tldw_Server_API/app/core/Jobs/manager.py:5408 if owner_user_id
+tldw_Server_API/app/core/Jobs/manager.py:5456 if owner_user_id
+tldw_Server_API/app/core/Jobs/manager.py:5542 if owner_user_id
+tldw_Server_API/app/core/Jobs/manager.py:5572 if owner_user_id
+tldw_Server_API/app/core/Jobs/manager.py:5720 if owner_user_id
+tldw_Server_API/app/core/Jobs/manager.py:5743 if owner_user_id
+tldw_Server_API/app/core/Jobs/operations/postgres/lifecycle.py:384 if owner_user_id
+tldw_Server_API/app/core/Jobs/operations/sqlite/lifecycle.py:161 if owner_user_id
+tldw_Server_API/app/core/Jobs/operations/sqlite/lifecycle.py:180 if owner_user_id
+tldw_Server_API/app/core/RAG/rag_service/security_filters.py:640 if user_id
+tldw_Server_API/app/core/Sandbox/store.py:2493 if user_id
+tldw_Server_API/app/core/Sandbox/store.py:2584 if user_id
+tldw_Server_API/app/core/Sandbox/store.py:4029 if user_id
+tldw_Server_API/app/core/Sandbox/store.py:4121 if user_id
+tldw_Server_API/app/services/admin_system_service.py:525 if user_id
+tldw_Server_API/app/services/registration_service.py:1003 if created_by

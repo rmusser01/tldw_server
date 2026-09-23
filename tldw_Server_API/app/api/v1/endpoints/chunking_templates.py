@@ -180,19 +180,34 @@ async def list_templates(
             _emit_db_capability_headers(response, db, ["list_chunking_templates"])
             _set_db_capability_gauge(response)
         _ensure_fallback_policy(db, ["list_chunking_templates"])  # Enforce prod safeguard
+        # `user_id` arrives from the query string. It used to be passed straight
+        # through, so ?user_id=<someone else> read their templates and omitting
+        # it read everyone's -- the in-memory fallback below is a process-global
+        # dict keyed by user id, so that held on SQLite too, not just on a
+        # shared PostgreSQL content backend.
+        caller_user_id = str(getattr(current_user, 'id', '') or '')
+        # Called directly (unit tests, internal reuse) the unfilled default is a
+        # fastapi Query object rather than None, so test the resolved type.
+        requested_user_id = user_id if isinstance(user_id, str) else None
+        if requested_user_id is not None and requested_user_id != caller_user_id:
+            raise HTTPException(
+                status_code=403,
+                detail="Cannot list another user's chunking templates",
+            )
+        scoped_user_id = caller_user_id or None
         if _supports(db, 'list_chunking_templates'):
             templates = db.list_chunking_templates(
                 include_builtin=include_builtin,
                 include_custom=include_custom,
                 tags=tags,
-                user_id=user_id,
+                user_id=scoped_user_id,
                 include_deleted=False
             )
         else:
             increment_counter("chunking_templates_fallback_list_total", labels={"mode": "fallback"})
             # Fallback: aggregate from in-memory store
             templates = []
-            buckets = [_fb_bucket(user_id)] if user_id is not None else list(_FALLBACK_TEMPLATES.values())
+            buckets = [_fb_bucket(scoped_user_id)]
             for bucket in buckets:
                 for _, rec in bucket.items():
                     if tags and not any(t in (rec.get('tags') or []) for t in tags):
