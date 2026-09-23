@@ -703,9 +703,20 @@ class SyncV2ProfileManager:
             or existing_state.get("authority_id") != authority_id
         ):
             raise PersonalContextBootstrapError("personal_context_authority_mismatch")
-        if self.service is not None:
-            self.service.prepare_notes_suggestion_authority(user_id=user_id, dataset=dataset)
         selected_store = store or self.store
+        if self.service is not None:
+            # existing_state is the Personal Context binding computed just above. When
+            # it is set this dataset IS the bound authority, which the bootstrap
+            # transaction is allowed to select even when it is not the chatbook
+            # default, so the default markers must not be demanded of it.
+            # selected_store is passed because it carries the bootstrap transaction:
+            # the dataset may exist only inside it, which no other connection can see.
+            self.service.prepare_notes_suggestion_authority(
+                user_id=user_id,
+                dataset=dataset,
+                require_default=existing_state is None,
+                store=selected_store,
+            )
         try:
             return selected_store.bind_personal_context_dataset(
                 dataset_id=dataset.dataset_id,

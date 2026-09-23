@@ -2504,16 +2504,45 @@ class SyncV2Service:
         return outcome
 
     def prepare_notes_suggestion_authority(
-        self, *, user_id: str, dataset: SyncDataset, note_db: Any | None = None
+        self,
+        *,
+        user_id: str,
+        dataset: SyncDataset,
+        note_db: Any | None = None,
+        require_default: bool = True,
+        store: Any | None = None,
     ) -> None:
-        """Fence prior local review state before a real Notes default snapshot."""
+        """Fence prior local review state before a real Notes default snapshot.
 
-        actual = self.store.get_dataset(dataset.dataset_id)
+        Ownership and personal scope are always required -- they are what keep one
+        user's Notes suggestion scope out of another's.
+
+        ``require_default`` additionally demands the chatbook default markers. It is
+        True by default, but must be False when the dataset is ALREADY the bound
+        Personal Context authority: Sync_DB.personal_context_bootstrap_transaction
+        deliberately selects ``bound_rows[0]`` whatever its markers, and carries an
+        explicit ``require_chatbook_default`` flag that it relaxes for exactly this
+        case. Applying the default requirement there refused a legitimately bound
+        non-default authority and failed six tests, surfacing as the unhelpful
+        ``personal_context_snapshot_unavailable`` because profile.py maps any other
+        SyncStoreError to it.
+        """
+
+        # Read through the caller's store when one is given. During bootstrap the
+        # dataset is created inside the guard's transaction, and self.store holds no
+        # connection to it -- on PostgreSQL that uncommitted row is invisible to any
+        # other connection, so this lookup returned None and the fence refused a
+        # dataset that plainly existed. SQLite hid the bug.
+        reader = store if store is not None else self.store
+        actual = reader.get_dataset(dataset.dataset_id)
         if (
             actual is None
             or actual.owner_user_id != user_id
             or actual.scope_type != "personal"
-            or actual.metadata.get("default_personal") is not True
+        ):
+            raise SyncStoreError("Notes suggestion authority requires the owned default dataset")
+        if require_default and (
+            actual.metadata.get("default_personal") is not True
             or actual.metadata.get("client_family") != "chatbook"
         ):
             raise SyncStoreError("Notes suggestion authority requires the owned default dataset")
