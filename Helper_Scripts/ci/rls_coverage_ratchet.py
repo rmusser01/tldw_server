@@ -166,6 +166,39 @@ BASELINE_HEADER = """\
 """
 
 
+DEFAULT_EXEMPTIONS = Path(__file__).resolve().parent / "rls_coverage_exemptions.txt"
+
+
+def load_exemptions(path: Path) -> dict[str, str]:
+    """Return {table: reason} for tables that must not get an owner-scoped policy.
+
+    Distinct from the baseline: a baseline entry is work not yet done, an
+    exemption is a decision that the obvious policy would break the feature.
+    Every entry must carry a reason, so the decision survives past the pull
+    request that made it.
+
+    Raises ``RatchetError`` if the file is unreadable or an entry has no reason.
+    """
+    try:
+        text = path.read_text()
+    except OSError as exc:
+        raise RatchetError(f"could not read the exemptions at {path}: {exc}") from exc
+
+    exemptions: dict[str, str] = {}
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        entry = line.strip()
+        if not entry or entry.startswith("#"):
+            continue
+        table, separator, reason = entry.partition(":")
+        if not separator or not reason.strip():
+            raise RatchetError(
+                f"{path}:{lineno}: exemption '{entry}' has no reason. "
+                "Write 'table_name: why the obvious policy breaks the feature'."
+            )
+        exemptions[_normalise(table)] = reason.strip()
+    return exemptions
+
+
 def load_baseline(path: Path) -> frozenset[str]:
     names = []
     for line in path.read_text().splitlines():
@@ -179,15 +212,28 @@ def write_baseline(path: Path, uncovered: frozenset[str]) -> None:
     path.write_text(BASELINE_HEADER + "\n".join(sorted(uncovered)) + "\n")
 
 
-def compare(report: CoverageReport, baseline: frozenset[str]) -> tuple[frozenset[str], frozenset[str]]:
-    """Return (newly uncovered, newly covered) against the baseline."""
-    uncovered = report.uncovered
-    return frozenset(uncovered - baseline), frozenset(baseline - uncovered)
+def compare(
+    report: CoverageReport,
+    baseline: frozenset[str],
+    exemptions: dict[str, str] | None = None,
+) -> tuple[frozenset[str], frozenset[str]]:
+    """Return (newly uncovered, newly covered) against the baseline.
+
+    Exempted tables are accounted for separately and take part in neither: they
+    are a standing decision, not work in progress.
+    """
+    uncovered = report.uncovered - frozenset(exemptions or {})
+    covered_baseline = baseline - frozenset(exemptions or {})
+    return frozenset(uncovered - covered_baseline), frozenset(covered_baseline - uncovered)
 
 
-def enforce(report: CoverageReport, baseline: frozenset[str]) -> frozenset[str]:
+def enforce(
+    report: CoverageReport,
+    baseline: frozenset[str],
+    exemptions: dict[str, str] | None = None,
+) -> frozenset[str]:
     """Raise when new uncovered tables appeared; return the ones now covered."""
-    regressions, improvements = compare(report, baseline)
+    regressions, improvements = compare(report, baseline, exemptions)
     if regressions:
         listed = "\n  ".join(sorted(regressions))
         raise RatchetError(
@@ -199,7 +245,10 @@ def enforce(report: CoverageReport, baseline: frozenset[str]) -> frozenset[str]:
             "app/core/DB_Management/backends/pg_rls_policies.py). If the table "
             "is genuinely global -- a catalog, migration bookkeeping, or an "
             "authentication table that must be read before a tenant is known -- "
-            "add it to the baseline and say why in the pull request."
+            "add it to the baseline. If the obvious policy would actively break "
+            "the feature, as it does for anonymous share-link redemption, add it "
+            "to rls_coverage_exemptions.txt with the reason, so the decision "
+            "outlives the pull request that made it."
         )
     return improvements
 
@@ -220,13 +269,23 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     report = scan_source([DEFAULT_APP_ROOT])
+    try:
+        exemptions = load_exemptions(DEFAULT_EXEMPTIONS)
+    except RatchetError as exc:
+        print(exc)
+        return 1
+
     if args.write_baseline:
-        write_baseline(DEFAULT_BASELINE, report.uncovered)
-        print(f"Wrote {len(report.uncovered)} entries to {DEFAULT_BASELINE}")
+        recorded = report.uncovered - frozenset(exemptions)
+        write_baseline(DEFAULT_BASELINE, recorded)
+        print(
+            f"Wrote {len(recorded)} entries to {DEFAULT_BASELINE} "
+            f"({len(exemptions)} exempted)"
+        )
         return 0
 
     try:
-        improvements = enforce(report, load_baseline(DEFAULT_BASELINE))
+        improvements = enforce(report, load_baseline(DEFAULT_BASELINE), exemptions)
     except RatchetError as exc:
         print(exc)
         return 1
@@ -243,7 +302,11 @@ def main(argv: list[str] | None = None) -> int:
         )
         for site in report.dynamic_table_sites[:10]:
             print(f"  {site}")
-    print(f"{len(report.uncovered)} tenant-owned tables still lack an RLS policy.")
+    outstanding = len(report.uncovered) - len(exemptions)
+    print(
+        f"{outstanding} tenant-owned tables still lack an RLS policy; "
+        f"{len(exemptions)} exempted with a recorded reason."
+    )
     return 0
 
 
