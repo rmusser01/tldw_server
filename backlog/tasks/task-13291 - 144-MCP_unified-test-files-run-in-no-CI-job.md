@@ -4,7 +4,7 @@ title: 144 MCP_unified test files run in no CI job
 status: To Do
 assignee: []
 created_date: '2026-09-22 04:34'
-updated_date: '2026-09-23 15:05'
+updated_date: '2026-09-23 16:58'
 labels:
   - ci
   - mcp
@@ -95,6 +95,29 @@ them are owner decisions (what licence the published artifact carries; whether a
 version-bump push is meant to publish). Adding the shard now would mean either a red
 required gate or 13 xfails -- and batch-xfailing them would reproduce the invisibility
 this task exists to end. Blocked on TASK-13356, TASK-13357, TASK-13358.
+
+THE REPO ALREADY HAS THE RATCHET THIS TASK NEEDS, AND IT CANNOT SEE THIS TREE.
+
+Helper_Scripts/ci/check_shard_coverage.py exists precisely to stop 'a test file in no shard'
+-- its own docstring says an unsharded file 'is silently never collected -> the suite goes
+green while skipping it'. That is this task, stated by an existing guard.
+
+It never fired here because DEFAULT_TESTS_ROOT = 'tldw_Server_API/tests' (:41), and it
+enumerates only that root (:98 tests_root.rglob). tldw_Server_API/app/core/MCP_unified/tests
+is outside it, so all 144 files are invisible to the guard -- not baselined, not ignored,
+just unseen. Current run: shards=809 test_files=4790 ignored=4 baseline=130.
+
+So the fix has two halves, not one:
+  1. Add the tree to the shard matrix (what this task already says).
+  2. Extend the guard to enumerate it, so the next in-app test tree cannot hide the same
+     way. It already takes --tests-root, so this is cheap -- but it must come after (1),
+     since the guard fails closed on anything unsharded.
+
+Demonstrated live on PR #2994 while this task was open: a new file added under
+tldw_Server_API/tests/Embeddings/ failed the guard because it was in no shard. The guard
+works; its root is the gap. Also note ci.yml repeats the shard matrix 5 times (per
+OS/Python job), so assigning a path means editing all 5 copies -- a single edit leaves four
+jobs still skipping the file.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
