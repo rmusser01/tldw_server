@@ -1,9 +1,10 @@
 ---
 id: TASK-13317
 title: Raw SQL in 20 endpoint files violates the no-raw-SQL-in-endpoints rule
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-09-22 04:54'
+updated_date: '2026-09-23 01:03'
 labels:
   - duplication
   - api
@@ -35,8 +36,77 @@ Owner-only (app/api/v1/**). Source: synthesis F19
 - [ ] #1 The 14 small files route through their existing core owners
 - [ ] #2 Three orphan tables get a core owner
 - [ ] #3 No endpoint reaches a core private API
-- [ ] #4 A lint ratchet prevents new raw SQL in endpoints
+- [x] #4 A lint ratchet prevents new raw SQL in endpoints
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+AC4 DONE in 2b92365ee1: tests/lint/test_no_raw_sql_in_endpoints.py. ACs 1-3 remain.
+
+MEASUREMENT (AST, not grep). Executed raw SQL -- a SQL literal, an f-string whose literal head is SQL, or a module-level name bound to one, passed as the FIRST argument to a call named execute/executemany/executescript/fetchone/fetchall/fetchval/fetch/_execute/execute_query/query/exec_driver_sql/run:
+
+  22 files, 138 statements.
+
+  56  admin/admin_rbac.py                      2  media/debug.py
+  32  jobs_admin.py                            2  media/listing.py
+   8  prompt_studio/prompt_studio_evaluations.py  2  media/navigation.py
+   7  sync.py                                  2  notes.py
+   4  admin/admin_ops.py                       2  prompt_studio/prompt_studio_status.py
+   4  admin/admin_rate_limits.py               1  admin/__init__.py
+   4  admin/admin_tenant_provisioning.py       1  audio/audio_studio.py
+   4  users.py                                 1  chat_documents.py
+   1  health.py                                1  media/versions.py
+   1  outputs_templates.py                     1  prompt_studio/prompt_studio_projects.py
+   1  vector_stores_openai.py                  1  watchlists.py
+
+Same files and ordering as the review; the statement counts differ because the review counted differently. A grep-shaped count says 98 files / 470 statements -- that over-counts by catching docstrings, error messages, OpenAPI examples, and text2sql.py, which is an endpoint ABOUT SQL that executes none of its own. Worth knowing before anyone re-measures and thinks the problem grew.
+
+The ratchet was verified to actually fail, not assumed: adding cur.execute("SELECT 1 FROM probe_table") to feedback.py trips the new-file check; an inflated baseline entry trips the improvement check; a bogus entry trips the stale check. Four checks, because a bare count would rot -- new files, growth, stale entries, and unrecorded improvements are each caught.
+
+AC2 GROUNDWORK -- the rbac rate-limit orphan is confirmed and mapped:
+  rbac_role_rate_limits and rbac_user_rate_limits have SCHEMA but no repo. Migrations
+  exist at AuthNZ/migrations.py:2292,2306 (SQLite) and AuthNZ/pg_migrations_extra.py:1197,1209
+  (Postgres), and nothing under core/ reads or writes them. AuthnzRateLimitsRepo is NOT their
+  owner -- it owns the `rate_limits` and `account_lockouts` tables, a different concern
+  (throttling windows and lockouts).
+
+  Two call sites query them directly, both hand-rolling the dialect branch:
+    1. endpoints/admin/admin_rate_limits.py -- the CRUD (4 executed statements).
+       Its _POSTGRES_RATE_LIMIT_LIST_QUERIES and _SQLITE_RATE_LIMIT_LIST_QUERIES
+       (lines 85-130) are BYTE-IDENTICAL. Verified. There is no dialect difference at
+       all in the list path; the split is pure duplication.
+    2. API_Deps/auth_deps.py:2206 enforce_rbac_rate_limit -- the PER-REQUEST lookup.
+       Here the two branches genuinely diverge in shape: Postgres does TWO round trips
+       (fetch role_ids from user_roles, then rbac_role_rate_limits WHERE role_id = ANY($1)),
+       while SQLite does ONE JOIN against user_roles. Same semantics, same expiry filter,
+       different cost and different row shapes -- Postgres returns dict rows, SQLite tuples,
+       reconciled by an isinstance check at :2266-2273.
+
+  A core owner should therefore expose: list_all, upsert_role, clear_role, upsert_user,
+  clear_user, and resolve_effective_limits(user_id, resource). Note the two call sites hold
+  DIFFERENT handles -- the admin endpoints take get_db_transaction (a transaction connection,
+  or a pool adapter in test mode) while auth_deps holds a DatabasePool -- so the owner needs
+  to serve both without changing the admin path's transaction semantics. That is the one
+  design decision in this piece, and it is why it was not rushed here.
+
+AC3 GROUNDWORK. The five named private reaches are confirmed present:
+  jobs_admin.py:595,680,1383,1531  jm._connect()
+  jobs_admin.py:600,686,710,1387   jm._pg_cursor(conn)
+  prompt_studio/prompt_studio_projects.py:226  db._execute(
+  audio/audio_studio.py:866  collections_db._coerce_bool_flag (already carries # noqa: SLF001)
+  plus vector_store_batches_db._connect
+  Note users.py:260,265 _coerce_bool_flag is a LOCAL function, not a core reach -- do not
+  count it.
+  A broad AST sweep for private-attribute access from endpoints finds 147 reaches across 54
+  files, but most are endpoint-to-endpoint aliases (e.g. admin_mod._is_postgres_backend), so
+  that total is not a useful target; the five core-DB reaches are.
+
+NOT RATCHETED, deliberately: the ten files that hand-roll the SQLite/PostgreSQL dialect
+branch. A count is the wrong instrument -- the branch is the problem, not its frequency. This
+is why core/AuthNZ/database.py:1966 _normalize_sqlite_sql exists; its own docstring calls
+itself a safety net for when a dollar-style query slips through.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
