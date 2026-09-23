@@ -25,6 +25,7 @@ from tldw_Server_API.app.core.DB_Management.sql_utils import split_sql_statement
 from tldw_Server_API.app.core.testing import is_truthy
 
 from .base import (
+    ConstraintViolationError,
     BackendFeatures,
     BackendType,
     ConnectionPool,
@@ -1011,6 +1012,7 @@ class PostgreSQLBackend(DatabaseBackend):
         query, params = self._prepare_query(query, params)
         redacted_failure = False
         unique_failure = False
+        constraint_failure = False
         if connection:
             conn = connection
             external_conn = True
@@ -1078,7 +1080,17 @@ class PostgreSQLBackend(DatabaseBackend):
             )
 
         except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as e:
-            unique_failure = isinstance(e, _PSYCOPG_DRIVER_EXCEPTIONS) and getattr(e, "sqlstate", None) == "23505"
+            _sqlstate = (
+                getattr(e, "sqlstate", None)
+                if isinstance(e, _PSYCOPG_DRIVER_EXCEPTIONS)
+                else None
+            )
+            unique_failure = _sqlstate == "23505"
+            # SQLSTATE class 23 is integrity_constraint_violation: NOT NULL (23502),
+            # FOREIGN KEY (23503), UNIQUE (23505), CHECK (23514) and friends. The CLASS
+            # of failure only -- the driver exception is still never chained and the
+            # message is unchanged.
+            constraint_failure = bool(_sqlstate) and str(_sqlstate).startswith("23")
             if not external_conn:
                 try:
                     conn.rollback()
@@ -1097,6 +1109,8 @@ class PostgreSQLBackend(DatabaseBackend):
         if redacted_failure:
             if unique_failure:
                 raise UniqueConstraintError("PostgreSQL query execution failed")
+            if constraint_failure:
+                raise ConstraintViolationError("PostgreSQL query execution failed")
             raise DatabaseError("PostgreSQL query execution failed")
 
     def execute_many(

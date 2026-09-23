@@ -21,6 +21,7 @@ from loguru import logger as _loguru_logger
 
 from ..sqlite_policy import configure_sqlite_connection
 from .base import (
+    ConstraintViolationError,
     BackendFeatures,
     BackendType,
     ConnectionPool,
@@ -412,6 +413,7 @@ class SQLiteBackend(DatabaseBackend):
         """Execute a query and return results."""
         start_time = time.time()
         redacted_failure = False
+        constraint_failure = False
 
         conn = connection or self.get_pool().get_connection()
 
@@ -445,8 +447,14 @@ class SQLiteBackend(DatabaseBackend):
                 "SQLite query execution failed"
             )
             redacted_failure = True
+            # The CLASS of failure only. sqlite3.IntegrityError covers CHECK, NOT NULL,
+            # FOREIGN KEY and UNIQUE. The raise stays outside this except block so the
+            # driver exception is never chained; the message is unchanged.
+            constraint_failure = isinstance(e, sqlite3.IntegrityError)
 
         if redacted_failure:
+            if constraint_failure:
+                raise ConstraintViolationError("SQLite query execution failed")
             raise DatabaseError("SQLite query execution failed")
 
     def execute_many(

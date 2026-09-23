@@ -21,7 +21,22 @@ class DatabaseError(Exception):
     pass
 
 
-class UniqueConstraintError(DatabaseError):
+class ConstraintViolationError(DatabaseError):
+    """A constraint violation, without driver diagnostics or identifying payload.
+
+    Covers CHECK, NOT NULL, FOREIGN KEY and uniqueness. Exists because the backends
+    deliberately redact the driver message -- the raise sits outside the except block
+    so the original is never chained, keeping query text and bound parameters out of
+    any traceback -- which otherwise leaves callers unable to tell a constraint
+    violation from a disk error or a locked database without re-running the query.
+
+    The TYPE carries that distinction instead, which is the mechanism this module
+    already used for uniqueness. Message strings are unchanged, and several tests pin
+    them with anchored patterns precisely to assert that nothing is appended.
+    """
+
+
+class UniqueConstraintError(ConstraintViolationError):
     """A uniqueness conflict, without driver diagnostics or identifying payload."""
 
 
