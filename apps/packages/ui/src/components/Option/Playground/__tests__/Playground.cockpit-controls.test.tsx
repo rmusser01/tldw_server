@@ -1350,6 +1350,32 @@ describe("Playground cockpit controls", () => {
     );
   });
 
+  it("disables cockpit regenerate when a saved conversation has selected history", async () => {
+    messageOptionState.value.streaming = false;
+    messageOptionState.value.temporaryChat = false;
+    const selection = renderHook(() => useHistorySelection());
+    await act(async () => {
+      await selection.result.current.open({
+        kind: "native",
+        owner_key: "owner",
+        conversation_id: "chat-1",
+        validate_lease: () => true,
+      } as any);
+    });
+    forkSettings.controller = selection.result.current;
+
+    render(<Playground />);
+
+    const inspector = within(
+      await screen.findByTestId("playground-cockpit-right-rail"),
+    ).getByTestId("playground-runtime-inspector");
+    expect(
+      within(inspector).getByRole("button", { name: "Regenerate last response" }),
+    ).toBeDisabled();
+    expect(within(inspector).getByText(/selected history/i)).toBeInTheDocument();
+    expect(messageOptionState.value.regenerateLastMessage).not.toHaveBeenCalled();
+  });
+
   it("reflects degraded server readiness in the cockpit runtime rail", async () => {
     messageOptionState.value.streaming = false;
     messageOptionState.value.selectedAssistant = null;

@@ -14,13 +14,20 @@
 **Goal:** Fix idle-controller send/edit/delete, source-switch review state, server deletion display reconciliation, unresolved skill-directory admission, and any other confirmed high-impact H1 defects.
 **Success Criteria:** Selected history keeps owner fences while ordinary chat paths remain usable; selected-history admission fails closed when skill visibility cannot be established.
 **Tests:** Targeted Vitest for both chat hooks and review component, plus focused Python endpoint/security tests, each with red/green evidence.
-**Status:** In Progress
+**Status:** Complete
 
 ## Stage 3: Resolve remaining review items and stacked H2
 **Goal:** Address validated async database, typing, documentation, equality, fixture, and cross-repository-contract findings with the smallest safe changes; process H2 Qodo feedback against its internal-storage scope.
 **Success Criteria:** Every Qodo thread is fixed or answered technically; no P1/P2 review issue remains. H2 descends the final H1 head and stays scoped to groundwork.
 **Tests:** Affected Python/frontend suites, SQLite/PostgreSQL fixtures when needed, Ruff/format and Bandit for touched Python.
-**Status:** Not Started
+**Status:** In Progress
+
+The live cockpit smoke exposed one more H1 mismatch: the selected-history
+regeneration handler correctly refuses a sibling-producing retry, but the runtime
+rail still enabled its button and the old gate expected a provider request. The
+button now reflects the same selection condition and shows a specific reason.
+The focused real-server gate still selects five tests and verifies the visible
+boundary after a real send.
 
 ## Stage 4: Verify and integrate
 **Goal:** Recheck latest `origin/dev`, required CI and PR review status, then merge H1 followed by H2 only when both are qualified.

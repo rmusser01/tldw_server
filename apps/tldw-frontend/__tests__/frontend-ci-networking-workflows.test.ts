@@ -103,7 +103,7 @@ describe("frontend CI workflow networking", () => {
     expect(script).toContain("keeps mobile cockpit tabs and focus composer usable")
     expect(script).toContain("sends a real mobile focus conversation")
     expect(script).toContain("proves model provider confidence")
-    expect(script).toContain("captures streaming stop and regenerate controls")
+    expect(script).toContain("captures streaming stop and the selected-history regeneration gate")
     expect(script).toContain("assert-playwright-no-skips.mjs")
     expect(script).toContain("playwright_status=$?")
     expect(script).toContain("assert_status=$?")
