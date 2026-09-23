@@ -97,7 +97,6 @@ from tldw_Server_API.app.core.testing import (
 from tldw_Server_API.app.core.testing import is_test_mode as _is_test_mode
 from tldw_Server_API.app.services.registration_service import RegistrationService, get_registration_service
 from tldw_Server_API.app.services.storage_quota_service import StorageQuotaService, get_storage_service
-from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS, PLATFORM_ADMIN_ROLES
 
 # Narrowed exception tuple for auth dependency safety (BLE001)
@@ -2224,51 +2223,9 @@ async def enforce_rbac_rate_limit(
 
     candidates: list[tuple[int | None, int | None]] = []
     try:
-        user_limit = None
-        role_limit = None
+        from tldw_Server_API.app.core.AuthNZ.repos.rbac_rate_limits_repo import effective_limits
 
-        # SQLite vs Postgres param binding
-        if db_pool.pool:  # Postgres
-            user_limit = await db_pool.fetchone(
-                "SELECT limit_per_min, burst FROM rbac_user_rate_limits WHERE user_id = $1 AND resource = $2",
-                user_id, resource
-            )
-            # Get roles for user
-            role_ids = await db_pool.fetchall(
-                """
-                SELECT role_id FROM user_roles
-                WHERE user_id = $1 AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
-                """,
-                user_id
-            )
-            if role_ids:
-                role_ids_list = [r['role_id'] for r in role_ids]
-                # Take the strictest (min) among role limits
-                role_limit = await db_pool.fetchone(
-                    """
-                    SELECT MIN(limit_per_min) as limit_per_min, MIN(burst) as burst
-                    FROM rbac_role_rate_limits WHERE role_id = ANY($1) AND resource = $2
-                    """,
-                    role_ids_list, resource
-                )
-        else:  # SQLite
-            async with db_pool.acquire() as conn:
-                c1 = await conn.execute(
-                    "SELECT limit_per_min, burst FROM rbac_user_rate_limits WHERE user_id = ? AND resource = ?",
-                    (user_id, resource)
-                )
-                user_limit = await c1.fetchone()
-                c2 = await conn.execute(
-                    """
-                    SELECT MIN(rl.limit_per_min), MIN(rl.burst)
-                    FROM rbac_role_rate_limits rl
-                    JOIN user_roles ur ON ur.role_id = rl.role_id
-                    WHERE ur.user_id = ? AND (ur.expires_at IS NULL OR ur.expires_at > CURRENT_TIMESTAMP)
-                      AND rl.resource = ?
-                    """,
-                    (user_id, resource)
-                )
-                role_limit = await c2.fetchone()
+        user_limit, role_limit = await effective_limits(db_pool, user_id, resource)
 
         if user_limit:
             lp = user_limit[0] if not isinstance(user_limit, dict) else user_limit.get('limit_per_min')
