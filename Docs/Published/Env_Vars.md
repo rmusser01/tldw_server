@@ -460,7 +460,8 @@ All five values must be integers from `1` through `256`; `0` does not disable a 
 
 Runtime overrides (non-persistent) are available via API:
 - `GET /api/v1/config/tokenizer` → read current mode/divisor
-- `PUT /api/v1/config/tokenizer` → update mode/divisor in memory
+- `PUT /api/v1/config/tokenizer` → update mode/divisor in memory (admin only:
+  the value is process-global and feeds token/quota accounting for every user)
 
 ## Usage Logging & Aggregators
 - `USAGE_LOG_ENABLED`: Enable lightweight HTTP usage logging middleware (`true|false`, default `false`).
