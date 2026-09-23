@@ -1712,26 +1712,34 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
 
             if _is_truthy(_os.getenv("JOBS_PG_RLS_ENABLE", "")):
                 with psycopg.connect(_dsn, autocommit=True) as _c_rls, _c_rls.cursor() as _p:
-                    with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-                        _p.execute("ALTER TABLE jobs ENABLE ROW LEVEL SECURITY")
-                    with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-                        _p.execute("ALTER TABLE job_events ENABLE ROW LEVEL SECURITY")
-                    with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-                        _p.execute("ALTER TABLE job_counters ENABLE ROW LEVEL SECURITY")
-                    with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-                        _p.execute("ALTER TABLE job_queue_controls ENABLE ROW LEVEL SECURITY")
-                    with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-                        _p.execute("ALTER TABLE job_attachments ENABLE ROW LEVEL SECURITY")
-                    with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-                        _p.execute("ALTER TABLE job_sla_policies ENABLE ROW LEVEL SECURITY")
-                    with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-                        _p.execute("ALTER TABLE job_dependencies ENABLE ROW LEVEL SECURITY")
-                    with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-                        _p.execute("ALTER TABLE jobs_archive ENABLE ROW LEVEL SECURITY")
-                    with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-                        _p.execute(
-                            "ALTER TABLE job_idempotency_receipts ENABLE ROW LEVEL SECURITY"
-                        )
+                    # ENABLE alone exempts the table owner, and the app usually
+                    # connects as the owner, so FORCE has to accompany it or the
+                    # policies below never run for the process that matters.
+                    # Written out rather than looped over table names so the
+                    # RLS coverage ratchet can see them: it scans source text,
+                    # and DDL assembled from a loop variable is invisible to it.
+                    for _rls_ddl in (
+                        "ALTER TABLE jobs ENABLE ROW LEVEL SECURITY",
+                        "ALTER TABLE jobs FORCE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_events ENABLE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_events FORCE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_counters ENABLE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_counters FORCE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_queue_controls ENABLE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_queue_controls FORCE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_attachments ENABLE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_attachments FORCE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_sla_policies ENABLE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_sla_policies FORCE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_dependencies ENABLE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_dependencies FORCE ROW LEVEL SECURITY",
+                        "ALTER TABLE jobs_archive ENABLE ROW LEVEL SECURITY",
+                        "ALTER TABLE jobs_archive FORCE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_idempotency_receipts ENABLE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_idempotency_receipts FORCE ROW LEVEL SECURITY",
+                    ):
+                        with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
+                            _p.execute(_rls_ddl)
         except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
             # Ignore in environments without permissions or when tables don't exist yet
             pass
@@ -1802,6 +1810,29 @@ def ensure_job_events_pg(db_url: str) -> None:
                 pass
     except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
         return
+
+
+def build_jobs_rls_predicates() -> tuple[str, str, str]:
+    """Return the (admin, domain, owner) SQL predicates used by the Jobs policies.
+
+    Owner is the tenant boundary and is deliberately fail-CLOSED: when
+    ``app.owner_user_id`` is unset, ``NULLIF`` yields NULL, the comparison
+    yields NULL, and the row is filtered out. Missing context must mean "no
+    rows", never "all rows".
+
+    Domain is a worker capability filter rather than a tenant boundary, so it
+    stays permissive when unset -- a worker that has not narrowed its domains
+    legitimately polls all of them. Crossing the tenant line still requires
+    either owning the row or holding the admin claim.
+    """
+    admin_expr = "COALESCE(NULLIF(current_setting('app.is_admin', true), ''), '') = 'true'"
+    domain_expr = "NULLIF(current_setting('app.domain_allowlist', true), '')"
+    owner_expr = "NULLIF(current_setting('app.owner_user_id', true), '')"
+    domain_filter = (
+        f"({domain_expr} IS NULL OR domain = ANY(string_to_array({domain_expr}, ',')))"
+    )
+    owner_filter = f"(owner_user_id = {owner_expr})"
+    return admin_expr, domain_filter, owner_filter
 
 
 def ensure_jobs_rls_policies_pg(db_url: str) -> None:
@@ -1931,11 +1962,7 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                 "job_idempotency_receipts",
             ):
                 _enable_rls(_table)
-            admin_expr = "COALESCE(NULLIF(current_setting('app.is_admin', true), ''), '') = 'true'"
-            domain_expr = "NULLIF(current_setting('app.domain_allowlist', true), '')"
-            owner_expr = "NULLIF(current_setting('app.owner_user_id', true), '')"
-            domain_filter = f"({domain_expr} IS NULL OR domain = ANY(string_to_array({domain_expr}, ',')))"
-            owner_filter = f"({owner_expr} IS NULL OR owner_user_id = {owner_expr})"
+            admin_expr, domain_filter, owner_filter = build_jobs_rls_predicates()
 
             cur.execute("DROP POLICY IF EXISTS jobs_domain_select ON jobs")
             cur.execute(

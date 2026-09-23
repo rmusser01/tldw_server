@@ -2593,7 +2593,18 @@ class EvaluationsDatabase:
     ) -> tuple[str, list[Any]]:
         variants = self._user_id_variants(user_id)
         if not variants:
-            return query, params
+            if user_id is None:
+                # Explicit opt-out: the caller asked for an unscoped read. Kept
+                # because workers and admin paths legitimately span accounts.
+                return query, params
+            # A scope was intended and could not be applied. Returning the query
+            # unchanged here is how a blank or unparseable user id silently
+            # turned a scoped read -- or a delete -- into one over every
+            # account's rows.
+            raise ValueError(
+                f"user_id {user_id!r} yielded no filter variants; refusing to run "
+                f"an unscoped query on {field}. Pass None to opt out explicitly."
+            )
         if len(variants) == 1:
             query += f" AND {field} = ?"
             params.append(variants[0])

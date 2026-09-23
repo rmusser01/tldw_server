@@ -2032,6 +2032,7 @@ class EnhancedWebScraper:
                 "processed_urls": 0,
                 "current_url": sitemap_url,
                 "started_at": datetime.now().isoformat(),
+                "owner_user_id": None if user_id is None else str(user_id),
             }
         cookies = self._build_cookie_map(sitemap_url, custom_cookies)
         resp = await afetch(
@@ -2116,6 +2117,7 @@ class EnhancedWebScraper:
                 "pages_scraped": 0,
                 "current_url": base_url,
                 "started_at": datetime.now().isoformat(),
+                "owner_user_id": None if user_id is None else str(user_id),
             }
         visited: set[str] = set()
         base_norm = normalize_for_crawl(base_url, base_url)
@@ -2749,9 +2751,21 @@ class EnhancedWebScraper:
             logger.warning(f"Error parsing links from content: {e}")
             return []
 
-    def get_progress(self, task_name: str) -> dict[str, Any]:
-        """Get progress for a specific task"""
-        return self._progress.get(task_name, {})
+    def get_progress(
+        self, task_name: str, *, owner_user_id: Optional[str] = None
+    ) -> dict[str, Any]:
+        """Get progress for a specific task.
+
+        ``self._progress`` is process-global and shared by every caller, so a
+        task id alone is not an authorization claim. Request handlers must pass
+        ``owner_user_id``; a task belonging to somebody else reads as absent.
+        """
+        entry = self._progress.get(task_name, {})
+        if owner_user_id is None or not entry:
+            return entry
+        if str(entry.get("owner_user_id") or "") != str(owner_user_id):
+            return {}
+        return entry
 
     async def save_progress(self, task_name: str, filepath: Path):
         """Save progress to file for resumability"""

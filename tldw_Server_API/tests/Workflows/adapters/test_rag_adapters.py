@@ -1467,7 +1467,7 @@ class TestSemanticCacheCheckAdapter:
 
         monkeypatch.setattr(
             "tldw_Server_API.app.core.Workflows.adapters.rag.query._get_semantic_cache_collection",
-            lambda _name: (MagicMock(), mock_collection),
+            lambda _name, _user_id: (MagicMock(), mock_collection),
         )
         monkeypatch.setattr(
             "tldw_Server_API.app.core.Workflows.adapters.rag.query._build_semantic_cache_query_embedding",
@@ -1497,7 +1497,7 @@ class TestSemanticCacheCheckAdapter:
 
         monkeypatch.setattr(
             "tldw_Server_API.app.core.Workflows.adapters.rag.query._get_semantic_cache_collection",
-            lambda _name: (MagicMock(), mock_collection),
+            lambda _name, _user_id: (MagicMock(), mock_collection),
         )
         monkeypatch.setattr(
             "tldw_Server_API.app.core.Workflows.adapters.rag.query._build_semantic_cache_query_embedding",
@@ -1545,7 +1545,7 @@ class TestSemanticCacheCheckAdapter:
 
         monkeypatch.setattr(
             "tldw_Server_API.app.core.Workflows.adapters.rag.query._get_semantic_cache_collection",
-            lambda _name: (_ for _ in ()).throw(
+            lambda _name, _user_id: (_ for _ in ()).throw(
                 RuntimeError("semantic cache exploded at /private/rag-cache")
             ),
         )
@@ -1565,7 +1565,7 @@ class TestSemanticCacheCheckAdapter:
 
         monkeypatch.setattr(
             "tldw_Server_API.app.core.Workflows.adapters.rag.query._get_semantic_cache_collection",
-            lambda _name: (None, None),
+            lambda _name, _user_id: (None, None),
         )
 
         config = {"query": "test query"}
@@ -1594,7 +1594,7 @@ class TestSemanticCacheCheckAdapter:
 
         monkeypatch.setattr(
             "tldw_Server_API.app.core.Workflows.adapters.rag.query._get_semantic_cache_collection",
-            lambda _name: (MagicMock(), mock_collection),
+            lambda _name, _user_id: (MagicMock(), mock_collection),
         )
         monkeypatch.setattr(
             "tldw_Server_API.app.core.Workflows.adapters.rag.query._build_semantic_cache_query_embedding",

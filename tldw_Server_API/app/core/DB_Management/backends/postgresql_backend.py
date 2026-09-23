@@ -11,6 +11,7 @@ Note: This implementation requires psycopg (v3) to be installed:
     pip install psycopg-pool
 """
 
+import contextlib
 import os
 import threading
 import time
@@ -110,6 +111,51 @@ _WRITE_COMMANDS = {
 }
 
 
+def _reset_pooled_connection(conn: Any) -> None:
+    """Scrub per-request session state before a connection returns to the pool.
+
+    The tenant GUCs are written with ``set_config(..., false)``, which is
+    session-scoped: it outlives the transaction and rides the connection back
+    into the pool. A rollback does not clear it. Without this hook the next
+    borrower can inherit the previous request's ``app.current_user_id`` or, worse,
+    its ``app.is_admin``, whenever re-applying scope at checkout fails.
+
+    A connection that cannot be fully scrubbed must not be reused, so any
+    failure is raised rather than swallowed: psycopg_pool discards a connection
+    whose reset callback raises, which is exactly the outcome wanted. Returning
+    quietly would put a connection still carrying another account's identity
+    back into rotation.
+    """
+    failures: list[str] = []
+    for statement in ("RESET ROLE", "RESET SESSION AUTHORIZATION", "RESET ALL"):
+        try:
+            with conn.cursor() as cur:
+                cur.execute(statement)
+        except Exception as exc:  # noqa: BLE001 - recorded, then raised below
+            failures.append(f"{statement}: {exc}")
+
+    # psycopg_pool requires the callback to hand back a connection that is NOT
+    # in a transaction. The statements above open an implicit one, so it has to
+    # be closed here, and with a commit: SET and RESET are transactional in
+    # PostgreSQL, so a rollback would undo the very reset just performed.
+    try:
+        conn.commit()
+    except Exception as exc:  # noqa: BLE001 - recorded, then raised below
+        failures.append(f"COMMIT: {exc}")
+        # Leave no open transaction behind either way; the connection is being
+        # discarded, and the rollback cannot make the session state any staler
+        # than the failed commit already left it.
+        with contextlib.suppress(Exception):
+            conn.rollback()
+
+    if failures:
+        raise RuntimeError(
+            "Could not clear session state from a pooled PostgreSQL connection, "
+            "so it may still carry another account's tenant settings. Discarding "
+            "it rather than reusing it. Failures: " + "; ".join(failures)
+        )
+
+
 class PostgreSQLConnectionPool(ConnectionPool):
     """PostgreSQL connection pool using psycopg (v3).
 
@@ -162,10 +208,17 @@ class PostgreSQLConnectionPool(ConnectionPool):
                     open=True,
                     # Ensure JSON is parsed into Python objects consistently
                     configure=lambda conn: setattr(conn, 'row_factory', dict_row),
+                    # Clear tenant GUCs on check-in so one request's identity
+                    # cannot be inherited by the next borrower.
+                    reset=_reset_pooled_connection,
                 )
             except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS:
-                # Fallback to defaults if parameters unsupported
-                self._pool = psycopg_pool.ConnectionPool(self._dsn, open=True)
+                # Fallback to defaults if parameters unsupported. The reset hook
+                # is not optional -- it is what stops tenant GUCs leaking between
+                # requests -- so it is kept on this path too.
+                self._pool = psycopg_pool.ConnectionPool(
+                    self._dsn, open=True, reset=_reset_pooled_connection
+                )
         else:
             self._pool = None
 

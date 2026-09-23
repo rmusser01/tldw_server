@@ -126,6 +126,23 @@ def resolve_context_user_id(context: dict[str, Any]) -> str | None:
     return resolve_user_id_value(raw, allow_none=True)
 
 
+def workflow_chroma_manager(user_id: str) -> Any:
+    """Build a ChromaDB manager bound to one account.
+
+    Chroma isolates by directory, so the manager has to be constructed per
+    account. Adapters previously reached for a process-global default pinned to
+    the single-user id, which put every account's workflow vectors in user 1's
+    store. Centralised here so the embedding-config assembly is not repeated,
+    and mis-repeated, at each call site.
+    """
+    from tldw_Server_API.app.core.config import settings
+    from tldw_Server_API.app.core.Embeddings.ChromaDB_Library import ChromaDBManager
+
+    embedding_config = dict(settings.get("EMBEDDING_CONFIG", {}))
+    embedding_config["USER_DB_BASE_DIR"] = settings.get("USER_DB_BASE_DIR")
+    return ChromaDBManager(user_id=str(user_id), user_embedding_config=embedding_config)
+
+
 def watchlist_artifact_metadata(context: dict[str, Any]) -> dict[str, Any]:
     """Return Watchlists correlation metadata safe to copy onto artifacts."""
     metadata = context.get("workflow_metadata")

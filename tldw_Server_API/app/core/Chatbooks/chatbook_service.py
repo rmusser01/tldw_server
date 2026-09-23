@@ -5008,7 +5008,9 @@ class ChatbookService:
             import hashlib
             import hmac
             exp = int(expires_at.timestamp())
-            msg = f"{job_id}:{exp}".encode()
+            # Bind the owner into the signature. Without it the token proves
+            # only "this job, this expiry" and is valid in anyone's hands.
+            msg = f"{job_id}:{exp}:{self.user_id}".encode()
             sig = hmac.new(secret.encode("utf-8"), msg, hashlib.sha256).hexdigest()
             return f"{base}?exp={exp}&token={sig}"
         return base
