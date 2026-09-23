@@ -1,10 +1,10 @@
 ---
 id: TASK-13290
 title: Prompt Studio optimizations endpoint returns 500 on every SQLite deployment
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-22 04:34'
-updated_date: '2026-09-23 19:37'
+updated_date: '2026-09-23 23:09'
 labels:
   - bug
   - prompt-studio
@@ -40,11 +40,11 @@ Found by the comprehensive core-module review; independently verified by the orc
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A failing test calls the endpoint against a real _SQLitePromptStudioDatabase and reproduces the 500 before any fix
+- [x] #1 A failing test calls the endpoint against a real _SQLitePromptStudioDatabase and reproduces the 500 before any fix
 - [x] #2 list_optimizations is implemented on the SQLite class with behaviour matching the PostgreSQL body
 - [x] #3 A parity guard test asserts the two backend classes expose the same public method set, or documents each intentional asymmetry (currently 9 PG-only and 7 SQLite-only)
-- [ ] #4 The endpoint logs the underlying exception rather than only the generic message
-- [ ] #5 The stub-based tests no longer mask a missing method (stub derives from or is checked against the real class)
+- [x] #4 The endpoint logs the underlying exception rather than only the generic message
+- [x] #5 The stub-based tests no longer mask a missing method (stub derives from or is checked against the real class)
 - [x] #6 Bandit run for touched scope
 <!-- AC:END -->
 
@@ -59,14 +59,22 @@ The retry loops follow the established idiom of this class and carry a comment p
 NOTE: the endpoint at app/api/v1/endpoints/prompt_studio/prompt_studio_optimization.py is untouched - the defect was entirely in core. Remaining: Bandit on touched scope.
 
 2026-09-23 reconciliation: AC2 met (7c348a05ae added it on SQLite; dee169a794/TASK-13318 then moved all optimization methods into prompt_studio_db/repositories/optimizations.py so both backends share one body; tests/prompt_studio/test_list_optimizations_sqlite.py passes). AC3 met (tests/DB_Management/test_prompt_studio_backend_parity.py ratchets signatures and documents the 3 intentional one-sided public methods; with test_backend_behaviour_parity.py: 24 passed, 0 skipped). AC6 met (uvx bandit on PromptStudioDatabase.py + repositories/optimizations.py: no issues). AC1 NOT met: the regression test calls PromptStudioDatabase directly, not the endpoint; no test drives GET /api/v1/prompt-studio/optimizations against a real SQLite DB. AC4 NOT met: prompt_studio_optimization.py:1017/1020 still log only 'Database error listing optimizations'/'Unexpected error listing optimizations' with no exception type/detail (endpoint untouched; note earlier commit 290e4fe7b6 deliberately sanitized these logs, so a fix should log at least the exception class). AC5 NOT met: _BrokenListOptimizations*Db in tests/prompt_studio/unit/test_optimization_endpoint_error_mapping.py:31-37 and _OptimizationDbWithoutPagination in integration/test_api_endpoints.py:373 are still free-standing stubs not derived from/checked against the real class.
+
+2026-09-23 close-out (commit bcb8b9adea): AC1 - tests/prompt_studio/integration/test_api_endpoints.py::test_list_optimizations_endpoint_against_real_sqlite_db drives GET /api/v1/prompt-studio/optimizations/list/{project_id} through TestClient against a real SQLite PromptStudioDatabase. RED: with the facade restored to the pre-fix blind 'return self._impl.list_optimizations(...)' -> 500, AttributeError: '_SQLitePromptStudioDatabase' object has no attribute 'list_optimizations'. GREEN on current code (200, one row). Side finding while writing it: a row created with optimization_config=None/max_iterations=None also 500s (OptimizationResponse requires both); the create endpoints always set them, so the test uses realistic rows and this is not a live bug. AC4 - both list error branches now log the exception class ('... listing optimizations: {}', type(exc).__name__); message text stays out, preserving 290e4fe7b6 sanitization; sanitization tests updated to pin the class name. AC5 - new tests/prompt_studio/db_stub_contract.py::unservable_stub_methods(): a stub method must be implemented on the facade itself, or (if the facade forwards to self._impl explicitly or via __getattr__) exist on BOTH backend impls. Applied to every *Db stub in unit/test_optimization_endpoint_error_mapping.py and to _OptimizationDbWithoutPagination. RED under the old forwarder facade: 3 failed (stub contract test, stub pagination test, real-SQLite endpoint test); GREEN after. Suite: tests/prompt_studio + tests/DB_Management/test_prompt_studio_backend_parity.py -> 1162 passed, 17 skipped, 0 failed. Bandit on prompt_studio_optimization.py: no issues (only pre-existing nosec warnings). No doc change needed (internal test/log change).
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+GET /api/v1/prompt-studio/optimizations/list/{project_id} was 500 on every SQLite deployment because list_optimizations existed only on the PostgreSQL backend. Fixed in 7c348a05ae, then unified in dee169a794 (TASK-13318) so both backends share one repository body; backend parity ratchet in test_prompt_studio_backend_parity.py. This close-out (bcb8b9adea) adds the endpoint-level regression against a real SQLite DB, logs the exception class on both list error paths (still no message text), and a stub contract check so hand-written DB stubs can no longer mask a one-backend gap. Known skip: 17 Postgres-dependent tests skip locally.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
+- [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
