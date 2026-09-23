@@ -28,8 +28,9 @@ one.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -79,18 +80,28 @@ def enrolled(sync_store: SyncV2Store) -> SyncV2Store:
 
 
 def _iso(moment: datetime) -> str:
-    return moment.astimezone(timezone.utc).isoformat()
+    """Render an aware datetime as canonical UTC ISO text, as the store writes it."""
+    return moment.astimezone(timezone.utc).isoformat(timespec="microseconds")
+
+
+# Fixed instants far from any real clock, so the expired/live split cannot drift with
+# system time or land on a boundary. The store compares against its own real "now", so
+# these must bracket every plausible run date rather than sit an hour either side of it.
+_PAST = "2000-01-01T00:00:00.000000+00:00"
+_FUTURE = "2999-01-01T00:00:00.000000+00:00"
 
 
 def _past() -> str:
-    return _iso(datetime.now(timezone.utc) - timedelta(hours=1))
+    """A deadline that has certainly passed."""
+    return _PAST
 
 
 def _future() -> str:
-    return _iso(datetime.now(timezone.utc) + timedelta(hours=1))
+    """A deadline that has certainly not passed."""
+    return _FUTURE
 
 
-def _session(**overrides) -> SyncBlobUploadSessionCreate:
+def _session(**overrides: Any) -> SyncBlobUploadSessionCreate:
     """One upload session create payload, overridable per test."""
     payload = {
         "upload_id": "upload-1",
@@ -209,10 +220,10 @@ def test_the_service_stamps_a_deadline_on_new_sessions() -> None:
     """
     from tldw_Server_API.app.core.Sync.v2.models import blob_upload_expires_at
 
-    deadline = blob_upload_expires_at(3600)
+    deadline = blob_upload_expires_at(3600, now="2026-05-23T18:12:00+00:00")
 
     assert deadline is not None
-    assert deadline > _iso(datetime.now(timezone.utc)), (
+    assert deadline > "2026-05-23T18:12:00.000000+00:00", (
         "a fresh session's deadline must be in the future or it expires immediately"
     )
 
@@ -263,11 +274,11 @@ def test_the_deadline_the_service_composes_is_exact() -> None:
 
     assert (
         blob_upload_expires_at(3600, now="2026-05-23T18:12:00+00:00")
-        == "2026-05-23T19:12:00+00:00"
+        == "2026-05-23T19:12:00.000000+00:00"
     )
     assert (
         blob_upload_expires_at(86_400, now="2026-05-23T18:12:00+00:00")
-        == "2026-05-24T18:12:00+00:00"
+        == "2026-05-24T18:12:00.000000+00:00"
     )
 
 
@@ -394,7 +405,7 @@ def test_the_service_create_path_stamps_the_deadline(enrolled: SyncV2Store) -> N
 
     stored = enrolled.get_blob_upload_session(session.upload_id)
     assert stored is not None
-    assert stored.expires_at == "2026-05-23T19:12:00+00:00", (
+    assert datetime.fromisoformat(stored.expires_at) == datetime(2026, 5, 23, 19, 12, tzinfo=timezone.utc), (
         f"the create path stored expires_at={stored.expires_at!r}; a session with no "
         "deadline never expires, so its quota and upload slot are held forever"
     )
@@ -433,3 +444,124 @@ def test_the_ttl_is_configurable_from_the_environment(
         _sync_v2_non_negative_int_env(
             "SYNC_V2_BLOB_UPLOAD_SESSION_TTL_SECONDS", default=86_400
         )
+
+
+# ---------------------------------------------------------------------------
+# Qodo review on #3006: three real defects in the first cut.
+# ---------------------------------------------------------------------------
+
+
+def test_an_expired_session_cannot_be_completed(enrolled: SyncV2Store) -> None:
+    """Completion must honour the deadline, or the quota can be exceeded.
+
+    summarize_blob_quota stops counting a session's reservation at its deadline, so a
+    replacement upload may already hold that allowance. Committing the late blob would
+    push committed usage past the quota.
+    """
+    from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncBlobObjectCreate
+
+    session = enrolled.create_blob_upload_session(_session(expires_at=_past()))
+
+    with pytest.raises(SyncStoreError, match="expired"):
+        enrolled.complete_blob_upload(
+            SyncBlobObjectCreate(
+                blob_id="blob-late",
+                dataset_id="dataset-1",
+                owner_user_id="user-1",
+                attachment_id=session.attachment_id,
+                payload_hash=session.payload_hash,
+                content_type=session.content_type,
+                size_bytes=session.size_bytes,
+                encryption_policy="server_trusted_v1",
+                storage_backend="local_fs",
+                storage_key="blobs/late",
+                status="available",
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    "clock_value",
+    [
+        "2026-05-23T18:12:00+00:00",
+        "2026-05-23T20:12:00+02:00",
+        "2026-05-23T13:12:00-05:00",
+        "2026-05-23T18:12:00",  # naive: taken as UTC
+    ],
+)
+def test_the_deadline_is_canonical_utc_whatever_the_clock_offset(clock_value: str) -> None:
+    """Equivalent instants in any offset must yield the identical UTC deadline.
+
+    The SQL predicate compares expires_at lexicographically with UTC text, so an
+    offset-carrying deadline would release the reservation at the wrong instant.
+    """
+    from tldw_Server_API.app.core.Sync.v2.models import blob_upload_expires_at
+
+    assert (
+        blob_upload_expires_at(3600, now=clock_value)
+        == "2026-05-23T19:12:00.000000+00:00"
+    )
+
+
+def test_expiry_compares_instants_not_text() -> None:
+    """A +02:00 deadline one second ahead in real time is not yet expired."""
+    from tldw_Server_API.app.core.Sync.v2.models import blob_upload_session_is_expired
+
+    assert blob_upload_session_is_expired(
+        "2026-05-23T20:12:01+02:00", now="2026-05-23T18:12:00+00:00"
+    ) is False
+    assert blob_upload_session_is_expired(
+        "2026-05-23T20:11:59+02:00", now="2026-05-23T18:12:00+00:00"
+    ) is True
+
+
+class _RecordingBlobStore:
+    """Blob-store double that records writes and discards."""
+
+    def __init__(self) -> None:
+        self.writes: list[tuple[str, int]] = []
+        self.discarded: list[str] = []
+
+    def write_upload_chunk(self, *, upload_id: str, chunk_index: int, payload: bytes,
+                           expected_hash: str) -> str:
+        """Record the write and return a storage key."""
+        self.writes.append((upload_id, chunk_index))
+        return f"_uploads/{upload_id}/{chunk_index}"
+
+    def discard_upload(self, upload_id: str) -> None:
+        """Record the discard."""
+        self.discarded.append(upload_id)
+
+
+def test_an_expired_chunk_upload_writes_nothing_to_disk(enrolled: SyncV2Store) -> None:
+    """Refuse before touching disk, so an expired session leaves no staged bytes."""
+    import hashlib
+
+    from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service, SyncV2Settings
+
+    payload = b"x" * 1024
+    session = enrolled.create_blob_upload_session(_session(expires_at=_past()))
+    store = _RecordingBlobStore()
+
+    service = SyncV2Service.__new__(SyncV2Service)
+    service.store = enrolled
+    service.settings = SyncV2Settings(supports_attachments=True)
+    service.clock = lambda: "2026-05-23T18:12:00+00:00"
+    service._require_blob_transfer = lambda: store
+    service.get_blob_upload_session = lambda **kwargs: session
+
+    with pytest.raises(SyncStoreError, match="expired"):
+        service.upload_blob_chunk(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            upload_id=session.upload_id,
+            chunk_index=0,
+            offset_bytes=0,
+            chunk_hash="sha256:" + hashlib.sha256(payload).hexdigest(),
+            chunk_payload=payload,
+        )
+
+    assert store.writes == [], "an expired session still wrote a chunk to disk"
+    assert store.discarded == [session.upload_id], (
+        "the expired session's staged chunks were not discarded"
+    )

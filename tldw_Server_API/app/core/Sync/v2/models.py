@@ -2252,18 +2252,54 @@ __all__ = [
 # utcnow_iso() / blob_upload_expires_at(), giving one fixed format
 # (YYYY-MM-DDTHH:MM:SS.ffffff+00:00). Do not write a "Z"-suffixed or offset-shifted value
 # into expires_at; it would sort wrongly against these.
+def _as_utc(value: str | datetime) -> datetime:
+    """Parse an ISO timestamp as an aware UTC datetime; naive values are taken as UTC."""
+
+    moment = datetime.fromisoformat(value) if isinstance(value, str) else value
+    if moment.tzinfo is None:
+        return moment.replace(tzinfo=timezone.utc)
+    return moment.astimezone(timezone.utc)
+
+
 def blob_upload_expires_at(ttl_seconds: int, *, now: str | None = None) -> str | None:
-    """Return the canonical deadline for a new upload session, or None for no expiry."""
+    """Return the canonical deadline for a new upload session.
+
+    Args:
+        ttl_seconds: How long the session may hold its quota reservation. ``0`` or less
+            disables expiry.
+        now: ISO-8601 start time, normally the service's injected ``clock()``. Any
+            offset is accepted and normalised; a naive value is taken as UTC. Defaults to
+            the current UTC time.
+
+    Returns:
+        The deadline as canonical UTC ISO text with microseconds
+        (``YYYY-MM-DDTHH:MM:SS.ffffff+00:00``), or ``None`` for no expiry. Always UTC
+        because the SQL predicate compares ``expires_at`` lexicographically against
+        ``utcnow_iso()``; an offset-carrying value would sort by its local
+        representation and release the reservation at the wrong instant.
+    """
 
     if ttl_seconds <= 0:
         return None
-    started = datetime.fromisoformat(now) if now else datetime.now(timezone.utc)
-    return (started + timedelta(seconds=ttl_seconds)).isoformat()
+    started = _as_utc(now) if now else datetime.now(timezone.utc)
+    return (started + timedelta(seconds=ttl_seconds)).isoformat(timespec="microseconds")
 
 
 def blob_upload_session_is_expired(expires_at: Any, *, now: str | None = None) -> bool:
-    """Return whether one session row's deadline has passed."""
+    """Return whether a session's deadline has passed.
+
+    Args:
+        expires_at: The session's stored deadline. ``None`` or empty means no deadline --
+            never "already expired", because every session written before TASK-13321
+            has ``NULL`` here.
+        now: ISO-8601 instant to compare against; defaults to the current UTC time.
+
+    Returns:
+        ``True`` once ``now`` is at or past the deadline. Both sides are compared as
+        aware UTC datetimes, so differing offsets or precision cannot mis-order them.
+    """
 
     if not expires_at:
         return False
-    return str(expires_at) <= (now or datetime.now(timezone.utc).isoformat())
+    current = _as_utc(now) if now else datetime.now(timezone.utc)
+    return _as_utc(str(expires_at)) <= current

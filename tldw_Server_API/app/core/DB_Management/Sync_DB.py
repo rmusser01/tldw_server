@@ -29,7 +29,6 @@ from tldw_Server_API.app.core.Sync.v2.errors import (
     SyncStoreError,
 )
 from tldw_Server_API.app.core.Sync.v2.models import (
-    blob_upload_session_is_expired,
     DEFAULT_M1_ENCRYPTION_POLICY,
     M1_SYNC_DOMAINS,
     MEDIA_SYNC_DOMAINS,
@@ -88,6 +87,7 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     SyncNotesAttachmentSourceMap,
     SyncObjectState,
     SyncRestoreManifestStats,
+    blob_upload_session_is_expired,
     normalize_sync_timestamp,
     resolve_personal_context_ingress_result_revision,
 )
@@ -1432,7 +1432,6 @@ def utcnow_iso() -> str:
     """Return an ISO-8601 UTC timestamp for Sync v2 rows."""
 
     return datetime.now(timezone.utc).isoformat()
-
 
 
 def encode_json(value: Any, *, default: Any) -> str:
@@ -12197,6 +12196,13 @@ class SyncDatabase:
                 raise SyncDatasetNotFoundError(f"Sync dataset not found: {blob.dataset_id}")
             session = self._find_active_blob_session_for_blob(blob, connection=conn)
             if session is not None:
+                if blob_upload_session_is_expired(session["expires_at"], now=now):
+                    # summarize_blob_quota stops counting this session's reservation
+                    # at its deadline, so another upload may already have taken that
+                    # allowance. Committing it now would push committed usage past the
+                    # quota -- completion must honour the deadline exactly as chunk
+                    # writes do. See TASK-13321.
+                    raise SyncStoreError("Sync blob upload session has expired")
                 uploaded_chunks = self._blob_chunk_indexes(
                     session["upload_id"],
                     connection=conn,

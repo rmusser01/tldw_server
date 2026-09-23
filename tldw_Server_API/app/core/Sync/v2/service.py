@@ -56,7 +56,6 @@ from .materializers.guarded_product_mutation import (
     has_guard_required_routing_key,
 )
 from .models import (
-    blob_upload_expires_at,
     DEFAULT_M1_ENCRYPTION_POLICY,
     M1_SYNC_DOMAINS,
     NOTES_LINK_DOMAINS,
@@ -116,6 +115,8 @@ from .models import (
     SyncRestoreCompletenessStatus,
     SyncRestoreDomainCompleteness,
     _sync_v2_internal_domain_schemas,
+    blob_upload_expires_at,
+    blob_upload_session_is_expired,
     client_private_server_frontend_limitation_warning,
     normalize_supported_adapter_versions,
     normalize_sync_timestamp,
@@ -6384,6 +6385,11 @@ class SyncV2Service:
             raise SyncIdempotencyConflictError(
                 "Sync blob chunk was reused with different content"
             )
+        # Refuse before touching disk: an expired session's staged chunks are never
+        # completed, so writing one only leaves bytes behind. See TASK-13321.
+        if blob_upload_session_is_expired(session.expires_at, now=self.clock()):
+            blob_store.discard_upload(upload_id)
+            raise SyncStoreError("Sync blob upload session has expired")
         try:
             storage_key = blob_store.write_upload_chunk(
                 upload_id=upload_id,
@@ -6393,17 +6399,25 @@ class SyncV2Service:
             )
         except SyncBlobStoreError as exc:
             raise SyncStoreError(str(exc)) from exc
-        return self.store.record_blob_chunk(
-            SyncBlobChunkCreate(
-                upload_id=upload_id,
-                dataset_id=dataset_id,
-                chunk_index=chunk_index,
-                offset_bytes=offset_bytes,
-                size_bytes=len(chunk_payload),
-                chunk_hash=chunk_hash,
-                storage_key=storage_key,
+        try:
+            return self.store.record_blob_chunk(
+                SyncBlobChunkCreate(
+                    upload_id=upload_id,
+                    dataset_id=dataset_id,
+                    chunk_index=chunk_index,
+                    offset_bytes=offset_bytes,
+                    size_bytes=len(chunk_payload),
+                    chunk_hash=chunk_hash,
+                    storage_key=storage_key,
+                )
             )
-        )
+        except SyncStoreError:
+            # The deadline can pass between the check above and the store's own check.
+            # The session is then dead, so discard its staged chunks rather than leave
+            # them on disk until an explicit cancel that will never come.
+            if blob_upload_session_is_expired(session.expires_at, now=self.clock()):
+                blob_store.discard_upload(upload_id)
+            raise
 
     def complete_blob_upload(
         self,
