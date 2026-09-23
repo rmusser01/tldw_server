@@ -28,6 +28,7 @@ import {
   updateLastUsedPrompt,
   updateChatHistoryCreatedAt
 } from "@/db/dexie/helpers"
+import { removeAcknowledgedServerMirrorMessage } from "@/db/dexie/server-chat-mirror"
 import {
   rollbackScopedComparePersistence,
   runChatPersistenceTransaction
@@ -3406,10 +3407,16 @@ export const useChatActions = ({
       compareServicePromptSnapshot &&
       compareServicePromptSnapshot.scopeInvalidatedSignal.aborted
     )
+    const currentHistorySelection = historySelection?.getCurrent()
+    const selectedHistoryTurn =
+      currentHistorySelection?.status === "idle" ||
+      (temporaryChat && !currentHistorySelection?.owner)
+        ? null
+        : historySelection
 
     try {
       if (
-        historySelection &&
+        selectedHistoryTurn &&
         !compareModeActive &&
         turnResolvedSendMode === "tracked_persona"
       ) {
@@ -3418,7 +3425,7 @@ export const useChatActions = ({
         )
       }
       if (
-        historySelection &&
+        selectedHistoryTurn &&
         (isRegenerate ||
           isContinue ||
           turnUsesImageMode ||
@@ -3442,6 +3449,11 @@ export const useChatActions = ({
         !turnShouldUseRag &&
         turnResolvedSendMode !== "tracked_character" &&
         turnResolvedSendMode !== "tracked_persona"
+      const normalHistorySelection = selectedHistoryTurn ?? (
+        historySelection && needsSavedNormalScope && !isRegenerate
+          ? historySelection
+          : null
+      )
       const needsSavedMirrorScope = !temporaryChat && (
         Boolean(requestOverrides?.serverChatId ?? serverChatIdOverride ?? serverChatId) ||
         (!compareModeActive && (turnResolvedSendMode === "tracked_character" || turnResolvedSendMode === "tracked_persona"))
@@ -3892,7 +3904,7 @@ export const useChatActions = ({
                     effectiveAssistantState.systemPromptSnapshot ?? undefined
                 }
               : servicePromptChatModeParams
-          const workspaceServerChat = historySelection
+          const workspaceServerChat = normalHistorySelection
             ? { chatId: null, historyId: chatModeParams.historyId }
             : await ensureWorkspaceServerChatForTurn({
                 message,
@@ -3937,9 +3949,9 @@ export const useChatActions = ({
               ...scopedNormalModeParams,
               ownsAbortController: (turnSignal: AbortSignal) =>
                 activeAbortControllerRef.current?.signal === turnSignal,
-              historySelection: historySelection
+              historySelection: normalHistorySelection
                 ? {
-                    controller: historySelection,
+                    controller: normalHistorySelection,
                     originIsCurrent: historyOriginIsCurrent!,
                     temporary: temporaryChat
                   }
@@ -4606,7 +4618,7 @@ export const useChatActions = ({
       } catch {
         // The active chat's selected character and metadata are sufficient.
       }
-      if (characterId == null) throw new Error("Cannot branch server chat without character_id")
+      if (characterId === null || characterId === undefined) throw new Error("Cannot branch server chat without character_id")
       const base = (title || (serverChatTopic || "").trim() || "Extension chat").slice(0, 60)
       const created = await tldwClient.createChat({
         title: `${base} [${serverChatId.slice(0, 8)}] · msg #${index + 1}`,
@@ -4650,6 +4662,12 @@ export const useChatActions = ({
     }
   }
 
+  const actionSelectionState = historySelection?.getCurrent()
+  const selectedHistoryForActions =
+    actionSelectionState?.status === "idle" ||
+    (temporaryChat && !actionSelectionState?.owner)
+      ? null
+      : historySelection
   const regenerateLastMessage = createRegenerateLastMessage({
     notification,
     allowOrdinaryRetry: true,
@@ -4659,9 +4677,9 @@ export const useChatActions = ({
     setHistory,
     setMessages,
     onSubmit,
-    historySelection,
+    historySelection: selectedHistoryForActions,
     beforeSubmit: async ({ lastAssistant, nextMessages }) => {
-      if (!serverChatId || historySelection) return
+      if (!serverChatId || selectedHistoryForActions) return
       if (selectedCharacter?.id == null && serverChatCharacterId == null) return
       if (decodeChatErrorPayload(lastAssistant.message) || getLocalRagDiagnosticUser(messages, lastAssistant)) return
       const index = nextMessages.length - 1
@@ -4694,10 +4712,12 @@ export const useChatActions = ({
     [abortController, setAbortController]
   )
 
+  const ordinaryLocalMutation =
+    !serverChatId && historySelection?.getCurrent().status === "idle"
   const editMessage = createEditMessage({
     notification,
-    captureViewFence: historySelection?.fence,
-    mutate: async (target, content) => {
+    captureViewFence: ordinaryLocalMutation ? undefined : historySelection?.fence,
+    mutate: ordinaryLocalMutation ? undefined : async (target, content) => {
       const owner = captureLocalMutationOwner(
         historySelection,
         historyId,
@@ -4718,9 +4738,10 @@ export const useChatActions = ({
     async (index: number) => {
       const target = messages[index]
       if (!target?.id) throw new Error("missing_message")
-      if (!historySelection && !temporaryChat && !serverChatId)
+      const selectedHistory = ordinaryLocalMutation ? null : historySelection
+      if (!selectedHistory && !historySelection && !temporaryChat && !serverChatId)
         throw new Error("history_selection_unavailable")
-      if (!historySelection) {
+      if (!selectedHistory) {
         const serverMessageId = target.serverMessageId
         const historyRole = target.role ?? (target.isBot ? "assistant" : "user")
         const targetIsInPrompt = excludeLocalRagDiagnostics(messages).includes(target)
@@ -4728,15 +4749,22 @@ export const useChatActions = ({
         try {
           if (serverMessageId) {
             await tldwClient.initialize().catch(() => null)
-            const serverMessage = target.serverMessageVersion == null
+            const serverMessage = target.serverMessageVersion === null || target.serverMessageVersion === undefined
               ? await tldwClient.getMessage(serverMessageId)
               : null
             const version = target.serverMessageVersion ?? serverMessage?.version
-            if (version == null) throw new Error("Missing server message version")
+            if (version === null || version === undefined) throw new Error("Missing server message version")
             await tldwClient.deleteMessage(serverMessageId, Number(version), serverChatId ?? undefined)
             invalidateServerChatHistory()
           }
-          if (historyId) await removeMessageById(historyId, target.id)
+          if (historyId) {
+            if (serverMessageId && serverChatId)
+              await removeAcknowledgedServerMirrorMessage({
+                historyId, chatId: serverChatId,
+                localMessageId: target.id, serverMessageId
+              })
+            else await removeMessageById(historyId, target.id)
+          }
         } catch (error) {
           console.error("[deleteMessage] Failed to delete message", error)
           return
@@ -4757,18 +4785,22 @@ export const useChatActions = ({
         })
         return
       }
-      const origin = historySelection?.getCurrent()
-      const current = historySelection?.fence() ?? (() => true)
+      const origin = selectedHistory.getCurrent()
+      const current = selectedHistory.fence()
       try {
         if (serverChatId && origin?.capture?.status !== "captured") {
           if (!target.serverMessageId) throw new Error("Missing server message ID")
           await tldwClient.initialize().catch(() => null)
-          const serverMessage = target.serverMessageVersion == null
+          const serverMessage = target.serverMessageVersion === null || target.serverMessageVersion === undefined
             ? await tldwClient.getMessage(target.serverMessageId)
             : null
           const version = target.serverMessageVersion ?? serverMessage?.version
-          if (version == null) throw new Error("Missing server message version")
+          if (version === null || version === undefined) throw new Error("Missing server message version")
           await tldwClient.deleteMessage(target.serverMessageId, Number(version), serverChatId)
+          if (historyId) await removeAcknowledgedServerMirrorMessage({
+            historyId, chatId: serverChatId,
+            localMessageId: target.id, serverMessageId: target.serverMessageId
+          })
           if (!current()) return
           if (replyTarget?.id === target.id || replyTarget?.id === target.serverMessageId) clearReplyTarget()
           const remaining = messages.filter((row) => row.id !== target.id)
@@ -4778,7 +4810,7 @@ export const useChatActions = ({
           return
         }
         const owner = captureLocalMutationOwner(
-          historySelection,
+          selectedHistory,
           historyId,
           serverChatId
         )
@@ -4799,7 +4831,7 @@ export const useChatActions = ({
           view.cursor.kind !== "empty" &&
           view.cursor.message_id === target.id
         ) {
-          await historySelection?.choose(
+          await selectedHistory.choose(
             removed.parent_message_id
               ? { kind: "after_message", message_id: removed.parent_message_id }
               : { kind: "empty" }
@@ -4820,6 +4852,7 @@ export const useChatActions = ({
       temporaryChat,
       messages,
       historySelection,
+      ordinaryLocalMutation,
       replyTarget?.id,
       clearReplyTarget,
       setMessages,

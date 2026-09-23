@@ -103,6 +103,11 @@ vi.mock("@/db/dexie/helpers", async (original) => ({
   getPromptById: vi.fn(async () => null)
 }))
 
+vi.mock("@/db/dexie/server-chat-mirror", async (original) => ({
+  ...(await original<any>()),
+  removeAcknowledgedServerMirrorMessage: vi.fn(async () => undefined)
+}))
+
 vi.mock("@/db/dexie/nickname", () => ({
   getModelNicknameByID: vi.fn(async () => null)
 }))
@@ -163,6 +168,8 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     captureHistorySelection: (...args: any[]) => h1.capture(...args),
     streamChatCompletion: (...args: any[]) => h1.wire(...args),
     getConfig: vi.fn(async () => null),
+    deleteMessage: vi.fn(async () => undefined),
+    getMessage: vi.fn(async () => ({ version: 1 })),
     resolveVisualIdentityBinding: resolveVisualIdentityBindingMock
   }
 }))
@@ -471,6 +478,83 @@ const ordinaryOptions = () => ({
     { role: "user", content: "old question" },
     { role: "assistant", content: "wrong latest" }
   ]
+})
+
+it("edits an ordinary local message while the mounted history controller is idle", async () => {
+  const helpers = await import("@/db/dexie/helpers")
+  const current = h1.controller.getCurrent()
+  current.status = "idle"
+  current.owner = null
+  current.view = null
+  const options = {
+    ...ordinaryOptions(),
+    serverChatId: null,
+    messages: [{ id: "plain-message", isBot: false, message: "old", sources: [] }]
+  }
+  const { result } = renderHook(() => useChatActions(options as any))
+  await act(async () => {
+    await result.current.editMessage(0, "edited", false, false)
+  })
+  expect(helpers.updateMessageById).toHaveBeenCalledWith(
+    "history-character", "plain-message", "edited"
+  )
+})
+
+it("deletes an ordinary local message while the mounted history controller is idle", async () => {
+  const helpers = await import("@/db/dexie/helpers")
+  const current = h1.controller.getCurrent()
+  current.status = "idle"
+  current.owner = null
+  current.view = null
+  const options = {
+    ...ordinaryOptions(),
+    serverChatId: null,
+    messages: [{ id: "plain-message", isBot: false, message: "old", sources: [] }]
+  }
+  const { result } = renderHook(() => useChatActions(options as any))
+  await act(async () => {
+    await result.current.deleteMessage(0)
+  })
+  expect(helpers.removeMessageById).toHaveBeenCalledWith(
+    "history-character", "plain-message"
+  )
+})
+
+it("removes a server-backed message from its exact mirror after canonical deletion", async () => {
+  const helpers = await import("@/db/dexie/helpers")
+  const mirror = await import("@/db/dexie/server-chat-mirror")
+  const api = (await import("@/services/tldw/TldwApiClient")).tldwClient
+  const current = h1.controller.getCurrent()
+  current.capture = null
+  const options = {
+    ...ordinaryOptions(),
+    serverChatId: "tracked-chat-1",
+    messages: [{ id: "local-message", serverMessageId: "server-message", serverMessageVersion: 1, isBot: true, message: "answer", sources: [] }]
+  }
+  const { result } = renderHook(() => useChatActions(options as any))
+  await act(async () => { await result.current.deleteMessage(0) })
+  expect(api.deleteMessage).toHaveBeenCalledWith("server-message", 1, "tracked-chat-1")
+  expect(mirror.removeAcknowledgedServerMirrorMessage).toHaveBeenCalledWith({
+    historyId: "history-character", chatId: "tracked-chat-1",
+    localMessageId: "local-message", serverMessageId: "server-message"
+  })
+  expect(helpers.removeMessageById).not.toHaveBeenCalled()
+  expect(options.setMessages).toHaveBeenCalledWith([])
+})
+
+it("routes ordinary regeneration while the mounted history controller is idle", async () => {
+  const current = h1.controller.getCurrent()
+  current.status = "idle"
+  current.owner = null
+  current.view = null
+  normalChatModeMock.mockResolvedValue({ state: "submitted" } as any)
+  const options = ordinaryOptions()
+  const { result } = renderHook(() => useChatActions(options as any))
+  await act(async () => {
+    await result.current.onSubmit({ message: "again", image: "", isRegenerate: true })
+  })
+  expect(options.notification.error).not.toHaveBeenCalled()
+  expect(normalChatModeMock).toHaveBeenCalled()
 })
 
 it("mounted ordinary submit sends the selected A1 and settles once under its pre-admitted input", async () => {

@@ -52,7 +52,21 @@ def project_history_context(
     *,
     character_override: str | None = None,
 ) -> tuple[dict[str, Any] | None, int | None, dict[str, Any]]:
-    """Return detached neutral or saved single-character prompt and sampling data."""
+    """Project saved owner state into detached prompt and sampling data.
+
+    Args:
+        state: Coherent conversation, settings, and behavior snapshot from the
+            owner transaction.
+        character_override: Optional character identity requested by the send.
+
+    Returns:
+        A detached character card (or ``None``), its database ID, and the
+        assistant identity and saved sampling context.
+
+    Raises:
+        HistorySelectionError: Saved behavior cannot be represented faithfully
+            or the requested character differs from the saved owner.
+    """
     conversation = state["conversation"]
     settings = state.get("settings") or {}
     materialized = state.get("materialized_settings")
@@ -168,6 +182,13 @@ def require_history_skill_absence(base_path: Path, *, registry_may_be_visible: b
     SKILL.md files. Disabled skills cannot add context. Eligible registry rows
     and interrupted replacements cannot establish absence without mutation or
     an unfenced integrity decision, so they explicitly require another adapter.
+
+    Args:
+        base_path: User directory whose installed skills could affect the prompt.
+        registry_may_be_visible: Whether an eligible registry row may add a skill.
+
+    Raises:
+        HistorySelectionError: Skill absence cannot be established safely.
     """
     from tldw_Server_API.app.core.Skills.exceptions import SkillParseError
     from tldw_Server_API.app.core.Skills.skill_parser import SkillParser

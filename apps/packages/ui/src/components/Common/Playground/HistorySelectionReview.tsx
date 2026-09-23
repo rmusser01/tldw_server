@@ -54,6 +54,10 @@ export function HistorySelectionReview({
   const scroller = React.useRef<HTMLDivElement>(null)
   const errorRegion = React.useRef<HTMLDivElement>(null)
   const identity = React.useId()
+  const reviewOwner = selection.owner
+    ? `${selection.owner.kind}:${selection.owner.owner_key}:${selection.owner.conversation_id}`
+    : null
+  const previousReviewOwner = React.useRef(reviewOwner)
   const nodes = selection.capture?.snapshot.nodes || []
   const rowId = (id: string) => `${identity}-${encodeURIComponent(id)}`
   const virtualizer = useVirtualizer({
@@ -68,6 +72,14 @@ export function HistorySelectionReview({
     selection.status === "pending" || selection.status === "pending_unknown"
   const stale =
     selection.status === "stale_selection" || selection.status === "error"
+  React.useEffect(() => {
+    if (previousReviewOwner.current === reviewOwner) return
+    previousReviewOwner.current = reviewOwner
+    setExpanded(false)
+    setIncluded([])
+    setCursor({ kind: "empty" })
+    setFocusedId(null)
+  }, [reviewOwner])
   React.useEffect(() => {
     if (stale && expanded) errorRegion.current?.focus()
   }, [stale, expanded])

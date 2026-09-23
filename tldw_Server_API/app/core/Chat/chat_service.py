@@ -4116,12 +4116,18 @@ async def build_context_and_messages(
     admission = None
     if versioned:
         from tldw_Server_API.app.core.Chat.history_context import project_history_context
-        from tldw_Server_API.app.core.Chat.history_selection import HistorySelectionError
+        from tldw_Server_API.app.core.Chat.history_selection import HistorySelectionError, HistorySelectionSnapshotV1
         if getattr(request_data, "prompt_template_name", None) not in (None, "", DEFAULT_RAW_PASSTHROUGH_TEMPLATE.name):
             raise HTTPException(409, detail={"status": "unsupported_history_capability", "code": "unsupported_history_context_prompt_template"})
         selection = history_selection.model_dump(mode="json")
         owner = history_runtime["history_owner_key"]
-        def accept_history():
+        def accept_history() -> tuple[
+            HistorySelectionSnapshotV1,
+            tuple[dict[str, Any], ...],
+            dict[str, Any],
+            dict[str, Any],
+            tuple[dict[str, Any] | None, int | None, dict[str, Any]],
+        ]:
             with chat_db.transaction() as conn:
                 state = chat_db.get_roleplay_resume_state(final_conversation_id, conn=conn, lock_for_update=True,
                     owner_client_id=history_runtime["history_owner_client_id"])
