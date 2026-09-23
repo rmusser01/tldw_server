@@ -120,6 +120,41 @@ def _signatures(db: PromptStudioDatabase) -> dict[str, Any]:
     }
 
 
+def _projects(db: PromptStudioDatabase) -> dict[str, Any]:
+    ids = _seed(db)  # "parity", owned by u1, with one prompt and one test case
+    other = db.create_project(name="Other Thing", description="needle", status="active", metadata={"k": 1}, user_id="u2")
+
+    def names(result: dict[str, Any]) -> list[str]:
+        return sorted(p["name"] for p in result["projects"])
+
+    return {
+        "create": other,
+        "create_duplicate": _outcome(lambda: db.create_project(name="parity", user_id="u1")),
+        "create_same_name_other_user": db.create_project(name="parity", user_id="u3")["name"],
+        "create_blank": _outcome(lambda: db.create_project(name="   ")),
+        "create_too_long": _outcome(lambda: db.create_project(name="x" * 1000)),
+        "get": db.get_project(ids["project"]),
+        "get_missing": _outcome(lambda: db.get_project(99999)),
+        "list": db.list_projects(user_id="u1"),
+        "list_status": names(db.list_projects(status="active")),
+        "list_search_description": names(db.list_projects(search="NEEDLE")),
+        "list_paged": db.list_projects(page=2, per_page=1)["pagination"],
+        "update": db.update_project(other["id"], {"description": "d2", "metadata": {"k": 2}, "ignored": 1}),
+        "update_strips_name": db.update_project(other["id"], name="  Renamed  ")["name"],
+        "update_blank_name": _outcome(lambda: db.update_project(other["id"], {"name": ""})),
+        "update_noop": db.update_project(other["id"], {"ignored": 1})["name"],
+        "update_missing": _outcome(lambda: db.update_project(99999, {"description": "x"})),
+        "soft_delete": db.delete_project(other["id"]),
+        "soft_delete_again": db.delete_project(other["id"]),
+        "get_deleted": _outcome(lambda: db.get_project(other["id"])),
+        "get_deleted_included": _outcome(lambda: db.get_project(other["id"], include_deleted=True) is not None),
+        "update_deleted": _outcome(lambda: db.update_project(other["id"], {"description": "x"})),
+        "list_including_deleted": names(db.list_projects(include_deleted=True)),
+        "hard_delete": db.delete_project(other["id"], hard_delete=True),
+        "hard_delete_missing": db.delete_project(other["id"], hard_delete=True),
+    }
+
+
 def _reads(db: PromptStudioDatabase) -> dict[str, Any]:
     # Read paths shared by the later aggregates; pins that PostgreSQL does not leak
     # its tsvector columns through `SELECT *` / `RETURNING *`.
@@ -138,6 +173,7 @@ SCENARIOS: dict[str, Callable[[PromptStudioDatabase], dict[str, Any]]] = {
     "test_runs": _test_runs,
     "prompt_versions": _prompt_versions,
     "evaluations": _evaluations,
+    "projects": _projects,
     "reads": _reads,
     "signatures": _signatures,
 }
