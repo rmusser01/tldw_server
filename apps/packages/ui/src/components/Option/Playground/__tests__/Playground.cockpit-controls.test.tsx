@@ -4,6 +4,7 @@ import {
   act,
   fireEvent,
   render,
+  renderHook,
   screen,
   waitFor,
   within,
@@ -20,6 +21,20 @@ import {
   SET_TEMPORARY_CHAT_EVENT,
   TOGGLE_WEB_SEARCH_EVENT,
 } from "../playground-cockpit-actions";
+
+const forkSettings = vi.hoisted(() => ({controller: null as any, mode: "ordinary", current: true, update: vi.fn<(...args: any[]) => Promise<any>>(async () => ({}))}))
+vi.mock("@/hooks/chat/useHistorySelection", async importOriginal => {
+  const actual = await importOriginal<typeof import("@/hooks/chat/useHistorySelection")>()
+  return {...actual, useHistorySelectionContext: () => {
+    const controller = actual.useHistorySelectionContext()
+    return forkSettings.controller ?? {...controller, settingsMode: () => forkSettings.mode, updateForkSettings: forkSettings.update, fence: () => () => forkSettings.current}
+  }}
+})
+
+vi.mock("@/db/dexie/history-selection", () => ({ensureLocalProfileId: async () => "profile", loadHistoryBookmark: async () => null, saveHistoryBookmark: async () => {}, loadHistoryTurnRecoveries: async () => []}))
+vi.mock("@/db/dexie/fork-operations", () => ({findForkCandidate: async () => null, loadForkOperations: async () => []}))
+vi.mock("@/services/chat-history-selection", () => ({captureHistorySnapshot: async (owner: any, view: any) => ({status: "legacy_review_required", code: "legacy_review_required", view, snapshot: {version: 1, owner_key: owner.owner_key, conversation_id: owner.conversation_id, nodes: [], source_digest: "source", storage_context_digest: "storage", fences: {}, interpretation_status: {kind: "legacy_review_required"}}})}))
+import {useHistorySelection} from "@/hooks/chat/useHistorySelection"
 
 const messageOptionState = vi.hoisted(() => ({
   value: {
@@ -400,6 +415,7 @@ vi.mock("react-router-dom", async () => {
 
 describe("Playground cockpit controls", () => {
   beforeEach(() => {
+    forkSettings.controller = null; forkSettings.mode = "ordinary"; forkSettings.current = true; forkSettings.update.mockReset(); forkSettings.update.mockResolvedValue({});
     storageState.values.clear();
     storageState.values.set("playgroundChatContextRailVisible", true);
     storageState.values.set("playgroundChatRuntimeRailVisible", true);
@@ -1218,6 +1234,50 @@ describe("Playground cockpit controls", () => {
     });
     expect(messageOptionState.value.setSelectedAssistant).toHaveBeenCalledWith(null);
     expect(messageOptionState.value.setSelectedCharacter).toHaveBeenCalledWith(null);
+  });
+
+  it.each(["success", "scope-change", "failed", "pending"])("clears a copied child's overlay only through its current scoped settings action: %s", async outcome => {
+    forkSettings.mode = outcome === "pending" ? "pending" : "fork";
+    messageOptionState.value.streaming = false;
+    messageOptionState.value.historyId = null;
+    messageOptionState.value.serverChatId = "fork-child";
+    messageOptionState.value.selectedAssistant = {kind: "persona", id: "overlay", name: "Overlay", metadata: {selectionMode: "overlay"}} as any;
+    messageOptionState.value.selectedCharacter = null;
+    let finish!: () => void;
+    forkSettings.update.mockImplementation(() => new Promise((resolve, reject) => { finish = () => outcome === "failed" ? reject(new Error("lost response")) : resolve({}); }));
+    render(<Playground />);
+    const inspector = within(await screen.findByTestId("playground-cockpit-right-rail")).getByTestId("playground-runtime-inspector");
+    fireEvent.click(within(inspector).getByRole("button", {name: "Clear assistant"}));
+    if (outcome !== "pending") {
+      await waitFor(() => expect(forkSettings.update).toHaveBeenCalledWith({assistantOverlay: null}));
+      expect(messageOptionState.value.setServerChatId).not.toHaveBeenCalled();
+      if (outcome === "scope-change") forkSettings.current = false;
+      await act(async () => finish());
+    } else await act(async () => {});
+    expect(chatSettingsState.applyChatSettingsPatch).not.toHaveBeenCalled();
+    if (outcome === "success") expect(messageOptionState.value.setServerChatId).toHaveBeenCalledWith(null);
+    else {
+      expect(messageOptionState.value.setServerChatId).not.toHaveBeenCalled();
+      expect(messageOptionState.value.setSelectedAssistant).not.toHaveBeenCalled();
+      expect(sessionPersistenceState.value.clearPersistedSession).not.toHaveBeenCalled();
+    }
+  });
+
+  it("clears an ordinary legacy chat assistant through the real qualified controller before ancestry review", async () => {
+    messageOptionState.value.streaming = false;
+    messageOptionState.value.historyId = null;
+    messageOptionState.value.serverChatId = "legacy";
+    messageOptionState.value.selectedAssistant = {kind: "persona", id: "overlay", name: "Overlay", metadata: {selectionMode: "overlay"}} as any;
+    messageOptionState.value.selectedCharacter = null;
+    const actual = renderHook(() => useHistorySelection());
+    await act(async () => {await actual.result.current.open({kind: "native", owner_key: "owner", conversation_id: "legacy", validate_lease: () => true} as any)});
+    forkSettings.controller = actual.result.current;
+    render(<Playground />);
+    const inspector = within(await screen.findByTestId("playground-cockpit-right-rail")).getByTestId("playground-runtime-inspector");
+    fireEvent.click(within(inspector).getByRole("button", {name: "Clear assistant"}));
+    await waitFor(() => expect(messageOptionState.value.setServerChatId).toHaveBeenCalledWith(null));
+    expect(chatSettingsState.applyChatSettingsPatch).toHaveBeenCalledWith({historyId: null, serverChatId: "legacy", patch: {assistantOverlay: null}});
+    expect(actual.result.current.status).toBe("legacy_review_required");
   });
 
   it("does not render cockpit control rails in focus mode", async () => {

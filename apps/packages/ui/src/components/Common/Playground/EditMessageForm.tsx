@@ -36,6 +36,7 @@ export const EditMessageForm = (props: Props) => {
 
   return (
     <form
+      data-chat-message-editor
       onSubmit={form.onSubmit((data) => {
         if (isComposing) return
         props.onClose()
@@ -90,6 +91,7 @@ export const EditMessageForm = (props: Props) => {
             </button>
 
             <button
+              type="button"
               onClick={props.onClose}
               aria-label={t("cancel")}
               title={t("cancel")}

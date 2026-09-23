@@ -187,13 +187,18 @@ def iter_routes(app: Any) -> Iterator[tuple[str | None, list[str], Any]]:
     Raises ``RatchetError`` if an included router refuses to resolve, rather
     than silently under-reporting the route inventory.
     """
-    from fastapi.routing import APIRoute, _IncludedRouter
+    from fastapi.routing import APIRoute
 
     for route in app.routes:
         if isinstance(route, APIRoute):
             yield _route_facts(route)
             continue
-        if not isinstance(route, _IncludedRouter):
+        # Older FastAPI releases flatten included routers into APIRoute
+        # instances and do not expose the private _IncludedRouter type.
+        if not any(
+            hasattr(route, name)
+            for name in ("effective_candidates", "effective_low_priority_routes")
+        ):
             continue
         # FastAPI defers inclusion, so the real routes (carrying the merged
         # parent-router dependencies) only exist inside the included router.

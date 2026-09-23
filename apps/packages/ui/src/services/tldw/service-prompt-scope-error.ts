@@ -131,6 +131,8 @@ export const isServicePromptRequestPath = (
   if (/^\/api\/v1\/service-prompts\/[^/]+$/.test(pathname)) {
     return ["GET", "PUT", "DELETE"].includes(requestMethod)
   }
+  if (/^\/api\/v1\/chats\/[^/]+\/settings$/.test(pathname)) return ["GET", "PUT"].includes(requestMethod)
+  if (requestMethod === "GET" && /^\/api\/v1\/chats\/[^/]+$/.test(pathname)) return true
   if (/^\/api\/v1\/flashcards\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pathname)) return ["GET", "DELETE"].includes(requestMethod)
   if (requestMethod === "GET") {
     return pathname === "/api/v1/flashcards/decks" || /^\/api\/v1\/media\/[0-9]+$/.test(pathname) || pathname === "/api/v1/monitoring/alerts" ||
@@ -145,6 +147,8 @@ export const isServicePromptRequestPath = (
   if (["/api/v1/flashcards", "/api/v1/flashcards/decks", "/api/v1/flashcards/generate", "/api/v1/flashcards/assets", "/api/v1/flashcards/bulk"].includes(pathname)) return true
   if (/^\/api\/v1\/chats\/[^/]+\/(?:completions\/persist|complete-v2)$/.test(pathname)) return true
   if (pathname === "/api/v1/chats/") return true
+  if (/^\/api\/v1\/chat\/conversations\/[^/]+\/history\/(?:selection|legacy-projection)$/.test(pathname)) return true
+  if (/^\/api\/v1\/chats\/[^/]+\/completions\/persist$/.test(pathname)) return true
   return /^\/api\/v1\/(?:auth\/refresh|chat\/completions|media\/add|rag\/search|research\/websearch)$/.test(pathname) ||
     /^\/api\/v1\/chats\/[^/]+\/messages$/.test(pathname)
 }

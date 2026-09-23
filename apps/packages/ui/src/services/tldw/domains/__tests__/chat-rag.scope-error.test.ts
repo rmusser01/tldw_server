@@ -45,3 +45,17 @@ describe("chat RAG scoped errors", () => {
     await expect(request).rejects.toBe(scopeError)
   })
 })
+it.each(["getChat", "getChatSettings", "updateChatSettings"] as const)("forwards scoped credentials, workspace and cancellation for %s", async method => {
+  mocks.bgRequest.mockReset().mockResolvedValue({id: "child", conversation_id: "child", settings: {}})
+  const signal = new AbortController().signal
+  const options = {scope: {type: "workspace" as const, workspaceId: "original"}, signal,
+    requestScope: {config: {serverUrl: "https://original.test", authMode: "multi-user" as const}, userId: "alice"}}
+  const client = {normalizeChatSummary: (value: any) => value} as any
+  if (method === "updateChatSettings") await chatRagMethods[method].call(client, "child", {authorNote: "explicit"}, options)
+  else await chatRagMethods[method].call(client, "child", options)
+  expect(mocks.bgRequest).toHaveBeenCalledWith(expect.objectContaining({
+    path: expect.stringContaining("scope_type=workspace&workspace_id=original"), abortSignal: signal,
+    headers: expect.objectContaining({"X-TLDW-Expected-User-ID": "alice"}),
+    servicePromptConfig: expect.objectContaining({serverUrl: "https://original.test", expectedUserId: "alice"})
+  }))
+})

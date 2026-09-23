@@ -836,6 +836,9 @@ async def resolve_input_moderation_chat_type(
     loop: Any,
 ) -> str:
     """Resolve chat_type for input moderation from request fields and saved conversation state."""
+    if getattr(request_data, "tldw_history_selection_v1", None) is not None:
+        conversation = await loop.run_in_executor(None, chat_db.get_conversation_by_id, request_data.conversation_id)
+        return "character" if conversation and (conversation.get("character_id") or conversation.get("assistant_kind")) else "regular"
     default_character_id = await _resolve_default_character_id(chat_db, loop)
     requested_character_id = getattr(request_data, "character_id", None)
     # Also check legacy persona_id alias so moderation scope is consistent
@@ -2775,6 +2778,8 @@ def build_call_params_from_request(
             "prompt_template_name",
             "stream",
             "save_to_db",
+            "tldw_history_selection_v1",
+            "tldw_history_admission_v1",
             "history_message_limit",
             "history_message_order",
             "research_context",
@@ -2883,6 +2888,10 @@ def build_call_params_from_request(
         grammar_record=grammar_record,
         runtime_caps=resolve_llamacpp_runtime_caps(app_config=app_config),
     )["extra_body"]
+    for extension in ("extra_body", "extra_headers"):
+        if isinstance(call_params.get(extension), dict):
+            call_params[extension] = {key: value for key, value in call_params[extension].items()
+                if key.lower().replace("-", "_") not in {"tldw_history_selection_v1", "tldw_history_admission_v1"}}
     billing_prompt_cache_intent = getattr(request_data, "billing_prompt_cache_intent", None)
     if billing_prompt_cache_intent is not None:
         call_params["billing_prompt_cache_intent"] = billing_prompt_cache_intent
@@ -4095,18 +4104,57 @@ async def build_context_and_messages(
             raise HTTPException(status_code=409, detail="Regeneration requires an existing saved answered turn.")
     reuse_saved_turn = explicit_failed_retry or regenerate_reply_id is not None
 
-    # Assistant context
-    (
-        character_card,
-        character_db_id,
-        existing_conversation,
-        assistant_context,
-    ) = await _resolve_assistant_context_for_chat(
-        chat_db=chat_db,
-        request_data=request_data,
-        loop=loop,
-        conversation_id=final_conversation_id,
-    )
+    history_selection = getattr(request_data, "tldw_history_selection_v1", None)
+    if history_selection is not None and reuse_saved_turn:
+        raise HTTPException(409, detail={"status": "unsupported_history_capability", "code": "unsupported_history_legacy_retry"})
+    versioned = history_selection is not None
+    history_runtime = runtime_state or {}
+    if versioned and (not final_conversation_id or not history_runtime.get("history_owner_key")):
+        raise HTTPException(409, detail={"code": "missing_authenticated_history_binding"})
+    selected_content = ()
+    history_snapshot = None
+    admission = None
+    if versioned:
+        from tldw_Server_API.app.core.Chat.history_context import project_history_context
+        from tldw_Server_API.app.core.Chat.history_selection import HistorySelectionError
+        if getattr(request_data, "prompt_template_name", None) not in (None, "", DEFAULT_RAW_PASSTHROUGH_TEMPLATE.name):
+            raise HTTPException(409, detail={"status": "unsupported_history_capability", "code": "unsupported_history_context_prompt_template"})
+        selection = history_selection.model_dump(mode="json")
+        owner = history_runtime["history_owner_key"]
+        def accept_history():
+            with chat_db.transaction() as conn:
+                state = chat_db.get_roleplay_resume_state(final_conversation_id, conn=conn, lock_for_update=True,
+                    owner_client_id=history_runtime["history_owner_client_id"])
+                snap, content = chat_db.validate_history_selection(final_conversation_id, selection,
+                    owner_client_id=history_runtime["history_owner_client_id"], owner_key=owner, conn=conn)
+                context = project_history_context(state, character_override=getattr(request_data, "character_id", None))
+                for item in content:
+                    _saved_image_details(item.get("extra_metadata"), len(item["images"]))
+                accepted = chat_db.append_selected_history_inputs(final_conversation_id, selection, history_runtime["history_inputs"],
+                    owner_client_id=history_runtime["history_owner_client_id"], owner_key=owner, conn=conn)
+                return snap, content, accepted, state["conversation"], context
+        try:
+            history_snapshot, selected_content, admission, existing_conversation, context = await asyncio.to_thread(accept_history)
+        except HistorySelectionError as exc:
+            failure = "unsupported_history_capability" if exc.code.startswith("unsupported_history_context") else "stale_selection"
+            raise HTTPException(409, detail={"status": failure, "code": exc.code}) from exc
+        character_card, character_db_id, assistant_context = context
+        for field, value in assistant_context.pop("history_sampling", {}).items():
+            if field not in request_data.model_fields_set:
+                setattr(request_data, field, value)
+    else:
+        # Assistant context
+        (
+            character_card,
+            character_db_id,
+            existing_conversation,
+            assistant_context,
+        ) = await _resolve_assistant_context_for_chat(
+            chat_db=chat_db,
+            request_data=request_data,
+            loop=loop,
+            conversation_id=final_conversation_id,
+        )
     if character_card:
         logger.debug(
             "Loaded assistant context name={} system_prompt_summary={}",
@@ -4166,7 +4214,7 @@ async def build_context_and_messages(
     )
     # Ensure a valid assistant identity is present before attempting persistence
     if should_persist and character_db_id is None and not (
-        is_existing_persona_conversation or is_accepted_buddy_conversation or is_owned_neutral_conversation
+        is_existing_persona_conversation or is_accepted_buddy_conversation or is_owned_neutral_conversation or versioned
     ):
         logger.warning(
             'Persistence requested but no compatible assistant identity is available; disabling persistence for conversation {}.',
@@ -4177,12 +4225,12 @@ async def build_context_and_messages(
     if regenerate_reply_id:
         if (not should_persist or not existing_conversation
                 or existing_conversation.get("client_id") != client_id_from_db
-                or not (is_existing_persona_conversation or is_accepted_buddy_conversation or is_owned_neutral_conversation
+                or not (is_existing_persona_conversation or is_accepted_buddy_conversation or is_owned_neutral_conversation or versioned
                         or existing_conversation.get("character_id") == character_db_id)):
             raise HTTPException(status_code=409, detail="Regeneration requires the existing saved assistant and conversation.")
         # This operation can only reuse its existing target; it must never fork.
     elif should_persist:
-        if (is_existing_persona_conversation or is_accepted_buddy_conversation or is_owned_neutral_conversation) and conv_id:
+        if (is_existing_persona_conversation or is_accepted_buddy_conversation or is_owned_neutral_conversation or versioned) and conv_id:
             conversation_created = False
         else:
             conv_id, conversation_created = await get_or_create_conversation(
@@ -4208,7 +4256,7 @@ async def build_context_and_messages(
     continuation_metadata: dict[str, Any] | None = None
     assistant_parent_message_id: str | None = None
     assistant_prefill: str | None = None
-    if continuation_spec:
+    if continuation_spec and not versioned:
         assistant_parent_message_id, _mode, assistant_prefill = continuation_spec
         if conversation_created:
             raise HTTPException(
@@ -4240,7 +4288,7 @@ async def build_context_and_messages(
     historical_ids: list[str | None] = []
     retry_history_content: dict[int, Any] = {}
     raw_hist: list[dict[str, Any]] = []
-    if conv_id and (not conversation_created):
+    if conv_id and (not conversation_created) and not versioned:
         if continuation_spec:
             from_message_id, mode, assistant_prefill = continuation_spec
             resolved_hist, continuation_metadata = await _resolve_tldw_continuation_history(
@@ -4458,7 +4506,7 @@ async def build_context_and_messages(
 
     # If the client included history with conversation_id, trim overlaps against DB history
     overlap_cut = 0
-    if conv_id and historical_msgs and request_messages:
+    if conv_id and historical_msgs and request_messages and not versioned:
         has_non_user_role = any(
             msg.get("role") in {"assistant", "tool"} for msg in request_messages
         )
@@ -4538,6 +4586,38 @@ async def build_context_and_messages(
                             conv_id,
                         )
 
+    if versioned:
+        source_nodes = {row["id"]: row for row in history_snapshot.nodes}
+        for item in selected_content:
+            extra = item.get("extra_metadata") or {}
+            source_role = map_sender_to_role(source_nodes[item["id"]]["role"], character_card.get("name"))
+            role = extra.get("sender_role") or source_role
+            text = _saved_image_text({
+                "content": item["message"], "images": item["images"],
+                "sender": source_nodes[item["id"]]["role"], "version": item["_message_version"],
+            }, extra)
+            image_details = _saved_image_details(extra, len(item["images"]))
+            if text and role != "tool":
+                text = replace_placeholders(text, character_card.get("name", "Char"), "User")
+            entry = {"role": role, "content": text}
+            if item["images"]:
+                entry["content"] = ([{"type": "text", "text": text}] if text else []) + [
+                    {"type": "image_url", "image_url": {"url": image, "detail": detail}}
+                    for image, detail in zip(item["images"], image_details)]
+            if extra.get("content_placeholder_reason") in ("tool_calls", "function_call"):
+                entry["content"] = None
+            if item.get("tool_calls") is not None:
+                entry["tool_calls"] = item["tool_calls"]
+            for key in ("function_call", "tool_call_id"):
+                if extra.get(key) is not None:
+                    entry[key] = extra[key]
+            if extra.get("sender_name") or extra.get("tool_name"):
+                entry["name"] = extra.get("sender_name") or extra.get("tool_name")
+            historical_msgs.append(entry)
+        assistant_parent_message_id = admission["input_message_id"]
+        runtime_state["assistant_parent_message_id"] = assistant_parent_message_id
+        runtime_state["tldw_history_admission_v1"] = admission
+
     if retry_user_message_id and any(message.get("role") == "user" for message in request_messages[overlap_cut:-1]):
         raise HTTPException(status_code=409, detail="This retry contains extra unsaved user messages. Resolve the local conversation before retrying.")
     if retry_user_message_id and client_message_id:
@@ -4558,7 +4638,7 @@ async def build_context_and_messages(
         except ConflictError as exc:
             raise HTTPException(status_code=409, detail="The saved reply changed. Reload before regenerating.") from exc
 
-    persisted_user_message_id: str | None = retry_user_message_id
+    persisted_user_message_id: str | None = admission["input_message_id"] if versioned else retry_user_message_id
     current_turn: list[dict[str, Any]] = []
     for index, msg_dict in enumerate(request_messages[overlap_cut:], start=overlap_cut):
         role = msg_dict.get("role")
@@ -4567,7 +4647,7 @@ async def build_context_and_messages(
             # Persist assistant sender as sanitized character name
             msg_for_db["name"] = sanitize_sender_name(character_card.get("name", "Assistant"))
         reused_retry = retry_user_message_id is not None and index == len(request_messages) - 1
-        if should_persist and not reused_retry:
+        if should_persist and not reused_retry and not versioned:
             if role == "user" and index == len(request_messages) - 1 and client_message_id:
                 msg_for_db["client_message_id"] = client_message_id
             saved_message_id = await save_message_fn(chat_db, conv_id, msg_for_db, use_transaction=True)
@@ -4587,7 +4667,7 @@ async def build_context_and_messages(
         retry_index = historical_ids.index(retry_user_message_id)
         current_turn.append(historical_msgs.pop(retry_index))
 
-    if continuation_spec and assistant_prefill:
+    if continuation_spec and assistant_prefill and not versioned:
         prefill_payload: dict[str, Any] = {
             "role": "assistant",
             "content": assistant_prefill,
@@ -4688,7 +4768,8 @@ def apply_prompt_templating(
 
     Returns (final_system_message, templated_llm_payload)
     """
-    active_template = load_template(getattr(request_data, "prompt_template_name", None) or DEFAULT_RAW_PASSTHROUGH_TEMPLATE.name)
+    active_template = (DEFAULT_RAW_PASSTHROUGH_TEMPLATE if getattr(request_data, "tldw_history_selection_v1", None) is not None
+        else load_template(getattr(request_data, "prompt_template_name", None) or DEFAULT_RAW_PASSTHROUGH_TEMPLATE.name))
     template_data: dict[str, Any] = {}
     if character_card:
         template_data.update({k: v for k, v in character_card.items() if isinstance(v, (str, int, float))})
@@ -4926,6 +5007,7 @@ async def execute_streaming_call(
     continuation_metadata: dict[str, Any] | None = None,
     queue_request_id: str | None = None,
     provider_factory_timeout: float | None = None,
+    history_persistence_ack: bool = False,
 ) -> StreamingResponse:
     """Execute a streaming LLM call with queue, failover, moderation, and persistence.
 
@@ -6255,6 +6337,7 @@ async def execute_streaming_call(
                     system_message_id=system_message_id,
                     user_message_id=user_message_id,
                     continuation_metadata=normalized_continuation_metadata,
+                    history_persistence_ack=history_persistence_ack or None,
                 ),
                 stream_factory=create_streaming_response_with_timeout,
             )
@@ -7232,7 +7315,7 @@ async def _execute_non_stream_call_impl(
                                 pending_tool_messages = []
                             continuation_payload = _build_assistant_message_payload(
                                 character_card_for_context=character_card_for_context,
-                                assistant_parent_message_id=None,
+                                assistant_parent_message_id=assistant_parent_message_id,
                                 content=content_to_save,
                                 tool_calls=tool_calls_to_save,
                                 function_call=function_call_to_save,

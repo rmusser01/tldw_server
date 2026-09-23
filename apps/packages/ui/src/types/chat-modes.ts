@@ -1,3 +1,37 @@
+import type { HistoryOwnerV1 } from "@/services/chat-history-selection"
+import type {
+  HistoryAdmissionV1,
+  HistorySelectionCaptureV1,
+  HistoryViewSelectionV1,
+  HistorySelectionV1
+} from "@/types/history-selection"
+import type { Message as StoredMessage } from "@/db/dexie/types"
+
+/** One operation owns its adapter and immutable pending intent across display navigation. */
+export interface HistorySendTurn {
+  owner: HistoryOwnerV1
+  capture: HistorySelectionCaptureV1
+  currentView: () => HistoryViewSelectionV1 | null
+  validateLease: () => boolean
+  canUpdateView: () => boolean
+  admission?: HistoryAdmissionV1
+  selection?: HistorySelectionV1
+  input?: StoredMessage
+  resultId?: string
+  assistantId?: string
+  createdAt?: number
+  dispatched?: boolean
+  recover: (
+    data: { content: string; assistantId: string; createdAt: number },
+    error: unknown
+  ) => Promise<void>
+  cancelPreparation?: () => Promise<void>
+  beforeDispatch?: () => Promise<void>
+  afterAdmission?: () => Promise<void>
+  complete?: () => Promise<void>
+  followResult: (id: string) => Promise<void>
+}
+
 import type { ChatHistory, MessageMetadataExtra } from "~/store/option"
 import type { ChatDocuments } from "@/models/ChatTypes"
 import type { DynamicUIRequest } from "@/types/dynamic-ui"
@@ -6,6 +40,7 @@ import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-
 import type { UploadedFile } from "@/db/dexie/types"
 
 export interface SaveMessageBase {
+  historyTurn?: HistorySendTurn
   historyId: string | null
   setHistoryId: (id: string) => void
   selectedModel: string
