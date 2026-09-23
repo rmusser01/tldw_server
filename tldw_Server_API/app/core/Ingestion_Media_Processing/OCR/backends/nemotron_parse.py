@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import contextlib
 import importlib
 import importlib.util
@@ -8,7 +7,6 @@ import io
 import json
 import os
 import re
-import tempfile
 import threading
 from typing import Any
 
@@ -19,6 +17,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.types import (
 )
 from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.core.Utils.Utils import logging
+from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.runtime_support import image_payload
 
 _DEFAULT_PROMPT = "</s><s><predict_bbox><predict_classes><output_markdown>"
 _MIN_W = 1024
@@ -342,50 +341,35 @@ def _ocr_via_vllm(image_bytes: bytes, prompt: str, skip_special_tokens: bool) ->
     timeout = int(os.getenv("NEMOTRON_VLLM_TIMEOUT", "60"))
     use_data_url = _env_bool("NEMOTRON_VLLM_USE_DATA_URL", True)
 
-    tmp_path = None
-    if use_data_url:
-        b64 = base64.b64encode(image_bytes).decode("ascii")
-        content_image = {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}}
-    else:
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-            f.write(image_bytes)
-            f.flush()
-            tmp_path = f.name
-        content_image = {"type": "image_url", "image_url": {"url": tmp_path}}
-
     def _getf(env, cast, default):
         try:
             return cast(os.getenv(env, str(default)))
         except (TypeError, ValueError):
             return default
 
-    data = {
-        "model": model,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    content_image,
-                ],
-            }
-        ],
-        "max_new_tokens": _getf("NEMOTRON_MAX_NEW_TOKENS", int, 2048),
-        "temperature": _getf("NEMOTRON_TEMPERATURE", float, 0.1),
-        "repetition_penalty": _getf("NEMOTRON_REPETITION_PENALTY", float, 1.05),
-        "top_p": _getf("NEMOTRON_TOP_P", float, 0.8),
-        "top_k": _getf("NEMOTRON_TOP_K", int, 20),
-        "do_sample": _getf("NEMOTRON_DO_SAMPLE", lambda x: str(x).lower() in ("1", "true", "yes"), True),
-        "skip_special_tokens": skip_special_tokens,
-    }
+    with image_payload(image_bytes, use_data_url=use_data_url) as content_image:
+        data = {
+            "model": model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        content_image,
+                    ],
+                }
+            ],
+            "max_new_tokens": _getf("NEMOTRON_MAX_NEW_TOKENS", int, 2048),
+            "temperature": _getf("NEMOTRON_TEMPERATURE", float, 0.1),
+            "repetition_penalty": _getf("NEMOTRON_REPETITION_PENALTY", float, 1.05),
+            "top_p": _getf("NEMOTRON_TOP_P", float, 0.8),
+            "top_k": _getf("NEMOTRON_TOP_K", int, 20),
+            "do_sample": _getf("NEMOTRON_DO_SAMPLE", lambda x: str(x).lower() in ("1", "true", "yes"), True),
+            "skip_special_tokens": skip_special_tokens,
+        }
 
-    from tldw_Server_API.app.core.http_client import fetch_json
-    try:
+        from tldw_Server_API.app.core.http_client import fetch_json
         j = fetch_json(method="POST", url=url, json=data, timeout=timeout)
-    finally:
-        if tmp_path:
-            with contextlib.suppress(OSError):
-                os.unlink(tmp_path)
     choice = (j.get("choices") or [{}])[0]
     content = (
         choice.get("message", {}).get("content")

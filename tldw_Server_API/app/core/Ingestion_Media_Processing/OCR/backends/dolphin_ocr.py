@@ -4,9 +4,7 @@ import base64
 import importlib.util
 import io
 import json
-import contextlib
 import os
-import tempfile
 import threading
 from typing import Any
 from urllib.parse import urlparse
@@ -17,6 +15,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.types import (
     normalize_ocr_format,
 )
 from tldw_Server_API.app.core.Utils.Utils import logging
+from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.runtime_support import image_payload
 
 _TF_MODEL = None
 _TF_PROCESSOR = None
@@ -320,43 +319,24 @@ def _ocr_via_openai(image_bytes: bytes, prompt: str) -> str:
         logging.warning("DOLPHIN_USE_DATA_URL=false with non-local URL; forcing data URL for reliability.")
         use_data_url = True
 
-    tmp_path = None
-    if use_data_url:
-        b64 = base64.b64encode(image_bytes).decode("ascii")
-        content_image = {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}}
-    else:
-        # Path-based URLs are generally only useful for local file access
-        # delete=False: the file must outlive this block, because the request below
-        # references it by path. With delete=True it is unlinked at the with-exit and
-        # the POST names a path that no longer exists.
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-            f.write(image_bytes)
-            f.flush()
-            tmp_path = f.name
-        content_image = {"type": "image_url", "image_url": {"url": tmp_path}}
+    with image_payload(image_bytes, use_data_url=use_data_url) as content_image:
+        data = {
+            "model": model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        content_image,
+                    ],
+                }
+            ],
+        }
+        _apply_generation_params(data)
 
-    data = {
-        "model": model,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    content_image,
-                ],
-            }
-        ],
-    }
-    _apply_generation_params(data)
+        from tldw_Server_API.app.core.http_client import fetch_json
 
-    from tldw_Server_API.app.core.http_client import fetch_json
-
-    try:
         j = fetch_json(method="POST", url=url, json=data, timeout=timeout)
-    finally:
-        if tmp_path:
-            with contextlib.suppress(OSError):
-                os.unlink(tmp_path)
     return (
         j.get("choices", [{}])[0]
         .get("message", {})
