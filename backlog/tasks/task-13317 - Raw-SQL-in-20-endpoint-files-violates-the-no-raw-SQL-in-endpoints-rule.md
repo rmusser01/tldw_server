@@ -4,7 +4,7 @@ title: Raw SQL in 20 endpoint files violates the no-raw-SQL-in-endpoints rule
 status: In Progress
 assignee: []
 created_date: '2026-09-22 04:54'
-updated_date: '2026-09-23 16:24'
+updated_date: '2026-09-23 17:27'
 labels:
   - duplication
   - api
@@ -33,8 +33,8 @@ Owner-only (app/api/v1/**). Source: synthesis F19
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The 14 small files route through their existing core owners
-- [ ] #2 Three orphan tables get a core owner
+- [x] #1 The 14 small files route through their existing core owners
+- [x] #2 Three orphan tables get a core owner
 - [x] #3 No endpoint reaches a core private API
 - [x] #4 A lint ratchet prevents new raw SQL in endpoints
 <!-- AC:END -->
@@ -108,6 +108,8 @@ is why core/AuthNZ/database.py:1966 _normalize_sqlite_sql exists; its own docstr
 itself a safety net for when a dollar-style query slips through.
 
 2026-09-23: AC3 done - the five named private reaches are gone (PromptStudioDatabase._execute -> get_project_by_name; Collections_DB._coerce_bool_flag -> get_live_audio_studio_section_text; vector_store_batches_db._connect -> count_batches; jm._connect/_pg_cursor in prompt_studio_status -> core/Jobs/queue_stats.py and in jobs_admin -> core/Jobs/admin_operations.py; plus jm._update_gauges/_get_queue_flags -> public wrappers). Pinned by test_no_endpoint_reaches_database_internals. Five files left the raw-SQL baseline (jobs_admin, prompt_studio_status, prompt_studio_projects, audio_studio, vector_stores_openai). Finding outside AC3's list: endpoints still import 51 private names from core across 20 files (audio/* the most); not ratcheted.
+
+2026-09-23: AC1 done - every endpoint file except admin/admin_rbac.py now routes SQL through a core owner; RAW_SQL_BASELINE holds only admin_rbac.py (56). AC2 done - rbac_role/user_rate_limits -> core/AuthNZ/repos/rbac_rate_limits_repo.py (endpoint, simulator service, auth_deps enforcement); password_history -> PasswordService.set_password (was untrimmed on the change-password path); user_prompts -> DocumentGeneratorService.has_custom_prompt. Bugs found on the way: notes keyword-link listings leaked other tenants' links on PostgreSQL (c53fe19d83); outputs run selection read the Media DB for a Watchlists table so always returned nothing (75124ce509); rate-limit simulator joined nonexistent rbac_roles/rbac_user_roles and used ? with asyncpg (61e838d402). Verification: Media, Notes_NEW, Jobs(RUN_JOBS=1), Admin/Watchlists/Health, AuthNZ unit suites each diffed against HEAD with no new failures. Follow-up: admin_rbac.py (18 endpoints, 56 statements) filed separately.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
