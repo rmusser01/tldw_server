@@ -125,3 +125,48 @@ def test_backends_return_the_same_results(aggregate, both_backends):
     on_postgres = _normalise(SCENARIOS[aggregate](pg_db))
     for step in on_sqlite:
         assert on_sqlite[step] == on_postgres[step], f"{aggregate}.{step} differs between backends"
+
+
+def test_moved_writes_retry_transient_contention(tmp_path, monkeypatch):
+    """Repositories retry through retry_policy; one transient lock must not fail a write."""
+    import sqlite3
+
+    from tldw_Server_API.app.core.DB_Management import retry_policy
+
+    monkeypatch.setattr(retry_policy.time, "sleep", lambda _s: None)
+    db = PromptStudioDatabase(str(tmp_path / "retry.sqlite"), "retry")
+    try:
+        ids = _seed(db)
+        real_exec = db._impl._cursor_exec
+        failures = {"left": 1}
+
+        def flaky(conn, query, params=None):
+            if "INSERT INTO prompt_studio_test_runs" in query and failures["left"]:
+                failures["left"] -= 1
+                raise sqlite3.OperationalError("database is locked")
+            return real_exec(conn, query, params)
+
+        monkeypatch.setattr(db._impl, "_cursor_exec", flaky)
+        run = db.create_test_run(
+            project_id=ids["project"], prompt_id=ids["prompt"], test_case_id=ids["case"], model_name="m",
+            inputs={}, outputs={},
+        )
+        assert run["model_name"] == "m"
+        assert failures["left"] == 0
+    finally:
+        db.close()
+
+
+def test_update_evaluation_rejects_columns_outside_the_allowlist(tmp_path):
+    """Keys of `updates` become column names in the UPDATE, so they are allowlisted."""
+    from tldw_Server_API.app.core.DB_Management.Prompts_DB import InputError
+
+    db = PromptStudioDatabase(str(tmp_path / "allow.sqlite"), "allow")
+    try:
+        ids = _seed(db)
+        ev = db.create_evaluation(prompt_id=ids["prompt"], project_id=ids["project"])
+        with pytest.raises(InputError):
+            db.update_evaluation(ev["id"], {"status = 'failed', client_id": "x"})
+        assert db.get_evaluation(ev["id"])["status"] == "running"
+    finally:
+        db.close()
