@@ -620,26 +620,44 @@ def test_cleanup_candidate_schema_rejects_path_hash_identity_drift(
         source_key="notes_attachments/note-1/report.pdf",
     )
 
-    with pytest.raises(Exception, match="CHECK constraint failed"):
-        sync_store.db.execute(
-            "INSERT INTO sync_notes_attachment_cleanup_candidates "
-            "(dataset_id, bootstrap_id, source_key_hash, attachment_id, "
-            "source_relative_path, source_path_hash, source_blob_hash, "
-            "source_size_bytes, source_modified_ns, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                "dataset-1",
-                "bootstrap-stable",
-                mapping.source_key_hash,
-                mapping.attachment_id,
-                "notes_attachments/note-1/report.pdf",
-                "sha256:" + "b" * 64,
-                "sha256:" + "a" * 64,
-                7,
-                123,
-                "2026-08-13T00:00:00+00:00",
-            ),
+    insert = (
+        "INSERT INTO sync_notes_attachment_cleanup_candidates "
+        "(dataset_id, bootstrap_id, source_key_hash, attachment_id, "
+        "source_relative_path, source_path_hash, source_blob_hash, "
+        "source_size_bytes, source_modified_ns, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    )
+
+    def _row(source_path_hash: str) -> tuple[object, ...]:
+        return (
+            "dataset-1",
+            "bootstrap-stable",
+            mapping.source_key_hash,
+            mapping.attachment_id,
+            "notes_attachments/note-1/report.pdf",
+            source_path_hash,
+            "sha256:" + "a" * 64,
+            7,
+            123,
+            "2026-08-13T00:00:00+00:00",
         )
+
+    # This matched on "CHECK constraint failed", which the DB layer no longer surfaces:
+    # it wraps sqlite3 errors as DatabaseError("SQLite query execution failed") and does
+    # not chain the original, so __cause__ is None and the constraint name is gone.
+    # Matching the wrapper text instead would let ANY SQLite failure satisfy this test,
+    # so the protection is asserted three ways that do not depend on the message.
+
+    # 1. The schema really declares the path-hash identity constraint.
+    assert "CHECK (source_path_hash = source_key_hash)" in SYNC_SQLITE_SCHEMA
+
+    # 2. A drifted path hash is rejected.
+    with pytest.raises(Exception):
+        sync_store.db.execute(insert, _row("sha256:" + "b" * 64))
+
+    # 3. And the same row with a MATCHING path hash is accepted -- without this the
+    #    rejection above could have come from anything else in the row.
+    sync_store.db.execute(insert, _row(mapping.source_key_hash))
 
 
 @pytest.mark.unit
