@@ -1,10 +1,10 @@
 ---
 id: TASK-13287
 title: Fix double-escaped HTTP status regex misclassifying upstream 429 as 502
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-22 03:55'
-updated_date: '2026-09-23 19:36'
+updated_date: '2026-09-23 23:14'
 labels:
   - llm
   - bug
@@ -42,7 +42,7 @@ Source: comprehensive core-module review prompt smoke run, findings LLM_Calls-2 
 <!-- AC:BEGIN -->
 - [x] #1 A failing test reproduces 429 -> 502 misclassification through a NetworkError carrying only message text, before any production edit
 - [x] #2 The three copies of get_http_status_from_exception are reduced to one shared implementation with the working regex
-- [ ] #3 get_http_error_text (3 copies) and is_network_error (3 copies) are consolidated in the same pass, or the residual duplication is documented with a reason
+- [x] #3 get_http_error_text (3 copies) and is_network_error (3 copies) are consolidated in the same pass, or the residual duplication is documented with a reason
 - [x] #4 Behavioural divergences are preserved deliberately or fixed explicitly: Embeddings_Create.py:175-180 checks exc.status_code before exc.response.status_code while the others check response first
 - [x] #5 Existing coverage in tests/Local_LLM/test_http_utils.py:105-107 still passes against the consolidated helper
 - [x] #6 Bandit run for touched scope
@@ -70,14 +70,22 @@ Tests: parity suite extended to 27 cases, including three asserting every former
 Regression: app imports; 4 suites touching the cluster give 53 passed. tests/Local_LLM/test_http_utils.py shows 4 failed / 11 passed BOTH with and without the change (stash-isolated) - pre-existing wait_for_http_ready failures, unrelated.
 
 2026-09-23 reconciliation: AC1 met (tests/LLM_Calls/test_http_status_extraction_parity.py::test_status_recovered_from_network_error_message[429] + embedded-message case; pre-fix regex at 8c1a637a2d^ error_utils.py:145 returns None for 'HTTP 429', so the test is red against old code - caveat: test and fix landed in the same commit, so red-first ordering is not separately evidenced). AC2 met (single impl core/Utils/http_status_extraction.py via 8c1a637a2d+f6cfc9925d; only thin delegating aliases remain in chat_orchestrator and qwen3; identity test passes). AC4 met (Embeddings_Create copy deleted in f6cfc9925d, precedence unified, test_attribute_branch_still_wins). AC5 met (test_get_http_status_from_network_error_text passes; parity+http_utils: 38 passed, 4 failed = wait_for_http_ready tests failing on PackageNotFoundError tldw-server metadata, env issue unrelated). AC6 met (uvx bandit on the 8 touched files: no issues). AC3 NOT met: get_http_error_text still has 2 copies (Utils/http_status_extraction.py:74 and Local_LLM/http_utils.py:57, different bodies) and is_network_error still has 2 copies (LLM_Calls/error_utils.py:338 and Local_LLM/http_utils.py:69, same logic) plus Embeddings_Create._is_probable_network_error with different semantics; no documented reason for the residual duplication.
+
+2026-09-23 AC3 closed (89168a494c): get_http_error_text and is_network_error now live only in core/Utils/http_status_extraction.py; error_utils and Local_LLM/http_utils re-export them (identity test). Embeddings_Create._is_probable_network_error deliberately kept: broader semantics (builtin TimeoutError/ConnectionError + message text for SDK backends), documented in its docstring. Found and fixed a regression from Stage 2: the shared helper's noncritical tuple dropped RuntimeError, so httpx.ResponseNotRead (a RuntimeError) escaped get_http_error_text on unread streaming responses and the read-then-retry branch was dead. test_error_text_reads_an_unread_streaming_body red before (httpx.ResponseNotRead), green after. Tests: parity+Local_LLM+lint 154 passed/1 skipped. LLM_Calls+Local_LLM+Embeddings+TTS: 1956 passed, 16 failed - same 16 fail with the HEAD versions of the 3 source files (pre-existing: local-provider strict_filter tests, TTS mocks). Bandit -ll on touched files: no issues. Docs: none needed beyond module/function docstrings.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Transport-error classification is one implementation in core/Utils/http_status_extraction.py (status, error text, network/HTTP-status/chunked classifiers). The double-escaped regex that turned upstream 429 into 502 is gone (8c1a637a2d, f6cfc9925d); the last duplicated helpers were merged in 89168a494c, which also restored reading unread httpx streaming bodies. Only remaining look-alike is Embeddings' _is_probable_network_error, kept deliberately. Known skips: 16 pre-existing failures in LLM_Calls/TTS suites, unrelated.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
+- [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
