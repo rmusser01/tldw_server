@@ -1718,6 +1718,32 @@ class FilesystemModule(BaseModule):
         limit: int,
         walk_entry_limit: int,
     ) -> dict[str, Any]:
+        """Walk ``base`` and return the entries matching ``pattern`` for ``fs.glob``.
+
+        Args:
+            workspace_root: Root that returned paths are made relative to.
+            base: Directory to walk; must exist and be a directory.
+            pattern: Portable glob matched against workspace-relative paths.
+            include_hidden: Include dot-files and dot-directories.
+            include_files: Include regular files.
+            include_directories: Include directories.
+            follow_symlinks: Descend into symlinked directories.
+            case_sensitive: Match ``pattern`` case-sensitively.
+            respect_gitignore: Skip paths ignored by the workspace's ignore rules.
+            sort_by: ``"path"`` for path order; otherwise newest-modified first.
+            limit: Maximum number of matches returned.
+            walk_entry_limit: Maximum entries visited before the walk is truncated.
+
+        Returns:
+            ``{"base_path", "pattern", "matches", "truncated", "remaining_count",
+            "eval"}``. Each match is ``{"path", "type"}`` plus ``"size"`` for files; an
+            entry whose metadata cannot be read is still listed, with ``"size": None``
+            and ``"size_unavailable": True``, rather than failing the whole glob.
+
+        Raises:
+            FileNotFoundError: ``base`` does not exist.
+            NotADirectoryError: ``base`` is not a directory.
+        """
         if not base.exists():
             raise FileNotFoundError(f"path not found: {base}")
         if not base.is_dir():
