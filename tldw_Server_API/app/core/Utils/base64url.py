@@ -15,31 +15,37 @@ with strictness already diverged three ways:
   characters outside the alphabet rather than raising, so a tampered or truncated
   segment decodes to a different-but-valid byte string.
 
-**Two entry points, deliberately.** The sites split into two trust classes, and a single
-flattened helper -- especially one growing a ``verify=False`` default -- would be worse
-than the duplication, because it would let a caller reach for the unsigned path where a
-signed one was required:
+**Two trust classes, two entry points.** The sites split into opaque pagination
+cursors and HMAC-signed tokens. A single flattened helper -- especially one growing a
+``verify=False`` default -- would be worse than the duplication, because it would let a
+caller reach for the unsigned path where a signed one was required:
 
 ``decode_opaque_cursor_segment``
     An opaque pagination cursor the server minted and the client echoes back. Bounded
     and alphabet-validated. Non-canonical encodings are accepted: nothing keys off the
     cursor string itself.
 
-``decode_signed_token_segment``
-    One segment of a token whose integrity is established by a signature the caller
-    verifies separately. Additionally requires canonical form, so two distinct strings
-    cannot decode to the same signed bytes.
+``verify_signed_token``
+    A ``<payload>.<signature>`` HMAC-SHA256 token. REQUIRES the key and checks the
+    signature with ``hmac.compare_digest`` before returning the payload, so it cannot be
+    used to read a token without verifying it. Both segments must be canonical, so two
+    distinct strings cannot carry the same signed bytes.
 
-Neither function verifies a signature. That stays with the caller that owns the key.
+``decode_canonical_segment`` is the strict single-segment decoder for stored values
+that are not tokens (e.g. the salt and digest of an API-key KDF hash). It verifies
+nothing; never use it to read a client-supplied token.
 """
 
 import base64
+import hmac
 
 __all__ = [
     "Base64SegmentError",
+    "SignatureMismatchError",
+    "decode_canonical_segment",
     "decode_opaque_cursor_segment",
-    "decode_signed_token_segment",
     "encode_segment",
+    "verify_signed_token",
 ]
 
 # Generous by default: every observed caller's payload is far below this. A caller with
@@ -51,6 +57,10 @@ _ALTCHARS = b"-_"
 
 class Base64SegmentError(ValueError):
     """A base64url segment was malformed, oversized, or non-canonical."""
+
+
+class SignatureMismatchError(Base64SegmentError):
+    """A well-formed signed token whose signature does not verify under the key."""
 
 
 def encode_segment(raw: bytes) -> str:
@@ -94,14 +104,48 @@ def decode_opaque_cursor_segment(
     return _decode(segment, require_canonical=False, max_encoded_len=max_encoded_len)
 
 
-def decode_signed_token_segment(
+def decode_canonical_segment(
     segment: str,
     *,
     max_encoded_len: int | None = None,
 ) -> bytes:
-    """Decode one segment of a signed token.
+    """Decode one stored segment, rejecting non-canonical encodings.
 
-    Enforces canonical form so two distinct strings cannot decode to the same signed
-    bytes. Does NOT verify the signature: that belongs with whoever holds the key.
+    Verifies nothing. For a client-supplied token use ``verify_signed_token``.
     """
     return _decode(segment, require_canonical=True, max_encoded_len=max_encoded_len)
+
+
+def verify_signed_token(
+    token: str,
+    key: bytes,
+    *,
+    max_encoded_len: int | None = None,
+    sign_encoded_payload: bool = False,
+) -> bytes:
+    """Verify a ``<payload>.<signature>`` HMAC-SHA256 token and return the payload bytes.
+
+    ``sign_encoded_payload`` selects what was MACed: the raw payload bytes (default) or
+    the ASCII payload segment as it appears in the token.
+
+    Raises ``TypeError`` for a missing key (a configuration error, not a bad token),
+    ``SignatureMismatchError`` for a well-formed token that fails verification, and
+    ``Base64SegmentError`` for anything malformed or larger than ``max_encoded_len``.
+    """
+    if not isinstance(key, bytes) or not key:
+        raise TypeError("verify_signed_token requires a non-empty bytes key")
+    if not isinstance(token, str):
+        raise Base64SegmentError("token must be a string")
+    limit = DEFAULT_MAX_ENCODED_LEN if max_encoded_len is None else max_encoded_len
+    if len(token) > limit:
+        raise Base64SegmentError(f"token exceeds {limit} encoded bytes")
+    parts = token.split(".")
+    if len(parts) != 2:
+        raise Base64SegmentError("token must have exactly two segments")
+    payload_segment, signature_segment = parts
+    payload = _decode(payload_segment, require_canonical=True, max_encoded_len=limit)
+    signature = _decode(signature_segment, require_canonical=True, max_encoded_len=limit)
+    signed = payload_segment.encode("ascii") if sign_encoded_payload else payload
+    if not hmac.compare_digest(signature, hmac.digest(key, signed, "sha256")):
+        raise SignatureMismatchError("token signature does not verify")
+    return payload

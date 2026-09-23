@@ -4,7 +4,7 @@ import base64
 import hashlib
 import hmac
 import secrets
-from tldw_Server_API.app.core.Utils.base64url import decode_signed_token_segment
+from tldw_Server_API.app.core.Utils.base64url import decode_canonical_segment
 
 API_KEY_PREFIX = "tldw_"
 API_KEY_SEPARATOR = "."
@@ -141,12 +141,12 @@ def _b64encode(raw: bytes) -> str:
 def _b64decode(encoded: str) -> bytes:
     """Decode one segment of a stored API-key hash.
 
-    Uses the shared signed-token decoder: alphabet-validated, length-bounded, and
+    Uses the shared canonical decoder: alphabet-validated, length-bounded, and
     canonical-form enforcing. The previous bare urlsafe_b64decode silently DISCARDED
     out-of-alphabet characters, so a corrupted segment decoded to different valid bytes
     instead of raising.
     """
-    return decode_signed_token_segment(encoded, max_encoded_len=_MAX_HASH_SEGMENT_LEN)
+    return decode_canonical_segment(encoded, max_encoded_len=_MAX_HASH_SEGMENT_LEN)
 
 
 __all__ = [
