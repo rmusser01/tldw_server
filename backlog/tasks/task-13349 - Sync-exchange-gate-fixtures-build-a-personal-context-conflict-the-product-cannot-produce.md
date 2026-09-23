@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-09-23 00:51'
+updated_date: '2026-09-23 02:33'
 labels:
   - bug
   - sync
@@ -54,6 +55,50 @@ Source: TASK-13344 AC1.
 - [ ] #1 The three mixed-batch tests build personal-context conflicts through the product path and pass
 - [ ] #2 The fixtures no longer call store.insert_conflict with a fabricated remote_envelope_id
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+INVESTIGATED FURTHER (no code change). The obvious repair -- teach the exchange-gate fixtures to build a valid conflict -- is NOT the right shape, and this records why so the next attempt does not rediscover it.
+
+The gate tests run on the transport double: _RecordingService / _RecordingRepository in test_sync_v2_personal_context_transport.py, which by its own docstring supplies 'only the canonical proof needed by isolated transport scenarios'. It has sync_integrity_key, apply_sync_object and apply_sync_ingress, and nothing else.
+
+Making a personal-context resolution succeed through that double requires adding, at minimum:
+  - capture_sync_conflict or an equivalent journal writer
+  - get_sync_conflict, returning a journal with FOURTEEN keys that _candidate_envelope
+    and _finalize read: profile_id, dataset_id, purge_generation, integrity_key_id,
+    candidate, candidate_version_id, domain, candidate_object_id, candidate_created_at,
+    remote_envelope_id, conflict_id, authority, local_digest, local_envelope_digest
+    (plus key_slot, read by _attach_candidate)
+  - resolve_sync_conflict, returning a receipt that the rest of _finalize consumes
+
+and the journal's values must agree exactly with the stored candidate envelope, because
+_validate_candidate compares _restore_personal_context_from_storage(dataset, candidate)
+field-by-field against the reconstruction, and _finalize separately recomputes
+local_digest as sha256 over canonical_json_bytes(local.payload) and local_envelope_digest
+via _local_envelope_digest(local).
+
+That is a canonical conflict journal reimplemented inside a test double -- a second source
+of truth for conflict semantics, which is the failure mode this whole review is about. It
+would pass today and drift exactly as the current fixtures did.
+
+WHAT IS TRACTABLE, and confirmed while checking: the dataset the gate tests enroll ALREADY
+carries the metadata _candidate_envelope requires -- metadata['personal_context'] with
+profile_id, integrity_key_id, purge_generation 0 and link_state 'complete'
+(test_sync_v2_personal_context_transport.py:269-274). So the blocker is purely the missing
+canonical journal, not the dataset shape.
+
+RECOMMENDED SHAPE, unchanged but now better motivated: port these three tests to the
+runtime used by test_sync_v2_personal_context_conflicts.py, whose _conflict() helper drives
+a REAL push through _attach_candidate against a real canonical service. The gate tests then
+assert what they are actually about -- mixed-batch ordering and the exchange gate -- over a
+conflict the product itself produced.
+
+Also confirmed: simply inserting an envelope whose client_envelope_id is the fabricated
+remote-envelope-<id> is NOT sufficient. It clears the 'remote is None' check and then fails
+in _validate_candidate, because no journal exists to reconstruct the expected candidate
+from.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
