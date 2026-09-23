@@ -1715,22 +1715,31 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
                     # ENABLE alone exempts the table owner, and the app usually
                     # connects as the owner, so FORCE has to accompany it or the
                     # policies below never run for the process that matters.
-                    for _rls_table in (
-                        "jobs",
-                        "job_events",
-                        "job_counters",
-                        "job_queue_controls",
-                        "job_attachments",
-                        "job_sla_policies",
-                        "job_dependencies",
-                        "jobs_archive",
-                        "job_idempotency_receipts",
+                    # Written out rather than looped over table names so the
+                    # RLS coverage ratchet can see them: it scans source text,
+                    # and DDL assembled from a loop variable is invisible to it.
+                    for _rls_ddl in (
+                        "ALTER TABLE jobs ENABLE ROW LEVEL SECURITY",
+                        "ALTER TABLE jobs FORCE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_events ENABLE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_events FORCE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_counters ENABLE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_counters FORCE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_queue_controls ENABLE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_queue_controls FORCE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_attachments ENABLE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_attachments FORCE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_sla_policies ENABLE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_sla_policies FORCE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_dependencies ENABLE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_dependencies FORCE ROW LEVEL SECURITY",
+                        "ALTER TABLE jobs_archive ENABLE ROW LEVEL SECURITY",
+                        "ALTER TABLE jobs_archive FORCE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_idempotency_receipts ENABLE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_idempotency_receipts FORCE ROW LEVEL SECURITY",
                     ):
-                        for _rls_stmt in ("ENABLE", "FORCE"):
-                            with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-                                _p.execute(
-                                    f"ALTER TABLE {_rls_table} {_rls_stmt} ROW LEVEL SECURITY"
-                                )
+                        with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
+                            _p.execute(_rls_ddl)
         except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
             # Ignore in environments without permissions or when tables don't exist yet
             pass

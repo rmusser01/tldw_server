@@ -120,25 +120,40 @@ def _reset_pooled_connection(conn: Any) -> None:
     borrower can inherit the previous request's ``app.current_user_id`` or, worse,
     its ``app.is_admin``, whenever re-applying scope at checkout fails.
 
-    Each statement is suppressed individually so that a connection which cannot
-    be fully scrubbed is still closed out cleanly by the pool.
+    A connection that cannot be fully scrubbed must not be reused, so any
+    failure is raised rather than swallowed: psycopg_pool discards a connection
+    whose reset callback raises, which is exactly the outcome wanted. Returning
+    quietly would put a connection still carrying another account's identity
+    back into rotation.
     """
+    failures: list[str] = []
     for statement in ("RESET ROLE", "RESET SESSION AUTHORIZATION", "RESET ALL"):
         try:
             with conn.cursor() as cur:
                 cur.execute(statement)
-        except Exception:  # noqa: BLE001 - best effort; pool discards on failure
-            continue
-    # psycopg_pool requires the reset callback to hand back a connection that is
-    # NOT in a transaction, and discards it otherwise. Executing the statements
-    # above opens an implicit transaction, so it has to be closed here. It must
-    # be a commit, not a rollback: SET and RESET are transactional in
-    # PostgreSQL, so rolling back would undo the very reset we just performed.
+        except Exception as exc:  # noqa: BLE001 - recorded, then raised below
+            failures.append(f"{statement}: {exc}")
+
+    # psycopg_pool requires the callback to hand back a connection that is NOT
+    # in a transaction. The statements above open an implicit one, so it has to
+    # be closed here, and with a commit: SET and RESET are transactional in
+    # PostgreSQL, so a rollback would undo the very reset just performed.
     try:
         conn.commit()
-    except Exception:  # noqa: BLE001 - pool discards a connection it cannot reset
+    except Exception as exc:  # noqa: BLE001 - recorded, then raised below
+        failures.append(f"COMMIT: {exc}")
+        # Leave no open transaction behind either way; the connection is being
+        # discarded, and the rollback cannot make the session state any staler
+        # than the failed commit already left it.
         with contextlib.suppress(Exception):
             conn.rollback()
+
+    if failures:
+        raise RuntimeError(
+            "Could not clear session state from a pooled PostgreSQL connection, "
+            "so it may still carry another account's tenant settings. Discarding "
+            "it rather than reusing it. Failures: " + "; ".join(failures)
+        )
 
 
 class PostgreSQLConnectionPool(ConnectionPool):

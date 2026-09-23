@@ -43,6 +43,22 @@ _CREATE_POLICY_RE = re.compile(
     r"CREATE\s+POLICY\s+[A-Za-z_0-9]+\s+ON\s+[\"'`]?([A-Za-z_0-9.]+)[\"'`]?",
     re.IGNORECASE,
 )
+# A policy only isolates anything once the table has RLS switched on, and FORCE
+# is what makes it bind the table owner. A CREATE POLICY with neither is text,
+# not protection, so coverage requires both to appear for the same table.
+_ENABLE_RLS_RE = re.compile(
+    r"ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?[\"'`]?([A-Za-z_0-9.]+)[\"'`]?\s+"
+    r"ENABLE\s+ROW\s+LEVEL\s+SECURITY",
+    re.IGNORECASE,
+)
+# CREATE TABLE forms whose name is built at runtime, e.g. psycopg's
+# sql.Identifier composition. The name cannot be resolved statically, so these
+# are reported rather than ignored: silently skipping them is how a new
+# tenant-owned table would slip past this guard entirely.
+_DYNAMIC_CREATE_TABLE_RE = re.compile(
+    r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[{%$]",
+    re.IGNORECASE,
+)
 
 SCANNED_SUFFIXES = (".py", ".sql")
 
@@ -53,11 +69,27 @@ class RatchetError(AssertionError):
 
 @dataclass(frozen=True)
 class CoverageReport:
+    """What one scan of the source tree found.
+
+    Attributes:
+        owned_tables: Tables whose CREATE TABLE names an ownership column, and
+            which therefore hold rows belonging to a particular account.
+        policy_tables: Tables that both have a CREATE POLICY and have row-level
+            security switched on. A policy alone is not protection, so both are
+            required before a table counts as covered.
+        dynamic_table_sites: ``path:line`` for CREATE TABLE statements whose
+            name is built at runtime. A static scan cannot resolve those, so
+            they are reported rather than silently omitted -- if one of them is
+            tenant-owned, this guard cannot see it.
+    """
+
     owned_tables: frozenset[str]
     policy_tables: frozenset[str]
+    dynamic_table_sites: tuple[str, ...] = ()
 
     @property
     def uncovered(self) -> frozenset[str]:
+        """Tenant-owned tables with no enforced policy, i.e. no DB-level backstop."""
         return frozenset(self.owned_tables - self.policy_tables)
 
 
@@ -82,7 +114,9 @@ def _column_list(text: str, open_paren_index: int) -> str:
 def scan_source(roots: list[Path]) -> CoverageReport:
     """Collect tenant-owned table names and tables carrying an RLS policy."""
     owned: set[str] = set()
-    policied: set[str] = set()
+    with_policy: set[str] = set()
+    rls_enabled: set[str] = set()
+    dynamic: list[str] = []
 
     for root in roots:
         if not root.exists():
@@ -92,18 +126,35 @@ def scan_source(roots: list[Path]) -> CoverageReport:
                 continue
             try:
                 text = path.read_text(errors="ignore")
-            except OSError:
-                continue
+            except OSError as exc:
+                # Skipping an unreadable file would drop its tables and its
+                # policies from the report, so the guard could pass on partial
+                # input. Refuse instead.
+                raise RatchetError(
+                    f"Could not read {path} while scanning for tenant-owned "
+                    "tables. Coverage cannot be established from partial input."
+                ) from exc
 
             for match in _CREATE_POLICY_RE.finditer(text):
-                policied.add(_normalise(match.group(1)))
+                with_policy.add(_normalise(match.group(1)))
+
+            for match in _ENABLE_RLS_RE.finditer(text):
+                rls_enabled.add(_normalise(match.group(1)))
 
             for match in _CREATE_TABLE_RE.finditer(text):
                 body = _column_list(text, match.end() - 1)
                 if _OWNER_RE.search(body):
                     owned.add(_normalise(match.group(1)))
 
-    return CoverageReport(frozenset(owned), frozenset(policied))
+            for match in _DYNAMIC_CREATE_TABLE_RE.finditer(text):
+                line = text[: match.start()].count("\n") + 1
+                dynamic.append(f"{path}:{line}")
+
+    # Coverage means a policy AND row-level security switched on for the table.
+    policied = with_policy & rls_enabled
+    return CoverageReport(
+        frozenset(owned), frozenset(policied), tuple(sorted(dynamic))
+    )
 
 
 BASELINE_HEADER = """\
@@ -184,6 +235,14 @@ def main(argv: list[str] | None = None) -> int:
             f"{len(improvements)} table(s) gained a policy. Re-run with "
             "--write-baseline to hold the better position."
         )
+    if report.dynamic_table_sites:
+        print(
+            f"note: {len(report.dynamic_table_sites)} CREATE TABLE statements build "
+            "their name at runtime and cannot be checked by a static scan. If any "
+            "of them is tenant-owned, this guard will not see it:"
+        )
+        for site in report.dynamic_table_sites[:10]:
+            print(f"  {site}")
     print(f"{len(report.uncovered)} tenant-owned tables still lack an RLS policy.")
     return 0
 

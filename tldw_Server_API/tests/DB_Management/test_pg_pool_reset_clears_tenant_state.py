@@ -19,17 +19,17 @@ pytestmark = pytest.mark.unit
 
 
 class _Cursor:
-    def __init__(self, sink, failing):
+    def __init__(self, sink: list[str], failing: set[str]) -> None:
         self._sink = sink
         self._failing = failing
 
-    def __enter__(self):
+    def __enter__(self) -> "_Cursor":
         return self
 
-    def __exit__(self, *exc):
+    def __exit__(self, *exc: object) -> bool:
         return False
 
-    def execute(self, sql):
+    def execute(self, sql: str) -> None:
         if sql in self._failing:
             raise RuntimeError(f"cannot run {sql}")
         self._sink.append(sql)
@@ -44,7 +44,9 @@ class _Conn:
     transactional in PostgreSQL and a rollback would undo the reset.
     """
 
-    def __init__(self, failing=(), commit_fails=False):
+    def __init__(
+        self, failing: tuple[str, ...] | set[str] = (), commit_fails: bool = False
+    ) -> None:
         self.executed: list[str] = []
         self._failing = set(failing)
         self.in_transaction = False
@@ -52,17 +54,17 @@ class _Conn:
         self.rolled_back = False
         self._commit_fails = commit_fails
 
-    def cursor(self):
+    def cursor(self) -> _Cursor:
         self.in_transaction = True
         return _Cursor(self.executed, self._failing)
 
-    def commit(self):
+    def commit(self) -> None:
         if self._commit_fails:
             raise RuntimeError("commit refused")
         self.in_transaction = False
         self.committed = True
 
-    def rollback(self):
+    def rollback(self) -> None:
         self.in_transaction = False
         self.rolled_back = True
 
@@ -77,22 +79,25 @@ def test_reset_clears_session_gucs_and_role():
     assert "RESET SESSION AUTHORIZATION" in conn.executed
 
 
-def test_reset_continues_when_one_statement_is_rejected():
-    """A role the server will not let us reset must not skip clearing GUCs."""
+def test_a_partly_scrubbed_connection_is_rejected():
+    """The remaining statements still run, but the connection is not reused.
+
+    Returning quietly would put a connection that may still carry another
+    account's tenant settings back into rotation.
+    """
     conn = _Conn(failing={"RESET SESSION AUTHORIZATION"})
 
-    _reset_pooled_connection(conn)
+    with pytest.raises(RuntimeError, match="another account"):
+        _reset_pooled_connection(conn)
 
-    assert "RESET ALL" in conn.executed
+    assert "RESET ALL" in conn.executed, "must still attempt the remaining resets"
 
 
-def test_reset_never_raises_into_the_pool():
-    """The pool discards a connection it cannot reset; it must not see an error."""
+def test_a_connection_that_cannot_be_scrubbed_at_all_is_rejected():
     conn = _Conn(failing={"RESET ROLE", "RESET SESSION AUTHORIZATION", "RESET ALL"})
 
-    _reset_pooled_connection(conn)
-
-    assert conn.executed == []
+    with pytest.raises(RuntimeError, match="Discarding"):
+        _reset_pooled_connection(conn)
 
 
 def test_reset_leaves_no_open_transaction():
@@ -110,10 +115,11 @@ def test_reset_leaves_no_open_transaction():
     assert conn.committed is True, "must commit: rollback would undo the RESET"
 
 
-def test_reset_falls_back_to_rollback_when_commit_fails():
+def test_a_failed_commit_rejects_the_connection_and_leaves_no_transaction():
     conn = _Conn(commit_fails=True)
 
-    _reset_pooled_connection(conn)
+    with pytest.raises(RuntimeError, match="Could not clear session state"):
+        _reset_pooled_connection(conn)
 
     assert conn.in_transaction is False
     assert conn.rolled_back is True

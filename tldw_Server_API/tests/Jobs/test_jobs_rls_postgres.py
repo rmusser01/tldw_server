@@ -436,8 +436,6 @@ def test_rls_hidden_lifecycle_operation_reports_missing_and_preserves_row(
     assert _read_lifecycle_facts(admin_dsn, job_id) == before
 
 
-@pytest.mark.jobs
-@pytest.mark.pg_jobs
 def test_rls_denies_everything_when_no_context_was_established(monkeypatch):
     """Missing tenant context must mean no rows, not every row.
 

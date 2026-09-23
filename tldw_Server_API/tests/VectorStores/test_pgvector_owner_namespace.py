@@ -35,27 +35,46 @@ def _adapter(user_id: str) -> PGVectorAdapter:
     return PGVectorAdapter(cfg)
 
 
-def test_same_store_name_maps_to_different_tables_per_account():
-    """The regression: both accounts previously resolved to the same table."""
+async def _collections_for(user_id: str, tables: list[str], monkeypatch) -> list[str]:
+    """List collections an account can see, given what exists in the database."""
+    adapter = _adapter(user_id)
+
+    async def _fake_query(sql, params):
+        prefix = params[0].rstrip("%")
+        return [(t,) for t in tables if t.startswith(prefix)]
+
+    monkeypatch.setattr(adapter, "_query", _fake_query)
+    return await adapter.list_collections()
+
+
+async def test_one_account_cannot_see_anothers_store(monkeypatch):
+    """The regression, stated in observable terms.
+
+    Both accounts previously resolved the same store name to the same table and
+    list_collections returned every account's stores to whoever asked.
+    """
+    existing = ["vs_u11_shared_name", "vs_u22_shared_name", "vs_u22_secret"]
+
+    alice = await _collections_for("11", existing, monkeypatch)
+    bob = await _collections_for("22", existing, monkeypatch)
+
+    assert alice == ["shared_name"], "must see only its own store"
+    assert sorted(bob) == ["secret", "shared_name"]
+    assert "secret" not in alice, "bob's private store must be invisible to alice"
+
+
+def test_the_same_store_name_is_a_different_table_per_account():
+    """Characterises the naming scheme the isolation above relies on."""
     alice = _adapter("11")._sanitize_collection("vs_abc123")
     bob = _adapter("22")._sanitize_collection("vs_abc123")
 
     assert alice != bob
-    assert "11" in alice
-    assert "22" in bob
 
 
-def test_table_name_is_still_a_safe_identifier():
-    name = _adapter("11")._sanitize_collection("weird-name!; DROP TABLE x")
-
-    assert name.replace("_", "").isalnum()
-
-
-def test_owner_prefix_survives_a_hostile_user_id():
-    """A user id is not assumed to be numeric or clean."""
-    name = _adapter("../../etc; DROP")._sanitize_collection("s")
-
-    assert name.replace("_", "").isalnum()
+def test_table_names_stay_safe_identifiers_for_hostile_input():
+    for user_id, name in (("11", "weird-name!; DROP TABLE x"), ("../../etc; DROP", "s")):
+        table = _adapter(user_id)._sanitize_collection(name)
+        assert table.replace("_", "").isalnum()
 
 
 async def test_list_collections_only_returns_this_accounts_stores(monkeypatch):

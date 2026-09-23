@@ -122,16 +122,96 @@ async def start_connectors_startup(
 
 
 def _postgres_content_mode_active() -> bool:
-    """True when user content shares one PostgreSQL database across accounts."""
-    try:
-        from tldw_Server_API.app.core.DB_Management.media_db.runtime.defaults import (
-            build_media_runtime_config,
-        )
+    """True when user content shares one PostgreSQL database across accounts.
 
+    Detection failure is fatal rather than falsey. Returning False here would
+    classify an unknown backend as SQLite and skip the isolation policies that
+    shared PostgreSQL tables depend on, which is the failure mode this whole
+    startup path exists to prevent.
+    """
+    from tldw_Server_API.app.core.DB_Management.media_db.runtime.defaults import (
+        build_media_runtime_config,
+    )
+
+    try:
         return bool(build_media_runtime_config().postgres_content_mode)
     except _STARTUP_GUARD_EXCEPTIONS as exc:
-        logger.debug("Could not determine content backend mode: {}", exc)
-        return False
+        raise RuntimeError(
+            "Could not determine whether the content backend is PostgreSQL, so "
+            "whether tenant isolation policies are required is unknown. Refusing "
+            f"to start on an unverified backend. Cause: {exc}"
+        ) from exc
+
+
+_INSUFFICIENT_PRIVILEGE_SQLSTATE = "42501"
+_OWNERSHIP_ERROR_MARKERS = (
+    "must be owner",
+    "permission denied",
+    "insufficient privilege",
+)
+
+
+def _is_insufficient_privilege(exc: BaseException) -> bool:
+    """True when a failure is PostgreSQL refusing DDL for lack of ownership."""
+    seen: list[BaseException] = []
+    current: BaseException | None = exc
+    while current is not None and current not in seen:
+        seen.append(current)
+        sqlstate = getattr(current, "sqlstate", None) or getattr(current, "pgcode", None)
+        if sqlstate == _INSUFFICIENT_PRIVILEGE_SQLSTATE:
+            return True
+        text = str(current).lower()
+        if any(marker in text for marker in _OWNERSHIP_ERROR_MARKERS):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+def _assert_pg_rls_policies_present(backend: Any, install_error: BaseException) -> None:
+    """Fail startup unless tenant isolation is already installed on the tables.
+
+    Used when the application role cannot install policies itself. Confirms the
+    owner did so during migration, rather than assuming it.
+    """
+    try:
+        result = backend.execute(
+            "SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity, "
+            "       COUNT(p.polname) AS policy_count "
+            "FROM pg_class c "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "LEFT JOIN pg_policy p ON p.polrelid = c.oid "
+            "WHERE n.nspname = current_schema() AND c.relkind = 'r' "
+            "  AND c.relname IN ('notes', 'character_cards') "
+            "GROUP BY c.relname, c.relrowsecurity, c.relforcerowsecurity"
+        )
+        rows = list(result.rows or []) if result is not None else []
+    except Exception as exc:  # noqa: BLE001 - unverifiable isolation is fatal
+        raise RuntimeError(
+            "Could not verify PostgreSQL row-level security policies, and the "
+            "application role cannot install them itself. Refusing to start "
+            f"without confirmed tenant isolation. Cause: {exc}"
+        ) from install_error
+
+    if not rows:
+        raise RuntimeError(
+            "PostgreSQL content mode is active but the expected content tables "
+            "were not found, so tenant isolation could not be confirmed. Run "
+            "migrations as the table owner before starting the application."
+        ) from install_error
+
+    unprotected = [
+        str(row.get("relname"))
+        for row in rows
+        if not (row.get("relrowsecurity") and row.get("relforcerowsecurity"))
+        or int(row.get("policy_count") or 0) == 0
+    ]
+    if unprotected:
+        raise RuntimeError(
+            "PostgreSQL row-level security is missing on: "
+            f"{', '.join(sorted(unprotected))}. The application role is not the "
+            "table owner, so it cannot install policies; run the RLS migration "
+            "as the owner first. Refusing to start without tenant isolation."
+        ) from install_error
 
 
 async def _maybe_ensure_pg_rls(run_pg_rls_auto_ensure: Callable[[Any], Any]) -> None:
@@ -158,19 +238,35 @@ async def _maybe_ensure_pg_rls(run_pg_rls_auto_ensure: Callable[[Any], Any]) -> 
     from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
     from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 
+    config = DatabaseConfig.from_env()
+    backend = DatabaseBackendFactory.create_backend(config)
+
     try:
-        config = DatabaseConfig.from_env()
-        backend = DatabaseBackendFactory.create_backend(config)
         run_pg_rls_auto_ensure(backend)
-    except Exception as exc:
-        if required:
+        return
+    except Exception as exc:  # noqa: BLE001 - classified immediately below
+        if not required:
+            logger.warning(f"Failed to apply PG RLS policies automatically: {exc}")
+            return
+        if not _is_insufficient_privilege(exc):
             raise RuntimeError(
                 "Failed to apply PostgreSQL RLS policies, and the content backend "
                 "is PostgreSQL, where every account shares the same tables. "
                 "Refusing to start without tenant isolation policies in place. "
                 f"Cause: {exc}"
             ) from exc
-        logger.warning(f"Failed to apply PG RLS policies automatically: {exc}")
+        install_error = exc
+
+    # Installing RLS needs table ownership, and a correctly hardened deployment
+    # deliberately runs the application as a non-owner so that FORCE ROW LEVEL
+    # SECURITY actually binds it. Those two requirements are not in conflict:
+    # the owner installs the policies during migration, and the application only
+    # has to confirm they are already there.
+    logger.info(
+        "PG RLS install skipped: the application role does not own the content "
+        "tables, which is the hardened configuration. Verifying instead."
+    )
+    _assert_pg_rls_policies_present(backend, install_error)
 
 
 async def _start_tts_history_cleanup_worker(

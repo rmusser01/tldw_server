@@ -28,6 +28,16 @@ from Helper_Scripts.ci.rls_coverage_ratchet import (
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _write(sql: str):
+    """Write one throwaway .sql file and return the root to scan."""
+    import tempfile
+
+    root = Path(tempfile.mkdtemp())
+    (root / "schema.sql").write_text(sql)
+    return root
+
 APP_ROOT = REPO_ROOT / "tldw_Server_API" / "app"
 BASELINE = REPO_ROOT / "Helper_Scripts" / "ci" / "rls_coverage_baseline.txt"
 
@@ -98,3 +108,54 @@ def test_ratchet_accepts_a_table_that_gained_a_policy():
 def test_ownership_columns_cover_the_conventions_used_in_this_repo():
     for column in ("user_id", "owner_user_id", "client_id", "created_by"):
         assert column in OWNERSHIP_COLUMNS
+
+
+def test_a_policy_without_enabled_rls_is_not_coverage():
+    """A CREATE POLICY on a table with RLS switched off protects nothing.
+
+    The scanner previously counted any policy-shaped text as coverage, so an
+    assertion string or a policy created without ENABLE ROW LEVEL SECURITY
+    removed a table from the uncovered set while giving no isolation.
+    """
+    report = scan_source([_write(
+        "CREATE TABLE thing (id INT, user_id TEXT);\n"
+        "CREATE POLICY thing_iso ON thing USING (true);\n"
+    )])
+
+    assert "thing" in report.owned_tables
+    assert "thing" not in report.policy_tables
+    assert "thing" in report.uncovered
+
+
+def test_a_policy_with_enabled_rls_is_coverage():
+    report = scan_source([_write(
+        "CREATE TABLE thing (id INT, user_id TEXT);\n"
+        "ALTER TABLE thing ENABLE ROW LEVEL SECURITY;\n"
+        "CREATE POLICY thing_iso ON thing USING (true);\n"
+    )])
+
+    assert "thing" in report.policy_tables
+    assert "thing" not in report.uncovered
+
+
+def test_runtime_built_table_names_are_reported_not_ignored():
+    """A name composed at runtime cannot be checked, so it must be surfaced."""
+    report = scan_source([_write(
+        'cur.execute(f"CREATE TABLE {ident(name)} (id INT, user_id TEXT)")\n'
+    )])
+
+    assert report.dynamic_table_sites, "a dynamic CREATE TABLE must be reported"
+
+
+def test_an_unreadable_source_file_fails_instead_of_being_skipped(tmp_path):
+    """Partial input must not be able to produce a passing coverage report."""
+    root = tmp_path / "src"
+    root.mkdir()
+    bad = root / "unreadable.sql"
+    bad.write_text("CREATE TABLE t (id INT, user_id TEXT);")
+    bad.chmod(0o000)
+    try:
+        with pytest.raises(RatchetError, match="Could not read"):
+            scan_source([root])
+    finally:
+        bad.chmod(0o644)
