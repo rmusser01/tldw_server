@@ -23,6 +23,7 @@ import os
 import subprocess  # nosec B404
 import sys
 import tempfile
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional, Union
@@ -44,6 +45,8 @@ IS_MACOS = sys.platform == 'darwin'
 # so a request for a different model_path silently received the wrong weights
 # while the requested name was still reported upstream.
 _mlx_model_cache: dict[tuple[str, Optional[str]], Any] = {}
+# ponytail: one lock per module, so loads of different models serialize; per-key locks if that matters.
+_mlx_model_cache_lock = threading.Lock()
 _DEFAULT_MLX_MODEL_ID = "mlx-community/parakeet-tdt-0.6b-v3"
 
 
@@ -365,6 +368,21 @@ def load_parakeet_mlx_model(
         logger.debug("Using cached Parakeet MLX model for {}", cache_key[0])
         return cached_model
 
+    # Re-check under the lock so concurrent requests for one key load it once.
+    with _mlx_model_cache_lock:
+        cached_model = _mlx_model_cache.get(cache_key)
+        if cached_model is not None and not force_reload:
+            return cached_model
+        return _load_parakeet_mlx_uncached(model_id, model_cache_dir, cache_key, allow_download)
+
+
+def _load_parakeet_mlx_uncached(
+    model_id: str,
+    model_cache_dir: Optional[str],
+    cache_key: tuple[str, Optional[str]],
+    allow_download: bool,
+) -> Optional[Any]:
+    """Load ``model_id`` and store it under ``cache_key``; the caller holds the lock."""
     # Check MLX availability (tests may monkeypatch this to True)
     if not check_mlx_available():
         logger.error("MLX is not available. Install with: pip install mlx")

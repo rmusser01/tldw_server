@@ -841,6 +841,32 @@ def test_mlx_loader_cache_discriminates_by_model_path(monkeypatch):
     assert from_pretrained.call_count == 2
 
 
+
+def test_mlx_loader_concurrent_same_key_loads_once(monkeypatch):
+    """Two threads asking for one model must not both run from_pretrained."""
+    import threading
+    import time
+
+    mlx_mod, from_pretrained = _fake_mlx_loader(monkeypatch, {})
+
+    def slow_load(model_id, **_kw):
+        time.sleep(0.2)
+        return object()
+
+    from_pretrained.side_effect = slow_load
+    results: list[object] = []
+    threads = [
+        threading.Thread(target=lambda: results.append(mlx_mod.load_parakeet_mlx_model(model_path="org/model-a")))
+        for _ in range(2)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert from_pretrained.call_count == 1
+    assert results[0] is results[1]
+
 def test_mlx_loader_cache_keys_on_resolved_config_model_id(monkeypatch):
     """With no model_path the loader resolves the id from config; the cache must
     key on that resolved id, or a config change keeps serving the old model."""
