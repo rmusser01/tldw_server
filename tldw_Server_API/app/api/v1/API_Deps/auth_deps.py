@@ -97,6 +97,8 @@ from tldw_Server_API.app.core.testing import (
 from tldw_Server_API.app.core.testing import is_test_mode as _is_test_mode
 from tldw_Server_API.app.services.registration_service import RegistrationService, get_registration_service
 from tldw_Server_API.app.services.storage_quota_service import StorageQuotaService, get_storage_service
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS, PLATFORM_ADMIN_ROLES
 
 # Narrowed exception tuple for auth dependency safety (BLE001)
 _AUTH_DEPS_NONCRITICAL_EXCEPTIONS = (
@@ -1270,7 +1272,12 @@ def _principal_from_legacy_active_user_override(
     is_admin = bool(data.get("is_admin"))
     if not is_admin:
         roles_lc = {str(value).strip().lower() for value in roles}
-        is_admin = ("admin" in roles_lc) or bool(permissions_lc & {"*", "system.configure"})
+        # Both canonical sets: this path re-derives admin from a raw claims dict with no
+        # resolver behind it, and used to accept only the literal "admin" role and omit
+        # the service-account "admin" permission (TASK-13353, see platform_admin.py).
+        is_admin = bool(roles_lc & PLATFORM_ADMIN_ROLES) or bool(
+            permissions_lc & PLATFORM_ADMIN_PERMISSIONS
+        )
 
     org_ids = [
         int(org_id)
@@ -1912,7 +1919,7 @@ async def get_org_policy_from_principal(
 
 
 _ADMIN_BYPASS_PERMISSIONS = frozenset({"*"})
-_ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
+_ADMIN_CLAIM_PERMISSIONS = PLATFORM_ADMIN_PERMISSIONS  # see core/AuthNZ/platform_admin.py
 
 
 def _normalized_claim_values(values: list[Any] | tuple[Any, ...] | None) -> set[str]:

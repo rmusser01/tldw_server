@@ -12,24 +12,34 @@ The module deliberately imports nothing, so it can be imported from anywhere --
 including MCP_unified, which previously reached for the private name in
 auth_principal_resolver and thereby pulled in FastAPI's Request for a frozenset.
 
-NOT INCLUDED HERE, on purpose: the companion permission set. The three copies of
-``_ADMIN_CLAIM_PERMISSIONS`` do NOT agree, and never have -- all three were introduced
-in the same commit (d0654d0cfb) with one already different:
+PERMISSIONS. ``PLATFORM_ADMIN_PERMISSIONS`` is the companion set: permission claims that
+make a principal a platform administrator. Note that "admin" appears in BOTH sets and
+means two different things:
 
-    auth_principal_resolver.py   {"*", "system.configure", "admin"}
-    byok_helpers.py              {"*", "system.configure"}
-    claims_service.py            {"*", "system.configure"}
+* the ``admin`` ROLE is how an interactive user is made an administrator;
+* the ``admin`` PERMISSION is how a SERVICE ACCOUNT is. Service-account tokens carry
+  permissions and no roles -- jwt_service.create_service_account_token has no roles
+  parameter -- so a permission is the only way to grant one administrator status.
 
-So the ``admin`` PERMISSION grants administrator status during principal resolution but
-not in BYOK or Claims. Unifying those would widen or narrow real authorisation, which is
-a policy decision rather than a deduplication, and it is tracked separately. MCP
-diverges further still and deliberately: per ADR-048 it accepts only ``*``, because a
-configuration permission should not authorise destroying another user's data.
+That second meaning used to exist in exactly one place. The permission set was written
+out in twenty-two places; twenty-one of them omitted "admin", so a service account
+granted it was an administrator at principal resolution and nowhere else -- not in
+BYOK, Claims, billing, org, setup or any endpoint that re-derived the answer from
+claims. Decided (TASK-13353): it is an administrator everywhere, so every copy now
+aliases this one.
+
+MCP_unified is deliberately narrower and does not use this set: per ADR-048 it accepts
+only "*", because a configuration permission should not authorise destroying another
+user's data.
 """
 
 from __future__ import annotations
 
-__all__ = ["PLATFORM_ADMIN_ROLES"]
+__all__ = ["PLATFORM_ADMIN_PERMISSIONS", "PLATFORM_ADMIN_ROLES"]
 
 #: Roles that make a principal a platform administrator, lowercase.
 PLATFORM_ADMIN_ROLES: frozenset[str] = frozenset({"admin", "owner", "super_admin"})
+
+#: Permission claims that make a principal a platform administrator. "admin" here is
+#: the service-account grant, not the role -- see the module docstring.
+PLATFORM_ADMIN_PERMISSIONS: frozenset[str] = frozenset({"*", "system.configure", "admin"})

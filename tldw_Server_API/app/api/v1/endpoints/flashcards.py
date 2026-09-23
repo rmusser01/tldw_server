@@ -145,6 +145,7 @@ from tldw_Server_API.app.core.Utils.image_validation import (
     validate_uploaded_image_bytes,
 )
 from tldw_Server_API.app.core.Workflows.adapters.content import run_flashcard_generate_adapter
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 
 router = APIRouter(prefix="/flashcards", tags=["flashcards"])
 MAX_STUDY_PACK_JOBS_OFFSET = 10_000
@@ -215,7 +216,7 @@ _FLASHCARDS_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     ValueError,
     json.JSONDecodeError,
 )
-_ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
+_ADMIN_CLAIM_PERMISSIONS = PLATFORM_ADMIN_PERMISSIONS  # see core/AuthNZ/platform_admin.py
 _STUDY_PACK_JOB_STATUS_MAP = {
     "queued": "queued",
     "processing": "running",

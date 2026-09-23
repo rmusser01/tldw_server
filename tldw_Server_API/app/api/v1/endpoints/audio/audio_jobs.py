@@ -49,13 +49,14 @@ from tldw_Server_API.app.core.Usage.audio_quota import (
     get_user_tier,
     set_user_tier,
 )
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 
 router = APIRouter()
 
 MAX_CACHED_JOB_MANAGER_INSTANCES = 4
 _job_manager_cache: LRUCache = LRUCache(maxsize=MAX_CACHED_JOB_MANAGER_INSTANCES)
 _job_manager_lock = threading.Lock()
-_ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
+_ADMIN_CLAIM_PERMISSIONS = PLATFORM_ADMIN_PERMISSIONS  # see core/AuthNZ/platform_admin.py
 
 _ADMIN_DEPS = [
     Depends(RequireRole("admin")),

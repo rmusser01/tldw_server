@@ -95,3 +95,58 @@ def test_canonical_module_has_no_imports() -> None:
     assert not imports, (  # nosec B101
         f"core/AuthNZ/platform_admin.py must import nothing; found {len(imports)}"
     )
+
+
+_PERMISSION_MARKERS = {"*", "system.configure"}
+
+
+def _defines_permission_set_literally(tree: ast.AST) -> bool:
+    """True when the module builds an admin permission set from literals.
+
+    Matches any set/frozenset literal containing both "*" and "system.configure". That
+    set was written out in twenty-two places, twenty-one of which omitted the "admin"
+    service-account grant, so a service account made administrator was one only at
+    principal resolution (TASK-13353).
+    """
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Set):
+            elements = node.elts
+        elif (
+            isinstance(node, ast.Call)
+            and (getattr(node.func, "id", None) or getattr(node.func, "attr", None)) == "frozenset"
+            and node.args
+            and isinstance(node.args[0], (ast.Set, ast.List, ast.Tuple))
+        ):
+            elements = node.args[0].elts
+        else:
+            continue
+        values = {
+            el.value for el in elements if isinstance(el, ast.Constant) and isinstance(el.value, str)
+        }
+        if _PERMISSION_MARKERS <= values:
+            return True
+    return False
+
+
+def test_platform_admin_permissions_defined_exactly_once() -> None:
+    offenders = []
+    for path in sorted(APP_ROOT.rglob("*.py")):
+        if path == CANONICAL:
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:  # pragma: no cover
+            continue
+        if _defines_permission_set_literally(tree):
+            offenders.append(str(path.relative_to(REPO_ROOT)))
+    assert not offenders, (  # nosec B101
+        "These modules restate the platform admin permission set instead of importing "
+        "PLATFORM_ADMIN_PERMISSIONS from core/AuthNZ/platform_admin.py: "
+        f"{offenders}"
+    )
+
+
+def test_canonical_permission_set_includes_the_service_account_grant() -> None:
+    from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
+
+    assert PLATFORM_ADMIN_PERMISSIONS == frozenset({"*", "system.configure", "admin"})  # nosec B101

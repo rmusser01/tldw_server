@@ -77,9 +77,10 @@ from tldw_Server_API.app.core.RAG.rag_service.vector_stores.factory import (
 )
 from tldw_Server_API.app.core.testing import env_flag_enabled
 from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 
 RBAC_VECTOR_ADMIN = rbac_rate_limit("vector.admin")
-_ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
+_ADMIN_CLAIM_PERMISSIONS = PLATFORM_ADMIN_PERMISSIONS  # see core/AuthNZ/platform_admin.py
 _METADATA_ORDER_KEY_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 
 _VECTORSTORE_NONCRITICAL_EXCEPTIONS = (

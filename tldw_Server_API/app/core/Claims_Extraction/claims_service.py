@@ -73,6 +73,7 @@ from tldw_Server_API.app.core.exceptions import EgressPolicyError, RetryExhauste
 from tldw_Server_API.app.core.Jobs.worker_utils import jobs_manager_from_env
 from tldw_Server_API.app.core.Setup import setup_manager
 from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_ROLES
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 
 try:
     import psycopg as _psycopg
@@ -124,7 +125,7 @@ _REVIEW_TRANSITIONS = {
 }
 # Imported, not restated: see AuthNZ/platform_admin.py for why there is one copy.
 _PLATFORM_ADMIN_ROLES = PLATFORM_ADMIN_ROLES
-_ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
+_ADMIN_CLAIM_PERMISSIONS = PLATFORM_ADMIN_PERMISSIONS  # see core/AuthNZ/platform_admin.py
 _CLAIMS_PROMPT_VALIDATION_MODES = frozenset({"off", "warning", "error"})
 _CLAIMS_ALIGNMENT_MODES = frozenset({"off", "exact", "fuzzy"})
 _CLAIMS_CONTEXT_WINDOW_CHARS_MAX = 20000

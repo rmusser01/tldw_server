@@ -90,3 +90,36 @@ problem needs.
 (`AuthNZ/auth_principal_resolver.py`, `AuthNZ/byok_helpers.py`,
 `Claims_Extraction/claims_service.py`, and now imported by MCP). Collapsing those is
 tracked separately as TASK-13345 — the same divergence risk, one level up.
+
+## Addendum (2026-09-23): "admin" is both a role and a permission, and they mean different things
+
+**Decided under TASK-13353.**
+
+The word `admin` appears in two different claim sets, both now defined once in
+`core/AuthNZ/platform_admin.py`:
+
+| Set | Contains | What `admin` means there |
+| --- | --- | --- |
+| `PLATFORM_ADMIN_ROLES` | `admin`, `owner`, `super_admin` | the **role** that makes an interactive user an administrator |
+| `PLATFORM_ADMIN_PERMISSIONS` | `*`, `system.configure`, `admin` | the **permission** that makes a *service account* an administrator |
+
+The permission exists because service-account tokens carry permissions and **no roles**:
+`jwt_service.create_service_account_token` has no roles parameter, so a permission is the only
+way to grant one administrator status. No seeded RBAC permission is named `admin`; it appears
+only in service-account grants.
+
+**Before:** the permission set was written out in 25 places (22 named constants, 3 inline
+literals). Only `auth_principal_resolver` included `admin`, so a service account granted it was
+an administrator at principal resolution and nowhere else — not in BYOK, Claims, billing, org,
+setup, storage, RAG checkpoints, or any endpoint that re-derived the answer from claims.
+
+**Decision:** a service account granted the `admin` permission is an administrator everywhere
+AuthNZ decides platform administration. All 25 sites now use the canonical sets, and a lint
+ratchet (`tests/lint/test_platform_admin_roles_single_definition.py`) fails on a 26th literal.
+
+**Unchanged:** MCP remains deliberately narrower, per the decision above — it accepts only `*`
+among permissions and does not use `PLATFORM_ADMIN_PERMISSIONS`.
+
+**Also aligned in passing:** `API_Deps/auth_deps.py`'s claims-dict path accepted only the literal
+`admin` role, the same owner/super_admin under-grant this ADR originally fixed in MCP. It now uses
+`PLATFORM_ADMIN_ROLES`.
