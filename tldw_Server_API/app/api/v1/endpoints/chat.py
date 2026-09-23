@@ -60,6 +60,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     TokenScopeGuard,
     User,
 )
+from tldw_Server_API.app.core.Utils.base64url import SignatureMismatchError, verify_signed_token
 from tldw_Server_API.app.core.Utils.image_validation import (
     get_max_base64_bytes,
     validate_image_url,
@@ -6474,11 +6475,6 @@ def _urlsafe_b64encode(value: bytes) -> str:
     return base64.urlsafe_b64encode(value).decode("utf-8").rstrip("=")
 
 
-def _urlsafe_b64decode(value: str) -> bytes:
-    padding = "=" * (-len(value) % 4)
-    return base64.urlsafe_b64decode(f"{value}{padding}")
-
-
 def _build_knowledge_qa_share_token(payload: dict[str, Any]) -> str:
     encoded_payload = _urlsafe_b64encode(
         json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
@@ -6493,32 +6489,22 @@ def _build_knowledge_qa_share_token(payload: dict[str, Any]) -> str:
 
 
 def _decode_knowledge_qa_share_token(token: str) -> dict[str, Any]:
-    token_parts = token.split(".")
-    if len(token_parts) != 2:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Malformed share token")
-
-    encoded_payload, encoded_signature = token_parts
-    expected_signature = hmac.new(
-        _get_knowledge_qa_share_signing_key(),
-        encoded_payload.encode("utf-8"),
-        hashlib.sha256,
-    ).digest()
+    # 400 for input we cannot decode, 403 for input that decodes but fails the
+    # signature compare. The token MACs the encoded payload segment, not raw bytes.
     try:
-        provided_signature = _urlsafe_b64decode(encoded_signature)
+        raw_payload = verify_signed_token(
+            token,
+            _get_knowledge_qa_share_signing_key(),
+            sign_encoded_payload=True,
+        )
+    except SignatureMismatchError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid share token") from exc
     except ValueError as exc:
-        # binascii.Error subclasses ValueError. Decoding here rather than inside the
-        # payload try below meant a signature segment of an undecodable length left
-        # this function as an unhandled exception and surfaced as HTTP 500 on the
-        # public, unauthenticated share route.
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Malformed share token"
-        ) from exc
-    if not hmac.compare_digest(expected_signature, provided_signature):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid share token")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Malformed share token") from exc
 
     try:
-        payload = json.loads(_urlsafe_b64decode(encoded_payload).decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        payload = json.loads(raw_payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Malformed share token payload") from exc
 
     if not isinstance(payload, dict):

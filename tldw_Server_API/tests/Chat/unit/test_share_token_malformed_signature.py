@@ -38,3 +38,19 @@ def test_wrong_arity_still_400() -> None:
     with pytest.raises(HTTPException) as excinfo:
         _decode_knowledge_qa_share_token("not-a-valid-token")
     assert excinfo.value.status_code == 400
+
+
+def test_valid_token_roundtrips_and_tampered_payload_is_403() -> None:
+    from tldw_Server_API.app.api.v1.endpoints.chat import (
+        _build_knowledge_qa_share_token,
+        _urlsafe_b64encode,
+    )
+
+    token = _build_knowledge_qa_share_token({"v": 1, "sid": "abc"})
+    assert _decode_knowledge_qa_share_token(token) == {"v": 1, "sid": "abc"}
+
+    _, signature = token.split(".")
+    forged = _urlsafe_b64encode(b'{"sid":"xyz","v":1}') + "." + signature
+    with pytest.raises(HTTPException) as excinfo:
+        _decode_knowledge_qa_share_token(forged)
+    assert excinfo.value.status_code == 403
