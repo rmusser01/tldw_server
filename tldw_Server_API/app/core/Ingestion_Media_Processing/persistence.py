@@ -5031,12 +5031,10 @@ async def process_document_like_item(
 
             final_result["processing_source"] = processing_source
 
-    except HTTPException:
-        # Deliberate client-facing failures (e.g. the 413 storage-quota rejection
-        # raised above) must reach the caller rather than be folded into the
-        # generic preparation-error path below. Same idiom as :2815, :2975, :3041.
-        raise
     except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as prep_err:
+        # Includes HTTPException on purpose: an SSRF block or per-URL quota rejection
+        # fails this item only. Callers (the /media/add gather, the ingest-jobs
+        # worker, the reading service) expect an Error result, not a raise.
         error_detail = str(getattr(prep_err, "detail", prep_err))
         prep_error_type = type(prep_err).__name__
         temp_dir_exists: bool | None = None
