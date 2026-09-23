@@ -197,7 +197,7 @@ def _clear_local_model_caches(monkeypatch):
     getattr(atlib, "_qwen2audio_plan_cache", {}).clear()
     nemo._model_cache.clear()
     parakeet_onnx._onnx_model_cache.clear()
-    parakeet_mlx._mlx_model_cache = None
+    parakeet_mlx._mlx_model_cache.clear()
     yield
     atlib.whisper_model_cache.clear()
     atlib.qwen_processor = None
@@ -205,7 +205,7 @@ def _clear_local_model_caches(monkeypatch):
     getattr(atlib, "_qwen2audio_plan_cache", {}).clear()
     nemo._model_cache.clear()
     parakeet_onnx._onnx_model_cache.clear()
-    parakeet_mlx._mlx_model_cache = None
+    parakeet_mlx._mlx_model_cache.clear()
 
 
 @pytest.mark.unit
@@ -1112,8 +1112,8 @@ def test_planned_parakeet_mlx_transcription_fails_before_runtime_or_audio_entry(
             ("variant", "mlx"),
         ),
     )
-    cached = object()
-    parakeet_mlx._mlx_model_cache = cached
+    cached = {("/private/model", None): object()}
+    monkeypatch.setattr(parakeet_mlx, "_mlx_model_cache", cached)
     monkeypatch.setattr(
         parakeet_mlx,
         "load_parakeet_mlx_model",

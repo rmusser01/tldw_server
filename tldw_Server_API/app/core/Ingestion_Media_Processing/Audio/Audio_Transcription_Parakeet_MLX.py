@@ -343,7 +343,23 @@ def load_parakeet_mlx_model(
         logger.error("Parakeet MLX is only supported on macOS with Apple Silicon")
         return None
 
-    cache_key = (model_path or _DEFAULT_MLX_MODEL_ID, cache_dir)
+    try:
+        from tldw_Server_API.app.core.config import get_stt_config
+
+        stt_cfg: dict[str, Any] = get_stt_config() or {}
+    except Exception:
+        stt_cfg = {}
+
+    # Key the cache on what is actually loaded (config fallbacks included),
+    # not the raw args, or a config change would keep serving the old model.
+    # Default model from the parakeet-mlx CLI (v3)
+    model_id = (
+        model_path
+        or str(stt_cfg.get("mlx_model_id", "")).strip()
+        or _DEFAULT_MLX_MODEL_ID
+    )
+    model_cache_dir = cache_dir or str(stt_cfg.get("mlx_cache_dir", "")).strip() or None
+    cache_key = (model_id, model_cache_dir)
     cached_model = _mlx_model_cache.get(cache_key)
     if cached_model is not None and not force_reload:
         logger.debug("Using cached Parakeet MLX model for {}", cache_key[0])
@@ -363,12 +379,6 @@ def load_parakeet_mlx_model(
 
     try:
         import parakeet_mlx
-        try:
-            from tldw_Server_API.app.core.config import get_stt_config
-
-            stt_cfg: dict[str, Any] = get_stt_config() or {}
-        except Exception:
-            stt_cfg = {}
 
         # dtype is optional for tests; if mlx is unavailable, proceed without dtype
         try:
@@ -379,16 +389,6 @@ def load_parakeet_mlx_model(
 
         logger.info("Loading Parakeet MLX model...")
 
-        # Initialize the model
-        # The parakeet-mlx library handles model downloading and caching
-        # Try to load from Hugging Face model ID
-        # Default model from the parakeet-mlx CLI (v3)
-        model_id = (
-            model_path
-            or str(stt_cfg.get("mlx_model_id", "")).strip()
-            or _DEFAULT_MLX_MODEL_ID
-        )
-        model_cache_dir = cache_dir or str(stt_cfg.get("mlx_cache_dir", "")).strip() or None
         from_pretrained_kwargs: dict[str, Any] = {}
         if _dtype is not None and _supports_kwarg(parakeet_mlx.from_pretrained, "dtype"):
             from_pretrained_kwargs["dtype"] = _dtype

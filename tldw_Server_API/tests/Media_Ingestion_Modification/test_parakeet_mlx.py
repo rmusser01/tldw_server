@@ -805,22 +805,50 @@ if __name__ == "__main__":
     pytest.main([__file__, "-v"])
 
 
-def test_mlx_cache_discriminates_by_model_path(monkeypatch):
-    """Regression: the cache was a single slot, so a request for a different
-    model_path received whichever model was loaded first while still reporting
-    the requested name upstream."""
+def _fake_mlx_loader(monkeypatch, stt_cfg):
+    """Stub parakeet_mlx.from_pretrained to return a distinct object per model id."""
+    import types
+
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import (
         Audio_Transcription_Parakeet_MLX as mlx_mod,
     )
+    import tldw_Server_API.app.core.config as config_mod
 
-    mlx_mod._mlx_model_cache = {}
-    sentinel_a = object()
-    sentinel_b = object()
-    mlx_mod._mlx_model_cache[("model-a", None)] = sentinel_a
-    mlx_mod._mlx_model_cache[("model-b", None)] = sentinel_b
+    fake = types.ModuleType("parakeet_mlx")
+    fake.from_pretrained = MagicMock(side_effect=lambda model_id, **_kw: object())
+    monkeypatch.setitem(sys.modules, "parakeet_mlx", fake)
+    monkeypatch.setattr(mlx_mod, "IS_MACOS", True)
+    monkeypatch.setattr(mlx_mod, "check_mlx_available", lambda: True)
+    monkeypatch.setattr(mlx_mod, "check_parakeet_mlx_installed", lambda: True)
+    monkeypatch.setattr(config_mod, "get_stt_config", lambda: stt_cfg)
+    monkeypatch.setattr(mlx_mod, "_mlx_model_cache", {})
+    _install_fake_mlx_core(monkeypatch)
+    return mlx_mod, fake.from_pretrained
 
-    assert mlx_mod._mlx_model_cache[("model-a", None)] is sentinel_a
-    assert mlx_mod._mlx_model_cache[("model-b", None)] is sentinel_b
-    assert mlx_mod._mlx_model_cache.get(("model-c", None)) is None
-    # cache_dir participates in the key
-    assert mlx_mod._mlx_model_cache.get(("model-a", "/tmp/x")) is None
+
+def test_mlx_loader_cache_discriminates_by_model_path(monkeypatch):
+    """Regression: the cache was a single slot, so a request for a different
+    model_path received whichever model was loaded first while still reporting
+    the requested name upstream."""
+    mlx_mod, from_pretrained = _fake_mlx_loader(monkeypatch, {})
+
+    model_a = mlx_mod.load_parakeet_mlx_model(model_path="org/model-a")
+    model_b = mlx_mod.load_parakeet_mlx_model(model_path="org/model-b")
+
+    assert model_a is not None and model_b is not None
+    assert model_a is not model_b
+    assert mlx_mod.load_parakeet_mlx_model(model_path="org/model-a") is model_a
+    assert from_pretrained.call_count == 2
+
+
+def test_mlx_loader_cache_keys_on_resolved_config_model_id(monkeypatch):
+    """With no model_path the loader resolves the id from config; the cache must
+    key on that resolved id, or a config change keeps serving the old model."""
+    stt_cfg = {"mlx_model_id": "org/model-a"}
+    mlx_mod, _ = _fake_mlx_loader(monkeypatch, stt_cfg)
+
+    model_a = mlx_mod.load_parakeet_mlx_model()
+    stt_cfg["mlx_model_id"] = "org/model-b"
+    model_b = mlx_mod.load_parakeet_mlx_model()
+
+    assert model_a is not model_b
