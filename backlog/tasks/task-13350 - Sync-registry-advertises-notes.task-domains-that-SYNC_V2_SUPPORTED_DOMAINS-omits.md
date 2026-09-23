@@ -3,9 +3,10 @@ id: TASK-13350
 title: >-
   Sync registry advertises notes.task domains that SYNC_V2_SUPPORTED_DOMAINS
   omits
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-23 00:51'
+updated_date: '2026-09-23 06:07'
 labels:
   - bug
   - sync
@@ -40,6 +41,12 @@ Source: TASK-13344 triage.
 - [ ] #1 notes.task and notes.task_activity are either in SYNC_V2_SUPPORTED_DOMAINS or gated out of the default registry
 - [ ] #2 The registry and the service advertise the same domain set
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Resolved in the preceding commit with a TEST change only. Both earlier framings were wrong: (1) this was not the test correctly catching a product inconsistency -- registry.supported_domains is the set of adapters HELD, not what the service advertises; (2) promoting notes.task into SYNC_V2_SUPPORTED_DOMAINS was implemented, broke 11 tests that pin notes.task as deliberately dormant (wired but unadvertised), and was reverted. Verified at runtime: registry minus supported equals exactly the dormant task pair, and settings.supported_domains excludes notes.task. The test now expects supported + dormant.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
