@@ -252,6 +252,35 @@ class TimedEffects(BaseModel):
     delay: int = Field(0, ge=0, description="Initial delay before first trigger in seconds")
 
 
+def parse_timed_effects(value: Any) -> TimedEffects | None:
+    """
+    Normalize various representations into a TimedEffects instance.
+
+    Accepts:
+    - None -> None
+    - TimedEffects -> returned as-is
+    - dict -> TimedEffects(**dict) when possible
+    - JSON string containing a dict payload
+    """
+    if value is None:
+        return None
+    if isinstance(value, TimedEffects):
+        return value
+    if isinstance(value, dict):
+        try:
+            return TimedEffects(**value)
+        except Exception:
+            return None
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, dict):
+                return TimedEffects(**parsed)
+        except Exception:
+            return None
+    return None
+
+
 class DictionaryEntryBase(BaseModel):
     """Base schema for dictionary entries."""
     pattern: str = Field(..., min_length=1, description="Pattern to match (literal or regex)")
