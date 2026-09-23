@@ -34,7 +34,6 @@ GET /api/v1/embeddings/health
 GET /api/v1/embeddings/models
 GET /api/v1/evaluations/health
 GET /api/v1/invites/preview
-GET /api/v1/llamafile/metrics
 GET /api/v1/llm/health
 GET /api/v1/llm/models
 GET /api/v1/llm/models/metadata

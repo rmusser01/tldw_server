@@ -1236,7 +1236,13 @@ async def get_llamacpp_metrics_endpoint(llm_manager: LLMInferenceManager = Depen
         raise HTTPException(status_code=500, detail="An unexpected error occurred.") from e
 
 
-@router.get("/llamafile/metrics", summary="Get Llamafile Metrics")
+@router.get(
+    "/llamafile/metrics",
+    summary="Get Llamafile Metrics",
+    # Matches get_llamacpp_metrics_endpoint directly above: the same operation
+    # for a sibling backend, admin-gated there and open here.
+    dependencies=[Depends(check_rate_limit), Depends(RequireRole("admin"))],
+)
 async def get_llamafile_metrics_endpoint(llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager)):
     try:
         if not getattr(llm_manager, "llamafile", None):
