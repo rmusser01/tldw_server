@@ -7,6 +7,7 @@ import threading
 from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from fastapi import HTTPException
@@ -32,11 +33,11 @@ def db(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[CharactersRAG
         kwargs["backend"].get_pool().close_all()
 
 
-def test_soft_delete_closure_survives_cascade_failure_and_retry(db, monkeypatch):
+def test_soft_delete_closure_survives_cascade_failure_and_retry(db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch) -> None:
     child = db.add_conversation({"character_id": 1, "title": "Child", "scope_type": "workspace", "workspace_id": "workspace-one"})
     original = db.soft_delete_conversation
 
-    def fail_once(conversation_id, expected_version):
+    def fail_once(conversation_id: str, expected_version: int) -> None:
         monkeypatch.setattr(db, "soft_delete_conversation", original)
         raise RuntimeError("injected cascade failure")
 
@@ -54,7 +55,7 @@ def test_soft_delete_closure_survives_cascade_failure_and_retry(db, monkeypatch)
 
 
 @pytest.mark.parametrize("hard", [False, True])
-def test_admission_closure_commits_before_conversation_enumeration(db, monkeypatch, hard):
+def test_admission_closure_commits_before_conversation_enumeration(db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch, hard: bool) -> None:
     enumerating = threading.Event()
     allow_enumeration = threading.Event()
     original = db.execute_query
@@ -64,7 +65,7 @@ def test_admission_closure_commits_before_conversation_enumeration(db, monkeypat
         if hard else "SELECT id, version FROM conversations WHERE workspace_id"
     )
 
-    def pause_at_enumeration(query, params=(), **kwargs):
+    def pause_at_enumeration(query: str, params: tuple[Any, ...] = (), **kwargs: Any) -> Any:
         if query.startswith(enumeration_prefix):
             enumerating.set()
             assert allow_enumeration.wait(timeout=10)
@@ -72,7 +73,7 @@ def test_admission_closure_commits_before_conversation_enumeration(db, monkeypat
 
     monkeypatch.setattr(db, "execute_query", pause_at_enumeration)
 
-    def delete():
+    def delete() -> None:
         try:
             if hard:
                 results["deleted"] = db.hard_delete_workspace("workspace-one")
@@ -101,7 +102,7 @@ def test_admission_closure_commits_before_conversation_enumeration(db, monkeypat
 
 
 @pytest.mark.parametrize("hard", [False, True])
-def test_workspace_staged_delete_rejects_enclosing_transaction_without_committing_caller(db, hard):
+def test_workspace_staged_delete_rejects_enclosing_transaction_without_committing_caller(db: CharactersRAGDB, hard: bool) -> None:
     with pytest.raises(RuntimeError, match="caller rollback"):
         with db.transaction() as conn:
             conn.execute("UPDATE workspaces SET name = 'Caller change' WHERE id = 'workspace-one'")
@@ -116,11 +117,11 @@ def test_workspace_staged_delete_rejects_enclosing_transaction_without_committin
     assert not bool(workspace["native_chat_admission_closed"])
 
 
-def test_hard_delete_closure_survives_cascade_failure_and_retry(db, monkeypatch):
+def test_hard_delete_closure_survives_cascade_failure_and_retry(db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch) -> None:
     db.add_conversation({"character_id": 1, "title": "Child", "scope_type": "workspace", "workspace_id": "workspace-one"})
     original = db.hard_delete_conversation
 
-    def fail_once(conversation_id):
+    def fail_once(conversation_id: str) -> None:
         monkeypatch.setattr(db, "hard_delete_conversation", original)
         raise RuntimeError("injected cascade failure")
 
@@ -134,7 +135,7 @@ def test_hard_delete_closure_survives_cascade_failure_and_retry(db, monkeypatch)
 
 
 @pytest.mark.parametrize(("hard", "trashed"), [(False, False), (True, False), (True, True)])
-def test_final_transition_preserves_workspace_when_protected_chat_was_missed(db, monkeypatch, hard, trashed):
+def test_final_transition_preserves_workspace_when_protected_chat_was_missed(db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch, hard: bool, trashed: bool) -> None:
     child = db.add_conversation({"character_id": 1, "title": "Protected", "scope_type": "workspace", "workspace_id": "workspace-one"})
     with db.transaction() as conn:
         conn.execute("UPDATE conversations SET required_projection_version = 'native-fork-v1' WHERE id = ?", (child,))
@@ -142,7 +143,7 @@ def test_final_transition_preserves_workspace_when_protected_chat_was_missed(db,
         db.soft_delete_conversation(child, expected_version=1)
     original = db.execute_query
 
-    def miss_enumeration(query, params=(), **kwargs):
+    def miss_enumeration(query: str, params: tuple[Any, ...] = (), **kwargs: Any) -> Any:
         if query.startswith("SELECT id") and "FROM conversations WHERE workspace_id" in query:
             monkeypatch.setattr(db, "execute_query", original)
             return original("SELECT id FROM conversations WHERE 1 = 0", ())
@@ -160,13 +161,13 @@ def test_final_transition_preserves_workspace_when_protected_chat_was_missed(db,
     assert db.get_conversation_by_id(child, include_deleted=True)["workspace_id"] == "workspace-one"
 
 
-def test_stale_soft_delete_does_not_close_admission(db):
+def test_stale_soft_delete_does_not_close_admission(db: CharactersRAGDB) -> None:
     with pytest.raises(ConflictError, match="version mismatch"):
         db.delete_workspace("workspace-one", expected_version=0)
     assert not bool(db.get_workspace("workspace-one")["native_chat_admission_closed"])
 
 
-def test_other_owner_cannot_close_or_delete_workspace(db):
+def test_other_owner_cannot_close_or_delete_workspace(db: CharactersRAGDB) -> None:
     other = CharactersRAGDB(db_path=db.db_path_str, client_id="bob", backend=db.backend)
     try:
         with pytest.raises(ConflictError, match="not found"):
@@ -178,7 +179,7 @@ def test_other_owner_cannot_close_or_delete_workspace(db):
         other.close_connection()
 
 
-def test_hard_delete_missing_workspace_remains_idempotent(db):
+def test_hard_delete_missing_workspace_remains_idempotent(db: CharactersRAGDB) -> None:
     db.hard_delete_workspace("workspace-one")
     db.hard_delete_workspace("workspace-one")
     assert db.get_workspace("workspace-one", include_deleted=True) is None
@@ -186,7 +187,7 @@ def test_hard_delete_missing_workspace_remains_idempotent(db):
 
 @pytest.mark.parametrize("closed", [False, True])
 @pytest.mark.parametrize("typed_asset", [False, True])
-def test_protected_restore_requires_open_workspace(db, closed, typed_asset):
+def test_protected_restore_requires_open_workspace(db: CharactersRAGDB, closed: bool, typed_asset: bool) -> None:
     child = db.add_conversation({"character_id": 1, "title": "Protected", "scope_type": "workspace", "workspace_id": "workspace-one"})
     with db.transaction() as conn:
         if typed_asset:
@@ -205,7 +206,7 @@ def test_protected_restore_requires_open_workspace(db, closed, typed_asset):
         assert not db.get_conversation_by_id(child, include_deleted=True)["deleted"]
 
 
-def test_protected_restore_rejects_other_owner(db):
+def test_protected_restore_rejects_other_owner(db: CharactersRAGDB) -> None:
     child = db.add_conversation({"character_id": 1, "title": "Protected", "scope_type": "workspace", "workspace_id": "workspace-one"})
     with db.transaction() as conn:
         conn.execute("UPDATE conversations SET required_projection_version = 'native-fork-v1' WHERE id = ?", (child,))
@@ -219,7 +220,7 @@ def test_protected_restore_rejects_other_owner(db):
         other.close_connection()
 
 
-def test_protected_restore_cannot_reopen_deleted_workspace(db):
+def test_protected_restore_cannot_reopen_deleted_workspace(db: CharactersRAGDB) -> None:
     child = db.add_conversation({"character_id": 1, "title": "Protected", "scope_type": "workspace", "workspace_id": "workspace-one"})
     with db.transaction() as conn:
         conn.execute("UPDATE conversations SET required_projection_version = 'native-fork-v1' WHERE id = ?", (child,))
@@ -280,7 +281,7 @@ def test_workspace_delete_guard_reads_postgres_driver_transaction_status() -> No
         CharactersRAGDB._require_outermost_workspace_delete(fake_db, "workspace-one")
 
 
-def test_active_only_restore_validation_never_reactivates_a_deleted_chat(db):
+def test_active_only_restore_validation_never_reactivates_a_deleted_chat(db: CharactersRAGDB) -> None:
     child = db.add_conversation({"character_id": 1, "title": "Child", "scope_type": "workspace", "workspace_id": "workspace-one"})
     db.soft_delete_conversation(child, expected_version=1)
     with pytest.raises(ConflictError, match="chat_restore_state_changed"):
@@ -288,11 +289,11 @@ def test_active_only_restore_validation_never_reactivates_a_deleted_chat(db):
     assert db.get_conversation_by_id(child, include_deleted=True)["deleted"]
 
 
-def test_active_restore_endpoint_rejects_delete_between_read_and_validation(db, monkeypatch):
+def test_active_restore_endpoint_rejects_delete_between_read_and_validation(db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch) -> None:
     child = db.add_conversation({"character_id": 1, "title": "Racing child"})
     original_get = db.get_conversation_by_id
 
-    def read_then_delete(conversation_id, include_deleted=False):
+    def read_then_delete(conversation_id: str, include_deleted: bool = False) -> Any:
         snapshot = original_get(conversation_id, include_deleted=include_deleted)
         if include_deleted and snapshot and not snapshot["deleted"]:
             db.soft_delete_conversation(conversation_id, expected_version=snapshot["version"])
@@ -315,7 +316,7 @@ def test_active_restore_endpoint_rejects_delete_between_read_and_validation(db, 
 
 @pytest.mark.parametrize("typed_asset", [False, True])
 @pytest.mark.parametrize("trashed", [False, True])
-def test_sync_upsert_cannot_reparent_or_revive_protected_chat(db, typed_asset, trashed):
+def test_sync_upsert_cannot_reparent_or_revive_protected_chat(db: CharactersRAGDB, typed_asset: bool, trashed: bool) -> None:
     child = db.add_conversation({"character_id": 1, "title": "Protected", "scope_type": "workspace", "workspace_id": "workspace-one"})
     with db.transaction() as conn:
         if typed_asset:
@@ -337,7 +338,7 @@ def test_sync_upsert_cannot_reparent_or_revive_protected_chat(db, typed_asset, t
     assert db.get_conversation_by_id(child, include_deleted=True) == before
 
 
-def test_sync_tombstone_cannot_bypass_protected_delete_adapter(db):
+def test_sync_tombstone_cannot_bypass_protected_delete_adapter(db: CharactersRAGDB) -> None:
     child = db.add_conversation({"character_id": 1, "title": "Protected", "scope_type": "workspace", "workspace_id": "workspace-one"})
     with db.transaction() as conn:
         conn.execute("UPDATE conversations SET required_projection_version = 'native-fork-v1' WHERE id = ?", (child,))
@@ -362,7 +363,7 @@ def test_sync_tombstone_cannot_bypass_protected_delete_adapter(db):
         ("persona_memory_mode", "none"),
     ],
 )
-def test_generic_identity_update_cannot_rebind_protected_chat(db, typed_asset, identity_field, new_value):
+def test_generic_identity_update_cannot_rebind_protected_chat(db: CharactersRAGDB, typed_asset: bool, identity_field: str, new_value: object) -> None:
     child = db.add_conversation({
         "assistant_kind": "persona", "assistant_id": "persona-original",
         "title": "Protected", "scope_type": "workspace", "workspace_id": "workspace-one",

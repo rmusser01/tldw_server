@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 from psycopg import sql
@@ -126,7 +127,7 @@ def test_native_schema_failure_rolls_back_tables_and_version(
     method_name = "_migrate_from_v73_to_v74_postgres" if backend_name == "postgres" else "_migrate_from_v69_to_v70"
     migrate = getattr(CharactersRAGDB, method_name)
 
-    def interrupted(self, conn):
+    def interrupted(self: CharactersRAGDB, conn: Any) -> None:
         migrate(self, conn)
         raise RuntimeError("native migration interrupted")
 
