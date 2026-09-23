@@ -240,7 +240,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -m pytest -q --timeout=300 \
+          # Plugins are named explicitly because setup-python-deps writes
+          # PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 into $GITHUB_ENV ("Enforce pytest plugin
+          # isolation"), which applies to every later step in the job. Without this,
+          # --timeout is an unrecognised argument and the step dies with exit 4 before
+          # running a single test -- which is exactly how this guard first failed, and
+          # would have failed the same way in its original ci.yml home had it ever been
+          # allowed to run.
+          python -m pytest -q \
+            -p pytest_asyncio.plugin \
+            -p pytest_timeout \
+            --timeout=300 \
             tldw_Server_API/tests/AuthNZ_SQLite/test_admin_endpoints_sqlite.py \
             tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_api_keys_repo_sqlite.py \
             tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_llm_provider_overrides_repo_sqlite.py \
