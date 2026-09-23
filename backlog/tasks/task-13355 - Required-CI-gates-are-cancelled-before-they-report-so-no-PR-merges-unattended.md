@@ -4,6 +4,7 @@ title: 'Required CI gates are cancelled before they report, so no PR merges unat
 status: To Do
 assignee: []
 created_date: '2026-09-23 04:52'
+updated_date: '2026-09-23 05:17'
 labels:
   - ci
   - tech-debt
@@ -46,11 +47,28 @@ OPERATIONAL WORKAROUND, documented in Docs/Development/CI_REQUIRED_GATES.md and 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A decision is recorded on whether license-first CI is enabled or parked
+- [x] #1 A decision is recorded on whether license-first CI is enabled or parked
 - [ ] #2 A PR opened and left untouched reaches all six gates green without any manual re-run
 - [ ] #3 If the pinned contracts are changed, each of the four is updated deliberately with the reason recorded, and Docs/Evidence/PR2761-codeql-actions.json is reconciled
 - [ ] #4 Docs/Development/CI_REQUIRED_GATES.md no longer needs its manual landing procedure
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+DECISION TAKEN 2026-09-23: resolution A. LICENSE_FIRST_CI_ENABLED=true set on the repository at 05:14:57Z (gh variable set). Resolution B -- loosening the four pinned contracts -- is not pursued.
+
+Effect NOT yet confirmed. Setting the variable makes admission run on workflow_run events instead of skipping, but no pull-request event has occurred since, so no evidence either way. The next PR through is the test. Two ways it can still fail:
+
+- admission may DENY, in which case the gate jobs skip by design and the PR cannot merge. That would be worse than the previous state, and the remedy is 'gh variable delete LICENSE_FIRST_CI_ENABLED'.
+- the pull_request run may still be cancelled while the admitted workflow_run run does the work. That is the intended design, but it only helps if the admitted run actually reports a status for each required check name.
+
+Diagnostic for whoever picks this up, also recorded in Docs/Development/CI_REQUIRED_GATES.md:
+
+  gh api "repos/rmusser01/tldw_server/actions/runs?event=workflow_run&per_page=20" --template '{{range .workflow_runs}}{{.name}} {{.status}}/{{.conclusion}}{{"\n"}}{{end}}' | grep -E "required|container-build-check"
+
+completed/skipped on the required lanes means the admission path is still declining the work. As of the decision the most recent workflow_run runs still read completed/skipped, but all of them predate the variable being set.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
