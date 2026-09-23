@@ -3,10 +3,10 @@ id: TASK-13349
 title: >-
   Sync exchange-gate fixtures build a personal-context conflict the product
   cannot produce
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-23 00:51'
-updated_date: '2026-09-23 02:33'
+updated_date: '2026-09-23 16:05'
 labels:
   - bug
   - sync
@@ -52,8 +52,8 @@ Source: TASK-13344 AC1.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The three mixed-batch tests build personal-context conflicts through the product path and pass
-- [ ] #2 The fixtures no longer call store.insert_conflict with a fabricated remote_envelope_id
+- [x] #1 The three mixed-batch tests build personal-context conflicts through the product path and pass
+- [x] #2 The fixtures no longer call store.insert_conflict with a fabricated remote_envelope_id
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -100,12 +100,18 @@ in _validate_candidate, because no journal exists to reconstruct the expected ca
 from.
 <!-- SECTION:NOTES:END -->
 
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Moved the three mixed notes+Personal Context batch tests to test_sync_v2_personal_context_conflicts.py, building the PC conflict through a real push (_attach_candidate stores/journals the remote candidate). Gate fixtures no longer fabricate remote_envelope_id (None, documented as gate/shape-only). tests/Sync 3000 passed, 0 failed. Bandit: test-only change, not applicable. Docs: none needed.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
