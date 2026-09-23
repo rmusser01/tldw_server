@@ -21,6 +21,10 @@ from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDa
 from tldw_Server_API.app.core.RAG.rag_service.types import Document, DataSource
 from tldw_Server_API.app.core.RAG.rag_service.metrics_collector import QueryMetrics
 
+# The only SQLite/Postgres-parametrized RAG fixture lives in tests/RAG; conftest fixtures
+# are directory-scoped, so re-export it here to let RAG_NEW tests run on both backends.
+from tldw_Server_API.tests.RAG.conftest import DualBackendEnv, dual_backend_env  # noqa: F401
+
 # =====================================================================
 # Test Markers
 # =====================================================================
