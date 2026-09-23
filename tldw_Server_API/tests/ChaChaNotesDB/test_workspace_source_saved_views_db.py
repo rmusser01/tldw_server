@@ -643,38 +643,59 @@ def test_raw_corrupt_unsupported_and_invalid_v1_rows_remain_retrievable(
         assert db.get_workspace_source_saved_view(OWNER_A, WORKSPACE_A, view_id)["state_json"] == state_json
 
 
-def test_real_v53_sqlite_database_migrates_additively_to_v54(db_path: Path) -> None:
-    seed = CharactersRAGDB(db_path=db_path, client_id=OWNER_A)
-    seed.upsert_workspace(WORKSPACE_A, "Workspace A")
-    seed.add_workspace_source(
-        WORKSPACE_A,
-        {"id": "source-1", "media_id": 42, "title": "Source", "source_type": "pdf"},
-    )
-    original_table_sql = seed.execute_query(
-        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'workspace_sources'"
-    ).fetchone()["sql"]
-    with seed.transaction() as conn:
-        conn.execute("DROP TABLE workspace_source_saved_views")
-        conn.execute(
-            "UPDATE db_schema_version SET version = 53 WHERE schema_name = ?",
-            (CharactersRAGDB._SCHEMA_NAME,),
-        )
-    seed.close_all_connections()
+def test_real_v53_sqlite_database_migrates_additively_to_v54(
+    db_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def initialize_historical(db: CharactersRAGDB) -> None:
+        with db.transaction() as conn:
+            db._apply_schema_v4(conn)
+            steps = db._sqlite_linear_migration_steps()
+            for version in range(4, 53):
+                steps[version](conn)
+                assert db._get_db_version(conn) == version + 1
+
+    with monkeypatch.context() as patch:
+        patch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 53)
+        patch.setattr(CharactersRAGDB, "_initialize_schema", initialize_historical)
+        seed = CharactersRAGDB(db_path, "owner-a")
+    try:
+        with seed.transaction() as conn:
+            assert seed._get_db_version(conn) == 53
+            assert {"workspace_source_saved_views", "note_attachments"}.isdisjoint(seed._sqlite_table_names(conn))
+            conn.execute(
+                "INSERT INTO workspaces (id, name, client_id) VALUES (?, ?, ?)",
+                (WORKSPACE_A, "Workspace A", OWNER_A),
+            )
+            conn.execute(
+                "INSERT INTO workspace_sources (id, workspace_id, media_id, title, source_type) "
+                "VALUES (?, ?, ?, ?, ?)",
+                ("source-1", WORKSPACE_A, 42, "Source", "pdf"),
+            )
+            before = dict(conn.execute("SELECT * FROM workspace_sources").fetchone())
+            original_table_sql = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'workspace_sources'"
+            ).fetchone()["sql"]
+            seed._migrate_from_v53_to_v54(conn)
+            assert seed._get_db_version(conn) == 54
+            assert "workspace_source_saved_views" in seed._sqlite_table_names(conn)
+            assert conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'workspace_sources'"
+            ).fetchone()["sql"] == original_table_sql
+            assert dict(conn.execute("SELECT * FROM workspace_sources").fetchone()) == before
+    finally:
+        seed.close_all_connections()
 
     migrated = CharactersRAGDB(db_path=db_path, client_id=OWNER_A)
     try:
-        version = migrated.execute_query(
-            "SELECT version FROM db_schema_version WHERE schema_name = ?",
-            (CharactersRAGDB._SCHEMA_NAME,),
-        ).fetchone()["version"]
-        migrated_table_sql = migrated.execute_query(
-            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'workspace_sources'"
-        ).fetchone()["sql"]
-        source = migrated.get_workspace_source(WORKSPACE_A, "source-1")
-
-        assert version == 54
+        conn = migrated.get_connection()
+        assert migrated._get_db_version(conn) == CharactersRAGDB._CURRENT_SCHEMA_VERSION
         assert migrated.backend.table_exists("workspace_source_saved_views")
-        assert migrated_table_sql == original_table_sql
+        current = dict(conn.execute("SELECT * FROM workspace_sources WHERE id = ?", (before["id"],)).fetchone())
+        # Current compatibility repair fills an unset review timestamp from added_at.
+        assert {key: current[key] for key in before} == {
+            **before, "review_state_updated_at": before["added_at"],
+        }
+        source = migrated.get_workspace_source(WORKSPACE_A, "source-1")
         assert source is not None and source["title"] == "Source"
     finally:
         migrated.close_all_connections()

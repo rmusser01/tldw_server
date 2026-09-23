@@ -390,7 +390,7 @@ def _activate_scope_context(
 
 
 async def get_login_db_connection() -> AsyncGenerator[Any, None]:
-    """Yield a statement-autocommit connection for login and token refresh.
+    """Yield a statement-autocommit connection for sign-in and token refresh.
 
     Lockout and session services use separate database connections. A
     SQLite ``BEGIN IMMEDIATE`` around the whole request would block those

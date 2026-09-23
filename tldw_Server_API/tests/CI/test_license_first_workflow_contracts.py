@@ -438,13 +438,21 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                 assert _normalized(job.get("if")) == _normalized(expected_condition), (name, job_name)
             else:
                 assert "admission" not in needs, (name, job_name)
+                prerequisite_guard = "!cancelled() && " + " && ".join(
+                    f"needs['{dependency}'].result == 'success'"
+                    for dependency in original_needs
+                )
                 if name == "ci.yml" and job_name in BACKEND_CHANGED_JOBS:
-                    assert _normalized(job.get("if")) == _normalized(backend_changed), (name, job_name)
+                    assert _normalized(job.get("if")) == _normalized(
+                        f"{prerequisite_guard} && ({backend_changed})"
+                    ), (name, job_name)
                 elif (name, job_name) == ("ci.yml", "full-suite-os-313-release-shards"):
                     assert _normalized(job.get("if")) == _normalized(
-                        "github.event_name != 'pull_request' && "
-                        "github.event_name != 'workflow_run'"
+                        f"{prerequisite_guard} && (github.event_name != 'pull_request' && "
+                        "github.event_name != 'workflow_run')"
                     )
+                elif (name, job_name) == ("jobs-suite.yml", "jobs-postgres"):
+                    assert _normalized(job.get("if")) == _normalized(prerequisite_guard)
                 elif (name, job_name) in {
                     ("coverage-required.yml", "coverage-required"),
                     ("e2e-required.yml", "e2e-required"),
@@ -474,6 +482,14 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                 expected_other_inputs = (
                     {"fetch-depth": 0} if (name, job_name) in FETCH_DEPTH_CHECKOUTS else {}
                 )
+                if name == "ci.yml" and job_name in {
+                    "full-suite-linux-312-shards",
+                    "full-suite-linux-313-shards",
+                }:
+                    expected_other_inputs = {
+                        "fetch-depth": "${{ contains(matrix.shard.paths, "
+                        "'tldw_Server_API/tests/Docs') && '0' || '1' }}"
+                    }
                 assert other_inputs == expected_other_inputs, (name, job_name)
 
     assert checkout_count == 55
@@ -490,7 +506,10 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
             assert "concurrency" not in data
         else:
             prefix = "${{ github.workflow }}" if name == "jobs-suite.yml" else name.removesuffix(".yml")
-            assert data["concurrency"]["group"] == f"{prefix}-{concurrency_suffix}", name
+            # A non-admitted workflow_run must not cancel direct PR CI.
+            assert data["concurrency"]["group"] == (
+                f"{prefix}-{concurrency_suffix}-${{{{ github.event_name }}}}"
+            ), name
             expected_cancel: object = True
             if name == "jobs-suite.yml":
                 expected_cancel = (
@@ -1013,3 +1032,59 @@ def test_helper_is_the_only_checked_out_program_and_owns_all_outputs() -> None:
     assert script.count('"${GITHUB_OUTPUT}"') == 1
     assert ">>" not in script
     assert _unquoted_shell_expansions(script) == []
+
+
+def test_frontend_critical_journeys_start_real_application_with_declared_provider() -> None:
+    """Critical journeys require a ready real backend and a controlled downstream provider."""
+    data = yaml.safe_load((REPO_ROOT / ".github/workflows/frontend-e2e-tiers.yml").read_text(encoding="utf-8"))
+    for name in ("critical", "features", "admin"):
+        job = data["jobs"][name]
+        assert "TEST_MODE" not in job["env"]
+        start = next(step for step in job["steps"] if step.get("name") == "Start backend server")
+        assert "exit 1" in start["run"], "Readiness exhaustion must fail before Playwright can skip unavailable APIs"
+        assert '-H "X-API-KEY: $SINGLE_USER_API_KEY"' in start["run"], "Readiness must authenticate against the actual protected application health route"
+    critical = data["jobs"]["critical"]
+    assert critical["env"]["TLDW_LIVE_TIER_UAT"] == "1"
+    assert critical["env"]["TLDW_E2E_ALLOW_OFFLINE"] == "0", "Notification journeys require a verified connection, not offline bypass"
+    assert critical["env"]["TLDW_UAT390_MODE"] == "deterministic"
+    assert critical["env"]["TLDW_UAT390_PROVIDER"] == critical["env"]["UAT_STUDY_PROVIDER"] == "openai"
+    assert critical["env"]["TLDW_UAT390_MODEL"] == critical["env"]["UAT_STUDY_MODEL"]
+    assert critical["env"]["OPENAI_API_BASE_URL"].startswith("http://127.0.0.1:")
+    assert any(step.get("name") == "Start deterministic downstream provider" for step in critical["steps"])
+
+
+def test_frontend_critical_serves_a_completed_build_instead_of_compiling_routes() -> None:
+    """Browser timing must not include dev compilation or source watcher updates."""
+    data = yaml.safe_load((REPO_ROOT / ".github/workflows/frontend-e2e-tiers.yml").read_text(encoding="utf-8"))
+    critical = data["jobs"]["critical"]
+    command = critical["env"].get("TLDW_WEB_CMD", "")
+    assert "bun run start" in command
+    assert ".tmp/frontend-e2e/frontend.log" in command
+    steps = critical["steps"]
+    build = next(step for step in steps if step.get("name") == "Build frontend for browser tests")
+    execution = next(step for step in steps if step.get("name") == "Run critical E2E tests")
+    assert steps.index(build) < steps.index(execution)
+    assert "bun run build:dev" in build["run"]
+    assert "frontend-build.log" in build["run"]
+    assert build["shell"] == "bash", "GitHub explicit bash enables pipefail so tee cannot mask build failures"
+    assert not build.get("continue-on-error", False)
+
+
+def test_frontend_critical_keeps_first_attempt_evidence_within_job_deadline() -> None:
+    """A failed first pass must report failure and upload its own retained evidence."""
+    data = yaml.safe_load((REPO_ROOT / ".github/workflows/frontend-e2e-tiers.yml").read_text(encoding="utf-8"))
+    steps = data["jobs"]["critical"]["steps"]
+    executions = [step for step in steps if "bun run e2e:critical" in step.get("run", "")]
+    assert len(executions) == 1, "A second full run overwrites results and exhausts the upload deadline"
+    run = executions[0]
+    assert not run.get("continue-on-error", False)
+    assert run["timeout-minutes"] < data["jobs"]["critical"]["timeout-minutes"] - 5
+    assert "--retries=0" in run["run"]
+    assert "--trace=retain-on-failure" in run["run"]
+    assert "--reporter=list,json" in run["run"]
+    assert run["env"]["PLAYWRIGHT_JSON_OUTPUT_NAME"].endswith("/results.json")
+    upload = next(step for step in steps if step.get("name") == "Upload test artifacts")
+    assert upload["if"] == "always()"
+    assert "test-results/" in upload["with"]["path"]
+    assert ".tmp/frontend-e2e/" in upload["with"]["path"]
+    assert upload["with"]["include-hidden-files"] is True

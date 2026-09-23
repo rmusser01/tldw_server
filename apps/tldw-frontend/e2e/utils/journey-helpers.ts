@@ -27,10 +27,22 @@ const extractMediaId = (payload: unknown): string | undefined => {
 
   for (const candidate of candidates) {
     const value = String(candidate ?? "").trim()
-    if (value) return value
+    if (/^[1-9]\d*$/.test(value)) return value
   }
 
   return undefined
+}
+
+/** Require a saved Media ID, never a submission job or batch identifier. */
+export const requireIngestMediaId = (
+  payload: unknown,
+  completedMediaId?: string
+): string => {
+  const mediaId = completedMediaId === undefined
+    ? extractMediaId(payload)
+    : extractMediaId({ media_id: completedMediaId })
+  if (!mediaId) throw new Error("Ingestion did not return a canonical Media ID")
+  return mediaId
 }
 
 const extractIngestJobIds = (payload: unknown): number[] => {
@@ -172,7 +184,7 @@ const waitForQuickIngestQueueAdvance = async (
           .isVisible()
           .catch(() => false)
         const configureVisible = await dialog
-          .getByRole("button", { name: /configure \d+ items/i })
+          .getByRole("button", { name: /^configure \d+ items?$/i })
           .isVisible()
           .catch(() => false)
         const startProcessingVisible = await dialog
@@ -304,12 +316,11 @@ const ensureQuickIngestAddStep = async (
     return
   }
 
-  const ingestMoreBtn = dialog.getByRole("button", { name: /ingest more/i }).first()
+  const ingestMoreBtn = dialog.getByRole("button", { name: /start a new ingest|ingest more/i }).first()
   if (await ingestMoreBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
     await ingestMoreBtn.click()
-    await expect(urlInput).toBeVisible({ timeout: timeoutMs })
-    return
   }
+  await expect(urlInput).toBeVisible({ timeout: timeoutMs })
 }
 
 const advanceQuickIngestToReviewStep = async (
@@ -396,7 +407,7 @@ const startQueuedQuickIngestFromCurrentStep = async (
   options: Pick<QueueUrlAndStartProcessingOptions, "performAnalysis" | "performChunking"> = {}
 ): Promise<void> => {
   const configureBtn = dialog
-    .getByRole("button", { name: /configure \d+ items/i })
+    .getByRole("button", { name: /^configure \d+ items?$/i })
     .first()
   if (await configureBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
     await configureBtn.click()
@@ -709,7 +720,7 @@ export async function advanceQuickIngestToConfigureStep(
   }
 
   const configureBtn = dialog
-    .getByRole("button", { name: /configure \d+ items/i })
+    .getByRole("button", { name: /^configure \d+ items?$/i })
     .first()
   await configureBtn.click()
   await waitForQuickIngestConfigureUi(dialog, timeoutMs)
@@ -759,52 +770,38 @@ export async function reachQuickIngestOptionInConstrainedViewport(
   return option
 }
 
-const waitForCompletedIngestJob = async (
+export const waitForCompletedIngestJob = async (
   page: Page,
   jobIds: number[],
   timeoutMs: number
 ): Promise<string | undefined> => {
   if (jobIds.length === 0) return undefined
 
-  const response = await page
-    .waitForResponse(
-      async (candidate) => {
-        if (candidate.request().method().toUpperCase() !== "GET") return false
-        if (
-          !jobIds.some((jobId) =>
-            candidate.url().includes(`${QUICK_INGEST_JOB_STATUS_PATH}${jobId}`)
-          )
-        ) {
-          return false
-        }
-
-        const payload = await candidate.json().catch(() => null)
-        if (!payload) return false
-
-        const status = String(
-          payload?.status ?? payload?.job?.status ?? payload?.result?.status ?? ""
-        ).toLowerCase()
-
-        return (
-          status === "completed" ||
-          status === "succeeded" ||
-          status === "success" ||
-          Boolean(extractMediaId(payload))
-        )
-      },
-      { timeout: timeoutMs }
-    )
-    .catch(() => null)
-
-  if (!response) return undefined
-
-  const payload = await response.json().catch(() => null)
-  return extractMediaId(payload)
+  const successStatuses = ["completed", "succeeded", "success"]
+  const terminalStatuses = [...successStatuses, "failed", "error", "cancelled", "canceled"]
+  const readStatus = (payload: { status?: unknown; job?: { status?: unknown }; result?: { status?: unknown } } | null): string =>
+    String(payload?.status ?? payload?.job?.status ?? payload?.result?.status ?? "").toLowerCase()
+  const response = await page.waitForResponse(
+    async (candidate) => {
+      if (candidate.request().method().toUpperCase() !== "GET") return false
+      const pathname = new URL(candidate.url()).pathname.replace(/\/+$/, "")
+      if (!jobIds.some(jobId => pathname === `${QUICK_INGEST_JOB_STATUS_PATH}${jobId}`)) {
+        return false
+      }
+      if (!candidate.ok()) return true
+      return terminalStatuses.includes(readStatus(await candidate.json()))
+    },
+    { timeout: timeoutMs }
+  )
+  expect(response.ok(), `Ingest job status returned HTTP ${response.status()}`).toBe(true)
+  const payload = await response.json()
+  expect(successStatuses, `Ingest job ended with status ${readStatus(payload)}`).toContain(readStatus(payload))
+  return requireIngestMediaId(payload)
 }
 
 /**
  * Ingest content via the media page and wait until processing completes.
- * Returns the media_id from the completed ingest job when available.
+ * Returns the canonical media_id only after successful ingestion.
  */
 export async function ingestAndWaitForReady(
   page: Page,
@@ -846,12 +843,11 @@ export async function ingestAndWaitForReady(
     await queueFileForQuickIngest(quickIngestDialog, input.file, timeoutMs)
 
     const configureBtn = quickIngestDialog
-      .getByRole("button", { name: /configure \d+ items/i })
+      .getByRole("button", { name: /^configure \d+ items?$/i })
       .first()
-    if (await configureBtn.isVisible({ timeout: 5_000 }).catch(() => false)) {
-      await configureBtn.click()
-      await waitForQuickIngestConfigureUi(quickIngestDialog, timeoutMs)
-    }
+    await expect(configureBtn).toBeVisible({ timeout: 15_000 })
+    await configureBtn.click()
+    await waitForQuickIngestConfigureUi(quickIngestDialog, timeoutMs)
 
     await applyQuickIngestProcessOptions(quickIngestDialog, {}, timeoutMs)
     const nextBtn = quickIngestDialog.getByRole("button", { name: /^next$/i }).first()
@@ -870,17 +866,20 @@ export async function ingestAndWaitForReady(
   }
 
   const { response } = await submitRequest
-  const body = await response.json().catch(() => ({}))
-  const ingestJobIds = extractIngestJobIds(body)
-  const completedMediaIdPromise = waitForCompletedIngestJob(page, ingestJobIds, timeoutMs)
-
-  await waitForQuickIngestCompletionUi(quickIngestDialog, timeoutMs)
-
-  return (
-    (await completedMediaIdPromise) ??
-    extractMediaId(body) ??
-    String(body.id ?? ingestJobIds[0] ?? body.batch_id ?? "unknown")
-  )
+  expect(response.ok(), `Ingestion submission returned HTTP ${response.status()}`).toBe(true)
+  const body = await response.json()
+  const isJobSubmission = QUICK_INGEST_JOB_SUBMIT_MATCHER.test(response.url())
+  const ingestJobIds = isJobSubmission ? extractIngestJobIds(body) : []
+  if (isJobSubmission) {
+    expect(ingestJobIds.length, "Ingestion accepted without a job ID").toBeGreaterThan(0)
+  } else {
+    requireIngestMediaId(body)
+  }
+  const [completedMediaId] = await Promise.all([
+    waitForCompletedIngestJob(page, ingestJobIds, timeoutMs),
+    waitForQuickIngestCompletionUi(quickIngestDialog, timeoutMs),
+  ])
+  return requireIngestMediaId(body, completedMediaId)
 }
 
 /**

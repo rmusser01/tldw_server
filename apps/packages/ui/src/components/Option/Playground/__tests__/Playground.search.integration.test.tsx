@@ -48,6 +48,16 @@ const messageOptionState = vi.hoisted(() => ({
     setContextFiles: vi.fn(),
     createChatBranch: vi.fn(),
     streaming: false,
+    effectiveAssistantState: {
+      mode: "plain",
+      kind: null,
+      id: null,
+      displayName: null,
+      avatarUrl: null,
+      systemPromptSnapshot: null,
+      source: "none"
+    },
+    selectedAssistant: null,
     selectedCharacter: null,
     setSelectedCharacter: vi.fn(),
     compareMode: false,

@@ -1,11 +1,19 @@
 import path from "path"
+import { createRequire } from "node:module"
 import { defineConfig } from "vitest/config"
+
+const require = createRequire(import.meta.url)
 
 export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
       "~": path.resolve(__dirname, "./src"),
+      // Legacy route copies use these packages through Next's runtime shims.
+      // Resolve the shared UI instances when exercising both routes in Vitest.
+      "@plasmohq/storage/hook": require.resolve("@plasmohq/storage/hook"),
+      "@plasmohq/storage": require.resolve("@plasmohq/storage"),
+      "wxt/browser": require.resolve("wxt/browser"),
       "pa-tesseract.js": path.resolve(__dirname, "../../tldw-frontend/node_modules/pa-tesseract.js")
     }
   },

@@ -30,13 +30,13 @@ const makeTabStorage = (copy?: Storage): Storage => {
     clear: () => data.clear()
   }
 }
-const mount = (tab: Storage) => {
+const mount = (tab: Storage, strictMode = false) => {
   vi.stubGlobal("sessionStorage", tab)
   return renderHook(() => useComposerText({
     draftKey: "tldw:playgroundChatDraft",
     tabScopedDraft: true,
     textareaRef: React.createRef<HTMLTextAreaElement>()
-  }))
+  }), { wrapper: strictMode ? React.StrictMode : undefined })
 }
 const settle = async () => {
   await act(async () => { await vi.dynamicImportSettled() })
@@ -50,6 +50,161 @@ const enter = async (view: ReturnType<typeof mount>, text: string) => {
 describe("Playground drafts in distinct native tab storage areas", () => {
   beforeEach(() => { vi.useFakeTimers(); localStorage.clear(); authority.user = "alice" })
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.useRealTimers() })
+
+  it.each(["", "PREVIOUSLY SAVED"])("preserves an immediate route departure after editing %j", async previous => {
+    const tab = makeTabStorage()
+    const view = mount(tab)
+    await settle()
+    if (previous) await enter(view, previous)
+    act(() => view.result.current.setMessageValue("LATEST BEFORE IN-APP NAVIGATION"))
+    view.unmount()
+    const restored = mount(tab)
+    await settle()
+    expect(restored.result.current.form.values.message).toBe("LATEST BEFORE IN-APP NAVIGATION")
+  })
+
+  it("does not revive an explicitly cleared pending draft when the route unmounts", async () => {
+    const tab = makeTabStorage()
+    const view = mount(tab)
+    await settle(); await enter(view, "PREVIOUSLY SAVED")
+    act(() => view.result.current.setMessageValue("PENDING EDIT"))
+    act(() => { view.result.current.clearDraft(); view.result.current.setMessageValue("") })
+    view.unmount()
+    const restored = mount(tab)
+    await settle()
+    expect(restored.result.current.form.values.message).toBe("")
+  })
+
+  it("preserves the latest edit on route unmount under StrictMode", async () => {
+    const tab = makeTabStorage()
+    const view = mount(tab, true)
+    await settle(); await enter(view, "PREVIOUSLY SAVED")
+    act(() => view.result.current.setMessageValue("FIRST PENDING EDIT"))
+    act(() => view.result.current.setMessageValue("LATEST PENDING EDIT"))
+    view.unmount()
+    const restored = mount(tab, true)
+    await settle()
+    expect(restored.result.current.form.values.message).toBe("LATEST PENDING EDIT")
+  })
+
+  it("keeps the other native tab's draft separate when a pending route edit flushes", async () => {
+    const a = makeTabStorage(), b = makeTabStorage()
+    const first = mount(a)
+    await settle(); await enter(first, "PRIMARY CHARACTER DRAFT")
+    const second = mount(b)
+    await settle()
+    act(() => second.result.current.setMessageValue("SECONDARY NAVIGATION DRAFT"))
+    second.unmount()
+    const restoredSecond = mount(b)
+    await settle()
+    expect(restoredSecond.result.current.form.values.message).toBe("SECONDARY NAVIGATION DRAFT")
+    first.unmount()
+    const restoredFirst = mount(a)
+    await settle()
+    expect(restoredFirst.result.current.form.values.message).toBe("PRIMARY CHARACTER DRAFT")
+  })
+
+  it("does not flush a revoked owner's edit when account change also unmounts the route", async () => {
+    const tab = makeTabStorage()
+    const view = mount(tab)
+    await settle(); await enter(view, "ALICE SAVED")
+    act(() => view.result.current.setMessageValue("ALICE PENDING"))
+    act(() => {
+      authority.user = "bob"
+      window.dispatchEvent(new CustomEvent("tldw:config-updated", { detail: { authorityChanged: true } }))
+      view.unmount()
+    })
+    const bob = mount(tab)
+    await settle()
+    expect(bob.result.current.form.values.message).toBe("")
+    bob.unmount()
+    authority.user = "alice"
+    const alice = mount(tab)
+    await settle()
+    expect(alice.result.current.form.values.message).toBe("ALICE SAVED")
+  })
+
+  it.each(["pagehide", "hidden"])("restores the latest edit after %s before the save delay elapses", async event => {
+    const tab = makeTabStorage()
+    const view = mount(tab)
+    await settle(); await enter(view, "PREVIOUSLY SAVED")
+    act(() => view.result.current.setMessageValue("LATEST UNSENT EDIT"))
+    const visibility = event === "hidden"
+      ? vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden")
+      : null
+    act(() => {
+      if (event === "hidden") document.dispatchEvent(new Event("visibilitychange"))
+      else window.dispatchEvent(new Event("pagehide"))
+    })
+    // A reload can terminate async durable writes; only the pin already written
+    // before the lifecycle handler returns is guaranteed to survive this reload.
+    const reloadedTab = makeTabStorage(tab)
+    visibility?.mockRestore()
+    view.unmount()
+    const restored = mount(reloadedTab)
+    await settle()
+    expect(restored.result.current.form.values.message).toBe("LATEST UNSENT EDIT")
+  })
+
+  it("preserves a first draft when pagehide precedes the first debounce", async () => {
+    const tab = makeTabStorage()
+    const view = mount(tab)
+    await settle()
+    act(() => view.result.current.setMessageValue("FIRST UNSENT EDIT"))
+    act(() => window.dispatchEvent(new Event("pagehide")))
+    const reloadedTab = makeTabStorage(tab)
+    view.unmount()
+    const restored = mount(reloadedTab)
+    await settle()
+    expect(restored.result.current.form.values.message).toBe("FIRST UNSENT EDIT")
+  })
+
+  it("does not resurrect an explicitly cleared pending edit on pagehide", async () => {
+    const tab = makeTabStorage()
+    const view = mount(tab)
+    await settle(); await enter(view, "PREVIOUSLY SAVED")
+    act(() => view.result.current.setMessageValue("PENDING EDIT"))
+    act(() => { view.result.current.clearDraft(); window.dispatchEvent(new Event("pagehide")) })
+    const reloadedTab = makeTabStorage(tab)
+    view.unmount()
+    const restored = mount(reloadedTab)
+    await settle()
+    expect(restored.result.current.form.values.message).toBe("")
+  })
+
+  it("does not flush invalidated owner text during a synchronous account change", async () => {
+    const tab = makeTabStorage()
+    const view = mount(tab)
+    await settle(); await enter(view, "ALICE SAVED")
+    act(() => view.result.current.setMessageValue("ALICE PENDING"))
+    act(() => {
+      authority.user = "bob"
+      window.dispatchEvent(new CustomEvent("tldw:config-updated", { detail: { authorityChanged: true } }))
+      window.dispatchEvent(new Event("pagehide"))
+    })
+    await settle()
+    expect(view.result.current.form.values.message).toBe("")
+    act(() => {
+      authority.user = "alice"
+      window.dispatchEvent(new CustomEvent("tldw:config-updated", { detail: { authorityChanged: true } }))
+    })
+    await settle()
+    expect(view.result.current.form.values.message).toBe("ALICE SAVED")
+  })
+
+  it("reports draft readiness only after current-owner hydration", async () => {
+    const view = mount(makeTabStorage())
+    expect(view.result.current.draftReady).toBe(false)
+    await settle()
+    expect(view.result.current.draftReady).toBe(true)
+    act(() => {
+      authority.user = "bob"
+      window.dispatchEvent(new CustomEvent("tldw:config-updated", { detail: { authorityChanged: true } }))
+    })
+    expect(view.result.current.draftReady).toBe(false)
+    await settle()
+    expect(view.result.current.draftReady).toBe(true)
+  })
 
   it("restores each active tab's draft after the other tab saves", async () => {
     const a = makeTabStorage(), b = makeTabStorage()

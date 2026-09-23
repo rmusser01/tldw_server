@@ -345,10 +345,15 @@ PROVIDER_STREAM_ERROR_MESSAGES = {
     "model_not_allowed": "The selected model is not allowed for this provider.",
     "provider_configuration_invalid": "The selected provider configuration is invalid.",
     "provider_unavailable": "The chat service provider is currently unavailable.",
+    "provider_output_limit": (
+        "The model reached its output token limit before producing a final answer. "
+        "Increase the output token limit and try again."
+    ),
 }
 _PROVIDER_STREAM_ERROR_STATUS = {
     "provider_authentication_failed": 502,
     "provider_unavailable": 502,
+    "provider_output_limit": 502,
     "provider_disabled": 403,
     "model_not_allowed": 403,
 }

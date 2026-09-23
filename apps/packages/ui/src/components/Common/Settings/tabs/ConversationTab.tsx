@@ -940,7 +940,6 @@ export function ConversationTab({
   return (
     <div className="space-y-4">
       <Form.Item
-        name="systemPrompt"
         help={t("common:modelSettings.form.systemPrompt.help", {
           defaultValue:
             "Applies persistently to this conversation and overrides the selected system prompt template until you reset it."
@@ -949,14 +948,16 @@ export function ConversationTab({
           defaultValue: "Conversation System Prompt"
         })}>
         <div className="space-y-1">
-          <Input.TextArea
-            rows={useDrawer ? 4 : 6}
-            placeholder={t(
-              "common:modelSettings.form.systemPrompt.placeholder",
-              { defaultValue: "Enter System Prompt" }
-            )}
-            onChange={(e) => onSystemPromptChange(e.target.value)}
-          />
+          <Form.Item name="systemPrompt" noStyle>
+            <Input.TextArea
+              rows={useDrawer ? 4 : 6}
+              placeholder={t(
+                "common:modelSettings.form.systemPrompt.placeholder",
+                { defaultValue: "Enter System Prompt" }
+              )}
+              onChange={(e) => onSystemPromptChange(e.target.value)}
+            />
+          </Form.Item>
           <div className="flex items-center justify-end">
             <Button
               type="link"

@@ -7,6 +7,7 @@ import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { useLoadLocalConversation } from "../useLoadLocalConversation"
 
 const io = vi.hoisted(() => ({
+  scopeSignal: new AbortController(),
   readMessages: vi.fn(),
   readInfo: vi.fn(),
   readModelPreference: vi.fn(),
@@ -14,6 +15,13 @@ const io = vi.hoisted(() => ({
   readFiles: vi.fn(),
   notifyError: vi.fn(),
   deps: null as Parameters<typeof useLoadLocalConversation>[0] | null
+}))
+vi.mock("@/services/service-prompts", () => ({
+  loadServicePromptSnapshot: async () => ({
+    requestScope: { config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "bob" },
+    scopeSignal: io.scopeSignal.signal, scopeInvalidatedSignal: io.scopeSignal.signal,
+    release: vi.fn()
+  })
 }))
 vi.mock("@/db/dexie/chat", () => ({ pageAssistDatabase: { getChatHistoriesPaginated: async () => ({ histories: [{ id: "owned", title: "Owned local chat", createdAt: Date.now() }], hasMore: false, totalCount: 1 }) }, PageAssistDatabase: class {
   getChatHistory(id: string) { return io.readMessages(id) }
@@ -62,16 +70,32 @@ const setup = () => {
 }
 beforeEach(() => {
   vi.clearAllMocks()
+  for (const read of [io.readMessages, io.readInfo, io.readModelPreference, io.readPrompt, io.readFiles]) read.mockReset()
+  io.scopeSignal = new AbortController()
   usePlaygroundSessionStore.setState({ restoreRevision: 0 })
   document.title = "Current page"
   io.readMessages.mockImplementation(async (id: string) => [{ id, content: `Message ${id}` }])
-  io.readInfo.mockImplementation(async (id: string) => ({ title: `Title ${id}`, model_id: "saved-model", last_used_prompt: { prompt_id: "saved-prompt", prompt_content: "" } }))
+  io.readInfo.mockImplementation(async (id: string) => ({ id, title: `Title ${id}`, server_scope_key: '["http://chat.test","multi-user","manual",null,"bob",null]', model_id: "saved-model", last_used_prompt: { prompt_id: "saved-prompt", prompt_content: "" } }))
   io.readModelPreference.mockResolvedValue(true)
   io.readPrompt.mockResolvedValue({ id: "saved-prompt", content: "Saved prompt" })
   io.readFiles.mockResolvedValue([{ id: "saved-file" }])
 })
 
 describe("local conversation load ownership", () => {
+  it.each(['["http://chat.test","multi-user","manual",null,"alice",null]', undefined])("rejects foreign or unowned local history before publishing (%s)", async owner => {
+    io.readInfo.mockResolvedValue({ id: "alice", title: "ALICE SECRET", server_scope_key: owner, last_used_prompt: { prompt_content: "ALICE PIRATE" } })
+    io.readMessages.mockResolvedValue([{ content: "ALICE PRIVATE" }])
+    const { result, state, unmount } = setup()
+    let restored = true
+    await act(async () => { restored = await result.current("alice") })
+    expect({ restored, state, title: document.title }).toEqual({
+      restored: false,
+      state: { serverId: "server-before", historyId: "before", messages: [], history: [], model: "before", promptId: "before", prompt: "before", files: [] },
+      title: "Current page"
+    })
+    unmount()
+  })
+
   it("restores the complete current local selection", async () => {
     const { result, state, unmount } = setup()
     await act(async () => { await result.current("owned") })

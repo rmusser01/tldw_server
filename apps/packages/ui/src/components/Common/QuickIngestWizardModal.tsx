@@ -1,3 +1,4 @@
+import { createReviewDraftsFromResults } from "./hooks/useIngestResults"
 import { quickIngestAuthority, useQuickIngestAuthority } from "@/services/tldw/quick-ingest-authority"
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Modal, Button } from "antd"
@@ -1665,6 +1666,38 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
 
   // Navigation callbacks for WizardResultsStep CTAs
   const navigate = useNavigate()
+  const [reviewError, setReviewError] = useState<string | null>(null)
+  const [reviewRetry, setReviewRetry] = useState(0)
+  const reviewCreationRef = useRef<ReturnType<typeof createReviewDraftsFromResults> | null>(null)
+  useEffect(() => {
+    if (!open || currentStep !== 5 || !presetConfig.reviewBeforeStorage || !results.some(item => item.status === "ok")) return
+    if (!reviewCreationRef.current) {
+      setReviewError(null)
+      const files = new Map<string, File>()
+      for (const item of queueItems) if (item.file) files.set(item.id, item.file)
+      reviewCreationRef.current = createReviewDraftsFromResults({
+        results, files, operation,
+        batchId: "quick-ingest-review:" + session.id,
+        processingOptions: {
+          perform_analysis: Boolean(presetConfig.common.perform_analysis),
+          perform_chunking: Boolean(presetConfig.common.perform_chunking),
+          overwrite_existing: Boolean(presetConfig.common.overwrite_existing),
+          advancedValues: { ...presetConfig.advancedValues }
+        }
+      })
+    }
+    // Reuse the same write across rerenders and StrictMode, but only the
+    // currently open wizard may publish its completion to the UI.
+    let cancelled = false
+    void reviewCreationRef.current.then(batch => {
+      if (cancelled || !operation.isCurrent() || !batch) return
+      navigate("/content-review?batch=" + encodeURIComponent(batch.batchId))
+      onClose()
+    }).catch(error => {
+      if (!cancelled && operation.isCurrent()) setReviewError(error instanceof Error ? error.message : "Failed to save review drafts.")
+    })
+    return () => { cancelled = true }
+  }, [currentStep, navigate, onClose, open, operation, presetConfig, queueItems, results, reviewRetry, session.id])
 
   const handleSearchKnowledge = useCallback(() => {
     if (!operation.isCurrent()) return
@@ -1748,6 +1781,13 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         return <ProcessingStep onCancelAll={handleCancelAll} onMinimize={onClose} />
       case 5:
         return (
+          <>
+          {reviewError && <div role="alert">
+            <p>{reviewError}</p>
+            <Button onClick={() => { reviewCreationRef.current = null; setReviewRetry(value => value + 1) }}>
+              {qi("reviewDraftsRetry", "Retry saving review drafts")}
+            </Button>
+          </div>}
           <WizardResultsStep
             onClose={onClose}
             onIngestMore={handleIngestMore}
@@ -1756,6 +1796,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
             onOpenWorkspace={handleOpenWorkspace}
             onOpenCollection={handleOpenCollection}
           />
+          </>
         )
       default:
         return null
@@ -1763,6 +1804,8 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   }, [
     connectionRecoveryMessage,
     currentStep,
+    reviewError,
+    qi,
     handleCancelAll,
     handleOpenMedia,
     handleOpenCollection,

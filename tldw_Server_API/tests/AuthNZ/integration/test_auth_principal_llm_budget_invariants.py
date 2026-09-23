@@ -1,26 +1,25 @@
-from typing import Any, Dict, Tuple
-
 import os
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
-from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal, AuthContext
-
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
+from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
 
 pytestmark = pytest.mark.integration
 
 
-def _install_auth_capture(app: FastAPI) -> Tuple[Dict[str, Any], Any]:
+def _install_auth_capture(app: FastAPI) -> tuple[dict[str, Any], Any]:
     """
     Install a lightweight wrapper around get_auth_principal that records
     principal/state alignment for the last request, in the context of LLM
     budget enforcement.
     """
-    captured: Dict[str, Any] = {}
+    captured: dict[str, Any] = {}
     original_get_auth_principal = auth_deps.get_auth_principal
 
     async def _capturing_get_auth_principal(request: Request) -> AuthPrincipal:  # type: ignore[override]
@@ -86,9 +85,9 @@ async def test_llm_budget_guard_overage_preserves_principal_state_alignment(tmp_
     db_path = tmp_path / "users_budget_invariants.db"
     os.environ["DATABASE_URL"] = f"sqlite:///{db_path}"
 
-    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
     reset_settings()
     await reset_db_pool()
@@ -96,12 +95,15 @@ async def test_llm_budget_guard_overage_preserves_principal_state_alignment(tmp_
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
 
-    # Seed a basic user
-    async with pool.transaction() as conn:
-        await conn.execute(
-            "INSERT INTO users (username, email, password_hash, is_active) VALUES (?, ?, ?, 1)",
-            ("budget_guard_invariants_user", "bg_invariants@example.com", "x"),
-        )
+    # Seed through the canonical writer for profile-visible user fields.
+    users = UsersDB(pool)
+    await users.initialize(ensure_schema=False)
+    await users.create_user(  # nosec B106 # Inert fixture hash, never used for login
+        username="budget_guard_invariants_user",
+        email="bg_invariants@example.com",
+        password_hash="x",
+        is_active=True,
+    )
     user_id = await pool.fetchval("SELECT id FROM users WHERE username = ?", "budget_guard_invariants_user")
 
     # Create a virtual key with a zero budget so it is immediately over limit
@@ -112,23 +114,19 @@ async def test_llm_budget_guard_overage_preserves_principal_state_alignment(tmp_
     vk = await mgr.create_virtual_key(
         user_id=user_id,
         name="vk-budget-guard-invariants",
+        scope="write",
         allowed_endpoints=["chat.completions"],
         budget_day_tokens=0,
     )
     key_id = vk["id"]
     vkey = vk["key"]
 
-    # POST /chat/completions now enforces write scope even when scope="any".
-    # Virtual keys default to "read", so promote this test key explicitly.
-    async with pool.transaction() as conn:
-        if getattr(pool, "pool", None):
-            await conn.execute("UPDATE api_keys SET scope = $1 WHERE id = $2", "write", key_id)
-        else:
-            await conn.execute("UPDATE api_keys SET scope = ? WHERE id = ?", ("write", key_id))
+    # The endpoint requires write scope, so verify the canonical key writer stored it.
+    assert await pool.fetchval("SELECT scope FROM api_keys WHERE id = ?", key_id) == "write"
 
     # Remove LLMBudgetMiddleware so the dependency path handles the 402
-    from tldw_Server_API.app.main import app
     from tldw_Server_API.app.core.AuthNZ.llm_budget_middleware import LLMBudgetMiddleware
+    from tldw_Server_API.app.main import app
 
     original_middleware = list(getattr(app, "user_middleware", []))
     app.user_middleware = [m for m in original_middleware if getattr(m, "cls", None) is not LLMBudgetMiddleware]

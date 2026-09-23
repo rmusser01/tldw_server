@@ -660,22 +660,66 @@ test.describe("Character Chat Phase 7 real-backend readiness", () => {
 
       const response = await completeResponse
       const calls = await capture.stop()
-      const completeCall = calls.find((call) =>
+      const completeCalls = calls.filter((call) =>
         completeV2CallPredicate(call.url, call.method),
       )
-
-      expect(response.status()).toBeGreaterThanOrEqual(400)
-      expect(completeCall).toBeTruthy()
-      expect(JSON.stringify(completeCall?.responseBody ?? {}).toLowerCase()).toMatch(
-        /provider|credential|api key|configured|model/,
-      )
+      expect(completeCalls).toHaveLength(1)
+      const requestedModel = failureModel.replace(/^tldw:/, "").trim()
+      expect(completeCalls[0].requestBody).toEqual(expect.objectContaining({
+        include_character_context: true,
+        stream: true,
+        model: requestedModel,
+        ...(requestedModel.includes(":")
+          ? { provider: requestedModel.split(":")[0] }
+          : {}),
+      }))
+      const streaming = response.headers()["content-type"]?.includes("text/event-stream")
+      if (streaming) {
+        expect(response.status()).toBe(200)
+      } else {
+        expect(response.status()).toBeGreaterThanOrEqual(400)
+      }
 
       const banner = page.getByTestId("playground-chat-error-banner")
       await expect(banner).toBeVisible({ timeout: 30_000 })
-      await expect(banner).toContainText(/model setup|not callable|provider/i)
-      await expect(
-        banner.getByRole("button", { name: /open model settings/i }),
-      ).toBeVisible()
+      await expect(banner.getByRole("heading")).toHaveText(
+        "Character chat model setup needs attention.",
+      )
+      const failedMessage = page.getByRole("log", { name: "chat messages" })
+        .getByRole("article").last()
+      await failedMessage.getByRole("button", { name: "Show technical details", exact: true }).click()
+      const technicalDetails = failedMessage.locator("pre")
+      await expect(technicalDetails).toBeVisible()
+      const safeMessages: Record<string, string> = {
+        provider_authentication_failed: "The selected provider credentials could not be authenticated.",
+        invalid_provider_credentials: "The selected provider credentials are invalid.",
+        missing_provider_credentials: "The selected provider credentials are not configured.",
+        provider_configuration_invalid: "The selected provider configuration is invalid.",
+      }
+      const detailParts = (await technicalDetails.innerText()).split(" | ")
+      const errorCode = Object.keys(safeMessages).find((code) => detailParts.includes(code))
+      expect(errorCode).toBeTruthy()
+      const safeMessage = safeMessages[errorCode!]
+      if (streaming) {
+        // The error consumer cancels its reader after decoding the error, so
+        // Chromium may discard response.text(). Assert the exact consumed error
+        // here; API streaming integration tests own the error + [DONE] frames.
+        await expect(technicalDetails).toHaveText(`Error | ${safeMessage} | ${errorCode}`)
+      } else {
+        const body = await response.json()
+        expect(body.detail ?? body).toEqual({
+          error: expect.objectContaining({ code: errorCode, message: safeMessage }),
+        })
+      }
+
+      const recoveryDraft = "Continue this character chat after configuring the provider."
+      await input.fill(recoveryDraft)
+      await banner.getByRole("button", { name: "Edit provider", exact: true }).click()
+      const modelSettings = page.getByRole("dialog", { name: "Current Chat Model Settings", exact: true })
+      await expect(modelSettings).toBeVisible()
+      await modelSettings.getByRole("button", { name: "Close", exact: true }).click()
+      await expect(modelSettings).toBeHidden()
+      await expect(input).toHaveValue(recoveryDraft)
       await expectSelectedCharacter(page, character.name)
     } finally {
       await deleteCharacterViaApi(character)

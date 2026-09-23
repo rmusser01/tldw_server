@@ -2,6 +2,8 @@ import React from "react"
 import { renderHook } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+const ownerMeta = vi.hoisted(() => ({ current: undefined as { assistantKey: string; isLoading: boolean; isCurrent: () => boolean } | undefined }))
+
 const {
   storeState,
   chatBaseState,
@@ -281,7 +283,7 @@ vi.mock("@/hooks/useSelectedCharacter", () => ({
 }))
 
 vi.mock("@/hooks/useSelectedAssistant", () => ({
-  useSelectedAssistant: () => [selectedAssistantState.current, setSelectedAssistantSpy]
+  useSelectedAssistant: () => [selectedAssistantState.current, setSelectedAssistantSpy, ownerMeta.current]
 }))
 
 vi.mock("@/hooks/useSetting", () => ({
@@ -448,4 +450,183 @@ describe("useMessageOption assistant overlay changes", () => {
       })
     )
   })
+  const canonicalCard = (suffix = "") => ({
+    kind: "character",
+    id: "42",
+    name: `Helpful AI Assistant${suffix}`,
+    avatar_url: `https://example.test/assistant${suffix}.png`,
+    system_prompt: `Owned prompt${suffix}`,
+    greeting: `Owned greeting${suffix}`,
+    extensions: { reviewOwned: suffix || "initial" }
+  })
+  const seedCanonicalCard = () => {
+    const lease = { current: true }
+    ownerMeta.current = {
+      assistantKey: "owner:alice",
+      isLoading: false,
+      isCurrent: () => lease.current
+    }
+    storeState.serverChatId = "owned-chat"
+    storeState.serverChatAssistantKind = "character"
+    storeState.serverChatCharacterId = 42
+    storeState.serverChatAssistantId = "42"
+    selectedAssistantState.current = canonicalCard()
+    chatSettingsState.current = null
+    setSelectedAssistantSpy.mockClear()
+    return lease
+  }
+  it.each(["cleared", "foreign"])(
+    "keeps full canonical display after %s shared preference",
+    (mirror) => {
+      seedCanonicalCard()
+      const view = renderHook(() => useMessageOption())
+      try {
+        expect(view.result.current.effectiveAssistantState.displayName).toBe(
+          "Helpful AI Assistant"
+        )
+        selectedAssistantState.current =
+          mirror === "cleared"
+            ? null
+            : { kind: "character", id: "99", name: "Foreign card" }
+        view.rerender()
+        expect
+          .soft(view.result.current.effectiveAssistantState.displayName)
+          .toBe("Helpful AI Assistant")
+        expect
+          .soft(view.result.current.selectedAssistant)
+          .toMatchObject(canonicalCard())
+        expect
+          .soft(lastUseChatActionsArgs.value?.selectedAssistant)
+          .toMatchObject(canonicalCard())
+        expect(setSelectedAssistantSpy).not.toHaveBeenCalled()
+      } finally {
+        view.unmount()
+        ownerMeta.current = undefined
+      }
+    }
+  )
+  it("plain transition immediately drops canonical metadata", () => {
+    seedCanonicalCard()
+    const view = renderHook(() => useMessageOption())
+    try {
+      selectedAssistantState.current = null
+      storeState.serverChatId = null
+      storeState.serverChatCharacterId = null
+      storeState.serverChatAssistantKind = null
+      storeState.serverChatAssistantId = null
+      view.rerender()
+      expect(view.result.current.effectiveAssistantState.mode).toBe("plain")
+      expect(view.result.current.selectedAssistant).toBeNull()
+    } finally {
+      view.unmount()
+      ownerMeta.current = undefined
+    }
+  })
+  it.each(["conversation", "canonical-id"])(
+    "%s change and return does not restore stale metadata",
+    (boundary) => {
+      seedCanonicalCard()
+      const view = renderHook(() => useMessageOption())
+      try {
+        selectedAssistantState.current = null
+        if (boundary === "conversation")
+          storeState.serverChatId = "another-chat"
+        else {
+          storeState.serverChatCharacterId = 99
+          storeState.serverChatAssistantId = "99"
+        }
+        view.rerender()
+        expect(
+          view.result.current.effectiveAssistantState.displayName
+        ).not.toBe("Helpful AI Assistant")
+        storeState.serverChatId = "owned-chat"
+        storeState.serverChatCharacterId = 42
+        storeState.serverChatAssistantId = "42"
+        view.rerender()
+        expect(
+          view.result.current.effectiveAssistantState.displayName
+        ).not.toBe("Helpful AI Assistant")
+      } finally {
+        view.unmount()
+        ownerMeta.current = undefined
+      }
+    }
+  )
+  it.each(["revoked", "owner-aba"])(
+    "%s invalidates the captured lease even with the same key",
+    (boundary) => {
+      const lease = seedCanonicalCard()
+      const view = renderHook(() => useMessageOption())
+      try {
+        lease.current = false
+        selectedAssistantState.current = null
+        if (boundary === "owner-aba")
+          ownerMeta.current = {
+            assistantKey: "owner:alice",
+            isLoading: false,
+            isCurrent: () => true
+          }
+        view.rerender()
+        expect(
+          view.result.current.effectiveAssistantState.displayName
+        ).not.toBe("Helpful AI Assistant")
+        expect(setSelectedAssistantSpy).not.toHaveBeenCalled()
+      } finally {
+        view.unmount()
+        ownerMeta.current = undefined
+      }
+    }
+  )
+  it("a matching card update replaces retained full metadata", () => {
+    seedCanonicalCard()
+    const view = renderHook(() => useMessageOption())
+    try {
+      selectedAssistantState.current = canonicalCard(" updated")
+      view.rerender()
+      expect(view.result.current.selectedAssistant).toMatchObject(
+        canonicalCard(" updated")
+      )
+      selectedAssistantState.current = null
+      view.rerender()
+      expect(view.result.current.selectedAssistant).toMatchObject(
+        canonicalCard(" updated")
+      )
+    } finally {
+      view.unmount()
+      ownerMeta.current = undefined
+    }
+  })
+
+  it("keeps the retained card when another tab publishes a failed lookup placeholder", () => {
+    seedCanonicalCard()
+    const view = renderHook(() => useMessageOption())
+    try {
+      selectedAssistantState.current = null
+      view.rerender()
+      selectedAssistantState.current = {
+        kind: "character", id: "42", name: "Assistant",
+        avatar_url: null, system_prompt: null, greeting: null, extensions: null
+      }
+      view.rerender()
+      expect(view.result.current.selectedAssistant).toMatchObject(canonicalCard())
+      selectedAssistantState.current = null
+      view.rerender()
+      expect(view.result.current.selectedAssistant).toMatchObject(canonicalCard())
+    } finally { view.unmount(); ownerMeta.current = undefined }
+  })
+
+  it("accepts an updated full Character card actually named Assistant", () => {
+    seedCanonicalCard()
+    const view = renderHook(() => useMessageOption())
+    try {
+      selectedAssistantState.current = { ...canonicalCard(" updated"), name: "Assistant" }
+      view.rerender()
+      selectedAssistantState.current = null
+      view.rerender()
+      expect(view.result.current.selectedAssistant).toMatchObject({
+        ...canonicalCard(" updated"), name: "Assistant"
+      })
+    } finally { view.unmount(); ownerMeta.current = undefined }
+  })
+
 })

@@ -134,6 +134,13 @@ class TransactionPassthroughError(Exception):
     """Sanitized domain failure that may cross a rolled-back DB transaction."""
 
 
+class APIKeyRotationRejected(ValueError, TransactionPassthroughError):
+    """Source-key validation failed without distinguishing absence from ownership."""
+
+    def __init__(self) -> None:
+        super().__init__("API key not found or unauthorized")
+
+
 class BuiltinCharacterSeedError(TransactionPassthroughError):
     """Raised when a bundled character cannot be installed with verified assets."""
 

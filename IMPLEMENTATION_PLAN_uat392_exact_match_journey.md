@@ -1,0 +1,29 @@
+# UAT392 C-03 exact-match evaluation repair
+
+Task: TASK-13260.278.5.2. PR #2979. Full/native UAT remains paused.
+
+## Stage 1: Establish the execution contract
+**Goal**: Trace the existing UI, dataset schema, runner and canonical result API; reproduce advertised option failures.
+**Success Criteria**: A literal two-row dataset has one match and one mismatch; case-sensitive configuration is honored.
+**Tests**: Actual EvaluationRunner and saved run results; case-sensitive/default controls.
+**Status**: Complete
+
+## Stage 2: Require real browser outcomes
+**Goal**: Replace the empty recipe click with UI-created exact-match evaluation and canonical completed run.
+**Success Criteria**: Input/expected values, two sample identities, scores, aggregate and saved IDs survive reload; failed or unavailable execution fails.
+**Tests**: Focused result-oracle controls and strict existing journey; types and lint.
+**Status**: Complete
+
+UAT427 follow-up: retained CI307/ERR_FAILED proves list/create collection paths omit the canonical trailing slash. Keep request-core redirect rejection and fix those two service paths with filter/body/idempotency regression controls. TASK13260.278.5.2.1 owns this repair. Ant Select virtual options also require selecting the visible exact_match title in the journey.
+
+UAT428 follow-up: b41461 reaches Configuration but unmounted form fields lose their watcher/submission values. TASK13260.278.5.2.2 retains preserved values through the existing Form APIs; three actual-component regressions prove both causes. The unchanged strict C-03 browser run must confirm create/run/readback on the repaired head.
+
+UAT431 follow-up: the repaired wizard reaches Dataset in94d7db, but JsonEditor mounts its preview on blur and moves Create between pointer-down/up. TASK13260.278.5.2.4 removes focus-based mounting so the preview remains stable; preserve the unchanged single-click C-03 request and canonical results assertions.
+
+## Stage 3: Review and publish
+**Goal**: Record exact execution evidence and remaining C-03/B-09 coverage limits.
+**Success Criteria**: Scoped checks and security review; retained first-attempt CI; no generated captures in Git.
+**Tests**: Remote browser check; export/batch/foreign-owner and B-09 draft commit remain separately accounted variants until implemented and executed.
+**Status**: Complete
+
+Completion receipt: Frontend E2E Tiers35779395002 on ddcb99d988 verifies46passes/0skips/0retries and the exact2sample saved result plus reload. Canonical attachment retained outsideGit. Full/native matrix and listed batch/export/foreign-owner/B09 variants remain under the broader sweep plan.

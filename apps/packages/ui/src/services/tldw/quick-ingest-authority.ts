@@ -21,6 +21,7 @@ export const quickIngestAuthorityKey = ({ config, userId }: ServicePromptRequest
 
 export type QuickIngestOperation = {
   authorityKey: string
+  authorityRevision: number
   requestScope: ServicePromptRequestScope
   signal: AbortSignal
   isCurrent: () => boolean
@@ -143,16 +144,16 @@ export const createQuickIngestAuthority = (store: ReturnType<typeof createQuickI
         if (--owners === 0) { detach?.(); detach = null; stop(true) }
       }
     },
-    capture: (): QuickIngestOperation => {
+    capture: ({ sessionBound = true }: { sessionBound?: boolean } = {}): QuickIngestOperation => {
       const state = store.getState()
       const captured = snapshot
       if (!captured || !state.authorityKey || captured.scopeSignal.aborted) throw createServicePromptScopeChangedError()
       const currentRevision = revision
       const { generation, authorityKey } = state
       const isCurrent = () => currentRevision === revision && !captured.scopeSignal.aborted &&
-        store.getState().generation === generation && store.getState().authorityKey === authorityKey
+        (!sessionBound || store.getState().generation === generation) && store.getState().authorityKey === authorityKey
       return {
-        authorityKey, requestScope: captured.requestScope, signal: captured.scopeSignal,
+        authorityKey, authorityRevision: currentRevision, requestScope: captured.requestScope, signal: captured.scopeSignal,
         isCurrent,
         assertCurrent: () => { if (!isCurrent()) throw createServicePromptScopeChangedError() }
       }

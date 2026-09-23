@@ -4,6 +4,7 @@ from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
 
 pytestmark = pytest.mark.integration
 
@@ -18,29 +19,24 @@ async def test_authnz_admin_monitoring_repo_postgres_round_trip(test_db_pool: An
     repo = AuthnzAdminMonitoringRepo(pool)
     await repo.ensure_schema()
 
-    async with pool.acquire() as conn:
-        actor_id = await conn.fetchval(
-            """
-            INSERT INTO users (username, email, password_hash, role, is_active, is_verified)
-            VALUES ($1, $2, $3, $4, TRUE, TRUE)
-            RETURNING id
-            """,
-            "pg-monitor-actor",
-            "pg-monitor-actor@example.com",
-            "hashed",
-            "admin",
-        )
-        assignee_id = await conn.fetchval(
-            """
-            INSERT INTO users (username, email, password_hash, role, is_active, is_verified)
-            VALUES ($1, $2, $3, $4, TRUE, TRUE)
-            RETURNING id
-            """,
-            "pg-monitor-assignee",
-            "pg-monitor-assignee@example.com",
-            "hashed",
-            "admin",
-        )
+    users = UsersDB(pool)
+    await users.initialize(ensure_schema=False)
+    actor = await users.create_user(  # nosec B106 # Inert fixture hash, never used for login
+        username="pg-monitor-actor",
+        email="pg-monitor-actor@example.com",
+        password_hash="hashed",
+        role="admin",
+        is_verified=True,
+    )
+    assignee = await users.create_user(  # nosec B106 # Inert fixture hash, never used for login
+        username="pg-monitor-assignee",
+        email="pg-monitor-assignee@example.com",
+        password_hash="hashed",
+        role="admin",
+        is_verified=True,
+    )
+    actor_id = actor["id"]
+    assignee_id = assignee["id"]
 
     created_rule = await repo.create_rule(
         metric="queue_depth",

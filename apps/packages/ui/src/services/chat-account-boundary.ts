@@ -1,10 +1,11 @@
 import { browser } from "wxt/browser"
 import { connectionAuthoritiesMatch } from "@/services/chat-surface-scope"
 import { safeStorageSerde } from "@/utils/safe-storage"
+import type { TldwConfig } from "@/services/tldw/TldwApiClient"
 
 /** Observe account boundaries even when the Chat route is not mounted. */
 export const watchChatAccountChanges = (
-  changed: (invalidated: boolean) => void
+  changed: (invalidated: boolean, currentConfig?: TldwConfig | null) => void
 ): (() => void) => {
   if (typeof window === "undefined") return () => {}
   const principalChanged = () => changed(true)
@@ -12,9 +13,10 @@ export const watchChatAccountChanges = (
     changed(Boolean((event as CustomEvent<{ authorityChanged?: boolean }>).detail?.authorityChanged))
   }
   const compare = (previous: unknown, current: unknown) => {
+    const currentConfig = safeStorageSerde.deserializer(current) as TldwConfig | null
     changed(!current || !connectionAuthoritiesMatch(
-      safeStorageSerde.deserializer(current), safeStorageSerde.deserializer(previous)
-    ))
+      currentConfig, safeStorageSerde.deserializer(previous)
+    ), currentConfig)
   }
   const configKey = (key: string) => key === "tldwConfig" || key === "tldwCookieSessionConfig"
   const storageChanged = (event: StorageEvent) => {

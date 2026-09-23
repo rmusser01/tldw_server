@@ -79,6 +79,8 @@ export interface UseComposerQueueOptions {
    * state on the queue head item.
    */
   sendQueuedRequest: (item: QueuedRequest) => Promise<void>
+  /** Refuse a late result that belongs to a replaced composer/conversation. */
+  canCommitDispatchResult?: () => boolean
 
   /**
    * Cancel the in-flight streaming turn. Called by `useQueuedRequests.runNow`
@@ -166,6 +168,7 @@ export function useComposerQueue(
     queuedMessages,
     setQueuedMessages,
     sendQueuedRequest,
+    canCommitDispatchResult,
     stopStreamingRequest,
     resolveConversationId,
     buildQueuedDocuments,
@@ -182,6 +185,7 @@ export function useComposerQueue(
     queue: queuedMessages,
     setQueue: setQueuedMessages,
     sendQueuedRequest,
+    canCommitDispatchResult,
     stopStreamingRequest
   })
 

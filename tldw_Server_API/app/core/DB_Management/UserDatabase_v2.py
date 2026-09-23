@@ -411,7 +411,7 @@ class UserDatabase:
             return user_dict
         return None
 
-    def update_user(self, user_id: int, **updates) -> bool:
+    def update_user(self, user_id: int | None, **updates) -> bool:
         """
         Update user information.
 
@@ -420,8 +420,11 @@ class UserDatabase:
             **updates: Fields to update
 
         Returns:
-            bool: True if update successful
+            bool: True if update successful; False when no target is supplied.
         """
+        if user_id is None:
+            return False
+
         with self.backend.transaction() as conn:
             # Build update query
             allowed_fields = ['email', 'is_active', 'is_verified', 'metadata']

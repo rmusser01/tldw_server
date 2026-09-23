@@ -1595,9 +1595,12 @@ class EvaluationRunner:
                 expected = expected_field
             expected = expected if expected is not None else ""
 
-            # Normalize strings
-            output = str(output).strip().lower()
-            expected = str(expected).strip().lower()
+            # Preserve the historical whitespace normalization in both modes.
+            output = str(output).strip()
+            expected = str(expected).strip()
+            if not eval_spec.get("case_sensitive", False):
+                output = output.lower()
+                expected = expected.lower()
 
             passed = output == expected
             score = 1.0 if passed else 0.0
@@ -1634,10 +1637,13 @@ class EvaluationRunner:
             if isinstance(expected_items, str) or not isinstance(expected_items, list):
                 expected_items = [expected_items]
 
-            # Check each expected item
+            case_sensitive = eval_spec.get("case_sensitive", False)
+            if not case_sensitive:
+                output = output.lower()
             found_count = 0
             for item in expected_items:
-                if str(item).lower() in output.lower():
+                expected = str(item) if case_sensitive else str(item).lower()
+                if expected in output:
                     found_count += 1
 
             score = found_count / len(expected_items) if expected_items else 0

@@ -1,4 +1,7 @@
 {
+  "chat": {
+    "restoreFailed": "Could not restore your saved chat. Retry to load it."
+  },
   "tooltip": {
     "embed": "It may take a few minutes to embed the page. Please wait...",
     "clear": "Erase chat history",

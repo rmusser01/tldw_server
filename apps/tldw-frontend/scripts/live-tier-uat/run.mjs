@@ -23,12 +23,13 @@ import {
   waitForHttpOk,
 } from "../onboarding-uat/processes.mjs"
 import { resolvePythonCommand } from "../onboarding-uat/run.mjs"
+import { buildCollectionCommand } from "../list-release-tests.mjs"
 import { inventoryProjects } from "./inventory-api-mocks.mjs"
 import { buildLiveTierBackendEnv, buildLiveTierProfile } from "./profile.mjs"
 import {
   assertProjectAccounting,
   collectSkippedTests,
-  parseListOutput,
+  collectPlaywrightCases,
   renderMarkdownReport,
   summarizePlaywrightReport,
 } from "./report.mjs"
@@ -100,18 +101,10 @@ export function formatUsage() {
   ].join("\n")
 }
 
-export function isCertificationRun(options) {
-  const certificationProjects = ["tier-1", "tier-2", "tier-3"]
-  const selectedProjects = new Set(options.projects ?? [])
-  const hasCompleteProjectSet =
-    selectedProjects.size === certificationProjects.length &&
-    certificationProjects.every((project) => selectedProjects.has(project))
-
-  return !options.listOnly &&
-    !options.grep &&
-    options.failOnSkip &&
-    options.workers === 1 &&
-    hasCompleteProjectSet
+export function isCertificationRun() {
+  // This runner uses Next dev, a mutable checkout, SQLite single-user and
+  // controlled inference. Even a complete run is diagnostic evidence only.
+  return false
 }
 
 function safeEnv(baseEnv, keys) {
@@ -173,6 +166,7 @@ export function buildCommands({
   }
   const projectArgs = playwrightProjectArgs(projects)
   const jsonPath = path.join(artifactRoot, "playwright-results.json")
+  const listJsonPath = path.join(artifactRoot, "playwright-list.json")
   const runArgs = [
     "playwright", "test", ...projectArgs, `--workers=${workers}`, "--retries=0", "--reporter=line,json",
   ]
@@ -217,9 +211,9 @@ export function buildCommands({
     playwrightList: {
       name: "playwright-list",
       command: "bunx",
-      args: ["playwright", "test", "--list", ...projectArgs, ...grepArgs],
+      args: ["playwright", "test", "--list", "--reporter=json", ...projectArgs, ...grepArgs],
       cwd: frontendRoot,
-      env: sharedFrontendEnv,
+      env: { ...sharedFrontendEnv, PLAYWRIGHT_JSON_OUTPUT_NAME: listJsonPath },
     },
     playwrightRun: {
       name: "playwright-run",
@@ -229,6 +223,7 @@ export function buildCommands({
       env: { ...sharedFrontendEnv, PLAYWRIGHT_JSON_OUTPUT_NAME: jsonPath },
     },
     jsonPath,
+    listJsonPath,
     nextDistPath,
   }
 }
@@ -385,6 +380,18 @@ export function readPlaywrightReport(jsonPath, {
   return JSON.parse(read(jsonPath, "utf8"))
 }
 
+/** Retain a flushed partial report after teardown, while preserving the original abort reason. */
+export function readPlaywrightOutcome(jsonPath, { signal } = {}) {
+  let report = null
+  let error = null
+  try {
+    report = readPlaywrightReport(jsonPath)
+  } catch (caught) {
+    error = caught
+  }
+  return { report, error: signal?.aborted ? signal.reason : error }
+}
+
 export function assertServicesStopped(stopped) {
   if (!stopped) {
     throw new Error("One or more spawned live-tier services did not stop")
@@ -524,6 +531,8 @@ export async function runLiveTierUat({
     return { status: "help" }
   }
 
+  if (options.listOnly) return listLiveTierCases({ options, frontendRoot, baseEnv, signal })
+
   const runId = options.runId ?? runIdNow()
   const artifactRoot = path.join(frontendRoot, "test-results/live-tier-uat", runId)
   const profileRoot = path.join(tmpdir(), `tldw-onboarding-uat-${runId}`)
@@ -540,6 +549,9 @@ export async function runLiveTierUat({
   const inventoryPath = path.join(artifactRoot, "api-interception-inventory.json")
   const processes = []
   const health = { before: false, after: false, stopped: false }
+  const startedCommit = commitHash(repoRoot)
+  let registeredCases = []
+  let playwrightReport = null
   let listed = {}
   let results = {}
   let inventory = []
@@ -604,7 +616,8 @@ export async function runLiveTierUat({
     const listResult = await runCommand(commands.playwrightList, logs.list, { signal })
     signal?.throwIfAborted()
     if (listResult.code !== 0) throw new Error(`Playwright list failed with exit code ${listResult.code}`)
-    listed = parseListOutput(listResult.output)
+    registeredCases = collectPlaywrightCases(readPlaywrightReport(commands.listJsonPath))
+    listed = countRegisteredCases(registeredCases)
     for (const project of options.projects) {
       if (!listed[project]) throw new Error(`Playwright listed no tests for ${project}`)
     }
@@ -612,28 +625,29 @@ export async function runLiveTierUat({
     inventory = inventoryProjects(frontendRoot, options.projects)
     writeFileSync(inventoryPath, `${JSON.stringify(inventory, null, 2)}\n`, "utf8")
 
-    if (options.listOnly) {
-      status = "listed"
-    } else {
-      const testResult = await runCommand(commands.playwrightRun, logs.run, { signal })
-      signal?.throwIfAborted()
-      const playwrightReport = readPlaywrightReport(commands.jsonPath)
+    const testResult = await runCommand(commands.playwrightRun, logs.run, { signal })
+    const outcome = readPlaywrightOutcome(commands.jsonPath, { signal })
+    playwrightReport = outcome.report
+    if (playwrightReport) {
       results = summarizePlaywrightReport(playwrightReport)
       skippedTests = collectSkippedTests(playwrightReport)
-      assertProjectAccounting({
-        projects: options.projects,
-        listed,
-        results,
-        allowSkips: !options.failOnSkip,
-      })
-      if (testResult.code !== 0) {
-        status = "failed"
-      } else if (options.failOnSkip && skippedTests.length) {
-        status = "failed"
-        runnerError = `Strict live-tier UAT rejected ${skippedTests.length} skipped test(s)`
-      } else {
-        status = "passed"
-      }
+    }
+    if (outcome.error) throw outcome.error
+    assertProjectAccounting({
+      projects: options.projects,
+      listed,
+      results,
+      allowSkips: !options.failOnSkip,
+      registeredCases,
+      report: playwrightReport,
+    })
+    if (testResult.code !== 0) {
+      status = "failed"
+    } else if (options.failOnSkip && skippedTests.length) {
+      status = "failed"
+      runnerError = `Strict live-tier UAT rejected ${skippedTests.length} skipped test(s)`
+    } else {
+      status = "passed"
     }
 
     await waitForHttpOk(`${commands.urls.backend}/api/v1/health`, {
@@ -705,13 +719,14 @@ export async function runLiveTierUat({
       }
       const report = renderMarkdownReport({
         runId,
-        commit: commitHash(repoRoot),
+        commit: startedCommit,
         listed,
         results,
         inventory,
         health,
         artifacts,
-        certification: isCertificationRun(options),
+        certification: isCertificationRun(),
+        report: playwrightReport,
         skippedTests,
         error: runnerError,
       })
@@ -721,6 +736,45 @@ export async function runLiveTierUat({
   }
 
   return { status, runId, ports, listed, results, skippedTests, inventory, health, artifactRoot, reportPath, summaryPath, error: runnerError }
+}
+
+function countRegisteredCases(cases) {
+  const listed = {}
+  for (const entry of cases) listed[entry.project] = (listed[entry.project] ?? 0) + 1
+  return listed
+}
+
+async function listLiveTierCases({ options, frontendRoot, baseEnv, signal }) {
+  const runId = options.runId ?? runIdNow()
+  const artifactRoot = path.join(frontendRoot, "test-results/live-tier-uat", runId)
+  const jsonPath = path.join(artifactRoot, "playwright-list.json")
+  const logPath = path.join(artifactRoot, "playwright-list.log")
+  let listed = {}
+  let status = "failed"
+  let error = null
+  try {
+    assertFreshRunTargets([artifactRoot])
+    mkdirSync(artifactRoot, { recursive: true })
+    const command = buildCollectionCommand({ env: baseEnv })
+    command.cwd = frontendRoot
+    command.args[0] = path.join(frontendRoot, "node_modules/@playwright/test/cli.js")
+    command.args.push(...playwrightProjectArgs(options.projects))
+    if (options.grep) command.args.push("--grep", options.grep)
+    command.env.PLAYWRIGHT_JSON_OUTPUT_NAME = jsonPath
+    const result = await runCommand(command, logPath, { signal })
+    signal?.throwIfAborted()
+    if (result.code !== 0) throw new Error(`Playwright list failed with exit code ${result.code}`)
+    const report = readPlaywrightReport(jsonPath)
+    if (report.errors?.length) throw new Error("Playwright collection reported errors")
+    listed = countRegisteredCases(collectPlaywrightCases(report))
+    for (const project of options.projects) {
+      if (!listed[project]) throw new Error(`Playwright listed no tests for ${project}`)
+    }
+    status = "listed"
+  } catch (caught) {
+    error = caught?.message ?? String(caught)
+  }
+  return { status, runId, listed, ports: {}, artifactRoot, error }
 }
 
 const isEntrypoint = process.argv[1] === fileURLToPath(import.meta.url)

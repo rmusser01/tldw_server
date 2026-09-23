@@ -74,7 +74,47 @@ async def test_list_users_sanitizes_generic_failure_log(monkeypatch: pytest.Monk
 
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Failed to retrieve users"
-    assert logger_stub.error_records == [("Failed to list users", (), {})]
+    assert logger_stub.error_records == [(
+        "Failed to list users (principal={}, page={}, limit={}, error_type={})",
+        (None, 1, 20, "RuntimeError"), {},
+    )]
+
+
+@pytest.mark.asyncio
+async def test_list_users_real_logger_does_not_attach_private_exception(monkeypatch) -> None:
+    from loguru import logger
+
+    records = []
+
+    async def fail_listing(*_args: Any, **_kwargs: Any):
+        raise RuntimeError("private-database-password-sentinel")
+
+    monkeypatch.setattr(admin_user, "logger", logger)
+    monkeypatch.setattr(admin_user, "is_test_mode", lambda: False)
+    monkeypatch.setattr(admin_user.admin_users_service, "list_users", fail_listing)
+    sink = logger.add(
+        records.append,
+        format="{message}",
+        filter=lambda record: record["name"] == admin_user.__name__,
+    )
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            await admin_user.list_users(
+                request=SimpleNamespace(headers={}), response=Response(),
+                principal=SimpleNamespace(user_id=7), page=1, limit=20,
+                role=None, admin_capable=False, is_active=None, mfa_enabled=None,
+                search=None, org_id=None,
+            )
+    finally:
+        logger.remove(sink)
+
+    assert exc_info.value.status_code == 500
+    assert len(records) == 1
+    assert records[0].record["exception"] is None
+    assert "private-database-password-sentinel" not in str(records[0])
+    assert records[0].record["message"] == (
+        "Failed to list users (principal=7, page=1, limit=20, error_type=RuntimeError)"
+    )
 
 
 @pytest.mark.asyncio
@@ -142,7 +182,10 @@ async def test_list_users_sanitizes_generic_header_assignment_log(
 
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Failed to retrieve users"
-    assert logger_stub.error_records == [("Failed to list users", (), {})]
+    assert logger_stub.error_records == [(
+        "Failed to list users (principal={}, page={}, limit={}, error_type={})",
+        (None, 1, 20, "RuntimeError"), {},
+    )]
     assert logger_stub.debug_records == [("TEST_MODE header assignment failed", (), {})]
 
 

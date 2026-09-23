@@ -92,9 +92,10 @@ async def test_sqlite_statement_autocommit_persists_login_write_without_explicit
     assert stored_hash == "new-hash"
 
 
+@pytest.mark.parametrize("operation", ["update_user_last_login", "mark_user_verified"])
 @pytest.mark.asyncio
-async def test_sqlite_statement_autocommit_supports_versioned_last_login_write(
-    tmp_path,
+async def test_sqlite_statement_autocommit_supports_versioned_user_write(
+    tmp_path, operation: str,
 ) -> None:
     db_path = str(tmp_path / "login-versioned-write.db")
     initial_version = "2025-01-01T00:00:00.000000Z"
@@ -104,6 +105,8 @@ async def test_sqlite_statement_autocommit_supports_versioned_last_login_write(
             CREATE TABLE users (
                 id INTEGER PRIMARY KEY,
                 last_login TEXT,
+                is_verified INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT,
                 profile_version TEXT NOT NULL
             );
             CREATE TABLE org_members (user_id INTEGER, org_id INTEGER, status TEXT);
@@ -120,21 +123,27 @@ async def test_sqlite_statement_autocommit_supports_versioned_last_login_write(
     last_login = datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
     async with pool.acquire_statement_autocommit() as login_conn:
         try:
-            await auth_service.update_user_last_login(login_conn, 1, last_login)
+            await getattr(auth_service, operation)(login_conn, 1, last_login)
         except Exception as exc:  # noqa: BLE001 - surface the production-path failure
             pytest.fail(f"versioned autocommit write failed: {exc}")
 
     with sqlite3.connect(db_path) as conn:
-        stored_login, stored_version = conn.execute(
-            "SELECT last_login, profile_version FROM users WHERE id = 1"
+        stored_login, verified, updated_at, stored_version = conn.execute(
+            "SELECT last_login, is_verified, updated_at, profile_version FROM users WHERE id = 1"
         ).fetchone()
-    assert datetime.fromisoformat(stored_login) == last_login
+    if operation == "mark_user_verified":
+        assert (stored_login, verified) == (None, 1)
+        assert datetime.fromisoformat(updated_at) == last_login
+    else:
+        assert datetime.fromisoformat(stored_login) == last_login
+        assert (verified, updated_at) == (0, None)
     assert stored_version != initial_version
 
 
+@pytest.mark.parametrize("operation", ["update_user_last_login", "mark_user_verified"])
 @pytest.mark.asyncio
-async def test_sqlite_versioned_last_login_rolls_back_when_anchor_touch_fails(
-    tmp_path,
+async def test_sqlite_versioned_user_write_rolls_back_when_anchor_touch_fails(
+    tmp_path, operation: str,
 ) -> None:
     db_path = str(tmp_path / "login-versioned-write-rollback.db")
     initial_version = "2025-01-01T00:00:00.000000Z"
@@ -144,6 +153,8 @@ async def test_sqlite_versioned_last_login_rolls_back_when_anchor_touch_fails(
             CREATE TABLE users (
                 id INTEGER PRIMARY KEY,
                 last_login TEXT,
+                is_verified INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT,
                 profile_version TEXT NOT NULL
             );
             CREATE TABLE org_members (user_id INTEGER, org_id INTEGER, status TEXT);
@@ -165,14 +176,13 @@ async def test_sqlite_versioned_last_login_rolls_back_when_anchor_touch_fails(
     last_login = datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
     with pytest.raises(ProfileVersionReadFailed):
         async with pool.acquire_statement_autocommit() as login_conn:
-            await auth_service.update_user_last_login(login_conn, 1, last_login)
+            await getattr(auth_service, operation)(login_conn, 1, last_login)
 
     with sqlite3.connect(db_path) as conn:
-        stored_login, stored_version = conn.execute(
-            "SELECT last_login, profile_version FROM users WHERE id = 1"
+        stored_login, verified, updated_at, stored_version = conn.execute(
+            "SELECT last_login, is_verified, updated_at, profile_version FROM users WHERE id = 1"
         ).fetchone()
-    assert stored_login is None
-    assert stored_version == initial_version
+    assert (stored_login, verified, updated_at, stored_version) == (None, 0, None, initial_version)
 
 
 @pytest.mark.asyncio

@@ -154,6 +154,7 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
   )
   const previousSelectedSystemPromptRef = React.useRef(selectedSystemPrompt)
   const moreBtnRef = React.useRef<HTMLButtonElement>(null)
+  const knowledgeBtnRef = React.useRef<HTMLButtonElement>(null)
   const modelSelectRef = React.useRef<ModelSelectHandle | null>(null)
   const fullAppHandoffDescriptionId = React.useId()
   const { capabilities } = useServerCapabilities()
@@ -346,6 +347,12 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
   // Track if hints have been seen
   const knowledgeHintSeen = useFeatureHintSeen("knowledge-search")
   const moreToolsHintSeen = useFeatureHintSeen("more-tools")
+  const activeHint =
+    !knowledgeHintSeen && isConnected
+      ? "knowledge-search"
+      : !moreToolsHintSeen
+        ? "more-tools"
+        : null
 
   const openSidepanelModelSelector = React.useCallback(() => {
     modelSelectRef.current?.openAndFocus()
@@ -1083,6 +1090,36 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
 
   return (
     <div data-testid="control-row" className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+        {activeHint && (
+          <FeatureHint
+            key={activeHint}
+            featureKey={activeHint}
+            title={
+              activeHint === "knowledge-search"
+                ? t("common:featureHints.knowledge.title", "Search your knowledge")
+                : t("common:featureHints.moreTools.title", "More tools available")
+            }
+            description={
+              activeHint === "knowledge-search"
+                ? t(
+                    "common:featureHints.knowledge.description",
+                    "Open the knowledge search panel to find snippets and insert them into your chat."
+                  )
+                : t(
+                    "common:featureHints.moreTools.description",
+                    "Access vision mode, image upload, quick ingest, and the full app."
+                  )
+            }
+            className="basis-full"
+            onDismiss={() => {
+              const trigger =
+                activeHint === "knowledge-search"
+                  ? knowledgeBtnRef.current
+                  : moreBtnRef.current
+              trigger?.focus()
+            }}
+          />
+        )}
         {rolePlayActive && (
           <div
             data-testid="sidepanel-character-chat-chip"
@@ -1165,6 +1202,7 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
         {/* Knowledge Search - opens panel */}
         <div className="relative">
           <button
+            ref={knowledgeBtnRef}
             type="button"
             data-testid="control-rag-toggle"
             onClick={onToggleRag}
@@ -1175,14 +1213,6 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
             <Search className="size-3.5" />
             <span className="hidden sm:inline">{t("sidepanel:controlRow.knowledge", "Knowledge search")}</span>
           </button>
-          {!knowledgeHintSeen && isConnected && (
-            <FeatureHint
-              featureKey="knowledge-search"
-              title={t("common:featureHints.knowledge.title", "Search your knowledge")}
-              description={t("common:featureHints.knowledge.description", "Open the knowledge search panel to find snippets and insert them into your chat.")}
-              position="top"
-            />
-          )}
         </div>
 
         {/* Web Search Toggle - with label and shortcut (if available) */}
@@ -1254,14 +1284,6 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
               <MoreHorizontal className="size-4 text-text-subtle" />
             </button>
           </Popover>
-          {!moreToolsHintSeen && (
-            <FeatureHint
-              featureKey="more-tools"
-              title={t("common:featureHints.moreTools.title", "More tools available")}
-              description={t("common:featureHints.moreTools.description", "Access vision mode, image upload, quick ingest, and the full app.")}
-              position="top"
-            />
-          )}
         </div>
       </div>
     )

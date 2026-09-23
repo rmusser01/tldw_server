@@ -1,13 +1,15 @@
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import React from "react"
 import { Button, Modal } from "antd"
 import { bgRequest } from "@/services/background-proxy"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { getNoteKeywords, searchNoteKeywords } from "@/services/note-keywords"
-import { setSetting, clearSetting } from "@/services/settings/registry"
+import { clearSetting } from "@/services/settings/registry"
 import {
-  DISCUSS_MEDIA_PROMPT_SETTING,
   LAST_MEDIA_ID_SETTING
 } from "@/services/settings/ui-settings"
+import { useHomeMilestoneScope } from "@/hooks/useHomeMilestoneScope"
+import { createMediaChatHandoff, buildMediaChatHandoffRoute, removeMediaChatHandoff } from "@/services/tldw/media-chat-handoff"
 import { rankKeywordSuggestions } from "@/components/Review/filter-chip-priority"
 import { IDLE_CONTENT_FILTER_PROGRESS } from "@/components/Review/content-filtering-progress"
 import {
@@ -33,6 +35,17 @@ import {
 } from "@/components/Review/media-review-types"
 
 export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions & { _fetchList: () => Promise<MediaItem[]> } {
+  const ownerScope = useHomeMilestoneScope()
+  const handoffBoundaryRevision = React.useRef(0)
+  React.useLayoutEffect(() => watchChatAccountChanges(invalidated => {
+    if (invalidated) handoffBoundaryRevision.current += 1
+  }), [])
+  const handoffLifetime = React.useRef<AbortController | null>(null)
+  React.useLayoutEffect(() => {
+    const lifetime = new AbortController()
+    handoffLifetime.current = lifetime
+    return () => lifetime.abort()
+  }, [ownerScope, s.selectedIds])
   const {
     t, navigate, message,
     query, page, pageSize, types, keywordTokens, includeContent, sortBy, dateRange,
@@ -52,7 +65,6 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
     searchInputRef, viewerRef, listParentRef,
     lastClickedRef, pendingRestoreFocusIdRef, ensureDetailRef,
     cardRefs, prefersReducedMotion,
-    setChatMode, setSelectedKnowledge, setRagMediaIds,
     setKeywordOptions,
     data, refetch,
     setFocusedId: _setFocusedId,
@@ -565,8 +577,10 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
     setCompareDiffOpen(true)
   }, [message, resolveDetailForCompare, selectedIds, t, setCompareLeftText, setCompareRightText, setCompareLeftLabel, setCompareRightLabel, setCompareDiffOpen])
 
-  const handleChatAboutSelection = React.useCallback(() => {
-    if (selectedIds.length === 0) return
+  const handleChatAboutSelection = React.useCallback(async () => {
+    const boundaryRevision = handoffBoundaryRevision.current
+    const lifetime = handoffLifetime.current
+    if (selectedIds.length === 0 || !ownerScope || !lifetime || lifetime.signal.aborted) return
 
     const numericIds = Array.from(
       new Set(
@@ -585,29 +599,26 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
     }
 
     const primaryId = String(numericIds[0])
-    setSelectedKnowledge(null as any)
-    setRagMediaIds(numericIds)
-    setChatMode('rag')
 
     const payload = {
       mediaId: primaryId,
+      mediaIds: numericIds,
+      ownerScope,
       mode: 'rag_media' as const
     }
 
     try {
-      void setSetting(DISCUSS_MEDIA_PROMPT_SETTING, payload)
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(
-          new CustomEvent('tldw:discuss-media', {
-            detail: { ...payload, mediaIds: numericIds }
-          })
-        )
+      const token = await createMediaChatHandoff(payload)
+      if (boundaryRevision !== handoffBoundaryRevision.current || lifetime.signal.aborted) {
+        await removeMediaChatHandoff(token)
+        return
       }
+      navigate(buildMediaChatHandoffRoute(token))
     } catch {
-      // ignore storage/event errors
+      message.error(t('mediaPage.chatPrepareFailed', 'Could not prepare this source for Chat. Please try again.'))
+      return
     }
 
-    navigate('/chat')
     try {
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('tldw:focus-composer'))
@@ -622,7 +633,7 @@ export function useMediaReviewActions(s: MediaReviewState): MediaReviewActions &
         count: numericIds.length
       })
     )
-  }, [message, navigate, selectedIds, setChatMode, setRagMediaIds, setSelectedKnowledge, t])
+  }, [message, navigate, ownerScope, selectedIds, t])
 
   const getSelectedNumericIds = React.useCallback(() => {
     return Array.from(

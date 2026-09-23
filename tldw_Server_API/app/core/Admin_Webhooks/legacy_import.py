@@ -260,6 +260,8 @@ class _FileEvidence:
     group_id: int
     mode: int
     identity: str
+    # Ephemeral cleanup evidence; persisted artifact identities retain their format.
+    change_time_ns: int | None = None
 
 
 class _RecordIssue(Exception):
@@ -509,6 +511,7 @@ def _file_evidence(path: Path, *, expected_payload: bytes | None = None) -> _Fil
         group_id=metadata.st_gid,
         mode=stat.S_IMODE(metadata.st_mode),
         identity=f"{metadata.st_dev}:{metadata.st_ino}",
+        change_time_ns=metadata.st_ctime_ns,
     )
 
 
@@ -663,6 +666,7 @@ def _remove_published_output_if_same(path: Path, evidence: _FileEvidence) -> Non
         or metadata.st_gid != evidence.group_id
         or stat.S_IMODE(metadata.st_mode) != evidence.mode
         or f"{metadata.st_dev}:{metadata.st_ino}" != evidence.identity
+        or metadata.st_ctime_ns != evidence.change_time_ns
     ):
         return
     with suppress(OSError):

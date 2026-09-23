@@ -18,7 +18,7 @@ def test_all_production_rbac_seed_callers_own_pool_transactions() -> None:
     repository_root = Path(__file__).resolve().parents[4]
     app_root = repository_root / "tldw_Server_API" / "app"
     expected_callers = {
-        "core/AuthNZ/initialize.py": 2,
+        "core/AuthNZ/initialize.py": 3,
         "core/MCP_unified/adapters/tldw_runtime.py": 1,
     }
     actual_callers: dict[str, int] = {}
@@ -36,7 +36,7 @@ def test_all_production_rbac_seed_callers_own_pool_transactions() -> None:
         if not seed_calls:
             continue
 
-        relative_path = str(path.relative_to(app_root))
+        relative_path = path.relative_to(app_root).as_posix()
         actual_callers[relative_path] = len(seed_calls)
         transaction_owned_calls: set[ast.AST] = set()
         for async_with in (
@@ -416,12 +416,16 @@ def _create_version_089_rbac_database(db_path: Path) -> None:
 
 
 def _migrate_version_089_database(db_path: Path) -> None:
-    from tldw_Server_API.app.core.AuthNZ.migrations import get_authnz_migrations
+    from tldw_Server_API.app.core.AuthNZ.migrations import (
+        get_authnz_migrations,
+        migration_090_seed_notification_permissions,
+    )
     from tldw_Server_API.app.core.DB_Management.migrations import MigrationManager
 
     manager = MigrationManager(db_path)
     migrations = get_authnz_migrations()
-    assert migrations[-1].version == 96
+    notification_migration = next(migration for migration in migrations if migration.version == 90)
+    assert notification_migration.up is migration_090_seed_notification_permissions
     for migration in migrations:
         manager.add_migration(migration)
 
@@ -433,7 +437,7 @@ def _migrate_version_089_database(db_path: Path) -> None:
 
     manager.migrate()
     with sqlite3.connect(db_path) as conn:
-        migrations[-1].apply(conn)
+        notification_migration.apply(conn)
     manager.migrate()
 
 

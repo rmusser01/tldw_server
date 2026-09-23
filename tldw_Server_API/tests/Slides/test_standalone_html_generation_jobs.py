@@ -2890,6 +2890,7 @@ async def test_lost_terminal_cas_reloads_completed_winner(stores, monkeypatch):
             generation_provenance_json=generation_input.provenance_json,
             committed_at=(_FIXED_NOW + timedelta(minutes=1)).isoformat(),
             expires_at=(_FIXED_NOW + timedelta(days=30, minutes=1)).isoformat(),
+            now=lambda: _FIXED_NOW + timedelta(minutes=1),
         )
         return False
 
@@ -2902,6 +2903,11 @@ async def test_lost_terminal_cas_reloads_completed_winner(stores, monkeypatch):
     )
     result = await _process(slides, jobs, job)
     assert result["presentation_id"] == _RECEIPT_ID
+    receipt = slides.get_generation_receipt(_RECEIPT_ID, owner_user_id="owner-1")
+    assert (receipt.receipt_status, receipt.presentation_id) == ("completed", _RECEIPT_ID)
+    assert slides.get_presentation_by_id(_RECEIPT_ID).generation_job_uuid == job["uuid"]
+    with pytest.raises(KeyError):
+        slides.get_generation_input(_RECEIPT_ID, owner_user_id="owner-1")
     monkeypatch.setattr(slides, "terminalize_generation_receipt", original_terminalize)
 
 
@@ -2927,6 +2933,7 @@ async def test_lost_retry_reset_cas_reloads_completed_or_terminal_winner(
                 generation_provenance_json=generation_input.provenance_json,
                 committed_at=(_FIXED_NOW + timedelta(minutes=2)).isoformat(),
                 expires_at=(_FIXED_NOW + timedelta(days=30, minutes=2)).isoformat(),
+                now=lambda: _FIXED_NOW + timedelta(minutes=2),
             )
         else:
             current = slides.get_generation_receipt(_RECEIPT_ID, owner_user_id="owner-1")
@@ -2952,6 +2959,11 @@ async def test_lost_retry_reset_cas_reloads_completed_or_terminal_winner(
     )
     if winner_status == "completed":
         assert outcome["presentation_id"] == _RECEIPT_ID
+        receipt = slides.get_generation_receipt(_RECEIPT_ID, owner_user_id="owner-1")
+        assert (receipt.receipt_status, receipt.presentation_id) == ("completed", _RECEIPT_ID)
+        assert slides.get_presentation_by_id(_RECEIPT_ID).generation_job_uuid == job["uuid"]
+        with pytest.raises(KeyError):
+            slides.get_generation_input(_RECEIPT_ID, owner_user_id="owner-1")
     else:
         assert outcome == WorkerTerminalOutcome(
             status="failed",

@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { describe, expect, it, vi } from "vitest"
 import { MediaReviewReadingPane } from "../MediaReviewReadingPane"
 import type { MediaDetail, MediaReviewActions, MediaReviewState } from "../media-review-types"
+import englishReview from "@/assets/locale/en/review.json"
 
 vi.mock("@/components/Review/InContentSearch", () => ({
   InContentSearch: () => null
@@ -176,6 +177,67 @@ const makeActions = (retryFetch = vi.fn()): MediaReviewActions =>
   }) as unknown as MediaReviewActions
 
 describe("MediaReviewReadingPane product-state alerts", () => {
+  it.each(["fallback", "English"])("hides selection removal from an unselected preview with the %s label", (locale) => {
+    const detail = makeDetail()
+    const actions = makeActions()
+    const state = {
+      ...makeState(detail, new Set()),
+      t: ((...args: Parameters<typeof t>) => locale === "English" && args[0] === "mediaPage.unstack"
+        ? englishReview.mediaPage.unstack
+        : t(...args)) as MediaReviewState["t"],
+      selectedIds: [],
+      viewerItems: [],
+      previewedId: detail.id,
+      previewedDetail: detail,
+      previewIndex: 0
+    }
+    render(<MediaReviewReadingPane state={state} actions={actions} />)
+
+    expect(screen.getByText("Transcript body")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /^(Unstack|Remove from selection)$/ })).not.toBeInTheDocument()
+    expect(actions.removeFromSelection).not.toHaveBeenCalled()
+  })
+
+  it("does not offer removal for a rendered card whose ID is outside the selection", () => {
+    const state = { ...makeState(makeDetail(), new Set()), selectedIds: [99] }
+    render(<MediaReviewReadingPane state={state} actions={makeActions()} />)
+
+    expect(screen.getByText("Transcript body")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Remove from selection" })).not.toBeInTheDocument()
+  })
+
+  it.each([42, "42"])("keeps removal available for matching selected ID %s", (selectedId) => {
+    const detail = makeDetail()
+    const actions = makeActions()
+    const state = { ...makeState(detail, new Set()), selectedIds: [selectedId] }
+    render(<MediaReviewReadingPane state={state} actions={actions} />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove from selection" }))
+
+    expect(actions.removeFromSelection).toHaveBeenCalledExactlyOnceWith(detail.id)
+  })
+
+  it("counts a visible preview when no items are selected", () => {
+    const detail = makeDetail()
+    const state = {
+      ...makeState(detail, new Set()),
+      selectedIds: [],
+      viewerItems: [],
+      previewedId: detail.id,
+      previewedDetail: detail,
+      previewIndex: 0
+    }
+    const view = render(<MediaReviewReadingPane state={state} actions={makeActions()} />)
+
+    expect(screen.getByText("1 open")).toBeInTheDocument()
+
+    view.rerender(<MediaReviewReadingPane state={{ ...state, previewedId: null, previewedDetail: null }} actions={makeActions()} />)
+    expect(screen.getByText("0 open")).toBeInTheDocument()
+
+    view.rerender(<MediaReviewReadingPane state={makeState(detail, new Set())} actions={makeActions()} />)
+    expect(screen.getByText("1 open")).toBeInTheDocument()
+  })
+
   it("renders failed content through the design-system Alert and keeps retry behavior", () => {
     const retryFetch = vi.fn()
 

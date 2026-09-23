@@ -24,6 +24,7 @@ async def ensure_test_user(
     role: str = "user",
     password_hash: str = "x",
     is_active: bool = True,
+    is_verified: bool = False,
     is_superuser: bool = False,
 ) -> int:
     """Return the id of ``username``, creating the user if it is not there yet.
@@ -40,6 +41,7 @@ async def ensure_test_user(
         role: Role for a newly created user.
         password_hash: Stored verbatim; these users never authenticate.
         is_active: Active flag for a newly created user.
+        is_verified: Verification flag for a newly created user.
         is_superuser: Superuser flag for a newly created user.
 
     Returns:
@@ -60,6 +62,7 @@ async def ensure_test_user(
         password_hash=password_hash,
         role=role,
         is_active=is_active,
+        is_verified=is_verified,
         is_superuser=is_superuser,
         uuid_value=_uuid.uuid4(),
     )

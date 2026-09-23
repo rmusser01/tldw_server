@@ -32,8 +32,9 @@ import { normalizeChatRole } from "@/utils/normalize-chat-role"
 import { createJsonResponseLike } from "@/services/tldw/json-response-like"
 import type { AllowedPath, PathOrUrl } from "@/services/tldw/openapi-guard"
 import { tldwRequest } from "@/services/tldw/request-core"
-import { servicePromptTargetsMatch } from "@/services/tldw/service-prompt-scope-error"
+import { createServicePromptScopeChangedError, servicePromptTargetsMatch } from "@/services/tldw/service-prompt-scope-error"
 import { connectionAuthoritiesMatch } from "@/services/chat-surface-scope"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import { appendPathQuery } from "@/services/tldw/path-utils"
 import { inferUploadMediaTypeFromUrl } from "@/services/tldw/media-routing"
 import {
@@ -2376,9 +2377,14 @@ export class TldwApiClientBase {
     )
   }
 
-  async updateConfig(config: Partial<TldwConfig>): Promise<void> {
+  async updateConfig(
+    config: Partial<TldwConfig>,
+    assertCurrent?: (current: Partial<TldwConfig>) => void,
+    assertCommitted?: (current: Partial<TldwConfig>) => void
+  ): Promise<void> {
     await this.initialize()
     let currentConfig = (await this.getConfig()) || ({} as TldwConfig)
+    assertCurrent?.(currentConfig)
     const previousConfig = currentConfig
     const targetAuthMode = config.authMode || currentConfig.authMode
     const submittedApiKey = Object.prototype.hasOwnProperty.call(config, "apiKey")
@@ -2414,8 +2420,52 @@ export class TldwApiClientBase {
         ({} as TldwConfig)
     }
 
+    // The auth attempt may have expired while configuration reads were pending.
+    assertCurrent?.(currentConfig)
     const newConfig = { ...currentConfig, ...config } as TldwConfig
     const persisted = toPersistedTldwConfig(newConfig)
+    if (assertCurrent) {
+      // Observe the write as well as its verification: either await can cross
+      // an account boundary, including a switch away and back to this account.
+      let invalidated = false
+      let revision = 0
+      const unwatch = watchChatAccountChanges((changed, current) => {
+        if (current) {
+          revision += 1
+          if (!connectionAuthoritiesMatch(current, persisted)) invalidated = true
+        } else if (changed) invalidated = true
+      })
+      let committed: TldwConfig | null | undefined
+      try {
+        await this.storage.set("tldwConfig", persisted)
+        let readRevision: number
+        do {
+          readRevision = revision
+          committed = await this.storage.get<TldwConfig>("tldwConfig")
+          if (invalidated) throw createServicePromptScopeChangedError()
+          if (!committed || !connectionAuthoritiesMatch(committed, persisted)) {
+            this.config = committed || null
+            this.applyConfigState()
+            throw createServicePromptScopeChangedError()
+          }
+          // A delayed own notification may be older or newer than this read.
+          // Read again instead of treating the notification as authoritative.
+        } while (readRevision !== revision)
+        try {
+          assertCommitted?.(committed)
+        } catch (error) {
+          this.config = null
+          throw error
+        }
+        this.config = committed
+        this.applyConfigState()
+      } finally {
+        unwatch()
+      }
+      this.publishConfigUpdated(previousConfig, true)
+      this.publishConfigUpdated(committed)
+      return
+    }
     await this.storage.set("tldwConfig", persisted)
     this.config = persisted
     this.applyConfigState()
@@ -5611,13 +5661,16 @@ export class TldwApiClientBase {
 
   async listChatsWithMeta(
     params?: Record<string, any>,
-    options?: { signal?: AbortSignal; scope?: ChatScope }
+    options?: { signal?: AbortSignal; scope?: ChatScope; requestScope?: ServicePromptRequestScope }
   ): Promise<{ chats: ServerChatSummary[]; total: number }> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     const query = this.buildQuery({ ...params, ...toChatScopeParams(options?.scope) })
     const data = await bgRequest<any>({
       path: `/api/v1/chats/${query}`,
       method: "GET",
-      abortSignal: options?.signal
+      abortSignal: options?.signal,
+      headers: scopeFields.headers,
+      ...(scopeFields.servicePromptConfig ? { servicePromptConfig: scopeFields.servicePromptConfig } : {})
     })
 
     let list: any[] = []

@@ -754,15 +754,20 @@ async def test_bounded_json_redirect_without_location_rejects_before_body(status
 
 @requires_httpx
 @pytest.mark.asyncio
-async def test_bounded_json_cross_origin_redirect_strips_sensitive_headers():
+async def test_bounded_json_cross_origin_redirect_strips_sensitive_headers(monkeypatch):
     import httpx
 
     from tldw_Server_API.app.core.http_client import afetch_json, create_async_client
+
+    # Both mock origins must pass policy before redirect-header behavior is tested.
+    monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWLIST", "93.184.216.34,93.184.216.35")
 
     seen_headers: dict[str, str] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.host == "93.184.216.34":
+            assert request.headers["authorization"] == "Bearer must-not-forward"
+            assert request.headers["x-api-key"] == "must-not-forward"
             return httpx.Response(
                 302,
                 request=request,

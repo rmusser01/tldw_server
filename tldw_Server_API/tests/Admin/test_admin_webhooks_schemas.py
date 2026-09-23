@@ -9,6 +9,7 @@ from tldw_Server_API.app.api.v1.schemas.admin_webhooks import (
     AdminWebhookRegistrationResponse,
     AdminWebhookStatusResponse,
     WebhookCreateRequest,
+    WebhookDeliveryListResponse,
     WebhookListResponse,
     WebhookPatchRequest,
 )
@@ -138,16 +139,27 @@ def test_list_schema_uses_bounded_offset_metadata() -> None:
             "total": 1,
             "limit": 50,
             "offset": 0,
+            "pagination": {
+                "limit": 50, "offset": 0, "total": 1,
+                "has_more": False, "next_offset": None,
+            },
         }
     )
     assert response.total == 1
     assert response.limit == 50
     assert response.offset == 0
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError) as exc_info:
         WebhookListResponse.model_validate(
-            {"items": [], "total": 0, "limit": 101, "offset": 0}
+            {
+                "items": [], "total": 0, "limit": 101, "offset": 0,
+                "pagination": {
+                    "limit": 101, "offset": 0, "total": 0,
+                    "has_more": False, "next_offset": None,
+                },
+            }
         )
+    assert ("limit",) in [error["loc"] for error in exc_info.value.errors()]
 
 
 @pytest.mark.unit
@@ -159,6 +171,36 @@ def test_status_schema_exposes_rollback_state_without_artifact_paths() -> None:
             "schema_ready": True,
             "key_state": "available",
             "delivery_capability_ready": False,
+            "delivery": {
+                "canonical_schema_version": 1,
+                "schema_ready": True,
+                "delivery_schema_ready": True,
+                "migration_complete": True,
+                "key_ready": True,
+                "key_primary_match": True,
+                "jobs_database_ready": True,
+                "queue_ready": True,
+                "job_type_ready": True,
+                "jobs_backend": "sqlite",
+                **{
+                    component: {
+                        "component": component,
+                        "ready": False,
+                        "reason_code": "mode_migrate",
+                    }
+                    for component in ("worker", "reconciler", "retention")
+                },
+                "backlog": {
+                    "pending": 0,
+                    "enqueue_claimed": 0,
+                    "queued": 0,
+                    "processing": 0,
+                    "retry_wait": 0,
+                },
+                "acquisition_ready": False,
+                "acquisition_reason_code": "mode_migrate",
+                "delivery_capability_ready": False,
+            },
             "limits": {
                 "registrations": 100,
                 "active_registrations": 25,
@@ -184,3 +226,32 @@ def test_status_schema_exposes_rollback_state_without_artifact_paths() -> None:
     assert "rollback_window_expires_at" in serialized["migration"]
     assert "backup_path" not in str(serialized)
     assert "key_path" not in str(serialized)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("response_model", [WebhookListResponse, WebhookDeliveryListResponse])
+def test_webhook_list_schema_populates_consistent_pagination_aliases(response_model) -> None:
+    response = response_model.model_validate({
+        "items": [], "total": 2, "limit": 1, "offset": 0,
+        "pagination": {"limit": 1, "offset": 0, "total": 2, "has_more": True, "next_offset": 1},
+    })
+
+    assert response.has_more is True
+    assert response.next_offset == 1
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("response_model", [WebhookListResponse, WebhookDeliveryListResponse])
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("total", 3), ("limit", 2), ("offset", 1), ("has_more", False), ("next_offset", 2)],
+)
+def test_webhook_list_schema_rejects_contradictory_pagination_aliases(response_model, field, value) -> None:
+    payload = {
+        "items": [], "total": 2, "limit": 1, "offset": 0,
+        "pagination": {"limit": 1, "offset": 0, "total": 2, "has_more": True, "next_offset": 1},
+    }
+    payload[field] = value
+
+    with pytest.raises(ValidationError, match=f"{field} alias mismatch"):
+        response_model.model_validate(payload)

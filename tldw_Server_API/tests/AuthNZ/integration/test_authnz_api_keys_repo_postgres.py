@@ -20,31 +20,15 @@ async def test_authnz_api_keys_repo_rotation_and_revoke_postgres(test_db_pool):
     """AuthnzApiKeysRepo mark_rotated / revoke_api_key_for_user should work on Postgres."""
     pool = test_db_pool
 
-    # Seed a user row for FK
-    async with pool.acquire() as conn:
-        await conn.execute(
-            """
-            INSERT INTO users (
-                uuid,
-                username,
-                email,
-                password_hash,
-                role,
-                is_active,
-                is_verified,
-                storage_quota_mb,
-                storage_used_mb,
-                created_at
-            )
-            VALUES ($1, $2, $3, $4, $5, TRUE, TRUE, 5120, 0.0, $6)
-            """,
-            str(uuid.uuid4()),
-            "pg_api_keys_repo_user",
-            "pg_api_keys_repo_user@example.com",
-            "x",
-            "user",
-            datetime.utcnow(),
-        )
+    # Seed the FK owner through the canonical guarded writer.
+    users = UsersDB(pool)
+    await users.initialize(ensure_schema=False)
+    await users.create_user(  # nosec B106 # Inert fixture hash, never used for login
+        username="pg_api_keys_repo_user",
+        email="pg_api_keys_repo_user@example.com",
+        password_hash="x",
+        is_verified=True,
+    )
 
     user_id = await pool.fetchval(
         "SELECT id FROM users WHERE username = $1",
@@ -117,31 +101,15 @@ async def test_authnz_api_keys_repo_usage_and_audit_postgres(test_db_pool):
     """AuthnzApiKeysRepo.increment_usage and insert_audit_log work on Postgres."""
     pool = test_db_pool
 
-    # Seed a user row for FK
-    async with pool.acquire() as conn:
-        await conn.execute(
-            """
-            INSERT INTO users (
-                uuid,
-                username,
-                email,
-                password_hash,
-                role,
-                is_active,
-                is_verified,
-                storage_quota_mb,
-                storage_used_mb,
-                created_at
-            )
-            VALUES ($1, $2, $3, $4, $5, TRUE, TRUE, 5120, 0.0, $6)
-            """,
-            str(uuid.uuid4()),
-            "pg_api_keys_usage_user",
-            "pg_api_keys_usage_user@example.com",
-            "x",
-            "user",
-            datetime.utcnow(),
-        )
+    # Seed the FK owner through the canonical guarded writer.
+    users = UsersDB(pool)
+    await users.initialize(ensure_schema=False)
+    await users.create_user(  # nosec B106 # Inert fixture hash, never used for login
+        username="pg_api_keys_usage_user",
+        email="pg_api_keys_usage_user@example.com",
+        password_hash="x",
+        is_verified=True,
+    )
 
     user_id = await pool.fetchval(
         "SELECT id FROM users WHERE username = $1",

@@ -4,6 +4,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
+
 
 @pytest.mark.asyncio
 async def test_chat_budget_guard_dependency_returns_principal(tmp_path):
@@ -18,9 +20,9 @@ async def test_chat_budget_guard_dependency_returns_principal(tmp_path):
     db_path = tmp_path / "users.db"
     os.environ["DATABASE_URL"] = f"sqlite:///{db_path}"
 
-    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
     reset_settings()
     await reset_db_pool()
@@ -28,12 +30,15 @@ async def test_chat_budget_guard_dependency_returns_principal(tmp_path):
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
 
-    # Seed a basic user
-    async with pool.transaction() as conn:
-        await conn.execute(
-            "INSERT INTO users (username, email, password_hash, is_active) VALUES (?, ?, ?, 1)",
-            ("budget_guard_user", "budget_guard@example.com", "x"),
-        )
+    # Seed a basic user through the canonical guarded writer.
+    users = UsersDB(pool)
+    await users.initialize(ensure_schema=False)
+    await users.create_user(  # nosec B106 # Inert fixture hash, never used for login
+        username="budget_guard_user",
+        email="budget_guard@example.com",
+        password_hash="x",
+        is_active=True,
+    )
     user_id = await pool.fetchval("SELECT id FROM users WHERE username = ?", "budget_guard_user")
 
     # Create a virtual key with a zero budget so it is immediately over limit
@@ -59,8 +64,8 @@ async def test_chat_budget_guard_dependency_returns_principal(tmp_path):
             await conn.execute("UPDATE api_keys SET scope = ? WHERE id = ?", ("write", key_id))
 
     # Remove LLMBudgetMiddleware so the dependency path handles the 402
-    from tldw_Server_API.app.main import app
     from tldw_Server_API.app.core.AuthNZ.llm_budget_middleware import LLMBudgetMiddleware
+    from tldw_Server_API.app.main import app
 
     original_middleware = list(getattr(app, "user_middleware", []))
     app.user_middleware = [m for m in original_middleware if getattr(m, "cls", None) is not LLMBudgetMiddleware]

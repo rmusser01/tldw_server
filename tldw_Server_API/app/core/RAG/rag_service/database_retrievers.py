@@ -48,6 +48,9 @@ from tldw_Server_API.app.core.DB_Management.media_db.api import (
 from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     DatabaseError as MediaDatabaseError,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.repositories.media_search_repository import (
+    append_sqlite_media_visibility,
+)
 from tldw_Server_API.app.core.RAG.exceptions import RAGDatabaseError
 
 from .hyde import (
@@ -1360,6 +1363,11 @@ class MediaDBRetriever(BaseRetriever):
             if filter_parts:
                 sql += f" AND ({' OR '.join(filter_parts)})"
 
+        visibility_conditions: list[str] = []
+        append_sqlite_media_visibility(visibility_conditions, params)
+        for condition in visibility_conditions:
+            sql += " AND " + condition
+
         # Add ordering and limit (bm25: lower is better on SQLite)
         sql += " ORDER BY rank ASC LIMIT ?"
         params.append(self.config.max_results)
@@ -1387,6 +1395,9 @@ class MediaDBRetriever(BaseRetriever):
                     "created_at": row.get("ingestion_date"),
                     "transcription_model": row.get("transcription_model"),
                     "source": "media_db",
+                    "source_id": str(row["id"]),
+                    "source_type": "media_db",
+                    "evidence_origin": "local_library",
                 },
                 score=float(score),
             )
@@ -1622,6 +1633,12 @@ class MediaDBRetriever(BaseRetriever):
             sql += " AND m.ingestion_date BETWEEN ? AND ?"
             params.extend([start_date.isoformat(), end_date.isoformat()])
 
+        if backend_type == BackendType.SQLITE:
+            visibility_conditions: list[str] = []
+            append_sqlite_media_visibility(visibility_conditions, params)
+            for condition in visibility_conditions:
+                sql += " AND " + condition
+
         # Order by relevance: SQLite bm25 prefers ASC; Postgres ts_rank prefers DESC
         if backend_type == BackendType.SQLITE:
             sql += " ORDER BY rank ASC LIMIT ?"
@@ -1723,6 +1740,13 @@ class MediaDBRetriever(BaseRetriever):
                             if key not in md and value is not None:
                                 md[key] = value
 
+            # Source identity comes from the owning row, even without descriptive metadata.
+            md.update({
+                "media_id": str(row["media_id"]),
+                "source_id": str(row["media_id"]),
+                "source_type": "media_db",
+                "evidence_origin": "local_library",
+            })
             chunk_uuid = str(row.get("chunk_uuid"))
             content_text = row.get("chunk_text") or ""
 
@@ -1870,6 +1894,11 @@ class MediaDBRetriever(BaseRetriever):
             # Use numeric media ID for Document.id to match callers/tests that
             # expect Media DB identifiers, and keep uuid in metadata if needed.
             doc_id = row.get("id")
+            metadata.update({
+                "source_id": str(doc_id),
+                "source_type": "media_db",
+                "evidence_origin": "local_library",
+            })
             title_text = (row.get("title") or "").strip()
             body_text = (row.get("content") or "").strip()
             if title_text and (not body_text or title_text.lower() not in body_text.lower()):

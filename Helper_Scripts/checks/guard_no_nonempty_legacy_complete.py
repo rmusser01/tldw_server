@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-import sys
 import re
+import sys
 from pathlib import Path
 
 
 def main() -> int:
+    """Reject non-empty test payloads only at the legacy complete endpoint."""
     repo_root = Path(__file__).resolve().parents[2]
     tests_root = repo_root / "tldw_Server_API" / "tests"
     if not tests_root.exists():
@@ -12,7 +13,7 @@ def main() -> int:
         return 0
 
     offenders = []
-    pattern_url = re.compile(r"/api/v1/chats/.+?/complete")
+    pattern_url = re.compile(r"/api/v1/chats/[^\"\'\n]+?/complete(?=[/?#\"\'])")
     for py in tests_root.rglob("*.py"):
         if py.name == "test_legacy_complete_deprecation.py":
             continue

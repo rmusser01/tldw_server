@@ -15,6 +15,12 @@ import { normalizeConversationState } from "@/utils/conversation-state"
 import type { NotificationInstance } from "antd/es/notification/interface"
 import type { ChatScope } from "@/types/chat-scope"
 import type { ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
+import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts"
+import { usePlaygroundSessionStore } from "@/store/playground-session"
+import { runChatPersistenceTransaction } from "@/db/dexie/chat-persistence-transaction"
+import { linkServerChatMirror, reconcileServerChatMirror, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
+
+export type ServerChatBranchSnapshot = { messages: Message[]; historyId: string }
 
 export const createRegenerateLastMessage = ({
   validateBeforeSubmitFn,
@@ -130,7 +136,8 @@ export const createRegenerateLastMessage = ({
       messages: submitMessages,
       controller: newController,
       messageType: userMessageType,
-      regenerateFromMessage: lastAssistant,
+      // A fork copied only the prefix; the previous reply and variants belong to its parent.
+      regenerateFromMessage: submitExtras.serverChatIdOverride ? undefined : lastAssistant,
       ...submitExtras
     })
   }
@@ -242,7 +249,7 @@ export const createBranchMessage = ({
   setMessages: (messages: Message[]) => void
   setHistory: (history: ChatHistory) => void
   historyId: string | null
-  setHistoryId: (id: string | null) => void
+  setHistoryId: (id: string | null, options?: { preserveServerChatId?: boolean }) => void
   setSelectedSystemPrompt?: (prompt: string) => void
   setSystemPrompt?: (prompt: string) => void
   setContext?: (context: UploadedFile[]) => void
@@ -275,18 +282,22 @@ export const createBranchMessage = ({
   serverOnly?: boolean
   notification: NotificationInstance
 }) => {
+  const sourceRevision = usePlaygroundSessionStore.getState().restoreRevision
+  const isSourceCurrent = () => usePlaygroundSessionStore.getState().restoreRevision === sourceRevision
   const createLocalBranch = async (index: number): Promise<string | null> => {
-    if (!historyId) {
+    if (!historyId || !isSourceCurrent()) {
       // No persisted history; nothing to branch from.
       return null
     }
 
     try {
       const newBranch = await generateBranchMessage(historyId, index)
+      if (!isSourceCurrent()) return null
       setHistory(formatToChatHistory(newBranch.messages))
       setMessages(formatToMessage(newBranch.messages))
       setHistoryId(newBranch.history.id)
       const systemFiles = await getSessionFiles(newBranch.history.id)
+      if (!isSourceCurrent()) return null
       if (setContext) {
         setContext(systemFiles)
       }
@@ -294,7 +305,8 @@ export const createBranchMessage = ({
       const lastUsedPrompt = newBranch?.history?.last_used_prompt
       if (lastUsedPrompt) {
         if (lastUsedPrompt.prompt_id) {
-          const prompt = await getPromptById(lastUsedPrompt.prompt_id)
+            const prompt = await getPromptById(lastUsedPrompt.prompt_id)
+            if (!isSourceCurrent()) return null
           if (prompt && setSelectedSystemPrompt) {
             setSelectedSystemPrompt(lastUsedPrompt.prompt_id)
           }
@@ -313,7 +325,7 @@ export const createBranchMessage = ({
     index: number,
     branchTitle: string
   ): Promise<string | null> => {
-    if (!messages || messages.length === 0) {
+    if (!messages || messages.length === 0 || !isSourceCurrent()) {
       return null
     }
 
@@ -322,44 +334,37 @@ export const createBranchMessage = ({
       return null
     }
 
+    let owner: ServicePromptSnapshot | undefined
     try {
-      const newHistory = await saveHistory(branchTitle, false, "branch")
-      const savedMessages: any[] = []
-
-      for (let i = 0; i < snapshot.length; i++) {
-        const msg = snapshot[i]
-        const role =
-          msg.name === "System"
-            ? "system"
-            : msg.isBot
-              ? "assistant"
-              : "user"
-        const name =
-          msg.name ||
-          (role === "assistant"
-            ? "Assistant"
-            : role === "system"
-              ? "System"
-              : "You")
-        const saved = await saveMessage({
-          history_id: newHistory.id,
-          name,
-          role,
-          content: String(msg.message ?? ""),
-          images: msg.images || [],
-          source: msg.sources || [],
-          time: i,
-          message_type: msg.messageType,
-          clusterId: msg.clusterId,
-          modelId: msg.modelId,
-          modelImage: msg.modelImage,
-          modelName: msg.modelName,
-          parent_message_id: msg.parentMessageId ?? null,
-          documents: msg.documents
-        })
-        savedMessages.push(saved)
-      }
-
+      owner = await loadServicePromptSnapshot([])
+      if (!isSourceCurrent() || owner.scopeSignal.aborted || owner.scopeInvalidatedSignal.aborted) return null
+      const { newHistory, savedMessages } = await runChatPersistenceTransaction(owner.scopeSignal, async () => {
+        const newHistory = await saveHistory(branchTitle, false, "branch", undefined, undefined, owner!.requestScope)
+        const savedMessages: Awaited<ReturnType<typeof saveMessage>>[] = []
+        for (let i = 0; i < snapshot.length; i++) {
+          const msg = snapshot[i]
+          const role = msg.name === "System" ? "system" : msg.isBot ? "assistant" : "user"
+          const name = msg.name || (role === "assistant" ? "Assistant" : role === "system" ? "System" : "You")
+          savedMessages.push(await saveMessage({
+            history_id: newHistory.id,
+            name,
+            role,
+            content: String(msg.message ?? ""),
+            images: msg.images || [],
+            source: msg.sources || [],
+            time: i,
+            message_type: msg.messageType,
+            clusterId: msg.clusterId,
+            modelId: msg.modelId,
+            modelImage: msg.modelImage,
+            modelName: msg.modelName,
+            parent_message_id: msg.parentMessageId ?? null,
+            documents: msg.documents
+          }))
+        }
+        return { newHistory, savedMessages }
+      })
+      if (!isSourceCurrent() || owner.scopeSignal.aborted || owner.scopeInvalidatedSignal.aborted) return null
       setHistory(formatToChatHistory(savedMessages))
       setMessages(formatToMessage(savedMessages))
       setHistoryId(newHistory.id)
@@ -368,16 +373,37 @@ export const createBranchMessage = ({
       }
       return newHistory.id
     } catch (e) {
+      if (isSourceCurrent()) console.warn("Unable to persist local Chat branch:", e)
       return null
+    } finally {
+      owner?.release()
     }
   }
 
-  return async (index: number): Promise<string | null> => {
+  return async (
+    index: number,
+    onSnapshot?: (snapshot: ServerChatBranchSnapshot) => void
+  ): Promise<string | null> => {
     // When a server-backed character chat is active, create a new server chat
     // branched from the current context and mirror the prefix messages.
     if (serverChatId) {
+      let owner: ServicePromptSnapshot | undefined
+      const isCurrent = () => isSourceCurrent() && owner !== undefined &&
+        !owner.scopeSignal.aborted && !owner.scopeInvalidatedSignal.aborted
       try {
-        await tldwClient.initialize().catch(() => null)
+        owner = await loadServicePromptSnapshot([])
+        if (!isCurrent()) return null
+        const requestOptions = {
+          ...(scope ? { scope } : {}),
+          signal: owner.scopeSignal,
+          requestScope: owner.requestScope
+        }
+        const prefix = excludeLocalRagDiagnostics((messages || []).slice(0, index + 1))
+        const snapshot = (history || []).slice(0, prefix.length)
+        if (!prefix.length || snapshot.length !== prefix.length || snapshot.some((row, i) =>
+          row.role !== (prefix[i].role || (prefix[i].name === "System" ? "system" : prefix[i].isBot ? "assistant" : "user")))) {
+          throw new Error("Chat history is not ready to branch")
+        }
 
         let resolvedTitle = (chatTitle || "").trim()
         let resolvedCharacterId = characterId ?? null
@@ -387,8 +413,9 @@ export const createBranchMessage = ({
         try {
           const chat = await tldwClient.getChat(
             serverChatId,
-            scope ? { scope } : undefined
+            requestOptions
           )
+          if (!isCurrent()) return null
           if (!resolvedTitle) {
             resolvedTitle = (chat?.title || "").trim()
           }
@@ -403,6 +430,7 @@ export const createBranchMessage = ({
               resolvedState
           )
         } catch (e) {
+          if (!isCurrent()) return null
           // server metadata fetch failed; continue with resolved defaults
         }
 
@@ -434,8 +462,9 @@ export const createBranchMessage = ({
 
         const created = await tldwClient.createChat(
           payload,
-          scope ? { scope } : undefined
+          requestOptions
         )
+        if (!isCurrent()) return null
         const rawId =
           (created as any)?.id ?? (created as any)?.chat_id ?? created
         const newChatId = rawId != null ? String(rawId) : ""
@@ -444,30 +473,58 @@ export const createBranchMessage = ({
         }
         onServerChatMutated?.()
 
-        const snapshot: ChatHistory =
-          (history && Array.isArray(history) ? history : []).slice(
-            0,
-            index + 1
-          )
-
-        for (const msg of snapshot) {
-          const content = (msg.content || "").trim()
-          if (!content) continue
+        const copiedMessages: Message[] = []
+        const copiedIds = new Map<string, string>()
+        for (const [position, msg] of snapshot.entries()) {
+          const original = prefix[position]
+          const content = msg.content || ""
+          const image = msg.image || original.images?.[0] || ""
+          const imageBase64 = image.includes(",") ? image.slice(image.indexOf(",") + 1) : image
+          if (!content.trim() && !imageBase64) continue
           const role =
             msg.role === "system" ||
             msg.role === "assistant" ||
             msg.role === "user"
               ? msg.role
               : "user"
-          await tldwClient.addChatMessage(
+          const parentId = original.parentMessageId ? copiedIds.get(original.parentMessageId) : undefined
+          const receipt = await tldwClient.addChatMessage(
             newChatId,
             {
               role,
-              content
+              ...(content ? { content } : {}),
+              ...(imageBase64 ? { image_base64: imageBase64 } : {}),
+              ...(parentId ? { parent_message_id: parentId } : {})
             },
-            scope ? { scope } : undefined
+            requestOptions
           )
+          if (!isCurrent()) return null
+          const id = receipt?.id != null ? String(receipt.id) : ""
+          if (!id) throw new Error("Missing copied message receipt")
+          if (original.id) copiedIds.set(original.id, id)
+          if (original.serverMessageId) copiedIds.set(original.serverMessageId, id)
+          copiedMessages.push({
+            ...original,
+            id,
+            serverMessageId: id,
+            serverMessageVersion: receipt.version,
+            parentMessageId: parentId ?? null,
+            // Only the active answer was copied; alternatives still belong to the parent.
+            variants: undefined,
+            activeVariantIndex: undefined
+          })
         }
+
+        const ownerKey = serverChatMirrorOwnerKey(owner)
+        const branchHistoryId = await linkServerChatMirror({
+          chatId: newChatId, title: branchTitle, ownerKey, signal: owner.scopeInvalidatedSignal
+        })
+        if (!isCurrent()) return null
+        await reconcileServerChatMirror({
+          historyId: branchHistoryId, chatId: newChatId, ownerKey,
+          messages: copiedMessages, localMessages: copiedMessages, signal: owner.scopeInvalidatedSignal
+        })
+        if (!isCurrent()) return null
 
         onServerChatBranchAccepted?.(newChatId, resolvedCharacterId)
         if (setServerChatId) {
@@ -509,16 +566,14 @@ export const createBranchMessage = ({
           setServerChatMetaLoaded(true)
         }
 
-        if (messages && messages.length > 0) {
-          const slicedMessages = messages.slice(0, index + 1)
-          setMessages(slicedMessages)
-          if (history && history.length > 0) {
-            setHistory(snapshot)
-          }
-        }
+        setHistoryId(branchHistoryId, { preserveServerChatId: true })
+        setMessages(copiedMessages)
+        setHistory(snapshot)
+        onSnapshot?.({ messages: copiedMessages, historyId: branchHistoryId })
 
         return newChatId
       } catch (e) {
+        if (!isCurrent()) return null
         // server branch failed; attempt local fallback
         if (serverOnly) {
           notification.error({
@@ -548,6 +603,8 @@ export const createBranchMessage = ({
             "Unable to create a branched server chat. Check your server connection and try again."
         })
         return null
+      } finally {
+        owner?.release()
       }
     }
 

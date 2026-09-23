@@ -207,30 +207,15 @@ export class ChatPage {
    * Wait for the chat page to be ready
    */
   async waitForReady(): Promise<void> {
-    const waitForSurface = async () => {
-      await Promise.race([
-        this.page
-          .getByRole("button", { name: /start chatting/i })
-          .waitFor({ state: "visible", timeout: 20_000 }),
-        this.page
-          .getByPlaceholder(/type a message/i)
-          .waitFor({ state: "visible", timeout: 20_000 }),
-        this.messageList.waitFor({ state: "visible", timeout: 20_000 }),
-      ])
-    }
-
-    await waitForSurface().catch(() => {})
-    // Check for Next.js error overlay (e.g. rate_limited) and reload if found
-    const hasErrorOverlay = await this.page.locator("nextjs-portal").count().catch(() => 0)
-    if (hasErrorOverlay > 0) {
-      await this.page.reload({ waitUntil: "domcontentloaded" })
-    }
-    // Dismiss any blocking modals
-    await this.page.evaluate(() => {
-      document.querySelectorAll('.ant-modal-root, .ant-modal-wrap, .ant-modal-mask').forEach(el => el.remove());
-      document.querySelectorAll('nextjs-portal').forEach(el => { if (el.children.length > 0) el.remove(); });
-    }).catch(() => {})
-    await waitForSurface()
+    // Readiness must not reload an in-memory handoff or remove recovery UI.
+    // A Next.js development-tools portal is present on healthy pages too.
+    await this.page
+      .getByRole("button", { name: /start chatting/i })
+      .or(this.page.getByPlaceholder(/type a message/i))
+      .or(this.messageList)
+      .filter({ visible: true })
+      .first()
+      .waitFor({ state: "visible", timeout: 20_000 })
   }
 
   /**
@@ -562,25 +547,17 @@ export class ChatPage {
    * Select a model from the model selector
    */
   async selectModel(modelId: string): Promise<void> {
-    // Click model selector to open dropdown
-    const selector =
-      this.modelSelector || this.page.getByTestId("model-select-trigger")
+    const selector = this.modelSelector
+    await expect(selector).toBeVisible({ timeout: 10_000 })
+    await selector.click()
 
-    if ((await selector.count()) > 0) {
-      await selector.click()
-
-      const modelChoiceCandidates = [
-        this.page.getByRole("option", { name: new RegExp(modelId, "i") }).first(),
-        this.page.getByRole("menuitem", { name: new RegExp(modelId, "i") }).first(),
-      ]
-
-      for (const candidate of modelChoiceCandidates) {
-        if (await candidate.isVisible().catch(() => false)) {
-          await candidate.click()
-          return
-        }
-      }
-    }
+    const choice = this.page.getByTestId("model-selector-option")
+      .and(this.page.locator(`[data-model-id=${JSON.stringify(modelId)}]`))
+      .filter({ visible: true })
+    await expect(choice).toBeVisible({ timeout: 10_000 })
+    const label = await choice.locator("span").first().innerText()
+    await choice.click()
+    await expect(selector).toContainText(label, { timeout: 10_000 })
   }
 
   /**

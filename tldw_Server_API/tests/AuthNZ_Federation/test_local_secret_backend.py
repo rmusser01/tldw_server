@@ -7,6 +7,7 @@ import pytest
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 from tldw_Server_API.app.core.AuthNZ.settings import Settings, reset_settings
+from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
 
 
 pytestmark = [pytest.mark.unit, pytest.mark.asyncio]
@@ -25,16 +26,14 @@ def _sqlite_settings(db_path: Path) -> Settings:
 
 
 async def _insert_test_user(pool: DatabasePool, *, username: str, email: str) -> int:
-    await pool.execute(
-        """
-        INSERT INTO users (username, email, password_hash)
-        VALUES (?, ?, ?)
-        """,
-        (username, email, "not-a-real-password-hash"),
+    users = UsersDB(pool)
+    await users.initialize(ensure_schema=False)
+    user = await users.create_user(  # nosec B106 # Inert fixture hash, never used for login
+        username=username,
+        email=email,
+        password_hash="not-a-real-password-hash",
     )
-    row = await pool.fetchone("SELECT id FROM users WHERE email = ?", (email,))
-    assert row is not None
-    return int(row["id"])
+    return int(user["id"])
 
 
 async def test_local_secret_backend_resolve_for_use_returns_ephemeral_material(

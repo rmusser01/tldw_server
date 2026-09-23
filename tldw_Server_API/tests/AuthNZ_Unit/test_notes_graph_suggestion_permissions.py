@@ -78,4 +78,8 @@ def test_migration_095_seeds_catalog_and_only_notes_writing_roles() -> None:
     }
     assert grants == expected
     assert not {role for role, _permission in grants} & {"reviewer", "viewer"}
-    assert get_authnz_migrations()[-1].version == 95
+    assert [
+        migration.version
+        for migration in get_authnz_migrations()
+        if migration.up is migration_095_seed_notes_graph_suggestion_permissions
+    ] == [95]

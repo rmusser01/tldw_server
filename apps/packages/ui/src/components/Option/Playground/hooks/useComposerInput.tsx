@@ -128,6 +128,7 @@ export function useComposerInput(deps: UseComposerInputDeps) {
     promptAssistSavedAttemptId,
     textAreaFocus,
     draftSaved,
+    draftReady,
     textareaMaxHeight,
   } = composerText;
 
@@ -605,5 +606,6 @@ export function useComposerInput(deps: UseComposerInputDeps) {
     wrapComposerProfile,
     // Draft persistence
     draftSaved,
+    draftReady,
   };
 }

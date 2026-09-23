@@ -25,7 +25,7 @@ env:
 
 concurrency:
   # Ensure newer PR commits cancel older queued runs for the same PR.
-  group: ci-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || github.ref || github.run_id }}
+  group: ci-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || github.ref || github.run_id }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
@@ -457,7 +457,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     needs: [lint, syntax-check, changes]
-    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'workflow_run') || needs.changes.outputs.backend_changed == 'true' }}
+    if: >-
+      !cancelled() &&
+      needs['lint'].result == 'success' &&
+      needs['syntax-check'].result == 'success' &&
+      needs['changes'].result == 'success' &&
+      ((github.event_name != 'pull_request' && github.event_name != 'workflow_run') || needs.changes.outputs.backend_changed == 'true')
     strategy:
       fail-fast: false
       matrix:
@@ -684,7 +689,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     needs: [lint, syntax-check, changes]
-    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'workflow_run') || needs.changes.outputs.backend_changed == 'true' }}
+    if: >-
+      !cancelled() &&
+      needs['lint'].result == 'success' &&
+      needs['syntax-check'].result == 'success' &&
+      needs['changes'].result == 'success' &&
+      ((github.event_name != 'pull_request' && github.event_name != 'workflow_run') || needs.changes.outputs.backend_changed == 'true')
     strategy:
       fail-fast: false
       matrix:
@@ -1463,6 +1473,7 @@ jobs:
           - name: chat-character-integration-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_auto_routing.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_images.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_stream_and_persist.py
           - name: chat-character-integration-context
             paths: >-
@@ -1908,6 +1919,8 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+          # Only the docs shard needs complete history for strict revision dates.
+          fetch-depth: ${{ contains(matrix.shard.paths, 'tldw_Server_API/tests/Docs') && '0' || '1' }}
 
       - name: Install FFmpeg and PortAudio (Linux)
         uses: ./.github/actions/setup-ffmpeg
@@ -2178,18 +2191,23 @@ jobs:
         shell: bash
         run: |
           r="${{ needs['full-suite-linux-312-shards'].result }}"
-          if [ "$r" != "success" ] && [ "$r" != "skipped" ]; then
+          if [ "$r" != "success" ]; then
             echo "Python 3.12 full-suite shards finished with: $r"
             exit 1
           fi
-          echo "Python 3.12 full-suite shards passed (or skipped via path filter)."
+          echo "Python 3.12 full-suite shards passed."
 
   full-suite-linux-313-shards:
     name: Full Suite shard (Ubuntu / Python 3.13 / ${{ matrix.shard.name }})
     runs-on: ubuntu-latest
     timeout-minutes: 60
     needs: [lint, syntax-check, changes]
-    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'workflow_run') || needs.changes.outputs.backend_changed == 'true' }}
+    if: >-
+      !cancelled() &&
+      needs['lint'].result == 'success' &&
+      needs['syntax-check'].result == 'success' &&
+      needs['changes'].result == 'success' &&
+      ((github.event_name != 'pull_request' && github.event_name != 'workflow_run') || needs.changes.outputs.backend_changed == 'true')
     strategy:
       fail-fast: false
       matrix:
@@ -2968,6 +2986,7 @@ jobs:
           - name: chat-character-integration-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_auto_routing.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_images.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_stream_and_persist.py
           - name: chat-character-integration-context
             paths: >-
@@ -3413,6 +3432,8 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+          # Only the docs shard needs complete history for strict revision dates.
+          fetch-depth: ${{ contains(matrix.shard.paths, 'tldw_Server_API/tests/Docs') && '0' || '1' }}
 
       - name: Install FFmpeg and PortAudio (Linux)
         uses: ./.github/actions/setup-ffmpeg
@@ -3627,11 +3648,11 @@ jobs:
         shell: bash
         run: |
           r="${{ needs['full-suite-linux-313-shards'].result }}"
-          if [ "$r" != "success" ] && [ "$r" != "skipped" ]; then
+          if [ "$r" != "success" ]; then
             echo "Python 3.13 full-suite shards finished with: $r"
             exit 1
           fi
-          echo "Python 3.13 full-suite shards passed (or skipped via path filter)."
+          echo "Python 3.13 full-suite shards passed."
 
 
   full-suite-macos-312-shards:
@@ -3639,7 +3660,12 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 60
     needs: [lint, syntax-check, changes]
-    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'workflow_run') || needs.changes.outputs.backend_changed == 'true' }}
+    if: >-
+      !cancelled() &&
+      needs['lint'].result == 'success' &&
+      needs['syntax-check'].result == 'success' &&
+      needs['changes'].result == 'success' &&
+      ((github.event_name != 'pull_request' && github.event_name != 'workflow_run') || needs.changes.outputs.backend_changed == 'true')
     strategy:
       fail-fast: false
       matrix:
@@ -4344,6 +4370,7 @@ jobs:
           - name: chat-character-integration-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_auto_routing.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_images.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_stream_and_persist.py
           - name: chat-character-integration-context
             paths: >-
@@ -4927,18 +4954,23 @@ jobs:
         shell: bash
         run: |
           r="${{ needs['full-suite-macos-312-shards'].result }}"
-          if [ "$r" != "success" ] && [ "$r" != "skipped" ]; then
+          if [ "$r" != "success" ]; then
             echo "macos-latest Python 3.12 full-suite shards finished with: $r"
             exit 1
           fi
-          echo "macos-latest Python 3.12 full-suite shards passed (or skipped via path filter)."
+          echo "macos-latest Python 3.12 full-suite shards passed."
 
   full-suite-windows-312-shards:
     name: Full Suite shard (windows-latest / Python 3.12 / ${{ matrix.shard.name }})
     runs-on: windows-latest
     timeout-minutes: 60
     needs: [lint, syntax-check, changes]
-    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'workflow_run') || needs.changes.outputs.backend_changed == 'true' }}
+    if: >-
+      !cancelled() &&
+      needs['lint'].result == 'success' &&
+      needs['syntax-check'].result == 'success' &&
+      needs['changes'].result == 'success' &&
+      ((github.event_name != 'pull_request' && github.event_name != 'workflow_run') || needs.changes.outputs.backend_changed == 'true')
     strategy:
       fail-fast: false
       matrix:
@@ -5643,6 +5675,7 @@ jobs:
           - name: chat-character-integration-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_auto_routing.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_images.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_stream_and_persist.py
           - name: chat-character-integration-context
             paths: >-
@@ -6231,18 +6264,22 @@ jobs:
         shell: bash
         run: |
           r="${{ needs['full-suite-windows-312-shards'].result }}"
-          if [ "$r" != "success" ] && [ "$r" != "skipped" ]; then
+          if [ "$r" != "success" ]; then
             echo "windows-latest Python 3.12 full-suite shards finished with: $r"
             exit 1
           fi
-          echo "windows-latest Python 3.12 full-suite shards passed (or skipped via path filter)."
+          echo "windows-latest Python 3.12 full-suite shards passed."
 
   full-suite-os-313-release-shards:
     name: Release Full Suite shard (${{ matrix.os }} / Python 3.13 / ${{ matrix.shard.name }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
     needs: [lint, syntax-check]
-    if: github.event_name != 'pull_request' && github.event_name != 'workflow_run'
+    if: >-
+      !cancelled() &&
+      needs['lint'].result == 'success' &&
+      needs['syntax-check'].result == 'success' &&
+      (github.event_name != 'pull_request' && github.event_name != 'workflow_run')
     strategy:
       fail-fast: false
       matrix:
@@ -6948,6 +6985,7 @@ jobs:
           - name: chat-character-integration-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_auto_routing.py
+              tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_images.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_character_chat_stream_and_persist.py
           - name: chat-character-integration-context
             paths: >-
@@ -7512,7 +7550,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: [full-suite-linux-312-summary, full-suite-linux-313-summary, changes]
-    if: ${{ (github.event_name != 'pull_request' && github.event_name != 'workflow_run') || needs.changes.outputs.backend_changed == 'true' }}
+    if: >-
+      !cancelled() &&
+      needs['full-suite-linux-312-summary'].result == 'success' &&
+      needs['full-suite-linux-313-summary'].result == 'success' &&
+      needs['changes'].result == 'success' &&
+      ((github.event_name != 'pull_request' && github.event_name != 'workflow_run') || needs.changes.outputs.backend_changed == 'true')
     env:
       PYTHONPATH: .
       PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'

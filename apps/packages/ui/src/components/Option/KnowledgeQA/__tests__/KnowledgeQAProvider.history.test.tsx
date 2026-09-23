@@ -45,7 +45,8 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 let latestContext: ReturnType<typeof useKnowledgeQA> | null = null
 
 function ContextProbe() {
-  latestContext = useKnowledgeQA()
+  const context = useKnowledgeQA()
+  React.useEffect(() => { latestContext = context }, [context])
   return null
 }
 
@@ -284,6 +285,41 @@ describe("KnowledgeQAProvider history hydration", () => {
       )
       expect(latestContext!.messages).toHaveLength(2)
     })
+  })
+
+  it.each([
+    { saved: { generation_provider: "openai", generation_model: "gpt-4.1-mini" }, expected: { generation_provider: "openai", generation_model: "gpt-4.1-mini" } },
+    { saved: { generation_provider: null, generation_model: null }, expected: { generation_provider: null, generation_model: null } },
+    { saved: { generation_provider: 7, generation_model: {} }, expected: { generation_provider: "ollama", generation_model: "previous-model" } },
+    { saved: {}, expected: { generation_provider: "ollama", generation_model: "previous-model" } },
+  ])("restores typed answer choices before a follow-up: %j", async ({ saved, expected }) => {
+    addChatMessageMock.mockResolvedValue({ id: "follow-up-user" })
+    fetchWithAuthMock.mockImplementation(async (path: string) => ({
+      ok: true,
+      status: 200,
+      json: async () => path.includes("/messages-with-context") ? [{
+        id: "saved-assistant", role: "assistant", content: "Saved answer",
+        rag_context: { search_query: "Original question", generated_answer: "Saved answer", settings_snapshot: saved },
+      }] : [],
+      text: async () => "",
+    }))
+    render(<KnowledgeQAProvider><ContextProbe /></KnowledgeQAProvider>)
+    await waitFor(() => expect(latestContext).not.toBeNull())
+    act(() => {
+      latestContext!.updateSetting("generation_provider", "ollama")
+      latestContext!.updateSetting("generation_model", "previous-model")
+    })
+    await act(async () => {
+      await latestContext!.restoreFromHistory({ ...baseHistoryItem, preset: "custom" })
+    })
+    expect(latestContext!.settings).toMatchObject(expected)
+    await act(async () => { await latestContext!.askFollowUp("A follow-up question") })
+    const request = ragSearchMock.mock.calls.at(-1)?.[1]
+    expect(request).toBeDefined()
+    for (const field of ["generation_provider", "generation_model"] as const) {
+      if (expected[field] === null) expect(request).not.toHaveProperty(field)
+      else expect(request[field]).toBe(expected[field])
+    }
   })
 
   it("hydrates partial payloads without failing and clears stale results", async () => {

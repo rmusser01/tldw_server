@@ -4,6 +4,7 @@ import contextlib
 import json
 import os
 import uuid
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -519,12 +520,22 @@ async def test_log_llm_usage_persists_router_enrichment(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_log_llm_usage_derives_token_name_from_key(monkeypatch):
+@pytest.mark.parametrize("backend_name", ["sqlite", "postgres"])
+async def test_log_llm_usage_derives_token_name_from_key(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    request: pytest.FixtureRequest,
+    backend_name: str,
+) -> None:
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setenv("SINGLE_USER_API_KEY", "ut-key-" + uuid.uuid4().hex)
     monkeypatch.setenv("PII_REDACT_LOGS", "false")
     monkeypatch.setenv("USAGE_LOG_DISABLE_META", "false")
-    dburl = f"sqlite:///./Databases/users_test_ut_{uuid.uuid4().hex}.sqlite"
+    dburl = (
+        request.getfixturevalue("pg_temp_db")["dsn"]
+        if backend_name == "postgres"
+        else f"sqlite:///{tmp_path / 'users_usage.db'}"
+    )
     monkeypatch.setenv("DATABASE_URL", dburl)
 
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
@@ -535,76 +546,77 @@ async def test_log_llm_usage_derives_token_name_from_key(monkeypatch):
     await reset_db_pool()
     await reset_session_manager()
 
+    from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
+    from tldw_Server_API.app.core.AuthNZ.profile_version import VersionedUserWriteGateway
+
     pool = await get_db_pool()
-    await _ensure_llm_tables(pool)
+    try:
+        assert bool(pool.pool) is (backend_name == "postgres")
+        await _ensure_llm_tables(pool)
+        await APIKeyManager(db_pool=pool).initialize()
 
-    if pool.pool:
-        await pool.execute(
-            """
-            INSERT INTO users (id, username, email, password_hash)
-            VALUES ($1, $2, $3, $4)
-            ON CONFLICT (id) DO NOTHING
-            """,
-            1,
-            "usage-test-user",
-            "usage-test-user@example.com",
-            "hash",
+        async with pool.transaction() as conn:
+            await VersionedUserWriteGateway(backend_name).insert_user(
+                conn,
+                values={
+                    "id": 1,
+                    "username": "usage-test-user",
+                    "email": "usage-test-user@example.com",
+                    "password_hash": "hash",  # nosec B105 # Inert fixture hash, never used for login
+                },
+                ignore_conflict=True,
+            )
+
+        key_hash = "kh-" + uuid.uuid4().hex
+        if pool.pool:
+            await pool.execute(
+                "INSERT INTO api_keys (user_id, key_hash, name, scope, key_prefix) VALUES ($1, $2, $3, $4, $5)",
+                1,
+                key_hash,
+                "DerivedName",
+                "read",
+                key_hash[:10],
+            )
+            key_id = await pool.fetchval("SELECT id FROM api_keys WHERE key_hash = $1", key_hash)
+        else:
+            await pool.execute(
+                "INSERT INTO api_keys (user_id, key_hash, name, scope, key_prefix) VALUES (?, ?, ?, ?, ?)",
+                1,
+                key_hash,
+                "DerivedName",
+                "read",
+                key_hash[:10],
+            )
+            key_id = await pool.fetchval("SELECT id FROM api_keys WHERE key_hash = ?", key_hash)
+        assert key_id is not None
+
+        await log_llm_usage(
+            user_id=1,
+            key_id=int(key_id),
+            endpoint="POST:/api/v1/chat/completions",
+            operation="chat",
+            provider="openai",
+            model="gpt-4o-mini",
+            status=200,
+            latency_ms=90,
+            prompt_tokens=5,
+            completion_tokens=2,
+            total_tokens=7,
+            request_id="req-derive-name",
         )
-    else:
-        await pool.execute(
-            """
-            INSERT OR IGNORE INTO users (id, username, email, password_hash)
-            VALUES (?, ?, ?, ?)
-            """,
-            1,
-            "usage-test-user",
-            "usage-test-user@example.com",
-            "hash",
-        )
 
-    key_hash = "kh-" + uuid.uuid4().hex
-    if pool.pool:
-        await pool.execute(
-            "INSERT INTO api_keys (user_id, key_hash, name, scope) VALUES ($1, $2, $3, $4)",
-            1,
-            key_hash,
-            "DerivedName",
-            "read",
-        )
-        key_id = await pool.fetchval("SELECT id FROM api_keys WHERE key_hash = $1", key_hash)
-    else:
-        await pool.execute(
-            "INSERT INTO api_keys (user_id, key_hash, name, scope) VALUES (?, ?, ?, ?)",
-            1,
-            key_hash,
-            "DerivedName",
-            "read",
-        )
-        key_id = await pool.fetchval("SELECT id FROM api_keys WHERE key_hash = ?", key_hash)
-    assert key_id is not None
+        if pool.pool:
+            row = await pool.fetchone("SELECT token_name FROM llm_usage_log WHERE request_id = $1", "req-derive-name")
+        else:
+            row = await pool.fetchone("SELECT token_name FROM llm_usage_log WHERE request_id = ?", "req-derive-name")
 
-    await log_llm_usage(
-        user_id=1,
-        key_id=int(key_id),
-        endpoint="POST:/api/v1/chat/completions",
-        operation="chat",
-        provider="openai",
-        model="gpt-4o-mini",
-        status=200,
-        latency_ms=90,
-        prompt_tokens=5,
-        completion_tokens=2,
-        total_tokens=7,
-        request_id="req-derive-name",
-    )
+        assert row is not None
+        if isinstance(row, dict):
+            assert row["token_name"] == "DerivedName"
+        else:
+            assert row[0] == "DerivedName"
 
-    if pool.pool:
-        row = await pool.fetchone("SELECT token_name FROM llm_usage_log WHERE request_id = $1", "req-derive-name")
-    else:
-        row = await pool.fetchone("SELECT token_name FROM llm_usage_log WHERE request_id = ?", "req-derive-name")
-
-    assert row is not None
-    if isinstance(row, dict):
-        assert row["token_name"] == "DerivedName"
-    else:
-        assert row[0] == "DerivedName"
+    finally:
+        await reset_session_manager()
+        await reset_db_pool()
+        reset_settings()

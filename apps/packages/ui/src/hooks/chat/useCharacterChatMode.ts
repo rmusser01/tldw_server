@@ -137,6 +137,7 @@ const collectChatFailureStrings = (
 
   for (const key of [
     "code",
+    "error_code",
     "error",
     "message",
     "detail",
@@ -195,6 +196,10 @@ export const classifyCharacterChatFailureRecovery = (
   const lower = detail.toLowerCase();
 
   const providerUnconfigured =
+    lower.includes("provider_authentication_failed") ||
+    lower.includes("invalid_provider_credentials") ||
+    lower.includes("missing_provider_credentials") ||
+    lower.includes("provider_configuration_invalid") ||
     lower.includes("provider_not_configured") ||
     lower.includes("no_provider_configured") ||
     lower.includes("no llm providers are configured") ||
@@ -472,6 +477,9 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
         return fromHistory.content.trim();
       }
 
+      // Existing turns own their transcript; only reuse a recorded greeting.
+      if (hasUserTurns) return "";
+
       if (selectedGreeting.length > 0) {
         return selectedGreeting;
       }
@@ -701,7 +709,7 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
               name: "You",
               message,
               sources: [],
-              images: [],
+              images: image ? [image] : [],
               createdAt,
               id: resolvedUserMessageId,
               parentMessageId: null,

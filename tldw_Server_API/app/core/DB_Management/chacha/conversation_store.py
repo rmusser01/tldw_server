@@ -1643,6 +1643,21 @@ class ConversationStore:
         )
         return clause, [like_pattern, like_pattern, like_pattern]
 
+    @staticmethod
+    def _sqlite_fts_literal_after_parse_error(query: str, exc: CharactersRAGDBError) -> str | None:
+        """Interpret rejected MATCH syntax as a literal, preserving valid FTS queries."""
+        cause = exc.__cause__
+        if not isinstance(cause, sqlite3.OperationalError):
+            return None
+        message = str(cause)
+        unknown_column = message.removeprefix("no such column: ")
+        query_column_error = message.startswith("no such column: ") and bool(unknown_column) and unknown_column in query
+        if not (
+            message.startswith("fts5: syntax error near ") or message == "unterminated string" or query_column_error
+        ):
+            return None
+        return '"' + query.replace('"', '""') + '"'
+
     def search_conversations(
         self,
         query: str | None,
@@ -1768,7 +1783,18 @@ class ConversationStore:
         if filters:
             base_query += " AND " + " AND ".join(filters)
 
-        cursor = self._db.execute_query(base_query, tuple(params))
+        try:
+            cursor = self._db.execute_query(base_query, tuple(params))
+        except CharactersRAGDBError as exc:
+            literal_query = (
+                self._sqlite_fts_literal_after_parse_error(safe_query, exc)
+                if safe_query and not use_deleted_text_search
+                else None
+            )
+            if literal_query is None:
+                raise
+            params[0] = literal_query
+            cursor = self._db.execute_query(base_query, tuple(params))
         return [dict(row) for row in cursor.fetchall()]
 
     def search_conversations_page(
@@ -1962,8 +1988,18 @@ class ConversationStore:
             count_cursor = self._db.execute_query(count_query, tuple(count_params))
             count_row = count_cursor.fetchone()
         except CharactersRAGDBError as exc:
-            logger.error("Error counting paged conversation search rows: {}", exc)
-            raise
+            literal_query = (
+                self._sqlite_fts_literal_after_parse_error(safe_query, exc)
+                if self._db.backend_type == BackendType.SQLITE and safe_query and not use_deleted_text_search
+                else None
+            )
+            if literal_query is None:
+                logger.error("Error counting paged conversation search rows: {}", exc)
+                raise
+            # Count, global rank, and page rows must all search the same literal.
+            count_params[0] = base_params[0] = literal_query
+            count_cursor = self._db.execute_query(count_query, tuple(count_params))
+            count_row = count_cursor.fetchone()
 
         if count_row is None:
             return [], 0, 0.0

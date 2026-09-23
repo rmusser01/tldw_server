@@ -23,6 +23,7 @@ import asyncpg
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
 from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
 from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService
 from tldw_Server_API.app.core.AuthNZ.settings import Settings
@@ -1931,17 +1932,18 @@ async def test_user(test_db_pool, password_service):
     password = "Test@Pass#2024!"
     password_hash = password_service.hash_password(password)
 
-    async with test_db_pool.acquire() as conn:
-        user = await conn.fetchrow("""
-            INSERT INTO users (
-                uuid, username, email, password_hash, role,
-                is_active, is_verified, storage_quota_mb, storage_used_mb
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-            RETURNING id, uuid, username, email, role, is_active, is_verified,
-                      storage_quota_mb, storage_used_mb, created_at
-        """, user_uuid, "testuser", "test@example.com", password_hash,
-            "user", True, True, 5120, 0.0)
+    users = UsersDB(test_db_pool)
+    await users.initialize(ensure_schema=False)
+    user = await users.create_user(
+        username="testuser",
+        email="test@example.com",
+        password_hash=password_hash,
+        role="user",
+        is_active=True,
+        is_verified=True,
+        storage_quota_mb=5120,
+        uuid_value=user_uuid,
+    )
 
     return {
         "id": user["id"],
@@ -1966,17 +1968,18 @@ async def admin_user(test_db_pool, password_service):
     password = "Admin@Pass#2024!"
     password_hash = password_service.hash_password(password)
 
-    async with test_db_pool.acquire() as conn:
-        user = await conn.fetchrow("""
-            INSERT INTO users (
-                uuid, username, email, password_hash, role,
-                is_active, is_verified, storage_quota_mb, storage_used_mb
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-            RETURNING id, uuid, username, email, role, is_active, is_verified,
-                      storage_quota_mb, storage_used_mb, created_at
-        """, user_uuid, "admin", "admin@example.com", password_hash,
-            "admin", True, True, 10240, 0.0)
+    users = UsersDB(test_db_pool)
+    await users.initialize(ensure_schema=False)
+    user = await users.create_user(
+        username="admin",
+        email="admin@example.com",
+        password_hash=password_hash,
+        role="admin",
+        is_active=True,
+        is_verified=True,
+        storage_quota_mb=10240,
+        uuid_value=user_uuid,
+    )
 
     return {
         "id": user["id"],
@@ -2001,17 +2004,18 @@ async def inactive_user(test_db_pool, password_service):
     password = "Inactive@Pass#2024!"
     password_hash = password_service.hash_password(password)
 
-    async with test_db_pool.acquire() as conn:
-        user = await conn.fetchrow("""
-            INSERT INTO users (
-                uuid, username, email, password_hash, role,
-                is_active, is_verified, storage_quota_mb, storage_used_mb
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-            RETURNING id, uuid, username, email, role, is_active, is_verified,
-                      storage_quota_mb, storage_used_mb, created_at
-        """, user_uuid, "inactiveuser", "inactive@example.com", password_hash,
-            "user", False, True, 5120, 0.0)
+    users = UsersDB(test_db_pool)
+    await users.initialize(ensure_schema=False)
+    user = await users.create_user(
+        username="inactiveuser",
+        email="inactive@example.com",
+        password_hash=password_hash,
+        role="user",
+        is_active=False,
+        is_verified=True,
+        storage_quota_mb=5120,
+        uuid_value=user_uuid,
+    )
 
     return {
         "id": user["id"],

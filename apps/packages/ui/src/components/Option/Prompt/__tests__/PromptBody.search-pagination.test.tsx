@@ -535,6 +535,32 @@ describe("PromptBody server search and pagination", () => {
     expect(screen.getByTestId("prompt-location-search")).toHaveTextContent("?tab=trash")
   })
 
+  it.each(["studio", "copilot"])(
+    "preserves the requested %s tab while connection verification is pending",
+    async (tab) => {
+      state.isOnline = false
+      const { rerenderPromptBody } = renderPromptBody([`/prompts?tab=${tab}`])
+      expect(screen.getByTestId("prompt-location-search")).toHaveTextContent(`?tab=${tab}`)
+      state.isOnline = true
+      rerenderPromptBody()
+      await waitFor(() =>
+        expect(screen.getByTestId("prompt-location-search")).toHaveTextContent(`?tab=${tab}`)
+      )
+    }
+  )
+
+  it("keeps the selected remote tab across a temporary connection loss", async () => {
+    const { rerenderPromptBody } = renderPromptBody(["/prompts?tab=studio"])
+    state.isOnline = false
+    rerenderPromptBody()
+    expect(screen.getByTestId("prompt-location-search")).toHaveTextContent("?tab=studio")
+    state.isOnline = true
+    rerenderPromptBody()
+    await waitFor(() =>
+      expect(screen.getByTestId("prompt-location-search")).toHaveTextContent("?tab=studio")
+    )
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     window.sessionStorage.clear()

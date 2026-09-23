@@ -27,10 +27,8 @@ export const JsonEditor: React.FC<JsonEditorProps> = ({
   ...textAreaProps
 }) => {
   const [error, setError] = useState<string | null>(null)
-  const [focused, setFocused] = useState(false)
 
   const handleBlur = useCallback(() => {
-    setFocused(false)
     if (!value || !value.trim()) {
       setError(null)
       onValidationError?.(null)
@@ -66,12 +64,11 @@ export const JsonEditor: React.FC<JsonEditorProps> = ({
         value={value}
         onChange={handleChange}
         onBlur={handleBlur}
-        onFocus={() => setFocused(true)}
         className={`font-mono text-sm ${className || ""}`}
         status={error ? "error" : undefined}
       />
       {showError && error && <div className={errorClassName}>{error}</div>}
-      {!focused && value?.trim() && (
+      {value?.trim() && (
         <div className="mt-2 rounded border border-border bg-surface2 text-xs">
           <Highlight code={value} language={safeLanguage("json")} theme={resolveTheme("auto")}>
             {({
@@ -90,9 +87,9 @@ export const JsonEditor: React.FC<JsonEditorProps> = ({
                 }}
               >
                 {tokens.map((line, i) => (
-                  <div key={i} {...getLineProps({ line, key: i })}>
+                  <div key={i} {...getLineProps({ line })}>
                     {line.map((token, key) => (
-                      <span key={key} {...getTokenProps({ token, key })} />
+                      <span key={key} {...getTokenProps({ token })} />
                     ))}
                   </div>
                 ))}

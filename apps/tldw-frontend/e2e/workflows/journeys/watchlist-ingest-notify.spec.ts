@@ -341,9 +341,9 @@ test.describe("Watchlist -> Ingest -> Notify journey", () => {
       await waitForConnection(page)
 
       await expect(page.getByTestId("watchlists-health-bar")).toBeVisible()
-      await expect(page.getByTestId("watchlists-repeat-actions")).toBeVisible()
-      await expect(page.getByTestId("watchlists-repeat-open-runs")).toBeVisible()
-
+      // Repeated guidance and commands now live in the Help disclosure.
+      await page.getByTestId("watchlists-help-icon").click()
+      await expect(page.getByTestId("watchlists-help-panel")).toBeVisible()
       await page.getByTestId("watchlists-open-command-palette").click()
       await expect(page.getByTestId("watchlists-command-palette-input")).toBeVisible()
       await page.getByTestId("watchlists-command-nav-monitors").click()
@@ -365,7 +365,9 @@ test.describe("Watchlist -> Ingest -> Notify journey", () => {
     })
 
     await test.step("Verify the completed run appears in Activity", async () => {
-      await page.getByRole("button", { name: "Open Activity" }).click()
+      await page.getByTestId("watchlists-help-icon").click()
+      await page.getByTestId("watchlists-open-command-palette").click()
+      await page.getByTestId("watchlists-command-nav-activity").click()
 
       const activitySection = page.getByTestId("watchlists-secondary-activity")
       await expect(page.getByLabel(/Activity runs table/i)).toBeVisible()
@@ -373,8 +375,8 @@ test.describe("Watchlist -> Ingest -> Notify journey", () => {
       await expect(activitySection.getByRole("button", { name: /Open Reports/i })).toBeVisible()
     })
 
-    await test.step("Verify the ingested article appears in Articles", async () => {
-      await page.getByRole("tab", { name: /^(Items|Articles)$/ }).click()
+    await test.step("Verify the ingested article appears in Updates", async () => {
+      await page.getByRole("tab", { name: /^Updates$/ }).click()
 
       const row = page.getByTestId("watchlists-item-row-9001")
       await expect(row).toBeVisible()

@@ -1,0 +1,1613 @@
+{
+  "schema_version": 1,
+  "inventory_kind": "workflow families and static source audit; not an executable case manifest or UAT result",
+  "created_at": "2026-09-21T19:05:49.743Z",
+  "task": "TASK-13260.278.1",
+  "playbook": {
+    "path": "Docs/Development/RELEASE_UAT_PLAYBOOK.md",
+    "sha256": "9ee7e357baedbc57085a82494d4a69516deb6c96cae3416fc68872aee10049e6",
+    "version": "1.0"
+  },
+  "checkpoint": {
+    "head": "3c871df7173d7b87b64bbb421882c2088542cb7d",
+    "cachedDev": "08e980a453d12155cccf10d0c5eb7fe32d05ac75",
+    "commonBase": "d72b1d2850ea947b6d12cac19f6b95867b68a580",
+    "rows": 205,
+    "copied": 184,
+    "groups": {
+      "UAT tracking/plans": 45,
+      "UAT candidate12-associated": 122,
+      "runtime/cache or private material; retained in place": 21,
+      "ownership unresolved; preserve, review before integration": 4,
+      "concurrent Chatbook work; do not integrate implicitly": 9,
+      "approved release-playbook input": 2,
+      "concurrent TTS work; do not integrate implicitly": 2
+    },
+    "artifactHashes": {
+      "tracked-head.patch": "5db19875a12c9f114438cc6a964c69f486d800750d42300bf1df813ffab61ecb",
+      "index.patch": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "working.patch": "5db19875a12c9f114438cc6a964c69f486d800750d42300bf1df813ffab61ecb",
+      "commits.bundle": "1a4e269eae0e495bffdb42b0818f08c67b603bb1b8b4431abf628eb914da20c8",
+      "git-status.z": "7e03de5e182b7dd779a03691750b3ab773c5bd5d2691cb33234fe26cf8a04b9a"
+    },
+    "manifestSha256": "b8a4f5d1afa29497daf1f6f7a9d6fb228fdcbde921957b4643f4cba0afba6720",
+    "sourceCopyMismatches": []
+  },
+  "case_manifest_status": "NOT_FROZEN",
+  "planned_case_count": null,
+  "execution_status": "NOT_RUN",
+  "family_counts": {
+    "A": 12,
+    "B": 9,
+    "C": 12,
+    "X": 4,
+    "S": 6,
+    "total": 43
+  },
+  "source_inventory": {
+    "workflow_spec_files": 101,
+    "static_declarations": 624,
+    "browser_interception_records": 413,
+    "by_project": {
+      "chromium": {
+        "files": 42,
+        "staticDeclarations": 342,
+        "interceptionRecords": 330
+      },
+      "journeys": {
+        "files": 8,
+        "staticDeclarations": 17,
+        "interceptionRecords": 2
+      },
+      "tier-1": {
+        "files": 2,
+        "staticDeclarations": 12,
+        "interceptionRecords": 0
+      },
+      "tier-2": {
+        "files": 21,
+        "staticDeclarations": 113,
+        "interceptionRecords": 16
+      },
+      "tier-3": {
+        "files": 5,
+        "staticDeclarations": 38,
+        "interceptionRecords": 5
+      },
+      "tier-4": {
+        "files": 11,
+        "staticDeclarations": 66,
+        "interceptionRecords": 52
+      },
+      "tier-5": {
+        "files": 12,
+        "staticDeclarations": 36,
+        "interceptionRecords": 8
+      }
+    },
+    "limitations": [
+      "Static test declarations are not registered test instances and cannot supply execution totals.",
+      "Playwright collection failed; original and adapted collection attempts are retained locally.",
+      "Browser API fulfillment is a UI contract, not real application integration.",
+      "No test or UAT browser executed during this audit."
+    ]
+  },
+  "findings": [
+    "UAT389",
+    "UAT390",
+    "UAT391",
+    "UAT392"
+  ],
+  "families": [
+    {
+      "workflow_id": "A-01",
+      "title": "Fresh setup to first successful Chat",
+      "spec_line": 200,
+      "required_scope": "required",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "fresh application state",
+        "published clean-install procedure"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [
+        {
+          "path": "apps/tldw-frontend/e2e/onboarding-uat/scenarios.ts",
+          "sha256": "04a3c9231c2985c0394698bad789ccd0dd18a4a9936c7d88970e45e521087838",
+          "kind": "file"
+        },
+        {
+          "path": "apps/tldw-frontend/e2e/onboarding-uat/setup-happy-path.spec.ts",
+          "sha256": "b9cfc6107db98085b4ebab3f59a3bf175844de50cd59a839e6c393aa907174e5",
+          "kind": "file"
+        },
+        {
+          "path": "apps/tldw-frontend/e2e/single-user-cookie-lifecycle.spec.ts",
+          "sha256": "ade38ec143d5414256f82ba9c4495ddf9cb361d4be4ad6ac6f198de097e6f845",
+          "kind": "file"
+        },
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/tier-1-critical/settings-core.spec.ts",
+          "sha256": "eab3a2ebfcbb0ab59ad275414221debfb085b1febc4921edcbc01ac4c270e6be",
+          "kind": "file"
+        }
+      ],
+      "known_mapping_limit": "Onboarding runner uses mock downstream inference and SQLite single-user profiles. Auth seeding elsewhere cannot certify fresh login, natural expiry or all four cells."
+    },
+    {
+      "workflow_id": "A-02",
+      "title": "Login, persistence, logout and connection recovery",
+      "spec_line": 212,
+      "required_scope": "required",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "fresh application state"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [
+        {
+          "path": "apps/tldw-frontend/e2e/onboarding-uat/scenarios.ts",
+          "sha256": "04a3c9231c2985c0394698bad789ccd0dd18a4a9936c7d88970e45e521087838",
+          "kind": "file"
+        },
+        {
+          "path": "apps/tldw-frontend/e2e/onboarding-uat/setup-happy-path.spec.ts",
+          "sha256": "b9cfc6107db98085b4ebab3f59a3bf175844de50cd59a839e6c393aa907174e5",
+          "kind": "file"
+        },
+        {
+          "path": "apps/tldw-frontend/e2e/single-user-cookie-lifecycle.spec.ts",
+          "sha256": "ade38ec143d5414256f82ba9c4495ddf9cb361d4be4ad6ac6f198de097e6f845",
+          "kind": "file"
+        },
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/tier-1-critical/settings-core.spec.ts",
+          "sha256": "eab3a2ebfcbb0ab59ad275414221debfb085b1febc4921edcbc01ac4c270e6be",
+          "kind": "file"
+        }
+      ],
+      "known_mapping_limit": "Onboarding runner uses mock downstream inference and SQLite single-user profiles. Auth seeding elsewhere cannot certify fresh login, natural expiry or all four cells."
+    },
+    {
+      "workflow_id": "A-03",
+      "title": "Multi-turn Chat, stream controls and Retry",
+      "spec_line": 225,
+      "required_scope": "required",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "fresh application state"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/chat-cockpit.real-server.spec.ts",
+          "sha256": "62ba54b6bd6467cc929b592cea7351def0f285a3d059a6b5d4b1df8347b48819",
+          "kind": "file"
+        }
+      ],
+      "known_mapping_limit": "Focused command selects five cases; attachment, true hidden-state and successful vision coverage must be explicitly mapped."
+    },
+    {
+      "workflow_id": "A-04",
+      "title": "Image attachments and capability recovery",
+      "spec_line": 237,
+      "required_scope": "required",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "fresh application state"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/chat-cockpit.real-server.spec.ts",
+          "sha256": "62ba54b6bd6467cc929b592cea7351def0f285a3d059a6b5d4b1df8347b48819",
+          "kind": "file"
+        }
+      ],
+      "known_mapping_limit": "Focused command selects five cases; attachment, true hidden-state and successful vision coverage must be explicitly mapped."
+    },
+    {
+      "workflow_id": "A-05",
+      "title": "Ingest files/URLs and follow background progress",
+      "spec_line": 248,
+      "required_scope": "required",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "fresh application state"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/journeys/ingest-search-chat.spec.ts",
+          "sha256": "84d66a647d1ac86d5f7116cf34aa79f8f13d18f50d6338ea9263972d3a83cde9",
+          "kind": "file"
+        },
+        {
+          "path": "apps/test-utils/real-server-workflows.ts",
+          "sha256": "56bd58a91476f3616342d4cd42ae728e807ec69ff6c7f48dec72f2f296e0837f",
+          "kind": "file"
+        }
+      ],
+      "known_mapping_limit": "Existing assertions/fixtures may be weaker than complete cited handoff; denied Wikipedia is not a substitute article."
+    },
+    {
+      "workflow_id": "A-06",
+      "title": "Media search, batch management, delete and restore",
+      "spec_line": 260,
+      "required_scope": "required",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "fresh application state"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [
+        {
+          "path": "apps/tldw-frontend/e2e/real-server-workflows.spec.ts",
+          "sha256": "4a5b00c14cd1196682a140c8e2c0c253c2d71b236305e637872894799628625d",
+          "kind": "file"
+        }
+      ],
+      "known_mapping_limit": "Four active tests: Chat→Note, Chat→card, Media Trash, ingestion→analysis/reanalysis. Historical title constants are not registered test counts. Auth/onboarding are seeded."
+    },
+    {
+      "workflow_id": "A-07",
+      "title": "Search/RAG to cited answer and grounded Chat",
+      "spec_line": 273,
+      "required_scope": "required",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "fresh application state"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/journeys/ingest-search-chat.spec.ts",
+          "sha256": "84d66a647d1ac86d5f7116cf34aa79f8f13d18f50d6338ea9263972d3a83cde9",
+          "kind": "file"
+        },
+        {
+          "path": "apps/test-utils/real-server-workflows.ts",
+          "sha256": "56bd58a91476f3616342d4cd42ae728e807ec69ff6c7f48dec72f2f296e0837f",
+          "kind": "file"
+        }
+      ],
+      "known_mapping_limit": "Existing assertions/fixtures may be weaker than complete cited handoff; denied Wikipedia is not a substitute article."
+    },
+    {
+      "workflow_id": "A-08",
+      "title": "Notes lifecycle, search and export",
+      "spec_line": 286,
+      "required_scope": "required",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "fresh application state"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/tier-1-critical/notes.spec.ts",
+          "sha256": "b4b0a872ee9fab971dab91f50d926afcf5c5c4936b46611095d3764efc7728e9",
+          "kind": "file"
+        }
+      ],
+      "known_mapping_limit": "Audit exact CRUD/export/conflict coverage and prerequisite creation before mapping a result."
+    },
+    {
+      "workflow_id": "A-09",
+      "title": "Chat answer to Note/card with provenance",
+      "spec_line": 298,
+      "required_scope": "required",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "fresh application state"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [
+        {
+          "path": "apps/tldw-frontend/e2e/real-server-workflows.spec.ts",
+          "sha256": "4a5b00c14cd1196682a140c8e2c0c253c2d71b236305e637872894799628625d",
+          "kind": "file"
+        }
+      ],
+      "known_mapping_limit": "Four active tests: Chat→Note, Chat→card, Media Trash, ingestion→analysis/reanalysis. Historical title constants are not registered test counts. Auth/onboarding are seeded."
+    },
+    {
+      "workflow_id": "A-10",
+      "title": "Generate, review and manage five study cards",
+      "spec_line": 310,
+      "required_scope": "required",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "fresh application state"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/journeys/notes-flashcards.spec.ts",
+          "sha256": "4922330f71ec801ecc81f6966b6da62b86aba634c31f68a30b7f778a1a95c450",
+          "kind": "file"
+        },
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/tier-2-features/flashcards.spec.ts",
+          "sha256": "c3fc440bd441b9db49f6f8b25a2e6276dc7f443630b5fdf5c19c9ce947ab0afe",
+          "kind": "file"
+        }
+      ],
+      "known_mapping_limit": "A positive count or one card is weaker than exactly five distinct generated/saved/reviewed cards, complete scheduling and analytics checks."
+    },
+    {
+      "workflow_id": "A-11",
+      "title": "Study, scheduling, practice and accurate analytics",
+      "spec_line": 322,
+      "required_scope": "required",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "fresh application state"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/journeys/notes-flashcards.spec.ts",
+          "sha256": "4922330f71ec801ecc81f6966b6da62b86aba634c31f68a30b7f778a1a95c450",
+          "kind": "file"
+        },
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/tier-2-features/flashcards.spec.ts",
+          "sha256": "c3fc440bd441b9db49f6f8b25a2e6276dc7f443630b5fdf5c19c9ce947ab0afe",
+          "kind": "file"
+        }
+      ],
+      "known_mapping_limit": "A positive count or one card is weaker than exactly five distinct generated/saved/reviewed cards, complete scheduling and analytics checks."
+    },
+    {
+      "workflow_id": "A-12",
+      "title": "Settings and provider readiness reflect real behavior",
+      "spec_line": 335,
+      "required_scope": "required",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "fresh application state"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [
+        {
+          "path": "apps/tldw-frontend/e2e/onboarding-uat/scenarios.ts",
+          "sha256": "04a3c9231c2985c0394698bad789ccd0dd18a4a9936c7d88970e45e521087838",
+          "kind": "file"
+        },
+        {
+          "path": "apps/tldw-frontend/e2e/onboarding-uat/setup-happy-path.spec.ts",
+          "sha256": "b9cfc6107db98085b4ebab3f59a3bf175844de50cd59a839e6c393aa907174e5",
+          "kind": "file"
+        },
+        {
+          "path": "apps/tldw-frontend/e2e/single-user-cookie-lifecycle.spec.ts",
+          "sha256": "ade38ec143d5414256f82ba9c4495ddf9cb361d4be4ad6ac6f198de097e6f845",
+          "kind": "file"
+        },
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/tier-1-critical/settings-core.spec.ts",
+          "sha256": "eab3a2ebfcbb0ab59ad275414221debfb085b1febc4921edcbc01ac4c270e6be",
+          "kind": "file"
+        }
+      ],
+      "known_mapping_limit": "Onboarding runner uses mock downstream inference and SQLite single-user profiles. Auth seeding elsewhere cannot certify fresh login, natural expiry or all four cells."
+    },
+    {
+      "workflow_id": "B-01",
+      "title": "Character create/edit/import/export lifecycle",
+      "spec_line": 349,
+      "required_scope": "required",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "fresh application state"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/tier-2-features/characters.spec.ts",
+          "sha256": "a038928a10ed567c81a2444e00e44ddc2bcdd8304a48dea5a52e77ac367a7241",
+          "kind": "file"
+        },
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/journeys/character-chat.spec.ts",
+          "sha256": "93455de74c1a4f2c6dbfc8297d872dca47f8e3092b1ec0b0530432ec10d9824e",
+          "kind": "file"
+        },
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/journeys/character-chat-phase7-readiness.spec.ts",
+          "sha256": "e1e820c4e67f58e6da4654fc15b873757bb4c1bf6ac1903be1684d9a260ee74f",
+          "kind": "file"
+        }
+      ],
+      "known_mapping_limit": "Skip/recovery branches do not certify actual `BEEP BOOP` or transitions."
+    },
+    {
+      "workflow_id": "B-02",
+      "title": "Character conversation and ordinary-Chat transitions",
+      "spec_line": 361,
+      "required_scope": "required",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "fresh application state"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/tier-2-features/characters.spec.ts",
+          "sha256": "a038928a10ed567c81a2444e00e44ddc2bcdd8304a48dea5a52e77ac367a7241",
+          "kind": "file"
+        },
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/journeys/character-chat.spec.ts",
+          "sha256": "93455de74c1a4f2c6dbfc8297d872dca47f8e3092b1ec0b0530432ec10d9824e",
+          "kind": "file"
+        },
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/journeys/character-chat-phase7-readiness.spec.ts",
+          "sha256": "e1e820c4e67f58e6da4654fc15b873757bb4c1bf6ac1903be1684d9a260ee74f",
+          "kind": "file"
+        }
+      ],
+      "known_mapping_limit": "Skip/recovery branches do not certify actual `BEEP BOOP` or transitions."
+    },
+    {
+      "workflow_id": "B-03",
+      "title": "World books and dictionaries affect only intended context",
+      "spec_line": 373,
+      "required_scope": "required",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "fresh application state"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/world-books.spec.ts",
+          "sha256": "ac434edc4ef882faaea9f421282090d1347d8463ec475740d5034839e2acaa56",
+          "kind": "file"
+        },
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/dictionaries.spec.ts",
+          "sha256": "ff877e3fad19f9dc251c954295b6c92670100d2224f7a5dee9348c5ba2d26a4e",
+          "kind": "file"
+        }
+      ],
+      "known_mapping_limit": "Include the actual catalog reader, not only character-attached readers; verify context effect/scope separately."
+    },
+    {
+      "workflow_id": "B-04",
+      "title": "Text to speech, voice selection and playback",
+      "spec_line": 385,
+      "required_scope": "required",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "fresh application state"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/tier-2-features/tts-synthesis.spec.ts",
+          "sha256": "539f3e2f660f1baf3168f826c3f80675faa72f29afcf3b38bbe2c7dcd8deb4e9",
+          "kind": "file"
+        },
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/tier-2-features/stt-transcription.spec.ts",
+          "sha256": "023ec7dff4028d357b28aaf30cf2e78e08f29b1bb41049e06922a5a0167efbec",
+          "kind": "file"
+        },
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/tier-2-features/audio-studio.spec.ts",
+          "sha256": "9938f84b69944eb59393dc2f588ac2b58e128b86b198c8efc003ac760d91c3b4",
+          "kind": "file"
+        }
+      ],
+      "known_mapping_limit": "Route/control/request checks are partial. Artifact decoding, listening/transcript quality, generation completion and export need explicit cases."
+    },
+    {
+      "workflow_id": "B-05",
+      "title": "File transcription and microphone dictation",
+      "spec_line": 397,
+      "required_scope": "required",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "fresh application state"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/tier-2-features/tts-synthesis.spec.ts",
+          "sha256": "539f3e2f660f1baf3168f826c3f80675faa72f29afcf3b38bbe2c7dcd8deb4e9",
+          "kind": "file"
+        },
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/tier-2-features/stt-transcription.spec.ts",
+          "sha256": "023ec7dff4028d357b28aaf30cf2e78e08f29b1bb41049e06922a5a0167efbec",
+          "kind": "file"
+        },
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/tier-2-features/audio-studio.spec.ts",
+          "sha256": "9938f84b69944eb59393dc2f588ac2b58e128b86b198c8efc003ac760d91c3b4",
+          "kind": "file"
+        }
+      ],
+      "known_mapping_limit": "Route/control/request checks are partial. Artifact decoding, listening/transcript quality, generation completion and export need explicit cases."
+    },
+    {
+      "workflow_id": "B-06",
+      "title": "Audio Studio project to rendered export",
+      "spec_line": 409,
+      "required_scope": "required",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "fresh application state"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/tier-2-features/tts-synthesis.spec.ts",
+          "sha256": "539f3e2f660f1baf3168f826c3f80675faa72f29afcf3b38bbe2c7dcd8deb4e9",
+          "kind": "file"
+        },
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/tier-2-features/stt-transcription.spec.ts",
+          "sha256": "023ec7dff4028d357b28aaf30cf2e78e08f29b1bb41049e06922a5a0167efbec",
+          "kind": "file"
+        },
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/tier-2-features/audio-studio.spec.ts",
+          "sha256": "9938f84b69944eb59393dc2f588ac2b58e128b86b198c8efc003ac760d91c3b4",
+          "kind": "file"
+        }
+      ],
+      "known_mapping_limit": "Route/control/request checks are partial. Artifact decoding, listening/transcript quality, generation completion and export need explicit cases."
+    },
+    {
+      "workflow_id": "B-07",
+      "title": "Watchlist source to scheduled item and notification",
+      "spec_line": 421,
+      "required_scope": "required",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "fresh application state"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/journeys/watchlist-ingest-notify.spec.ts",
+          "sha256": "ce17eb64075fd8a98768efce9fb02dfa44548f6c33aabd11ac2e2a4511ad1a67",
+          "kind": "file"
+        },
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/watchlists-items.spec.ts",
+          "sha256": "b465211131a97fe71f6f20ff09cdc0478d181f77ecb80ef426e3b3210bbafeb6",
+          "kind": "file"
+        }
+      ],
+      "known_mapping_limit": "Journey fulfills watchlist and notification APIs in the browser; it cannot certify scheduler/worker integration."
+    },
+    {
+      "workflow_id": "B-08",
+      "title": "Collections organize and share the intended sources",
+      "spec_line": 434,
+      "required_scope": "required",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "fresh application state"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/collections-stage3.spec.ts",
+          "sha256": "ce4a562a14537f1be0def95d40dffe59480c7eeea83cc78948d3b77625fbdaf3",
+          "kind": "file"
+        }
+      ],
+      "known_mapping_limit": "Check real account/permission and source-membership coverage before reuse."
+    },
+    {
+      "workflow_id": "B-09",
+      "title": "Content draft review and source reanalysis",
+      "spec_line": 446,
+      "required_scope": "required",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "fresh application state"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/tier-2-features/content-review.spec.ts",
+          "sha256": "89249ca154b39d8fb10a8107f1c48ef9a84c090476014e365656130669172b52",
+          "kind": "file"
+        },
+        {
+          "path": "apps/tldw-frontend/e2e/utils/page-objects/ContentReviewPage.ts",
+          "sha256": "9bae509b86993ab9ee5c97709b12df93e44d595f21ef9a083a2ed21bb3547676",
+          "kind": "file"
+        }
+      ],
+      "known_mapping_limit": "Existing tests can return when no draft exists or catch an absent API call. Such a result is not completed draft/commit acceptance."
+    },
+    {
+      "workflow_id": "C-01",
+      "title": "Prompt library to applied Chat behavior",
+      "spec_line": 461,
+      "required_scope": "required",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "fresh application state"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/journeys/prompts-chat.spec.ts",
+          "sha256": "d565a846d68c8b10ce7ce695bf7833bbc7d5e3f4861942b37ddf14ae248475f5",
+          "kind": "file"
+        },
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/tier-2-features/prompts-workspace.spec.ts",
+          "sha256": "7db0e9661f5b6cc8d57f4ff396f94bed69720b5cabe50c9c51d4b00cf61f2792",
+          "kind": "file"
+        }
+      ],
+      "known_mapping_limit": "Add actual instruction application, template/variable revision and Studio-run outcomes; library CRUD alone is insufficient."
+    },
+    {
+      "workflow_id": "C-02",
+      "title": "Prompt Studio variables, tests and revisions",
+      "spec_line": 473,
+      "required_scope": "required",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "fresh application state"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/journeys/prompts-chat.spec.ts",
+          "sha256": "d565a846d68c8b10ce7ce695bf7833bbc7d5e3f4861942b37ddf14ae248475f5",
+          "kind": "file"
+        },
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/tier-2-features/prompts-workspace.spec.ts",
+          "sha256": "7db0e9661f5b6cc8d57f4ff396f94bed69720b5cabe50c9c51d4b00cf61f2792",
+          "kind": "file"
+        }
+      ],
+      "known_mapping_limit": "Add actual instruction application, template/variable revision and Studio-run outcomes; library CRUD alone is insufficient."
+    },
+    {
+      "workflow_id": "C-03",
+      "title": "Evaluation dataset to interpretable single/batch results",
+      "spec_line": 485,
+      "required_scope": "required",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "fresh application state"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/tier-2-features/evaluations.spec.ts",
+          "sha256": "4999aaf3f7aa359ec9a618139b5697f478f6734e20ad51d0c6ebbc56da1c9f40",
+          "kind": "file"
+        },
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/journeys/ingest-evaluate-review.spec.ts",
+          "sha256": "0f527658c6cda824ebad7843c60eb3d2a1842e785ea6a825c5fb5a34b3d1c8c9",
+          "kind": "file"
+        }
+      ],
+      "known_mapping_limit": "A usable recipe validation outcome can still be a failed requested run; assert exact dataset/results."
+    },
+    {
+      "workflow_id": "C-04",
+      "title": "Agent registry to completed task and retained result",
+      "spec_line": 497,
+      "required_scope": "required",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "fresh application state"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/tier-3-automation/agent-registry.spec.ts",
+          "sha256": "1070be3b3de4b05e9972947ddf5a53dbe95005df5ef4521564b58b49716947e3",
+          "kind": "file"
+        },
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/tier-3-automation/agent-tasks.spec.ts",
+          "sha256": "bb77e3f49b0eacc97889a791189602495a15a8c9e4c3f83e726704d4b083f4e9",
+          "kind": "file"
+        },
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/tier-3-automation/acp-playground.spec.ts",
+          "sha256": "1fc0230a1481939e9da6508699db6fad6b5c3353626ce925f106a23a3a29d421",
+          "kind": "file"
+        }
+      ],
+      "known_mapping_limit": "Some cases mock APIs or accept empty/guarded states; actual task execution, permission effects and real adapter remain separate."
+    },
+    {
+      "workflow_id": "C-05",
+      "title": "ACP session, tool permission and workspace boundaries",
+      "spec_line": 509,
+      "required_scope": "required",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "fresh application state"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/tier-3-automation/agent-registry.spec.ts",
+          "sha256": "1070be3b3de4b05e9972947ddf5a53dbe95005df5ef4521564b58b49716947e3",
+          "kind": "file"
+        },
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/tier-3-automation/agent-tasks.spec.ts",
+          "sha256": "bb77e3f49b0eacc97889a791189602495a15a8c9e4c3f83e726704d4b083f4e9",
+          "kind": "file"
+        },
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/tier-3-automation/acp-playground.spec.ts",
+          "sha256": "1fc0230a1481939e9da6508699db6fad6b5c3353626ce925f106a23a3a29d421",
+          "kind": "file"
+        }
+      ],
+      "known_mapping_limit": "Some cases mock APIs or accept empty/guarded states; actual task execution, permission effects and real adapter remain separate."
+    },
+    {
+      "workflow_id": "C-06",
+      "title": "Writing session to reviewed, saved/exported revision",
+      "spec_line": 522,
+      "required_scope": "required",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "fresh application state"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/tier-2-features/writing-playground.spec.ts",
+          "sha256": "99645fc43ed4ea30f3fab67010a7927b147579cd7d2ab22ae88c97dbbbc41310",
+          "kind": "file"
+        },
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/tier-5-specialized/repo2txt.spec.ts",
+          "sha256": "0ef7263da60989eac9d0768845cb31487d77a3dce20cd24d4f22d56fcc32cc3b",
+          "kind": "file"
+        }
+      ],
+      "known_mapping_limit": "Request-fired/page-loaded evidence does not prove a correct saved/exported result."
+    },
+    {
+      "workflow_id": "C-07",
+      "title": "Repository to text bundle",
+      "spec_line": 534,
+      "required_scope": "required",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "fresh application state"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/tier-2-features/writing-playground.spec.ts",
+          "sha256": "99645fc43ed4ea30f3fab67010a7927b147579cd7d2ab22ae88c97dbbbc41310",
+          "kind": "file"
+        },
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/tier-5-specialized/repo2txt.spec.ts",
+          "sha256": "0ef7263da60989eac9d0768845cb31487d77a3dce20cd24d4f22d56fcc32cc3b",
+          "kind": "file"
+        }
+      ],
+      "known_mapping_limit": "Request-fired/page-loaded evidence does not prove a correct saved/exported result."
+    },
+    {
+      "workflow_id": "C-08",
+      "title": "Administrator account, role and quota lifecycle",
+      "spec_line": 545,
+      "required_scope": "required",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "fresh application state"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/tier-4-admin",
+          "sha256": null,
+          "kind": "directory"
+        },
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/llamacpp-runtime-admin.spec.ts",
+          "sha256": "957c2e77cdf6dd361e32525ea67e5f9f3e072bf00f2fe032b689d171c37327de",
+          "kind": "file"
+        }
+      ],
+      "known_mapping_limit": "Guarded/skipped admin tests do not prove authorized operations, restore or inference."
+    },
+    {
+      "workflow_id": "C-09",
+      "title": "Health, backup/restore and maintenance recovery",
+      "spec_line": 558,
+      "required_scope": "required",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "fresh application state"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/tier-4-admin",
+          "sha256": null,
+          "kind": "directory"
+        },
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/llamacpp-runtime-admin.spec.ts",
+          "sha256": "957c2e77cdf6dd361e32525ea67e5f9f3e072bf00f2fe032b689d171c37327de",
+          "kind": "file"
+        }
+      ],
+      "known_mapping_limit": "Guarded/skipped admin tests do not prove authorized operations, restore or inference."
+    },
+    {
+      "workflow_id": "C-10",
+      "title": "Model/runtime administration to real inference",
+      "spec_line": 570,
+      "required_scope": "required",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "fresh application state"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/tier-4-admin",
+          "sha256": null,
+          "kind": "directory"
+        },
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/llamacpp-runtime-admin.spec.ts",
+          "sha256": "957c2e77cdf6dd361e32525ea67e5f9f3e072bf00f2fe032b689d171c37327de",
+          "kind": "file"
+        }
+      ],
+      "known_mapping_limit": "Guarded/skipped admin tests do not prove authorized operations, restore or inference."
+    },
+    {
+      "workflow_id": "C-11",
+      "title": "MCP discovery and scoped tool execution",
+      "spec_line": 582,
+      "required_scope": "required",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "fresh application state"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/tier-2-features/mcp-hub.spec.ts",
+          "sha256": "01f4d14905a38444e878d059fb9d85bb668ec911c432dd8fa0dc5e8f47481c9f",
+          "kind": "file"
+        },
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/tier-3-automation/workflow-editor.spec.ts",
+          "sha256": "ef543a1269e94557b4e7a4b35ad3726c254ae42625e05c4c8f31fe2fe11ca39b",
+          "kind": "file"
+        },
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/tier-3-automation/chat-workflows.spec.ts",
+          "sha256": "17967d0102488dfb506915f5160cfdc466d143d1202195b4d808066f9648f93b",
+          "kind": "file"
+        }
+      ],
+      "known_mapping_limit": "Complete worker/tool execution, permission and real-schedule variants need explicit mapping."
+    },
+    {
+      "workflow_id": "C-12",
+      "title": "Workflow/scheduled task to monitored result",
+      "spec_line": 594,
+      "required_scope": "required",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "fresh application state"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/tier-2-features/mcp-hub.spec.ts",
+          "sha256": "01f4d14905a38444e878d059fb9d85bb668ec911c432dd8fa0dc5e8f47481c9f",
+          "kind": "file"
+        },
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/tier-3-automation/workflow-editor.spec.ts",
+          "sha256": "ef543a1269e94557b4e7a4b35ad3726c254ae42625e05c4c8f31fe2fe11ca39b",
+          "kind": "file"
+        },
+        {
+          "path": "apps/tldw-frontend/e2e/workflows/tier-3-automation/chat-workflows.spec.ts",
+          "sha256": "17967d0102488dfb506915f5160cfdc466d143d1202195b4d808066f9648f93b",
+          "kind": "file"
+        }
+      ],
+      "known_mapping_limit": "Complete worker/tool execution, permission and real-schedule variants need explicit mapping."
+    },
+    {
+      "workflow_id": "X-01",
+      "title": "Upgrade an existing installation without losing work",
+      "spec_line": 608,
+      "required_scope": "required",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "upgrade previous public release",
+        "upgrade oldest supported start if different"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [],
+      "known_mapping_limit": "Exact executable variants and source mapping remain to audit."
+    },
+    {
+      "workflow_id": "X-02",
+      "title": "Reciprocal user, organization and browser-state isolation",
+      "spec_line": 620,
+      "required_scope": "required",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "fresh application state"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [],
+      "known_mapping_limit": "Exact executable variants and source mapping remain to audit."
+    },
+    {
+      "workflow_id": "X-03",
+      "title": "Usability, accessibility and responsive review",
+      "spec_line": 633,
+      "required_scope": "required",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "fresh application state"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [
+        {
+          "path": "apps/tldw-frontend/e2e/smoke/stage4-axe-high-risk-routes.spec.ts",
+          "sha256": "1f5476f6ac0dcfd7edd353f84f0ddfc3aed39b1b154f43e6f74239273b703f98",
+          "kind": "file"
+        },
+        {
+          "path": "apps/tldw-frontend/playwright.config.ts",
+          "sha256": "828c15d712b8cb366919d24761de4fbec69ac97746a8a6eb1ae66717b37d3cc3",
+          "kind": "file"
+        }
+      ],
+      "known_mapping_limit": "Route inventory and screenshot/axe checks are partial; map actual end-to-end variants and human review."
+    },
+    {
+      "workflow_id": "X-04",
+      "title": "Extension capture, sidepanel and cross-surface continuity",
+      "spec_line": 646,
+      "required_scope": "required",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui",
+        "extension-options",
+        "extension-sidepanel"
+      ],
+      "phase_mapping": [
+        "fresh application state"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [
+        {
+          "path": "apps/tldw-frontend/e2e/smoke/stage4-axe-high-risk-routes.spec.ts",
+          "sha256": "1f5476f6ac0dcfd7edd353f84f0ddfc3aed39b1b154f43e6f74239273b703f98",
+          "kind": "file"
+        },
+        {
+          "path": "apps/tldw-frontend/playwright.config.ts",
+          "sha256": "828c15d712b8cb366919d24761de4fbec69ac97746a8a6eb1ae66717b37d3cc3",
+          "kind": "file"
+        }
+      ],
+      "known_mapping_limit": "Route inventory and screenshot/axe checks are partial; map actual end-to-end variants and human review."
+    },
+    {
+      "workflow_id": "S-01",
+      "title": "Quiz and study assistance",
+      "spec_line": 664,
+      "required_scope": "all shipped advertised variants; applicability unresolved",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "fresh application state"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [],
+      "known_mapping_limit": "Exact executable variants and source mapping remain to audit.",
+      "supplemental_contract": "From F-BIOLOGY create/review a quiz; take it with one intentional wrong answer; verify question-level scoring and saved attempt; generate reviewed remediation cards for the missed question; repeat conversion to verify documented deduplication; reload and study the linked cards. Open a study assistant, ask a question, create a two-client conflict and verify pending input recovery.",
+      "supplemental_variants": "Quiz, remediation conversion, Study assistant. D/L/U; real model for generation; card/conversion IDs and counts required."
+    },
+    {
+      "workflow_id": "S-02",
+      "title": "Chatbooks and portable backups",
+      "spec_line": 665,
+      "required_scope": "all shipped advertised variants; applicability unresolved",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "fresh application state"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [],
+      "known_mapping_limit": "Exact executable variants and source mapping remain to audit.",
+      "supplemental_contract": "Create a bundle containing one Chat, Note and source of each advertised supported type; export, inspect manifest and import into a separate account/profile through the supported mapping; verify text, links, assets and ownership. Retry a failed/corrupt import and ensure no false completed job or unexplained duplicate.",
+      "supplemental_variants": "Each supported advertised import format and full-account export. D/U; separate restore target; never assume API export equals UI roundtrip."
+    },
+    {
+      "workflow_id": "S-03",
+      "title": "Artifact editors",
+      "spec_line": 666,
+      "required_scope": "all shipped advertised variants; applicability unresolved",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "fresh application state"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [],
+      "known_mapping_limit": "Exact executable variants and source mapping remain to audit.",
+      "supplemental_contract": "Create a small artifact from a fixture, edit/reorder one item, save/reload, export and independently open the output; cancel a failing generation while preserving the saved artifact. Use exact cell/slide/card/text comparisons for deterministic edits.",
+      "supplemental_variants": "Data Tables:3rows×2columns; Presentations:3slides; Kanban:2lists/3cards with one move; Document Workspace:2page document with one annotation. Each variant D/L/U when generated; no title-only pass."
+    },
+    {
+      "workflow_id": "S-04",
+      "title": "Research and source workspaces",
+      "spec_line": 667,
+      "required_scope": "all shipped advertised variants; applicability unresolved",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "fresh application state"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [],
+      "known_mapping_limit": "Exact executable variants and source mapping remain to audit.",
+      "supplemental_contract": "Create a research/project workspace, add F-SOURCE plus a controlled additional source, run a bounded query/brief, inspect citations and save a resulting Note/report; reload and verify project/source/result identities and user scope; retry a failed provider action without losing prior work.",
+      "supplemental_variants": "Each advertised Research Workspace/connector/source-import path. D/L/U; real connector for L, controlled source for repeatability; no public web result guarantees."
+    },
+    {
+      "workflow_id": "S-05",
+      "title": "Moderation and claims review",
+      "spec_line": 668,
+      "required_scope": "all shipped advertised variants; applicability unresolved",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "fresh application state"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [],
+      "known_mapping_limit": "Exact executable variants and source mapping remain to audit.",
+      "supplemental_contract": "Create one benign and one flagged synthetic item; inspect matched rule/reason/evidence, approve/reject or correct through the actual review controls, and verify only selected items change. Review a clearly supported and unsupported Rowan claim; save the decision and audit attribution; verify role denial and batch partial failure.",
+      "supplemental_variants": "Moderation review, rules, claims review, specialized power-user route when shipped. D/U and L for model-derived classifications; fictional benign fixtures only."
+    },
+    {
+      "workflow_id": "S-06",
+      "title": "Specialized tools and discovery",
+      "spec_line": 669,
+      "required_scope": "all shipped advertised variants; applicability unresolved",
+      "required_cells": [
+        "sqlite-single",
+        "sqlite-multi",
+        "pg-single",
+        "pg-multi"
+      ],
+      "surface_mapping": [
+        "webui; extension parity variants require explicit mapping"
+      ],
+      "phase_mapping": [
+        "fresh application state"
+      ],
+      "code_review": "NOT_RUN",
+      "regression_verification": "NOT_RUN",
+      "native_uat_verification": "NOT_RUN",
+      "planned_case_count": null,
+      "automation_candidates": [],
+      "known_mapping_limit": "Exact executable variants and source mapping remain to audit.",
+      "supplemental_contract": "For each variant, select a supported input, execute its principal action, inspect a concrete result, save/export or follow its promised handoff, reload, then run one invalid-input/unavailable-dependency case. Pin the variant's expected output before execution.",
+      "supplemental_variants": "Chunking:known text/exact coverage and valid boundaries; model playground:real answer + selected provider; skills:one declared safe skill action + result; domain research tools (researchers/journalists/OSINT):controlled public dataset + cited report; documentation:search + correct linked page; profile/companion:save identity/settings + actual advertised interaction. D/L/U as applicable."
+    }
+  ],
+  "preserved_native_artifact_hashes": [
+    {
+      "candidate": 10,
+      "sourceBase": "2896dac108307cb437c91d9665700961da97b390",
+      "overlaySha256": "4011a9d1902aa1e312df583283a6a0d533fb7562cc19bea589d9e0661455d068",
+      "nativeExtensionTreeSha256": "8f137cac6e6f4285b61e6113768206207e89519dfa450c0bc1f92679dd70ba0d",
+      "files": 1386,
+      "bytes": 48839694,
+      "algorithm": "SHA256 of path-NUL-fileSHA256-newline sorted lexicographically by relative path",
+      "recordedAt": "2026-09-21T19:09:27.923Z"
+    },
+    {
+      "candidate": 11,
+      "sourceBase": "2896dac108307cb437c91d9665700961da97b390",
+      "overlaySha256": "cc4ec2357dabb1595be1f6172fcc6220e71824bbb3370a1da7be6255ce1b985f",
+      "nativeExtensionTreeSha256": "965867aa9562e989286bb6d5e97ff57dfa87d3e51dba887fb431083ac19149b8",
+      "files": 1386,
+      "bytes": 48839734,
+      "algorithm": "SHA256 of path-NUL-fileSHA256-newline sorted lexicographically by relative path",
+      "recordedAt": "2026-09-21T19:09:28.108Z"
+    },
+    {
+      "candidate": 12,
+      "sourceBase": "2896dac108307cb437c91d9665700961da97b390",
+      "overlaySha256": "a8a2fad4db8b14c243dc898e850cf316ca7e34ec006bf219fd1a44fcbe7a4a85",
+      "nativeExtensionTreeSha256": "200ce9ff4c9a724e0d76d811d5859a0864dbc0eac23131fc1270ef71342e009f",
+      "files": 1386,
+      "bytes": 48844727,
+      "algorithm": "SHA256 of path-NUL-fileSHA256-newline sorted lexicographically by relative path",
+      "recordedAt": "2026-09-21T19:09:28.291Z"
+    }
+  ]
+}

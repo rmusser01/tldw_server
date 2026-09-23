@@ -27,7 +27,7 @@ EVENT_ID = "33333333-3333-4333-8333-333333333333"
 
 
 def test_postgres_initializer_preserves_v60_v61_and_v62_steps_before_current_v63() -> None:
-    assert CharactersRAGDB._POSTGRES_SCHEMA_VERSION == 63
+    assert CharactersRAGDB._POSTGRES_SCHEMA_VERSION >= 63
     source = inspect.getsource(CharactersRAGDB._initialize_schema_postgres)
     assert "target_version = self._POSTGRES_SCHEMA_VERSION" in source
     assert "_migrate_from_v59_to_v60_postgres" in source

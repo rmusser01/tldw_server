@@ -45069,6 +45069,8 @@ for _message_store_method in (
     "count_root_messages_for_conversation",
     "get_root_messages_for_conversation",
     "get_messages_for_conversation_by_parent_ids",
+    "add_retry_system_instruction_block",
+    "get_retry_message_context",
     "has_system_message_for_conversation",
     "update_message",
     "soft_delete_message",

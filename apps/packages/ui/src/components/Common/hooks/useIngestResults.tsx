@@ -1,10 +1,16 @@
+import type { QuickIngestOperation } from "@/services/tldw/quick-ingest-authority"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import React from 'react'
+import i18n from 'i18next'
 import type { MessageInstance } from 'antd/es/message/interface'
 import { useNavigate } from "react-router-dom"
 import { browser } from "wxt/browser"
 import type { ResultOutcome } from "../QuickIngest/types"
 import {
   DRAFT_STORAGE_CAP_BYTES,
+  getDraftBatchById,
+  getDraftsByBatch,
+  withDraftTransaction,
   storeDraftAsset,
   upsertContentDraft,
   upsertDraftBatch
@@ -12,9 +18,11 @@ import {
 import type { ContentDraft, DraftBatch } from "@/db/dexie/types"
 import { setSetting } from "@/services/settings/registry"
 import {
-  DISCUSS_MEDIA_PROMPT_SETTING,
   LAST_MEDIA_ID_SETTING
 } from "@/services/settings/ui-settings"
+import { useHomeMilestoneScope } from "@/hooks/useHomeMilestoneScope"
+import { isExtensionRuntime } from "@/utils/browser-runtime"
+import { createMediaChatHandoff, buildMediaChatHandoffRoute, removeMediaChatHandoff } from "@/services/tldw/media-chat-handoff"
 import { resolvePerformChunking } from "@/services/tldw/ingest-defaults"
 import { useQuickIngestStore } from "@/store/quick-ingest"
 import { detectSections } from "@/utils/content-review"
@@ -324,6 +332,72 @@ type ResultsFilter = (typeof RESULT_FILTERS)[keyof typeof RESULT_FILTERS]
 // Deps interface
 // ---------------------------------------------------------------------------
 
+/** Shared by the shipped wizard and legacy modal. Existing batch IDs make
+ * completion replay/reload idempotent without overwriting a user's edits. */
+export async function createReviewDraftsFromResults({ results, files, rows = [], processingOptions, operation, batchId = crypto.randomUUID() }: {
+  results: ResultItem[]
+  files: Map<string, File>
+  rows?: Array<Pick<Entry, "id" | "url" | "type">>
+  processingOptions: ProcessingOptions
+  operation: QuickIngestOperation
+  batchId?: string
+}): Promise<{ batchId: string; draftIds: string[]; skippedAssets: number } | null> {
+  return withDraftTransaction(operation, async () => {
+    if (await getDraftBatchById(batchId, operation)) {
+      const drafts = await getDraftsByBatch(batchId, operation)
+      return { batchId, draftIds: drafts.map(draft => draft.id), skippedAssets: drafts.filter(draft => draft.source.kind === "file" && !draft.sourceAssetId).length }
+    }
+    const okResults = results.filter(item => item.status === "ok")
+    if (!okResults.length) return null
+    const now = Date.now()
+    const batch: DraftBatch = { id: batchId, source: "quick_ingest", sourceDetails: { total: okResults.length }, createdAt: now, updatedAt: now }
+    await upsertDraftBatch(batch, operation)
+    const draftIds: string[] = []
+    let skippedAssets = 0
+    for (const item of okResults) {
+      const sourceRow = rows.find(row => row.id === item.id)
+      const localFile = files.get(item.id)
+      for (const processed of extractProcessingItems(item.data)) {
+        const status = normalizeStatusLabel(processed.status)
+        if (RESULT_FAILURE_STATUS_TOKENS.includes(status) || isSkippedStatus(status)) continue
+        const id = crypto.randomUUID()
+        const content = resolveContent(processed)
+        const title = resolveTitle(processed, sourceRow?.url || item.url || localFile?.name || item.fileName || i18n.t("playground:sharedWorkspace.untitled", "Untitled source"))
+        const metadata = processed.metadata || {}
+        const contentFormat = inferContentFormat(content)
+        const { sections, strategy } = detectSections(content, processed.segments)
+        const analysis = resolveAnalysis(processed)
+        const prompt = resolvePrompt(processed)
+        const source: ContentDraft["source"] = localFile
+          ? { kind: "file", fileName: localFile.name, mimeType: localFile.type, sizeBytes: localFile.size, lastModified: localFile.lastModified }
+          : item.fileName ? { kind: "file", fileName: item.fileName }
+          : { kind: "url", url: sourceRow?.url || item.url || processed.url || processed.input_ref }
+        let sourceAssetId: string | undefined
+        if (localFile) {
+          const stored = await storeDraftAsset(id, localFile, operation)
+          sourceAssetId = stored.asset?.id
+          if (!stored.stored) skippedAssets += 1
+        }
+        const draft: ContentDraft = {
+          id, batchId, source, sourceAssetId, title, originalTitle: title,
+          mediaType: coerceDraftMediaType(String(processed.media_type || item.type || sourceRow?.type || "document")),
+          content, originalContent: content, contentFormat, originalContentFormat: contentFormat,
+          metadata: cloneObject(metadata) ?? {}, originalMetadata: cloneObject(metadata) ?? {},
+          keywords: normalizeKeywords(processed.keywords || metadata.keywords),
+          sections: sections.length ? sections : undefined, sectionStrategy: strategy || undefined,
+          excludedSectionIds: [], revisions: [], processingOptions: { ...processingOptions, advancedValues: { ...processingOptions.advancedValues } },
+          status: "pending", createdAt: now, updatedAt: now, expiresAt: now + 30 * 24 * 60 * 60 * 1000,
+          analysis, prompt, originalAnalysis: analysis, originalPrompt: prompt
+        }
+        await upsertContentDraft(draft, operation)
+        draftIds.push(id)
+      }
+    }
+    if (!draftIds.length) throw new Error("No processed content was returned for review.")
+    return { batchId, draftIds, skippedAssets }
+  })
+}
+
 export interface UseIngestResultsDeps {
   open: boolean
   running: boolean
@@ -357,6 +431,17 @@ export interface UseIngestResultsDeps {
 // ---------------------------------------------------------------------------
 
 export function useIngestResults(deps: UseIngestResultsDeps) {
+  const ownerScope = useHomeMilestoneScope()
+  const handoffBoundaryRevision = React.useRef(0)
+  React.useLayoutEffect(() => watchChatAccountChanges(invalidated => {
+    if (invalidated) handoffBoundaryRevision.current += 1
+  }), [])
+  const handoffLifetime = React.useRef<AbortController | null>(null)
+  React.useLayoutEffect(() => {
+    const lifetime = new AbortController()
+    handoffLifetime.current = lifetime
+    return () => lifetime.abort()
+  }, [ownerScope])
   const {
     open,
     running: runningProp,
@@ -595,145 +680,17 @@ export function useIngestResults(deps: UseIngestResultsDeps) {
   )
 
   // ---- draft creation ----
-  const createDraftBatchMetadata = React.useCallback(
-    (okResults: ResultItem[]) => {
-      const now = Date.now()
-      const batchId = crypto.randomUUID()
-      const batch: DraftBatch = {
-        id: batchId,
-        source: "quick_ingest",
-        sourceDetails: { total: okResults.length },
-        createdAt: now,
-        updatedAt: now
-      }
-      const processingOptions: ProcessingOptions = {
-        perform_analysis: Boolean(common.perform_analysis),
-        perform_chunking: resolvePerformChunking(common.perform_chunking),
-        overwrite_existing: Boolean(common.overwrite_existing),
-        advancedValues: { ...(advancedValues || {}) }
-      }
-      const expiresAt = now + 30 * 24 * 60 * 60 * 1000
-      const rowMap = new Map(rows.map((row) => [row.id, row]))
-      return { now, batchId, batch, processingOptions, expiresAt, rowMap }
+  const reviewDraftOperationRef = React.useRef<QuickIngestOperation | null>(null)
+  const createDraftsFromResults = React.useCallback(
+    (out: ResultItem[], fileLookup: Map<string, File>, operation = reviewDraftOperationRef.current) => {
+      if (!operation) throw new Error("Verify the original ingest account before retrying review drafts.")
+      reviewDraftOperationRef.current = operation
+      return createReviewDraftsFromResults({ results: out, files: fileLookup, rows, operation,
+        processingOptions: { perform_analysis: Boolean(common.perform_analysis),
+          perform_chunking: resolvePerformChunking(common.perform_chunking),
+          overwrite_existing: Boolean(common.overwrite_existing), advancedValues: { ...advancedValues } } })
     },
     [advancedValues, common, rows]
-  )
-
-  const extractMetadataForDraft = React.useCallback((processed: ProcessingItem) => {
-    const metadata = processed?.metadata && typeof processed.metadata === "object" ? processed.metadata : {}
-    const metadataCopy = cloneObject(metadata)
-    const originalMetadata = cloneObject(metadata)
-    if (!metadataCopy || !originalMetadata) {
-      console.warn("[createDraftsFromResults] Unable to clone metadata, using empty metadata", metadata)
-    }
-    const keywords = normalizeKeywords(processed?.keywords || metadata?.keywords)
-    return { metadataCopy: metadataCopy ?? {}, originalMetadata: originalMetadata ?? {}, keywords }
-  }, [])
-
-  const storeDraftAssetIfPresent = React.useCallback(
-    async ({ draftId, localFile, item, sourceRow, processed }: {
-      draftId: string; localFile?: File; item: ResultItem; sourceRow?: Entry; processed: ProcessingItem
-    }) => {
-      let sourceAssetId: string | undefined
-      let source: ContentDraft["source"] = {
-        kind: "url",
-        url: sourceRow?.url || item.url || processed?.url || processed?.input_ref
-      }
-      let skippedAssetsDelta = 0
-      if (localFile) {
-        const stored = await storeDraftAsset(draftId, localFile)
-        const fileSource: ContentDraft["source"] = {
-          kind: "file",
-          fileName: localFile.name,
-          mimeType: localFile.type,
-          sizeBytes: localFile.size,
-          lastModified: localFile.lastModified
-        }
-        if (stored.asset) sourceAssetId = stored.asset.id
-        else skippedAssetsDelta += 1
-        source = fileSource
-      } else if (item.fileName) {
-        source = { kind: "file", fileName: item.fileName }
-      }
-      return { source, sourceAssetId, skippedAssetsDelta }
-    },
-    []
-  )
-
-  const buildDraftFromProcessedItem = React.useCallback(
-    async ({ item, processed, sourceRow, localFile, batchId, now, expiresAt, processingOptions }: {
-      item: ResultItem; processed: ProcessingItem; sourceRow?: Entry; localFile?: File;
-      batchId: string; now: number; expiresAt: number; processingOptions: ProcessingOptions
-    }): Promise<{ draftId: string; skippedAssetsDelta: number } | null> => {
-      const statusLabel = String(processed?.status || "").toLowerCase()
-      if (statusLabel === "error" || statusLabel === "failed") return null
-
-      const draftId = crypto.randomUUID()
-      const content = resolveContent(processed)
-      const { metadataCopy, originalMetadata, keywords } = extractMetadataForDraft(processed)
-      const mediaTypeRaw = String(processed?.media_type || item.type || sourceRow?.type || "document").toLowerCase()
-      const mediaType: ContentDraft["mediaType"] = coerceDraftMediaType(mediaTypeRaw)
-      const sourceLabel = sourceRow?.url || item.url || localFile?.name || item.fileName || processed?.input_ref || "Untitled source"
-      const title = resolveTitle(processed, sourceLabel)
-      const contentFormat = inferContentFormat(content)
-      const { sections, strategy } = detectSections(content, processed?.segments)
-      const processingSnapshot = { ...processingOptions, advancedValues: { ...(processingOptions.advancedValues || {}) } }
-      const analysis = resolveAnalysis(processed)
-      const prompt = resolvePrompt(processed)
-
-      const { source, sourceAssetId, skippedAssetsDelta } =
-        await storeDraftAssetIfPresent({ draftId, localFile, item, sourceRow, processed })
-
-      const draft: ContentDraft = {
-        id: draftId, batchId, source, sourceAssetId, mediaType, title,
-        originalTitle: title, content, originalContent: content,
-        contentFormat, originalContentFormat: contentFormat,
-        metadata: metadataCopy, originalMetadata, keywords,
-        sections: sections.length > 0 ? sections : undefined,
-        excludedSectionIds: [],
-        sectionStrategy: strategy || undefined,
-        revisions: [],
-        processingOptions: processingSnapshot,
-        status: "pending",
-        createdAt: now, updatedAt: now, expiresAt,
-        analysis, prompt, originalAnalysis: analysis, originalPrompt: prompt
-      }
-      await upsertContentDraft(draft)
-      return { draftId, skippedAssetsDelta }
-    },
-    [extractMetadataForDraft, storeDraftAssetIfPresent]
-  )
-
-  const createDraftsFromResults = React.useCallback(
-    async (out: ResultItem[], fileLookup: Map<string, File>): Promise<{
-      batchId: string; draftIds: string[]; skippedAssets: number
-    } | null> => {
-      const okResults = out.filter((item) => item.status === "ok")
-      if (okResults.length === 0) return null
-      const { now, batchId, batch, processingOptions, expiresAt, rowMap } = createDraftBatchMetadata(okResults)
-      const draftIds: string[] = []
-      let skippedAssets = 0
-      await upsertDraftBatch(batch)
-      const draftPromises = okResults.map(async (item) => {
-        const sourceRow = rowMap.get(item.id)
-        const localFile = fileLookup.get(item.id)
-        const processingItems = extractProcessingItems(item.data)
-        if (processingItems.length === 0) return []
-        const itemDrafts = await Promise.all(
-          processingItems.map(async (processed) =>
-            buildDraftFromProcessedItem({ item, processed, sourceRow, localFile, batchId, now, expiresAt, processingOptions })
-          )
-        )
-        return itemDrafts.filter((draft): draft is { draftId: string; skippedAssetsDelta: number } => Boolean(draft))
-      })
-      const allDrafts = (await Promise.all(draftPromises)).flat()
-      for (const draft of allDrafts) {
-        skippedAssets += draft.skippedAssetsDelta
-        draftIds.push(draft.draftId)
-      }
-      return { batchId, draftIds, skippedAssets }
-    },
-    [buildDraftFromProcessedItem, createDraftBatchMetadata]
   )
 
   // ---- navigation helpers ----
@@ -763,7 +720,7 @@ export function useIngestResults(deps: UseIngestResultsDeps) {
     async (batchId: string): Promise<boolean> => {
       const hash = `#/content-review?batch=${batchId}`
       const isOptionsContext = window.location.pathname.includes("options.html")
-      if (isOptionsContext) {
+      if (!isExtensionRuntime() || isOptionsContext) {
         try { navigate(`/content-review?batch=${batchId}`); return true } catch {
           messageApi.error(qi("reviewNavigationFailed", "Couldn't open Content Review. Please try again."))
           return false
@@ -853,7 +810,11 @@ export function useIngestResults(deps: UseIngestResultsDeps) {
     } catch {}
   }, [openOptionsRoute])
 
-  const discussInChat = React.useCallback((item: ResultItem) => {
+  const discussInChat = React.useCallback(async (item: ResultItem) => {
+    const boundaryRevision = handoffBoundaryRevision.current
+    const lifetime = handoffLifetime.current
+    if (!ownerScope || !lifetime || lifetime.signal.aborted) return
+    let token: string | undefined
     try {
       const id = mediaIdFromPayload(item.data)
       if (id == null) return
@@ -862,12 +823,18 @@ export function useIngestResults(deps: UseIngestResultsDeps) {
         const payload = item.data as Record<string, unknown>
         sourceUrl = typeof payload.url === "string" ? payload.url : typeof payload.source_url === "string" ? payload.source_url : undefined
       }
-      const payload = { mediaId: String(id), url: item.url || sourceUrl, mode: "rag_media" as const }
-      void setSetting(DISCUSS_MEDIA_PROMPT_SETTING, payload)
-      try { window.dispatchEvent(new CustomEvent("tldw:discuss-media", { detail: payload })) } catch {}
-      openOptionsRoute("#/")
-    } catch {}
-  }, [openOptionsRoute])
+      const payload = { mediaId: String(id), url: item.url || sourceUrl, mode: "rag_media" as const, ownerScope }
+      const newTab = isExtensionRuntime() && !window.location.pathname.includes("options.html")
+      token = await createMediaChatHandoff(payload, { newTab })
+      if (boundaryRevision !== handoffBoundaryRevision.current || lifetime.signal.aborted) { await removeMediaChatHandoff(token); return }
+      const route = buildMediaChatHandoffRoute(token)
+      if (newTab) await browser.tabs.create({ url: browser.runtime.getURL(`/options.html#${route}`) })
+      else navigate(route)
+    } catch {
+      if (token) await removeMediaChatHandoff(token).catch(() => undefined)
+      messageApi.error(qi("chatPrepareFailed", "Could not prepare this source for Chat. Please try again."))
+    }
+  }, [ownerScope, navigate, messageApi, qi])
 
   // ---- retry / requeue ----
   const retryFailedUrls = React.useCallback(

@@ -9,6 +9,7 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
     _profile_user_backend,
 )
@@ -133,23 +134,27 @@ async def _managed_profile_write_transaction(
     db: Any,
     *,
     backend: str,
-) -> AsyncIterator[None]:
+) -> AsyncIterator[Any]:
     """Make a managed compound write atomic unless its caller already did."""
+    if isinstance(db, DatabasePool):
+        async with db.transaction() as conn:
+            yield conn
+        return
     if _profile_user_backend(db) is None:
-        yield
+        yield db
         return
     if inspect.getattr_static(db, "transaction", None) is None:
-        yield
+        yield db
         return
 
     if backend == "sqlite":
         if inspect.getattr_static(db, "in_transaction", None) is None:
-            yield
+            yield db
             return
         in_transaction = db.in_transaction
     else:
         if inspect.getattr_static(db, "is_in_transaction", None) is None:
-            yield
+            yield db
             return
         is_in_transaction = db.is_in_transaction
         in_transaction = is_in_transaction()
@@ -157,14 +162,14 @@ async def _managed_profile_write_transaction(
     if type(in_transaction) is not bool:
         raise TypeError("Managed connection returned an invalid transaction state")
     if in_transaction:
-        yield
+        yield db
         return
 
     transaction = db.transaction
     if not callable(transaction):
         raise TypeError("Managed connection transaction factory is not callable")
     async with transaction():
-        yield
+        yield db
 
 
 def _normalize_datetime_for_backend(value: datetime, *, backend: str) -> datetime:
@@ -210,23 +215,23 @@ async def update_user_last_login(db, user_id: int, now: datetime | None = None) 
     """Update last_login timestamp for the user."""
     now = now or datetime.now(timezone.utc)
     try:
-        gateway = _versioned_user_gateway(db)
-        now = _normalize_datetime_for_backend(now, backend=gateway.backend)
-        statement = (
-            "UPDATE users SET last_login = $1 WHERE id = $2"
-            if gateway.backend == "postgres"
-            else "UPDATE users SET last_login = ? WHERE id = ?"
-        )
         async with _managed_profile_write_transaction(
             db,
-            backend=gateway.backend,
-        ):
+            backend=_versioned_user_gateway(db).backend,
+        ) as conn:
+            gateway = _versioned_user_gateway(conn)
+            normalized_now = _normalize_datetime_for_backend(now, backend=gateway.backend)
+            statement = (
+                "UPDATE users SET last_login = $1 WHERE id = $2"
+                if gateway.backend == "postgres"
+                else "UPDATE users SET last_login = ? WHERE id = ?"
+            )
             await gateway.execute_update(
-                db,
+                conn,
                 user_id=user_id,
                 profile_visible_fields=("last_login",),
                 statement=statement,
-                parameters=(now, user_id),
+                parameters=(normalized_now, user_id),
             )
         await _maybe_commit(db)
     except Exception as e:
@@ -368,31 +373,34 @@ async def verify_user_email_once(
 ) -> int:
     """Mark user email as verified once; return number of updated rows."""
     try:
-        gateway = _versioned_user_gateway(db)
-        now_utc = _normalize_datetime_for_backend(now_utc, backend=gateway.backend)
-        if gateway.backend == "postgres":
-            statement = """
-                UPDATE users
-                   SET is_verified = $1, updated_at = $2
-                 WHERE id = $3
-                   AND lower(email) = lower($4)
-                   AND COALESCE(is_verified, $5) != $6
-                """
-        else:
-            statement = """
-                UPDATE users
-                   SET is_verified = ?, updated_at = ?
-                 WHERE id = ?
-                   AND lower(email) = lower(?)
-                   AND COALESCE(is_verified, ?) != ?
-                """
-        write_result = await gateway.execute_update(
-            db,
-            user_id=user_id,
-            profile_visible_fields=("is_verified",),
-            statement=statement,
-            parameters=(True, now_utc, user_id, email, False, True),
-        )
+        async with _managed_profile_write_transaction(
+            db, backend=_versioned_user_gateway(db).backend
+        ) as conn:
+            gateway = _versioned_user_gateway(conn)
+            normalized_now = _normalize_datetime_for_backend(now_utc, backend=gateway.backend)
+            if gateway.backend == "postgres":
+                statement = """
+                    UPDATE users
+                       SET is_verified = $1, updated_at = $2
+                     WHERE id = $3
+                       AND lower(email) = lower($4)
+                       AND COALESCE(is_verified, $5) != $6
+                    """
+            else:
+                statement = """
+                    UPDATE users
+                       SET is_verified = ?, updated_at = ?
+                     WHERE id = ?
+                       AND lower(email) = lower(?)
+                       AND COALESCE(is_verified, ?) != ?
+                    """
+            write_result = await gateway.execute_update(
+                conn,
+                user_id=user_id,
+                profile_visible_fields=("is_verified",),
+                statement=statement,
+                parameters=(True, normalized_now, user_id, email, False, True),
+            )
         await _maybe_commit(db)
         return len(write_result.affected_user_ids)
     except ProfileVersionNotFound:
@@ -424,20 +432,23 @@ async def fetch_user_by_email_for_verification(db: Any, email: str) -> dict[str,
 async def mark_user_verified(db: Any, user_id: int, now_utc: datetime) -> None:
     """Mark user email as verified."""
     try:
-        gateway = _versioned_user_gateway(db)
-        now_utc = _normalize_datetime_for_backend(now_utc, backend=gateway.backend)
-        statement = (
-            "UPDATE users SET is_verified = $1, updated_at = $2 WHERE id = $3"
-            if gateway.backend == "postgres"
-            else "UPDATE users SET is_verified = ?, updated_at = ? WHERE id = ?"
-        )
-        await gateway.execute_update(
-            db,
-            user_id=user_id,
-            profile_visible_fields=("is_verified",),
-            statement=statement,
-            parameters=(True, now_utc, user_id),
-        )
+        async with _managed_profile_write_transaction(
+            db, backend=_versioned_user_gateway(db).backend
+        ) as conn:
+            gateway = _versioned_user_gateway(conn)
+            normalized_now = _normalize_datetime_for_backend(now_utc, backend=gateway.backend)
+            statement = (
+                "UPDATE users SET is_verified = $1, updated_at = $2 WHERE id = $3"
+                if gateway.backend == "postgres"
+                else "UPDATE users SET is_verified = ?, updated_at = ? WHERE id = ?"
+            )
+            await gateway.execute_update(
+                conn,
+                user_id=user_id,
+                profile_visible_fields=("is_verified",),
+                statement=statement,
+                parameters=(True, normalized_now, user_id),
+            )
         await _maybe_commit(db)
     except Exception as exc:
         logger.error(f"auth_service.mark_user_verified failed for user {user_id}: {exc}")

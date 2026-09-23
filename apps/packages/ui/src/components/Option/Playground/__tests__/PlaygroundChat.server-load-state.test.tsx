@@ -1,10 +1,13 @@
 // @vitest-environment jsdom
 import React from "react"
-import { render, screen } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { render, screen, act, waitFor } from "@testing-library/react"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { MemoryRouter } from "react-router-dom"
 
 import { PlaygroundChat } from "../PlaygroundChat"
+import type { Character } from "@/types/character"
+
+const mirroredCharacter = vi.hoisted(() => ({ value: null as Character | null }))
 
 const queryState = vi.hoisted(() => ({
   chatModels: [] as any[],
@@ -66,7 +69,7 @@ const useMessageOptionState = vi.hoisted(() => ({
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string, defaultValue?: string) => defaultValue || key
+    t: (key: string, defaultValue?: string | { defaultValue?: string }) => (typeof defaultValue === "string" ? defaultValue : defaultValue?.defaultValue) || key
   })
 }))
 
@@ -91,7 +94,7 @@ vi.mock("@tanstack/react-query", () => ({
 }))
 
 vi.mock("@plasmohq/storage/hook", () => ({
-  useStorage: () => [false]
+  useStorage: (key: string) => [key === "chatUserDisplayName" ? "" : false, vi.fn()]
 }))
 
 vi.mock("@/hooks/useConnectionState", () => ({
@@ -103,7 +106,7 @@ vi.mock("@/hooks/useMessageOption", () => ({
 }))
 
 vi.mock("@/hooks/useSelectedCharacter", () => ({
-  useSelectedCharacter: () => [null]
+  useSelectedCharacter: () => [mirroredCharacter.value]
 }))
 
 vi.mock("@/hooks/useAntdNotification", () => ({
@@ -115,8 +118,8 @@ vi.mock("@/hooks/useAntdNotification", () => ({
   })
 }))
 
-vi.mock("@/components/Common/ChatGreetingPicker", () => ({
-  ChatGreetingPicker: () => null
+vi.mock("@/hooks/chat/useChatSettingsRecord", () => ({
+  useChatSettingsRecord: () => ({ settings: null, updateSettings: vi.fn() })
 }))
 
 vi.mock("../PlaygroundEmpty", () => ({
@@ -345,3 +348,102 @@ describe("PlaygroundChat selected server chat load state", () => {
     expect(screen.queryByTestId("playground-empty")).not.toBeInTheDocument()
   })
 })
+afterEach(() => { vi.useRealTimers() })
+
+it("UAT355: a plain chat does not gain a greeting picker from a cross-tab mirror", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+  mirroredCharacter.value = null
+  Object.assign(useMessageOptionState.value, {
+    historyId: null,
+    serverChatId: null,
+    serverChatAssistantKind: null,
+    serverChatAssistantId: null,
+    serverChatCharacterId: null,
+    serverChatMetaLoaded: false,
+    serverChatLoadState: "idle",
+    serverChatLoadError: null,
+    selectedAssistant: null,
+    effectiveAssistantState: {
+      mode: "plain",
+      kind: null,
+      id: null,
+      displayName: null,
+      avatarUrl: null,
+      systemPromptSnapshot: null,
+      source: "none"
+    }
+  })
+  const view = render(
+    <MemoryRouter>
+      <PlaygroundChat />
+    </MemoryRouter>
+  )
+  mirroredCharacter.value = {
+    id: "foreign-robot",
+    name: "Foreign Robot",
+    greeting: "Foreign greeting",
+    system_prompt: "Foreign prompt"
+  }
+  view.rerender(
+    <MemoryRouter>
+      <PlaygroundChat />
+    </MemoryRouter>
+  )
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(70)
+  })
+  expect
+    .soft(screen.queryAllByText("Foreign greeting", { exact: true }))
+    .toEqual([])
+  expect.soft(screen.queryByText("Include greeting in context")).toBeNull()
+  view.unmount()
+  mirroredCharacter.value = null
+})
+it.each([null, "owned-chat"])(
+  "UAT355: preserves owned Character greeting for chat %s",
+  async (chatId) => {
+    const selection = {
+      kind: "character",
+      id: "owned",
+      name: "Owned Character",
+      greeting: "Owned greeting",
+      metadata: { selectionMode: "tracked" }
+    }
+    mirroredCharacter.value = selection
+    Object.assign(useMessageOptionState.value, {
+      historyId: null,
+      serverChatId: chatId,
+      serverChatAssistantKind: chatId ? "character" : null,
+      serverChatAssistantId: chatId ? "owned" : null,
+      serverChatCharacterId: chatId ? "owned" : null,
+      serverChatMetaLoaded: !!chatId,
+      serverChatLoadState: "idle",
+      serverChatLoadError: null,
+      selectedAssistant: selection,
+      effectiveAssistantState: {
+        mode: "tracked_character",
+        kind: "character",
+        id: "owned",
+        displayName: "Owned Character",
+        avatarUrl: null,
+        systemPromptSnapshot: null,
+        source: "tracked"
+      }
+    })
+    const view = render(
+      <MemoryRouter>
+        <PlaygroundChat />
+      </MemoryRouter>
+    )
+    try {
+      await waitFor(() =>
+        expect(
+          screen.getAllByText("Owned greeting", { exact: true }).length
+        ).toBeGreaterThan(0)
+      )
+    } finally {
+      view.unmount()
+      mirroredCharacter.value = null
+    }
+  }
+)

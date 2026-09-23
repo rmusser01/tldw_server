@@ -1,3 +1,4 @@
+import { watchChatAccountChanges } from "@/services/chat-account-boundary";
 import { useDefaultCharacterSelection } from "@/hooks/useDefaultCharacterSelection";
 import {
   ChatComposer,
@@ -65,7 +66,6 @@ import {
   derivePromptAssistAuthorizationRevision,
 } from "@/services/chat-surface-scope";
 import {
-  DISCUSS_MEDIA_PROMPT_SETTING,
   DISCUSS_WATCHLIST_PROMPT_SETTING,
 } from "@/services/settings/ui-settings";
 import {
@@ -82,8 +82,11 @@ import {
 import {
   buildDiscussMediaHint,
   getMediaChatHandoffMode,
-  normalizeMediaChatHandoffPayload,
   parseMediaIdAsNumber,
+  consumeMediaChatHandoff,
+  removeMediaChatHandoff,
+  MEDIA_CHAT_HANDOFF_PARAM,
+  type MediaChatHandoffPayload,
 } from "@/services/tldw/media-chat-handoff";
 import {
   normalizeVoiceConversationRuntimeError,
@@ -171,7 +174,7 @@ import {
 } from "lucide-react";
 import React from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { useStorage } from "@plasmohq/storage/hook";
 
@@ -507,6 +510,7 @@ export const PlaygroundForm = ({
   );
   const notificationApi = useAntdNotification();
   const navigate = useNavigate();
+  const location = useLocation();
   const [attachedResearchContextDraft, setAttachedResearchContextDraft] =
     React.useState<AttachedResearchContext | null>(null);
   const [followUpResearchModalOpen, setFollowUpResearchModalOpen] =
@@ -543,6 +547,8 @@ export const PlaygroundForm = ({
     setMessages,
     selectedModel,
     selectedModelIsLoading,
+    selectedAssistant: resolvedAssistantSelection,
+    effectiveAssistantState,
     setSelectedModel,
     chatMode,
     setChatMode,
@@ -1057,9 +1063,16 @@ export const PlaygroundForm = ({
     () => getAssistantSelectionMode(selectedAssistant),
     [selectedAssistant]
   );
-  const selectedCharacter = React.useMemo(
+  const storedCharacter = React.useMemo(
     () => assistantSelectionToCharacter<Character>(selectedAssistant),
     [selectedAssistant]
+  );
+  const activeAssistantSelection = effectiveAssistantState?.mode === "plain"
+    ? null
+    : resolvedAssistantSelection;
+  const selectedCharacter = React.useMemo(
+    () => assistantSelectionToCharacter<Character>(activeAssistantSelection),
+    [activeAssistantSelection]
   );
   const setSelectedCharacter = React.useCallback(
     async (next: Character | null) => {
@@ -1165,8 +1178,8 @@ export const PlaygroundForm = ({
     : "";
 
   const storedCharacterId = React.useMemo(
-    () => resolveCharacterSelectionId(selectedCharacter),
-    [selectedCharacter],
+    () => resolveCharacterSelectionId(storedCharacter),
+    [storedCharacter],
   );
   const localDefaultCharacterId = React.useMemo(
     () => resolveCharacterSelectionId(defaultCharacter),
@@ -1995,6 +2008,7 @@ export const PlaygroundForm = ({
     onComposerRenderProfile,
     wrapComposerProfile,
     draftSaved,
+    draftReady,
   } = composerInput;
 
   const hasDraft = (form.values.message || "").trim().length > 0;
@@ -2504,30 +2518,40 @@ export const PlaygroundForm = ({
     };
   }, [toggleCompareMode]);
 
-  const applyDiscussMediaPayload = React.useCallback(
-    (
-      rawPayload: unknown,
-      options?: {
-        clearAfterUse?: boolean;
-      },
-    ) => {
-      const payload = normalizeMediaChatHandoffPayload(rawPayload);
-      if (!payload || (payload.ownerScope && payload.ownerScope !== homeScopeRef.current)) {
-        if (options?.clearAfterUse) {
-          void clearSetting(DISCUSS_MEDIA_PROMPT_SETTING);
-        }
-        return;
-      }
-      if (options?.clearAfterUse) {
-        void clearSetting(DISCUSS_MEDIA_PROMPT_SETTING);
-      }
+  const mediaHandoffToken = new URLSearchParams(location.search).get(MEDIA_CHAT_HANDOFF_PARAM);
+  const mediaDestinationRef = React.useRef({ token: mediaHandoffToken, owner: homeScope, draftReady, text: form.values.message });
+  mediaDestinationRef.current = { token: mediaHandoffToken, owner: homeScope, draftReady, text: form.values.message };
+  const handoffBoundaryRevision = React.useRef(0);
+  React.useLayoutEffect(() => watchChatAccountChanges(invalidated => {
+    if (invalidated) handoffBoundaryRevision.current += 1;
+  }), []);
+  const mediaLifetime = React.useRef<AbortController | null>(null);
+  React.useLayoutEffect(() => {
+    const lifetime = new AbortController();
+    mediaLifetime.current = lifetime;
+    return () => lifetime.abort();
+  }, []);
+  const handledMediaHandoffs = React.useRef(new Set<string>());
+  const [mediaHandoffConflict, setMediaHandoffConflict] = React.useState<{ token: string; owner: string } | null>(null);
+  const cleanMediaHandoffRoute = () => {
+    const params = new URLSearchParams(location.search);
+    params.delete(MEDIA_CHAT_HANDOFF_PARAM);
+    navigate({ pathname: location.pathname, search: params.toString() ? `?${params}` : "", hash: location.hash }, { replace: true });
+  };
+
+  const applyDiscussMediaPayload = (
+    payload: MediaChatHandoffPayload,
+    message: string,
+  ) => {
+      useStoreMessageOption.getState().setSelectedKnowledge(null);
       const mode = getMediaChatHandoffMode(payload);
       if (mode === "rag_media") {
         const mediaId = parseMediaIdAsNumber(payload);
-        if (mediaId != null) {
+        const mediaIds = payload.mediaIds || (mediaId == null ? [] : [mediaId]);
+        if (mediaIds.length) {
           usePlaygroundSessionStore.getState().markSourceSelectionIntent();
           setChatMode("rag");
-          setRagMediaIds([mediaId]);
+          setRagMediaIds(mediaIds);
           setFileRetrievalEnabled(true);
         }
       } else {
@@ -2535,41 +2559,69 @@ export const PlaygroundForm = ({
         setChatMode("normal");
         setRagMediaIds(null);
       }
-      const hint = buildDiscussMediaHint(payload);
-      if (!hint) return;
-      setMessageValue(hint, { collapseLarge: true, forceCollapse: true });
+      if (!message) return;
+      setMessageValue(message, { collapseLarge: true, forceCollapse: true });
       textAreaFocus();
-    },
-    [setChatMode, setFileRetrievalEnabled, setMessageValue, setRagMediaIds, textAreaFocus],
-  );
+  };
+  const applyMediaRef = React.useRef(applyDiscussMediaPayload);
+  applyMediaRef.current = applyDiscussMediaPayload;
+  const cleanMediaRouteRef = React.useRef(cleanMediaHandoffRoute);
+  cleanMediaRouteRef.current = cleanMediaHandoffRoute;
 
-  // Seed composer when a media item requests discussion (e.g., from Quick ingest or Review page)
+  const acceptMediaHandoff = React.useCallback(async (
+    token: string, owner: string, action: "auto" | "insert" | "replace", current: () => boolean = () => true,
+  ) => {
+    const boundaryRevision = handoffBoundaryRevision.current;
+    const lifetime = mediaLifetime.current;
+    if (!lifetime || lifetime.signal.aborted) return;
+    await consumeMediaChatHandoff(token, owner, payload => {
+      const destination = mediaDestinationRef.current;
+      if (boundaryRevision !== handoffBoundaryRevision.current || lifetime.signal.aborted || !current() || !destination.draftReady || destination.token !== token || destination.owner !== owner || handledMediaHandoffs.current.has(token)) return false;
+      const hint = buildDiscussMediaHint(payload);
+      if (action === "auto" && destination.text.trim()) {
+        setMediaHandoffConflict({ token, owner });
+        return false;
+      }
+      const text = action === "insert" && destination.text ? `${destination.text}\n\n${hint}` : hint;
+      handledMediaHandoffs.current.add(token);
+      applyMediaRef.current(payload, text);
+      setMediaHandoffConflict(null);
+      cleanMediaRouteRef.current();
+      return true;
+    });
+  }, []);
+
+  // Only this tab's explicit destination token may deliver source text. Legacy
+  // shared pending settings and unaddressed window events are never consumed.
   React.useEffect(() => {
-    const requestOwnerScope = homeScope;
+    if (!mediaHandoffToken || !homeScope || !draftReady || handledMediaHandoffs.current.has(mediaHandoffToken)) return;
     let cancelled = false;
-    void (async () => {
-      const payload = await getSetting(DISCUSS_MEDIA_PROMPT_SETTING);
-      if (cancelled || homeScopeRef.current !== requestOwnerScope || !payload) return;
-      // Legacy Review handoffs may have no token-derived identity (cookie auth).
-      // Owned Home handoffs wait for identity resolution before validation.
-      if (payload.ownerScope && !requestOwnerScope) return;
-      applyDiscussMediaPayload(payload, { clearAfterUse: true });
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [applyDiscussMediaPayload, homeScope]);
+    void acceptMediaHandoff(mediaHandoffToken, homeScope, "auto", () => !cancelled);
+    return () => { cancelled = true; };
+  }, [acceptMediaHandoff, mediaHandoffToken, homeScope, draftReady]);
 
-  React.useEffect(() => {
-    const handler = (event: Event) => {
-      const detail = (event as CustomEvent).detail;
-      applyDiscussMediaPayload(detail);
-    };
-    window.addEventListener("tldw:discuss-media", handler as any);
-    return () => {
-      window.removeEventListener("tldw:discuss-media", handler as any);
-    };
-  }, [applyDiscussMediaPayload]);
+  const previousMediaOwner = React.useRef(homeScope);
+  React.useLayoutEffect(() => {
+    const previous = previousMediaOwner.current;
+    previousMediaOwner.current = homeScope;
+    if (previous && previous !== homeScope) {
+      setMediaHandoffConflict(null);
+      if (mediaHandoffToken) {
+        handledMediaHandoffs.current.add(mediaHandoffToken);
+        // Drop this destination request without clearing another owner’s token.
+        // Expiration handles a transfer abandoned across an account boundary.
+        cleanMediaRouteRef.current();
+      }
+    }
+  }, [homeScope, mediaHandoffToken]);
+
+  const cancelMediaHandoff = () => {
+    if (!mediaHandoffConflict) return;
+    handledMediaHandoffs.current.add(mediaHandoffConflict.token);
+    void removeMediaChatHandoff(mediaHandoffConflict.token).catch(() => undefined);
+    setMediaHandoffConflict(null);
+    cleanMediaHandoffRoute();
+  };
 
   const applyDiscussWatchlistPayload = React.useCallback(
     (rawPayload: unknown, options?: { clearAfterUse?: boolean }) => {
@@ -4275,13 +4327,13 @@ export const PlaygroundForm = ({
     : 0;
   const rolePlayIdentity = React.useMemo<RolePlayIdentity | null>(() => {
     if (
-      selectedAssistant?.kind === "character" ||
-      selectedAssistant?.kind === "persona"
+      activeAssistantSelection?.kind === "character" ||
+      activeAssistantSelection?.kind === "persona"
     ) {
       return {
-        kind: selectedAssistant.kind,
-        id: selectedAssistant.id,
-        name: selectedAssistant.name,
+        kind: activeAssistantSelection.kind,
+        id: activeAssistantSelection.id,
+        name: activeAssistantSelection.name,
       };
     }
     if (selectedCharacter?.id || selectedCharacter?.name) {
@@ -4295,7 +4347,7 @@ export const PlaygroundForm = ({
       };
     }
     return null;
-  }, [selectedAssistant, selectedCharacter]);
+  }, [activeAssistantSelection, selectedCharacter]);
   const rolePlayState = React.useMemo(
     () =>
       deriveRolePlayState({
@@ -5178,6 +5230,16 @@ export const PlaygroundForm = ({
                     />,
                   )
                 : null}
+              {mediaHandoffConflict ? (
+                <div role="status" aria-label={t("mediaHandoff.conflictLabel", "Media handoff conflict")} className="mb-2 rounded-md border border-border bg-surface2 px-3 py-2 text-xs text-text">
+                  <p>{t("mediaHandoff.conflict", "Your composer already has a draft. Insert the media source, replace your draft, or cancel the import.")}</p>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" className="min-h-7 rounded border border-border px-3 py-1" onClick={() => { void acceptMediaHandoff(mediaHandoffConflict.token, mediaHandoffConflict.owner, "insert"); }}>{t("mediaHandoff.insert", "Insert media source")}</button>
+                    <button type="button" className="min-h-7 rounded border border-border px-3 py-1" onClick={() => { void acceptMediaHandoff(mediaHandoffConflict.token, mediaHandoffConflict.owner, "replace"); }}>{t("mediaHandoff.replace", "Replace current draft")}</button>
+                    <button type="button" className="min-h-7 rounded border border-border px-3 py-1" onClick={cancelMediaHandoff}>{t("mediaHandoff.cancel", "Cancel import")}</button>
+                  </div>
+                </div>
+              ) : null}
               {sidepanelHandoffConflict ? (
                 <div
                   role="status"

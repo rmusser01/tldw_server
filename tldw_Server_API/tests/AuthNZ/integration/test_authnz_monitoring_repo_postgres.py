@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 from typing import Any
-import json
 
 import pytest
-from tldw_Server_API.app.core.AuthNZ.repos.monitoring_repo import AuthnzMonitoringRepo
 
+from tldw_Server_API.app.core.AuthNZ.repos.monitoring_repo import AuthnzMonitoringRepo
+from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
 
 pytestmark = pytest.mark.integration
 
@@ -43,19 +44,18 @@ async def test_authnz_monitoring_repo_postgres_basic(test_db_pool: Any) -> None:
     assert summary["rate_limit_hits"] >= 1
 
     # Seed sessions and api_keys for count helpers.
+    users = UsersDB(pool)
+    await users.initialize(ensure_schema=False)
+    await users.create_user(  # nosec B106 # Inert fixture hash, never used for login
+        username="monitor-user",
+        email="monitor@example.com",
+        password_hash="hashed",
+        role="admin",
+        is_verified=True,
+    )
     async with pool.acquire() as conn:
         expires_at = now + timedelta(hours=1)
         expires_at_naive = expires_at.replace(tzinfo=None)
-        await conn.execute(
-            """
-            INSERT INTO users (username, email, password_hash, role, is_active, is_verified)
-            VALUES ($1, $2, $3, $4, TRUE, TRUE)
-            """,
-            "monitor-user",
-            "monitor@example.com",
-            "hashed",
-            "admin",
-        )
         user_id = await conn.fetchval(
             "SELECT id FROM users WHERE username = $1",
             "monitor-user",

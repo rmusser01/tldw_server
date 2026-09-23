@@ -3142,6 +3142,12 @@ async def _save_message_turn_to_db(
             serialized_extra = {}
         serialized_extra["client_message_id"] = client_message_id
 
+    system_block_id = message_obj.get("system_instruction_block_id")
+    if role == "system" and isinstance(system_block_id, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", system_block_id):
+        if serialized_extra is None:
+            serialized_extra = {}
+        serialized_extra["system_instruction_block_id"] = system_block_id
+
     if sender_meta:
         if serialized_extra is None:
             serialized_extra = {}
@@ -6041,7 +6047,9 @@ async def create_chat_completion(
                         client_detail = "Request failed."
                 else:
                     # Server errors should be generic
-                    if err_status == 502:
+                    if err_status == 502 and error_code == "provider_output_limit":
+                        client_detail = PROVIDER_STREAM_ERROR_MESSAGES[error_code]
+                    elif err_status == 502:
                         client_detail = "The chat service provider is currently unavailable."
                     elif err_status == 503:
                         client_detail = "The chat service is temporarily unavailable."

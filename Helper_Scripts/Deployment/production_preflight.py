@@ -5,12 +5,14 @@ from __future__ import annotations
 import argparse
 import ipaddress
 import json
+import ntpath
 import os
+import posixpath
 import re
 import stat
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import unquote, urlsplit
 
@@ -585,6 +587,21 @@ def _validate_backup(
     raw = values.get("TLDW_BACKUP_DIR", "")
     if not raw:
         return []
+    # These locations belong to Linux containers even when the host is Windows.
+    portable = PurePosixPath(posixpath.normpath(raw))
+    if portable.is_absolute():
+        for socket in (PurePosixPath("/var/run/docker.sock"), PurePosixPath("/run/docker.sock")):
+            if portable == socket or portable in socket.parents:
+                return [
+                    _issue(
+                        "docker_socket_path",
+                        "TLDW_BACKUP_DIR",
+                        "must not equal or contain a Docker socket location",
+                    )
+                ]
+        for live in (PurePosixPath("/app/Databases"), PurePosixPath("/var/lib/postgresql"), PurePosixPath("/data")):
+            if portable == live or live in portable.parents or portable in live.parents:
+                return [_issue("live_data_path", "TLDW_BACKUP_DIR", "must be separate from live data")]
     configured = Path(raw)
     if not configured.is_absolute():
         return [_issue("unsafe_backup_path", "TLDW_BACKUP_DIR", "must be an absolute path")]
@@ -805,14 +822,16 @@ def _rendered_mounts(service: Mapping[str, Any]) -> dict[str, tuple[str, str, bo
     mounts: dict[str, tuple[str, str, bool]] = {}
     for item in raw_mounts:
         if isinstance(item, str):
-            parts = item.split(":")
-            if len(parts) not in {2, 3}:
+            declaration, separator, option = item.rpartition(":")
+            if separator and option in {"ro", "rw"}:
+                read_only = option == "ro"
+            else:
+                declaration = item
+                read_only = False
+            source, separator, target = declaration.rpartition(":")
+            if not separator or not source or not target:
                 return None
-            source, target = parts[:2]
-            read_only = len(parts) == 3 and parts[2] == "ro"
-            if len(parts) == 3 and parts[2] not in {"ro", "rw"}:
-                return None
-            mount_type = "bind" if source.startswith((".", "/")) else "volume"
+            mount_type = "bind" if source.startswith((".", "/")) or ntpath.isabs(source) else "volume"
         elif isinstance(item, Mapping):
             source = item.get("source")
             target = item.get("target")

@@ -1888,3 +1888,123 @@ def test_regular_full_suite_steps_skip_dedicated_media_legacy_free_shard() -> No
     assert len(regular_shard_steps) == 5
     for step in regular_shard_steps:
         assert step.get("if") == "matrix.shard.name != 'media-legacy-free'"
+
+
+def test_critical_e2e_installs_the_backend_playwright_browser(tmp_path) -> None:
+    """Execute the install step: both runtimes need their own Chromium revision."""
+    import os
+    import shutil
+    import subprocess  # nosec B404 - execute checked-in workflow steps in a temporary test directory
+
+    workflow = _load(".github/workflows/frontend-e2e-tiers.yml")
+    steps = workflow["jobs"]["critical"]["steps"]
+    browser_step = _get_step(steps, "Install Playwright browsers")
+    calls = tmp_path / "calls.txt"
+    for tool in ("python", "bunx"):
+        executable = tmp_path / tool
+        executable.write_text('#!/bin/sh\nprintf "%s|%s\\n" "${0##*/}" "$*" >> "$CALL_LOG"\n')
+        executable.chmod(0o700)
+    bash = shutil.which("bash")
+    assert bash is not None, "Workflow shell bash is required"
+    result = subprocess.run(  # nosec B603 - trusted repository YAML, isolated cwd and stubbed installers
+        [bash, "-e", "-c", browser_step["run"]],
+        cwd=tmp_path,
+        env={**os.environ, "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}", "CALL_LOG": str(calls)},
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    commands = calls.read_text().splitlines()
+    assert "python|-m playwright install --with-deps chromium" in commands
+    assert "bunx|playwright install --with-deps chromium" in commands
+    assert steps.index(browser_step) < steps.index(_get_step(steps, "Run critical E2E tests"))
+
+
+def test_critical_e2e_budget_preserves_other_policies_and_still_enforces_limits(tmp_path) -> None:
+    """Parallel browser journeys share one principal; their fixture budget stays finite."""
+    import asyncio
+    import os
+    import shutil
+    import subprocess  # nosec B404 - execute checked-in workflow steps in a temporary test directory
+
+    from tldw_Server_API.app.core.Resource_Governance import MemoryResourceGovernor, RGRequest
+
+    workflow = _load(".github/workflows/frontend-e2e-tiers.yml")["jobs"]["critical"]
+    step = _get_step(workflow["steps"], "Configure shared browser-test request budget")
+    source_path = Path("tldw_Server_API/Config_Files/resource_governor_policies.yaml")
+    source = _load(str(source_path))
+    copied = tmp_path / source_path
+    copied.parent.mkdir(parents=True)
+    copied.write_text(source_path.read_text())
+    output = tmp_path / workflow["env"]["RG_POLICY_PATH"]
+    bash = shutil.which("bash")
+    assert bash is not None, "Workflow shell bash is required"
+    subprocess.run(  # nosec B603 - trusted repository YAML writes only a temporary policy fixture
+        [bash, "-e", "-c", step["run"]], cwd=tmp_path,
+        env={**os.environ, "RG_POLICY_PATH": str(output)}, check=True,
+        capture_output=True, text=True,
+    )
+    configured = _load(str(output))
+
+    async def allowed_count(policies: dict, count: int) -> int:
+        governor = MemoryResourceGovernor(policies=policies, time_source=lambda: 0.0)
+        request = RGRequest(entity="user:1", categories={"requests": {"units": 1}}, tags={"policy_id": "character_chat.default"})
+        allowed = 0
+        for number in range(count):
+            decision, _ = await governor.reserve(request, op_id=str(number))
+            allowed += int(decision.allowed)
+        return allowed
+
+    assert asyncio.run(allowed_count(source["policies"], 61)) == 60
+    assert asyncio.run(allowed_count(configured["policies"], 601)) == 600
+    configured["policies"]["character_chat.default"]["requests"]["rpm"] = 60
+    assert configured == source
+    assert workflow["steps"].index(step) < workflow["steps"].index(_get_step(workflow["steps"], "Start backend server"))
+
+
+def test_required_backend_jobs_override_skipped_ancestor_status() -> None:
+    """An intentional admission skip must not suppress successful downstream gates."""
+    targets = {
+        ".github/workflows/ci.yml": (
+            "full-suite-linux-311-smoke", "full-suite-linux-312-shards",
+            "full-suite-linux-313-shards", "full-suite-macos-312-shards",
+            "full-suite-windows-312-shards", "full-suite-os-313-release-shards",
+            "character-chat-rate-limits",
+        ),
+        ".github/workflows/jobs-suite.yml": ("jobs-postgres",),
+    }
+    for path, names in targets.items():
+        jobs = _load(path)["jobs"]
+        for name in names:
+            job = jobs[name]
+            condition = " ".join(str(job.get("if", "")).split())
+            assert "!cancelled()" in condition, (path, name)
+            dependencies = job["needs"]
+            if isinstance(dependencies, str):
+                dependencies = [dependencies]
+            for dependency in dependencies:
+                assert f"needs['{dependency}'].result == 'success'" in condition, (path, name, dependency)
+
+
+def test_selected_full_suite_summaries_reject_unexecuted_shards(tmp_path: Path) -> None:
+    """Execute the real summary shell with successful, skipped and failed results."""
+    import shutil
+    import subprocess  # nosec B404 - run checked-in summary commands in an isolated directory
+
+    bash = shutil.which("bash")
+    assert bash is not None
+    jobs = _load(".github/workflows/ci.yml")["jobs"]
+    for name, job in jobs.items():
+        if not name.startswith("full-suite-") or not name.endswith("-summary"):
+            continue
+        shard = job["needs"][0]
+        script = job["steps"][0]["run"]
+        placeholder = "${{ needs['" + shard + "'].result }}"
+        assert placeholder in script
+        for result in ("success", "skipped", "failure", "cancelled"):
+            process = subprocess.run(  # nosec B603 - trusted workflow shell with fixed result values
+                [bash, "-c", script.replace(placeholder, result)],
+                cwd=tmp_path, capture_output=True, text=True, timeout=5, check=False,
+            )
+            assert (process.returncode == 0) is (result == "success"), (name, result, process.stdout)

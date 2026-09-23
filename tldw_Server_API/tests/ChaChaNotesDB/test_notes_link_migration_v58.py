@@ -6,6 +6,7 @@ import inspect
 import json
 import sqlite3
 from pathlib import Path
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
@@ -57,32 +58,36 @@ OWNER = "owner-notes-link"
 CREATED_AT = "2026-08-10T12:00:00+00:00"
 
 
+@pytest.fixture(autouse=True)
+def _v59_migration_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exercise the v58 graph contract before unrelated later migrations."""
+    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 59)
+
+
 def _replace_with_v57_edge_table(
     db_path: Path,
     *,
     edge_rows: list[tuple[object, ...]],
     extra_notes: list[tuple[str, str]] | None = None,
 ) -> None:
-    """Create a genuine legacy edge table while retaining the current base schema."""
+    """Create a genuine v57 legacy edge table."""
 
     source_id = "11111111-1111-4111-8111-111111111111"
     target_id = "22222222-2222-4222-8222-222222222222"
-    db = CharactersRAGDB(str(db_path), client_id=OWNER)
+    with patch.object(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 57):
+        db = CharactersRAGDB(str(db_path), client_id=OWNER)
     try:
-        for note_id, title in [(source_id, "Source"), (target_id, "Target")]:
-            if db.get_note_by_id(note_id) is None:
-                db.add_note(title=title, content="Body", note_id=note_id)
-        for note_id, note_owner in extra_notes or []:
-            if db.get_note_by_id(note_id) is None:
-                db.add_note(title=note_id, content="Body", note_id=note_id)
-            with db.transaction() as conn:
-                conn.execute("UPDATE notes SET client_id = ? WHERE id = ?", (note_owner, note_id))
+        with db.transaction() as conn:
+            conn.executemany(
+                "INSERT INTO notes(id, title, content, client_id) VALUES (?, ?, 'Body', ?)",
+                [(source_id, "Source", OWNER), (target_id, "Target", OWNER)]
+                + [(note_id, note_id, note_owner) for note_id, note_owner in extra_notes or []],
+            )
     finally:
         db.close_connection()
 
     with sqlite3.connect(db_path) as conn:
         conn.execute("PRAGMA foreign_keys = OFF")
-        conn.execute("DROP TABLE note_attachments")
         conn.execute("DROP TABLE note_edges")
         conn.execute(
             """
@@ -107,10 +112,6 @@ def _replace_with_v57_edge_table(
         conn.executemany(
             "INSERT INTO note_edges VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             edge_rows,
-        )
-        conn.execute(
-            "UPDATE db_schema_version SET version = 57 WHERE schema_name = ?",
-            (CharactersRAGDB._SCHEMA_NAME,),
         )
 
 

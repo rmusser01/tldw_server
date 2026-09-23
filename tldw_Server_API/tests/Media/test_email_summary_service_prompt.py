@@ -158,7 +158,9 @@ def test_email_core_resolves_configured_and_keyless_credentials(
         summary, "get_registry", lambda: SimpleNamespace(get_adapter=lambda name: SimpleNamespace(chat=chat))
     )
     monkeypatch.setattr(
-        summary, "loaded_config_data", {f"{provider}_api": {"api_key": configured_key, "model": "test-summary-model"}}
+        summary,
+        "load_and_log_configs",
+        lambda: {f"{provider}_api": {"api_key": configured_key, "model": "test-summary-model"}},
     )
     result = email_lib.process_email_task(
         file_bytes=context.email_bytes,

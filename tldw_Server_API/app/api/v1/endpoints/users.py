@@ -74,6 +74,7 @@ from tldw_Server_API.app.core.AuthNZ.profile_version import (
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager
 from tldw_Server_API.app.core.DB_Management.user_profile_writes import update_user_email
+from tldw_Server_API.app.core.exceptions import APIKeyRotationRejected
 from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.core.UserProfiles.command_service import ProfileCommandService
 from tldw_Server_API.app.core.UserProfiles.contracts import (
@@ -897,6 +898,8 @@ async def rotate_api_key(
             actor_kind=principal.kind,
             actor_roles=list(principal.roles or []),
         )
+    except APIKeyRotationRejected as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="API key not found") from exc
     except MandatoryAuditWriteError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

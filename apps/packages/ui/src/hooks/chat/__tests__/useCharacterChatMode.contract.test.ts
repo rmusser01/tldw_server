@@ -147,7 +147,36 @@ describe("createCharacterChatMode contract", () => {
     })
   })
 
-  it("creates a character chat and streams complete-v2 with character context", async () => {
+  it.each(["messages", "history", "saved-greeting", "new-chat"] as const)("preserves existing greeting provenance for %s", async kind => {
+    const setters = createSetterBundle()
+    const greeting = "Welcome from the Character default"
+    const user = { id: "earlier-user", isBot: false, role: "user", message: "Earlier question", sources: [] }
+    const savedGreeting = { id: "saved-greeting", isBot: true, role: "assistant", message: greeting, messageType: "character:greeting", sources: [] }
+    const initial = kind === "new-chat" || kind === "history" ? [] : kind === "saved-greeting" ? [savedGreeting, user] : [user]
+    let visible: typeof initial = initial
+    setters.setMessages.mockImplementation(next => { visible = typeof next === "function" ? next(visible) : next })
+    const save = vi.fn(async (_payload: { history: Array<{ content: string }> }) => "history-1")
+    const mode = createCharacterChatMode({ ...setters, t: translate, notification: { error: vi.fn() },
+      selectedCharacter: { id: 42, name: "Mira", greeting }, temporaryChat: false, historyId: "history-1",
+      serverChatId: kind === "new-chat" ? null : "chat-77", serverChatCharacterId: 42,
+      currentChatModelSettings: { apiProvider: "openai", setSystemPrompt: vi.fn() }, invalidateServerChatHistory: vi.fn(),
+      greetingEnabled: true, greetingSelectionId: null, greetingsChecksum: null, useCharacterDefault: true,
+      directedCharacterId: null, resolvedMessageSteeringPrompts: null, getEffectiveSelectedModel: () => "test-model",
+      saveMessageOnSuccess: save, saveMessageOnError: vi.fn(), discardCurrentTurnOnAbortRef: { current: false }
+    } as unknown as Parameters<typeof createCharacterChatMode>[0])
+    const controller = new AbortController()
+    await mode({ message: "Follow-up", image: "", isRegenerate: false, messages: initial,
+      history: kind === "history" ? [{ role: "user", content: "Earlier question" }] : [],
+      signal: controller.signal, model: "test-model", controller,
+      messageSteering: { continueAsUser: false, impersonateUser: false, forceNarrate: false } } as unknown as Parameters<typeof mode>[0])
+    const expected = kind === "saved-greeting" || kind === "new-chat" ? 1 : 0
+    expect(visible.filter(row => "messageType" in row && row.messageType === "character:greeting")).toHaveLength(expected)
+    expect(save).toHaveBeenCalled()
+    const savedHistory = setters.setHistory.mock.calls.at(-1)?.[0] as Array<{ content: string }>
+    expect(savedHistory.filter(row => row.content === greeting)).toHaveLength(expected)
+  })
+
+  it.each(["", "data:image/png;base64,aW1hZ2U="])("creates a character chat and preserves attachment %s", async image => {
     const setters = createSetterBundle()
     let messagesState: unknown[] = []
     setters.setMessages.mockImplementation((next) => {
@@ -193,7 +222,7 @@ describe("createCharacterChatMode contract", () => {
 
     await mode({
       message: "Hello Mira",
-      image: "",
+      image,
       isRegenerate: false,
       messages: [],
       history: [],
@@ -206,6 +235,8 @@ describe("createCharacterChatMode contract", () => {
         forceNarrate: false
       }
     })
+
+    expect((messagesState as Array<{ isBot: boolean; images?: string[] }>).find(row => !row.isBot)?.images).toEqual(image ? [image] : [])
 
     expect(mocks.createChatMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -221,7 +252,8 @@ describe("createCharacterChatMode contract", () => {
       "chat-77",
       {
         role: "user",
-        content: "Hello Mira"
+        content: "Hello Mira",
+        ...(image ? { image_base64: "aW1hZ2U=" } : {})
       },
       { scope }
     )
@@ -685,6 +717,31 @@ describe("createCharacterChatMode contract", () => {
     })
   })
 
+  it.each([
+    "provider_authentication_failed",
+    "invalid_provider_credentials",
+    "missing_provider_credentials",
+    "provider_configuration_invalid"
+  ])("offers model settings for canonical credential failure %s", code => {
+    for (const error of [
+      Object.assign(new Error("Safe provider failure"), { code }),
+      { response: { data: { detail: { error_code: code, message: "Safe provider failure" } } } }
+    ]) {
+      expect(classifyCharacterChatFailureRecovery(error)).toMatchObject({
+        kind: "provider_unconfigured", action: "open-model-settings"
+      })
+    }
+  })
+
+  it.each([
+    "provider_unavailable", "credential_store_unavailable", "provider_error"
+  ])("keeps transient failure %s retryable", code => {
+    const error = Object.assign(new Error("Service temporarily unavailable"), { code })
+    expect(classifyCharacterChatFailureRecovery(error)).toMatchObject({
+      kind: "transient", action: "retry"
+    })
+  })
+
   it("bounds and redacts persisted character chat failure details", () => {
     const largeProviderBody = [
       "provider_not_configured",
@@ -744,7 +801,10 @@ describe("createCharacterChatMode contract", () => {
     )
   })
 
-  it("maps provider setup stream failures to model-settings recovery copy", async () => {
+  it.each(["legacy", "provider_authentication_failed", "provider_configuration_invalid"])(
+    "maps %s provider setup stream failures to model-settings recovery copy", async failureCode => {
+    const { consumeStreamingChunk } = await vi.importActual<typeof import("@/utils/streaming-chunks")>("@/utils/streaming-chunks")
+    mocks.consumeStreamingChunkMock.mockImplementation(consumeStreamingChunk)
     const setters = createSetterBundle()
     let messagesState: any[] = []
     setters.setMessages.mockImplementation((next) => {
@@ -764,7 +824,8 @@ describe("createCharacterChatMode contract", () => {
     )
     mocks.streamCharacterChatCompletionMock.mockImplementation(async function* () {
       yield* []
-      throw providerSetupError
+      if (failureCode === "legacy") throw providerSetupError
+      yield { error: { code: failureCode, type: failureCode, message: "Safe provider failure" } }
     })
     const saveMessageOnError = vi.fn(async () => "history-1")
     const controller = new AbortController()
@@ -830,7 +891,7 @@ describe("createCharacterChatMode contract", () => {
       recoveryLabel: "Open model settings"
     })
     expect(payload?.hint).toContain("Open model settings")
-    expect(payload?.detail).toContain("provider_not_configured")
+    expect(payload?.detail).toContain(failureCode === "legacy" ? "provider_not_configured" : failureCode)
     expect(saveMessageOnError).toHaveBeenCalledWith(
       expect.objectContaining({
         botMessage: assistantError?.message,

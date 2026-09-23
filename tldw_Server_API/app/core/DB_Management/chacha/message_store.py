@@ -1243,6 +1243,116 @@ class MessageStore:
             )
             raise
 
+    def add_retry_system_instruction_block(
+        self,
+        conversation_id: str,
+        messages: list[dict[str, Any]],
+        block_id: str,
+    ) -> list[str]:
+        """Persist an ordered retry instruction block and its metadata atomically.
+
+        Args:
+            conversation_id: Existing conversation owned by this database client.
+            messages: Validated system-message dictionaries with string content;
+                optional speaker names are retained. Empty/whitespace-only entries
+                are ignored consistently with prompt comparison. Inputs are not mutated.
+            block_id: Shared application-generated identity for the complete block.
+
+        Returns:
+            New message IDs in instruction order after all writes succeed. An
+            enclosing transaction retains control of its final commit.
+
+        Raises:
+            InputError: The conversation is unavailable or a message is not a
+                system message with string content.
+            CharactersRAGDBError: Any row or metadata write fails. The transaction
+                rolls back every member, preserving the previous instruction block.
+        """
+        try:
+            self._db._ensure_message_metadata_table()
+            message_ids: list[str] = []
+            with self._db.transaction() as conn:
+                owned = conn.execute(
+                    "SELECT 1 FROM conversations WHERE id = ? AND client_id = ? AND deleted = FALSE",
+                    (conversation_id, self._db.client_id),
+                ).fetchone()
+                if not owned:
+                    raise InputError("Retry conversation is unavailable.")  # noqa: TRY003
+                for message in messages:
+                    if message.get("role") != "system" or not isinstance(message.get("content"), str):
+                        raise InputError("Retry instructions require system messages with text content.")  # noqa: TRY003
+                    if not message["content"].strip():
+                        continue
+                    message_id = self._db.add_message({
+                        "conversation_id": conversation_id,
+                        "sender": "system",
+                        "content": message["content"],
+                        "client_id": self._db.client_id,
+                    }, conn=conn)
+                    if not message_id:
+                        raise CharactersRAGDBError("Failed to persist retry instruction.")  # noqa: TRY003
+                    extra = {"sender_role": "system", "system_instruction_block_id": block_id}
+                    if message.get("name"):
+                        extra["sender_name"] = message["name"]
+                    if not self._db.add_message_metadata(message_id, extra=extra, conn=conn):
+                        raise CharactersRAGDBError("Failed to persist retry instruction metadata.")  # noqa: TRY003
+                    message_ids.append(message_id)
+            return message_ids
+        except (sqlite3.Error, BackendDatabaseError) as exc:
+            raise CharactersRAGDBError("Failed to persist retry instruction block.") from exc  # noqa: TRY003
+
+
+    def get_retry_message_context(self, conversation_id: str) -> tuple[list[str], list[dict[str, Any]]]:
+        """Read the non-system tail and latest instruction block without attachment blobs.
+
+        System updates can follow an unanswered user. Count only non-system rows
+        to locate that turn and the latest contiguous instruction block, regardless
+        of the caller's LLM history limit. Block IDs separate consecutive updates;
+        legacy unmarked rows retain their contiguous-block interpretation.
+        """
+        cursor = self._db.execute_query(
+            """
+            WITH ordered AS (
+                SELECT m.id, m.sender, m.content, mm.extra_json,
+                       m.timestamp, m.last_modified,
+                       SUM(CASE WHEN lower(m.sender) = 'system' THEN 0 ELSE 1 END)
+                           OVER (ORDER BY m.timestamp DESC, m.last_modified DESC, m.id DESC
+                                 ROWS UNBOUNDED PRECEDING) AS non_system_count
+                FROM messages m
+                JOIN conversations c ON c.id = m.conversation_id
+                LEFT JOIN message_metadata mm ON mm.message_id = m.id
+                WHERE m.conversation_id = ? AND c.client_id = ?
+                  AND m.deleted = FALSE AND c.deleted = FALSE
+            )
+            SELECT id, sender, content, extra_json FROM ordered
+            WHERE (lower(sender) != 'system' AND non_system_count <= 2)
+               OR (lower(sender) = 'system' AND non_system_count = (
+                   SELECT MIN(non_system_count) FROM ordered WHERE lower(sender) = 'system'
+               ))
+            ORDER BY timestamp DESC, last_modified DESC, id DESC
+            """,
+            (conversation_id, self._db.client_id),
+        )
+        tail_ids: list[str] = []
+        system_messages: list[dict[str, Any]] = []
+        block_id = None
+        block_finished = False
+        for row in cursor.fetchall():
+            if str(self._row_value(row, "sender", 1)).lower() != "system":
+                tail_ids.append(str(self._row_value(row, "id")))
+                continue
+            if block_finished:
+                continue
+            extra = self._metadata_json_value(self._row_value(row, "extra_json", 3))
+            row_block_id = extra.get("system_instruction_block_id") if isinstance(extra, dict) else None
+            if system_messages and row_block_id != block_id:
+                block_finished = True
+                continue
+            block_id = row_block_id
+            system_messages.append({"role": "system", "content": self._row_value(row, "content", 2)})
+        system_messages.reverse()
+        return tail_ids, system_messages
+
     def has_system_message_for_conversation(
         self,
         conversation_id: str,
@@ -1716,8 +1826,9 @@ class MessageStore:
         message_id: str,
         *,
         conn: Any | None = None,
+        strict: bool = False,
     ) -> dict[str, Any] | None:
-        """Fetch metadata for a message if present."""
+        """Fetch metadata; strict reads distinguish unavailable data from legacy rows."""
         try:
             self._db._ensure_message_metadata_table()
             if conn is not None:
@@ -1743,7 +1854,9 @@ class MessageStore:
                 "extra": self._metadata_json_value(ex) if ex is not None else None,
                 "last_modified": lm,
             }
-        except _CHACHA_NONCRITICAL_EXCEPTIONS:
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
+            if strict:
+                raise CharactersRAGDBError("Message metadata could not be read completely.") from exc
             return None
 
     def get_message_metadata_map(self, message_ids: list[str]) -> dict[str, dict[str, Any]]:

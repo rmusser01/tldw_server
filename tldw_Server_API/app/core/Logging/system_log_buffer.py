@@ -330,9 +330,9 @@ def _log_file_lock(timeout: float | None = None) -> Iterator[None]:
                     fcntl.flock(lock_fd, fcntl.LOCK_UN)
             with suppress(Exception):
                 os.close(lock_fd)
-        if not _HAS_FCNTL:
-            with suppress(Exception):
-                lock_path.unlink(missing_ok=True)
+            if not _HAS_FCNTL:
+                with suppress(Exception):
+                    lock_path.unlink(missing_ok=True)
 
 
 def _coerce_timestamp(value: Any) -> datetime | None:

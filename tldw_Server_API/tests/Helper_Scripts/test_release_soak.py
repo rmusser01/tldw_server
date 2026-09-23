@@ -370,6 +370,16 @@ async def test_final_observation_cannot_regress_after_sustained_recovery():
     runner = importlib.import_module("Helper_Scripts.load_tests.release_soak")
     config = profile()
     config["sample_interval_seconds"] = 0.04
+
+    class TrackedPhases(list):
+        complete = False
+
+        def __iter__(self):
+            self.complete = False
+            yield from super().__iter__()
+            self.complete = True
+
+    config["phases"] = TrackedPhases(config["phases"])
     samples = 0
     requests = 0
 
@@ -382,8 +392,8 @@ async def test_final_observation_cannot_regress_after_sustained_recovery():
                 json={
                     "artifact_sha256": "a" * 64,
                     "source_revision": "b" * 40,
-                    "sampled_at": time.time(),
-                    "queue_depth": 99 if samples == 8 else 0,
+                    "sampled_at": int(time.time() * 10) / 10 + samples * 0.001,
+                    "queue_depth": 99 if samples > 1 and config["phases"].complete else 0,
                     "db_pool_in_use": 0,
                     "storage_bytes": 0,
                 },
@@ -394,8 +404,9 @@ async def test_final_observation_cannot_regress_after_sustained_recovery():
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(responder), base_url="http://fixture.local") as client:
         report = await runner.run(config, dataset(), client)
-    assert samples == 8
+    assert samples == 2 + sum(phase["telemetry"]["samples"] for phase in report["phases"])
     assert all(phase["telemetry"]["maxima"]["queue_depth"] == 0 for phase in report["phases"])
+    assert report["final_metrics"]["queue_depth"] == 99
     assert not report["passed"]
     assert "final observation exceeds recovery resource ceilings" in report["failures"]
 
@@ -403,24 +414,35 @@ async def test_final_observation_cannot_regress_after_sustained_recovery():
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "fault,category",
-    [("timeout", "timeout"), ("transport", "http_error"),
-     ("json", "invalid_json"), ("size", "response_size_limit")],
+    [("timeout", "timeout"), ("transport", "http_error"), ("json", "invalid_json"), ("size", "response_size_limit")],
 )
 async def test_request_failure_categories_are_bounded_and_redacted(
-    monkeypatch: pytest.MonkeyPatch, fault: str, category: str,
+    monkeypatch: pytest.MonkeyPatch,
+    fault: str,
+    category: str,
 ) -> None:
     """Attribute failed workloads without retaining exception payloads or flooding logs."""
     runner = importlib.import_module("Helper_Scripts.load_tests.release_soak")
     canary = "PRIVATE_REQUEST_CREDENTIAL"
+    telemetry_samples = 0
 
     async def failing_request(
-        client: httpx.AsyncClient, row: dict[str, Any], timeout: float, *, json_body: bool = False,
+        client: httpx.AsyncClient,
+        row: dict[str, Any],
+        timeout: float,
+        *,
+        json_body: bool = False,
     ) -> tuple[int, Any]:
+        nonlocal telemetry_samples
         if row["path"] == "/observations":
+            telemetry_samples += 1
             return 200, {
-                "artifact_sha256": "a" * 64, "source_revision": "b" * 40,
-                "sampled_at": time.time(), "queue_depth": 0,
-                "db_pool_in_use": 0, "storage_bytes": 0,
+                "artifact_sha256": "a" * 64,
+                "source_revision": "b" * 40,
+                "sampled_at": int(time.time() * 10) / 10 + telemetry_samples * 0.001,
+                "queue_depth": 0,
+                "db_pool_in_use": 0,
+                "storage_bytes": 0,
             }
         if fault == "timeout":
             raise TimeoutError(canary)
