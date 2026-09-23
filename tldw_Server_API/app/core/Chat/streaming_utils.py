@@ -33,6 +33,7 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
     SanitizedProviderStreamError,
 )
 from tldw_Server_API.app.core.config import load_comprehensive_config
+from tldw_Server_API.app.core.LLM_Calls.sse import sse_data, sse_done, sse_event
 from tldw_Server_API.app.core.testing import is_truthy
 
 #######################################################################################################################
@@ -108,7 +109,7 @@ def trusted_local_stream_error_frame(code: str) -> str:
     if message is None:
         raise ValueError("Unsupported local stream error code")
     return _trusted_local_stream_frame(
-        f"data: {json.dumps({'error': {'code': code, 'type': code, 'message': message}})}\n\n"
+        sse_data({'error': {'code': code, 'type': code, 'message': message}})
     )
 
 
@@ -1551,7 +1552,7 @@ class StreamingResponseHandler:
                 self.cancel()
                 payload = provider_stream_error_payload("provider_unavailable")
                 self._attach_stream_metadata(payload)
-                yield f"data: {json.dumps(payload)}\n\n"
+                yield sse_data(payload)
                 break
             yield f": heartbeat {datetime.now(timezone.utc).isoformat()}\n\n"
 
@@ -1587,7 +1588,7 @@ class StreamingResponseHandler:
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
             self._attach_stream_metadata(start_payload)
-            yield f"event: stream_start\ndata: {json.dumps(start_payload)}\n\n"
+            yield sse_event("stream_start", start_payload)
             self.update_activity()
 
             def iter_logical_lines(raw_chunk: str) -> list[str]:
@@ -1621,7 +1622,7 @@ class StreamingResponseHandler:
                 err_payload = provider_stream_error_payload(value)
                 self._attach_stream_metadata(err_payload)
                 self.error_occurred = True
-                return f"data: {json.dumps(err_payload)}\n\n"
+                return sse_data(err_payload)
 
             def structural_error_code(value: Any) -> str | None:
                 nested_code = provider_payload_structural_error_code(value)
@@ -1781,7 +1782,7 @@ class StreamingResponseHandler:
                                         self._attach_stream_metadata(err_payload)
                                         outputs.append(
                                             _trusted_local_stream_frame(
-                                                f"data: {json.dumps(err_payload)}\n\n"
+                                                sse_data(err_payload)
                                             )
                                         )
                                         self.error_occurred = True
@@ -1801,18 +1802,18 @@ class StreamingResponseHandler:
                                             }
                                         }
                                         self._attach_stream_metadata(err_payload)
-                                        outputs.append(f"data: {json.dumps(err_payload)}\n\n")
+                                        outputs.append(sse_data(err_payload))
                                         self.error_occurred = True
                                         return outputs, True
                                     if text_piece and not append_content(text_piece):
                                         err_payload = {"error": {"message": "Response size limit exceeded"}}
                                         self._attach_stream_metadata(err_payload)
-                                        outputs.append(f"data: {json.dumps(err_payload)}\n\n")
+                                        outputs.append(sse_data(err_payload))
                                         self.error_occurred = True
                                         return outputs, True
                                     delta["content"] = text_piece
                             self._attach_stream_metadata(data)
-                            outputs.append(f"data: {json.dumps(data)}\n\n")
+                            outputs.append(sse_data(data))
                             self.update_activity()
                             return outputs, False
                     if isinstance(data, dict):
@@ -1820,7 +1821,7 @@ class StreamingResponseHandler:
                     elif data not in (None, "", [], {}):
                         self.semantic_output_seen = True
                         first_output_pending = True
-                    outputs.append(f"data: {json.dumps(data)}\n\n")
+                    outputs.append(sse_data(data))
                     self.update_activity()
                     return outputs, False
                 if not sse_framed:
@@ -1848,7 +1849,7 @@ class StreamingResponseHandler:
                     self._attach_stream_metadata(err_payload)
                     outputs.append(
                         _trusted_local_stream_frame(
-                            f"data: {json.dumps(err_payload)}\n\n"
+                            sse_data(err_payload)
                         )
                     )
                     self.error_occurred = True
@@ -1868,19 +1869,19 @@ class StreamingResponseHandler:
                         }
                     }
                     self._attach_stream_metadata(err_payload)
-                    outputs.append(f"data: {json.dumps(err_payload)}\n\n")
+                    outputs.append(sse_data(err_payload))
                     self.error_occurred = True
                     return outputs, True
                 if text_piece and not append_content(text_piece):
                     err_payload = {"error": {"message": "Response size limit exceeded"}}
                     self._attach_stream_metadata(err_payload)
-                    outputs.append(f"data: {json.dumps(err_payload)}\n\n")
+                    outputs.append(sse_data(err_payload))
                     self.error_occurred = True
                     return outputs, True
                 if text_piece:
                     content_payload = {"choices": [{"delta": {"content": text_piece}}]}
                     self._attach_stream_metadata(content_payload)
-                    outputs.append(f"data: {json.dumps(content_payload)}\n\n")
+                    outputs.append(sse_data(content_payload))
                     self.update_activity()
                 return outputs, False
 
@@ -2041,13 +2042,13 @@ class StreamingResponseHandler:
                             if append_content(flush_text):
                                 content_payload = {"choices": [{"delta": {"content": flush_text}}]}
                                 self._attach_stream_metadata(content_payload)
-                                yield f"data: {json.dumps(content_payload)}\n\n"
+                                yield sse_data(content_payload)
                                 self.update_activity()
                             else:
                                 size_err = {"error": {"message": "Response size limit exceeded"}}
                                 self._attach_stream_metadata(size_err)
                                 self.error_occurred = True
-                                yield f"data: {json.dumps(size_err)}\n\n"
+                                yield sse_data(size_err)
                                 return
             yield canonical_provider_error(e)
 
@@ -2120,12 +2121,12 @@ class StreamingResponseHandler:
                                 if not append_content(flush_text):
                                     err_payload = {"error": {"message": "Response size limit exceeded"}}
                                     self._attach_stream_metadata(err_payload)
-                                    yield f"data: {json.dumps(err_payload)}\n\n"
+                                    yield sse_data(err_payload)
                                     self.error_occurred = True
                                 else:
                                     content_payload = {"choices": [{"delta": {"content": flush_text}}]}
                                     self._attach_stream_metadata(content_payload)
-                                    yield f"data: {json.dumps(content_payload)}\n\n"
+                                    yield sse_data(content_payload)
                                     self.update_activity()
 
                 # Save the full response/tool calls if callback provided (only when not cancelled)
@@ -2149,7 +2150,7 @@ class StreamingResponseHandler:
                             self._attach_stream_metadata(err_payload)
                             self.error_occurred = True
                             yield _trusted_local_stream_frame(
-                                f"data: {json.dumps(err_payload)}\n\n"
+                                sse_data(err_payload)
                             )
                         except _STREAMING_NONCRITICAL_EXCEPTIONS as before_success_err:
                             logger.error(
@@ -2160,7 +2161,7 @@ class StreamingResponseHandler:
                             self.error_occurred = True
                             err_payload = provider_stream_error_payload("provider_unavailable")
                             self._attach_stream_metadata(err_payload)
-                            yield f"data: {json.dumps(err_payload)}\n\n"
+                            yield sse_data(err_payload)
 
                 if (
                     not self.is_cancelled
@@ -2241,7 +2242,7 @@ class StreamingResponseHandler:
                         "choices": [{"delta": {}, "finish_reason": "stop", "index": 0}],
                     }
                     self._attach_stream_metadata(done_payload)
-                    yield f"data: {json.dumps(done_payload)}\n\n"
+                    yield sse_data(done_payload)
 
                 if not self.is_cancelled and finalize_callback and self.error_occurred:
                     try:
@@ -2266,12 +2267,12 @@ class StreamingResponseHandler:
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
                     self._attach_stream_metadata(end_payload)
-                    yield f"event: stream_end\ndata: {json.dumps(end_payload)}\n\n"
+                    yield sse_event("stream_end", end_payload)
                 # Ensure final [DONE] sentinel for client compatibility (unless already sent).
                 # If upstream already sent [DONE], defer emission until after stream_end.
                 if not self.is_cancelled:
                     if (self.upstream_done_received and not self.done_sent) or not self.done_sent:
-                        yield "data: [DONE]\n\n"
+                        yield sse_done()
                         self.done_sent = True
                     self.upstream_done_received = False
 
@@ -2369,7 +2370,7 @@ async def create_streaming_response_with_timeout(
             handler.error_occurred = True
             payload = provider_stream_error_payload("provider_unavailable")
             handler._attach_stream_metadata(payload)
-            return f"data: {json.dumps(payload)}\n\n"
+            return sse_data(payload)
 
         async def close_and_finalize_initial_capacity_rejection() -> None:
             close = getattr(stream, "aclose", None)
@@ -2477,7 +2478,7 @@ async def create_streaming_response_with_timeout(
                     # As a safety net, emit a final [DONE] only if it hasn't been sent yet
                     try:
                         if not handler.done_sent and not handler.is_cancelled:
-                            yield "data: [DONE]\n\n"
+                            yield sse_done()
                             handler.done_sent = True
                     except _STREAMING_NONCRITICAL_EXCEPTIONS as done_err:
                         logger.debug(
@@ -2490,7 +2491,7 @@ async def create_streaming_response_with_timeout(
                 await close_and_finalize_initial_capacity_rejection()
             yield capacity_error_frame()
             if not handler.done_sent and not handler.is_cancelled:
-                yield "data: [DONE]\n\n"
+                yield sse_done()
                 handler.done_sent = True
         finally:
             # Provider iterators may ignore cancellation. Drain briefly, then

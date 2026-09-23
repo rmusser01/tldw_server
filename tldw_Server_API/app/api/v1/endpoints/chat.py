@@ -238,6 +238,7 @@ from tldw_Server_API.app.core.LLM_Calls.routing import (
 from tldw_Server_API.app.core.LLM_Calls.routing.candidate_pool import (
     build_candidate_pool,
 )
+from tldw_Server_API.app.core.LLM_Calls.sse import sse_data, sse_done
 from tldw_Server_API.app.core.Chat.provider_manager import get_provider_manager
 from tldw_Server_API.app.core.Chat.rate_limiter import get_rate_limiter
 from tldw_Server_API.app.core.Chat.request_queue import RequestPriority, get_request_queue
@@ -1100,7 +1101,7 @@ def _attach_credential_runtime_cleanup(
 def _provider_stream_error_frame_for_code(code: str) -> str:
     """Build a canonical sanitized SSE error frame."""
     payload = provider_stream_error_payload(code)
-    return f"data: {json.dumps(payload)}\n\n"
+    return sse_data(payload)
 
 
 def _provider_stream_frame_count(chunk: Any) -> int:
@@ -2177,7 +2178,7 @@ def _chat_macro_completion_response(
     frames = [
         f"data: {json.dumps(first_chunk, separators=(',', ':'))}\n\n",
         f"data: {json.dumps(final_chunk, separators=(',', ':'))}\n\n",
-        "data: [DONE]\n\n",
+        sse_done(),
     ]
     return StreamingResponse(
         iter(frames),
@@ -5114,8 +5115,8 @@ async def create_chat_completion(
                                     }
                                 ]
                             }
-                            yield f"data: {json.dumps(data_chunk)}\n\n"
-                            yield "data: [DONE]\n\n"
+                            yield sse_data(data_chunk)
+                            yield sse_done()
 
                         return _stream_generator()
 

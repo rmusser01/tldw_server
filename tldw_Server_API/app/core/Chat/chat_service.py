@@ -184,6 +184,7 @@ from tldw_Server_API.app.core.LLM_Calls.provider_config_resolution import resolv
 from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.LLM_Calls.provider_readiness import normalize_catalog_provider_for_chat
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingDecision
+from tldw_Server_API.app.core.LLM_Calls.sse import sse_data, sse_done
 from tldw_Server_API.app.core.LLM_Calls.streaming import wrap_sync_stream
 from tldw_Server_API.app.core.LLM_Calls.structured_generation import (
     StructuredGenerationCapabilityError,
@@ -4889,8 +4890,8 @@ async def execute_streaming_call(
         return payload
 
     async def _terminal_stream_error(payload: dict[str, Any]) -> AsyncIterator[str]:
-        yield f"data: {_json.dumps(payload)}\n\n"
-        yield "data: [DONE]\n\n"
+        yield sse_data(payload)
+        yield sse_done()
 
     try:
         try:
@@ -5147,16 +5148,16 @@ async def execute_streaming_call(
                                     stream_channel.get_nowait()
                             except asyncio.QueueEmpty:
                                 pass
-                            yield f"data: {_json.dumps(_public_stream_error_payload('provider_unavailable'))}\n\n"
+                            yield sse_data(_public_stream_error_payload('provider_unavailable'))
                             break
                         if item is None:
                             graceful_end = True
                             break
                         if isinstance(item, QueueStreamTerminalError):
                             yield (
-                                f"data: {_json.dumps(_public_stream_error_payload(item.code))}\n\n"
+                                sse_data(_public_stream_error_payload(item.code))
                             )
-                            yield "data: [DONE]\n\n"
+                            yield sse_done()
                             break
                         yield item
                 except asyncio.CancelledError:
@@ -5905,7 +5906,7 @@ async def execute_streaming_call(
                     metadata_payload["tldw_system_message_id"] = system_message_id
                 if normalized_continuation_metadata:
                     metadata_payload["tldw_continuation"] = normalized_continuation_metadata
-                yield f"data: {_json.dumps(metadata_payload)}\n\n"
+                yield sse_data(metadata_payload)
             try:
                 stream_buffer_limit = int(os.getenv("MODERATION_STREAM_BUFFER_CHARS", "1024"))
             except _CHAT_NONCRITICAL_EXCEPTIONS:

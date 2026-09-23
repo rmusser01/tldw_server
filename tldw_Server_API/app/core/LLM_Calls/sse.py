@@ -43,6 +43,11 @@ def sse_data(payload: dict[str, Any]) -> str:
     return f"data: {json.dumps(payload)}\n\n"
 
 
+def sse_event(name: str, payload: dict[str, Any]) -> str:
+    """Return a named SSE event frame (``event:`` line plus one data line)."""
+    return f"event: {name}\ndata: {json.dumps(payload)}\n\n"
+
+
 def sse_done() -> str:
     """Return the SSE end-of-stream sentinel."""
     return "data: [DONE]\n\n"

@@ -231,7 +231,7 @@ from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requir
 from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import provider_auth_is_resolved
 from tldw_Server_API.app.core.Research.service import ResearchService
-from tldw_Server_API.app.core.LLM_Calls.sse import ensure_sse_line, normalize_provider_line, sse_done
+from tldw_Server_API.app.core.LLM_Calls.sse import ensure_sse_line, normalize_provider_line, sse_data, sse_done
 from tldw_Server_API.app.core.Persona.exemplar_prompt_assembly import (
     PersonaExemplarPromptAssembly,
     assemble_persona_exemplar_prompt,
@@ -6635,14 +6635,14 @@ async def character_chat_completion(
                     payload = provider_stream_error_payload(
                         normalized_error or "provider_unavailable"
                     )
-                    return ensure_sse_line(f"data: {json.dumps(payload)}"), True
+                    return sse_data(payload), True
                 if any(
                     line.lower().startswith("event:")
                     and line.partition(":")[2].strip().lower() == "error"
                     for line in lines
                 ):
                     payload = provider_stream_error_payload("provider_unavailable")
-                    return ensure_sse_line(f"data: {json.dumps(payload)}"), True
+                    return sse_data(payload), True
 
                 for line in lines:
                     if not line.lower().startswith("data:"):
@@ -6652,7 +6652,7 @@ async def character_chat_completion(
                         continue
                     if payload_text.lower().startswith("error:"):
                         payload = provider_stream_error_payload("provider_unavailable")
-                        return ensure_sse_line(f"data: {json.dumps(payload)}"), True
+                        return sse_data(payload), True
                     try:
                         decoded = json.loads(payload_text)
                     except (TypeError, ValueError, json.JSONDecodeError):
@@ -6664,7 +6664,7 @@ async def character_chat_completion(
                     ).strip().lower() != "error":
                         continue
                     payload = provider_stream_error_payload(decoded)
-                    return ensure_sse_line(f"data: {json.dumps(payload)}"), True
+                    return sse_data(payload), True
 
                 # If line looks like SSE control or data, keep as-is; otherwise normalize
                 lower = stripped.lower()
@@ -6729,7 +6729,7 @@ async def character_chat_completion(
                             {"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}
                         ],
                     }
-                    yield f"data: {json.dumps(head)}\n\n"
+                    yield sse_data(head)
 
                     for chunk in _chunk_text(text):
                         data = {
@@ -6741,7 +6741,7 @@ async def character_chat_completion(
                                 {"index": 0, "delta": {"content": chunk}, "finish_reason": None}
                             ],
                         }
-                        yield f"data: {json.dumps(data)}\n\n"
+                        yield sse_data(data)
 
                     tail = {
                         "id": stream_id,
@@ -6752,11 +6752,11 @@ async def character_chat_completion(
                             {"index": 0, "delta": {}, "finish_reason": "stop"}
                         ],
                     }
-                    yield f"data: {json.dumps(tail)}\n\n"
-                    yield "data: [DONE]\n\n"
+                    yield sse_data(tail)
+                    yield sse_done()
                 except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as e:
-                    yield f"data: {json.dumps({'error': str(e)})}\n\n"
-                    yield "data: [DONE]\n\n"
+                    yield sse_data({'error': str(e)})
+                    yield sse_done()
 
             return StreamingResponse(_stream_text(), media_type="text/event-stream", headers=sse_headers)
 
@@ -6948,7 +6948,7 @@ async def character_chat_completion(
                                 "Streaming chunk limit exceeded ({})",
                                 MAX_STREAMING_CHUNKS,
                             )
-                            yield f"data: {json.dumps({'error': 'Streaming limit exceeded.'})}\n\n"
+                            yield sse_data({'error': 'Streaming limit exceeded.'})
                             break
 
                         line, terminal_error = _coerce_sse_line(chunk)
@@ -6962,7 +6962,7 @@ async def character_chat_completion(
                                 "Streaming byte limit exceeded ({})",
                                 MAX_STREAMING_BYTES,
                             )
-                            yield f"data: {json.dumps({'error': 'Streaming size limit exceeded.'})}\n\n"
+                            yield sse_data({'error': 'Streaming size limit exceeded.'})
                             break
 
                         if terminal_error:
@@ -6985,18 +6985,18 @@ async def character_chat_completion(
                         "Character stream provider failure error_type={}",
                         type(exc).__name__,
                     )
-                    yield f"data: {json.dumps({'error': 'Chat provider error'})}\n\n"
+                    yield sse_data({'error': 'Chat provider error'})
                 except Exception as exc:  # noqa: BLE001 - lazy adapter failures are terminal frames
                     stream_success_state["successful"] = False
                     logger.debug(
                         "Character stream failure error_type={}",
                         type(exc).__name__,
                     )
-                    yield f"data: {json.dumps({'error': 'An internal error has occurred.'})}\n\n"
+                    yield sse_data({'error': 'An internal error has occurred.'})
                 finally:
                     await stream_cleanup()
                 if not done_sent:
-                    yield "data: [DONE]\n\n"
+                    yield sse_done()
 
             response = StreamingResponse(
                 _sse_provider(),
