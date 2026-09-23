@@ -31,6 +31,7 @@ from tldw_Server_API.app.core.Sync.v2.factory import default_sync_v2_registry
 from tldw_Server_API.app.core.Sync.v2.models import (
     M1_SYNC_DOMAINS,
     NOTES_ORGANIZATION_DOMAINS,
+    NOTES_TASK_SYNC_DOMAINS,
     SYNC_V2_SUPPORTED_DOMAINS,
     WORKSPACE_SYNC_DOMAINS,
     SyncDataset,
@@ -1218,7 +1219,16 @@ def test_service_persists_domain_adapter_conflicts(tmp_path: Path):
 def test_default_sync_v2_registry_advertises_personal_and_workspace_metadata_domains():
     registry = sync_endpoint._default_sync_v2_registry()
 
-    assert registry.supported_domains == sorted(SYNC_V2_SUPPORTED_DOMAINS)
+    # registry.supported_domains lists the adapters the registry HOLDS; it is not what
+    # the service advertises. notes.task / notes.task_activity are deliberately
+    # "dormant": wired into the registry but absent from SYNC_V2_SUPPORTED_DOMAINS and
+    # from the service's advertised supported_domains -- see
+    # test_notes_task_domains_are_known_internally_but_not_supported_or_public and
+    # test_factory_registers_task_components_without_advertising_domain. Comparing the
+    # registry to the advertised list alone conflated the two surfaces.
+    assert registry.supported_domains == sorted(
+        [*SYNC_V2_SUPPORTED_DOMAINS, *NOTES_TASK_SYNC_DOMAINS]
+    )
     for domain in M1_SYNC_DOMAINS:
         if domain == "attachment.ref":
             assert isinstance(registry.get(domain), AttachmentRefAdapter)
