@@ -330,8 +330,20 @@ async def slack_commands(request: Request) -> JSONResponse:
 @router.get("/jobs/{job_id}")
 async def slack_job_status(
     job_id: int,
+    user: User = Depends(get_request_user),
 ):
-    return _chatops_ingress.job_status_payload(_get_job_manager(), job_id, domain="slack")
+    return await _chatops_ingress.job_status_payload(
+        _get_job_manager(),
+        job_id,
+        domain="slack",
+        tenant_field="team_id",
+        user_id=int(user.id),
+        list_memberships=list_org_memberships_for_user,
+        get_installations_repo=_get_workspace_provider_installations_repo,
+        policy_for=_slack_policy_for_workspace,
+        coerce=_coerce_nonempty_string,
+        auth_mode=str(getattr(get_settings(), "AUTH_MODE", "")),
+    )
 
 
 @router.post("/oauth/start")

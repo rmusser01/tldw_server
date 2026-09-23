@@ -112,12 +112,62 @@ def status_command_response(
     )
 
 
-def job_status_payload(jm: Any, job_id: int, *, domain: str) -> dict[str, Any]:
-    """The ``GET /{domain}/jobs/{job_id}`` body; 404 for a missing job or another integration's."""
+_ACTIVE_MEMBERSHIP_STATUSES = frozenset({"", "active", "member", "approved"})
+
+
+async def job_status_payload(
+    jm: Any,
+    job_id: int,
+    *,
+    domain: str,
+    tenant_field: str,
+    user_id: int,
+    list_memberships: Callable[[int], Awaitable[Any]],
+    get_installations_repo: Callable[[], Awaitable[Any]],
+    policy_for: Callable[[str | None], dict[str, Any]],
+    coerce: Callable[[Any], str | None],
+    auth_mode: str,
+) -> dict[str, Any]:
+    """The ``GET /{domain}/jobs/{job_id}`` body, for a caller allowed to see that job.
+
+    Allowed: the job's owner, or an active member of an org that installed the job's
+    guild/workspace -- unless that tenant's policy limits status to the job owner, as
+    the in-platform ``status`` command does. Anything else is a 404, so ids do not
+    reveal which jobs exist. In single-user mode the one user owns every installation.
+    """
+    not_found = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job_not_found")
     job = jm.get_job(int(job_id))
     if not job or str(job.get("domain") or "").strip().lower() != domain:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job_not_found")
-    return {"ok": True, "job": job_summary(job, int(job.get("id") or job_id))}
+        raise not_found
+    body = {"ok": True, "job": job_summary(job, int(job.get("id") or job_id))}
+
+    if auth_mode.strip().lower() == "single_user" or coerce(job.get("owner_user_id")) == str(int(user_id)):
+        return body
+
+    payload = job.get("payload") if isinstance(job.get("payload"), dict) else {}
+    tenant_id = coerce(payload.get(tenant_field))
+    if not tenant_id:
+        raise not_found
+    if str(policy_for(tenant_id).get("status_scope") or "").strip().lower().endswith("_and_user"):
+        raise not_found
+
+    org_ids: list[int] = []
+    for membership in await list_memberships(int(user_id)) or []:
+        membership = membership or {}
+        if str(membership.get("status") or "").strip().lower() not in _ACTIVE_MEMBERSHIP_STATUSES:
+            continue
+        try:
+            org_ids.append(int(membership.get("org_id")))
+        except (TypeError, ValueError):
+            continue
+    if not org_ids:
+        raise not_found
+    repo = await get_installations_repo()
+    for org_id in org_ids:
+        for installation in await repo.list_installations(org_id=org_id, provider=domain) or []:
+            if coerce(installation.get("external_id")) == tenant_id:
+                return body
+    raise not_found
 
 
 async def resolve_workspace_org_id(

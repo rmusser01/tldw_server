@@ -88,3 +88,14 @@ vocabulary from one implementation.
 - The policy vocabulary drift (`team_*` vs `workspace_*`) is **not** addressed here —
   it lives in `discord.py`/`slack.py` and belongs to stage 3. It remains a live
   divergence until then.
+
+## Addendum (2026-09-23): job-status route authorization
+
+`GET /api/v1/{discord,slack}/jobs/{job_id}` required no authentication; its only guard
+was that the job belonged to that integration (the "IDOR fix" above), which stops
+cross-integration reads, not unauthenticated ones. It now requires a logged-in web user
+and returns a job only to its owner, or to an active member of an org that installed
+the job's guild/workspace unless that tenant's policy restricts status to the job owner
+(`*_and_user`), matching the in-platform `status` command. Single-user mode sees every
+job of the integration. Everything else is 404. TASK-13364.
+

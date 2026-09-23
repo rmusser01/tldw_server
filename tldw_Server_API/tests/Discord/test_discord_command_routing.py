@@ -25,6 +25,30 @@ def _sign(private_key: Ed25519PrivateKey, timestamp: int, body: bytes) -> str:
     return private_key.sign(str(timestamp).encode("utf-8") + body).hex()
 
 
+def _as_web_user_in_installing_org(monkeypatch: pytest.MonkeyPatch, module, app: FastAPI, provider: str, external_id: str) -> None:
+    """The job-status route needs a logged-in user in the org that installed the tenant."""
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user
+
+    async def _memberships(_user_id: int):
+        return [{"org_id": 5, "status": "active"}]
+
+    installed = {(5, provider): [external_id]}
+
+    class _Repo:
+        async def list_installations(self, *, org_id: int, provider: str | None = None, **_kwargs):
+            return [{"external_id": ext} for ext in installed.get((org_id, provider), [])]
+
+    async def _repo():
+        return _Repo()
+
+    monkeypatch.setattr(module, "list_org_memberships_for_user", _memberships)
+    monkeypatch.setattr(module, "_get_workspace_provider_installations_repo", _repo)
+    monkeypatch.setattr(module, "get_settings", lambda: SimpleNamespace(AUTH_MODE="multi_user"))
+    app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=7)
+
+
 @pytest.fixture()
 def discord_client(monkeypatch: pytest.MonkeyPatch) -> tuple[TestClient, Ed25519PrivateKey]:
     private_key, public_key_hex = _make_test_signer()
@@ -35,6 +59,7 @@ def discord_client(monkeypatch: pytest.MonkeyPatch) -> tuple[TestClient, Ed25519
 
     app = FastAPI()
     app.include_router(discord_endpoint.router, prefix="/api/v1")
+    _as_web_user_in_installing_org(monkeypatch, discord_endpoint, app, "discord", "guild-1")
     return TestClient(app), private_key
 
 
