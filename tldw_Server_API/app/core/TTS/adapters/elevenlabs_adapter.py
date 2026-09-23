@@ -831,9 +831,7 @@ class ElevenLabsTTSAdapter(ElevenLabsAdapter):
         return resp.json() or {}
 
     async def clone_voice(self, name: str, samples: list[bytes]) -> str:
-        if not self.client:
-            from tldw_Server_API.app.core.http_client import create_async_client
-            self.client = create_async_client()
+        self._ensure_client()
         headers = {"xi-api-key": self.api_key, "Content-Type": "application/json"}
         payload = {"name": name, "samples": [s.decode("latin1") if isinstance(s, (bytes, bytearray)) else s for s in samples]}
         resp = await afetch(
@@ -849,9 +847,7 @@ class ElevenLabsTTSAdapter(ElevenLabsAdapter):
         return data.get("voice_id") or data.get("id") or ""
 
     async def get_usage(self) -> dict[str, Any]:
-        if not self.client:
-            from tldw_Server_API.app.core.http_client import create_async_client
-            self.client = create_async_client()
+        self._ensure_client()
         headers = {"xi-api-key": self.api_key}
         resp = await afetch(
             method="GET",
@@ -927,11 +923,7 @@ class ElevenLabsTTSAdapter(ElevenLabsAdapter):
         return response
 
     async def generate_stream(self, request: TTSRequest) -> AsyncGenerator[bytes, None]:
-        # Ensure initialization client exists if needed
-        if not self.client:
-            # Use centralized client (still httpx.AsyncClient) for policy defaults
-            from tldw_Server_API.app.core.http_client import create_async_client
-            self.client = create_async_client()
+        self._ensure_client()
 
         # Prepare voice/model
         voice_id = self._get_voice_id(request.voice or "rachel")

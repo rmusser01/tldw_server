@@ -425,3 +425,27 @@ class TestElevenLabsPooledClientOwnership:
 
         await adapter._cleanup_resources()
         created.aclose.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("method", ["clone_voice", "get_usage"])
+    async def test_other_convenience_calls_own_and_close_their_client(self, method):
+        """clone_voice/get_usage also self-create a client; it must be owned so close() frees it."""
+        from tldw_Server_API.app.core.TTS.adapters.elevenlabs_adapter import (
+            ElevenLabsTTSAdapter,
+        )
+
+        adapter = ElevenLabsTTSAdapter({"elevenlabs_api_key": "xi-test"})
+        created = AsyncMock()
+        resp = AsyncMock()
+        resp.raise_for_status = lambda: None
+        resp.json = lambda: {}
+        call = adapter.clone_voice("v", [b"x"]) if method == "clone_voice" else adapter.get_usage()
+        with patch(
+            "tldw_Server_API.app.core.http_client.create_async_client",
+            return_value=created,
+        ), patch.object(elevenlabs_mod, "afetch", AsyncMock(return_value=resp)):
+            await call
+
+        assert adapter._owns_client is True
+        await adapter._cleanup_resources()
+        created.aclose.assert_awaited_once()
