@@ -9,6 +9,7 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+from tldw_Server_API.app.core.AuthNZ.repos._dual_backend import load_json
 
 
 @dataclass
@@ -41,37 +42,6 @@ class AuthnzDataSubjectRequestsRepo:
         if db_fs_path:
             ensure_authnz_tables(Path(str(db_fs_path)))
 
-    @staticmethod
-    def _parse_json_field(value: Any, *, fallback: Any) -> Any:
-        """Decode a stored JSON blob, clamped to the container the caller asked for.
-
-        The four sibling copies in this package end with
-        ``dict(parsed) if isinstance(parsed, dict) else {}``; this one returned
-        ``json.loads(...)`` raw, so a column holding "[]", "null" or "123" yielded a
-        list / None / int where ``fallback`` promised a dict. coverage_metadata is
-        declared ``dict[str, Any]`` on the response models
-        (api/v1/schemas/admin_schemas.py:1027, :1082), so that surfaced as a validation
-        error on a GDPR data-subject-request read rather than a benign default.
-        """
-        if value is None:
-            return fallback
-
-        if isinstance(value, str):
-            try:
-                parsed: Any = json.loads(value)
-            except json.JSONDecodeError:
-                return fallback
-        elif isinstance(value, (list, dict)):
-            parsed = value
-        else:
-            return fallback
-
-        if isinstance(fallback, dict):
-            return parsed if isinstance(parsed, dict) else fallback
-        if isinstance(fallback, list):
-            return parsed if isinstance(parsed, list) else fallback
-        return parsed
-
     @classmethod
     def _normalize_record(cls, row: Any) -> dict[str, Any]:
         """Normalize backend row types into JSON-friendly dicts."""
@@ -88,18 +58,9 @@ class AuthnzDataSubjectRequestsRepo:
                 with contextlib.suppress(Exception):
                     record[field] = int(record[field])
 
-        record["selected_categories"] = cls._parse_json_field(
-            record.get("selected_categories"),
-            fallback=[],
-        )
-        record["preview_summary"] = cls._parse_json_field(
-            record.get("preview_summary"),
-            fallback=[],
-        )
-        record["coverage_metadata"] = cls._parse_json_field(
-            record.get("coverage_metadata"),
-            fallback={},
-        )
+        record["selected_categories"] = load_json(record.get("selected_categories"), list)
+        record["preview_summary"] = load_json(record.get("preview_summary"), list)
+        record["coverage_metadata"] = load_json(record.get("coverage_metadata"), dict)
 
         if "requested_at" in record and record["requested_at"] is not None:
             with contextlib.suppress(Exception):

@@ -7,6 +7,7 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+from tldw_Server_API.app.core.AuthNZ.repos._dual_backend import row_dict
 
 
 def _normalize_grant_kind(grant_kind: str) -> str:
@@ -54,17 +55,7 @@ class FederatedManagedGrantRepo:
             logger.error(f"FederatedManagedGrantRepo.ensure_tables failed: {exc}")
             raise
 
-    @staticmethod
-    def _row_to_dict(row: Any) -> dict[str, Any]:
-        if isinstance(row, dict):
-            return dict(row)
-        try:
-            return {key: row[key] for key in row.keys()}
-        except Exception as row_keys_error:
-            logger.bind(error_type=type(row_keys_error).__name__).debug(
-                "Managed grant row key materialization failed; falling back to dict(row)",
-            )
-        return dict(row)
+    _row_to_dict = staticmethod(row_dict)
 
     @classmethod
     def _normalize_row(cls, row: Any) -> dict[str, Any]:
