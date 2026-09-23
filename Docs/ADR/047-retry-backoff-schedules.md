@@ -70,3 +70,7 @@ retries to solve a problem those call sites do not have.
   PostgreSQL SQLSTATE 40001, 40P01, 55P03), so PostgreSQL contention is recognisable for the
   first time. Prompt Studio repositories use it as they move out of the two classes; the
   remaining inline loops go with their aggregates.
+- 2026-09-23: HTTP retriability classification moved out of `core/http_client.py` into
+  `core/Utils/backoff.py` (`classify_http_retry`, `is_dns_resolution_error`; DNS failures stay
+  permanent), so backoff.py now also answers *whether* an outbound HTTP attempt is retried.
+  DB contention classification stays in `DB_Management/retry_policy.py`.

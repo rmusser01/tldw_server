@@ -2,8 +2,10 @@ from __future__ import annotations
 
 """Compute the next retry delay.
 
-One job: given an attempt number or the previous delay, say how long to wait.
-Deliberately knows nothing about *what* is being retried.
+Given an attempt number or the previous delay, say how long to wait; and, for
+outbound HTTP, whether an attempt is worth retrying at all
+(:func:`classify_http_retry`, :func:`is_dns_resolution_error`). DB contention
+classification lives in core/DB_Management/retry_policy.py (ADR-047 follow-up).
 
 Two schedules, because the codebase retries two different things and one algorithm
 does not serve both:
@@ -29,12 +31,16 @@ module-level variants. Those copies had drifted three ways -- one tested
 """
 
 import random
+import socket
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
+from typing import Any
 
 __all__ = [
     "capped_exponential_delay",
+    "classify_http_retry",
     "decorrelated_jitter_delay",
+    "is_dns_resolution_error",
     "is_sqlite_locked_error",
     "parse_retry_after_seconds",
 ]
@@ -101,3 +107,77 @@ def parse_retry_after_seconds(
         return max(0.0, (parsed - current).total_seconds())
     except _NONCRITICAL:
         return None
+
+
+# The builtin members of http_client's _HTTPCLIENT_NONCRITICAL_EXCEPTIONS, which is what
+# these classifiers caught before they moved (its custom members cannot be raised by
+# getattr/str on an exception and would be a circular import here).
+_CLASSIFY_NONCRITICAL = (AttributeError, OSError, RuntimeError, TypeError, ValueError)
+
+_DNS_FAILURE_MARKERS = (
+    "nodename nor servname provided",
+    "Name or service not known",
+    "Temporary failure in name resolution",
+    "Host could not be resolved",
+    "DNSResolutionError",
+)
+
+
+def is_dns_resolution_error(exc: BaseException) -> bool:
+    """Best-effort detection of DNS resolution / unknown-host failures.
+
+    Looks for ``socket.gaierror`` in the exception chain, for common
+    platform-specific substrings in the message, and for the explicit
+    ``_tldw_dns_resolution`` flag / "DNSResolutionError" sentinel http_client sets.
+    """
+    try:
+        if getattr(exc, "_tldw_dns_resolution", False):
+            return True
+    except _CLASSIFY_NONCRITICAL:
+        pass
+    try:
+        seen_ids: set[int] = set()
+        cur: BaseException | None = exc
+        while cur is not None and id(cur) not in seen_ids:
+            seen_ids.add(id(cur))
+            if isinstance(cur, socket.gaierror):
+                return True
+            msg = str(cur)
+            if any(m in msg for m in _DNS_FAILURE_MARKERS):
+                return True
+            next_exc = getattr(cur, "__cause__", None) or getattr(cur, "__context__", None)
+            if not isinstance(next_exc, BaseException):
+                break
+            cur = next_exc
+    except _CLASSIFY_NONCRITICAL:
+        return False
+    return False
+
+
+def classify_http_retry(
+    method: str,
+    status: int | None,
+    exc: BaseException | None,
+    policy: Any,
+) -> tuple[bool, str]:
+    """Whether an outbound HTTP attempt should be retried, and a short reason.
+
+    ``policy`` supplies ``retry_on_methods``, ``retry_on_status`` and
+    ``retry_on_unsafe`` (http_client.RetryPolicy). Network exceptions are retried
+    for retriable methods, except DNS failures, which are treated as permanent.
+    """
+    m = method.upper()
+    if exc is not None:
+        if m not in policy.retry_on_methods and not policy.retry_on_unsafe:
+            return False, "method_not_retriable"
+        try:
+            if is_dns_resolution_error(exc):
+                return False, exc.__class__.__name__
+        except _CLASSIFY_NONCRITICAL:
+            pass
+        return True, exc.__class__.__name__
+    if status is None:
+        return False, "no_status"
+    if status in policy.retry_on_status and (m in policy.retry_on_methods or policy.retry_on_unsafe):
+        return True, f"{status}"
+    return False, "status_not_retriable"
