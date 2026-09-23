@@ -4,7 +4,7 @@ title: http_client version lookup crashes when tldw-server is not pip-installed
 status: Done
 assignee: []
 created_date: '2026-09-23 21:06'
-updated_date: '2026-09-23 21:07'
+updated_date: '2026-09-23 22:56'
 labels:
   - bug
   - http
@@ -27,6 +27,8 @@ _get_project_version caught _HTTPCLIENT_NONCRITICAL_EXCEPTIONS but not ImportErr
 
 <!-- SECTION:NOTES:BEGIN -->
 Fixed in 7039432940: except now includes ImportError. tests/http_client/test_http_client_project_version.py red on HEAD (PackageNotFoundError), green now. tests/http_client without TLDW_VERSION: 69 failed on HEAD -> 1 failed (test_sensitive_log_filter_does_not_hide_concurrent_public_request, also failing on HEAD). Bandit: one-line except change, no new calls. Docs: none.
+
+Duplicate of TASK-13284 (the review task for the same defect); both closed by 7039432940.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
