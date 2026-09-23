@@ -2951,6 +2951,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_legacy_complete_deprecation.py
               tldw_Server_API/tests/Character_Chat/test_messages_tool_calls_exposure.py
               tldw_Server_API/tests/Character_Chat/test_persona_dialogue_tree_character_eval.py
+              tldw_Server_API/tests/Character_Chat/test_message_listing_raw_content.py
           - name: chat-character-legacy-files
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_file_mime_detection.py
@@ -2990,6 +2991,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_memory.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_prompt_presets.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_templates.py
+              tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_behavior_snapshot.py
           - name: chat-character-unit-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_chat_completion_precheck.py
@@ -3346,6 +3348,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_startup_*.py
+              tldw_Server_API/tests/Services/test_study_pack_startup_default.py
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
           - name: platform-services-shutdown-lifespan
             paths: >-
@@ -4338,6 +4341,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_legacy_complete_deprecation.py
               tldw_Server_API/tests/Character_Chat/test_messages_tool_calls_exposure.py
               tldw_Server_API/tests/Character_Chat/test_persona_dialogue_tree_character_eval.py
+              tldw_Server_API/tests/Character_Chat/test_message_listing_raw_content.py
           - name: chat-character-legacy-files
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_file_mime_detection.py
@@ -4377,6 +4381,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_memory.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_prompt_presets.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_templates.py
+              tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_behavior_snapshot.py
           - name: chat-character-unit-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_chat_completion_precheck.py
@@ -4733,6 +4738,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_startup_*.py
+              tldw_Server_API/tests/Services/test_study_pack_startup_default.py
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
           - name: platform-services-shutdown-lifespan
             paths: >-
@@ -5648,6 +5654,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_legacy_complete_deprecation.py
               tldw_Server_API/tests/Character_Chat/test_messages_tool_calls_exposure.py
               tldw_Server_API/tests/Character_Chat/test_persona_dialogue_tree_character_eval.py
+              tldw_Server_API/tests/Character_Chat/test_message_listing_raw_content.py
           - name: chat-character-legacy-files
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_file_mime_detection.py
@@ -5687,6 +5694,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_memory.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_prompt_presets.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_templates.py
+              tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_behavior_snapshot.py
           - name: chat-character-unit-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_chat_completion_precheck.py
@@ -6043,6 +6051,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_startup_*.py
+              tldw_Server_API/tests/Services/test_study_pack_startup_default.py
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
           - name: platform-services-shutdown-lifespan
             paths: >-
@@ -6964,6 +6973,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_legacy_complete_deprecation.py
               tldw_Server_API/tests/Character_Chat/test_messages_tool_calls_exposure.py
               tldw_Server_API/tests/Character_Chat/test_persona_dialogue_tree_character_eval.py
+              tldw_Server_API/tests/Character_Chat/test_message_listing_raw_content.py
           - name: chat-character-legacy-files
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_file_mime_detection.py
@@ -7003,6 +7013,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_memory.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_prompt_presets.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_templates.py
+              tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_behavior_snapshot.py
           - name: chat-character-unit-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_chat_completion_precheck.py
@@ -7359,6 +7370,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_startup_*.py
+              tldw_Server_API/tests/Services/test_study_pack_startup_default.py
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
           - name: platform-services-shutdown-lifespan
             paths: >-
