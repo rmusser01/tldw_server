@@ -481,7 +481,15 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
 
 def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
     workflows = _load_ordinary_workflows()
+    # The group is scoped by event name as well as by pull request. Without that scope a
+    # pull_request run and the workflow_run run that follows it resolve the suffix to the
+    # same PR number, share one group, and cancel-in-progress kills the pull_request run
+    # -- the only run that can report a status to the pull request, because these
+    # workflows hold only `contents: read` and rely on GitHub's implicit check run, which
+    # for a workflow_run event attaches to the default branch rather than the PR head.
+    # See TASK-13355.
     concurrency_suffix = (
+        "${{ github.event_name }}-"
         "${{ github.event.workflow_run.pull_requests[0].number || "
         "github.event.pull_request.number || github.ref || github.run_id }}"
     )

@@ -23,7 +23,7 @@ permissions:
 # - pull_request is a same-workflow consistency check because the PR controls both.
 # - workflow_dispatch follows the selected workflow ref and inherits that ref's trust.
 concurrency:
-  group: frontend-required-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || github.ref || github.run_id }}
+  group: frontend-required-${{ github.event_name }}-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || github.ref || github.run_id }}
   cancel-in-progress: true
 
 jobs:
