@@ -6,13 +6,24 @@ has closed -- and unlinked -- the file. The OCR server is handed a path that no 
 exists, so every page comes back empty and `_ocr_pdf_pages` counts zero OCR'd pages
 while the run still completes.
 
-`nemotron_parse._ocr_via_vllm` is the correct sibling: `delete=False`, the path kept in
-`tmp_path`, and a `try/finally` that unlinks after the request. It is parametrised here
-as the control -- it passed before the fix and must keep passing.
+`nemotron_parse._ocr_via_vllm` was the correct sibling for *that* defect: `delete=False`,
+the path kept in `tmp_path`, and a `try/finally` that unlinks after the request. It is
+parametrised throughout as the control, and it passed the lifetime cases before the fix.
+
+It did not escape unscathed, though. Review of PR #2982 found that the same shape leaks
+on a *failed write*: `tmp_path` was assigned only after `write()` and `flush()`, so an
+OSError from a full filesystem left a file that `delete=False` no longer removes
+automatically. All three backends now record the path before writing, and all three
+route removal through `runtime_support.discard_staged_page_image`, which reports a failed
+unlink instead of suppressing it silently.
 
 The lifetime assertion is made *inside* the stubbed `fetch_json`, which is the only
 moment that matters: the file has to exist when the request is made, not merely at some
 point during the call.
+
+These tests call `_ocr_via_vllm` directly. That is deliberate: it is the unit whose
+temp-file contract is under test, and the public `ocr_image` wraps it in a CLI or
+transformers fallback that swallows the failure and would mask every assertion here.
 """
 
 from __future__ import annotations
@@ -39,6 +50,7 @@ _BACKENDS = [
 
 
 def _load(module_name: str):
+    """Import one OCR backend module by its short name."""
     import importlib
 
     return importlib.import_module(
@@ -152,6 +164,64 @@ def test_temp_image_is_removed_when_the_request_fails(
 
     assert not os.path.exists(seen["url"]), (
         f"{module_name} leaked {seen['url']!r} when the request raised"
+    )
+
+
+@pytest.mark.parametrize(("module_name", "env_prefix", "extra_args"), _BACKENDS)
+def test_a_failed_write_does_not_leak_the_temp_file(
+    monkeypatch: pytest.MonkeyPatch,
+    module_name: str,
+    env_prefix: str,
+    extra_args: tuple[Any, ...],
+) -> None:
+    """The `delete=False` needed for the fix makes a failed write leak unless handled.
+
+    Raised by Qodo on PR #2982. `delete=True` removed the file on close even when the
+    write failed; `delete=False` does not, so the path has to be recorded before the
+    write and cleaned up if it raises -- otherwise a full or read-only filesystem leaves
+    one partial image per page attempt.
+    """
+    module = _load(module_name)
+    monkeypatch.setenv(f"{env_prefix}_URL", "http://ocr.invalid/v1/chat/completions")
+    monkeypatch.setenv(f"{env_prefix}_USE_DATA_URL", "false")
+
+    created: list[str] = []
+    real_named_temp_file = module.tempfile.NamedTemporaryFile
+
+    class _WriteFails:
+        """A NamedTemporaryFile whose write raises, recording the path it created."""
+
+        def __init__(self, handle: Any) -> None:
+            self._handle = handle
+            self.name = handle.name
+
+        def __enter__(self) -> _WriteFails:
+            self._handle.__enter__()
+            return self
+
+        def __exit__(self, *exc_info: Any) -> Any:
+            return self._handle.__exit__(*exc_info)
+
+        def write(self, _data: bytes) -> int:
+            raise OSError(28, "No space left on device")
+
+        def flush(self) -> None:  # pragma: no cover - never reached
+            self._handle.flush()
+
+    def _failing_temp_file(*args: Any, **kwargs: Any) -> _WriteFails:
+        handle = real_named_temp_file(*args, **kwargs)
+        created.append(handle.name)
+        return _WriteFails(handle)
+
+    monkeypatch.setattr(module.tempfile, "NamedTemporaryFile", _failing_temp_file)
+
+    with pytest.raises(OSError):
+        module._ocr_via_vllm(_PNG, "prompt", *extra_args)
+
+    assert created, f"{module_name} never created a temp file"
+    assert not os.path.exists(created[0]), (
+        f"{module_name} leaked {created[0]!r} when the write failed; delete=False means "
+        "nothing removes it automatically"
     )
 
 

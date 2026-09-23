@@ -21,11 +21,13 @@ covered by `tests/sandbox/test_ws_connection_quotas.py`.
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.endpoints import mcp_unified_endpoint as mcp_ep
+from tldw_Server_API.app.core.MCP_unified.protocol import MCPResponse
 from tldw_Server_API.app.core.MCP_unified.server import MCPServer
 from tldw_Server_API.app.main import app
 
@@ -33,13 +35,20 @@ pytestmark = pytest.mark.integration
 
 
 class _OkProtocol:
-    async def process_request(self, payload, context):
-        from tldw_Server_API.app.core.MCP_unified.protocol import MCPResponse
+    """Minimal protocol stand-in that accepts any request and answers success.
 
+    Only `process_request` is exercised: these tests are about what the connection
+    registry does around the handler, not about protocol dispatch.
+    """
+
+    async def process_request(
+        self, payload: dict[str, Any], context: Any
+    ) -> MCPResponse:
         return MCPResponse(result={"ok": True}, id=None)
 
 
 def _build_server() -> MCPServer:
+    """Return a server that accepts unauthenticated query-param WebSocket clients."""
     server = MCPServer()
     server.initialized = True
     server.protocol = _OkProtocol()
@@ -49,6 +58,7 @@ def _build_server() -> MCPServer:
 
 
 def _connect_once(client: TestClient, client_id: str) -> None:
+    """Open one WebSocket, complete an initialize round-trip, and close it."""
     with client.websocket_connect(f"/api/v1/mcp/ws?client_id={client_id}") as ws:
         ws.send_text(
             json.dumps(
@@ -74,19 +84,21 @@ def test_disconnect_drains_the_connection_registry(monkeypatch: pytest.MonkeyPat
         "the connection was left in the registry after disconnect, so the finally's "
         "deregistration did not run to completion"
     )
-    # No public accessor exists for the per-IP reservation, and it is the half that
-    # actually locks a client out, so it is asserted directly.
-    assert server._ip_connection_counts == {}, (
-        f"per-IP connection slot not released: {dict(server._ip_connection_counts)}. "
-        "Once a bucket reaches ws_max_connections_per_ip that client is refused for "
-        "the life of the process."
-    )
+    # The per-IP reservation is deliberately NOT asserted here. It has no public
+    # accessor, and asserting the private counter couples this test to a field name
+    # while adding nothing: the test below already proves the slot is released, by
+    # exhausting the cap if it is not.
 
 
 def test_repeated_connects_do_not_exhaust_the_per_ip_cap(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The consequence, stated as behaviour rather than as internal state."""
+    """The consequence, stated as behaviour rather than as internal state.
+
+    With the cap at 2, a fourth sequential connect can only succeed if each of the first
+    three released its reservation on close. This is what makes asserting the private
+    counter unnecessary.
+    """
     server = _build_server()
     server.config.ws_max_connections_per_ip = 2
     monkeypatch.setattr(mcp_ep, "get_mcp_server", lambda: server)

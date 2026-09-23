@@ -26,19 +26,29 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-# BaseException subclasses that are NOT Exception subclasses. A tuple named
-# "noncritical" must not contain any of them.
+# BaseException subclasses that are NOT Exception subclasses, by unqualified name. A
+# tuple named "noncritical" must not contain any of them.
 _BASE_ONLY_EXCEPTIONS = frozenset(
     {
         "BaseException",
         "KeyboardInterrupt",
         "SystemExit",
         "GeneratorExit",
-        # asyncio.CancelledError and concurrent.futures.CancelledError are the same
-        # class since 3.8, and it derives from BaseException.
-        "CancelledError",
     }
 )
+
+# `CancelledError` cannot be judged on its unqualified name, and an earlier version of
+# this rule got it wrong -- caught by review. There are two distinct classes:
+#
+#   asyncio.exceptions.CancelledError            BaseException only  -> banned
+#   concurrent.futures._base.CancelledError      Exception subclass  -> allowed
+#
+# They are NOT aliases of one another on any version this repo supports (verified on
+# 3.12: `asyncio.CancelledError is concurrent.futures.CancelledError` is False, and the
+# futures one has Exception in its MRO). Banning the bare name therefore rejected
+# correct code, so the asyncio one is identified by its qualification or its import.
+_ASYNCIO_CANCELLED = "asyncio.CancelledError"
+_CANCELLED_NAME = "CancelledError"
 
 _TUPLE_NAME_SUFFIX = "NONCRITICAL_EXCEPTIONS"
 
@@ -51,13 +61,35 @@ def _app_root() -> Path:
     return _repo_root() / "tldw_Server_API" / "app"
 
 
-def _member_name(node: ast.expr) -> str | None:
-    """`ValueError` -> "ValueError"; `asyncio.CancelledError` -> "CancelledError"."""
+def _dotted_name(node: ast.expr) -> str | None:
+    """`ValueError` -> "ValueError"; `asyncio.CancelledError` -> "asyncio.CancelledError".
+
+    Qualification is preserved deliberately: two different classes share the
+    unqualified name `CancelledError`, and only one of them is BaseException-only.
+    """
     if isinstance(node, ast.Name):
         return node.id
     if isinstance(node, ast.Attribute):
-        return node.attr
+        prefix = _dotted_name(node.value)
+        return f"{prefix}.{node.attr}" if prefix else node.attr
     return None
+
+
+def _bare_cancelled_is_asyncio(tree: ast.Module) -> bool:
+    """Resolve an unqualified `CancelledError` to its module via the file's imports.
+
+    A bare name with no matching import would be a NameError at runtime, so absence of
+    an import means the name came from somewhere this scan cannot see; that is treated
+    as the banned case so the rule fails loudly rather than silently allowing it.
+    """
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        if not any(alias.name == _CANCELLED_NAME for alias in node.names):
+            continue
+        module = node.module or ""
+        return not (module.startswith("concurrent.futures") or module == "concurrent")
+    return True
 
 
 def _assigned_names(node: ast.Assign | ast.AnnAssign) -> list[str]:
@@ -85,8 +117,15 @@ def _scan() -> tuple[int, list[str]]:
                 continue
             inspected += 1
             for element in node.value.elts:
-                member = _member_name(element)
-                if member in _BASE_ONLY_EXCEPTIONS:
+                member = _dotted_name(element)
+                if member is None:
+                    continue
+                banned = member.rsplit(".", 1)[-1] in _BASE_ONLY_EXCEPTIONS
+                if member == _ASYNCIO_CANCELLED:
+                    banned = True
+                elif member == _CANCELLED_NAME:
+                    banned = _bare_cancelled_is_asyncio(tree)
+                if banned:
                     rel = path.relative_to(_repo_root())
                     violations.append(f"{rel}:{node.lineno} {names[0]} contains {member}")
 
@@ -101,7 +140,48 @@ def test_the_premise_holds_on_this_interpreter() -> None:
     assert issubclass(asyncio.CancelledError, BaseException)
 
 
+def test_the_two_cancellederrors_are_different_classes() -> None:
+    """The distinction the first version of this rule got wrong.
+
+    Banning the unqualified name `CancelledError` rejected
+    `concurrent.futures.CancelledError`, which is an ordinary Exception subclass and is
+    legitimate in a noncritical tuple. If these ever do become aliases, this test fails
+    and the rule can be simplified back to a name check.
+    """
+    import asyncio
+    import concurrent.futures
+
+    assert asyncio.CancelledError is not concurrent.futures.CancelledError
+    assert issubclass(concurrent.futures.CancelledError, Exception)
+    assert not issubclass(asyncio.CancelledError, Exception)
+
+
+def test_the_scanner_distinguishes_the_two_by_qualification() -> None:
+    """Exercise the resolution logic directly, both spellings and both import forms."""
+    banned_qualified = ast.parse("X_NONCRITICAL_EXCEPTIONS = (asyncio.CancelledError,)")
+    banned_bare = ast.parse(
+        "from asyncio import CancelledError\nX_NONCRITICAL_EXCEPTIONS = (CancelledError,)"
+    )
+    allowed_qualified = ast.parse(
+        "X_NONCRITICAL_EXCEPTIONS = (concurrent.futures.CancelledError,)"
+    )
+    allowed_bare = ast.parse(
+        "from concurrent.futures import CancelledError\n"
+        "X_NONCRITICAL_EXCEPTIONS = (CancelledError,)"
+    )
+
+    def _members(tree: ast.Module) -> list[str]:
+        assign = next(n for n in tree.body if isinstance(n, ast.Assign))
+        return [_dotted_name(e) or "" for e in assign.value.elts]
+
+    assert _members(banned_qualified) == ["asyncio.CancelledError"]
+    assert _members(allowed_qualified) == ["concurrent.futures.CancelledError"]
+    assert _bare_cancelled_is_asyncio(banned_bare) is True
+    assert _bare_cancelled_is_asyncio(allowed_bare) is False
+
+
 def test_noncritical_tuples_contain_no_baseexception_members() -> None:
+    """Scan every *_NONCRITICAL_EXCEPTIONS tuple in app/ and reject BaseException-only members."""
     inspected, violations = _scan()
 
     assert inspected > 0, "scanner matched nothing -- the tuple naming convention moved"

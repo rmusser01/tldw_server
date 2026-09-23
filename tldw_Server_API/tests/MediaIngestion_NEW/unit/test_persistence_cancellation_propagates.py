@@ -36,6 +36,12 @@ def test_the_tuple_does_not_catch_cancellation() -> None:
 
 
 def test_no_member_of_the_tuple_derives_from_baseexception_only() -> None:
+    """Assert the whole tuple, not just cancellation, so a sibling cannot creep in.
+
+    The tuple object is inspected directly because the tuple *is* the defect: its
+    membership is the shared thing every one of the ~140 handlers in this module
+    resolves. The awaiting-call-path test below covers the consequence.
+    """
     offenders = [
         exc.__name__
         for exc in persistence._PERSISTENCE_NONCRITICAL_EXCEPTIONS
