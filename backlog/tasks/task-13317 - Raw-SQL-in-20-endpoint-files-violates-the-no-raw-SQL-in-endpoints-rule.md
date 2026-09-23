@@ -4,7 +4,7 @@ title: Raw SQL in 20 endpoint files violates the no-raw-SQL-in-endpoints rule
 status: In Progress
 assignee: []
 created_date: '2026-09-22 04:54'
-updated_date: '2026-09-23 01:03'
+updated_date: '2026-09-23 16:24'
 labels:
   - duplication
   - api
@@ -35,7 +35,7 @@ Owner-only (app/api/v1/**). Source: synthesis F19
 <!-- AC:BEGIN -->
 - [ ] #1 The 14 small files route through their existing core owners
 - [ ] #2 Three orphan tables get a core owner
-- [ ] #3 No endpoint reaches a core private API
+- [x] #3 No endpoint reaches a core private API
 - [x] #4 A lint ratchet prevents new raw SQL in endpoints
 <!-- AC:END -->
 
@@ -106,6 +106,8 @@ NOT RATCHETED, deliberately: the ten files that hand-roll the SQLite/PostgreSQL 
 branch. A count is the wrong instrument -- the branch is the problem, not its frequency. This
 is why core/AuthNZ/database.py:1966 _normalize_sqlite_sql exists; its own docstring calls
 itself a safety net for when a dollar-style query slips through.
+
+2026-09-23: AC3 done - the five named private reaches are gone (PromptStudioDatabase._execute -> get_project_by_name; Collections_DB._coerce_bool_flag -> get_live_audio_studio_section_text; vector_store_batches_db._connect -> count_batches; jm._connect/_pg_cursor in prompt_studio_status -> core/Jobs/queue_stats.py and in jobs_admin -> core/Jobs/admin_operations.py; plus jm._update_gauges/_get_queue_flags -> public wrappers). Pinned by test_no_endpoint_reaches_database_internals. Five files left the raw-SQL baseline (jobs_admin, prompt_studio_status, prompt_studio_projects, audio_studio, vector_stores_openai). Finding outside AC3's list: endpoints still import 51 private names from core across 20 files (audio/* the most); not ratcheted.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
