@@ -47,6 +47,7 @@ from .backends.query_utils import (
 from .Prompts_DB import ConflictError, DatabaseError, InputError, PromptsDatabase, SchemaError
 from .prompt_studio_db.prompt_fields import _prepare_prompt_record_fields  # noqa: F401 - re-exported for endpoints
 from .prompt_studio_db.repositories.evaluations import EvaluationsRepository
+from .prompt_studio_db.session import PromptStudioSessionOps
 from .prompt_studio_db.repositories.jobs import JobsRepository
 from .prompt_studio_db.repositories.optimizations import OptimizationsRepository
 from .prompt_studio_db.repositories.test_cases import TestCasesRepository
@@ -562,7 +563,7 @@ class BackendPromptStudioDatabaseBase:
         return cursor.executemany(query, params_list)
 
 
-class _BackendPromptStudioDatabase(BackendPromptStudioDatabaseBase):
+class _BackendPromptStudioDatabase(PromptStudioSessionOps, BackendPromptStudioDatabaseBase):
     """PostgreSQL-backed Prompt Studio database implementation."""
 
     _SCHEMA_VERSION = 1
@@ -863,49 +864,6 @@ class _BackendPromptStudioDatabase(BackendPromptStudioDatabaseBase):
         return statements
 
     # --- Idempotency helpers (Postgres) ---
-    def _idem_lookup(self, entity_type: str, key: str, user_id: Optional[str]) -> Optional[int]:
-        try:
-            if user_id is None:
-                cursor = self._execute(
-                    """
-                    SELECT entity_id
-                    FROM prompt_studio_idempotency
-                    WHERE entity_type = ?
-                      AND idempotency_key = ?
-                      AND user_id IS NULL
-                    LIMIT 1
-                    """,
-                    (entity_type, key),
-                )
-            else:
-                cursor = self._execute(
-                    """
-                    SELECT entity_id
-                    FROM prompt_studio_idempotency
-                    WHERE entity_type = ?
-                      AND idempotency_key = ?
-                      AND user_id = ?
-                    LIMIT 1
-                    """,
-                    (entity_type, key, user_id),
-                )
-            row = cursor.fetchone()
-            return int(row[0]) if row else None
-        except BackendDatabaseError:
-            return None
-
-    def _idem_record(self, entity_type: str, key: str, entity_id: int, user_id: Optional[str]) -> None:
-        try:
-            # INSERT OR IGNORE is translated to ON CONFLICT DO NOTHING for Postgres by the query adapter
-            with self.transaction() as conn:
-                self._execute(
-                    "INSERT OR IGNORE INTO prompt_studio_idempotency (entity_type, idempotency_key, entity_id, user_id) VALUES (?, ?, ?, ?)",
-                    (entity_type, key, entity_id, user_id),
-                    connection=conn,
-                )
-        except BackendDatabaseError:
-            pass
-
     def _transform_sqlite_statement_for_postgres(self, statement: str) -> Optional[str]:
         stmt = statement.strip()
         if not stmt:
@@ -1018,63 +976,6 @@ class _BackendPromptStudioDatabase(BackendPromptStudioDatabaseBase):
 
         return result
 
-    def _log_sync_event(self, entity: str, entity_uuid: str, operation: str, payload: dict[str, Any]) -> None:
-        if not entity or not entity_uuid or not operation:
-            return
-        if self._sync_log_available is False:
-            return
-
-        try:
-            with self.transaction() as conn:
-                if self._sync_log_available is None:
-                    try:
-                        self._sync_log_available = self.backend.table_exists(
-                            "sync_log",
-                            connection=conn.raw_connection,
-                        )
-                    except _PROMPT_STUDIO_NONCRITICAL_EXCEPTIONS as exc:
-                        logger.debug("Prompt Studio sync_log availability check failed: {}", exc)
-                        self._sync_log_available = False
-                        return
-                if not self._sync_log_available:
-                    return
-                self._cursor_exec(
-                    conn,
-                    """
-                    INSERT INTO sync_log (entity, entity_uuid, operation, client_id, version, payload, timestamp)
-                    VALUES (?, ?, ?, ?, 1, ?, CURRENT_TIMESTAMP)
-                    RETURNING change_id
-                    """,
-                    (
-                        entity,
-                        entity_uuid,
-                        operation,
-                        # Shared sync-log RLS uses this column as tenant ownership.
-                        # The project/prompt rows retain the originating audit client.
-                        self.tenant_user_id,
-                        json.dumps(payload, separators=(',', ':')) if payload else None,
-                    ),
-                )
-        except _PROMPT_STUDIO_NONCRITICAL_EXCEPTIONS as e:
-            # sync_log is optional across backends
-            err_str = str(e).lower()
-            if "no such table" in err_str or "does not exist" in err_str or "relation" in err_str:
-                # Table doesn't exist - expected in some deployments
-                self._sync_log_available = False
-                logger.debug(
-                    'Prompt Studio sync_log table not available; skipping event for {}/{}',
-                    entity,
-                    entity_uuid,
-                )
-            else:
-                # Actual write error - worth warning about
-                logger.warning(
-                    'Failed to log sync event for {}/{}: {}',
-                    entity,
-                    entity_uuid,
-                    e,
-                )
-
     # --- Core API ---
     # Project name constraints
 
@@ -1095,7 +996,7 @@ class _BackendPromptStudioDatabase(BackendPromptStudioDatabaseBase):
 ########################################################################################################################
 # Prompt Studio Database Class
 
-class _SQLitePromptStudioDatabase(PromptsDatabase):
+class _SQLitePromptStudioDatabase(PromptStudioSessionOps, PromptsDatabase):
     """
     Extends PromptsDatabase with Prompt Studio specific functionality.
     Manages projects, signatures, test cases, evaluations, and optimizations.
@@ -1301,51 +1202,6 @@ class _SQLitePromptStudioDatabase(PromptsDatabase):
                 logger.warning(f"Migration file not found: {migration_path}")
 
     # --- Idempotency helpers (SQLite) ---
-    def _idem_lookup(self, entity_type: str, key: str, user_id: Optional[str]) -> Optional[int]:
-        try:
-            conn = self.get_connection()
-            cursor = conn.cursor()
-            if user_id is None:
-                cursor.execute(
-                    """
-                    SELECT entity_id
-                    FROM prompt_studio_idempotency
-                    WHERE entity_type = ?
-                      AND idempotency_key = ?
-                      AND user_id IS NULL
-                    LIMIT 1
-                    """,
-                    (entity_type, key),
-                )
-            else:
-                cursor.execute(
-                    """
-                    SELECT entity_id
-                    FROM prompt_studio_idempotency
-                    WHERE entity_type = ?
-                      AND idempotency_key = ?
-                      AND user_id = ?
-                    LIMIT 1
-                    """,
-                    (entity_type, key, user_id),
-                )
-            row = cursor.fetchone()
-            return int(row[0]) if row else None
-        except _PROMPT_STUDIO_NONCRITICAL_EXCEPTIONS:
-            return None
-
-    def _idem_record(self, entity_type: str, key: str, entity_id: int, user_id: Optional[str]) -> None:
-        try:
-            conn = self.get_connection()
-            cursor = conn.cursor()
-            cursor.execute(
-                "INSERT OR IGNORE INTO prompt_studio_idempotency (entity_type, idempotency_key, entity_id, user_id) VALUES (?, ?, ?, ?)",
-                (entity_type, key, entity_id, user_id),
-            )
-            conn.commit()
-        except _PROMPT_STUDIO_NONCRITICAL_EXCEPTIONS:
-            pass
-
     ####################################################################################################################
     # Project Management
 
@@ -1386,49 +1242,6 @@ class _SQLitePromptStudioDatabase(PromptsDatabase):
                     pass
 
         return result
-
-    def _log_sync_event(self, entity: str, entity_uuid: str, operation: str, payload: dict[str, Any]):
-        """Log an event to sync_log table if it exists."""
-        try:
-            with self.transaction() as conn:
-                cursor = conn.cursor()
-
-                # Check if sync_log table exists
-                cursor.execute(
-                    """
-                    SELECT name FROM sqlite_master
-                    WHERE type='table' AND name='sync_log'
-                    """
-                )
-
-                if cursor.fetchone():
-                    cursor.execute(
-                        """
-                        INSERT INTO sync_log (
-                            entity,
-                            entity_uuid,
-                            operation,
-                            client_id,
-                            version,
-                            payload,
-                            timestamp
-                        )
-                        VALUES (?, ?, ?, ?, 1, ?, CURRENT_TIMESTAMP)
-                        """,
-                        (
-                            entity,
-                            entity_uuid,
-                            operation,
-                            self.client_id,
-                            json.dumps(payload),
-                        ),
-                    )
-        except _PROMPT_STUDIO_NONCRITICAL_EXCEPTIONS as e:
-            err_str = str(e).lower()
-            if "no such table" in err_str or "does not exist" in err_str:
-                logger.debug(f"sync_log table not available: {e}")
-            else:
-                logger.warning(f"Failed to log sync event for {entity}/{entity_uuid}: {e}")
 
     # Public convenience alias matching some endpoint call sites
     def row_to_dict(self, row: tuple, cursor: sqlite3.Cursor) -> dict[str, Any]:
