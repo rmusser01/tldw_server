@@ -2423,13 +2423,31 @@ def test_gateway_external_runtime_lifecycle_logs_unexpected_startup_exception(
     ]
 
 
+def _find_route(app, suffix: str):
+    """Find a gateway route by path suffix, wherever the app keeps it.
+
+    This used to be `next(r for r in app.routes if r.path == "/mcp/status")`, which
+    went red with StopIteration once the gateway stopped registering absolute paths
+    on the application. Its routes now live on an APIRouter reached through a custom
+    _IncludedRouter wrapper, with paths relative to the mount ("/status"), so nothing
+    on app.routes carries the full path any more. The endpoint itself is unchanged --
+    GET /mcp/status still answers 200 -- so this is a lookup that drifted, not a
+    regression.
+    """
+    pending = list(app.routes)
+    while pending:
+        route = pending.pop()
+        path = getattr(route, "path", None)
+        if path and path.endswith(suffix):
+            return route
+        inner = getattr(route, "original_router", None) or getattr(route, "app", None)
+        pending.extend(getattr(inner, "routes", []))
+    raise AssertionError(f"no route ending in {suffix!r} found")
+
+
 def test_gateway_status_includes_package_boundary_metadata() -> None:
     app = create_gateway_app(_FakeGatewayRuntime())
-    status_route = next(
-        route
-        for route in app.routes
-        if getattr(route, "path", None) == "/mcp/status"
-    )
+    status_route = _find_route(app, "/status")
     assert getattr(status_route, "response_model", None) is gateway_fastapi.GatewayReadinessStatusResponse
 
     with TestClient(app) as client:

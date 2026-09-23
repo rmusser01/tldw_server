@@ -151,14 +151,29 @@ def test_gateway_admin_auth_does_not_gate_status_or_jsonrpc() -> None:
             json={"jsonrpc": "2.0", "method": "tools/list", "id": "tools-1"},
         )
 
+    # The point of this test is that admin auth does not gate these two routes.
     assert status.status_code == 200
-    assert status.json() == {
-        "status": "ok",
-        "name": "admin-auth-test",
-        "version": "0.0-test",
-    }
     assert tools.status_code == 200
     assert tools.json()["result"]["tools"][0]["name"] == "echo.search"
+
+    # Identity fields, asserted individually. This was an exact-dict comparison, which
+    # went red as soon as the status payload grew transport, package, profile_store,
+    # external_servers, default_profile, warnings and next_actions blocks -- none of
+    # which this test is about.
+    body = status.json()
+    assert body["status"] == "ok"
+    assert body["name"] == "admin-auth-test"
+    assert body["version"] == "0.0-test"
+
+    # The admin_auth block is reported on an UNAUTHENTICATED route, so it may say that
+    # a key is configured but must never disclose it.
+    admin_auth = body["admin_auth"]
+    assert admin_auth == {
+        "enabled": True,
+        "configured": True,
+        "header_name": "X-MCP-Gateway-Admin-Key",
+    }
+    assert "test-admin-key" not in status.text
 
 
 @pytest.mark.parametrize("suffix", [".json", ".toml"])

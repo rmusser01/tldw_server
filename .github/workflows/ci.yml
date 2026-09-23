@@ -1765,21 +1765,12 @@ jobs:
           # process with tests/MCP_unified makes test_rag_module and
           # test_gateway_protocol_stdio fail through cross-test state pollution,
           # though both pass in isolation.
-          # The --ignore entries are a SHRINKING quarantine of files already red when
-          # the tree was wired in. Remove entries as they are fixed; never add.
+          # The quarantine this shard launched with (10 files, 21 red entries) is
+          # fully drained (TASK-13343); the shard runs the whole tree. Do not add
+          # --ignore entries here: fix the test, or skip it with a reason.
           - name: platform-mcp-inapp
             paths: >-
               tldw_Server_API/app/core/MCP_unified/tests
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_artifact_consumer.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_server_batch_and_formatting.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_refresh_token.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_gateway_tool_discovery.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_gateway_admin_auth.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_flashcards_module.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_external_federation_integration.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_codegraph_module.py
           - name: platform-resource-governance
             paths: >-
               tldw_Server_API/tests/Resource_Governance
@@ -3287,21 +3278,12 @@ jobs:
           # process with tests/MCP_unified makes test_rag_module and
           # test_gateway_protocol_stdio fail through cross-test state pollution,
           # though both pass in isolation.
-          # The --ignore entries are a SHRINKING quarantine of files already red when
-          # the tree was wired in. Remove entries as they are fixed; never add.
+          # The quarantine this shard launched with (10 files, 21 red entries) is
+          # fully drained (TASK-13343); the shard runs the whole tree. Do not add
+          # --ignore entries here: fix the test, or skip it with a reason.
           - name: platform-mcp-inapp
             paths: >-
               tldw_Server_API/app/core/MCP_unified/tests
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_artifact_consumer.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_server_batch_and_formatting.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_refresh_token.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_gateway_tool_discovery.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_gateway_admin_auth.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_flashcards_module.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_external_federation_integration.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_codegraph_module.py
           - name: platform-resource-governance
             paths: >-
               tldw_Server_API/tests/Resource_Governance
@@ -4679,21 +4661,12 @@ jobs:
           # process with tests/MCP_unified makes test_rag_module and
           # test_gateway_protocol_stdio fail through cross-test state pollution,
           # though both pass in isolation.
-          # The --ignore entries are a SHRINKING quarantine of files already red when
-          # the tree was wired in. Remove entries as they are fixed; never add.
+          # The quarantine this shard launched with (10 files, 21 red entries) is
+          # fully drained (TASK-13343); the shard runs the whole tree. Do not add
+          # --ignore entries here: fix the test, or skip it with a reason.
           - name: platform-mcp-inapp
             paths: >-
               tldw_Server_API/app/core/MCP_unified/tests
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_artifact_consumer.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_server_batch_and_formatting.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_refresh_token.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_gateway_tool_discovery.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_gateway_admin_auth.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_flashcards_module.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_external_federation_integration.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_codegraph_module.py
           - name: platform-resource-governance
             paths: >-
               tldw_Server_API/tests/Resource_Governance
@@ -5994,21 +5967,12 @@ jobs:
           # process with tests/MCP_unified makes test_rag_module and
           # test_gateway_protocol_stdio fail through cross-test state pollution,
           # though both pass in isolation.
-          # The --ignore entries are a SHRINKING quarantine of files already red when
-          # the tree was wired in. Remove entries as they are fixed; never add.
+          # The quarantine this shard launched with (10 files, 21 red entries) is
+          # fully drained (TASK-13343); the shard runs the whole tree. Do not add
+          # --ignore entries here: fix the test, or skip it with a reason.
           - name: platform-mcp-inapp
             paths: >-
               tldw_Server_API/app/core/MCP_unified/tests
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_artifact_consumer.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_server_batch_and_formatting.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_refresh_token.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_gateway_tool_discovery.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_gateway_admin_auth.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_flashcards_module.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_external_federation_integration.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_codegraph_module.py
           - name: platform-resource-governance
             paths: >-
               tldw_Server_API/tests/Resource_Governance
@@ -7315,21 +7279,12 @@ jobs:
           # process with tests/MCP_unified makes test_rag_module and
           # test_gateway_protocol_stdio fail through cross-test state pollution,
           # though both pass in isolation.
-          # The --ignore entries are a SHRINKING quarantine of files already red when
-          # the tree was wired in. Remove entries as they are fixed; never add.
+          # The quarantine this shard launched with (10 files, 21 red entries) is
+          # fully drained (TASK-13343); the shard runs the whole tree. Do not add
+          # --ignore entries here: fix the test, or skip it with a reason.
           - name: platform-mcp-inapp
             paths: >-
               tldw_Server_API/app/core/MCP_unified/tests
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_gateway_protocol_artifact_consumer.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_server_batch_and_formatting.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_refresh_token.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_gateway_tool_discovery.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_gateway_fastapi_package.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_gateway_admin_auth.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_flashcards_module.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_external_federation_integration.py
-              --ignore=tldw_Server_API/app/core/MCP_unified/tests/test_codegraph_module.py
           - name: platform-resource-governance
             paths: >-
               tldw_Server_API/tests/Resource_Governance

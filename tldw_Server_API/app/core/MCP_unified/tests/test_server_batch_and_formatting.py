@@ -68,7 +68,22 @@ async def test_tools_call_dict_result_is_json_content():
     content = resp.result.get("content")
     assert isinstance(content, list) and content
     assert content[0].get("type") == "json"
-    assert content[0].get("json") == {"ok": True, "x": 7}
+
+    # The tool's own fields must round-trip unchanged. Exact dict equality was the
+    # original assertion, but structured results now also carry an "eval" block:
+    # tool_observability.attach_execution_eval_metadata adds one to any dict result
+    # that lacks it, which is how the rest of the suite already asserts execution
+    # telemetry. The product feature is deliberate; this assertion predated it.
+    payload = content[0].get("json")
+    assert isinstance(payload, dict)
+    assert payload["ok"] is True
+    assert payload["x"] == 7
+
+    # And the telemetry itself is worth pinning, since it is now part of the shape.
+    eval_block = payload.get("eval")
+    assert isinstance(eval_block, dict)
+    assert eval_block["tool_name"] == "dict.echo"
+    assert eval_block["result_kind"] == "dict_result"
 
     await server.shutdown()
     await reset_module_registry()

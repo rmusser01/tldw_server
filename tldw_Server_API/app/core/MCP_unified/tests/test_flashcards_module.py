@@ -367,12 +367,21 @@ async def test_flashcards_export_rejects_cross_workspace_card_in_apkg_path(monke
         context=ctx,
     )
 
-    assert captured["rows"] == []  # nosec B101
-    assert captured["include_reverse"] is False  # nosec B101
+    # The workspace filter is still applied to the foreign deck: this is the security
+    # property, and it is unchanged.
     assert fake_db.list_flashcards_calls[-1]["workspace_id"] == "ws-1"  # nosec B101
     assert fake_db.list_flashcards_calls[-1]["deck_id"] == foreign_deck_id  # nosec B101
-    apkg_bytes = base64.b64decode(apkg_export["content_base64"])
-    assert apkg_bytes == b"apkg"  # nosec B101
+
+    # This used to assert the exporter was called with an empty row list. The module
+    # now short-circuits on an empty result (flashcards_module.py: `if not items`) and
+    # returns success=False WITHOUT calling export_apkg_from_rows at all, so
+    # captured["rows"] is never set -- the probe became unobservable, not the guard.
+    # The outcome is at least as strong and is asserted directly: no file is produced
+    # for a deck in another workspace.
+    assert "rows" not in captured  # nosec B101
+    assert apkg_export["success"] is False  # nosec B101
+    assert apkg_export["error"] == "No flashcards to export"  # nosec B101
+    assert "content_base64" not in apkg_export  # nosec B101
 
 
 @pytest.mark.asyncio

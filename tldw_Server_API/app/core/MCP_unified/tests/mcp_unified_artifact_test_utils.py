@@ -35,9 +35,33 @@ def _assert_subprocess_succeeded(
         )
 
 
+def require_build_backend() -> None:
+    """Skip when the standalone package cannot be built in this interpreter.
+
+    The build below runs with ``--no-isolation``, so the backend declared in
+    apps/mcp-unified/pyproject.toml ([build-system] requires = setuptools) has to be
+    importable here. setuptools is not a runtime dependency of tldw-server, so a venv
+    can legitimately lack it -- and when it does, ``python -m build`` fails with
+    BackendUnavailable and every artifact test errors out in collection. That is a
+    missing build tool, not a packaging regression, so it skips loudly instead.
+    """
+
+    import pytest
+
+    for module in ("build", "setuptools"):
+        pytest.importorskip(
+            module,
+            reason=(
+                f"{module} is required to build the standalone MCP Unified "
+                "distribution with --no-isolation"
+            ),
+        )
+
+
 def build_standalone_distributions(tmp_path: Path) -> tuple[Path, Path]:
     """Build one standalone wheel and sdist from an isolated source copy."""
 
+    require_build_backend()
     package_source = tmp_path / "mcp_unified_source"
     shutil.copytree(
         STANDALONE_PROJECT_ROOT,
