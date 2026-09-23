@@ -308,9 +308,9 @@ class TestEdgeCases:
 
             # Should be 0.2 (1/5), not 0.0
             # A judge score of 1 ("lowest") is 0.0 on a 1-5 scale. This asserted 0.2, the
-    # 20% floor the old inline raw/5.0 put under every metric -- a test named
-    # "zero_score_handling" pinning a non-zero value. See core/Evaluations/scoring.py.
-    assert result["score"] == 0.0
+            # 20% floor the old inline raw/5.0 put under every metric -- a test named
+            # "zero_score_handling" pinning a non-zero value. See core/Evaluations/scoring.py.
+            assert result["score"] == 0.0
             assert result["raw_score"] == 1.0
             assert "Evaluation failed" not in result.get("explanation", "")
 
