@@ -26,6 +26,7 @@ import pytest
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     ConstraintViolationError,
     DatabaseError,
+    TransientContentionError,
     UniqueConstraintError,
 )
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
@@ -89,3 +90,75 @@ def test_sqlite_integrity_error_is_the_classification_source() -> None:
     """Pin the driver class this maps from, so the mapping is not silently widened."""
     assert issubclass(sqlite3.IntegrityError, sqlite3.Error)
     assert not issubclass(sqlite3.OperationalError, sqlite3.IntegrityError)
+
+
+# --- Contention (TASK-13319) ---------------------------------------------------------
+# Same mechanism for a different class: lock or serialization contention that retrying
+# the whole transaction can clear. Without the type, PostgreSQL's 40001/40P01 reached
+# callers as a plain DatabaseError and no retry policy could recognise it.
+
+
+def test_contention_is_a_database_error_but_not_a_constraint_violation() -> None:
+    assert issubclass(TransientContentionError, DatabaseError)
+    assert not issubclass(TransientContentionError, ConstraintViolationError)
+
+
+def test_a_locked_sqlite_database_is_typed_as_contention(tmp_path: Path) -> None:
+    from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
+    from tldw_Server_API.app.core.DB_Management.backends.sqlite_backend import SQLiteBackend
+
+    path = tmp_path / "locked.sqlite"
+    holder = sqlite3.connect(path)
+    holder.execute("CREATE TABLE t (x INTEGER)")
+    holder.commit()
+    holder.execute("BEGIN EXCLUSIVE")
+    try:
+        backend = SQLiteBackend(DatabaseConfig(backend_type=BackendType.SQLITE, sqlite_path=str(path)))
+        conn = sqlite3.connect(path, timeout=0)
+        with pytest.raises(TransientContentionError) as exc_info:
+            backend.execute("INSERT INTO t (x) VALUES (?)", (_SENSITIVE,), connection=conn)
+        assert str(exc_info.value) == "SQLite query execution failed"
+        assert exc_info.value.__cause__ is None
+    finally:
+        holder.rollback()
+        holder.close()
+
+
+@pytest.mark.parametrize(
+    ("sqlstate", "expected"),
+    [
+        ("40001", TransientContentionError),  # serialization_failure
+        ("40P01", TransientContentionError),  # deadlock_detected
+        ("55P03", TransientContentionError),  # lock_not_available
+        ("23505", UniqueConstraintError),
+        ("42P01", DatabaseError),  # undefined_table: not retryable
+    ],
+)
+def test_postgres_sqlstate_classification(monkeypatch, sqlstate, expected) -> None:
+    from tldw_Server_API.app.core.DB_Management.backends import postgresql_backend as pg
+
+    class _DriverError(Exception):
+        pass
+
+    driver_error = _DriverError(f"driver says {_SENSITIVE}")
+    driver_error.sqlstate = sqlstate  # type: ignore[attr-defined]
+    monkeypatch.setattr(pg, "_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS", (_DriverError,))
+    monkeypatch.setattr(pg, "_PSYCOPG_DRIVER_EXCEPTIONS", (_DriverError,))
+
+    class _Cursor:
+        def execute(self, *_a, **_k):
+            raise driver_error
+
+    class _Conn:
+        def cursor(self, *_a, **_k):
+            return _Cursor()
+
+        def rollback(self):
+            pass
+
+    backend = object.__new__(pg.PostgreSQLBackend)
+    with pytest.raises(DatabaseError) as exc_info:
+        backend.execute("SELECT 1", connection=_Conn())
+    assert type(exc_info.value) is expected
+    assert str(exc_info.value) == "PostgreSQL query execution failed"
+    assert exc_info.value.__cause__ is None

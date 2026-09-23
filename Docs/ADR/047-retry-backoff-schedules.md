@@ -65,3 +65,8 @@ retries to solve a problem those call sites do not have.
   since that work restructures the file. The shared helper now exists for them.
 - TASK-13319 also covers the absence of any retry on the PostgreSQL side of that class,
   which this ADR does not address.
+- 2026-09-23: `core/DB_Management/retry_policy.py` is the shared contention policy. Both SQL
+  backends now raise the typed `TransientContentionError` (SQLite "database is locked";
+  PostgreSQL SQLSTATE 40001, 40P01, 55P03), so PostgreSQL contention is recognisable for the
+  first time. Prompt Studio repositories use it as they move out of the two classes; the
+  remaining inline loops go with their aggregates.

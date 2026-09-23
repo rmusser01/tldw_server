@@ -34,6 +34,7 @@ from .base import (
     DatabaseError,
     FTSQuery,
     QueryResult,
+    TransientContentionError,
     UniqueConstraintError,
 )
 from .fts_translator import FTSQueryTranslator
@@ -66,6 +67,10 @@ if PSYCOPG2_AVAILABLE:
     )
 else:
     _PSYCOPG_DRIVER_EXCEPTIONS = ()
+
+# SQLSTATEs a retry of the whole transaction can clear: serialization_failure,
+# deadlock_detected, lock_not_available.
+_CONTENTION_SQLSTATES = frozenset({"40001", "40P01", "55P03"})
 
 _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -1013,6 +1018,7 @@ class PostgreSQLBackend(DatabaseBackend):
         redacted_failure = False
         unique_failure = False
         constraint_failure = False
+        contention_failure = False
         if connection:
             conn = connection
             external_conn = True
@@ -1091,6 +1097,7 @@ class PostgreSQLBackend(DatabaseBackend):
             # of failure only -- the driver exception is still never chained and the
             # message is unchanged.
             constraint_failure = bool(_sqlstate) and str(_sqlstate).startswith("23")
+            contention_failure = _sqlstate in _CONTENTION_SQLSTATES
             if not external_conn:
                 try:
                     conn.rollback()
@@ -1111,6 +1118,8 @@ class PostgreSQLBackend(DatabaseBackend):
                 raise UniqueConstraintError("PostgreSQL query execution failed")
             if constraint_failure:
                 raise ConstraintViolationError("PostgreSQL query execution failed")
+            if contention_failure:
+                raise TransientContentionError("PostgreSQL query execution failed")
             raise DatabaseError("PostgreSQL query execution failed")
 
     def execute_many(

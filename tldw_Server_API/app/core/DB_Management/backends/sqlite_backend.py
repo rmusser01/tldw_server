@@ -19,6 +19,8 @@ from typing import Any, Optional, Union
 
 from loguru import logger as _loguru_logger
 
+from tldw_Server_API.app.core.Utils.backoff import is_sqlite_locked_error
+
 from ..sqlite_policy import configure_sqlite_connection
 from .base import (
     ConstraintViolationError,
@@ -30,6 +32,7 @@ from .base import (
     DatabaseError,
     FTSQuery,
     QueryResult,
+    TransientContentionError,
 )
 from .fts_translator import FTSQueryTranslator
 
@@ -414,6 +417,7 @@ class SQLiteBackend(DatabaseBackend):
         start_time = time.time()
         redacted_failure = False
         constraint_failure = False
+        contention_failure = False
 
         conn = connection or self.get_pool().get_connection()
 
@@ -451,10 +455,13 @@ class SQLiteBackend(DatabaseBackend):
             # FOREIGN KEY and UNIQUE. The raise stays outside this except block so the
             # driver exception is never chained; the message is unchanged.
             constraint_failure = isinstance(e, sqlite3.IntegrityError)
+            contention_failure = is_sqlite_locked_error(e)
 
         if redacted_failure:
             if constraint_failure:
                 raise ConstraintViolationError("SQLite query execution failed")
+            if contention_failure:
+                raise TransientContentionError("SQLite query execution failed")
             raise DatabaseError("SQLite query execution failed")
 
     def execute_many(
