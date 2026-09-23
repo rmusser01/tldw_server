@@ -384,6 +384,82 @@ class MessageStore:
             )
             return snapshot
 
+    def read_native_fork_source(
+        self,
+        view: Mapping[str, Any],
+        *,
+        owner_client_id: str,
+        owner_key: str,
+        scope_type: str,
+        workspace_id: str | None,
+        conn: Any | None = None,
+    ) -> tuple[Mapping[str, Any], dict[str, Any], tuple[Mapping[str, Any], ...]]:
+        """Detach a fork-purpose read under the existing conversation owner fence.
+
+        Recheck the complete H1 statement snapshot after resume/content reads. A
+        concurrent row-first writer may commit after admission, but cannot mix
+        settings, accepted snapshot, metadata or image revisions in this result.
+        The caller may supply the later atomic fork transaction; no byte I/O or
+        live behavior resolution occurs here. H1 send admission is unchanged.
+        """
+        from tldw_Server_API.app.core.Chat.history_selection import (
+            _freeze_json,
+            resolve_history_selection,
+        )
+
+        namespace = self._history_owner_key(owner_client_id, owner_key)
+        if view.get("owner_key") not in {None, namespace}:
+            raise HistorySelectionError("owner_conversation_mismatch")
+        conversation_id = view["conversation_id"]
+        projection_id = view["interpretation"].get("projection_id")
+        transaction = nullcontext(conn) if conn is not None else self._db.transaction()
+        with transaction as active:
+            self._lock_history_owner(active, conversation_id, owner_client_id)
+            snapshot, _ = self._read_history_snapshot(
+                conversation_id,
+                owner_client_id=owner_client_id,
+                owner_key=namespace,
+                projection_id=projection_id,
+                conn=active,
+            )
+            state = self._db.conversation_resume_store.get_roleplay_resume_state(
+                conversation_id,
+                conn=active,
+                owner_client_id=owner_client_id,
+            )
+            conversation = state["conversation"]
+            if (conversation["scope_type"] or "global", conversation["workspace_id"]) != (scope_type, workspace_id):
+                raise HistorySelectionError("scope_mismatch")
+            # Unlike the ordinary settings getter, row presence is retained even
+            # when required JSON was unreadable. settings_version is NOT NULL.
+            state["settings_present"] = state["settings_version"] is not None
+            resolved = resolve_history_selection(
+                snapshot_to_wire(snapshot),
+                {**view, "owner_key": namespace},
+                "fork",
+                "native-fork-capture-v1",
+            )
+            if resolved["status"] != "ready":
+                raise HistorySelectionError(resolved["code"])
+            ids = tuple(row["id"] for row in resolved["rows"])
+            fresh, content = self._read_history_snapshot(
+                conversation_id,
+                owner_client_id=owner_client_id,
+                owner_key=namespace,
+                projection_id=projection_id,
+                conn=active,
+                selected_ids=ids,
+                include_message_versions=True,
+            )
+            if (
+                snapshot.source_digest != fresh.source_digest
+                or snapshot.fences != fresh.fences
+                or snapshot.storage_context_digest != fresh.storage_context_digest
+            ):
+                raise HistorySelectionError("stale_source")
+            rows = tuple(_freeze_json({**node, **item}) for node, item in zip(resolved["rows"], content, strict=True))
+            return _freeze_json(state), resolved["selection"], rows
+
     def get_conversation_history_selected_content(
         self,
         conversation_id: str,

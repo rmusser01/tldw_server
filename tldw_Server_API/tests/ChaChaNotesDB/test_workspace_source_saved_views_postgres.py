@@ -656,6 +656,7 @@ def test_postgres_saved_view_mutations_serialize_with_workspace_soft_delete(
     pg_database_config: DatabaseConfig,
     operation: str,
     delete_first: bool,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     backend, db = _database(pg_database_config)
     workspace_id = f"ws-{operation}-{delete_first}"
@@ -664,6 +665,15 @@ def test_postgres_saved_view_mutations_serialize_with_workspace_soft_delete(
     first_done = threading.Event()
     allow_commit = threading.Event()
     results: dict[str, object] = {}
+    if delete_first:
+        original_finish = db._finish_native_workspace_delete
+
+        def pause_after_final_transition(conn: Any, workspace_id: str, **kwargs: Any) -> None:
+            original_finish(conn, workspace_id, **kwargs)
+            first_done.set()
+            assert allow_commit.wait(timeout=5)
+
+        monkeypatch.setattr(db, "_finish_native_workspace_delete", pause_after_final_transition)
 
     def mutate() -> None:
         try:
@@ -721,15 +731,12 @@ def test_postgres_saved_view_mutations_serialize_with_workspace_soft_delete(
                     expected_version=workspace["version"],
                 )
             else:
-                with db.transaction():
-                    workspace = db.get_workspace(workspace_id)
-                    assert workspace is not None
-                    results["deleted"] = db.delete_workspace(
-                        workspace_id,
-                        expected_version=workspace["version"],
-                    )
-                    first_done.set()
-                    assert allow_commit.wait(timeout=5)
+                workspace = db.get_workspace(workspace_id)
+                assert workspace is not None
+                results["deleted"] = db.delete_workspace(
+                    workspace_id,
+                    expected_version=workspace["version"],
+                )
         except Exception as exc:  # noqa: BLE001 - thread boundary surfaces the exact error
             results["delete_error"] = exc
         finally:

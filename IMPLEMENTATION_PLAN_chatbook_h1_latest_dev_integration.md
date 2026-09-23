@@ -28,4 +28,4 @@
 **Goal:** Publish the reviewed H1 merge commit to the existing draft PR and make H2 Task 1.2 consume the integrated source.
 **Success Criteria:** PR #2968 stays draft and reflects the verified branch; description has current evidence and still identifies the human-written merge summary gate. H2 branch/plan is updated to the correct migration baseline, strict-image reopen, saved-turn and PG operation/RLS constraints; its Task 1.2 brief is regenerated before implementation.
 **Tests:** Remote PR head/base verification, H2 source diff and design/plan link check, no new P1/P2 in scoped integration review.
-**Status:** In Progress
+**Status:** Complete
