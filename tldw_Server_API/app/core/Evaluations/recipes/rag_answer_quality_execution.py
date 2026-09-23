@@ -17,6 +17,7 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import (
     get_user_media_db_path,
 )
 from tldw_Server_API.app.core.Evaluations.ms_g_eval import run_geval
+from tldw_Server_API.app.core.Evaluations.scoring import normalize_geval_metric
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
 
@@ -756,7 +757,7 @@ def _blend_with_reference_artifact(
         return rubric
     metrics = reference_comparison.get("metrics") or {}
     scores = [
-        _coerce_unit_score(metrics.get(key))
+        _coerce_geval_score(key, metrics.get(key))
         for key in ("consistency", "relevance", "coherence", "fluency")
     ]
     reference_score = statistics.mean(score for score in scores if score is not None) if any(
@@ -1100,16 +1101,14 @@ def _build_pairwise_artifact(
     }
 
 
-def _coerce_unit_score(value: Any) -> float | None:
+def _coerce_geval_score(metric: str, value: Any) -> float | None:
     if value is None:
         return None
     try:
         numeric = float(value)
     except (TypeError, ValueError):
         return None
-    if numeric <= 1.0:
-        return max(0.0, min(1.0, numeric))
-    return max(0.0, min(1.0, numeric / 5.0))
+    return normalize_geval_metric(metric, numeric)
 
 
 def _contains_citation(answer: str) -> bool:

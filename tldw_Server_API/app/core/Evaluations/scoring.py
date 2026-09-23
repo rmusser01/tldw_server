@@ -20,9 +20,19 @@ RAGEvaluator._normalize_score always implemented -- correctly, and with tests --
 having zero production callers.
 
 Scales other than 1-5 pass their own bounds rather than growing another copy.
+
+Sites that receive a mix of raw judge scores and already-normalized values use
+normalize_judge_score: a value in [0, 1) cannot be a raw score on a scale that starts
+at 1, so it is taken as already normalized (0 is also run_geval's parse-failure
+sentinel). Exactly 1 is on the scale and maps to 0.0. Before this, those sites split
+three ways at 1: two returned 1.0 (the worst rating reported as perfect), the rest 0.2.
 """
 
-__all__ = ["normalize_likert", "parse_judge_score"]
+__all__ = ["normalize_geval_metric", "normalize_judge_score", "normalize_likert", "parse_judge_score"]
+
+# ms_g_eval.run_geval asks for fluency on 1-3 and every other metric on 1-5.
+_GEVAL_FLUENCY_MAX = 3.0
+_GEVAL_DEFAULT_MAX = 5.0
 
 
 def normalize_likert(
@@ -40,6 +50,25 @@ def normalize_likert(
         raise ValueError("scale_max must be greater than scale_min")
     clamped = max(scale_min, min(scale_max, float(raw)))
     return (clamped - scale_min) / (scale_max - scale_min)
+
+
+def normalize_judge_score(
+    raw: float,
+    *,
+    scale_min: float = 1.0,
+    scale_max: float = 5.0,
+) -> float:
+    """Like normalize_likert, but a value in [0, 1) below a 1-based scale passes through."""
+    value = float(raw)
+    if scale_min >= 1.0 and 0.0 <= value < 1.0:
+        return value
+    return normalize_likert(value, scale_min=scale_min, scale_max=scale_max)
+
+
+def normalize_geval_metric(metric: str, raw: float) -> float:
+    """Normalize one run_geval metric on its own scale (fluency 1-3, others 1-5)."""
+    scale_max = _GEVAL_FLUENCY_MAX if metric == "fluency" else _GEVAL_DEFAULT_MAX
+    return normalize_judge_score(raw, scale_max=scale_max)
 
 
 def parse_judge_score(

@@ -33,6 +33,7 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import (
 from tldw_Server_API.app.core.DB_Management.migrations import migrate_evaluations_database
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import configure_sqlite_connection
 from tldw_Server_API.app.core.Evaluations.identity import canonical_evaluations_user_scope
+from tldw_Server_API.app.core.Evaluations.scoring import normalize_judge_score
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 
 
@@ -610,7 +611,7 @@ class EvaluationManager:
                         raw_score = parsed['score']
                         # Validate score is a number between 0 and 10
                         if isinstance(raw_score, (int, float)) and 0 <= raw_score <= 10:
-                            score = float(raw_score) / 10.0
+                            score = normalize_judge_score(raw_score, scale_max=10.0)
                     if 'explanation' in parsed:
                         explanation = str(parsed['explanation'])
             except (json_module.JSONDecodeError, ValueError):
@@ -629,7 +630,7 @@ class EvaluationManager:
                             raw_score = float(match.group(1))
                             # Validate range
                             if 0 <= raw_score <= 10:
-                                score = raw_score / 10.0 if raw_score > 1 else raw_score
+                                score = normalize_judge_score(raw_score, scale_max=10.0)
                                 break
                         except (ValueError, IndexError):
                             continue
