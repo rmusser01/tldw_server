@@ -15,6 +15,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.types import (
     normalize_ocr_format,
 )
 from tldw_Server_API.app.core.Utils.Utils import logging
+from tldw_Server_API.app.core.Utils.coercion import env_bool
 from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.runtime_support import image_payload
 
 _TF_MODEL = None
@@ -418,7 +419,7 @@ def _ocr_via_transformers(image_bytes: bytes, prompt: str) -> str:
         "temperature": _getf("DOLPHIN_TEMPERATURE", float, 0.0),
         "top_p": _getf("DOLPHIN_TOP_P", float, 0.9),
         "top_k": _getf("DOLPHIN_TOP_K", int, 50),
-        "do_sample": _getf("DOLPHIN_DO_SAMPLE", lambda x: str(x).lower() in ("1", "true", "yes"), False),
+        "do_sample": env_bool("DOLPHIN_DO_SAMPLE", default=False),
         "num_beams": _getf("DOLPHIN_NUM_BEAMS", int, 1),
     }
 
@@ -469,10 +470,7 @@ def _getf_optional(env: str, cast):
 
 
 def _bool_env(env: str, default: bool) -> bool:
-    val = os.getenv(env)
-    if val is None:
-        return default
-    return str(val).lower() in ("1", "true", "yes")
+    return env_bool(env, default=default)
 
 
 def _is_local_url(url: str) -> bool:

@@ -15,8 +15,8 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.types import (
     OCRResult,
     normalize_ocr_format,
 )
-from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.core.Utils.Utils import logging
+from tldw_Server_API.app.core.Utils.coercion import env_bool
 from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.runtime_support import image_payload
 
 _DEFAULT_PROMPT = "</s><s><predict_bbox><predict_classes><output_markdown>"
@@ -59,10 +59,7 @@ def _resolve_mode() -> str:
 
 
 def _env_bool(name: str, default: bool) -> bool:
-    val = os.getenv(name)
-    if val is None:
-        return default
-    return is_truthy(str(val))
+    return env_bool(name, default=default)
 
 
 def _resolve_skip_special_tokens(
@@ -364,7 +361,7 @@ def _ocr_via_vllm(image_bytes: bytes, prompt: str, skip_special_tokens: bool) ->
             "repetition_penalty": _getf("NEMOTRON_REPETITION_PENALTY", float, 1.05),
             "top_p": _getf("NEMOTRON_TOP_P", float, 0.8),
             "top_k": _getf("NEMOTRON_TOP_K", int, 20),
-            "do_sample": _getf("NEMOTRON_DO_SAMPLE", lambda x: str(x).lower() in ("1", "true", "yes"), True),
+            "do_sample": env_bool("NEMOTRON_DO_SAMPLE", default=True),
             "skip_special_tokens": skip_special_tokens,
         }
 
@@ -448,7 +445,7 @@ def _ocr_via_transformers(image_bytes: bytes, prompt: str, skip_special_tokens: 
         "repetition_penalty": _getf("NEMOTRON_REPETITION_PENALTY", float, 1.05),
         "top_p": _getf("NEMOTRON_TOP_P", float, 0.8),
         "top_k": _getf("NEMOTRON_TOP_K", int, 20),
-        "do_sample": _getf("NEMOTRON_DO_SAMPLE", lambda x: str(x).lower() in ("1", "true", "yes"), True),
+        "do_sample": env_bool("NEMOTRON_DO_SAMPLE", default=True),
     }
 
     output = model.generate(**inputs, **gen_kwargs)

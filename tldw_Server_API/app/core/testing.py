@@ -2,13 +2,16 @@
 Lightweight helpers for test-mode detection and truthy env parsing.
 
 Kept dependency-free (stdlib only) to avoid import-time side effects.
+The boolean vocabulary lives in ``core/Utils/coercion.py`` and is re-exported
+here for the existing importers of ``is_truthy``.
 """
 
 from __future__ import annotations
 
 import os
 
-_TRUTHY = {"1", "true", "yes", "y", "on"}
+from tldw_Server_API.app.core.Utils.coercion import env_bool, parse_bool  # noqa: F401  (re-export)
+
 _PRODUCTION_VALUES = {"production", "prod", "live"}
 _PRODUCTION_ENV_KEYS = (
     "ENVIRONMENT",
@@ -21,8 +24,10 @@ _TEST_FLAG_KEYS = ("TEST_MODE", "TESTING", "TLDW_TEST_MODE")
 
 
 def _env_truthy(val: str | None) -> bool:
+    # Two-way on the string form: unrecognised is False. str() keeps the
+    # historical behaviour for non-string inputs (2 and 1.0 are not truthy).
     try:
-        return str(val or "").strip().lower() in _TRUTHY
+        return parse_bool(str(val or ""), default=False)
     except Exception:
         return False
 

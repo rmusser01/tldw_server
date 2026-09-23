@@ -10,6 +10,7 @@ import tempfile
 
 from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.base import OCRBackend
 from tldw_Server_API.app.core.Utils.Utils import logging
+from tldw_Server_API.app.core.Utils.coercion import env_bool
 from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.runtime_support import image_payload
 
 
@@ -184,7 +185,7 @@ def _ocr_via_vllm(image_bytes: bytes, prompt: str) -> str:
     url = os.getenv("DOTS_VLLM_URL").rstrip("/")
     model = os.getenv("DOTS_VLLM_MODEL", "model")
     timeout = int(os.getenv("DOTS_VLLM_TIMEOUT", "60"))
-    use_data_url = str(os.getenv("DOTS_VLLM_USE_DATA_URL", "true")).lower() in ("1", "true", "yes")
+    use_data_url = env_bool("DOTS_VLLM_USE_DATA_URL", default=True)
 
     def _getf(env, cast, default):
         try:
@@ -209,7 +210,7 @@ def _ocr_via_vllm(image_bytes: bytes, prompt: str) -> str:
             "repetition_penalty": _getf("DOTS_VLLM_REPETITION_PENALTY", float, 1.05),
             "top_p": _getf("DOTS_VLLM_TOP_P", float, 0.8),
             "top_k": _getf("DOTS_VLLM_TOP_K", int, 20),
-            "do_sample": _getf("DOTS_VLLM_DO_SAMPLE", lambda x: str(x).lower() in ("1","true","yes"), True),
+            "do_sample": env_bool("DOTS_VLLM_DO_SAMPLE", default=True),
         }
 
         from tldw_Server_API.app.core.http_client import fetch_json

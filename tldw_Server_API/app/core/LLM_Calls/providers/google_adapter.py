@@ -31,7 +31,7 @@ from tldw_Server_API.app.core.LLM_Calls.sse import (
     sse_done,
 )
 from tldw_Server_API.app.core.LLM_Calls.streaming import wrap_sync_stream
-from tldw_Server_API.app.core.testing import is_truthy
+from tldw_Server_API.app.core.Utils.coercion import env_bool
 
 from .base import ChatProvider
 
@@ -72,14 +72,8 @@ def _stream_debug_enabled(provider: str) -> bool:
 
 
 def _env_flag(name: str) -> bool:
-    """Parse boolean-like env flags with explicit false handling."""
-    value = os.getenv(name)
-    if value is None:
-        return False
-    lowered = value.strip().lower()
-    if is_truthy(lowered):
-        return True
-    return lowered not in {"0", "false", "no", "off", ""}
+    """Beta URL/tool flags: off unless explicitly enabled; unrecognised values stay off."""
+    return env_bool(name, default=False)
 
 
 class GoogleAdapter(ChatProvider):

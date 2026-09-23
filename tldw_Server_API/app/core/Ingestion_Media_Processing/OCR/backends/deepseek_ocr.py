@@ -6,8 +6,8 @@ import tempfile
 import threading
 
 from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.base import OCRBackend
-from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.core.Utils.Utils import logging
+from tldw_Server_API.app.core.Utils.coercion import env_bool
 
 _TF_MODEL = None
 _TF_TOKENIZER = None
@@ -40,10 +40,7 @@ _DEEPSEEK_NONCRITICAL_EXCEPTIONS = (
 
 
 def _env_bool(name: str, default: bool) -> bool:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    return is_truthy(str(raw).strip().lower())
+    return env_bool(name, default=default)
 
 
 def _env_int(name: str, default: int) -> int:

@@ -31,6 +31,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.types import (
     normalize_ocr_format,
 )
 from tldw_Server_API.app.core.Utils.Utils import logging
+from tldw_Server_API.app.core.Utils.coercion import env_bool
 from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.runtime_support import image_payload
 
 _LlamaCppProfile = RemoteOCRProfile | ManagedOCRProfile | CLIOCRProfile
@@ -57,10 +58,7 @@ _MANAGED_LIFECYCLE_LOCK = RLock()
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+    return env_bool(name, default=default)
 
 
 def _env_int(name: str, default: int) -> int:

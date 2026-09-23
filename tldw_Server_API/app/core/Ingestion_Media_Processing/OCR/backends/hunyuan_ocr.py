@@ -16,6 +16,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.types import (
     normalize_ocr_format,
 )
 from tldw_Server_API.app.core.Utils.Utils import logging
+from tldw_Server_API.app.core.Utils.coercion import env_bool
 from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.runtime_support import image_payload
 
 _TF_MODEL = None
@@ -181,7 +182,7 @@ def _ocr_via_vllm(image_bytes: bytes, prompt: str) -> str:
 
     model = os.getenv("HUNYUAN_VLLM_MODEL", "HunyuanOCR")
     timeout = int(os.getenv("HUNYUAN_VLLM_TIMEOUT", "60"))
-    use_data_url = str(os.getenv("HUNYUAN_VLLM_USE_DATA_URL", "true")).lower() in ("1", "true", "yes")
+    use_data_url = env_bool("HUNYUAN_VLLM_USE_DATA_URL", default=True)
 
     def _getf(env: str, cast, default):
         try:
@@ -277,7 +278,7 @@ def _ocr_via_transformers(image_bytes: bytes, prompt: str) -> str:
         inputs = inputs.to(model.device)
 
     max_new_tokens = int(os.getenv("HUNYUAN_MAX_NEW_TOKENS", "2048"))
-    do_sample = str(os.getenv("HUNYUAN_DO_SAMPLE", "false")).lower() in ("1", "true", "yes")
+    do_sample = env_bool("HUNYUAN_DO_SAMPLE", default=False)
 
     generated = model.generate(
         **inputs,
@@ -289,7 +290,7 @@ def _ocr_via_transformers(image_bytes: bytes, prompt: str) -> str:
 
 
 def _should_clean_repeats() -> bool:
-    return str(os.getenv("HUNYUAN_CLEAN_REPEATS", "true")).lower() in ("1", "true", "yes")
+    return env_bool("HUNYUAN_CLEAN_REPEATS", default=True)
 
 
 def _clean_repeated_substrings(text: str) -> str:
