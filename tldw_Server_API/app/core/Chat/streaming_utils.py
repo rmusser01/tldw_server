@@ -33,7 +33,7 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
     SanitizedProviderStreamError,
 )
 from tldw_Server_API.app.core.config import load_comprehensive_config
-from tldw_Server_API.app.core.LLM_Calls.sse import is_done_line, sse_data, sse_done, sse_event
+from tldw_Server_API.app.core.LLM_Calls.sse import SSE_CONTROL_FIELD_PREFIXES, is_done_line, sse_data, sse_done, sse_event
 from tldw_Server_API.app.core.testing import is_truthy
 
 #######################################################################################################################
@@ -55,8 +55,14 @@ _STREAMING_NONCRITICAL_EXCEPTIONS = (
     json.JSONDecodeError,
 )
 
-_SSE_CONTROL_PREFIXES = (":", "event:")
-_SSE_FRAMED_CONTROL_PREFIXES = ("id:", "retry:")
+# Comments and event: lines are always SSE control. id:/retry: are control only
+# inside SSE-framed chunks; an unframed provider chunk starting with them is
+# assistant text. sse.normalize_provider_line only ever sees framed lines, so it
+# drops every SSE_CONTROL_FIELD_PREFIXES entry unconditionally.
+_ALWAYS_SSE_CONTROL_PREFIXES = (":", "event:")
+_FRAMED_ONLY_SSE_CONTROL_PREFIXES = tuple(
+    prefix for prefix in SSE_CONTROL_FIELD_PREFIXES if prefix not in _ALWAYS_SSE_CONTROL_PREFIXES
+)
 _OPENAI_STREAM_FINISH_REASONS = {
     "stop",
     "length",
@@ -1035,7 +1041,7 @@ def _extract_text_from_upstream_sse(chunk_str: str) -> tuple[Optional[str], Opti
 
     # Ignore SSE control-only lines from upstream
     if (
-        s.startswith(_SSE_CONTROL_PREFIXES) or (is_sse_framed and s.startswith(_SSE_FRAMED_CONTROL_PREFIXES))
+        s.startswith(_ALWAYS_SSE_CONTROL_PREFIXES) or (is_sse_framed and s.startswith(_FRAMED_ONLY_SSE_CONTROL_PREFIXES))
     ) and "data:" not in s:
         return None, None, False
 
@@ -1048,7 +1054,7 @@ def _extract_text_from_upstream_sse(chunk_str: str) -> tuple[Optional[str], Opti
             ls = line.lstrip("\ufeff\u200b\u200c\u200d\u2060").strip()
             if not ls:
                 continue
-            if ls.startswith(_SSE_CONTROL_PREFIXES) or ls.startswith(_SSE_FRAMED_CONTROL_PREFIXES):
+            if ls.startswith(_ALWAYS_SSE_CONTROL_PREFIXES) or ls.startswith(_FRAMED_ONLY_SSE_CONTROL_PREFIXES):
                 # Skip SSE control fields
                 continue
             if not ls.startswith("data:"):
@@ -1682,8 +1688,8 @@ class StreamingResponseHandler:
                 candidate = stripped_leading.strip()
                 if not candidate and not stripped_leading:
                     return outputs, False
-                if candidate.startswith(_SSE_CONTROL_PREFIXES) or (
-                    sse_framed and candidate.startswith(_SSE_FRAMED_CONTROL_PREFIXES)
+                if candidate.startswith(_ALWAYS_SSE_CONTROL_PREFIXES) or (
+                    sse_framed and candidate.startswith(_FRAMED_ONLY_SSE_CONTROL_PREFIXES)
                 ):
                     return outputs, False
                 if candidate.startswith("data:"):

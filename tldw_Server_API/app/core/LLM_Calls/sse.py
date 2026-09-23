@@ -16,7 +16,8 @@ from typing import Any, Callable, Optional
 
 from loguru import logger
 
-_SSE_CONTROL_PREFIXES = ("event:", "id:", "retry:")
+# SSE control fields (comments, ":" lines, are handled separately).
+SSE_CONTROL_FIELD_PREFIXES = ("event:", "id:", "retry:")
 
 
 def finalize_stream(response: Optional[Any], done_already: bool = False) -> Iterable[str]:
@@ -84,7 +85,7 @@ def is_done_line(line: str) -> bool:
     must be recognised so it is suppressed rather than forwarded next to our own
     terminal ``sse_done()`` (single-terminal-DONE contract, ADR-025).
     """
-    s = line.lstrip("﻿​‌‍⁠").strip().lower()
+    s = line.lstrip("\ufeff\u200b\u200c\u200d\u2060").strip().lower()
     return s.startswith("data:") and s[len("data:") :].strip() == "[done]"
 
 
@@ -106,7 +107,7 @@ def normalize_provider_line(
         return None
 
     lower = stripped.lower()
-    for prefix in _SSE_CONTROL_PREFIXES:
+    for prefix in SSE_CONTROL_FIELD_PREFIXES:
         if lower.startswith(prefix):
             name, value = stripped.split(":", 1)
             name = name.strip()

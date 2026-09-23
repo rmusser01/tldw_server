@@ -26,3 +26,14 @@ def test_sse_event_matches_inline_frame(payload):
 
 def test_sse_done_matches_inline_sentinel():
     assert sse_done() == "data: [DONE]\n\n"
+
+
+def test_chat_stream_control_prefixes_derive_from_sse_fields():
+    """streaming_utils splits the same SSE field list; it must not drift from sse.py."""
+    from tldw_Server_API.app.core.Chat import streaming_utils
+    from tldw_Server_API.app.core.LLM_Calls.sse import SSE_CONTROL_FIELD_PREFIXES
+
+    always = set(streaming_utils._ALWAYS_SSE_CONTROL_PREFIXES)
+    framed_only = set(streaming_utils._FRAMED_ONLY_SSE_CONTROL_PREFIXES)
+    assert always | framed_only == {":"} | set(SSE_CONTROL_FIELD_PREFIXES)
+    assert framed_only == {"id:", "retry:"}
