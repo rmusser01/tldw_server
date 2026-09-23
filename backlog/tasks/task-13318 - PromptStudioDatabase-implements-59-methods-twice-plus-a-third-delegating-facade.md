@@ -3,10 +3,10 @@ id: TASK-13318
 title: >-
   PromptStudioDatabase implements 59 methods twice plus a third delegating
   facade
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-22 04:55'
-updated_date: '2026-09-23 15:30'
+updated_date: '2026-09-23 15:31'
 labels:
   - duplication
   - db
@@ -58,12 +58,18 @@ AC2 done in 0205612478 (signature-parity ratchet, 7 known mismatches frozen, ver
 2026-09-23: Stage 7 done (typed facade, signatures pinned to repositories). All stages complete.
 <!-- SECTION:NOTES:END -->
 
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+PromptStudioDatabase business logic now exists once (ADR-051, option B): nine per-aggregate repositories in core/DB_Management/prompt_studio_db/repositories plus shared session helpers; the two classes keep only backend infrastructure; PromptStudioDatabase.py 7426 -> ~1900 lines. Facade methods carry the repositories' exact signatures, pinned by tests. A behavioural parity harness (tests/prompt_studio/test_backend_behaviour_parity.py) runs every aggregate on SQLite and live PostgreSQL and found/fixed: PG uniqueness conflicts surfacing as DatabaseError (all PG writes), PG is_golden/is_generated updates always failing, PG stub prompts not advancing the id sequence, PG TypeError on missing rows, PG *_tsv leaks, SQLite transaction() override never issuing BEGIN (duplicate job acquisition across processes), SQLite iteration JSON undecoded. Retry via core/DB_Management/retry_policy.py on both backends (TASK-13319). Verification: prompt_studio 1151 passed; related suites 1716 passed, 5 pre-existing Evaluations route failures (identical on HEAD); DB_Management 22 failures vs 23 on HEAD, no new. Bandit clean on new modules. Known skip: an intermittent libc++abi recursive_mutex abort at interpreter exit after PG runs, not reproduced, not investigated.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
