@@ -173,3 +173,26 @@ def test_base_helper_and_canonical_predicate_agree(is_admin) -> None:
     for metadata, expected, why in CLAIM_MATRIX:
         assert metadata_has_admin_claims(metadata) is expected, why
         assert is_admin(metadata) is expected, why
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("roles", ["admin", "owner", "user", ["admin"], ["user"]])
+async def test_discovery_claims_half_matches_every_other_module(roles: Any) -> None:
+    """mcp_discovery keeps its own async _is_admin for the user_roles fallback.
+
+    With no stored role its answer must be exactly the shared predicate's, including
+    for a bare-string roles claim -- which used to split sandbox/discovery (grant)
+    from media/notes/kanban (deny) for the same principal.
+    """
+    from tldw_Server_API.app.core.MCP_unified.modules.implementations.mcp_discovery_module import (
+        MCPDiscoveryModule,
+    )
+
+    class _NoStoredRole:
+        async def fetchone(self, *_args: Any) -> None:
+            return None
+
+    ctx = _Ctx({"roles": roles})
+    discovery = MCPDiscoveryModule(ModuleConfig(name="discovery"))
+    shared = _Probe(ModuleConfig(name="probe")).caller_is_admin(ctx)
+    assert await discovery._is_admin(ctx, _NoStoredRole()) is shared
