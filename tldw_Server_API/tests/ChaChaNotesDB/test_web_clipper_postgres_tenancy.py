@@ -4,7 +4,10 @@ from uuid import uuid4
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError
+from tldw_Server_API.app.core.DB_Management.backends.base import (
+    DatabaseBackend,
+    DatabaseError,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 # Runs under `pg_restricted_backend`, whose role is NOSUPERUSER NOBYPASSRLS.
@@ -44,7 +47,7 @@ def _create_owner_clip(
 
 
 def test_postgres_web_clipper_same_clip_is_owner_isolated_by_rls(
-    pg_restricted_backend,
+    pg_restricted_backend: DatabaseBackend,
 ) -> None:
     owner_a = "910001"
     owner_b = "910002"
