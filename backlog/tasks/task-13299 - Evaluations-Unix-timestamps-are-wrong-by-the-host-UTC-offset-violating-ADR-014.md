@@ -6,7 +6,7 @@ title: >-
 status: Done
 assignee: []
 created_date: '2026-09-22 04:51'
-updated_date: '2026-09-22 14:28'
+updated_date: '2026-09-23 00:12'
 labels:
   - bug
   - evaluations
@@ -54,12 +54,12 @@ Found by the comprehensive core-module review; independently reproduced by the o
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A failing test under a non-UTC TZ asserts the Unix timestamp matches true UTC
-- [ ] #2 All four conversion sites treat naive stored timestamps as UTC
-- [ ] #3 The except fallback no longer uses naive datetime.now()
-- [ ] #4 The PostgreSQL datasets path no longer falls through to now() for an unmatched type
-- [ ] #5 One CI shard runs under a non-UTC TZ so this class of defect is visible -- this is the durable fix
-- [ ] #6 Conformance with ADR-014's Unix created convention is asserted by test
+- [x] #1 A failing test under a non-UTC TZ asserts the Unix timestamp matches true UTC
+- [x] #2 All four conversion sites treat naive stored timestamps as UTC
+- [x] #3 The except fallback no longer uses naive datetime.now()
+- [x] #4 The PostgreSQL datasets path no longer falls through to now() for an unmatched type
+- [x] #5 One CI shard runs under a non-UTC TZ so this class of defect is visible -- this is the durable fix
+- [x] #6 Conformance with ADR-014's Unix created convention is asserted by test
 <!-- AC:END -->
 
 ## Final Summary
@@ -70,10 +70,10 @@ Fixed test-first and merged to dev in PR #2980 (merge commit 8045fa2956). A fail
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

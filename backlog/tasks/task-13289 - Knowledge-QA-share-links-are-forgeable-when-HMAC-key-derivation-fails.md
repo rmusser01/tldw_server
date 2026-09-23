@@ -4,7 +4,7 @@ title: Knowledge-QA share links are forgeable when HMAC key derivation fails
 status: Done
 assignee: []
 created_date: '2026-09-22 04:34'
-updated_date: '2026-09-22 14:28'
+updated_date: '2026-09-23 00:12'
 labels:
   - security
   - chat
@@ -41,12 +41,12 @@ Found by the comprehensive core-module review (AuthNZ reviewer, flagged cross-sc
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A failing test proves a token signed with the literal fallback is currently accepted by the verifier
-- [ ] #2 Key derivation failure is fatal for share-link minting rather than silently downgraded: the endpoint returns an error instead of issuing a weakly-signed token
-- [ ] #3 No hardcoded signing-key literal remains anywhere in the share-link path
-- [ ] #4 The lru_cache does not pin a degraded key for the process lifetime after one transient failure
-- [ ] #5 Existing share tokens signed with a legitimate key still verify, or the rotation/invalidation is documented
-- [ ] #6 Bandit run for touched scope
+- [x] #1 A failing test proves a token signed with the literal fallback is currently accepted by the verifier
+- [x] #2 Key derivation failure is fatal for share-link minting rather than silently downgraded: the endpoint returns an error instead of issuing a weakly-signed token
+- [x] #3 No hardcoded signing-key literal remains anywhere in the share-link path
+- [x] #4 The lru_cache does not pin a degraded key for the process lifetime after one transient failure
+- [x] #5 Existing share tokens signed with a legitimate key still verify, or the rotation/invalidation is documented
+- [x] #6 Bandit run for touched scope
 <!-- AC:END -->
 
 ## Final Summary
@@ -57,10 +57,10 @@ Fixed test-first and merged to dev in PR #2980 (merge commit 8045fa2956). A fail
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

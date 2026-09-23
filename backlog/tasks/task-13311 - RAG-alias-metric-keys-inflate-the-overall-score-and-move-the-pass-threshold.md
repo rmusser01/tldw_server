@@ -4,7 +4,7 @@ title: RAG alias metric keys inflate the overall score and move the pass thresho
 status: Done
 assignee: []
 created_date: '2026-09-22 04:54'
-updated_date: '2026-09-22 14:28'
+updated_date: '2026-09-23 00:12'
 labels:
   - bug
   - evaluations
@@ -46,11 +46,11 @@ Found by the comprehensive core-module review; independently reproduced by the o
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A failing test asserts overall_score for two metrics scoring 1.0 and 0.0 is 0.5, not 0.667
-- [ ] #2 Alias keys are excluded from overall-score computation, or aliasing happens after scoring
-- [ ] #3 The fix holds on the eval_runner path where explicit_metrics is always truthy
-- [ ] #4 avg_score, mean_score and the 0.7 pass-threshold decision are verified against the corrected score
-- [ ] #5 Alias keys remain present in the response for OpenAI-style compatibility
+- [x] #1 A failing test asserts overall_score for two metrics scoring 1.0 and 0.0 is 0.5, not 0.667
+- [x] #2 Alias keys are excluded from overall-score computation, or aliasing happens after scoring
+- [x] #3 The fix holds on the eval_runner path where explicit_metrics is always truthy
+- [x] #4 avg_score, mean_score and the 0.7 pass-threshold decision are verified against the corrected score
+- [x] #5 Alias keys remain present in the response for OpenAI-style compatibility
 <!-- AC:END -->
 
 ## Final Summary
@@ -61,10 +61,10 @@ Fixed test-first and merged to dev in PR #2980 (merge commit 8045fa2956). A fail
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
