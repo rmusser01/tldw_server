@@ -39,7 +39,7 @@ from tldw_Server_API.app.core.DB_Management.DB_Manager import (
 
 # Import existing evaluation modules
 from tldw_Server_API.app.core.Evaluations.ms_g_eval import run_geval
-from tldw_Server_API.app.core.Evaluations.rag_evaluator import RAGEvaluator
+from tldw_Server_API.app.core.Evaluations.rag_evaluator import _CANONICAL_METRIC_FOR_ALIAS, RAGEvaluator
 from tldw_Server_API.app.core.Evaluations.response_quality_evaluator import ResponseQualityEvaluator
 from tldw_Server_API.app.core.http_client import RetryPolicy, afetch
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
@@ -1502,8 +1502,14 @@ class EvaluationRunner:
                 except (TypeError, ValueError):
                     scores[metric_name] = 0.0
 
-            # Calculate pass/fail
-            avg_score = statistics.mean(scores.values()) if scores else 0
+            # Calculate pass/fail. Alias keys (answer_relevance, ...) mirror their
+            # canonical metric; averaging both would count that metric twice.
+            scored = [
+                value
+                for name, value in scores.items()
+                if _CANONICAL_METRIC_FOR_ALIAS.get(name) not in scores
+            ]
+            avg_score = statistics.mean(scored) if scored else 0
             passed = self._evaluate_passed(scores, avg_score, eval_spec, default_threshold=0.7)
 
             return {
