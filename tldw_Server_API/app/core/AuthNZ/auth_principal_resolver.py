@@ -37,6 +37,7 @@ from tldw_Server_API.app.core.AuthNZ.single_user_session import validate_single_
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 from tldw_Server_API.app.core.exceptions import InactiveUserError
 from tldw_Server_API.app.core.testing import env_flag_enabled
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_ROLES
 
 _RESOLVER_MODE_EXCEPTIONS = (
     AttributeError,
@@ -67,7 +68,8 @@ _SINGLE_USER_COMPAT_EXCEPTIONS = (
     TypeError,
     ValueError,
 )
-_PLATFORM_ADMIN_ROLES = frozenset({"admin", "owner", "super_admin"})
+# Imported, not restated: see AuthNZ/platform_admin.py for why there is one copy.
+_PLATFORM_ADMIN_ROLES = PLATFORM_ADMIN_ROLES
 _ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure", "admin"})
 
 

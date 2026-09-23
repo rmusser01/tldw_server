@@ -7,9 +7,12 @@ from typing import Any
 from loguru import logger
 
 # Source of truth for which roles are platform administrators. Imported rather than
-# restated so MCP cannot drift from AuthNZ. (_PLATFORM_ADMIN_ROLES is itself spelled
-# out in four places under app/core -- see TASK-13345.)
-from tldw_Server_API.app.core.AuthNZ.auth_principal_resolver import _PLATFORM_ADMIN_ROLES
+# restated so MCP cannot drift from AuthNZ. Now from the dependency-free module rather
+# than reaching for the private name in auth_principal_resolver, which pulled FastAPI's
+# Request in for the sake of a frozenset.
+from tldw_Server_API.app.core.AuthNZ.platform_admin import (
+    PLATFORM_ADMIN_ROLES as _PLATFORM_ADMIN_ROLES,
+)
 
 from .modules.base import BaseModule
 

@@ -137,6 +137,7 @@ from tldw_Server_API.app.services.admin_system_ops_service import (
 from tldw_Server_API.app.services.admin_system_ops_service import (
     upsert_feature_flag as svc_upsert_feature_flag,
 )
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_ROLES
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.AuthNZ.repos.maintenance_rotation_runs_repo import (
@@ -146,7 +147,10 @@ if TYPE_CHECKING:
 router = APIRouter()
 legacy_webhooks_router = APIRouter()
 
-_INCIDENT_ASSIGNABLE_ROLES = frozenset({"admin", "owner", "super_admin"})
+# Same set as the platform admin roles, kept under a local name because that is how
+# this module reads. Imported so adding a platform admin role reaches incident
+# assignment automatically; see AuthNZ/platform_admin.py.
+_INCIDENT_ASSIGNABLE_ROLES = PLATFORM_ADMIN_ROLES
 
 _OPS_NONCRITICAL_EXCEPTIONS = (
     asyncio.TimeoutError,

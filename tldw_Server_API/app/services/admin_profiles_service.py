@@ -56,10 +56,12 @@ from tldw_Server_API.app.core.UserProfiles.update_service import (
 )
 from tldw_Server_API.app.core.UserProfiles.user_profile_catalog import load_user_profile_catalog
 from tldw_Server_API.app.services import admin_scope_service
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_ROLES
 
 REQUIRED_ADMIN_RANK = ROLE_HIERARCHY.get("admin", 3)
 REQUIRED_TEAM_ADMIN_RANK = ROLE_HIERARCHY.get("lead", 2)
-_PLATFORM_ADMIN_ROLES = frozenset({"admin", "owner", "super_admin"})
+# Imported, not restated: see AuthNZ/platform_admin.py for why there is one copy.
+_PLATFORM_ADMIN_ROLES = PLATFORM_ADMIN_ROLES
 _ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
 
 
