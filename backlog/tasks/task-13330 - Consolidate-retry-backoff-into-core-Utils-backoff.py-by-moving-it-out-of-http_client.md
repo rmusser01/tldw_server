@@ -3,10 +3,10 @@ id: TASK-13330
 title: >-
   Consolidate retry backoff into core/Utils/backoff.py by moving it out of
   http_client
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-22 04:58'
-updated_date: '2026-09-23 19:39'
+updated_date: '2026-09-23 20:50'
 labels:
   - duplication
   - utils
@@ -36,9 +36,9 @@ Source: synthesis F30
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 core/Utils/backoff.py owns delay computation and retriability classification
-- [ ] #2 http_client imports from it rather than defining it
-- [x] #3 ADR records the jitter algorithm choice
+- [x] #1 http_client imports from it rather than defining it
+- [x] #2 ADR records the jitter algorithm choice
+- [x] #3 core/Utils/backoff.py owns HTTP delay computation and HTTP retriability classification (DB contention classification is owned by DB_Management/retry_policy.py per ADR-047)
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -68,14 +68,30 @@ STILL OPEN: the 28 inline loops in PromptStudioDatabase.py, deliberately left to
 AC3 met - Docs/ADR/047-retry-backoff-schedules.md (Accepted, commit 865012cf6f) records decorrelated jitter for outbound HTTP and capped exponential for in-process contention, with rejected alternatives.
 AC1 NOT met (partial) - core/Utils/backoff.py owns delay computation (decorrelated_jitter_delay, capped_exponential_delay, parse_retry_after_seconds); tests/Utils/test_backoff_schedules.py 12 passed. But HTTP retriability classification did not move: _should_retry and _is_dns_resolution_error (the third function the task said to move) are still defined in core/http_client.py (~:1990, :2318). backoff.py's only classifier is is_sqlite_locked_error, and per ADR-047's 2026-09-23 follow-up contention classification is now owned by core/DB_Management/retry_policy.py (TransientContentionError), not backoff.py.
 AC2 NOT met (partial) - http_client imports the delay and Retry-After functions from backoff.py (no local definitions remain), but still defines the retriability classifier. Moving _is_dns_resolution_error/_should_retry (or amending AC1 to 'delay computation' only) closes AC1 and AC2 together.
+
+2026-09-23 completion (f78099dfc8):
+AC wording amended: original AC1 'owns delay computation and retriability classification' replaced by 'owns HTTP delay computation and HTTP retriability classification (DB contention classification is owned by DB_Management/retry_policy.py per ADR-047)'. Why: ADR-047's 2026-09-23 follow-up made retry_policy.py (TransientContentionError, SQLite + PostgreSQL SQLSTATEs) the owner of contention classification; pulling it back into Utils would split the DB policy across two modules.
+MOVED: _is_dns_resolution_error and _should_retry out of core/http_client.py into core/Utils/backoff.py as is_dns_resolution_error and classify_http_retry. http_client binds them to the original private names (module globals, patch-compatible); no test patched or called them. Policy arg duck-typed to avoid a circular import of http_client.RetryPolicy. Guard tuple = builtin members of _HTTPCLIENT_NONCRITICAL_EXCEPTIONS (AttributeError, OSError, RuntimeError, TypeError, ValueError).
+Equivalence: 163-case comparison (2 policies x 4 methods x 8 statuses + 11 exception shapes incl. chained gaierror, _tldw_dns_resolution flag, raising __str__) - HEAD vs moved outputs byte-identical.
+Tests: tests/Utils/test_backoff_schedules.py 30 passed (18 new: DNS detection incl. chained gaierror/flag/markers, 429/503/408 retryable, 404/POST not, no_status, DNS permanent vs other network errors retry, retry_on_unsafe, http_client binding identity).
+Regression (tests/http_client + test_backoff_schedules + LLM_Adapters/unit/test_provider_unsafe_post_no_retry + Web_Scraping/test_http_client_fetch): plain venv HEAD 69 failed/248 passed vs after 69 failed/266 passed, identical failure set (all PackageNotFoundError tldw-server, package not installed). With TLDW_VERSION=0.0.0 to bypass that: HEAD 1 failed/316 passed vs after 1 failed/334 passed; the one failure (test_sensitive_log_filter_does_not_hide_concurrent_public_request) is pre-existing and identical. HEAD baseline obtained by checking out HEAD copies of the files, no stash.
+ruff: same 7 pre-existing findings in http_client before/after; backoff.py and test file clean. Bandit: uvx bandit -q -ll on backoff.py + http_client.py - no findings.
+Docs: ADR-047 follow-up line records the new split.
+Known/unrelated: _get_project_version catches _HTTPCLIENT_NONCRITICAL_EXCEPTIONS, which lacks importlib.metadata.PackageNotFoundError (an ImportError), so an uninstalled checkout fails every default-header build unless TLDW_VERSION is set - not in scope here. Still open elsewhere: PromptStudioDatabase inline loops (TASK-13318/13319).
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+core/Utils/backoff.py now owns outbound-HTTP retry delay (decorrelated_jitter_delay, parse_retry_after_seconds) and HTTP retriability classification (classify_http_retry, is_dns_resolution_error), all moved out of core/http_client.py, which only imports them (bound to the original private names). DB contention classification stays in DB_Management/retry_policy.py per ADR-047; AC1 amended to say so. Pure move: 163-case HEAD-vs-new comparison identical; 18 new tests; http_client suites show the same failure set before and after; bandit clean. Unrelated follow-up spotted: _get_project_version does not catch PackageNotFoundError.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
