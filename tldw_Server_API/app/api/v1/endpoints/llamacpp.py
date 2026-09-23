@@ -1279,9 +1279,19 @@ async def list_llamacpp_models_endpoint(llm_manager: LLMInferenceManager = Depen
 from tldw_Server_API.app.api.v1.schemas.llamacpp_schemas import LlamaCppInferenceRequest
 
 
-@router.post("/llamacpp/inference", summary="Run inference with Llama.cpp")
+@router.post(
+    "/llamacpp/inference",
+    summary="Run inference with Llama.cpp",
+    # Every other route on this router carries check_rate_limit; the management
+    # ones add RequireRole("admin"). This one had neither, so an unauthenticated
+    # caller could spend the box's GPU. Inference is a user operation, not an
+    # admin one, so it authenticates rather than requiring a role.
+    dependencies=[Depends(check_rate_limit)],
+)
 async def run_llamacpp_inference_endpoint(
-    payload: LlamaCppInferenceRequest, llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager)
+    payload: LlamaCppInferenceRequest,
+    llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager),
+    current_user: User = Depends(get_request_user),
 ):
     """
     Runs inference using the currently loaded Llama.cpp model.

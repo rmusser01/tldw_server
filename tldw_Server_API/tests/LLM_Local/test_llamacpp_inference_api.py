@@ -8,6 +8,7 @@ from starlette.requests import Request
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.api.v1.endpoints import llamacpp as lp
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import InferenceError
 
 
@@ -79,9 +80,16 @@ def _make_app_with_manager(manager) -> FastAPI:  # noqa: ANN001
     async def _fake_check_rate_limit() -> None:
         return
 
+    async def _fake_get_request_user() -> User:
+        return User(id=1, username="llamacpp-test-user", email=None, is_active=True)
+
     app.dependency_overrides[auth_deps.get_auth_principal] = _fake_get_auth_principal
     app.dependency_overrides[auth_deps.check_rate_limit] = _fake_check_rate_limit
     app.dependency_overrides[lp.check_rate_limit] = _fake_check_rate_limit
+    # /llamacpp/inference authenticates like every other route on this router.
+    # These tests are about inference behaviour, so stand in a caller.
+    app.dependency_overrides[auth_deps.get_request_user] = _fake_get_request_user
+    app.dependency_overrides[lp.get_request_user] = _fake_get_request_user
     return app
 
 
@@ -238,3 +246,30 @@ def test_llamacpp_inference_inference_error_returns_safe_unavailable_detail():
     assert "backend exploded" not in detail
     assert "/private/llama.cpp" not in detail
     assert "api_key" not in detail.lower()
+
+
+@pytest.mark.unit
+def test_llamacpp_inference_requires_authentication() -> None:
+    """Running inference must not be free to an unauthenticated caller.
+
+    Every other route on this router carries `check_rate_limit`, and the
+    management ones add `RequireRole("admin")`. This one had neither, so anyone
+    who could reach the server could spend its GPU.
+    """
+    app = FastAPI()
+    app.include_router(lp.router, prefix="/api/v1")
+    app.state.llm_manager = _DefaultMgr()
+
+    async def _fake_check_rate_limit() -> None:
+        return
+
+    app.dependency_overrides[auth_deps.check_rate_limit] = _fake_check_rate_limit
+    app.dependency_overrides[lp.check_rate_limit] = _fake_check_rate_limit
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/llamacpp/inference",
+            json={"messages": [{"role": "user", "content": "hello"}]},
+        )
+
+    assert response.status_code in (401, 403), response.text
