@@ -1765,7 +1765,7 @@ class _BackendPromptStudioDatabase(BackendPromptStudioDatabaseBase):
                 ) from exc
             raise DatabaseError(f"Failed to update signature {signature_id}: {exc}") from exc  # noqa: TRY003
 
-    def delete_signature(self, signature_id: int, hard_delete: bool = False) -> bool:
+    def delete_signature(self, signature_id: int, *, hard_delete: bool = False) -> bool:
         try:
             with self._write_lock, self.transaction() as conn:
                 if hard_delete:
@@ -4987,6 +4987,7 @@ class _SQLitePromptStudioDatabase(PromptsDatabase):
 
     def list_evaluations(
         self,
+        *,
         project_id: Optional[int] = None,
         prompt_id: Optional[int] = None,
         status: Optional[str] = None,
@@ -5327,12 +5328,13 @@ class _SQLitePromptStudioDatabase(PromptsDatabase):
     ####################################################################################################################
     # Prompt Accessors (Prompt Studio tables)
 
-    def get_prompt(self, prompt_id: int) -> Optional[dict[str, Any]]:
+    def get_prompt(self, prompt_id: int, include_deleted: bool = False) -> Optional[dict[str, Any]]:
         """
         Fetch a prompt-studio prompt by id from the prompt_studio_prompts table.
 
         Args:
             prompt_id: ID of the prompt (prompt_studio_prompts.id)
+            include_deleted: Also return soft-deleted prompts.
 
         Returns:
             A dictionary representing the prompt or None if not found.
@@ -5340,14 +5342,10 @@ class _SQLitePromptStudioDatabase(PromptsDatabase):
         try:
             conn = self.get_connection()
             cursor = conn.cursor()
-            cursor.execute(
-                """
-                SELECT *
-                FROM prompt_studio_prompts
-                WHERE id = ? AND deleted = 0
-                """,
-                (prompt_id,)
-            )
+            query = "SELECT * FROM prompt_studio_prompts WHERE id = ?"
+            if not include_deleted:
+                query += " AND deleted = 0"
+            cursor.execute(query, (prompt_id,))
             row = cursor.fetchone()
             if not row:
                 return None
@@ -6995,6 +6993,7 @@ class _SQLitePromptStudioDatabase(PromptsDatabase):
         test_cases: list[dict[str, Any]],
         *,
         signature_id: Optional[int] = None,
+        client_id: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         import time
 
@@ -7019,7 +7018,7 @@ class _SQLitePromptStudioDatabase(PromptsDatabase):
                     tags_str,
                     int(bool(test_case.get("is_golden", False))),
                     int(bool(test_case.get("is_generated", False))),
-                    self.client_id,
+                    client_id or test_case.get("client_id") or self.client_id,
                 )
 
                 for attempt in range(max_retries):

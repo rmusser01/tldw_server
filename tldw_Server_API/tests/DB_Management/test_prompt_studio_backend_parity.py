@@ -7,7 +7,7 @@ signature difference from mypy and every IDE. Drift had already happened: a miss
 method (TASK-13290) and seven signature mismatches, with nothing to catch the next.
 
 This is a RATCHET until the planned consolidation lands (one backend-neutral
-implementation, following the core/DB_Management/media_db split). The seven known
+implementation, following the core/DB_Management/media_db split). The remaining known
 mismatches are frozen below with what each one means; a new mismatch fails, and fixing
 a known one fails the stale check until it is removed from the list.
 """
@@ -26,16 +26,12 @@ BACKEND = psd._BackendPromptStudioDatabase
 SQLITE = psd._SQLitePromptStudioDatabase
 FACADE = psd.PromptStudioDatabase
 
-# name -> why it differs. Four are PUBLIC and latent: no caller trips them today, but
-# the first one that does gets a TypeError on one backend only.
+# name -> why it differs. The four latent PUBLIC mismatches were aligned; what is left
+# is private and goes away with the consolidation.
 KNOWN_SIGNATURE_DRIFT: dict[str, str] = {
     "__init__": "legitimate: the backend variant takes tenant/backend/config",
     "_format_test_case": "ARITY differs, (row) vs (cursor, row): wrong on one side if shared",
     "_row_to_dict": "row is optional on the backend, required on SQLite",
-    "create_bulk_test_cases": "latent: client_id= accepted by the backend only",
-    "delete_signature": "latent: hard_delete positional on the backend, keyword-only on SQLite",
-    "get_prompt": "latent: include_deleted= accepted by the backend only",
-    "list_evaluations": "latent: filters keyword-only on the backend, positional on SQLite",
 }
 
 # Public methods that exist on one side by design, not by drift.
@@ -114,3 +110,27 @@ def test_every_facade_delegation_resolves_on_each_backend(backend: type) -> None
     assert not missing, (
         f"PromptStudioDatabase forwards these to {backend.__name__}, which lacks them: {missing}"
     )
+
+
+def test_sqlite_get_prompt_include_deleted_and_bulk_client_id(tmp_path):
+    """The two aligned signatures behave as on the backend, not just parse."""
+    db = FACADE(str(tmp_path / "ps.db"), "default_client")
+    try:
+        project = db.create_project(name="p")
+        prompt = db.create_prompt(project["id"], "pr")
+        conn = db.get_connection()
+        conn.execute("UPDATE prompt_studio_prompts SET deleted = 1 WHERE id = ?", (prompt["id"],))
+        conn.commit()
+        assert db.get_prompt(prompt["id"]) is None
+        assert db.get_prompt(prompt["id"], include_deleted=True)["id"] == prompt["id"]
+
+        created = db.create_bulk_test_cases(
+            project["id"],
+            [{"name": "a", "inputs": {}}, {"name": "b", "inputs": {}, "client_id": "row_client"}],
+            client_id=None,
+        )
+        assert [c["client_id"] for c in created] == ["default_client", "row_client"]
+        created = db.create_bulk_test_cases(project["id"], [{"name": "c", "inputs": {}}], client_id="call_client")
+        assert created[0]["client_id"] == "call_client"
+    finally:
+        db.close()
