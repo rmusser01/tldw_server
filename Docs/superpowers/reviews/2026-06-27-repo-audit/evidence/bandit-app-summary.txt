@@ -1,0 +1,94 @@
+Bandit app scan summary
+Command requested: source .venv/bin/activate && python -m bandit -r tldw_Server_API/app -f json -o /tmp/tldw_repo_audit_bandit_app.json
+Command run: source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate && python -m bandit -r tldw_Server_API/app -f json -o /tmp/tldw_repo_audit_bandit_app.json
+Tooling note: audit worktree .venv was absent; used existing parent repository .venv without installing dependencies.
+Exit code: 1
+JSON output: /tmp/tldw_repo_audit_bandit_app.json
+Result count: 4818
+LOC scanned: 1,120,179
+Severity totals: LOW=4792, MEDIUM=26, HIGH=0
+Confidence totals: LOW=1, MEDIUM=154, HIGH=4663
+Suppression totals: nosec=7, skipped_tests=2886
+stderr:
+[main]	INFO	profile include tests: None
+[main]	INFO	profile exclude tests: None
+[main]	INFO	cli include tests: None
+[main]	INFO	cli exclude tests: None
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/admin/admin_rbac.py:578
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/admin/admin_rbac.py:578
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/admin/admin_rbac.py:600
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/admin/admin_rbac.py:622
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/admin/admin_rbac.py:645
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/admin/admin_rbac.py:701
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/admin/admin_rbac.py:701
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/admin/admin_rbac.py:720
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/admin/admin_rbac.py:741
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/admin/admin_rbac.py:754
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/admin/admin_rbac.py:852
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/admin/admin_rbac.py:858
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/character_chat_sessions.py:4127
+[manager]	WARNING	Test in comment: non is not a test name or id, ignoring
+[manager]	WARNING	Test in comment: cryptographic is not a test name or id, ignoring
+[manager]	WARNING	Test in comment: retry is not a test name or id, ignoring
+[manager]	WARNING	Test in comment: jitter is not a test name or id, ignoring
+[manager]	WARNING	Test in comment: non is not a test name or id, ignoring
+[manager]	WARNING	Test in comment: cryptographic is not a test name or id, ignoring
+[manager]	WARNING	Test in comment: retry is not a test name or id, ignoring
+[manager]	WARNING	Test in comment: jitter is not a test name or id, ignoring
+[manager]	WARNING	Test in comment: non is not a test name or id, ignoring
+[manager]	WARNING	Test in comment: cryptographic is not a test name or id, ignoring
+[manager]	WARNING	Test in comment: retry is not a test name or id, ignoring
+[manager]	WARNING	Test in comment: jitter is not a test name or id, ignoring
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:609
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:609
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:627
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:627
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:719
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:719
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:737
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:737
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:1541
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:1541
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:1555
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:1555
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:1636
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:1636
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:1650
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:1650
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:1658
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:1658
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:1665
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:1665
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:1671
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:1671
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:1677
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:1677
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:1725
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:1725
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:1738
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:1738
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:1745
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:1745
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:1751
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:1751
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:1756
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:1756
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:1761
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:1761
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:1847
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:1857
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:1857
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:1864
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:1892
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:1902
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:1902
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:1908
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:2053
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:2062
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:2062
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:2067
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:2108
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:2117
+[tester]	WARNING	nosec encountered (B608), but no failed test on file tldw_Server_API/app/api/v1/endpoints/jobs_admin.py:2117
+stdout:
+Working... ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% 0:00:36
