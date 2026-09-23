@@ -490,75 +490,6 @@ def recursive_summarize_chunks(
     return current_summary
 
 
-def extract_text_from_input(input_data: Any) -> str:
-    """Extracts usable text content from various input types."""
-    logging.debug(f"Extracting text from input of type: {type(input_data)}")
-    if isinstance(input_data, str):
-        # Check if it's a file path
-        if os.path.isfile(input_data):
-            logging.debug(f"Input is a file path: {input_data}")
-            try:
-                with open(input_data, encoding='utf-8') as f:
-                    content = f.read()
-                # Attempt to parse as JSON, otherwise return raw content
-                try:
-                    data = json.loads(content)
-                    logging.debug("File content parsed as JSON.")
-                    return extract_text_from_input(data) # Recurse with parsed data
-                except json.JSONDecodeError:
-                    logging.debug("File content is not JSON, returning raw text.")
-                    return content.strip()
-            except _SUMMARIZATION_NONCRITICAL_EXCEPTIONS as e:
-                logging.error(f"Error reading file {input_data}: {e}")
-                return ""
-        # Check if it's a JSON string
-        elif input_data.strip().startswith('{') or input_data.strip().startswith('['):
-             logging.debug("Input is potentially a JSON string.")
-             try:
-                 data = json.loads(input_data)
-                 logging.debug("Input string parsed as JSON.")
-                 return extract_text_from_input(data) # Recurse with parsed data
-             except json.JSONDecodeError:
-                 logging.debug("Input string is not JSON, treating as plain text.")
-                 return input_data.strip()
-        # Otherwise, treat as plain text
-        else:
-            logging.debug("Input is a plain text string.")
-            return input_data.strip()
-
-    elif isinstance(input_data, dict):
-        logging.debug("Input is a dictionary.")
-        # Prioritize known structures
-        if 'transcription' in input_data:
-            logging.debug("Extracting text from 'transcription' field.")
-            return extract_text_from_segments(input_data['transcription'])
-        elif 'segments' in input_data:
-            logging.debug("Extracting text from 'segments' field.")
-            return extract_text_from_segments(input_data['segments'])
-        elif 'text' in input_data:
-             logging.debug("Extracting text from 'text' field.")
-             return str(input_data['text']).strip()
-        elif 'content' in input_data:
-             logging.debug("Extracting text from 'content' field.")
-             return str(input_data['content']).strip()
-        else:
-            # Fallback: try to convert the whole dict to string (might be noisy)
-            logging.warning("No specific text field found in dict, converting entire dict to string.")
-            try:
-                return json.dumps(input_data, indent=2)
-            except _SUMMARIZATION_NONCRITICAL_EXCEPTIONS:
-                 return str(input_data) # Final fallback
-
-    elif isinstance(input_data, list):
-        logging.debug("Input is a list, assuming list of segments.")
-        # Assume it's a list of segments like {'Text': '...'} or {'text': '...'}
-        return extract_text_from_segments(input_data)
-
-    else:
-        logging.warning(f"Unhandled input type: {type(input_data)}. Attempting string conversion.")
-        return str(input_data).strip()
-
-
 # --- Internal API Dispatcher ---
 def _dispatch_to_api(
     text_to_summarize: str,
@@ -914,13 +845,34 @@ def format_input_with_metadata(metadata, content):
 
 
 
-def extract_text_from_input(input_data):  # noqa: F811
+def extract_text_from_input(input_data):
+    """Extract usable text from a caller-supplied payload.
+
+    Deliberately does NOT treat a string as a filesystem path. A second definition of
+    this function used to live at module scope above this one and did
+    ``os.path.isfile(input_data)`` -> ``open(input_data).read()``; it lost to this one by
+    definition order, which is the only reason TASK-2425 could conclude the summarization
+    arbitrary file read was "not active through analyze()". That made a security property
+    depend on which definition came last plus an inline F811 suppression. The shadowed
+    copy is gone and this is now the only definition. Do not reintroduce path handling
+    here: `analyze()` passes caller-supplied `input_data` straight in for every caller
+    that does not set `input_is_literal_text=True`, and only two sites in the app do.
+
+    See TASK-13288.
+    """
     if isinstance(input_data, str):
         try:
             # Try to parse as JSON
             data = json.loads(input_data)
         except json.JSONDecodeError:
             # If not valid JSON, treat as plain text
+            return input_data
+        if not isinstance(data, dict):
+            # json.loads("123"), "true" and "null" yield a scalar, and the membership
+            # tests below then raised TypeError on it. TypeError is in
+            # _SUMMARIZATION_NONCRITICAL_EXCEPTIONS, so analyze() swallowed it into a
+            # generic error string and the caller never learned its input was usable.
+            # A scalar is text the caller wrote; hand it back as written.
             return input_data
     elif isinstance(input_data, dict):
         data = input_data
@@ -944,6 +896,15 @@ def extract_text_from_input(input_data):  # noqa: F811
     elif 'segments' in data:
         segments_text = extract_text_from_segments(data['segments'])
         text_parts.append(f"Segments: {segments_text}")
+    elif 'text' in data:
+        # Carried over from the deleted copy, which handled both of these. Without them
+        # a dict whose text sits under 'text' or 'content' extracted to "", and
+        # analyze() turned that into "Error: Could not extract text content." for input
+        # that plainly had text. Checked after the known structures so their precedence
+        # is unchanged.
+        text_parts.append(str(data['text']).strip())
+    elif 'content' in data:
+        text_parts.append(str(data['content']).strip())
 
     return '\n\n'.join(text_parts)
 
