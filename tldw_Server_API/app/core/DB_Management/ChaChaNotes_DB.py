@@ -27977,7 +27977,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if self.backend_type == BackendType.SQLITE:
             nested = bool(self.get_connection().in_transaction)
         else:
-            nested = bool(getattr(self._connection_state(), "tx_depth", 0))
+            connection = self.get_connection()
+            raw = connection._connection
+            transaction_status = getattr(getattr(raw, "info", None), "transaction_status", None)
+            nested = bool(
+                getattr(self._connection_state(), "tx_depth", 0)
+                or connection._backend._tx_depth(raw)
+                or getattr(transaction_status, "name", None) != "IDLE"
+            )
         if nested:
             raise ConflictError(  # noqa: TRY003
                 "Workspace deletion requires an outermost transaction boundary.",

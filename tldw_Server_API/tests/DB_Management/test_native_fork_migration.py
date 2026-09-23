@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import uuid
+from pathlib import Path
 
 import pytest
+from psycopg import sql
 
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -17,9 +18,13 @@ NATIVE_TABLES = (
     "native_chat_quota_intents",
 )
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.mark.parametrize("backend_name", ["sqlite", "postgres"])
-def test_upgrade_reopen_preserves_chat_and_installs_native_storage(backend_name, request, tmp_path, monkeypatch):
+def test_upgrade_reopen_preserves_chat_and_installs_native_storage(
+    backend_name: str, request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     kwargs = {"db_path": str(tmp_path / "native.sqlite"), "client_id": "alice"}
     if backend_name == "postgres":
         kwargs["backend"] = DatabaseBackendFactory.create_backend(request.getfixturevalue("pg_database_config"))
@@ -53,7 +58,7 @@ def test_upgrade_reopen_preserves_chat_and_installs_native_storage(backend_name,
         kwargs["backend"].get_pool().close_all()
 
 
-def test_sqlite_operation_receipt_has_no_cascading_chat_fk(tmp_path):
+def test_sqlite_operation_receipt_has_no_cascading_chat_fk(tmp_path: Path) -> None:
     db = CharactersRAGDB(db_path=str(tmp_path / "native.sqlite"), client_id="alice")
     assert db.backend.table_exists("native_chat_operations")
     foreign_keys = db.execute_query("PRAGMA foreign_key_list(native_chat_operations)").fetchall()
@@ -61,11 +66,11 @@ def test_sqlite_operation_receipt_has_no_cascading_chat_fk(tmp_path):
     db.close_connection()
 
 
-def test_postgres_native_tables_enforce_direct_owner_rls(pg_database_config):
+def test_postgres_native_tables_enforce_direct_owner_rls(pg_database_config: object) -> None:
     """An app role sees only its own receipts even without a live chat row."""
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
     db = CharactersRAGDB(db_path=":memory:", client_id="alice", backend=backend)
-    role = "h2_probe_" + uuid.uuid4().hex
+    role = "h2_probe_owner_rls"
 
     class RollbackProbe(Exception):
         pass
@@ -88,11 +93,13 @@ def test_postgres_native_tables_enforce_direct_owner_rls(pg_database_config):
                         (table,),
                     ).fetchone()
                     assert flags["relrowsecurity"] and flags["relforcerowsecurity"]
-                conn.execute(f"CREATE ROLE {role} NOLOGIN NOSUPERUSER")  # nosec B608 - generated hex identifier
-                conn.execute(f"GRANT USAGE ON SCHEMA public TO {role}")  # nosec B608
+                role_sql = sql.Identifier(role).as_string(conn._connection)
+                conn.execute(f"CREATE ROLE {role_sql} NOLOGIN NOSUPERUSER")  # nosec B608 - quoted identifier
+                conn.execute(f"GRANT USAGE ON SCHEMA public TO {role_sql}")  # nosec B608 - quoted identifier
                 for table in NATIVE_TABLES:
-                    conn.execute(f"GRANT SELECT ON {table} TO {role}")  # nosec B608 - fixed table list
-                conn.execute(f"SET LOCAL ROLE {role}")  # nosec B608
+                    table_sql = sql.Identifier(table).as_string(conn._connection)
+                    conn.execute(f"GRANT SELECT ON {table_sql} TO {role_sql}")  # nosec B608 - quoted identifiers
+                conn.execute(f"SET LOCAL ROLE {role_sql}")  # nosec B608 - quoted identifier
                 for client_id in ("alice", "bob"):
                     conn.execute("SELECT set_config('app.current_user_id', ?, true)", (client_id,))
                     rows = conn.execute("SELECT client_id FROM native_chat_operations").fetchall()
@@ -104,7 +111,9 @@ def test_postgres_native_tables_enforce_direct_owner_rls(pg_database_config):
 
 
 @pytest.mark.parametrize("backend_name", ["sqlite", "postgres"])
-def test_native_schema_failure_rolls_back_tables_and_version(backend_name, request, tmp_path, monkeypatch):
+def test_native_schema_failure_rolls_back_tables_and_version(
+    backend_name: str, request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     kwargs = {"db_path": str(tmp_path / "rollback.sqlite"), "client_id": "alice"}
     if backend_name == "postgres":
         kwargs["backend"] = DatabaseBackendFactory.create_backend(request.getfixturevalue("pg_database_config"))

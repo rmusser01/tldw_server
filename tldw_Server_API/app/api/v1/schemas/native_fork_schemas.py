@@ -94,18 +94,23 @@ class NativeForkBindingTemplateV1(HistoryWireModel):
 
 
 class NativeAssistantBindingV1(NativeForkBindingTemplateV1):
+    """Commit-time child identity tied to its retained assistant snapshot."""
+
     child_id: NativeId
     assistant_id: NativeId
     settings_revision: StrictInt = Field(ge=1)
 
     @model_validator(mode="after")
     def validate_child_identity(self) -> NativeAssistantBindingV1:
+        """Reject a child ID that does not name its immutable snapshot assistant."""
         if self.assistant_id != "snapshot:" + self.child_id:
             raise ValueError("invalid_snapshot_child_identity")
         return self
 
 
 class NativeForkCaptureRequestV1(HistoryWireModel):
+    """Read-only native fork capture request for a selected history view."""
+
     view: HistoryCaptureViewV1
     fidelity: NativeFidelity = "strict"
 
@@ -156,6 +161,8 @@ class _NativeForkSkeletonV1(HistoryWireModel):
 
 
 class NativeForkCaptureV1(_NativeForkSkeletonV1):
+    """Validated fork capture with explicit required effects and refusal reasons."""
+
     required_effects: tuple[NativeCode, ...] = ()
     reasons: tuple[NativeCode, ...] = ()
 
@@ -171,6 +178,8 @@ class NativeForkRequestV1(_NativeForkSkeletonV1):
 
 
 class NativeForkResolveRequestV1(HistoryWireModel):
+    """Owner-bound lookup for a previously reserved native fork operation."""
+
     protocol: Literal["native_atomic_v1"]
     projection_version: Literal["native-fork-v1"]
     owner_key: NativeOwnerKey
@@ -179,6 +188,8 @@ class NativeForkResolveRequestV1(HistoryWireModel):
 
 
 class NativeOperationBaseV1(HistoryWireModel):
+    """Shared immutable identity returned with every native operation receipt."""
+
     operation_id: NativeOperationId
     owner_key: NativeOwnerKey
     protocol: Literal["native_atomic_v1"] = "native_atomic_v1"
@@ -186,6 +197,8 @@ class NativeOperationBaseV1(HistoryWireModel):
 
 
 class NativeForkCommittedV1(NativeOperationBaseV1):
+    """Committed child identity and one-to-one source-to-child message map."""
+
     operation_kind: Literal["native_fork_v1"] = "native_fork_v1"
     state: Literal["committed"]
     child_id: NativeId
@@ -194,22 +207,28 @@ class NativeForkCommittedV1(NativeOperationBaseV1):
     @field_validator("message_map", mode="after")
     @classmethod
     def freeze_map(cls, value: Mapping[str, Any]) -> Mapping[str, Any]:
+        """Reject duplicate child IDs and freeze the accepted map."""
         if len(set(value.values())) != len(value):
             raise ValueError("duplicate_child_message")
         return MappingProxyType(dict(value))
 
     @field_serializer("message_map")
     def serialize_map(self, value: Mapping[str, Any]) -> dict[str, Any]:
+        """Emit a plain JSON-compatible copy of the immutable message map."""
         return dict(value)
 
 
 class NativeForkPendingV1(NativeOperationBaseV1):
+    """Retryable operation receipt with a nonnegative retry delay."""
+
     operation_kind: Literal["native_fork_v1"] = "native_fork_v1"
     state: Literal["pending"]
     retry_after_seconds: StrictInt = Field(ge=0)
 
 
 class NativeForkTerminalV1(NativeOperationBaseV1):
+    """Terminal operation receipt carrying a stable refusal code."""
+
     operation_kind: Literal["native_fork_v1"] = "native_fork_v1"
     state: Literal["not_recorded", "rejected", "expired", "gone"]
     code: NativeCode
@@ -221,6 +240,8 @@ NativeForkResultV1 = Annotated[
 
 
 class NativeAssetRetentionRequestV1(HistoryWireModel):
+    """Immutable request to retain an exact source asset manifest."""
+
     operation_kind: Literal["native_asset_retention_v1"]
     operation_id: NativeOperationId
     owner_key: NativeOwnerKey
@@ -234,11 +255,15 @@ class NativeAssetRetentionRequestV1(HistoryWireModel):
 
 
 class NativeRetainedAssetV1(HistoryWireModel):
+    """Allocated destination asset identity and revision."""
+
     asset_id: NativeId
     revision: NativeRevision
 
 
 class NativeAssetRetentionCommittedV1(NativeOperationBaseV1):
+    """Committed asset manifest revision and immutable reference mapping."""
+
     operation_kind: Literal["native_asset_retention_v1"] = "native_asset_retention_v1"
     state: Literal["committed"]
     asset_manifest_revision: NativeRevision
@@ -247,18 +272,24 @@ class NativeAssetRetentionCommittedV1(NativeOperationBaseV1):
     @field_validator("asset_map", mode="after")
     @classmethod
     def freeze_map(cls, value: Mapping[str, Any]) -> Mapping[str, Any]:
+        """Freeze the committed reference-to-asset mapping."""
         return MappingProxyType(dict(value))
 
     @field_serializer("asset_map")
     def serialize_map(self, value: Mapping[str, Any]) -> dict[str, Any]:
+        """Encode retained asset models as JSON-compatible values."""
         return {key: asset.model_dump(mode="json") for key, asset in value.items()}
 
 
 class NativeAssetRetentionPendingV1(NativeForkPendingV1):
+    """Pending receipt for an asset-retention operation."""
+
     operation_kind: Literal["native_asset_retention_v1"] = "native_asset_retention_v1"
 
 
 class NativeAssetRetentionTerminalV1(NativeForkTerminalV1):
+    """Terminal receipt for an asset-retention operation."""
+
     operation_kind: Literal["native_asset_retention_v1"] = "native_asset_retention_v1"
 
 
@@ -272,6 +303,8 @@ NativeOperationResultV1 = Annotated[
 
 
 class NativeAssetContextUpdateV1(HistoryWireModel):
+    """CAS update for one retained asset's participation in prompt context."""
+
     expected_asset_manifest_revision: NativeRevision
     target_reference_id: NativeId
     expected_reference_revision: NativeRevision
@@ -282,6 +315,7 @@ class NativeAssetContextUpdateV1(HistoryWireModel):
 
     @model_validator(mode="after")
     def validate_action(self) -> NativeAssetContextUpdateV1:
+        """Require replacement fields only for replace or restore actions."""
         if self.action == "remove_from_context":
             if self.replacement is not None or self.expected_original_hash is not None:
                 raise ValueError("invalid_remove_context")

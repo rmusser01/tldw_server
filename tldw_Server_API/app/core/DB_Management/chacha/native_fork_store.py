@@ -13,6 +13,14 @@ if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
+class NativeForkStoreError(ValueError):
+    """A stable native-fork storage failure that callers can inspect by code."""
+
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(code)
+
+
 @dataclass(frozen=True)
 class NativeOperationResult:
     """Minimal durable result; terminal keys never become new reservations."""
@@ -36,6 +44,7 @@ class NativeForkStore:
         self._db = db
 
     def _row(self, owner: Any, kind: str, operation_id: str, *, conn: Any) -> dict[str, Any] | None:
+        """Lock and read an operation only within the caller's owned transaction."""
         query = (
             "SELECT * FROM native_chat_operations WHERE client_id = ? AND operation_kind = ? "
             "AND operation_id = ? FOR UPDATE"
@@ -60,22 +69,24 @@ class NativeForkStore:
             (owner.scope.workspace_id, owner.client_id, False, False),
         ).fetchone()
         if workspace is None:
-            raise ValueError("workspace_native_unavailable")
+            raise NativeForkStoreError("workspace_native_unavailable")
 
     @staticmethod
     def _check_identity(row: dict[str, Any], owner: Any, digest: str, canonical_json: str | None = None) -> None:
+        """Reject replay of a key with different owner, scope, or request bytes."""
         scope = owner.scope
         if (row["owner_key"] != owner.owner_key or row["scope_type"] != scope.kind
                 or row["workspace_id"] != scope.workspace_id):
-            raise ValueError("operation_owner_mismatch")
+            raise NativeForkStoreError("operation_owner_mismatch")
         if row["request_digest"] != digest or (
             canonical_json is not None and row["canonical_request_json"] is not None
             and row["canonical_request_json"] != canonical_json
         ):
-            raise ValueError("operation_id_conflict")
+            raise NativeForkStoreError("operation_id_conflict")
 
     @staticmethod
     def _result(row: dict[str, Any] | None) -> NativeOperationResult:
+        """Convert a stored operation row to its stable public receipt shape."""
         if row is None:
             return NativeOperationResult("not_recorded")
         return NativeOperationResult(row["state"], row["child_conversation_id"])
@@ -86,7 +97,7 @@ class NativeForkStore:
     ) -> NativeOperationResult:
         """Reserve one immutable owner/key/request identity; replay returns its receipt."""
         if kind not in {"native_fork_v1", "native_asset_retention_v1"}:
-            raise ValueError("unsupported_operation_kind")
+            raise NativeForkStoreError("unsupported_operation_kind")
         canonical_json = json.dumps(canonical_request, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
         row = self._row(owner, kind, operation_id, conn=conn)
         if row is not None:
@@ -104,7 +115,7 @@ class NativeForkStore:
         )
         row = self._row(owner, kind, operation_id, conn=conn)
         if row is None:
-            raise RuntimeError("operation_reservation_missing")
+            raise NativeForkStoreError("operation_reservation_missing")
         self._check_identity(row, owner, request_digest, canonical_json)
         if inserted.rowcount == 1:
             try:
@@ -127,7 +138,7 @@ class NativeForkStore:
         self._check_identity(row, owner, request_digest)
         child_id = row["child_conversation_id"]
         if row["state"] == "committed" and not child_id:
-            raise ValueError("operation_receipt_incomplete")
+            raise NativeForkStoreError("operation_receipt_incomplete")
         if row["state"] == "committed" and child_id:
             child = conn.execute(
                 "SELECT deleted, workspace_id, required_projection_version, "
@@ -147,12 +158,12 @@ class NativeForkStore:
             else:
                 if (child["workspace_id"] != row["workspace_id"]
                         or child["required_projection_version"] != row["projection_version"]):
-                    raise ValueError("operation_child_scope_mismatch")
+                    raise NativeForkStoreError("operation_child_scope_mismatch")
                 if kind == "native_fork_v1" and (
                     child["native_creation_operation_kind"] != kind
                     or child["native_creation_operation_id"] != operation_id
                 ):
-                    raise ValueError("operation_child_binding_mismatch")
+                    raise NativeForkStoreError("operation_child_binding_mismatch")
                 if row["workspace_id"] is not None:
                     workspace = conn.execute(
                         "SELECT deleted, native_chat_admission_closed, system_operation_state "
@@ -162,7 +173,7 @@ class NativeForkStore:
                     if (workspace is None or workspace["deleted"]
                             or workspace["native_chat_admission_closed"]
                             or workspace["system_operation_state"] is not None):
-                        raise ValueError("workspace_native_unavailable")
+                        raise NativeForkStoreError("workspace_native_unavailable")
         return self._result(row)
 
     def claim_attempt(
@@ -171,7 +182,7 @@ class NativeForkStore:
     ) -> NativeAttempt | NativeOperationResult:
         """Assign a generation only after the prior lease and candidates are settled."""
         if now.tzinfo is None or now.utcoffset() is None:
-            raise ValueError("attempt_now_must_be_aware")
+            raise NativeForkStoreError("attempt_now_must_be_aware")
         now = now.astimezone(timezone.utc)
         row = self._row(owner, kind, operation_id, conn=conn)
         if row is None:
@@ -184,9 +195,9 @@ class NativeForkStore:
             try:
                 expiry = datetime.fromisoformat(lease_text)
             except ValueError as exc:
-                raise ValueError("operation_lease_invalid") from exc
+                raise NativeForkStoreError("operation_lease_invalid") from exc
             if expiry.tzinfo is None or expiry.utcoffset() is None:
-                raise ValueError("operation_lease_invalid")
+                raise NativeForkStoreError("operation_lease_invalid")
             if expiry.astimezone(timezone.utc) > now:
                 return NativeOperationResult("pending")
         self.lock_open_workspace(owner, conn=conn)
