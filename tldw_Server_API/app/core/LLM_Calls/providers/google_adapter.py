@@ -77,9 +77,12 @@ def _env_flag(name: str) -> bool:
     if value is None:
         return False
     lowered = value.strip().lower()
-    if is_truthy(lowered):
-        return True
-    return lowered not in {"0", "false", "no", "off", ""}
+    # Anything the canonical parser does not recognise as true is false. The previous
+    # form, `lowered not in {"0","false","no","off",""}`, made every unrecognised
+    # spelling true -- so "disabled" enabled the flag. This gates whether
+    # caller-supplied URLs are forwarded for Google to fetch server-side, so it fails
+    # closed.
+    return bool(is_truthy(lowered))
 
 
 class GoogleAdapter(ChatProvider):

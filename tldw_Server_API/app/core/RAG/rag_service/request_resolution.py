@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Optional
 
 from tldw_Server_API.app.core.RAG.rag_service.profiles import get_profile_kwargs
+from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
 
 _DEFAULT_PROFILE_ALIASES: dict[str, str] = {
@@ -44,7 +45,10 @@ def _default_single_user_id_resolver() -> int:
 
 
 def _is_truthy_value(raw_value: Any) -> bool:
-    return str(raw_value).strip().lower() in {"1", "true", "yes", "on"}
+    # Delegates to the canonical parser rather than carrying its own vocabulary. The
+    # local set omitted "y", which is_truthy accepts, so SEARCH_QUERY_CLASSIFICATION=y
+    # resolved off while RAG_GUARDRAILS_STRICT=y resolved on in the same request.
+    return is_truthy(str(raw_value))
 
 
 def _parse_csv_or_json_list(raw_value: Any) -> Optional[list[str]]:

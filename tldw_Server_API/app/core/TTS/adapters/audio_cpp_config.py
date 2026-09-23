@@ -22,10 +22,17 @@ def _as_bool(value: Any, default: bool = False) -> bool:
         return value
     if isinstance(value, str):
         normalized = value.strip().lower()
-        if normalized in {"1", "true", "yes", "on"}:
+        if normalized in {"1", "true", "yes", "y", "on"}:
             return True
-        if normalized in {"0", "false", "no", "off"}:
+        if normalized in {"0", "false", "no", "n", "off"}:
             return False
+        # An unrecognised string returns the caller's default rather than bool(value),
+        # which was True for every non-empty string. This gates allow_remote_base_url,
+        # whose False value is what makes validate_base_url enforce the loopback check,
+        # so "n" used to disable the guard -- the opposite of what the operator wrote.
+        # It also gates `managed`, which spawns a subprocess. Failing closed here means
+        # a typo leaves the restriction in place instead of lifting it.
+        return default
     return bool(value)
 
 

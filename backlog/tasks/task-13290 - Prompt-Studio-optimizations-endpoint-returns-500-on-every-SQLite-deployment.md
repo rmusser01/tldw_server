@@ -4,7 +4,7 @@ title: Prompt Studio optimizations endpoint returns 500 on every SQLite deployme
 status: Done
 assignee: []
 created_date: '2026-09-22 04:34'
-updated_date: '2026-09-22 16:54'
+updated_date: '2026-09-23 12:25'
 labels:
   - bug
   - prompt-studio
@@ -40,12 +40,12 @@ Found by the comprehensive core-module review; independently verified by the orc
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A failing test calls the endpoint against a real _SQLitePromptStudioDatabase and reproduces the 500 before any fix
-- [ ] #2 list_optimizations is implemented on the SQLite class with behaviour matching the PostgreSQL body
-- [ ] #3 A parity guard test asserts the two backend classes expose the same public method set, or documents each intentional asymmetry (currently 9 PG-only and 7 SQLite-only)
-- [ ] #4 The endpoint logs the underlying exception rather than only the generic message
-- [ ] #5 The stub-based tests no longer mask a missing method (stub derives from or is checked against the real class)
-- [ ] #6 Bandit run for touched scope
+- [x] #1 A failing test calls the endpoint against a real _SQLitePromptStudioDatabase and reproduces the 500 before any fix
+- [x] #2 list_optimizations is implemented on the SQLite class with behaviour matching the PostgreSQL body
+- [x] #3 A parity guard test asserts the two backend classes expose the same public method set, or documents each intentional asymmetry (currently 9 PG-only and 7 SQLite-only)
+- [x] #4 The endpoint logs the underlying exception rather than only the generic message
+- [x] #5 The stub-based tests no longer mask a missing method (stub derives from or is checked against the real class)
+- [x] #6 Bandit run for touched scope
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -83,10 +83,10 @@ STILL OPEN, tracked separately: the decomposition itself. 59 method names implem
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
