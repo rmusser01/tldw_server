@@ -27,6 +27,13 @@ this a test of the gating rather than of the adapters.
 Note the first term is also dead weight on its own: `_prefer_httpx_in_tests()` is
 defined as `bool(os.getenv("PYTEST_CURRENT_TEST"))`, so those two conditions are the
 same check written twice.
+
+Two tests call `_use_native_http()` directly rather than going through `chat`. That is
+deliberate: they cover the *parsing* of the four documented false spellings, which is a
+property of that method and not of any request path, and asserting it through `chat` would
+require a live transport for the cases that are expected to succeed. The reachability
+tests above go through the public `chat` and `stream` entry points, which is where the
+gating actually mattered.
 """
 
 from __future__ import annotations
@@ -53,6 +60,7 @@ _FALSE_SPELLINGS = ["0", "false", "no", "off"]
 
 
 def _adapter(module_name: str, class_name: str):
+    """Instantiate one provider adapter by module and class name."""
     import importlib
 
     module = importlib.import_module(
@@ -62,6 +70,7 @@ def _adapter(module_name: str, class_name: str):
 
 
 def _request() -> dict:
+    """Return the minimum chat request each adapter will accept for validation."""
     return {
         "messages": [{"role": "user", "content": "hello"}],
         "model": "some-model",

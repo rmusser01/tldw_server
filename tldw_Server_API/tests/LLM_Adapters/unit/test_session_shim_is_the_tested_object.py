@@ -19,9 +19,19 @@ that need to control the session already monkeypatch `create_session_with_retrie
 itself, which is unaffected by which class the unpatched function would have returned.
 `test_provider_unsafe_post_no_retry.py` goes further and re-points it at the
 `http_helpers` version explicitly -- the suite was already working around this gate.
+
+On naming `_SessionShim` and `_legacy_create_session_with_retries` directly: raised in
+review of PR #2982's sibling PR, and accepted as the cost of the assertion. *Which* class
+the factory returns is the entire defect -- a test that only checked observable POST
+behaviour would have passed before the fix too, because both classes end at the same
+`http_client.fetch`. Renaming `_SessionShim` will break the first test here, and that is
+the intended signal: the test exists to pin that production and test runs construct the
+same object.
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 import pytest
 
@@ -46,19 +56,21 @@ def test_non_streaming_post_goes_through_the_central_http_client(
     """The shim's whole purpose: egress policy and TLS pinning via http_client.fetch."""
     seen: dict[str, object] = {}
 
-    def _fake_fetch(**kwargs):
+    def _fake_fetch(**kwargs: Any) -> _Resp:
+        """Stand in for http_client.fetch, recording the kwargs it was handed."""
         seen.update(kwargs)
-
-        class _Resp:
-            status_code = 200
-
-            def json(self):
-                return {"ok": True}
-
-            def raise_for_status(self):
-                return None
-
         return _Resp()
+
+    class _Resp:
+        """The subset of the httpx response API that the shim's callers touch."""
+
+        status_code = 200
+
+        def json(self) -> dict[str, bool]:
+            return {"ok": True}
+
+        def raise_for_status(self) -> None:
+            return None
 
     monkeypatch.setattr(chat_calls, "fetch", _fake_fetch)
 
@@ -85,13 +97,15 @@ def test_provider_posts_are_single_attempt(monkeypatch: pytest.MonkeyPatch) -> N
     """
     seen: dict[str, object] = {}
 
-    def _fake_fetch(**kwargs):
+    def _fake_fetch(**kwargs: Any) -> _StatusOnly:
+        """Stand in for http_client.fetch, recording the retry policy it was handed."""
         seen.update(kwargs)
+        return _StatusOnly()
 
-        class _Resp:
-            status_code = 200
+    class _StatusOnly:
+        """Only `status_code` is read on this path."""
 
-        return _Resp()
+        status_code = 200
 
     monkeypatch.setattr(chat_calls, "fetch", _fake_fetch)
 
@@ -112,7 +126,17 @@ def test_streaming_still_uses_the_legacy_facade_for_iter_lines(
     built: list[object] = []
 
     class _FakeLegacy:
-        def post(self, url, *, headers=None, json=None, stream=False, timeout=None):
+        """Stand-in for the legacy requests-style session the shim delegates to."""
+
+        def post(
+            self,
+            url: str,
+            *,
+            headers: dict[str, str] | None = None,
+            json: dict[str, Any] | None = None,
+            stream: bool = False,
+            timeout: float | None = None,
+        ) -> object:
             built.append(("post", stream))
             return object()
 
