@@ -1086,6 +1086,7 @@ jobs:
               tldw_Server_API/tests/Embeddings/test_compactor_admin_endpoint.py
               tldw_Server_API/tests/Embeddings/test_connection_pool_failure_accounting.py
               tldw_Server_API/tests/Embeddings/test_contextual_chunking.py
+              tldw_Server_API/tests/Embeddings/test_http_status_extraction.py
           - name: ai-embeddings-dlq-config
             paths: >-
               tldw_Server_API/tests/Embeddings/test_delete_by_filter_endpoint.py
@@ -2591,6 +2592,7 @@ jobs:
               tldw_Server_API/tests/Embeddings/test_compactor_admin_endpoint.py
               tldw_Server_API/tests/Embeddings/test_connection_pool_failure_accounting.py
               tldw_Server_API/tests/Embeddings/test_contextual_chunking.py
+              tldw_Server_API/tests/Embeddings/test_http_status_extraction.py
           - name: ai-embeddings-dlq-config
             paths: >-
               tldw_Server_API/tests/Embeddings/test_delete_by_filter_endpoint.py
@@ -3967,6 +3969,7 @@ jobs:
               tldw_Server_API/tests/Embeddings/test_compactor_admin_endpoint.py
               tldw_Server_API/tests/Embeddings/test_connection_pool_failure_accounting.py
               tldw_Server_API/tests/Embeddings/test_contextual_chunking.py
+              tldw_Server_API/tests/Embeddings/test_http_status_extraction.py
           - name: ai-embeddings-dlq-config
             paths: >-
               tldw_Server_API/tests/Embeddings/test_delete_by_filter_endpoint.py
@@ -5266,6 +5269,7 @@ jobs:
               tldw_Server_API/tests/Embeddings/test_compactor_admin_endpoint.py
               tldw_Server_API/tests/Embeddings/test_connection_pool_failure_accounting.py
               tldw_Server_API/tests/Embeddings/test_contextual_chunking.py
+              tldw_Server_API/tests/Embeddings/test_http_status_extraction.py
           - name: ai-embeddings-dlq-config
             paths: >-
               tldw_Server_API/tests/Embeddings/test_delete_by_filter_endpoint.py
@@ -6571,6 +6575,7 @@ jobs:
               tldw_Server_API/tests/Embeddings/test_compactor_admin_endpoint.py
               tldw_Server_API/tests/Embeddings/test_connection_pool_failure_accounting.py
               tldw_Server_API/tests/Embeddings/test_contextual_chunking.py
+              tldw_Server_API/tests/Embeddings/test_http_status_extraction.py
           - name: ai-embeddings-dlq-config
             paths: >-
               tldw_Server_API/tests/Embeddings/test_delete_by_filter_endpoint.py
