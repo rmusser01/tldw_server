@@ -3,10 +3,10 @@ id: TASK-13319
 title: >-
   Retry and contention policy exists on SQLite only with zero retry on
   PostgreSQL
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-22 04:55'
-updated_date: '2026-09-23 15:15'
+updated_date: '2026-09-23 17:28'
 labels:
   - bug
   - db
@@ -46,12 +46,18 @@ Source: synthesis F21
 2026-09-23: AC1/AC2 met - every Prompt Studio write and read now goes through retry_policy on both backends (all 28 inline SQLite loops removed with their aggregates; PostgreSQL 40001/40P01/55P03 retried, including job queue paths).
 <!-- SECTION:NOTES:END -->
 
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+core/DB_Management/retry_policy.py is the one contention-retry policy; both SQL backends raise TransientContentionError (SQLite locked; PostgreSQL 40001/40P01/55P03), so PostgreSQL contention is retried for the first time. All 28 inline SQLite loops in PromptStudioDatabase.py are gone with the TASK-13318 consolidation; every Prompt Studio read/write goes through the policy on both backends (including the job queue). Jitter and the locked predicate come only from core/Utils/backoff.py. Tests: test_retry_policy.py, test_backend_constraint_classification.py (incl. real locked SQLite), and a retry integration test in the Prompt Studio parity harness verified to fail without the retry. Bandit clean. Known: other modules' own retry helpers (transaction_utils, Workflows_DB) keep their existing schedules per ADR-047 and do not yet use TransientContentionError.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
