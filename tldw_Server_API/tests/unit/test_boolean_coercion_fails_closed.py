@@ -41,17 +41,26 @@ _MEANT_AS_FALSE = ["n", "N", "no", "none", "nope", "disabled", "off", "0", "fals
 _MEANT_AS_TRUE = ["1", "true", "yes", "y", "on"]
 
 
-def test_the_canonical_parser_is_the_comparison_point() -> None:
-    """Pin what `is_truthy` does, since the assertions below are relative to it."""
-    assert is_truthy("y") is True
-    assert is_truthy("yes") is True
-    assert is_truthy("on") is True
-    assert is_truthy("disabled") is False
-    assert is_truthy("n") is False
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [("y", True), ("yes", True), ("on", True), ("disabled", False), ("n", False)],
+)
+def test_the_canonical_parser_is_the_comparison_point(value: str, expected: bool) -> None:
+    """Pin what `is_truthy` does, since the assertions below are relative to it.
+
+    One case per spelling so a disagreement names the spelling that moved rather than
+    stopping the rest of the comparison point from being checked at all.
+    """
+    assert is_truthy(value) is expected
 
 
 @pytest.mark.parametrize("value", _MEANT_AS_FALSE)
 def test_audio_cpp_as_bool_never_resolves_a_no_to_true(value: str) -> None:
+    """No spelling of "no" may resolve True, for every value in `_MEANT_AS_FALSE`.
+
+    `_as_bool` ended `return bool(value)`, so any unrecognised non-empty string was
+    True. Parametrised over the spellings an operator plausibly writes meaning "no".
+    """
     from tldw_Server_API.app.core.TTS.adapters.audio_cpp_config import _as_bool
 
     assert _as_bool(value, default=False) is False, (
@@ -91,8 +100,12 @@ def test_audio_cpp_unrecognised_value_keeps_the_loopback_guard_on(value: str) ->
     )
 
 
-def test_audio_cpp_still_honours_the_documented_true_spellings() -> None:
-    """Control: failing closed must not break the switch for people who do enable it."""
+@pytest.mark.parametrize("value", _MEANT_AS_TRUE)
+def test_audio_cpp_still_honours_the_documented_true_spellings(value: str) -> None:
+    """Control: failing closed must not break the switch for people who do enable it.
+
+    One case per spelling, so a regression names which `true` stopped working.
+    """
     from tldw_Server_API.app.core.TTS.adapters.audio_cpp_config import _as_bool
 
     for value in ("1", "true", "yes", "on"):
@@ -106,6 +119,11 @@ def test_audio_cpp_still_honours_the_documented_true_spellings() -> None:
 def test_google_env_flag_does_not_fail_open(
     monkeypatch: pytest.MonkeyPatch, value: str
 ) -> None:
+    """A "no" spelling in the env var must not read as True.
+
+    `_env_flag` ended `lowered not in {"0","false","no","off",""}`, so `disabled` was
+    True. Parametrised over the spellings that were wrongly accepted, plus `n`.
+    """
     from tldw_Server_API.app.core.LLM_Calls.providers import google_adapter
 
     monkeypatch.setenv("TLDW_TEST_GOOGLE_FLAG", value)
@@ -115,19 +133,36 @@ def test_google_env_flag_does_not_fail_open(
     )
 
 
-def test_google_env_flag_still_honours_true(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Control."""
+@pytest.mark.parametrize("value", _MEANT_AS_TRUE)
+def test_google_env_flag_still_honours_true(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    """Control: failing closed must not stop the flag turning on when asked.
+
+    One case per spelling, so a regression names which `true` stopped working.
+    """
     from tldw_Server_API.app.core.LLM_Calls.providers import google_adapter
 
-    for value in ("1", "true", "yes", "y", "on"):
-        monkeypatch.setenv("TLDW_TEST_GOOGLE_FLAG", value)
-        assert google_adapter._env_flag("TLDW_TEST_GOOGLE_FLAG") is True, value
+    monkeypatch.setenv("TLDW_TEST_GOOGLE_FLAG", value)
+    assert google_adapter._env_flag("TLDW_TEST_GOOGLE_FLAG") is True, value
+
+
+def test_google_env_flag_is_false_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Control: an absent variable is its own scenario, not a tail of the loop above."""
+    from tldw_Server_API.app.core.LLM_Calls.providers import google_adapter
+
     monkeypatch.delenv("TLDW_TEST_GOOGLE_FLAG", raising=False)
     assert google_adapter._env_flag("TLDW_TEST_GOOGLE_FLAG") is False
 
 
 @pytest.mark.parametrize("value", _MEANT_AS_TRUE)
 def test_rag_truthiness_matches_the_canonical_parser(value: str) -> None:
+    """Every spelling `is_truthy` accepts must mean the same thing to RAG.
+
+    `_is_truthy_value` omitted `y`, so `SEARCH_QUERY_CLASSIFICATION=y` resolved off while
+    `RAG_GUARDRAILS_STRICT=y` resolved on in the same request. Parametrised over
+    `_MEANT_AS_TRUE` so a divergence names the spelling.
+    """
     from tldw_Server_API.app.core.RAG.rag_service.request_resolution import (
         _is_truthy_value,
     )
