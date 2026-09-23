@@ -56,7 +56,6 @@ companion_knowledge_cards
 consent_records
 content_item_note_links
 content_items
-conversations
 daily_usage
 data_table_columns
 data_table_rows
@@ -118,8 +117,6 @@ kanban_boards
 kanban_cards
 kanban_comments
 kanban_lists
-keyword_collections
-keywords
 llm_usage_daily
 llm_usage_log
 managed_secret_refs
@@ -166,7 +163,6 @@ meeting_event_log
 meeting_integration_dispatch
 meeting_sessions
 meeting_templates
-messages
 messages_new
 moderation_review_items
 moodboard_notes_v61
@@ -289,7 +285,6 @@ sync_datasets
 sync_device_authorizations
 sync_devices
 sync_key_records
-sync_log
 sync_personal_context_activations
 sync_personal_context_link_receipts
 synthetic_eval_draft_samples
