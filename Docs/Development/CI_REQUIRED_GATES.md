@@ -43,8 +43,8 @@ See [Container Image Lifecycle](Container_Image_Lifecycle.md) for the full build
 
 ## Conditional Execution and No-op Behavior
 
-Each required gate is *designed* to always report a status, so branch protection behaves
-deterministically. Whether it does depends on repository configuration -- see
+Each required gate is designed to always report a status, so branch protection behaves
+deterministically. Between an unknown date and 2026-09-23 it did not; see
 [Gate Reporting and the `workflow_run` Admission Path](#gate-reporting-and-the-workflow_run-admission-path),
 and check current behaviour rather than assuming.
 
@@ -97,6 +97,36 @@ admitted one cancels. Enabling the variable makes each PR run the gates twice, n
 occurrence of which unblocks it. **This is a design gap, not a configuration gap**, which
 is why resolution A alone is insufficient.
 
+### Fixed, 2026-09-23
+
+PR #2989 scoped the concurrency group by event name, so a `workflow_run` run and a
+`pull_request` run no longer share a group and the reporting run survives:
+
+```yaml
+group: <workflow>-${{ github.event_name }}-${{ ...pull request number... }}
+```
+
+Applied to all 27 workflows carrying both triggers, which is every workflow with a
+`pull_request` trigger. It does not weaken admission: the `pull_request` lane already ran
+unadmitted, its condition being `github.event_name != 'workflow_run'` with no admission
+check, so nothing executes now that did not execute before -- the run is simply allowed to
+finish and post its result. Same-event supersede still works, so pushing a new commit
+still cancels the previous commit's runs.
+
+Verified on #2989 itself, on both event paths. `pull_request` events read the workflow
+file from the head branch, so the PR exercised its own change:
+
+- `opened`: run `35826025283` at `event=pull_request`, `run_attempt=1` (never re-run),
+  `conclusion=success`, `head_sha=aa97c71d` matching the PR head exactly.
+- `synchronize`: after a rebase push, the audit reached `completed/success` -- the moment
+  that previously killed every gate -- and all six gates survived and went green.
+- Final tally on that PR: 62 checks `SUCCESS`, zero `FAILURE`, zero `CANCELLED`, against
+  the 45 to 50 `CANCELLED` per PR recorded above.
+
+The procedure below is therefore **historical**. It is kept because it is the fallback if
+gates ever stop reporting again, and because `Helper_Scripts/ci/land_required_gates.sh`
+still implements it.
+
 ### Mechanism
 
 Steps 1, 2, 4 and 5 were observed directly. Step 3 is an inference; the evidence for it
@@ -109,14 +139,19 @@ is given.
    `workflow_run: [Frontend License Gate Audit]`. Those runs are attributed to the
    default branch, so they do not appear when listing runs for the PR branch -- which is
    what made this hard to see.
-3. *Inferred:* a `workflow_run` run resolves its concurrency group through
+3. A `workflow_run` run resolves its concurrency group through
    `github.event.workflow_run.pull_requests[0].number`, the same PR number the
    `pull_request` run used, so both share one group and `cancel-in-progress: true` kills
-   the `pull_request` run. GitHub does not expose which run cancelled which, so this is
-   not directly observed. The evidence is that cancellations landed about six seconds
+   the `pull_request` run.
+
+   This started as an inference, because GitHub does not expose which run cancelled
+   which. The circumstantial evidence was that cancellations landed about six seconds
    after the audit succeeded, and that `license-first-admission.yml` requires
    `workflow_run.pull_requests` to contain exactly one valid number, so the field that
-   collapses the two groups is populated.
+   collapses the two groups is populated. **The fix confirmed it:** adding
+   `${{ github.event_name }}` to the group -- changing nothing else -- stopped the
+   cancellations. If the shared group had not been the cause, that change would have had
+   no effect.
 4. That `workflow_run` run's `admission` job requires
    `vars.LICENSE_FIRST_CI_ENABLED == 'true'`, which was unset before 2026-09-23, so it
    was `SKIPPED`.
@@ -157,7 +192,10 @@ default-branch tip rather than the PR head means the work ran but the status lan
 somewhere the pull request cannot see -- which is the state recorded above for
 2026-09-23.
 
-### Landing a pull request when gates do not report
+### Fallback: landing a pull request when gates do not report
+
+Not needed as of 2026-09-23 -- see Fixed above. Use this only if the check below
+shows gates being cancelled or skipped again.
 
 `Helper_Scripts/ci/land_required_gates.sh <branch> <pr-number>` automates this. Run it
 from a checkout whose branch is already rebased onto the current `dev` and pushed. Pass

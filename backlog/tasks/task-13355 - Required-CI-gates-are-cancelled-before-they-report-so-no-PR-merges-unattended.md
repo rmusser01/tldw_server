@@ -1,10 +1,10 @@
 ---
 id: TASK-13355
 title: 'Required CI gates are cancelled before they report, so no PR merges unattended'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-23 04:52'
-updated_date: '2026-09-23 06:11'
+updated_date: '2026-09-23 07:04'
 labels:
   - ci
   - tech-debt
@@ -48,9 +48,9 @@ OPERATIONAL WORKAROUND, documented in Docs/Development/CI_REQUIRED_GATES.md and 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 A decision is recorded on whether license-first CI is enabled or parked
-- [ ] #2 A PR opened and left untouched reaches all six gates green without any manual re-run
-- [ ] #3 If the pinned contracts are changed, each of the four is updated deliberately with the reason recorded, and Docs/Evidence/PR2761-codeql-actions.json is reconciled
-- [ ] #4 Docs/Development/CI_REQUIRED_GATES.md no longer needs its manual landing procedure
+- [x] #2 A PR opened and left untouched reaches all six gates green without any manual re-run
+- [x] #3 If the pinned contracts are changed, each of the four is updated deliberately with the reason recorded, and Docs/Evidence/PR2761-codeql-actions.json is reconciled
+- [x] #4 Docs/Development/CI_REQUIRED_GATES.md no longer needs its manual landing procedure
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -99,14 +99,36 @@ A new third option, and the smallest one that could work: make the concurrency g
 Resolution B alternative: give the six workflows statuses: write and have them post explicitly against needs.admission.outputs.head_sha, matching what frontend-license-gate.yml already does. Larger change, and it grants status-write to six more workflows.
 
 Recommendation: the event-specific concurrency group. It is the narrowest change, it leaves admission untouched, and it fixes the actual failure (the reporting run being killed) rather than working around it.
+
+FIXED AND VERIFIED 2026-09-23. PR #2989 merged (dev 8467722c65).
+
+Neither of the two resolutions this task originally offered was the answer. The fix was a third option: scope the concurrency group by event name, so a workflow_run run and a pull_request run no longer share a group and the reporting run survives.
+
+  group: <workflow>-${{ github.event_name }}-${{ ...pull request number... }}
+
+Applied to all 27 workflows carrying both triggers, which is every workflow with a pull_request trigger -- which is why 45-50 checks died per PR rather than only the six required ones.
+
+It does not weaken admission. The pull_request lane already ran unadmitted, its condition being github.event_name != 'workflow_run' with no admission check, so nothing executes now that did not execute before; the run is simply allowed to finish and post. Same-event supersede still works: pushing a new commit still cancels the previous commit's runs. The invariant test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable protects is untouched. test_pr_context_and_base_diff_logic_are_workflow_run_safe pinned the old group and was updated deliberately with the reason recorded beside the assertion.
+
+VERIFIED ON BOTH EVENT PATHS, on #2989 itself. pull_request events read the workflow file from the head branch, so the PR exercised its own change:
+
+- opened: run 35826025283, event=pull_request, run_attempt=1 (never re-run), conclusion=success, head_sha=aa97c71d matching the PR head exactly. The first time in this work that a required gate reported against the correct commit unaided.
+- synchronize: after a rebase push, the audit reached completed/success -- the moment that previously killed every gate -- and all six gates survived and went green.
+- Final tally: 62 checks SUCCESS, zero FAILURE, zero CANCELLED.
+
+It also settles the one inference in the mechanism. Adding ${{ github.event_name }} and changing nothing else stopped the cancellations, which would not have happened had the shared concurrency group not been the cause.
+
+REMAINING DECISION, now cost-only rather than correctness. LICENSE_FIRST_CI_ENABLED is still true. With it on, each PR runs the gates twice: the pull_request lane reports, and the admitted lane repeats the work and posts to the default branch where nothing reads it. With it off, the workflow_run runs skip instantly as they did before. Either way PRs merge. Recommend unsetting it -- 'gh variable delete LICENSE_FIRST_CI_ENABLED' -- unless license-first is wanted for its own sake, in which case the duplicate work is the price and the admitted lane arguably wants statuses: write so it reports too.
+
+Docs/Development/CI_REQUIRED_GATES.md records all of the above; the manual landing procedure is now marked historical, kept as the fallback that Helper_Scripts/ci/land_required_gates.sh implements.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
