@@ -700,8 +700,30 @@ jobs:
               tldw_Server_API/tests/Files
               tldw_Server_API/tests/Meetings
               tldw_Server_API/tests/Notes_Tasks
-              tldw_Server_API/tests/Sync
               tldw_Server_API/tests/Translation
+          # tests/Sync outgrew one 60-minute shard: against Postgres the personal-context
+          # files run ~10-80x slower than locally (conflicts ~19 min, exchange_gate ~17 min),
+          # so gap-verified-2 was cancelled at the timeout and Sync never reported.
+          - name: sync-core
+            paths: >-
+              tldw_Server_API/tests/Sync
+              --ignore-glob=*/test_sync_v2_personal_context_*.py
+          - name: sync-pc-conflicts
+            paths: >-
+              tldw_Server_API/tests/Sync/test_sync_v2_personal_context_conflicts.py
+          - name: sync-pc-exchange-gate
+            paths: >-
+              tldw_Server_API/tests/Sync/test_sync_v2_personal_context_exchange_gate.py
+          - name: sync-pc-transport
+            paths: >-
+              tldw_Server_API/tests/Sync/test_sync_v2_personal_context_transport.py
+          # Every other personal-context file, including new ones, lands here.
+          - name: sync-pc-rest
+            paths: >-
+              tldw_Server_API/tests/Sync/test_sync_v2_personal_context_*.py
+              --deselect=tldw_Server_API/tests/Sync/test_sync_v2_personal_context_conflicts.py
+              --deselect=tldw_Server_API/tests/Sync/test_sync_v2_personal_context_exchange_gate.py
+              --deselect=tldw_Server_API/tests/Sync/test_sync_v2_personal_context_transport.py
           - name: gap-verified-3
             paths: >-
               tldw_Server_API/tests/DataTables
@@ -1247,6 +1269,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_payload_exemplars*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_security_filters_sanitizers.py
               tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_retrieval_hardening.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_sql_interpolation.py
               tldw_Server_API/tests/RAG_NEW/unit/test_source*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_strict_extractive_and_citations.py
           - name: rag-new-unit-media-ingest
@@ -1273,6 +1296,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_prompt_templates_sanitizers.py
               tldw_Server_API/tests/RAG_NEW/unit/test_quick_wins_spell_check_compat.py
               tldw_Server_API/tests/RAG_NEW/unit/test_schema_corpus_alias.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_notes_include_list_relevance.py
               tldw_Server_API/tests/RAG_NEW/unit/test_standard_core_contract_threading.py
               tldw_Server_API/tests/RAG_NEW/unit/test_suggestion_generator.py
               tldw_Server_API/tests/RAG_NEW/unit/test_synonyms_registry_logging.py
@@ -1677,6 +1701,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Watchlists/test_scheduler_*.py
               tldw_Server_API/tests/Watchlists/test_output_enrichment_scheduler.py
+              tldw_Server_API/tests/Watchlists/test_outputs_run_media_selection.py
               tldw_Server_API/tests/Watchlists/test_site_*.py
               tldw_Server_API/tests/Watchlists/test_subscriptions_*.py
               tldw_Server_API/tests/Watchlists/test_template_*.py
@@ -1714,6 +1739,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Workflows/test_artifact_*.py
               tldw_Server_API/tests/Workflows/test_events_*.py
+              tldw_Server_API/tests/Workflows/test_malformed_cursor_400.py
               tldw_Server_API/tests/Workflows/test_runs_*.py
               tldw_Server_API/tests/Workflows/test_webhook_*.py
               tldw_Server_API/tests/Workflows/test_workflow_approval_permissions.py
@@ -2215,8 +2241,30 @@ jobs:
               tldw_Server_API/tests/Files
               tldw_Server_API/tests/Meetings
               tldw_Server_API/tests/Notes_Tasks
-              tldw_Server_API/tests/Sync
               tldw_Server_API/tests/Translation
+          # tests/Sync outgrew one 60-minute shard: against Postgres the personal-context
+          # files run ~10-80x slower than locally (conflicts ~19 min, exchange_gate ~17 min),
+          # so gap-verified-2 was cancelled at the timeout and Sync never reported.
+          - name: sync-core
+            paths: >-
+              tldw_Server_API/tests/Sync
+              --ignore-glob=*/test_sync_v2_personal_context_*.py
+          - name: sync-pc-conflicts
+            paths: >-
+              tldw_Server_API/tests/Sync/test_sync_v2_personal_context_conflicts.py
+          - name: sync-pc-exchange-gate
+            paths: >-
+              tldw_Server_API/tests/Sync/test_sync_v2_personal_context_exchange_gate.py
+          - name: sync-pc-transport
+            paths: >-
+              tldw_Server_API/tests/Sync/test_sync_v2_personal_context_transport.py
+          # Every other personal-context file, including new ones, lands here.
+          - name: sync-pc-rest
+            paths: >-
+              tldw_Server_API/tests/Sync/test_sync_v2_personal_context_*.py
+              --deselect=tldw_Server_API/tests/Sync/test_sync_v2_personal_context_conflicts.py
+              --deselect=tldw_Server_API/tests/Sync/test_sync_v2_personal_context_exchange_gate.py
+              --deselect=tldw_Server_API/tests/Sync/test_sync_v2_personal_context_transport.py
           - name: gap-verified-3
             paths: >-
               tldw_Server_API/tests/DataTables
@@ -2762,6 +2810,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_payload_exemplars*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_security_filters_sanitizers.py
               tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_retrieval_hardening.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_sql_interpolation.py
               tldw_Server_API/tests/RAG_NEW/unit/test_source*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_strict_extractive_and_citations.py
           - name: rag-new-unit-media-ingest
@@ -2788,6 +2837,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_prompt_templates_sanitizers.py
               tldw_Server_API/tests/RAG_NEW/unit/test_quick_wins_spell_check_compat.py
               tldw_Server_API/tests/RAG_NEW/unit/test_schema_corpus_alias.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_notes_include_list_relevance.py
               tldw_Server_API/tests/RAG_NEW/unit/test_standard_core_contract_threading.py
               tldw_Server_API/tests/RAG_NEW/unit/test_suggestion_generator.py
               tldw_Server_API/tests/RAG_NEW/unit/test_synonyms_registry_logging.py
@@ -3190,6 +3240,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Watchlists/test_scheduler_*.py
               tldw_Server_API/tests/Watchlists/test_output_enrichment_scheduler.py
+              tldw_Server_API/tests/Watchlists/test_outputs_run_media_selection.py
               tldw_Server_API/tests/Watchlists/test_site_*.py
               tldw_Server_API/tests/Watchlists/test_subscriptions_*.py
               tldw_Server_API/tests/Watchlists/test_template_*.py
@@ -3227,6 +3278,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Workflows/test_artifact_*.py
               tldw_Server_API/tests/Workflows/test_events_*.py
+              tldw_Server_API/tests/Workflows/test_malformed_cursor_400.py
               tldw_Server_API/tests/Workflows/test_runs_*.py
               tldw_Server_API/tests/Workflows/test_webhook_*.py
               tldw_Server_API/tests/Workflows/test_workflow_approval_permissions.py
@@ -4145,6 +4197,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_payload_exemplars*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_security_filters_sanitizers.py
               tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_retrieval_hardening.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_sql_interpolation.py
               tldw_Server_API/tests/RAG_NEW/unit/test_source*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_strict_extractive_and_citations.py
           - name: rag-new-unit-media-ingest
@@ -4171,6 +4224,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_prompt_templates_sanitizers.py
               tldw_Server_API/tests/RAG_NEW/unit/test_quick_wins_spell_check_compat.py
               tldw_Server_API/tests/RAG_NEW/unit/test_schema_corpus_alias.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_notes_include_list_relevance.py
               tldw_Server_API/tests/RAG_NEW/unit/test_standard_core_contract_threading.py
               tldw_Server_API/tests/RAG_NEW/unit/test_suggestion_generator.py
               tldw_Server_API/tests/RAG_NEW/unit/test_synonyms_registry_logging.py
@@ -4573,6 +4627,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Watchlists/test_scheduler_*.py
               tldw_Server_API/tests/Watchlists/test_output_enrichment_scheduler.py
+              tldw_Server_API/tests/Watchlists/test_outputs_run_media_selection.py
               tldw_Server_API/tests/Watchlists/test_site_*.py
               tldw_Server_API/tests/Watchlists/test_subscriptions_*.py
               tldw_Server_API/tests/Watchlists/test_template_*.py
@@ -4610,6 +4665,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Workflows/test_artifact_*.py
               tldw_Server_API/tests/Workflows/test_events_*.py
+              tldw_Server_API/tests/Workflows/test_malformed_cursor_400.py
               tldw_Server_API/tests/Workflows/test_runs_*.py
               tldw_Server_API/tests/Workflows/test_webhook_*.py
               tldw_Server_API/tests/Workflows/test_workflow_approval_permissions.py
@@ -5451,6 +5507,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_payload_exemplars*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_security_filters_sanitizers.py
               tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_retrieval_hardening.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_sql_interpolation.py
               tldw_Server_API/tests/RAG_NEW/unit/test_source*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_strict_extractive_and_citations.py
           - name: rag-new-unit-media-ingest
@@ -5477,6 +5534,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_prompt_templates_sanitizers.py
               tldw_Server_API/tests/RAG_NEW/unit/test_quick_wins_spell_check_compat.py
               tldw_Server_API/tests/RAG_NEW/unit/test_schema_corpus_alias.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_notes_include_list_relevance.py
               tldw_Server_API/tests/RAG_NEW/unit/test_standard_core_contract_threading.py
               tldw_Server_API/tests/RAG_NEW/unit/test_suggestion_generator.py
               tldw_Server_API/tests/RAG_NEW/unit/test_synonyms_registry_logging.py
@@ -5879,6 +5937,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Watchlists/test_scheduler_*.py
               tldw_Server_API/tests/Watchlists/test_output_enrichment_scheduler.py
+              tldw_Server_API/tests/Watchlists/test_outputs_run_media_selection.py
               tldw_Server_API/tests/Watchlists/test_site_*.py
               tldw_Server_API/tests/Watchlists/test_subscriptions_*.py
               tldw_Server_API/tests/Watchlists/test_template_*.py
@@ -5916,6 +5975,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Workflows/test_artifact_*.py
               tldw_Server_API/tests/Workflows/test_events_*.py
+              tldw_Server_API/tests/Workflows/test_malformed_cursor_400.py
               tldw_Server_API/tests/Workflows/test_runs_*.py
               tldw_Server_API/tests/Workflows/test_webhook_*.py
               tldw_Server_API/tests/Workflows/test_workflow_approval_permissions.py
@@ -6763,6 +6823,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_payload_exemplars*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_security_filters_sanitizers.py
               tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_retrieval_hardening.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_sql_interpolation.py
               tldw_Server_API/tests/RAG_NEW/unit/test_source*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_strict_extractive_and_citations.py
           - name: rag-new-unit-media-ingest
@@ -6789,6 +6850,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_prompt_templates_sanitizers.py
               tldw_Server_API/tests/RAG_NEW/unit/test_quick_wins_spell_check_compat.py
               tldw_Server_API/tests/RAG_NEW/unit/test_schema_corpus_alias.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_notes_include_list_relevance.py
               tldw_Server_API/tests/RAG_NEW/unit/test_standard_core_contract_threading.py
               tldw_Server_API/tests/RAG_NEW/unit/test_suggestion_generator.py
               tldw_Server_API/tests/RAG_NEW/unit/test_synonyms_registry_logging.py
@@ -7191,6 +7253,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Watchlists/test_scheduler_*.py
               tldw_Server_API/tests/Watchlists/test_output_enrichment_scheduler.py
+              tldw_Server_API/tests/Watchlists/test_outputs_run_media_selection.py
               tldw_Server_API/tests/Watchlists/test_site_*.py
               tldw_Server_API/tests/Watchlists/test_subscriptions_*.py
               tldw_Server_API/tests/Watchlists/test_template_*.py
@@ -7228,6 +7291,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Workflows/test_artifact_*.py
               tldw_Server_API/tests/Workflows/test_events_*.py
+              tldw_Server_API/tests/Workflows/test_malformed_cursor_400.py
               tldw_Server_API/tests/Workflows/test_runs_*.py
               tldw_Server_API/tests/Workflows/test_webhook_*.py
               tldw_Server_API/tests/Workflows/test_workflow_approval_permissions.py
