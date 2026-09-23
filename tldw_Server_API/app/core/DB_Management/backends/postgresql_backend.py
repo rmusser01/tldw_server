@@ -27,6 +27,7 @@ from tldw_Server_API.app.core.testing import is_truthy
 
 from .base import (
     BackendFeatures,
+    AuthorizationDeniedError,
     BackendType,
     ConnectionPool,
     DatabaseBackend,
@@ -1064,6 +1065,7 @@ class PostgreSQLBackend(DatabaseBackend):
         query, params = self._prepare_query(query, params)
         redacted_failure = False
         unique_failure = False
+        authorization_failure = False
         if connection:
             conn = connection
             external_conn = True
@@ -1131,7 +1133,12 @@ class PostgreSQLBackend(DatabaseBackend):
             )
 
         except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as e:
-            unique_failure = isinstance(e, _PSYCOPG_DRIVER_EXCEPTIONS) and getattr(e, "sqlstate", None) == "23505"
+            sqlstate = getattr(e, "sqlstate", None) if isinstance(e, _PSYCOPG_DRIVER_EXCEPTIONS) else None
+            unique_failure = sqlstate == "23505"
+            # 42501 is how a row-level security denial surfaces. Without this the
+            # caller cannot tell a tenant boundary from a syntax error, because
+            # the driver message is redacted and the cause is not chained.
+            authorization_failure = sqlstate == "42501"
             if not external_conn:
                 try:
                     conn.rollback()
@@ -1139,7 +1146,11 @@ class PostgreSQLBackend(DatabaseBackend):
                     logger.bind(
                         exception_type=type(rollback_exc).__name__,
                     ).debug("Rollback after failed execute() also failed")
-            logger.bind(exception_type=type(e).__name__).error(
+            # SQLSTATE is a fixed five-character class code -- it carries no
+            # query text, parameters or row values, so it can be logged where
+            # the driver message cannot, and it is the difference between
+            # "a tenant boundary held" and "the schema is wrong".
+            logger.bind(exception_type=type(e).__name__, sqlstate=sqlstate).error(
                 "PostgreSQL query execution failed"
             )
             redacted_failure = True
@@ -1150,6 +1161,11 @@ class PostgreSQLBackend(DatabaseBackend):
         if redacted_failure:
             if unique_failure:
                 raise UniqueConstraintError("PostgreSQL query execution failed")
+            if authorization_failure:
+                raise AuthorizationDeniedError(
+                    "PostgreSQL denied the statement: row-level security policy "
+                    "or insufficient privilege (SQLSTATE 42501)"
+                )
             raise DatabaseError("PostgreSQL query execution failed")
 
     def execute_many(
