@@ -21,7 +21,7 @@ from .conftest import _reset_prompt_studio_tables
 
 # Values that legitimately differ per run or per database.
 _VOLATILE_KEYS = frozenset(
-    {"uuid", "created_at", "updated_at", "last_modified", "started_at", "completed_at", "deleted_at"}
+    {"uuid", "created_at", "updated_at", "last_modified", "started_at", "completed_at", "deleted_at", "leased_until"}
 )
 
 
@@ -275,6 +275,42 @@ def _optimizations(db: PromptStudioDatabase) -> dict[str, Any]:
     }
 
 
+def _jobs(db: PromptStudioDatabase) -> dict[str, Any]:
+    ids = _seed(db)
+    low = db.create_job("evaluation", 1, {"a": 1}, project_id=ids["project"], priority=1)
+    high = db.create_job("optimization", 2, None, project_id=ids["project"], priority=9)
+    db.create_job("evaluation", 1, {"a": 2}, project_id=ids["project"], priority=1)
+
+    def summary(job: Any) -> Any:
+        return None if job is None else {k: job.get(k) for k in ("id", "job_type", "status", "lease_owner", "retry_count")}
+
+    first = db.acquire_next_job(worker_id="worker-a")
+    return {
+        "create": low,
+        "create_null_payload": high["payload"],
+        "acquire_takes_highest_priority": summary(first),
+        "renew_by_owner": db.renew_job_lease(high["id"], seconds=30, worker_id="worker-a"),
+        "renew_by_other_worker": db.renew_job_lease(high["id"], seconds=30, worker_id="worker-b"),
+        "renew_not_processing": db.renew_job_lease(low["id"], seconds=30),
+        "acquire_next": summary(db.acquire_next_job(worker_id="  worker-b  ")),
+        "complete": summary(db.update_job_status(high["id"], "completed", result={"ok": True})),
+        "completed_result": db.get_job(high["id"])["result"],
+        "fail": summary(db.update_job_status(low["id"], "failed", error_message="boom")),
+        "retry": db.retry_job_record(low["id"]),
+        "after_retry": summary(db.get_job(low["id"])),
+        "retry_missing": db.retry_job_record(99999),
+        "update_missing": db.update_job_status(99999, "failed"),
+        "get_by_uuid": summary(db.get_job_by_uuid(high["uuid"])),
+        "get_missing": db.get_job(99999),
+        "list": [summary(j) for j in db.list_jobs()],
+        "list_filtered": [summary(j) for j in db.list_jobs(status="queued", job_type="evaluation")],
+        "latest_for_entity": summary(db.get_latest_job_for_entity("evaluation", 1)),
+        "for_entity_desc": [j["id"] for j in db.list_jobs_for_entity("evaluation", 1, ascending=False)],
+        "cleanup_keeps_recent": db.cleanup_jobs(older_than_days=30),
+        "drain": [summary(db.acquire_next_job()) for _ in range(3)],
+    }
+
+
 def _reads(db: PromptStudioDatabase) -> dict[str, Any]:
     # Read paths shared by the later aggregates; pins that PostgreSQL does not leak
     # its tsvector columns through `SELECT *` / `RETURNING *`.
@@ -296,6 +332,7 @@ SCENARIOS: dict[str, Callable[[PromptStudioDatabase], dict[str, Any]]] = {
     "projects": _projects,
     "prompts": _prompts,
     "optimizations": _optimizations,
+    "jobs": _jobs,
     "reads": _reads,
     "test_cases": _test_cases,
     "signatures": _signatures,
