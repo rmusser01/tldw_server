@@ -17,7 +17,6 @@
 import copy
 import inspect
 import json
-import os
 import re
 from collections.abc import Generator
 from typing import Any, Callable, Optional, Union
@@ -802,7 +801,7 @@ def analyze(
 
 
 
-def extract_text_from_input(input_data):
+def extract_text_from_input(input_data: Any) -> str:
     """Extract usable text from a caller-supplied payload.
 
     Deliberately does NOT treat a string as a filesystem path. A second definition of
@@ -814,6 +813,20 @@ def extract_text_from_input(input_data):
     copy is gone and this is now the only definition. Do not reintroduce path handling
     here: `analyze()` passes caller-supplied `input_data` straight in for every caller
     that does not set `input_is_literal_text=True`, and only two sites in the app do.
+
+    Args:
+        input_data: The payload to extract from. Accepted shapes:
+
+            - ``str``: parsed as JSON when it is a JSON object, otherwise returned as
+              written -- including a JSON scalar such as ``"123"`` or ``"true"``. Never
+              treated as a filesystem path.
+            - ``dict``: text is taken from ``title``, ``description``, then
+              ``transcription`` or ``segments``, falling back to ``text`` or ``content``.
+            - anything else: ``str(input_data)``.
+
+    Returns:
+        The extracted text. An empty string means no recognised text field was found,
+        which ``analyze()`` reports as "Could not extract text content."
 
     See TASK-13288.
     """

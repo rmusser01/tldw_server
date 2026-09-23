@@ -20,6 +20,7 @@ which 17+ core modules import.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -36,7 +37,7 @@ pytestmark = pytest.mark.unit
 # ---------------------------------------------------------------------------
 
 
-def test_a_path_to_a_readable_file_is_not_read(tmp_path) -> None:
+def test_a_path_to_a_readable_file_is_not_read(tmp_path: Path) -> None:
     """A string naming a readable file is text, never a file to open.
 
     The shadowed copy returned the file's contents here. `analyze()` reaches this with
@@ -55,7 +56,7 @@ def test_a_path_to_a_readable_file_is_not_read(tmp_path) -> None:
     assert result == str(secret), "a path should come back as the plain string it is"
 
 
-def test_a_json_file_path_is_not_read_and_reparsed(tmp_path) -> None:
+def test_a_json_file_path_is_not_read_and_reparsed(tmp_path: Path) -> None:
     """The shadowed copy recursed into parsed file content; that path must stay gone."""
     payload = tmp_path / "payload.json"
     payload.write_text(json.dumps({"title": "LEAKED-TITLE"}), encoding="utf-8")
@@ -92,14 +93,24 @@ def test_only_one_definition_survives() -> None:
 
 
 def test_no_noqa_f811_remains() -> None:
-    """The suppression existed only to silence the shadow it is now safe to drop."""
+    """The suppression that hid the shadow must not return on this function.
+
+    Scoped to extract_text_from_input's own definition line: an unrelated F811
+    elsewhere in the module is not this defect, and a whole-file text scan would fail
+    on it. The AST test above already catches a second definition however it is
+    suppressed.
+    """
+    import ast
     import pathlib
 
     source = pathlib.Path(_module.__file__).read_text(encoding="utf-8")
-
-    assert "noqa: F811" not in source, (
-        "a # noqa: F811 remains, so a module-scope redefinition is still being suppressed"
-    )
+    lines = source.splitlines()
+    for node in ast.parse(source).body:
+        if isinstance(node, ast.FunctionDef) and node.name == "extract_text_from_input":
+            assert "noqa: F811" not in lines[node.lineno - 1], (
+                "extract_text_from_input carries a # noqa: F811, so a module-scope "
+                "redefinition of it is being suppressed again. See TASK-13288."
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -152,10 +163,10 @@ def test_json_scalar_strings_do_not_raise(raw: str) -> None:
     assert result != "", f"{raw!r} extracted to empty, so analyze() reports an error"
 
 
-def test_json_scalar_keeps_the_original_spelling() -> None:
+@pytest.mark.parametrize("raw", ["123", "true"])
+def test_json_scalar_keeps_the_original_spelling(raw: str) -> None:
     """A scalar is text the caller wrote; return it, do not re-render it."""
-    assert extract_text_from_input("123") == "123"
-    assert extract_text_from_input("true") == "true"
+    assert extract_text_from_input(raw) == raw
 
 
 # ---------------------------------------------------------------------------
