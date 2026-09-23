@@ -532,13 +532,38 @@ class BufferedTranscriber:
         return ' '.join(merged_texts)
 
     def _resample(self, audio: np.ndarray, orig_sr: int, target_sr: int) -> np.ndarray:
-        """Resample audio to target sample rate."""
+        """Resample audio to target sample rate.
+
+        Must always return audio at ``target_sr``. Both callers set
+        ``sample_rate = 16000`` immediately after calling this, unconditionally, so
+        returning the input unchanged does not degrade quality -- it makes the declared
+        rate false. Without librosa, 48 kHz audio was relabelled 16 kHz and the
+        transcriber then read samples 3x too dense: garbage transcript, every timestamp
+        3x short, and HTTP 200 with the warning buried in the logs. See TASK-13304.
+
+        librosa stays the primary path because its resampling is higher quality. The
+        fallback is the one already used by Audio_Transcription_Lib -- scipy polyphase
+        when available, linear interpolation otherwise -- imported lazily because pulling
+        that module in eagerly drags heavy optional dependencies into every import of
+        this one.
+        """
+        if orig_sr == target_sr:
+            return np.asarray(audio, dtype=np.float32)
         try:
             import librosa
             return librosa.resample(audio, orig_sr=orig_sr, target_sr=target_sr)
         except ImportError:
-            logger.warning("librosa not available, returning original audio")
-            return audio
+            from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib import (
+                _resample_audio_without_librosa,
+            )
+
+            logger.warning(
+                "librosa not available; resampling {} Hz -> {} Hz with the scipy/linear "
+                "fallback instead of returning the audio unchanged",
+                orig_sr,
+                target_sr,
+            )
+            return _resample_audio_without_librosa(audio, orig_sr, target_sr=target_sr)
 
 
 class LCSMergeTranscriber(BufferedTranscriber):
