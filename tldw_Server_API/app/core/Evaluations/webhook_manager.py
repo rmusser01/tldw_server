@@ -9,7 +9,6 @@ import asyncio
 import hashlib
 import hmac
 import json
-import os
 import secrets
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -576,10 +575,12 @@ class WebhookManager:
         url = webhook["url"]
         secret = webhook["secret"]
 
-        # In tests, skip DNS validation to keep runs deterministic.
-        from tldw_Server_API.app.core.testing import is_test_mode as _is_test_mode
-        testing_env = (_is_test_mode() or "PYTEST_CURRENT_TEST" in os.environ)
-        skip_dns = testing_env
+        # Under an active pytest run, skip DNS validation to keep runs deterministic.
+        # TEST_MODE alone must not do this: it is a server env var a deployment can
+        # carry, and skipping here disables the SSRF / DNS-rebinding check.
+        from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime
+
+        skip_dns = is_explicit_pytest_runtime()
         delivery_url = url
         host_headers: dict[str, str] = {}
         if not skip_dns:
