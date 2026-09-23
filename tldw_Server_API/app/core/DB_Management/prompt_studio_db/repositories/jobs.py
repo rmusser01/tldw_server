@@ -137,7 +137,7 @@ class JobsRepository:
 
         return self._run(_insert, "Failed to create job")
 
-    def acquire_next(self, worker_id: Optional[str] = None) -> Optional[dict[str, Any]]:
+    def acquire_next(self, *, worker_id: Optional[str] = None) -> Optional[dict[str, Any]]:
         """Lease the highest-priority queued job, or one whose lease has expired."""
         db = self.session
         owner = _owner(worker_id)
@@ -260,7 +260,7 @@ class JobsRepository:
 
         return self._run(_update, f"Failed to update job {job_id}")
 
-    def renew_lease(self, job_id: int, seconds: int = 60, worker_id: Optional[str] = None) -> bool:
+    def renew_lease(self, job_id: int, seconds: int = 60, *, worker_id: Optional[str] = None) -> bool:
         """Extend a processing job's lease; with ``worker_id``, only if that worker (or no one) holds it."""
         try:
             seconds = max(1, min(3600, int(seconds)))

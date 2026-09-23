@@ -1,6 +1,6 @@
 # Prompt Studio database consolidation
 
-**Status:** Implemented (stages 0–6); stage 7 open · **Task:** TASK-13318 · **ADR:** [ADR-051](../ADR/051-prompt-studio-db-single-implementation.md) · **Review finding:** F20
+**Status:** Implemented · **Task:** TASK-13318 · **ADR:** [ADR-051](../ADR/051-prompt-studio-db-single-implementation.md) · **Review finding:** F20
 
 ## Problem
 
@@ -68,7 +68,7 @@ Align the seven mismatches and rely on the parity ratchet.
 | 4 | Signatures, projects, prompts — **done**. Found: PostgreSQL uniqueness conflicts surfacing as `DatabaseError` (the cursor wrapper matched a now-redacted message), `TypeError` on missing rows, stub ids not advancing the sequence | as above |
 | 5 | Test cases — **done**, arity resolved. Found: PostgreSQL rejecting every `is_golden`/`is_generated` update | as above |
 | 6 | Optimizations and jobs — **done**. Found: SQLite `transaction()` override never issued `BEGIN` (reads outside the transaction, nested calls committing early); SQLite iteration rows returned as raw JSON. Sync-log and idempotency helpers now live once in `prompt_studio_db/session.py` | as above; job lease tests on both |
-| 7 | **Open.** The two classes now hold only backend infrastructure (connections, schema, statement execution, row decoding). What remains is the typed façade: most facade methods still forward `*args/**kwargs` to a repository, so mypy does not see the repository signatures. With one implementation there is nothing left to drift, so this is IDE/type-checker ergonomics rather than correctness | mypy sees real signatures |
+| 7 | Typed façade — **done**: every facade method that delegates to a repository has that method's exact signature (generated from the repository source, pinned by `test_facade_delegations_are_typed_like_their_repository`); only `update_project` keeps `**fields`, by design. The two classes remain as backend infrastructure (connections, schema, execution, row decoding) | mypy sees real signatures |
 
 Each stage removes that aggregate's entries from `KNOWN_SIGNATURE_DRIFT` in the parity test as they are resolved.
 

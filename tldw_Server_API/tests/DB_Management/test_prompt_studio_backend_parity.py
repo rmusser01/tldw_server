@@ -133,3 +133,68 @@ def test_sqlite_get_prompt_include_deleted_and_bulk_client_id(tmp_path):
         assert created[0]["client_id"] == "call_client"
     finally:
         db.close()
+
+
+# --- Typed facade (Stage 7) ---------------------------------------------------------
+# Facade methods that delegate to a repository must expose that method's exact
+# signature, so mypy and IDEs see the real parameters instead of *args/**kwargs.
+# These differ on purpose.
+FACADE_SIGNATURE_EXCEPTIONS = {
+    "update_project": "accepts updates as a dict and/or keyword fields",
+    "complete_optimization_with_transition": "fixes _return_transition_applied=True",
+}
+
+
+def _repository_delegations() -> dict[str, tuple[str, str]]:
+    """facade method -> (repository class, method), read from each method's AST."""
+    tree = ast.parse(Path(psd.__file__).read_text())
+    facade = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "PromptStudioDatabase")
+    found: dict[str, tuple[str, str]] = {}
+    for fn in facade.body:
+        if not isinstance(fn, ast.FunctionDef):
+            continue
+        for node in ast.walk(fn):
+            if (
+                isinstance(node, ast.Attribute)
+                and isinstance(node.value, ast.Call)
+                and isinstance(node.value.func, ast.Name)
+                and node.value.func.id.endswith("Repository")
+            ):
+                found[fn.name] = (node.value.func.id, node.attr)
+    return found
+
+
+def _params(func) -> list[tuple[str, str, object]]:
+    return [
+        (p.name, p.kind.name, p.default)
+        for p in inspect.signature(func).parameters.values()
+        if p.name != "self"
+    ]
+
+
+def test_facade_delegations_are_typed_like_their_repository():
+    delegations = _repository_delegations()
+    assert len(delegations) > 40, "delegation discovery broke"
+    mismatched = []
+    for name, (repo_name, method) in sorted(delegations.items()):
+        if name in FACADE_SIGNATURE_EXCEPTIONS:
+            continue
+        facade_params = _params(getattr(FACADE, name))
+        repo_params = _params(getattr(getattr(psd, repo_name), method))
+        if facade_params != repo_params:
+            mismatched.append(f"{name} vs {repo_name}.{method}")
+    assert not mismatched, mismatched
+
+
+def test_no_facade_method_takes_varargs_except_documented():
+    untyped = [
+        name
+        for name, fn in vars(FACADE).items()
+        if callable(fn)
+        and not name.startswith("__")
+        and any(
+            p.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+            for p in inspect.signature(fn).parameters.values()
+        )
+    ]
+    assert untyped == ["update_project"], untyped

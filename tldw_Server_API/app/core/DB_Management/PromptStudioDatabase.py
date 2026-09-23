@@ -144,7 +144,7 @@ class PromptStudioRowAdapter:
         for column in self._columns:
             yield column, self._mapping.get(column)
 
-    def get(self, key: str, default: Any = None) -> Any:
+    def get(self, key: str, default: Any  =  None) -> Any:
         return self._mapping.get(key, default)
 
     def to_dict(self) -> dict[str, Any]:
@@ -1309,24 +1309,26 @@ class PromptStudioDatabase:
 
     @property
     def backend_type(self) -> BackendType:
-        return getattr(self._impl, 'backend_type', BackendType.SQLITE)
+        return getattr(self._impl, "backend_type", BackendType.SQLITE)
 
     @property
     def backend(self) -> Optional[DatabaseBackend]:
-        return getattr(self._impl, 'backend', None)
+        return getattr(self._impl, "backend", None)
 
     # Idempotency helpers (public facade)
     def lookup_idempotency(self, entity_type: str, key: str, user_id: Optional[str]) -> Optional[int]:
-        if hasattr(self._impl, '_idem_lookup'):
+        if hasattr(self._impl, "_idem_lookup"):
             return self._impl._idem_lookup(entity_type, key, user_id)  # type: ignore[attr-defined]
         return None
 
     def record_idempotency(self, entity_type: str, key: str, entity_id: int, user_id: Optional[str]) -> None:
-        if hasattr(self._impl, '_idem_record'):
+        if hasattr(self._impl, "_idem_record"):
             with suppress(_PROMPT_STUDIO_NONCRITICAL_EXCEPTIONS):
                 self._impl._idem_record(entity_type, key, entity_id, user_id)  # type: ignore[attr-defined]
 
-    def update_project(self, project_id: int, updates: Optional[dict[str, Any]] = None, **fields: Any) -> dict[str, Any]:
+    def update_project(
+        self, project_id: int, updates: Optional[dict[str, Any]] = None, **fields: Any
+    ) -> dict[str, Any]:
         payload: dict[str, Any] = {}
         if updates:
             payload.update(updates)
@@ -1334,49 +1336,138 @@ class PromptStudioDatabase:
             payload.update(fields)
         return ProjectsRepository(self._impl).update(project_id, payload)
 
-    def create_project(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return ProjectsRepository(self._impl).create(*args, **kwargs)
+    def create_project(
+        self,
+        name: str,
+        description: Optional[str] = None,
+        status: str = "draft",
+        metadata: Optional[dict[str, Any]] = None,
+        user_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        return ProjectsRepository(self._impl).create(name, description, status, metadata, user_id)
 
-    def get_project(self, *args: Any, **kwargs: Any) -> Optional[dict[str, Any]]:
-        return ProjectsRepository(self._impl).get(*args, **kwargs)
+    def get_project(self, project_id: int, include_deleted: bool = False) -> Optional[dict[str, Any]]:
+        return ProjectsRepository(self._impl).get(project_id, include_deleted)
 
-    def list_projects(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return ProjectsRepository(self._impl).list(*args, **kwargs)
+    def list_projects(
+        self,
+        user_id: Optional[str] = None,
+        status: Optional[str] = None,
+        include_deleted: bool = False,
+        page: int = 1,
+        per_page: int = 20,
+        search: Optional[str] = None,
+    ) -> dict[str, Any]:
+        return ProjectsRepository(self._impl).list(user_id, status, include_deleted, page, per_page, search)
 
-    def delete_project(self, *args: Any, **kwargs: Any) -> bool:
-        return ProjectsRepository(self._impl).delete(*args, **kwargs)
+    def delete_project(self, project_id: int, hard_delete: bool = False) -> bool:
+        return ProjectsRepository(self._impl).delete(project_id, hard_delete)
 
-    def get_prompt(self, *args: Any, **kwargs: Any) -> Optional[dict[str, Any]]:
-        return PromptsRepository(self._impl).get(*args, **kwargs)
+    def get_prompt(self, prompt_id: int, include_deleted: bool = False) -> Optional[dict[str, Any]]:
+        return PromptsRepository(self._impl).get(prompt_id, include_deleted)
 
-    def get_prompt_with_project(self, *args: Any, **kwargs: Any) -> Optional[dict[str, Any]]:
-        return PromptsRepository(self._impl).get_with_project(*args, **kwargs)
+    def get_prompt_with_project(self, prompt_id: int, *, include_deleted: bool = False) -> Optional[dict[str, Any]]:
+        return PromptsRepository(self._impl).get_with_project(prompt_id, include_deleted=include_deleted)
 
-    def list_prompts(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return PromptsRepository(self._impl).list(*args, **kwargs)
+    def list_prompts(
+        self, project_id: int, *, page: int = 1, per_page: int = 20, include_deleted: bool = False
+    ) -> dict[str, Any]:
+        return PromptsRepository(self._impl).list(
+            project_id, page=page, per_page=per_page, include_deleted=include_deleted
+        )
 
     # Signature delegation ------------------------------------------------
 
-    def create_signature(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return SignaturesRepository(self._impl).create(*args, **kwargs)
+    def create_signature(
+        self,
+        project_id: int,
+        name: str,
+        *,
+        input_schema: Iterable[Any],
+        output_schema: Iterable[Any],
+        constraints: Optional[Any] = None,
+        validation_rules: Optional[Any] = None,
+        client_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        return SignaturesRepository(self._impl).create(
+            project_id,
+            name,
+            input_schema=input_schema,
+            output_schema=output_schema,
+            constraints=constraints,
+            validation_rules=validation_rules,
+            client_id=client_id,
+        )
 
-    def get_signature(self, *args: Any, **kwargs: Any) -> Optional[dict[str, Any]]:
-        return SignaturesRepository(self._impl).get(*args, **kwargs)
+    def get_signature(self, signature_id: int, *, include_deleted: bool = False) -> Optional[dict[str, Any]]:
+        return SignaturesRepository(self._impl).get(signature_id, include_deleted=include_deleted)
 
-    def list_signatures(self, *args: Any, **kwargs: Any) -> Union[dict[str, Any], list[dict[str, Any]]]:
-        return SignaturesRepository(self._impl).list(*args, **kwargs)
+    def list_signatures(
+        self,
+        project_id: int,
+        *,
+        include_deleted: bool = False,
+        search: Optional[str] = None,
+        page: int = 1,
+        per_page: int = 20,
+        return_pagination: bool = False,
+    ) -> Union[dict[str, Any], list[dict[str, Any]]]:
+        return SignaturesRepository(self._impl).list(
+            project_id,
+            include_deleted=include_deleted,
+            search=search,
+            page=page,
+            per_page=per_page,
+            return_pagination=return_pagination,
+        )
 
-    def update_signature(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return SignaturesRepository(self._impl).update(*args, **kwargs)
+    def update_signature(self, signature_id: int, updates: dict[str, Any]) -> dict[str, Any]:
+        return SignaturesRepository(self._impl).update(signature_id, updates)
 
-    def delete_signature(self, *args: Any, **kwargs: Any) -> bool:
-        return SignaturesRepository(self._impl).delete(*args, **kwargs)
+    def delete_signature(self, signature_id: int, *, hard_delete: bool = False) -> bool:
+        return SignaturesRepository(self._impl).delete(signature_id, hard_delete=hard_delete)
 
-    def create_prompt(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return PromptsRepository(self._impl).create(*args, **kwargs)
+    def create_prompt(
+        self,
+        project_id: int,
+        name: str,
+        *,
+        signature_id: Optional[int] = None,
+        version_number: int = 1,
+        system_prompt: Optional[str] = None,
+        user_prompt: Optional[str] = None,
+        prompt_format: str = "legacy",
+        prompt_schema_version: Optional[int] = None,
+        prompt_definition: Optional[Any] = None,
+        few_shot_examples: Optional[Any] = None,
+        modules_config: Optional[Any] = None,
+        parent_version_id: Optional[int] = None,
+        change_description: Optional[str] = None,
+        client_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        return PromptsRepository(self._impl).create(
+            project_id,
+            name,
+            signature_id=signature_id,
+            version_number=version_number,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            prompt_format=prompt_format,
+            prompt_schema_version=prompt_schema_version,
+            prompt_definition=prompt_definition,
+            few_shot_examples=few_shot_examples,
+            modules_config=modules_config,
+            parent_version_id=parent_version_id,
+            change_description=change_description,
+            client_id=client_id,
+        )
 
-    def ensure_prompt_stub(self, *args: Any, **kwargs: Any) -> None:
-        return PromptsRepository(self._impl).ensure_stub(*args, **kwargs)
+    def ensure_prompt_stub(
+        self, *, prompt_id: int, project_id: int, name: Optional[str] = None, client_id: Optional[str] = None
+    ) -> None:
+        return PromptsRepository(self._impl).ensure_stub(
+            prompt_id=prompt_id, project_id=project_id, name=name, client_id=client_id
+        )
 
     # Job queue delegation -------------------------------------------------
 
@@ -1449,65 +1540,204 @@ class PromptStudioDatabase:
     def cleanup_jobs(self, older_than_days: int = 30) -> int:
         return JobsRepository(self._impl).cleanup(older_than_days)
 
-    def get_latest_job_for_entity(self, *args: Any, **kwargs: Any) -> Optional[dict[str, Any]]:
-        return JobsRepository(self._impl).get_latest_for_entity(*args, **kwargs)
+    def get_latest_job_for_entity(self, job_type: str, entity_id: int) -> Optional[dict[str, Any]]:
+        return JobsRepository(self._impl).get_latest_for_entity(job_type, entity_id)
 
-    def list_jobs_for_entity(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
-        return JobsRepository(self._impl).list_for_entity(*args, **kwargs)
+    def list_jobs_for_entity(
+        self, job_type: str, entity_id: int, *, limit: int = 50, ascending: bool = True
+    ) -> list[dict[str, Any]]:
+        return JobsRepository(self._impl).list_for_entity(job_type, entity_id, limit=limit, ascending=ascending)
 
     # Test case delegation -------------------------------------------------
 
-    def create_test_case(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return TestCasesRepository(self._impl).create(*args, **kwargs)
+    def create_test_case(
+        self,
+        project_id: int,
+        name: str,
+        *,
+        inputs: dict[str, Any],
+        description: Optional[str] = None,
+        expected_outputs: Optional[dict[str, Any]] = None,
+        actual_outputs: Optional[dict[str, Any]] = None,
+        tags: Optional[Iterable[str]] = None,
+        is_golden: bool = False,
+        is_generated: bool = False,
+        signature_id: Optional[int] = None,
+        client_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        return TestCasesRepository(self._impl).create(
+            project_id,
+            name,
+            inputs=inputs,
+            description=description,
+            expected_outputs=expected_outputs,
+            actual_outputs=actual_outputs,
+            tags=tags,
+            is_golden=is_golden,
+            is_generated=is_generated,
+            signature_id=signature_id,
+            client_id=client_id,
+        )
 
-    def get_test_case(self, *args: Any, **kwargs: Any) -> Optional[dict[str, Any]]:
-        return TestCasesRepository(self._impl).get(*args, **kwargs)
+    def get_test_case(self, test_case_id: int, *, include_deleted: bool = False) -> Optional[dict[str, Any]]:
+        return TestCasesRepository(self._impl).get(test_case_id, include_deleted=include_deleted)
 
-    def list_test_cases(self, *args: Any, **kwargs: Any) -> Union[dict[str, Any], list[dict[str, Any]]]:
-        return TestCasesRepository(self._impl).list(*args, **kwargs)
+    def list_test_cases(
+        self,
+        project_id: int,
+        *,
+        signature_id: Optional[int] = None,
+        is_golden: Optional[bool] = None,
+        tags: Optional[list[str]] = None,
+        search: Optional[str] = None,
+        include_deleted: bool = False,
+        page: int = 1,
+        per_page: int = 20,
+        return_pagination: bool = False,
+    ) -> Union[dict[str, Any], list[dict[str, Any]]]:
+        return TestCasesRepository(self._impl).list(
+            project_id,
+            signature_id=signature_id,
+            is_golden=is_golden,
+            tags=tags,
+            search=search,
+            include_deleted=include_deleted,
+            page=page,
+            per_page=per_page,
+            return_pagination=return_pagination,
+        )
 
-    def update_test_case(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return TestCasesRepository(self._impl).update(*args, **kwargs)
+    def update_test_case(self, test_case_id: int, updates: dict[str, Any]) -> dict[str, Any]:
+        return TestCasesRepository(self._impl).update(test_case_id, updates)
 
-    def delete_test_case(self, *args: Any, **kwargs: Any) -> bool:
-        return TestCasesRepository(self._impl).delete(*args, **kwargs)
+    def delete_test_case(self, test_case_id: int, *, hard_delete: bool = False) -> bool:
+        return TestCasesRepository(self._impl).delete(test_case_id, hard_delete=hard_delete)
 
-    def create_bulk_test_cases(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
-        return TestCasesRepository(self._impl).create_bulk(*args, **kwargs)
+    def create_bulk_test_cases(
+        self,
+        project_id: int,
+        test_cases: list[dict[str, Any]],
+        *,
+        signature_id: Optional[int] = None,
+        client_id: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        return TestCasesRepository(self._impl).create_bulk(
+            project_id, test_cases, signature_id=signature_id, client_id=client_id
+        )
 
-    def search_test_cases(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
-        return TestCasesRepository(self._impl).search(*args, **kwargs)
+    def search_test_cases(self, project_id: int, query: str, *, limit: int = 10) -> list[dict[str, Any]]:
+        return TestCasesRepository(self._impl).search(project_id, query, limit=limit)
 
-    def get_test_cases_by_signature(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
-        return TestCasesRepository(self._impl).get_by_signature(*args, **kwargs)
+    def get_test_cases_by_signature(self, signature_id: int) -> list[dict[str, Any]]:
+        return TestCasesRepository(self._impl).get_by_signature(signature_id)
 
-    def get_test_case_stats(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return TestCasesRepository(self._impl).stats(*args, **kwargs)
+    def get_test_case_stats(self, project_id: int) -> dict[str, Any]:
+        return TestCasesRepository(self._impl).stats(project_id)
 
-    def get_golden_test_cases(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
-        return TestCasesRepository(self._impl).get_golden(*args, **kwargs)
+    def get_golden_test_cases(self, project_id: int, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
+        return TestCasesRepository(self._impl).get_golden(project_id, limit, offset)
 
     # Test run delegation -------------------------------------------------
 
-    def create_test_run(self, **kwargs: Any) -> dict[str, Any]:
-        return TestRunsRepository(self._impl).create(**kwargs)
+    def create_test_run(
+        self,
+        *,
+        project_id: int,
+        prompt_id: int,
+        test_case_id: int,
+        model_name: str,
+        model_params: Optional[dict[str, Any]] = None,
+        inputs: Optional[dict[str, Any]] = None,
+        outputs: Optional[dict[str, Any]] = None,
+        expected_outputs: Optional[dict[str, Any]] = None,
+        scores: Optional[dict[str, Any]] = None,
+        execution_time_ms: Optional[int] = None,
+        tokens_used: Optional[int] = None,
+        cost_estimate: Optional[float] = None,
+        error_message: Optional[str] = None,
+        client_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        return TestRunsRepository(self._impl).create(
+            project_id=project_id,
+            prompt_id=prompt_id,
+            test_case_id=test_case_id,
+            model_name=model_name,
+            model_params=model_params,
+            inputs=inputs,
+            outputs=outputs,
+            expected_outputs=expected_outputs,
+            scores=scores,
+            execution_time_ms=execution_time_ms,
+            tokens_used=tokens_used,
+            cost_estimate=cost_estimate,
+            error_message=error_message,
+            client_id=client_id,
+        )
 
-    def create_prompt_version(self, prompt_id: int, **kwargs: Any) -> dict[str, Any]:
-        return PromptVersionsRepository(self._impl).create(prompt_id, **kwargs)
+    def create_prompt_version(
+        self,
+        prompt_id: int,
+        *,
+        change_description: str,
+        name: Optional[str] = None,
+        system_prompt: Optional[str] = None,
+        user_prompt: Optional[str] = None,
+        prompt_format: Optional[str] = None,
+        prompt_schema_version: Optional[int] = None,
+        prompt_definition: Optional[Any] = None,
+        few_shot_examples: Optional[Any] = None,
+        modules_config: Optional[Any] = None,
+        client_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        return PromptVersionsRepository(self._impl).create(
+            prompt_id,
+            change_description=change_description,
+            name=name,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            prompt_format=prompt_format,
+            prompt_schema_version=prompt_schema_version,
+            prompt_definition=prompt_definition,
+            few_shot_examples=few_shot_examples,
+            modules_config=modules_config,
+            client_id=client_id,
+        )
 
-    def revert_prompt_to_version(self, prompt_id: int, target_version: int, **kwargs: Any) -> dict[str, Any]:
-        return PromptVersionsRepository(self._impl).revert(prompt_id, target_version, **kwargs)
+    def revert_prompt_to_version(
+        self, prompt_id: int, target_version: int, *, client_id: Optional[str] = None
+    ) -> dict[str, Any]:
+        return PromptVersionsRepository(self._impl).revert(prompt_id, target_version, client_id=client_id)
 
-    def list_prompt_versions(self, project_id: int, prompt_name: str, **kwargs: Any) -> list[dict[str, Any]]:
-        return PromptVersionsRepository(self._impl).list(project_id, prompt_name, **kwargs)
+    def list_prompt_versions(
+        self, project_id: int, prompt_name: str, *, include_deleted: bool = False
+    ) -> list[dict[str, Any]]:
+        return PromptVersionsRepository(self._impl).list(project_id, prompt_name, include_deleted=include_deleted)
 
-    def get_test_cases_by_ids(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
-        return TestCasesRepository(self._impl).get_by_ids(*args, **kwargs)
+    def get_test_cases_by_ids(
+        self, test_case_ids: Iterable[int], *, include_deleted: bool = False
+    ) -> list[dict[str, Any]]:
+        return TestCasesRepository(self._impl).get_by_ids(test_case_ids, include_deleted=include_deleted)
 
     # Evaluation delegation -----------------------------------------------
 
-    def create_evaluation(self, **kwargs: Any) -> dict[str, Any]:
-        return EvaluationsRepository(self._impl).create(**kwargs)
+    def create_evaluation(
+        self,
+        *,
+        prompt_id: int,
+        project_id: int,
+        model_configs: Optional[dict[str, Any]] = None,
+        status: str = "running",
+        test_case_ids: Optional[Iterable[int]] = None,
+        client_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        return EvaluationsRepository(self._impl).create(
+            prompt_id=prompt_id,
+            project_id=project_id,
+            model_configs=model_configs,
+            status=status,
+            test_case_ids=test_case_ids,
+            client_id=client_id,
+        )
 
     def update_evaluation(self, evaluation_id: int, updates: dict[str, Any]) -> dict[str, Any]:
         return EvaluationsRepository(self._impl).update(evaluation_id, updates)
@@ -1515,68 +1745,183 @@ class PromptStudioDatabase:
     def get_evaluation(self, evaluation_id: int) -> Optional[dict[str, Any]]:
         return EvaluationsRepository(self._impl).get(evaluation_id)
 
-    def list_evaluations(self, **kwargs: Any) -> dict[str, Any]:
-        return EvaluationsRepository(self._impl).list(**kwargs)
+    def list_evaluations(
+        self,
+        *,
+        project_id: Optional[int] = None,
+        prompt_id: Optional[int] = None,
+        status: Optional[str] = None,
+        page: int = 1,
+        per_page: int = 20,
+    ) -> dict[str, Any]:
+        return EvaluationsRepository(self._impl).list(
+            project_id=project_id, prompt_id=prompt_id, status=status, page=page, per_page=per_page
+        )
 
     # Optimization delegation --------------------------------------------
 
-    def create_optimization(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        if "optimization_config" in kwargs:
-            kwargs = dict(kwargs)
-            kwargs["optimization_config"] = validate_secret_free_optimization_config(
-                kwargs["optimization_config"],
-            )
-        return OptimizationsRepository(self._impl).create(*args, **kwargs)
+    def create_optimization(
+        self,
+        *,
+        project_id: int,
+        name: Optional[str],
+        initial_prompt_id: Optional[int],
+        optimizer_type: str,
+        optimization_config: Optional[dict[str, Any]] = None,
+        max_iterations: Optional[int] = None,
+        bootstrap_samples: Optional[int] = None,
+        status: str = "pending",
+        client_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        if optimization_config is not None:
+            optimization_config = validate_secret_free_optimization_config(optimization_config)
+        return OptimizationsRepository(self._impl).create(
+            project_id=project_id,
+            name=name,
+            initial_prompt_id=initial_prompt_id,
+            optimizer_type=optimizer_type,
+            optimization_config=optimization_config,
+            max_iterations=max_iterations,
+            bootstrap_samples=bootstrap_samples,
+            status=status,
+            client_id=client_id,
+        )
 
-    def get_optimization(self, *args: Any, **kwargs: Any) -> Optional[dict[str, Any]]:
-        return OptimizationsRepository(self._impl).get(*args, **kwargs)
+    def get_optimization(self, optimization_id: int, *, include_deleted: bool = False) -> Optional[dict[str, Any]]:
+        return OptimizationsRepository(self._impl).get(optimization_id, include_deleted=include_deleted)
 
-    def list_optimizations(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return OptimizationsRepository(self._impl).list(*args, **kwargs)
+    def list_optimizations(
+        self,
+        *,
+        project_id: Optional[int] = None,
+        status: Optional[str] = None,
+        include_deleted: bool = False,
+        page: int = 1,
+        per_page: int = 20,
+    ) -> dict[str, Any]:
+        return OptimizationsRepository(self._impl).list(
+            project_id=project_id, status=status, include_deleted=include_deleted, page=page, per_page=per_page
+        )
 
-    def update_optimization(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        positional = list(args)
-        if len(positional) >= 2 and isinstance(positional[1], dict):
-            updates = dict(positional[1])
-            if "optimization_config" in updates:
-                updates["optimization_config"] = validate_secret_free_optimization_config(
-                    updates["optimization_config"],
-                )
-            positional[1] = updates
-        elif isinstance(kwargs.get("updates"), dict):
-            kwargs = dict(kwargs)
-            updates = dict(kwargs["updates"])
-            if "optimization_config" in updates:
-                updates["optimization_config"] = validate_secret_free_optimization_config(
-                    updates["optimization_config"],
-                )
-            kwargs["updates"] = updates
-        return OptimizationsRepository(self._impl).update(*positional, **kwargs)
+    def update_optimization(
+        self,
+        optimization_id: int,
+        updates: dict[str, Any],
+        *,
+        set_started_at: bool = False,
+        set_completed_at: bool = False,
+        expected_statuses: Optional[Iterable[str]] = None,
+        expected_uuid: Optional[str] = None,
+        _return_transition_applied: bool = False,
+    ) -> dict[str, Any] | tuple[dict[str, Any], bool]:
+        if isinstance(updates, dict) and "optimization_config" in updates:
+            updates = {
+                **updates,
+                "optimization_config": validate_secret_free_optimization_config(updates["optimization_config"]),
+            }
+        return OptimizationsRepository(self._impl).update(
+            optimization_id,
+            updates,
+            set_started_at=set_started_at,
+            set_completed_at=set_completed_at,
+            expected_statuses=expected_statuses,
+            expected_uuid=expected_uuid,
+            _return_transition_applied=_return_transition_applied,
+        )
 
-    def set_optimization_status(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return OptimizationsRepository(self._impl).set_status(*args, **kwargs)
+    def set_optimization_status(
+        self,
+        optimization_id: int,
+        status: str,
+        *,
+        error_message: Optional[str] = None,
+        mark_started: bool = False,
+        mark_completed: bool = False,
+    ) -> dict[str, Any]:
+        return OptimizationsRepository(self._impl).set_status(
+            optimization_id,
+            status,
+            error_message=error_message,
+            mark_started=mark_started,
+            mark_completed=mark_completed,
+        )
 
-    def complete_optimization(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return OptimizationsRepository(self._impl).complete(*args, **kwargs)
+    def complete_optimization(
+        self,
+        optimization_id: int,
+        *,
+        optimized_prompt_id: Optional[int] = None,
+        iterations_completed: Optional[int] = None,
+        initial_metrics: Optional[dict[str, Any]] = None,
+        final_metrics: Optional[dict[str, Any]] = None,
+        improvement_percentage: Optional[float] = None,
+        total_tokens: Optional[int] = None,
+        total_cost: Optional[float] = None,
+        _return_transition_applied: bool = False,
+    ) -> dict[str, Any] | tuple[dict[str, Any], bool]:
+        return OptimizationsRepository(self._impl).complete(
+            optimization_id,
+            optimized_prompt_id=optimized_prompt_id,
+            iterations_completed=iterations_completed,
+            initial_metrics=initial_metrics,
+            final_metrics=final_metrics,
+            improvement_percentage=improvement_percentage,
+            total_tokens=total_tokens,
+            total_cost=total_cost,
+            _return_transition_applied=_return_transition_applied,
+        )
 
     def complete_optimization_with_transition(
         self,
-        *args: Any,
-        **kwargs: Any,
+        optimization_id: int,
+        *,
+        optimized_prompt_id: Optional[int] = None,
+        iterations_completed: Optional[int] = None,
+        initial_metrics: Optional[dict[str, Any]] = None,
+        final_metrics: Optional[dict[str, Any]] = None,
+        improvement_percentage: Optional[float] = None,
+        total_tokens: Optional[int] = None,
+        total_cost: Optional[float] = None,
     ) -> tuple[dict[str, Any], bool]:
         """Complete an active optimization and report whether this caller won."""
 
         result = OptimizationsRepository(self._impl).complete(
-            *args,
-            **kwargs,
+            optimization_id,
+            optimized_prompt_id=optimized_prompt_id,
+            iterations_completed=iterations_completed,
+            initial_metrics=initial_metrics,
+            final_metrics=final_metrics,
+            improvement_percentage=improvement_percentage,
+            total_tokens=total_tokens,
+            total_cost=total_cost,
             _return_transition_applied=True,
         )
         if not isinstance(result, tuple):
             raise DatabaseError("Optimization transition result is invalid")
         return result
 
-    def record_optimization_iteration(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return OptimizationsRepository(self._impl).record_iteration(*args, **kwargs)
+    def record_optimization_iteration(
+        self,
+        optimization_id: int,
+        *,
+        iteration_number: int,
+        prompt_variant: Optional[dict[str, Any]] = None,
+        metrics: Optional[dict[str, Any]] = None,
+        tokens_used: Optional[int] = None,
+        cost: Optional[float] = None,
+        note: Optional[str] = None,
+    ) -> dict[str, Any]:
+        return OptimizationsRepository(self._impl).record_iteration(
+            optimization_id,
+            iteration_number=iteration_number,
+            prompt_variant=prompt_variant,
+            metrics=metrics,
+            tokens_used=tokens_used,
+            cost=cost,
+            note=note,
+        )
 
-    def list_optimization_iterations(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return OptimizationsRepository(self._impl).list_iterations(*args, **kwargs)
+    def list_optimization_iterations(
+        self, optimization_id: int, *, page: int = 1, per_page: int = 50
+    ) -> dict[str, Any]:
+        return OptimizationsRepository(self._impl).list_iterations(optimization_id, page=page, per_page=per_page)
