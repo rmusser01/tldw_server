@@ -1777,7 +1777,22 @@ class FilesystemModule(BaseModule):
                     is_directory=candidate_kind == "directory",
                 ):
                     continue
-                is_symlink = candidate.is_symlink()
+                try:
+                    is_symlink = candidate.is_symlink()
+                except OSError as exc:
+                    # An entry whose metadata cannot be read must still be listed. On
+                    # 3.12 Path.is_symlink() goes through Path.stat(follow_symlinks=
+                    # False), the same call the size block below already tolerates -- so
+                    # leaving this one bare made fs.glob raise for the whole pattern
+                    # instead of marking one entry size_unavailable. Fall back to the
+                    # kind os.walk already reported. See TASK-13291.
+                    logger.debug(
+                        "Unable to determine fs.glob symlink status for workspace path "
+                        "{}; using the walk-reported kind: {}",
+                        rel_path,
+                        exc.__class__.__name__,
+                    )
+                    is_symlink = False
                 if is_symlink:
                     candidate_type = "symlink"
                 else:
