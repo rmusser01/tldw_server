@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-09-23 02:35'
+updated_date: '2026-09-23 02:36'
 labels:
   - db
   - diagnostics
@@ -36,6 +37,14 @@ Source: found while fixing TASK-13352/13344 follow-ups.
 - [ ] #1 DatabaseError chains the original driver exception so __cause__ is populated
 - [ ] #2 A constraint violation is identifiable from the raised exception without re-running the query
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+CORRECTION to the description: one sentence lost its content to shell backtick substitution when this task was filed. It should read:
+
+Fix is small: raise the wrapper with a 'raise ... from exc' chain so the original is preserved, and ideally include the driver message in the wrapper text. Callers that deliberately hide SQL from logs can still do so -- chaining does not force anything into a log line, it just stops the information being destroyed.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
