@@ -1652,6 +1652,8 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_persona_*.py
               tldw_Server_API/tests/Evaluations/test_recipe_*.py
           - name: product-evaluations-unit
+            # Non-UTC on purpose (TASK-13336): UTC hides host-offset timestamp bugs (delta 0).
+            tz: America/Los_Angeles
             paths: >-
               tldw_Server_API/tests/Evaluations/unit/test_*.py
           - name: product-flashcards
@@ -1938,6 +1940,7 @@ jobs:
       SHARD_NAME: ${{ matrix.shard.name }}
       TEST_PATHS: ${{ matrix.shard.paths }}
       RESULTS_DIR: test-results-linux-3.12-${{ matrix.shard.name }}
+      TZ: ${{ matrix.shard.tz || 'UTC' }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd

@@ -521,6 +521,15 @@ def test_windows_research_shard_has_bounded_per_test_timeout() -> None:
     assert '"${EXTRA_PYTEST_ARGS[@]}"' in run_script
 
 
+def test_one_linux_312_shard_runs_under_non_utc_timezone() -> None:
+    """UTC CI hides host-offset timestamp bugs (the delta is zero), so one shard runs elsewhere."""
+    job = _load(".github/workflows/ci.yml")["jobs"]["full-suite-linux-312-shards"]
+
+    assert job["env"]["TZ"] == "${{ matrix.shard.tz || 'UTC' }}"
+    tzs = {s["name"]: s.get("tz") for s in job["strategy"]["matrix"]["shard"]}
+    assert tzs["product-evaluations-unit"] == "America/Los_Angeles"
+
+
 def test_embedding_model_cache_restore_is_non_blocking() -> None:
     workflow = _load(".github/workflows/ci.yml")
     cache_steps = [
