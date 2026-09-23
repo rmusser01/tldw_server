@@ -6,7 +6,7 @@ title: >-
 status: In Progress
 assignee: []
 created_date: '2026-09-22 04:55'
-updated_date: '2026-09-23 12:27'
+updated_date: '2026-09-23 14:27'
 labels:
   - duplication
   - db
@@ -44,6 +44,12 @@ Source: synthesis F20
 
 <!-- SECTION:NOTES:BEGIN -->
 AC2 done in 0205612478 (signature-parity ratchet, 7 known mismatches frozen, verified to bite). AC1 done: Docs/Design/2026-09-23-prompt-studio-db-consolidation-design.md + ADR-051 (Proposed). AC3 (logic exists once) is the multi-stage refactor the design stages; not started, pending the owner's choice of option. Notable finding: _BackendPromptStudioDatabase already branches on backend_type and could run on a SQLite DatabaseBackend -- a faster but riskier route, documented as Option A.
+
+2026-09-23: decision 3 done — four latent public signature mismatches aligned (get_prompt include_deleted, create_bulk_test_cases client_id on SQLite; delete_signature hard_delete and list_evaluations filters keyword-only on both). Parity drift list down to 3 private entries. prompt_studio suite 1145 passed. Next: Stage 1 package skeleton.
+
+2026-09-23: Stage 2 done — tests/prompt_studio/test_backend_behaviour_parity.py (scenarios: test_runs, prompt_versions, evaluations, reads) on SQLite + live PG. Found and fixed PG leaking *_tsv columns from 8 read paths. Stage 1 folded into Stage 3 (session = legacy object, as in media_db). Next: Stage 3 — move test runs, prompt versions, evaluations into prompt_studio_db/repositories/.
+
+2026-09-23 (d27f06a143): Stage 3 done — test runs, prompt versions, evaluations in prompt_studio_db/repositories/; 13 duplicated methods removed; writes retry via retry_policy on both backends; update_evaluation allowlists columns. prompt_studio+Evaluations: 2019 passed, 5 failures pre-existing on HEAD (route mounting). DB_Management: 22 failures, all pre-existing (ChaCha/Media). Next: Stage 4 signatures, projects, prompts.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

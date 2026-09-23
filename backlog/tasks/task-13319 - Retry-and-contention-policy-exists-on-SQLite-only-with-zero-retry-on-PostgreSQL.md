@@ -3,9 +3,10 @@ id: TASK-13319
 title: >-
   Retry and contention policy exists on SQLite only with zero retry on
   PostgreSQL
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-09-22 04:55'
+updated_date: '2026-09-23 14:27'
 labels:
   - bug
   - db
@@ -34,8 +35,14 @@ Source: synthesis F21
 <!-- AC:BEGIN -->
 - [ ] #1 One retry policy shared by both backends
 - [ ] #2 PostgreSQL serialization failures are retried
-- [ ] #3 Jitter and the locked-error predicate are defined once
+- [x] #3 Jitter and the locked-error predicate are defined once
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-09-23 (12125df6ab): TransientContentionError raised by both SQL backends (SQLite 'database is locked'; PG SQLSTATE 40001/40P01/55P03), class-only, redaction intact. core/DB_Management/retry_policy.py: is_retryable_contention (walks cause chain) + run_with_contention_retry (ADR-047 capped exponential; jitter and locked predicate from core/Utils/backoff.py, defined once => AC3). Used by Prompt Studio repositories as aggregates move (TASK-13318). AC1/AC2 complete for moved aggregates; the remaining inline SQLite loops and PG job-queue paths go with Stage 4-6. Bandit clean on new modules.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
