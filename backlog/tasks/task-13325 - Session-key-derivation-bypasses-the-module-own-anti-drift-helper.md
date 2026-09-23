@@ -1,9 +1,10 @@
 ---
 id: TASK-13325
 title: Session key derivation bypasses the module own anti-drift helper
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-22 04:56'
+updated_date: '2026-09-23 23:17'
 labels:
   - duplication
   - authnz
@@ -33,17 +34,29 @@ Source: synthesis F24
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 session_manager uses derive_hmac_key_candidates
-- [ ] #2 Existing encrypted sessions still decrypt via a trailing rotation candidate
-- [ ] #3 Test asserts both paths derive the same key set
+- [x] #1 session_manager uses derive_hmac_key_candidates
+- [x] #2 Existing encrypted sessions still decrypt via a trailing rotation candidate
+- [x] #3 Test asserts both paths derive the same key set
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+ae073d8cb8. session_manager._derive_secret_key_candidates now returns urlsafe_b64(derive_hmac_key_candidates(settings)) first, then the old derivation (moved verbatim to _derive_legacy_secret_key_candidates: static salt, 600k rounds, raw secrets incl. JWT secrets in single-user mode) as trailing rotation candidates. Canonical ValueError (no secret configured) is caught -> [] since derived keys are only a fallback behind the persisted/explicit SESSION_ENCRYPTION_KEY. Found while writing AC#2's test: decrypt_token's candidate walk never worked -- Fernet.InvalidToken was not in the caught tuple, so the first non-matching candidate aborted; and both decrypt failure raises called InvalidSessionError(msg), which takes no args (TypeError). Fixed both; otherwise adoption would have logged out every session encrypted under a derived key. Tests: tests/AuthNZ/unit/test_session_manager_key_derivation.py, 4 tests, all 4 fail on ea1cbc6941 session_manager, pass now. AuthNZ/unit + AuthNZ_Unit before: 21 failed/7 errors/2389 passed; after: 21/7/2393, identical failure set. Bandit -ll clean. Docs: none needed (internal). Cost note: init still runs the 600k-round legacy PBKDF2 per secret, as before; drop _derive_legacy_secret_key_candidates once old derived-key sessions have expired.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Session key derivation now goes through crypto_utils.derive_hmac_key_candidates with the old derivation kept as trailing decrypt-only candidates. Also fixed the rotation walk itself (uncaught InvalidToken, bad InvalidSessionError constructor), without which the trailing candidates were unreachable.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

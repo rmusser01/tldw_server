@@ -3,9 +3,10 @@ id: TASK-13320
 title: >-
   Five divergent _is_admin checks; the most permissive guards cross-user sandbox
   execution
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-22 04:55'
+updated_date: '2026-09-23 23:17'
 labels:
   - security
   - mcp
@@ -53,20 +54,32 @@ Found by the comprehensive core-module review; the five definitions, the sandbox
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The intended admin claim set is decided and recorded (the repo-wide convention is frozenset({"*", "system.configure"}); the MCP protocol copy currently says {"*"})
-- [ ] #2 One admin predicate remains; the other four call sites delegate to it
-- [ ] #3 A failing test passes a bare-string roles claim and asserts every module reaches the same authorization decision
-- [ ] #4 A failing test asserts a system.configure principal cannot reach another user's sandbox session unless that is the decided intent
-- [ ] #5 The dead context.is_admin probe is removed, or RequestContext gains the field so the branch is reachable in production
-- [ ] #6 Bandit run for touched scope
+- [x] #1 The intended admin claim set is decided and recorded (the repo-wide convention is frozenset({"*", "system.configure"}); the MCP protocol copy currently says {"*"})
+- [x] #2 One admin predicate remains; the other four call sites delegate to it
+- [x] #3 A failing test passes a bare-string roles claim and asserts every module reaches the same authorization decision
+- [x] #4 A failing test asserts a system.configure principal cannot reach another user's sandbox session unless that is the decided intent
+- [x] #5 The dead context.is_admin probe is removed, or RequestContext gains the field so the branch is reachable in production
+- [x] #6 Bandit run for touched scope
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Duplicate of TASK-13338, fixed in c49b56c281 before this task was picked up. Verified on ea1cbc6941: one predicate, protocol_types.metadata_has_admin_claims, reached via BaseModule.caller_is_admin; media/notes/kanban/sandbox call it, mcp_discovery._is_admin calls it then falls back to user_roles. Decision recorded in Docs/ADR/048-mcp-admin-claims.md: platform admin roles (admin/owner/super_admin, imported from AuthNZ _PLATFORM_ADMIN_ROLES) or the '*' permission; system.configure deliberately NOT admin in MCP (narrower than AuthNZ's frozenset({'*','system.configure'}) named in AC#1). Dead context.is_admin probes removed (test_dead_is_admin_attribute_is_not_consulted). Bare-string roles: matrix row {'roles': 'owner'} -> True for the shared predicate. Red-before: restoring the pre-c49b56c281 sandbox_module fails 3 tests in test_sandbox_module_auth_binding.py incl. test_sandbox_run_denies_system_configure_cross_user_override. Added 4c45412ab9: behavioural parity test for mcp_discovery's claims half (the one module not covered by the structural 'no re-declared _is_admin' test); fails on the pre-c49b56c281 discovery module ([owner] case), 32/32 pass now; admin matrix + sandbox binding 37 -> 42 pass. Bandit -ll clean on the test file. Breaking change carried from 13338: an API key whose only admin-ish claim is system.configure lost cross-user sandbox session access and needs a platform admin role.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Already fixed under TASK-13338 (c49b56c281, ADR-048). Verified every AC against the code and tests, confirmed red-before for the sandbox system.configure denial, and closed the one gap: mcp_discovery's claims half now has a behavioural parity test (4c45412ab9). No production code changed here.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
