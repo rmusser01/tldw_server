@@ -612,7 +612,8 @@ def _get_project_version() -> str:
             _CACHED_VERSION = _importlib_metadata.version("tldw-server")  # type: ignore[attr-defined]
             if _CACHED_VERSION:
                 return _CACHED_VERSION
-    except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
+    # PackageNotFoundError (not pip-installed, e.g. a source checkout) is an ImportError.
+    except (ImportError, *_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
         pass
     # 3) Fallback: parse pyproject.toml in repo root
     try:
