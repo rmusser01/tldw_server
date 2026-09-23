@@ -387,8 +387,10 @@ def pg_restricted_backend(pg_database_config):
                 pg_user=role,
                 pg_password=password,
                 connection_string=None,
-                pool_size=1,
-                max_overflow=1,
+                # Isolation tests routinely hold two owners' handles open at
+                # once; a single-connection pool deadlocks on the second.
+                pool_size=5,
+                max_overflow=5,
             )
         )
         # Fail loudly rather than silently proving nothing.
