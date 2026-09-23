@@ -1026,6 +1026,7 @@ jobs:
               tldw_Server_API/tests/Chunking/test_auto_*.py
               tldw_Server_API/tests/Chunking/test_chunker_*.py
               tldw_Server_API/tests/Chunking/test_chunking_runtime_lifecycle.py
+              tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
               tldw_Server_API/tests/Chunking/test_process_text_components.py
               tldw_Server_API/tests/Chunking/test_process_text_refactor_equivalence.py
               tldw_Server_API/tests/Chunking/test_chunking_endpoint.py
@@ -2531,6 +2532,7 @@ jobs:
               tldw_Server_API/tests/Chunking/test_auto_*.py
               tldw_Server_API/tests/Chunking/test_chunker_*.py
               tldw_Server_API/tests/Chunking/test_chunking_runtime_lifecycle.py
+              tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
               tldw_Server_API/tests/Chunking/test_process_text_components.py
               tldw_Server_API/tests/Chunking/test_process_text_refactor_equivalence.py
               tldw_Server_API/tests/Chunking/test_chunking_endpoint.py
@@ -3907,6 +3909,7 @@ jobs:
               tldw_Server_API/tests/Chunking/test_auto_*.py
               tldw_Server_API/tests/Chunking/test_chunker_*.py
               tldw_Server_API/tests/Chunking/test_chunking_runtime_lifecycle.py
+              tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
               tldw_Server_API/tests/Chunking/test_process_text_components.py
               tldw_Server_API/tests/Chunking/test_process_text_refactor_equivalence.py
               tldw_Server_API/tests/Chunking/test_chunking_endpoint.py
@@ -5206,6 +5209,7 @@ jobs:
               tldw_Server_API/tests/Chunking/test_auto_*.py
               tldw_Server_API/tests/Chunking/test_chunker_*.py
               tldw_Server_API/tests/Chunking/test_chunking_runtime_lifecycle.py
+              tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
               tldw_Server_API/tests/Chunking/test_process_text_components.py
               tldw_Server_API/tests/Chunking/test_process_text_refactor_equivalence.py
               tldw_Server_API/tests/Chunking/test_chunking_endpoint.py
@@ -6511,6 +6515,7 @@ jobs:
               tldw_Server_API/tests/Chunking/test_auto_*.py
               tldw_Server_API/tests/Chunking/test_chunker_*.py
               tldw_Server_API/tests/Chunking/test_chunking_runtime_lifecycle.py
+              tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
               tldw_Server_API/tests/Chunking/test_process_text_components.py
               tldw_Server_API/tests/Chunking/test_process_text_refactor_equivalence.py
               tldw_Server_API/tests/Chunking/test_chunking_endpoint.py
