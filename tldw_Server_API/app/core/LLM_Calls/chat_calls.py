@@ -54,6 +54,8 @@ from tldw_Server_API.app.core.Utils.Utils import logging
 # Session shim for non-streaming POST calls
 # - Preserves the public name `create_session_with_retries` so tests can
 #   monkeypatch it, while centralizing non-streaming requests via http_client.
+# - Returned in tests too: a pytest-only branch once handed tests the legacy
+#   facade, so no test exercised this shim's non-streaming path.
 # - For streaming (stream=True), falls back to the legacy session facade
 #   returned by http_helpers.create_session_with_retries to preserve
 #   iter_lines() semantics used in streaming paths.
@@ -114,26 +116,13 @@ def create_session_with_retries(
     status_forcelist: Optional[list[int]] = None,
     allowed_methods: Optional[list[str]] = None,
 ):
-    """Return a session object.
+    """Return the session object used for provider POSTs, in tests and production alike.
 
     Provider POSTs are single-attempt until an idempotency contract exists.
-    - Under pytest, return the legacy session facade so tests can patch
-      `create_session_with_retries` directly.
-    - In production, return a shim that routes non-streaming POSTs through
-      the centralized HTTP client (egress policy, TLS pinning) and streaming
-      through the legacy session facade for iter_lines semantics.
+    Non-streaming POSTs route through the centralized HTTP client (egress
+    policy, TLS pinning); streaming uses the legacy session facade for
+    iter_lines semantics.
     """
-    import os as _os
-    if _os.getenv("PYTEST_CURRENT_TEST"):
-        log_runtime_deprecation(
-            "llm_chat_legacy_session",
-            message=(
-                "LLM chat used legacy session compatibility path under pytest runtime."
-            ),
-        )
-        return _legacy_create_session_with_retries(
-            total=1,
-        )
     return _SessionShim(
         total=total,
         backoff_factor=backoff_factor,
