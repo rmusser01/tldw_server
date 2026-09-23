@@ -79,5 +79,6 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-045](045-persona-live-pending-plan-handoff.md) | Accepted | Project the latest active owned pending Persona plan through authenticated session detail for explicit full Live review. |
 | [ADR-046](046-persona-live-conversation-and-voice-runtime.md) | Accepted | Reuse authenticated Chat admission for Live conversation and require owned runtime preparation before voice capture. |
 | [ADR-047](047-per-user-audio-preset-ownership.md) | Accepted | Store reusable TTS/STT presets as authenticated per-user Audio API state in Media DB, separate from speech outputs and history. |
+| [ADR-048](048-sync-blob-upload-expiry-as-a-read-time-predicate.md) | Accepted | Judge Sync blob upload-session expiry by comparing expires_at at read time rather than transitioning rows to an expired status. |
 
 The original backfill inventory is [the 2026-06-03 decision inventory](inventory/2026-06-03-decision-inventory.md). See the [2026-09-25 reconciliation](inventory/2026-09-25-decision-inventory-reconciliation.md) for current dispositions of its unresolved rows.

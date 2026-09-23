@@ -56,6 +56,7 @@ from .materializers.guarded_product_mutation import (
     has_guard_required_routing_key,
 )
 from .models import (
+    blob_upload_expires_at,
     DEFAULT_M1_ENCRYPTION_POLICY,
     M1_SYNC_DOMAINS,
     NOTES_LINK_DOMAINS,
@@ -842,6 +843,11 @@ class SyncV2Settings:
     max_blob_bytes: int | None = None
     max_chunk_bytes: int = 4_194_304
     max_active_blob_uploads: int = 8
+    # How long a started upload holds its quota reservation. 0 disables expiry, which
+    # restores the pre-TASK-13321 behaviour where an abandoned upload held its slot and
+    # its bytes forever. 24h is long enough for a resumable upload over a poor link and
+    # short enough that a crashed client recovers the same day.
+    blob_upload_session_ttl_seconds: int = 86_400
     user_blob_quota_bytes: int | None = None
     reserved_blob_bytes: int = 0
     used_blob_bytes: int = 0
@@ -6166,6 +6172,14 @@ class SyncV2Service:
                 reserved_quota_bytes=size_bytes,
                 idempotency_key=idempotency_key,
                 metadata=normalized_metadata,
+                # Set here because it was set nowhere: the column, the "expired" status and
+                # the quota query's status filter were all built for a lifecycle whose
+                # writer was missing, so 8 crashed uploads locked a user out permanently.
+                # See TASK-13321.
+                expires_at=blob_upload_expires_at(
+                    self.settings.blob_upload_session_ttl_seconds,
+                    now=self.clock(),
+                ),
             )
         )
 

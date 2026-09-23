@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Literal, cast
 from uuid import UUID
 
@@ -2233,6 +2233,37 @@ __all__ = [
     "server_frontend_mutation_blockers_for_policy",
     "server_frontend_mutation_enabled_for_policy",
     "sync_v2_advertised_domain_schemas",
+    "blob_upload_expires_at",
+    "blob_upload_session_is_expired",
     "sync_v2_domain_schemas",
     "validate_notes_note_upsert_payload",
 ]
+
+
+# Upload sessions hold quota while they are live. Expiry is evaluated here, at read time,
+# rather than by a background reaper: a session past its deadline stops counting the moment
+# it is past it, so no sweeper has to run for a crashed client to get its budget back.
+#
+# NULL means "no deadline", not "already expired" -- every session written before
+# TASK-13321 has NULL here, and treating those as expired would free quota for live uploads
+# on upgrade.
+#
+# The comparison is lexicographic, which is only correct because every writer goes through
+# utcnow_iso() / blob_upload_expires_at(), giving one fixed format
+# (YYYY-MM-DDTHH:MM:SS.ffffff+00:00). Do not write a "Z"-suffixed or offset-shifted value
+# into expires_at; it would sort wrongly against these.
+def blob_upload_expires_at(ttl_seconds: int, *, now: str | None = None) -> str | None:
+    """Return the canonical deadline for a new upload session, or None for no expiry."""
+
+    if ttl_seconds <= 0:
+        return None
+    started = datetime.fromisoformat(now) if now else datetime.now(timezone.utc)
+    return (started + timedelta(seconds=ttl_seconds)).isoformat()
+
+
+def blob_upload_session_is_expired(expires_at: Any, *, now: str | None = None) -> bool:
+    """Return whether one session row's deadline has passed."""
+
+    if not expires_at:
+        return False
+    return str(expires_at) <= (now or datetime.now(timezone.utc).isoformat())

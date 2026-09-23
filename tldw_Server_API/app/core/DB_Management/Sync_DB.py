@@ -29,6 +29,7 @@ from tldw_Server_API.app.core.Sync.v2.errors import (
     SyncStoreError,
 )
 from tldw_Server_API.app.core.Sync.v2.models import (
+    blob_upload_session_is_expired,
     DEFAULT_M1_ENCRYPTION_POLICY,
     M1_SYNC_DOMAINS,
     MEDIA_SYNC_DOMAINS,
@@ -1431,6 +1432,7 @@ def utcnow_iso() -> str:
     """Return an ISO-8601 UTC timestamp for Sync v2 rows."""
 
     return datetime.now(timezone.utc).isoformat()
+
 
 
 def encode_json(value: Any, *, default: Any) -> str:
@@ -12055,6 +12057,12 @@ class SyncDatabase:
             )
             if session["status"] not in {"created", "uploading"}:
                 raise SyncStoreError("Sync blob upload session is not accepting chunks")
+            if blob_upload_session_is_expired(session["expires_at"], now=now):
+                # Releasing the reservation at read time is only sound if the session is
+                # also closed to writes. Otherwise a client could let a session expire --
+                # freeing its budget for another upload -- then resume it and exceed the
+                # quota. See TASK-13321.
+                raise SyncStoreError("Sync blob upload session has expired")
             if chunk.chunk_index < 0 or chunk.chunk_index >= int(session["chunk_count"]):
                 raise SyncStoreError("Sync blob chunk index is outside the upload session")
             expected_offset = int(session["chunk_size"]) * chunk.chunk_index
@@ -12636,8 +12644,14 @@ class SyncDatabase:
         *,
         dataset_id: str | None = None,
     ) -> SyncBlobQuotaUsage:
-        """Return committed and pending blob quota usage for one user."""
+        """Return committed and pending blob quota usage for one user.
 
+        Expired upload sessions are excluded, so a client that abandoned an upload stops
+        paying for it without any reaper having run. See TASK-13321.
+        """
+
+        # One timestamp for both branches, so a quota answer cannot straddle two instants.
+        quota_as_of = utcnow_iso()
         if dataset_id is None:
             reserved_row = _first(
                 self.execute(
@@ -12647,8 +12661,9 @@ class SyncDatabase:
                       FROM sync_blob_upload_sessions
                      WHERE owner_user_id = ?
                        AND status IN ('created', 'uploading')
+                       AND (expires_at IS NULL OR expires_at > ?)
                     """,
-                    (owner_user_id,),
+                    (owner_user_id, quota_as_of),
                 )
             )
             used_row = _first(
@@ -12672,8 +12687,9 @@ class SyncDatabase:
                      WHERE owner_user_id = ?
                        AND dataset_id = ?
                        AND status IN ('created', 'uploading')
+                       AND (expires_at IS NULL OR expires_at > ?)
                     """,
-                    (owner_user_id, dataset_id),
+                    (owner_user_id, dataset_id, quota_as_of),
                 )
             )
             used_row = _first(
