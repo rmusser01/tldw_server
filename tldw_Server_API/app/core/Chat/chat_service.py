@@ -31,7 +31,7 @@ from fastapi.encoders import jsonable_encoder
 from loguru import logger
 from starlette.responses import StreamingResponse
 
-from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import DEFAULT_CHARACTER_NAME
+from tldw_Server_API.app.core.Character_Chat.constants import DEFAULT_CHARACTER_NAME
 from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditEventType,
     MandatoryAuditWriteError,

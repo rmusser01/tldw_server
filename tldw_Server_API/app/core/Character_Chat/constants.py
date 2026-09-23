@@ -305,3 +305,16 @@ def safe_parse_json_dict(
     except ValueError as e:
         logger.warning(f"JSON validation failed for '{field_name}': {e}")
         return default
+
+
+# =============================================================================
+# Default Assistant Character
+# =============================================================================
+DEFAULT_CHARACTER_NAME = "Helpful AI Assistant"
+"""Name of the character card chats fall back to when none is chosen.
+
+Not the ``{{char}}`` placeholder default (``character_utils.DEFAULT_CHARACTER_NAME``).
+"""
+
+DEFAULT_CHARACTER_DESCRIPTION = "A default, friendly assistant created automatically by the system."
+"""Description given to the default assistant card when it is first created."""
