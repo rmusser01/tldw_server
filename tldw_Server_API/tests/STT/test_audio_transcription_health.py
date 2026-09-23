@@ -126,3 +126,25 @@ def test_transcriptions_health_treats_on_demand_whisper_as_usable(monkeypatch, c
     assert data.get("available") is False
     assert data.get("usable") is True
     assert data.get("on_demand") is True
+
+
+@pytest.mark.unit
+def test_transcriptions_health_reports_unavailable_when_stt_deps_missing(monkeypatch, client: TestClient):
+    """A missing STT/media dependency must yield a well-formed unavailable status, not a 500.
+
+    Audio_Files imports yt_dlp at module level; on an install without it the probe the
+    chat page fires on every load used to raise ImportError and return 500.
+    """
+    import sys
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing import Audio as audio_pkg
+
+    monkeypatch.delattr(audio_pkg, "Audio_Files", raising=False)
+    monkeypatch.setitem(sys.modules, "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Files", None)
+
+    r = client.get("/api/v1/audio/transcriptions/health")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["available"] is False
+    assert data["usable"] is False
+    assert "not available" in data["message"]

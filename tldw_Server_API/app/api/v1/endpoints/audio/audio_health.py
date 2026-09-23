@@ -886,8 +886,14 @@ def get_stt_capabilities(
     """Return read-only STT capability metadata without warming models."""
     from datetime import datetime
 
-    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Files as audio_files
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import stt_provider_adapter
+
+    try:
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Files as audio_files
+    except ImportError as exc:
+        # Missing optional STT/media deps: report every model's availability as unknown.
+        logger.warning("STT capabilities: transcription modules unavailable ({})", type(exc).__name__)
+        audio_files = None
 
     ensure_request_id(request)
     cached_payload = _get_cached_stt_capabilities()
@@ -910,7 +916,7 @@ def get_stt_capabilities(
             logger.debug("STT capability summary could not resolve provider for {}", model_id)
 
         try:
-            status_info = audio_files.check_transcription_model_status(model_id)
+            status_info = audio_files.check_transcription_model_status(model_id) if audio_files else {}
             if not isinstance(status_info, dict):
                 status_info = {}
         except Exception:
@@ -981,10 +987,26 @@ async def get_stt_health(
     """
     from datetime import datetime
 
-    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as stt_lib
-    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Files as audio_files
-
     request_id = ensure_request_id(request)
+    try:
+        import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as stt_lib
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Files as audio_files
+    except ImportError as exc:
+        # A missing optional STT/media dependency means speech is not available here;
+        # report that as a well-formed unavailable status instead of a 500 on every
+        # client probe (the chat page probes this on each load).
+        logger.warning("STT health: transcription modules unavailable ({})", type(exc).__name__)
+        return {
+            "provider": None,
+            "alias": model,
+            "model": model,
+            "available": False,
+            "usable": False,
+            "on_demand": False,
+            "message": "Speech-to-text is not available: required dependencies are not installed.",
+            "estimated_size": None,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
     raw_model = (model or "").strip()
     if not raw_model:
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter import (
