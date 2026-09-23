@@ -184,7 +184,7 @@ from tldw_Server_API.app.core.LLM_Calls.provider_config_resolution import resolv
 from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.LLM_Calls.provider_readiness import normalize_catalog_provider_for_chat
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingDecision
-from tldw_Server_API.app.core.LLM_Calls.sse import sse_data, sse_done
+from tldw_Server_API.app.core.LLM_Calls.sse import is_done_line, sse_data, sse_done
 from tldw_Server_API.app.core.LLM_Calls.streaming import wrap_sync_stream
 from tldw_Server_API.app.core.LLM_Calls.structured_generation import (
     StructuredGenerationCapabilityError,
@@ -3086,7 +3086,7 @@ def _inspect_nonstream_text_output(value: str) -> tuple[bool, bool]:
     stripped = value.lstrip("\ufeff\u200b\u200c\u200d\u2060").strip()
     if not stripped:
         return False, False
-    if stripped.lower() in {"[done]", "data: [done]"}:
+    if stripped.lower() == "[done]" or is_done_line(stripped):
         return False, True
     first_line = stripped.splitlines()[0].strip().lower()
     if first_line.startswith(("data:", "event:", "id:", "retry:", ":")):
@@ -6192,7 +6192,7 @@ async def execute_streaming_call(
                 async for ln in streaming_generator:
                     if not ln:
                         continue
-                    if ln.strip().lower() == "data: [done]":
+                    if is_done_line(ln):
                         # Suppress provider DONE; emit unified DONE immediately and stop producing
                         if not done_seen:
                             await sse_stream.done()

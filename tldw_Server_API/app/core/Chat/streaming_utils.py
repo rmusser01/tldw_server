@@ -33,7 +33,7 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
     SanitizedProviderStreamError,
 )
 from tldw_Server_API.app.core.config import load_comprehensive_config
-from tldw_Server_API.app.core.LLM_Calls.sse import sse_data, sse_done, sse_event
+from tldw_Server_API.app.core.LLM_Calls.sse import is_done_line, sse_data, sse_done, sse_event
 from tldw_Server_API.app.core.testing import is_truthy
 
 #######################################################################################################################
@@ -1054,7 +1054,7 @@ def _extract_text_from_upstream_sse(chunk_str: str) -> tuple[Optional[str], Opti
             if not ls.startswith("data:"):
                 continue
             payload_str = ls[len("data:") :].strip()
-            if payload_str == "[DONE]":
+            if is_done_line(ls):
                 saw_done = True
                 continue
             try:
@@ -1688,7 +1688,7 @@ class StreamingResponseHandler:
                     return outputs, False
                 if candidate.startswith("data:"):
                     payload_str = candidate[len("data:") :].strip()
-                    if payload_str == "[DONE]":
+                    if is_done_line(candidate):
                         # Defer terminal DONE until after stream_end metadata is emitted.
                         self.upstream_done_received = True
                         self.update_activity()

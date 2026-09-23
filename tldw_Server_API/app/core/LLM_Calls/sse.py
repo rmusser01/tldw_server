@@ -77,8 +77,15 @@ def openai_delta_chunk(text: str) -> str:
 
 
 def is_done_line(line: str) -> bool:
-    """Return True when the raw line represents the [DONE] sentinel."""
-    return line.strip().lower() == "data: [done]"
+    """Return True when the raw line represents the [DONE] sentinel.
+
+    Deliberately case-insensitive and tolerant of any whitespace after ``data:``
+    and of leading BOM/zero-width characters: a provider DONE in any spelling
+    must be recognised so it is suppressed rather than forwarded next to our own
+    terminal ``sse_done()`` (single-terminal-DONE contract, ADR-025).
+    """
+    s = line.lstrip("﻿​‌‍⁠").strip().lower()
+    return s.startswith("data:") and s[len("data:") :].strip() == "[done]"
 
 
 def normalize_provider_line(
