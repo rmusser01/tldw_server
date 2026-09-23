@@ -13,6 +13,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from types import SimpleNamespace
 
+import Helper_Scripts.Deployment.production_artifacts as production_artifacts
 import Helper_Scripts.Deployment.production_deploy as production_deploy
 import pytest
 from Helper_Scripts.Deployment.production_artifacts import (
@@ -33,6 +34,103 @@ from Helper_Scripts.Deployment.production_deploy import (
 from Helper_Scripts.Deployment.production_preflight import PreflightIssue, PreflightReport
 
 _RUNNING_CONTAINER_ID = "a" * 64
+_native_posix_owner_only_supported = production_artifacts.posix_owner_only_supported
+
+
+def _assert_owner_only_posix_mode(path: Path) -> None:
+    """Check mode bits only where they represent the production contract."""
+
+    if os.name == "posix":
+        assert path.stat().st_mode & 0o777 == 0o600
+
+
+@pytest.fixture(autouse=True)
+def _simulate_posix_artifact_permissions_on_windows(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exercise orchestration on Windows without claiming its ACLs are POSIX modes."""
+
+    if os.name != "posix":
+        monkeypatch.setattr(production_artifacts, "posix_owner_only_supported", lambda: True)
+        monkeypatch.setattr(os, "fchmod", lambda descriptor, mode: None, raising=False)
+
+
+def test_native_artifact_capability_requires_posix_fchmod() -> None:
+    assert _native_posix_owner_only_supported() is (
+        os.name == "posix" and callable(getattr(os, "fchmod", None))
+    )
+
+
+def test_unsupported_host_rejects_deployment_before_runner_or_artifacts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = _config(tmp_path)
+    runner = RecordingRunner()
+    monkeypatch.setattr(production_artifacts, "posix_owner_only_supported", lambda: False)
+
+    with pytest.raises(DeploymentError, match="POSIX"):
+        deploy(config, runner=runner)
+
+    assert runner.calls == []
+    assert not tuple(config.backup_dir.iterdir())
+
+
+def test_unsupported_host_rejects_rollback_before_manifest_read_or_runner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = _config(tmp_path)
+    manifest_path = tmp_path / "missing-manifest.json"
+    runner = RecordingRunner()
+    monkeypatch.setattr(production_artifacts, "posix_owner_only_supported", lambda: False)
+
+    with pytest.raises(DeploymentError, match="POSIX"):
+        rollback(config, manifest_path, runner=runner)
+
+    assert runner.calls == []
+    assert not manifest_path.exists()
+
+
+def test_unsupported_host_rejects_direct_private_artifact_writers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest_path = tmp_path / "new" / "manifest.json"
+    dump_path = tmp_path / "postgres.dump"
+    runner_called = False
+
+    def fake_run(*args, **kwargs):
+        nonlocal runner_called
+        runner_called = True
+        raise AssertionError("command must not run")
+
+    monkeypatch.setattr(production_artifacts, "posix_owner_only_supported", lambda: False)
+    monkeypatch.setattr(production_deploy.subprocess, "run", fake_run)
+    manifest = DeploymentManifest(
+        created_at="2026-08-30T00:00:00Z",
+        target_image="registry/tldw:sha-1234567",
+        rollback_image="registry/tldw:sha-7654321",
+        compose_file_sha256="a" * 64,
+        artifacts=(),
+    )
+
+    with pytest.raises(ValueError, match="POSIX"):
+        write_manifest(manifest_path, manifest)
+    with pytest.raises(DeploymentError, match="POSIX"):
+        production_deploy._write_private_bytes(dump_path, b"dump", "PostgreSQL backup")
+    with pytest.raises(DeploymentError, match="POSIX"):
+        production_deploy.default_streaming_command_runner(("docker",), None, dump_path)
+
+    assert not manifest_path.parent.exists()
+    assert not dump_path.exists()
+    assert not runner_called
+
+
+def test_unsupported_host_cli_returns_failure_before_deploy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = _config(tmp_path)
+    monkeypatch.setattr(production_artifacts, "posix_owner_only_supported", lambda: False)
+    monkeypatch.setattr(production_deploy, "_config_from_args", lambda args: config)
+
+    assert production_deploy.main(("deploy", "--env-file", str(config.env_file))) == 1
+    assert not tuple(config.backup_dir.iterdir())
 
 
 def _write_tar(path: Path, *, member_name: str = "data/state.db") -> None:
@@ -111,7 +209,7 @@ def test_manifest_contains_checksums_but_no_secrets(tmp_path: Path) -> None:
     text = path.read_text(encoding="utf-8")
     assert "password" not in text.lower()
     assert "database_url" not in text.lower()
-    assert path.stat().st_mode & 0o777 == 0o600
+    _assert_owner_only_posix_mode(path)
     assert load_verified_manifest(path) == manifest
 
 
@@ -217,7 +315,7 @@ def test_default_streaming_runner_writes_stdout_directly_to_private_file(
     )
 
     assert destination.read_bytes() == b"custom-postgres-dump"
-    assert destination.stat().st_mode & 0o777 == 0o600
+    _assert_owner_only_posix_mode(destination)
     assert result == CommandResult(returncode=0, stdout=b"", stderr=b"")
     assert observed["shell"] is False
     assert observed["check"] is False
@@ -317,7 +415,7 @@ def test_default_streaming_runner_enforces_mode_under_restrictive_umask(
     finally:
         os.umask(previous_umask)
 
-    assert destination.stat().st_mode & 0o777 == 0o600
+    _assert_owner_only_posix_mode(destination)
 
 
 def test_default_streaming_runner_does_not_remove_preexisting_destination(
@@ -570,7 +668,8 @@ def test_deploy_uses_injected_streaming_runner_for_database_and_app_data(
         next(config.backup_dir.rglob("postgres.dump")),
         next(config.backup_dir.rglob("app-data.tar")),
     )
-    assert all(path.stat().st_mode & 0o777 == 0o600 for path in artifacts)
+    for path in artifacts:
+        _assert_owner_only_posix_mode(path)
     assert all(not call[2].exists() for call in stream_runner.calls)
 
 
