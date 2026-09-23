@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-09-22 03:56'
+updated_date: '2026-09-23 15:28'
 labels:
   - llm
   - security
@@ -43,15 +44,66 @@ Source: comprehensive core-module review prompt smoke run, findings LLM_Calls-1 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A failing test reproduces the dict-input regression before any production edit: analyze(api, {"text": ...}) currently returns the extraction-error string
-- [ ] #2 A test pins the security property explicitly: a filesystem path passed through analyze() is NOT read from disk, and that test fails if the file-reading branch is ever restored
-- [ ] #3 Exactly one module-level definition of extract_text_from_input remains, and the inline # noqa: F811 is gone
-- [ ] #4 The surviving implementation handles text and content keys, and does not read files from caller-controlled paths
-- [ ] #5 Scalar JSON input ("123", "true", "null") no longer raises a TypeError that is swallowed into a generic error string
-- [ ] #6 Dead helpers extract_metadata_and_content and format_input_with_metadata are removed, or retained with a documented reason
-- [ ] #7 TASK-2425 is cross-referenced and its non-active conclusion is re-verified or explicitly superseded
-- [ ] #8 Bandit run for touched scope
+- [x] #1 A failing test reproduces the dict-input regression before any production edit: analyze(api, {"text": ...}) currently returns the extraction-error string
+- [x] #2 A test pins the security property explicitly: a filesystem path passed through analyze() is NOT read from disk, and that test fails if the file-reading branch is ever restored
+- [x] #3 Exactly one module-level definition of extract_text_from_input remains, and the inline # noqa: F811 is gone
+- [x] #4 The surviving implementation handles text and content keys, and does not read files from caller-controlled paths
+- [x] #5 Scalar JSON input ("123", "true", "null") no longer raises a TypeError that is swallowed into a generic error string
+- [x] #6 Dead helpers extract_metadata_and_content and format_input_with_metadata are removed, or retained with a documented reason
+- [x] #7 TASK-2425 is cross-referenced and its non-active conclusion is re-verified or explicitly superseded
+- [x] #8 Bandit run for touched scope
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Shipped on fix/summarization-shadowed-file-read.
+
+THE SHADOWING WAS THE CONTROL. extract_text_from_input was defined twice at module scope
+(:493 with the file read, :917 without, marked noqa F811). The second won, which is the
+only reason TASK-2425 could close the summarization arbitrary-file-read as 'not active
+through analyze()'. Deleting the *later* definition as a duplicate -- the obvious tidy-up,
+and exactly what the F811 warning invites -- would have re-armed a file read reachable
+from analyze(), which 17+ core modules import and which passes caller-supplied input_data
+straight through for every caller not setting input_is_literal_text=True (only two sites
+in the app do). The shadowed copy is deleted instead, so what already ran is now the only
+thing that can run.
+
+SECOND COPY OF THE SAME HAZARD, not previously recorded. extract_metadata_and_content did
+os.path.exists(input_data) -> open(input_data) -> json.load(file). It had no callers
+anywhere in tldw_Server_API, apps or Helper_Scripts -- dead code holding a live file read.
+Deleted, with format_input_with_metadata which only formatted its output. That answers
+AC#6's 'removed, or retained with a documented reason': 'it reads any file the caller
+names' is not a reason to retain.
+
+TWO DEFECTS IN THE SURVIVOR, both reachable from analyze():
+- a dict carrying text under 'text' or 'content' extracted to "", so analyze():699
+  returned 'Error: Could not extract text content.' for input that plainly had text. The
+  deleted copy handled both keys; kept, checked after the known structures so
+  title/description/transcription/segments precedence is unchanged.
+- json.loads on "123", "true", "null" yields a scalar and the membership tests raised
+  TypeError, which is in _SUMMARIZATION_NONCRITICAL_EXCEPTIONS and was swallowed into a
+  generic error. A scalar now comes back as the caller wrote it.
+
+VERIFICATION
+- tests/LLM_Calls/test_summarization_input_extraction.py: 21 passed. Pins the security
+  property directly rather than via definition order, plus an AST ratchet that fails on a
+  second module-scope definition, one that fails if an F811 suppression returns, and one
+  that flags os.path.isfile/exists/isdir called on a bare argument name.
+- PROBE-THE-FIX, four ways: reintroducing the file read turns the two arbitrary-file-read
+  tests red; removing the text/content handling turns 1 red; removing the scalar guard
+  turns 7 red; and a reintroduction split across three lines -- which leaves the substring
+  count unchanged at 1, all of it docstring prose -- still turns the AST ratchet red. The
+  ratchet is an AST walk for exactly that reason: a scan cannot tell code from prose.
+- Baseline: tests/LLM_Calls plus tests/Translation/test_translate_service_prompt.py are
+  17 failures on clean dev and the identical 17 with this change, byte-identical lists.
+  Zero regressions.
+- Bandit: clean, 0 issues.
+- Ruff: clean on both touched files.
+
+TASK-2425's notes updated to record that its 'not currently active' conclusion is
+superseded here.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
