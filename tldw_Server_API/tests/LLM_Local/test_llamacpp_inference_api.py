@@ -8,7 +8,7 @@ from starlette.requests import Request
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.api.v1.endpoints import llamacpp as lp
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+from tldw_Server_API.tests.LLM_Local.conftest import override_llamacpp_request_user
 from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import InferenceError
 
 
@@ -60,11 +60,13 @@ class _DefaultMgr:
 
 
 def _make_app_with_manager(manager) -> FastAPI:  # noqa: ANN001
+    """Build an app serving the Llama.cpp router with auth and rate limits stubbed."""
     app = FastAPI()
     app.include_router(lp.router, prefix="/api/v1")
     app.state.llm_manager = manager
 
     async def _fake_get_auth_principal(request: Request) -> AuthPrincipal:  # type: ignore[override]
+        """Attach an admin principal and the auth context the routes expect."""
         principal = _admin_principal()
         ip = request.client.host if getattr(request, "client", None) else None
         ua = request.headers.get("User-Agent") if getattr(request, "headers", None) else None
@@ -78,18 +80,15 @@ def _make_app_with_manager(manager) -> FastAPI:  # noqa: ANN001
         return principal
 
     async def _fake_check_rate_limit() -> None:
+        """Stand in for the router's rate limiter."""
         return
-
-    async def _fake_get_request_user() -> User:
-        return User(id=1, username="llamacpp-test-user", email=None, is_active=True)
 
     app.dependency_overrides[auth_deps.get_auth_principal] = _fake_get_auth_principal
     app.dependency_overrides[auth_deps.check_rate_limit] = _fake_check_rate_limit
     app.dependency_overrides[lp.check_rate_limit] = _fake_check_rate_limit
     # /llamacpp/inference authenticates like every other route on this router.
     # These tests are about inference behaviour, so stand in a caller.
-    app.dependency_overrides[auth_deps.get_request_user] = _fake_get_request_user
-    app.dependency_overrides[lp.get_request_user] = _fake_get_request_user
+    override_llamacpp_request_user(app)
     return app
 
 

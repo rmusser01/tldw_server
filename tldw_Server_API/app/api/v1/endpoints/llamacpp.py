@@ -1292,11 +1292,18 @@ async def run_llamacpp_inference_endpoint(
     payload: LlamaCppInferenceRequest,
     llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager),
     current_user: User = Depends(get_request_user),
-):
-    """
-    Runs inference using the currently loaded Llama.cpp model.
-    Payload should be OpenAI compatible (e.g., include 'messages' list).
-    Example: {"messages": [{"role": "user", "content": "Hello!"}], "temperature": 0.7}
+) -> dict[str, Any]:
+    """Run inference using the currently loaded Llama.cpp model.
+
+    Args:
+        payload: OpenAI-compatible request, e.g. ``{"messages": [...], "temperature": 0.7}``.
+        llm_manager: Resolved inference manager for the active backend.
+        current_user: Authenticated caller. Required only to establish that
+            there is one -- inference is not scoped per user, but it must not be
+            free to anonymous callers.
+
+    Returns:
+        The backend's completion payload, with ``model`` and ``backend`` filled in.
     """
     try:
         supervisor = getattr(llm_manager, "llamacpp_supervisor", None)
