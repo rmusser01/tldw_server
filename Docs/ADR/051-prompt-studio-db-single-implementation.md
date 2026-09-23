@@ -1,6 +1,6 @@
 # ADR-051: One Prompt Studio database implementation, moved aggregate by aggregate
 
-**Status:** Proposed
+**Status:** Accepted (2026-09-23)
 **Date:** 2026-09-23
 **Backfilled from:** not backfilled
 **Decision owner:** repository owner (pending)

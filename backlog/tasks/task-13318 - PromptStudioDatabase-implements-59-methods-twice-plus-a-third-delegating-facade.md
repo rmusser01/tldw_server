@@ -6,7 +6,7 @@ title: >-
 status: In Progress
 assignee: []
 created_date: '2026-09-22 04:55'
-updated_date: '2026-09-23 14:27'
+updated_date: '2026-09-23 15:15'
 labels:
   - duplication
   - db
@@ -37,7 +37,7 @@ Source: synthesis F20
 <!-- AC:BEGIN -->
 - [x] #1 Design doc and ADR recorded before code changes
 - [x] #2 A signature-parity test covers all paired methods
-- [ ] #3 Business logic exists once, with only SQL differing per backend
+- [x] #3 Business logic exists once, with only SQL differing per backend
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -50,6 +50,10 @@ AC2 done in 0205612478 (signature-parity ratchet, 7 known mismatches frozen, ver
 2026-09-23: Stage 2 done — tests/prompt_studio/test_backend_behaviour_parity.py (scenarios: test_runs, prompt_versions, evaluations, reads) on SQLite + live PG. Found and fixed PG leaking *_tsv columns from 8 read paths. Stage 1 folded into Stage 3 (session = legacy object, as in media_db). Next: Stage 3 — move test runs, prompt versions, evaluations into prompt_studio_db/repositories/.
 
 2026-09-23 (d27f06a143): Stage 3 done — test runs, prompt versions, evaluations in prompt_studio_db/repositories/; 13 duplicated methods removed; writes retry via retry_policy on both backends; update_evaluation allowlists columns. prompt_studio+Evaluations: 2019 passed, 5 failures pre-existing on HEAD (route mounting). DB_Management: 22 failures, all pre-existing (ChaCha/Media). Next: Stage 4 signatures, projects, prompts.
+
+2026-09-23: Stage 4 done (4ec9f9c515 signatures, b50dbf10dc projects, this: prompts). Harness found & fixed on PG: uniqueness conflicts surfacing as DatabaseError (cursor wrapper matched redacted message; now typed -> ConflictError, repairs all PG writes); get_signature/get_prompt TypeError on missing rows; ensure_prompt_stub not advancing the id sequence (false ConflictError on next create). SQLite aligned: project name validation, InputError on missing-row updates, no swallowed DB errors in get_prompt*. Next: Stage 5 test cases.
+
+2026-09-23: AC3 met. Stages 5-6 + helpers: 32c01e4105 test cases, dee169a794 optimizations, 689fb6d072 jobs (+ SQLite transaction() override that never issued BEGIN, found by the multiprocess acquisition test), 87e1cb21a2 sync-log/idempotency once. PromptStudioDatabase.py 7426 -> ~1700 lines; the two classes hold only connection/schema/execution/row-decoding infrastructure. ADR-051 Accepted. Open: Stage 7 typed facade (facade still forwards *args/**kwargs to repositories) - ergonomics, not correctness, since nothing is duplicated to drift.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
