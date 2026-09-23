@@ -104,6 +104,24 @@ class ProjectsRepository:
         except DB_ERRORS as exc:
             raise DatabaseError(f"Failed to get project {project_id}: {exc}") from exc  # noqa: TRY003
 
+    def get_by_name(self, name: str, user_id: str) -> Optional[dict[str, Any]]:
+        """The newest live project with this name for this owner."""
+        db = self.session
+        query = (
+            f"SELECT {_PROJECT_COLUMNS} FROM prompt_studio_projects"  # nosec B608 - constant column list
+            " WHERE name = ? AND user_id = ? AND deleted = FALSE ORDER BY id DESC LIMIT 1"
+        )
+
+        def _read() -> Optional[dict[str, Any]]:
+            cursor = db._execute(query, (name, user_id))
+            row = cursor.fetchone()
+            return db._row_to_dict(cursor, row) if row else None
+
+        try:
+            return run_with_contention_retry(_read)
+        except DB_ERRORS as exc:
+            raise DatabaseError(f"Failed to get project by name: {exc}") from exc  # noqa: TRY003
+
     def list(
         self,
         user_id: Optional[str] = None,

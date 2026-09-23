@@ -1360,6 +1360,9 @@ class PromptStudioDatabase:
     ) -> dict[str, Any]:
         return ProjectsRepository(self._impl).list(user_id, status, include_deleted, page, per_page, search)
 
+    def get_project_by_name(self, name: str, user_id: str) -> Optional[dict[str, Any]]:
+        return ProjectsRepository(self._impl).get_by_name(name, user_id)
+
     def delete_project(self, project_id: int, hard_delete: bool = False) -> bool:
         return ProjectsRepository(self._impl).delete(project_id, hard_delete)
 

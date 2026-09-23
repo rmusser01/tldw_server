@@ -222,19 +222,9 @@ async def create_project(
     except ConflictError as e:
         # For compatibility with tests, return existing project as if created
         try:
-            # Use DB helper to run a backend-aware query (placeholder-safe)
-            cursor = db._execute(
-                """
-                SELECT * FROM prompt_studio_projects
-                WHERE name = ? AND user_id = ? AND deleted = 0
-                ORDER BY id DESC LIMIT 1
-                """,
-                (project_data.name, str(user_context.get("user_id", "anonymous")))
-            )
-            row = cursor.fetchone()
-            if row:
-                project = db._row_to_dict(cursor, row)
-                return StandardResponse(success=True, data=ProjectResponse(**project))
+            existing = db.get_project_by_name(project_data.name, str(user_context.get("user_id", "anonymous")))
+            if existing:
+                return StandardResponse(success=True, data=ProjectResponse(**existing))
         except DatabaseError:
             logger.error("Failed to retrieve existing project after conflict")
         except Exception:
