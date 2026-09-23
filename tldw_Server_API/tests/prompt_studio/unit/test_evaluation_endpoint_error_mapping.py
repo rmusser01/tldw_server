@@ -136,42 +136,16 @@ class _UnexpectedConnectionDb:
         raise RuntimeError("driver exploded /private/tmp/prompt-studio.db")
 
 
-class _ColumnCheckFailureCursor:
-    def __init__(self):
-        self.rowcount = 0
-        self._execute_count = 0
+class _DeleteDb:
+    """delete_evaluation reports whether a row existed; the table has no soft delete."""
 
-    def execute(self, *_args, **_kwargs):
-        self._execute_count += 1
-        if self._execute_count == 1:
-            raise RuntimeError("driver exploded /private/tmp/prompt-studio.db")
-        self.rowcount = 1
+    def __init__(self, exists: bool):
+        self.exists = exists
+        self.deleted: list[int] = []
 
-    def fetchall(self):
-        return []
-
-
-class _ColumnCheckFailureConnection:
-    def __init__(self):
-        self.cursor_instance = _ColumnCheckFailureCursor()
-        self.committed = False
-
-    def cursor(self):
-        return self.cursor_instance
-
-    def commit(self):
-        self.committed = True
-
-
-class _ColumnCheckFailureDb:
-    backend_type = "sqlite"
-    backend = None
-
-    def __init__(self):
-        self.connection = _ColumnCheckFailureConnection()
-
-    def get_connection(self):
-        return self.connection
+    def delete_evaluation(self, evaluation_id: int) -> bool:
+        self.deleted.append(evaluation_id)
+        return self.exists
 
 
 class _UnexpectedEvaluationManager:
@@ -400,24 +374,22 @@ async def test_delete_evaluation_maps_database_error(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_delete_evaluation_column_check_failure_log_is_sanitized(monkeypatch):
-    logger_stub = _FakePsLogger()
-    monkeypatch.setattr(evaluations_endpoint, "logger", logger_stub, raising=True)
-    db = _ColumnCheckFailureDb()
+async def test_delete_evaluation_deletes_through_the_repository():
+    db = _DeleteDb(exists=True)
 
-    result = await delete_evaluation(
-        evaluation_id=42,
-        request=object(),
-        db=db,
-        user_context={"user_id": "tester"},
-    )
+    result = await delete_evaluation(evaluation_id=42, request=object(), db=db, user_context={"user_id": "tester"})
 
     assert result == {"message": "Evaluation 42 deleted successfully"}
-    assert db.connection.committed is True
-    _assert_sanitized_debug_log(
-        logger_stub,
-        "Failed to check prompt_studio_evaluations columns",
-    )
+    assert db.deleted == [42]
+
+
+@pytest.mark.asyncio
+async def test_delete_missing_evaluation_is_404():
+    with pytest.raises(HTTPException) as exc_info:
+        await delete_evaluation(
+            evaluation_id=42, request=object(), db=_DeleteDb(exists=False), user_context={"user_id": "tester"}
+        )
+    assert exc_info.value.status_code == 404
 
 
 @pytest.mark.asyncio

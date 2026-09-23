@@ -33,12 +33,16 @@ class EvaluationsRepository:
         status: str = "running",
         test_case_ids: Optional[Iterable[int]] = None,
         client_id: Optional[str] = None,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
     ) -> dict[str, Any]:
         db = self.session
         payload = (
             str(uuid.uuid4()),
             prompt_id,
             project_id,
+            name,
+            description,
             json.dumps(model_configs) if model_configs is not None else None,
             status,
             json.dumps(list(test_case_ids) if test_case_ids is not None else []),
@@ -46,9 +50,9 @@ class EvaluationsRepository:
         )
         insert_sql = """
             INSERT INTO prompt_studio_evaluations (
-                uuid, prompt_id, project_id, model_configs, status,
+                uuid, prompt_id, project_id, name, description, model_configs, status,
                 test_case_ids, started_at, client_id
-            ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
             RETURNING *
         """
 
@@ -103,6 +107,41 @@ class EvaluationsRepository:
             return run_with_contention_retry(_update)
         except DB_ERRORS as exc:
             raise DatabaseError(f"Failed to update evaluation {evaluation_id}: {exc}") from exc  # noqa: TRY003
+
+    def delete(self, evaluation_id: int) -> bool:
+        """Delete an evaluation; False if it did not exist. (The table has no soft-delete columns.)"""
+        db = self.session
+
+        def _delete() -> bool:
+            with db._write_lock, db.transaction() as conn:
+                row = db._cursor_exec(
+                    conn, "DELETE FROM prompt_studio_evaluations WHERE id = ? RETURNING id", (evaluation_id,)
+                ).fetchone()
+                return row is not None
+
+        try:
+            return run_with_contention_retry(_delete)
+        except DB_ERRORS as exc:
+            raise DatabaseError(f"Failed to delete evaluation {evaluation_id}: {exc}") from exc  # noqa: TRY003
+
+    def cancel_if_active(self, evaluation_id: int, message: str) -> bool:
+        """Mark a pending or running evaluation cancelled; a finished one is left alone."""
+        db = self.session
+
+        def _cancel() -> bool:
+            with db._write_lock, db.transaction() as conn:
+                row = db._cursor_exec(
+                    conn,
+                    "UPDATE prompt_studio_evaluations SET status = 'cancelled', error_message = ?,"
+                    " completed_at = CURRENT_TIMESTAMP WHERE id = ? AND status IN ('pending', 'running') RETURNING id",
+                    (message, evaluation_id),
+                ).fetchone()
+                return row is not None
+
+        try:
+            return run_with_contention_retry(_cancel)
+        except DB_ERRORS as exc:
+            raise DatabaseError(f"Failed to cancel evaluation {evaluation_id}: {exc}") from exc  # noqa: TRY003
 
     def get(self, evaluation_id: int) -> Optional[dict[str, Any]]:
         db = self.session

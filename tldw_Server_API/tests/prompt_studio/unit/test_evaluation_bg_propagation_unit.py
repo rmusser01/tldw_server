@@ -1225,6 +1225,10 @@ class _StubDB:
     def get_prompt(prompt_id: int) -> dict[str, Any]:
         return {"id": prompt_id, "project_id": 1, "deleted": False}
 
+    @staticmethod
+    def create_evaluation(**_kwargs: Any) -> dict[str, Any]:
+        return {"id": 1, "uuid": "00000000-0000-0000-0000-000000000001"}
+
     def get_connection(self):
         return _StubConn()
 
@@ -1449,13 +1453,24 @@ class _SnapshotDb:
         return [{"id": 1, "inputs": {}, "expected_outputs": {}}]
 
     def get_evaluation(self, _evaluation_id: int) -> dict[str, Any]:
-        return {"id": 17, "uuid": "00000000-0000-0000-0000-000000000017"}
+        # The repository returns JSON columns decoded.
+        return {
+            "id": 17,
+            "uuid": "00000000-0000-0000-0000-000000000017",
+            "project_id": 1,
+            "prompt_id": 1,
+            "test_case_ids": [1],
+            "model_configs": [{"model_name": "model-a"}],
+        }
 
     def create_evaluation(self, **_kwargs: Any) -> dict[str, Any]:
         return {"id": 17, "uuid": "00000000-0000-0000-0000-000000000017"}
 
     def update_evaluation(self, _evaluation_id: int, _updates: dict[str, Any]) -> None:
         return None
+
+    def cancel_evaluation_if_active(self, _evaluation_id: int, _message: str) -> bool:
+        return True
 
 
 class _CapturedBackgroundTasks:
@@ -3576,15 +3591,10 @@ async def test_prompt_studio_background_sanitizes_failure_log_and_record(
     )()
     runtime = _TrackingPromptRuntime(events, handle)
 
-    class _RecordingCursor(_SnapshotCursor):
-        def execute(self, query: str, *args: Any) -> None:
-            if "SET status = 'failed'" in query:
-                failed_messages.append(str(args[0][0]))
-            super().execute(query, *args)
-
-    class _RecordingConnection(_SnapshotConnection):
-        def __init__(self) -> None:
-            self.cursor_instance = _RecordingCursor()
+    class _RecordingDb(_SnapshotDb):
+        def update_evaluation(self, _evaluation_id: int, updates: dict[str, Any]) -> None:
+            if updates.get("status") == "failed":
+                failed_messages.append(str(updates.get("error_message")))
 
     class _FailingManager:
         def __init__(self, _db: object) -> None:
@@ -3593,8 +3603,7 @@ async def test_prompt_studio_background_sanitizes_failure_log_and_record(
         async def run_evaluation_with_existing_record(self, **_kwargs: Any) -> dict[str, Any]:
             raise RuntimeError(sentinel)
 
-    db = _SnapshotDb()
-    db.connection = _RecordingConnection()
+    db = _RecordingDb()
     monkeypatch.setattr(eval_endpoint, "EvaluationManager", _FailingManager)
     sink_id = logger.add(logs.append, format="{message}")
     try:

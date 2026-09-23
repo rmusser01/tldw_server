@@ -1732,6 +1732,8 @@ class PromptStudioDatabase:
         status: str = "running",
         test_case_ids: Optional[Iterable[int]] = None,
         client_id: Optional[str] = None,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
     ) -> dict[str, Any]:
         return EvaluationsRepository(self._impl).create(
             prompt_id=prompt_id,
@@ -1740,7 +1742,15 @@ class PromptStudioDatabase:
             status=status,
             test_case_ids=test_case_ids,
             client_id=client_id,
+            name=name,
+            description=description,
         )
+
+    def delete_evaluation(self, evaluation_id: int) -> bool:
+        return EvaluationsRepository(self._impl).delete(evaluation_id)
+
+    def cancel_evaluation_if_active(self, evaluation_id: int, message: str) -> bool:
+        return EvaluationsRepository(self._impl).cancel_if_active(evaluation_id, message)
 
     def update_evaluation(self, evaluation_id: int, updates: dict[str, Any]) -> dict[str, Any]:
         return EvaluationsRepository(self._impl).update(evaluation_id, updates)

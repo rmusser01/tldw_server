@@ -77,7 +77,6 @@ RAW_SQL_BASELINE: dict[str, int] = {
     "media/versions.py": 1,
     "notes.py": 2,
     "outputs_templates.py": 1,
-    "prompt_studio/prompt_studio_evaluations.py": 8,
     "sync.py": 7,
     "users.py": 4,
     "watchlists.py": 1,
