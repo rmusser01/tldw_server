@@ -875,7 +875,10 @@ async def _complete_ping(ping_id: str):
 @router.post("/background/ping", openapi_extra={
     "responses": {"200": {"description": "Ping scheduled", "content": {"application/json": {"examples": {"scheduled": {"value": {"id": "abc123", "status": "processing", "created_at": "2024-09-21T12:00:00"}}}}}}}
 })
-async def background_ping(background_tasks: BackgroundTasks) -> dict[str, Any]:
+async def background_ping(
+    background_tasks: BackgroundTasks,
+    _user: dict = Depends(get_prompt_studio_user),
+) -> dict[str, Any]:
     """Schedule a trivial background task to verify background execution works."""
     pid = str(uuid.uuid4())
     _BG_PINGS[pid] = {"id": pid, "status": "processing", "created_at": datetime.now().isoformat()}
@@ -886,7 +889,10 @@ async def background_ping(background_tasks: BackgroundTasks) -> dict[str, Any]:
 @router.get("/background/pings/{ping_id}", openapi_extra={
     "responses": {"200": {"description": "Ping status", "content": {"application/json": {"examples": {"done": {"value": {"id": "abc123", "status": "completed", "completed_at": "2024-09-21T12:00:01"}}}}}}, "404": {"description": "Not found"}}
 })
-async def get_ping_status(ping_id: str) -> dict[str, Any]:
+async def get_ping_status(
+    ping_id: str,
+    _user: dict = Depends(get_prompt_studio_user),
+) -> dict[str, Any]:
     if ping_id not in _BG_PINGS:
         raise HTTPException(status_code=404, detail="Ping not found")
     return _BG_PINGS[ping_id]

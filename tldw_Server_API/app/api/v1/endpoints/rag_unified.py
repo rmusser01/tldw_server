@@ -935,7 +935,9 @@ async def rag_ablate(
 @router.get(
     "/capabilities",
     summary="Capabilities",
-    description="List RAG pipeline features and defaults available to the current user"
+    description="List RAG pipeline features and defaults available to the current user",
+    # The description says "available to the current user", so there has to be one.
+    dependencies=[Depends(get_request_user)],
 )
 async def get_capabilities(request: Request):
     """Return supported features, defaults and configuration limits for the unified RAG pipeline.
@@ -1299,7 +1301,9 @@ async def get_capabilities(request: Request):
     "/vlm/backends",
     summary="VLM Backends",
     description="List VLM (Vision-Language) backends and their availability",
-    response_description="Backend availability map"
+    response_description="Backend availability map",
+    # Capability disclosure: names the deployment's configured VLM backends.
+    dependencies=[Depends(get_request_user)],
 )
 async def list_vlm_backends():
     """
@@ -2404,7 +2408,8 @@ async def advanced_search_endpoint(
     "/features",
     summary="List Available Features",
     description="Get a list of all available features in the unified pipeline",
-    response_description="Feature list with descriptions"
+    response_description="Feature list with descriptions",
+    dependencies=[Depends(get_request_user)],
 )
 async def list_features():
     """
