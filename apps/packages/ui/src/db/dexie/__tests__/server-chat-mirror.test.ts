@@ -7,6 +7,7 @@ function table<T extends { id: string }>(rows: Map<string, T>) { return ({
   get: async (id: string) => rows.get(id),
   add: async (row: T) => { if (rows.has(row.id)) throw new Error("duplicate primary key"); rows.set(row.id, structuredClone(row)); return row.id },
   put: async (row: T) => { rows.set(row.id, structuredClone(row)); return row.id },
+  delete: async (id: string) => { rows.delete(id) },
   update: async (id: string, changes: Partial<T>) => { if (!rows.has(id)) return 0; rows.set(id, { ...rows.get(id)!, ...changes }); return 1 },
   where: (field: string) => ({ equals: (value: unknown) => ({ toArray: async () => [...rows.values()].filter(row => (row as Record<string, unknown>)[field] === value) }) })
 }) }
@@ -15,7 +16,7 @@ vi.mock("../schema", () => ({ db: {
   transaction: async (_mode: string, _tables: unknown[], operation: (transaction: { abort: () => void }) => Promise<unknown>) => operation({ abort: vi.fn() })
 } }))
 vi.mock("../helpers", () => ({ generateID: () => `history-${state.histories.size + 1}` }))
-import { acknowledgePromotedChatMessage, linkServerChatMirror, reconcileServerChatMirror, reconcileServerChatMessages } from "../server-chat-mirror"
+import { acknowledgePromotedChatMessage, linkServerChatMirror, reconcileServerChatMirror, reconcileServerChatMessages, removeAcknowledgedServerMirrorMessage } from "../server-chat-mirror"
 
 const history = (id: string, owner?: string): HistoryInfo => ({ id, title: "Cedar", is_rag: false, createdAt: 1, server_chat_id: "chat-1", ...(owner ? { server_scope_key: owner } : {}) })
 const row = (id: string, historyId: string, content: string, serverMessageId?: string): Message => ({ id, history_id: historyId, name: "You", role: "user" as const, content, images: [], createdAt: 1, serverMessageId })
@@ -24,6 +25,20 @@ const link = (ownerKey: string, extra = {}) => linkServerChatMirror({ chatId: "c
 
 describe("owned server Chat mirror", () => {
   beforeEach(() => { state.histories.clear(); state.messages.clear() })
+  it("removes only the exact acknowledged server row after canonical deletion", async () => {
+    state.histories.set("alice", history("alice", "A"))
+    state.messages.set("target", row("target", "alice", "Repeat", "server-target"))
+    state.messages.set("same-text", row("same-text", "alice", "Repeat", "server-other"))
+    await removeAcknowledgedServerMirrorMessage({ historyId: "alice", chatId: "chat-1", localMessageId: "target", serverMessageId: "server-target" })
+    expect([...state.messages.keys()]).toEqual(["same-text"])
+  })
+
+  it("rejects a mismatched canonical deletion receipt without changing the mirror", async () => {
+    state.histories.set("alice", history("alice", "A"))
+    state.messages.set("target", row("target", "alice", "Repeat", "server-target"))
+    await expect(removeAcknowledgedServerMirrorMessage({ historyId: "alice", chatId: "chat-1", localMessageId: "target", serverMessageId: "server-other" })).rejects.toThrow()
+    expect(state.messages.has("target")).toBe(true)
+  })
   it.each(["unchanged", "edited"])("acknowledges the exact promotion source and preserves %s content", async kind => {
     state.histories.set("alice", history("alice", "A"))
     state.messages.set("source", { ...row("source", "alice", kind === "edited" ? "Later local edit" : "Greeting"), role: "assistant" as const })

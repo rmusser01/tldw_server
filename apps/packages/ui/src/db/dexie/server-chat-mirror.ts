@@ -230,6 +230,25 @@ export const reconcileServerChatMirror = async ({
   return { localIds, rows: await db.messages.where("history_id").equals(historyId).toArray() }
 })
 
+/** Apply a successful canonical delete to only its already-acknowledged local mirror. */
+export const removeAcknowledgedServerMirrorMessage = async ({
+  historyId, chatId, localMessageId, serverMessageId
+}: {
+  historyId: string; chatId: string; localMessageId: string; serverMessageId: string
+}): Promise<void> => runChatPersistenceTransaction(undefined, async () => {
+  const history = await db.chatHistories.get(historyId)
+  if (history?.server_chat_id !== chatId || !history.server_scope_key)
+    throw createServicePromptScopeChangedError()
+  const row = await db.messages.get(localMessageId)
+  if (!row) return
+  if (row.history_id !== historyId || row.serverMessageId !== serverMessageId)
+    throw createServicePromptScopeChangedError()
+  const rows = await db.messages.where("history_id").equals(historyId).toArray()
+  if (rows.filter(candidate => candidate.serverMessageId === serverMessageId).length !== 1)
+    throw createServicePromptScopeChangedError()
+  await db.messages.delete(localMessageId)
+})
+
 /** H1 translates a clicked local mirror ID before native capture. No text/position inference. */
 export const resolveServerMirrorCursor = async ({
   historyId, chatId, ownerKey, cursor, signal

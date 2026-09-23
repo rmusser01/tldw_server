@@ -99,6 +99,42 @@ describe("history review", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancel review" }))
     expect(trigger).toHaveFocus()
   })
+
+  it("does not confirm message IDs from a previously opened conversation", () => {
+    const first = {
+      ...controller(),
+      owner: { kind: "local", conversation_id: "first", owner_key: "owner" },
+      capture: { snapshot: { nodes: [nodes[0], nodes[1]], source_digest: "first" } }
+    } as unknown as HistorySelectionController
+    const second = {
+      ...controller(),
+      owner: { kind: "local", conversation_id: "second", owner_key: "owner" },
+      capture: {
+        snapshot: {
+          nodes: [{ ...nodes[0], id: "other-message" }],
+          source_digest: "second"
+        }
+      }
+    } as unknown as HistorySelectionController
+    const { rerender } = render(<HistorySelectionReview selection={first} />)
+    fireEvent.click(
+      screen.getByRole("button", { name: "Review conversation history" })
+    )
+    rerender(<HistorySelectionReview selection={second} />)
+    expect(
+      screen.queryByRole("button", { name: "Confirm selected history" })
+    ).toBeNull()
+    fireEvent.click(
+      screen.getByRole("button", { name: "Review conversation history" })
+    )
+    fireEvent.click(
+      screen.getByRole("button", { name: "Confirm selected history" })
+    )
+    expect(second.confirm).toHaveBeenCalledWith(
+      ["other-message"],
+      { kind: "after_message", message_id: "other-message" }
+    )
+  })
 })
 
 it("reorders included history by keyboard without changing virtual row identity", () => {

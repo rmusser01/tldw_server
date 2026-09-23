@@ -620,6 +620,53 @@ beforeEach(async () => {
   })
 })
 
+it("edits an ordinary local sidepanel message while history selection is idle", async () => {
+  const helpers = await import("@/db/dexie/helpers")
+  const current = h1.controller.getCurrent()
+  current.status = "idle"
+  current.owner = null
+  current.view = null
+  mocks.storeState.serverChatId = null
+  mocks.storeState.messages = [{ id: "plain-message", isBot: false, message: "old", sources: [] }]
+  const { result } = renderHook(() => useMessage())
+  await act(async () => {
+    await result.current.editMessage(0, "edited", false, false)
+  })
+  expect(helpers.updateMessageById).toHaveBeenCalledWith(
+    "history-1", "plain-message", "edited"
+  )
+})
+
+it("deletes an ordinary local sidepanel message while history selection is idle", async () => {
+  const helpers = await import("@/db/dexie/helpers")
+  const current = h1.controller.getCurrent()
+  current.status = "idle"
+  current.owner = null
+  current.view = null
+  mocks.storeState.serverChatId = null
+  mocks.storeState.messages = [{ id: "plain-message", isBot: false, message: "old", sources: [] }]
+  const { result } = renderHook(() => useMessage())
+  await act(async () => {
+    await result.current.deleteMessage(0)
+  })
+  expect(helpers.removeMessageById).toHaveBeenCalledWith(
+    "history-1", "plain-message"
+  )
+})
+
+it("routes ordinary sidepanel regeneration while history selection is idle", async () => {
+  const current = h1.controller.getCurrent()
+  current.status = "idle"
+  current.owner = null
+  current.view = null
+  mocks.storeState.serverChatId = null
+  const { result } = renderHook(() => useMessage())
+  await act(async () => {
+    await result.current.onSubmit({ message: "again", image: "", isRegenerate: true })
+  })
+  expect(mocks.setMessages).toHaveBeenCalled()
+})
+
 it("mounted sidepanel normal submit uses canonical A1 selection and pre-admits its input", async () => {
   const { result } = renderHook(() => useMessage())
   h1.wire.mockImplementation(async function* () {

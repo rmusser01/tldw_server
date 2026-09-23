@@ -655,7 +655,7 @@ const requirePlainForkSettings = (raw: unknown) => {
       continue
     if (
       key === "summary" &&
-      (value == null ||
+      ((value === null || value === undefined) ||
         (isRecord(value) &&
           Object.keys(value).every((k) =>
             ["enabled", "content", "sourceRange", "updatedAt"].includes(k)
@@ -691,7 +691,7 @@ const requirePlainForkSettings = (raw: unknown) => {
         "deepResearchPinnedAttachment",
         "autoSummaryThresholdMessages",
         "autoSummaryWindowMessages"
-      ].includes(key) && value == null
+      ].includes(key) && (value === null || value === undefined)
     if (
       emptyArray ||
       emptyObject ||

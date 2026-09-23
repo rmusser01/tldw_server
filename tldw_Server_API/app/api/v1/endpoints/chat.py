@@ -4552,13 +4552,15 @@ async def create_chat_completion(
                     if request_data.tldw_history_selection_v1.owner_key != history_owner:
                         raise HTTPException(409, detail={"code": "owner_conversation_mismatch"})
                     from tldw_Server_API.app.core.Chat.history_context import require_history_skill_absence
-                    if user_base_dir is not None:
-                        try:
-                            registry_may_be_visible = await asyncio.to_thread(chat_db.history_skills_may_be_visible)
-                            await asyncio.to_thread(require_history_skill_absence, user_base_dir,
-                                registry_may_be_visible=registry_may_be_visible)
-                        except HistorySelectionError as exc:
-                            raise HTTPException(409, detail={"status": "unsupported_history_capability", "code": exc.code}) from exc
+                    if user_base_dir is None:
+                        raise HTTPException(409, detail={"status": "unsupported_history_capability",
+                            "code": "unsupported_history_context_skills_unresolved"})
+                    try:
+                        registry_may_be_visible = await asyncio.to_thread(chat_db.history_skills_may_be_visible)
+                        await asyncio.to_thread(require_history_skill_absence, user_base_dir,
+                            registry_may_be_visible=registry_may_be_visible)
+                    except HistorySelectionError as exc:
+                        raise HTTPException(409, detail={"status": "unsupported_history_capability", "code": exc.code}) from exc
                     continuation_runtime.update(history_owner_key=history_owner, history_owner_client_id=str(current_user.id),
                         history_inputs=[await prepare_native_history_message(message.model_dump(exclude_none=True), final_conversation_id,
                             _process_content_for_db_sync) for message in request_data.messages if message.role != "system"])

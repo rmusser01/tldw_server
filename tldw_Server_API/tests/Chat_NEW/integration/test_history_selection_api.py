@@ -145,6 +145,40 @@ def test_character_settlement_uses_owner_admission_and_rejects_forged_retry(hist
     assert db.count_messages_for_conversation(cid) == 3
 
 
+def test_character_history_admission_runs_database_work_off_event_loop(history_api, monkeypatch):
+    import asyncio
+
+    client, db, cid, headers = history_api
+    body = capture(client, cid, headers).json()
+    selection = resolve_history_selection(body["snapshot"], body["view"], "send", "client-only")["selection"]
+    original_append = db.append_selected_history_input
+    original_settle = db.settle_history_admission
+    observed = []
+
+    def off_loop(operation):
+        def invoke(*args, **kwargs):
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                observed.append(operation)
+            else:
+                raise AssertionError(f"{operation} blocked the request event loop")
+            return (original_append if operation == "append" else original_settle)(*args, **kwargs)
+        return invoke
+
+    monkeypatch.setattr(db, "append_selected_history_input", off_loop("append"))
+    monkeypatch.setattr(db, "settle_history_admission", off_loop("settle"))
+    accepted = client.post(f"/api/v1/chats/{cid}/messages", headers=headers, json={
+        "id": "threaded-input", "role": "user", "content": "hello", "tldw_history_selection_v1": selection})
+    assert accepted.status_code == 201, accepted.text
+    admission = accepted.json()["tldw_history_admission_v1"]
+    reference = {key: admission[key] for key in ("version", "owner_key", "conversation_id", "input_message_id", "input_message_revision", "selection_digest")}
+    saved = client.post(f"/api/v1/chats/{cid}/messages", headers=headers, json={
+        "id": "threaded-result", "role": "assistant", "content": "hi", "tldw_history_admission_v1": reference})
+    assert saved.status_code == 201, saved.text
+    assert observed == ["append", "settle"]
+
+
 def test_versioned_server_completion_selected_input_and_consumed_replay(history_api):
     client, db, cid, headers = history_api
     body = capture(client, cid, headers).json()
@@ -271,6 +305,32 @@ def test_unsupported_saved_context_rejects_before_provider_or_admission(history_
     response = client.post("/api/v1/chat/completions", headers=headers, json=request)
     assert response.status_code == 409, response.text
     assert response.json()["detail"]["status"] == "unsupported_history_capability"
+    assert db.count_messages_for_conversation(cid) == 0
+
+
+def test_selected_history_rejects_unresolved_skill_directory_before_admission(history_api, monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import chat as endpoint
+
+    client, db, cid, headers = history_api
+    body = capture(client, cid, headers).json()
+    selection = resolve_history_selection(body["snapshot"], body["view"], "send", "skills-path")["selection"]
+
+    class UnavailableChatPaths(endpoint.DatabasePaths):
+        @staticmethod
+        def get_user_base_directory(_user_id):
+            raise OSError("user directory unavailable")
+
+    monkeypatch.setattr(endpoint, "DatabasePaths", UnavailableChatPaths)
+    response = client.post("/api/v1/chat/completions", headers=headers, json={
+        "model": "gpt-4o-mini", "conversation_id": cid, "save_to_db": True,
+        "messages": [{"role": "user", "content": "hello"}],
+        "tldw_history_selection_v1": selection,
+    })
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == {
+        "status": "unsupported_history_capability",
+        "code": "unsupported_history_context_skills_unresolved",
+    }
     assert db.count_messages_for_conversation(cid) == 0
 
 

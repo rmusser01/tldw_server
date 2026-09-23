@@ -1037,8 +1037,9 @@ it('shares one H1 controller across the WebUI shell and page only for the chat l
     return <output data-testid="web-controller">{current ? 'present' : 'absent'}</output>;
   }
   function Page() {
-    outer = useHistorySelectionContext()?.getReference ?? null;
-    return outer ? <HistorySelectionProvider><Probe /></HistorySelectionProvider> : <Probe />;
+    const current = useHistorySelectionContext()?.getReference ?? null;
+    React.useEffect(() => { outer = current; }, [current]);
+    return current ? <HistorySelectionProvider><Probe /></HistorySelectionProvider> : <Probe />;
   }
   const view = render(<OptionLayout><Page /></OptionLayout>);
   expect(view.getByTestId('header')).toHaveAttribute('data-history-controller', 'present');

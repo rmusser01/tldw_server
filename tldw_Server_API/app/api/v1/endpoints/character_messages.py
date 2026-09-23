@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Requ
 from loguru import logger
 from PIL import Image
 from pydantic import ValidationError
+from starlette.concurrency import run_in_threadpool
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     User,
@@ -509,12 +510,14 @@ async def send_message(
             try:
                 owner = native_history_owner_key(request, current_user.id)
                 if message_data.tldw_history_selection_v1 is not None:
-                    history_admission = db.append_selected_history_input(chat_id,
+                    history_admission = await run_in_threadpool(
+                        db.append_selected_history_input, chat_id,
                         message_data.tldw_history_selection_v1.model_dump(mode="json"), data,
                         owner_client_id=str(current_user.id), owner_key=owner)
                     created_id = history_admission["input_message_id"]
                 else:
-                    created_id = db.settle_history_admission(chat_id,
+                    created_id = await run_in_threadpool(
+                        db.settle_history_admission, chat_id,
                         message_data.tldw_history_admission_v1.model_dump(mode="json"), data,
                         owner_client_id=str(current_user.id), owner_key=owner)
             except HistorySelectionError as exc:
