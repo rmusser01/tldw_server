@@ -4,18 +4,23 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from collections.abc import Iterator
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
 
 from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.fixture(params=["sqlite", "postgres"])
-def db(request, tmp_path):
+def db(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[CharactersRAGDB]:
     kwargs = {"db_path": str(tmp_path / "workspace.sqlite"), "client_id": "alice"}
     if request.param == "postgres":
         kwargs["backend"] = DatabaseBackendFactory.create_backend(request.getfixturevalue("pg_database_config"))
@@ -223,6 +228,56 @@ def test_protected_restore_cannot_reopen_deleted_workspace(db):
     with pytest.raises(ConflictError, match="workspace_native_unavailable"):
         db.restore_conversation(child, expected_version=2)
     assert db.get_conversation_by_id(child, include_deleted=True)["deleted"]
+
+
+def test_resume_state_retains_snapshot_bound_assistant_identity(db: CharactersRAGDB) -> None:
+    child = db.add_conversation({"character_id": 1, "title": "Snapshot-bound child"})
+    with db.transaction() as conn:
+        conn.execute(
+            "UPDATE conversations SET character_id = NULL, assistant_kind = ?, assistant_id = ? WHERE id = ?",
+            ("character", f"snapshot:{child}", child),
+        )
+    assert db.get_roleplay_resume_state(child)["conversation"]["assistant_binding_mode"] is None
+    with db.transaction() as conn:
+        conn.execute(
+            "UPDATE conversations SET required_projection_version = ?, "
+            "native_creation_operation_kind = ?, native_creation_operation_id = ? WHERE id = ?",
+            ("native-fork-v1", "native_fork_v1", "source-fork", child),
+        )
+    state = db.get_roleplay_resume_state(child)
+    assert state["conversation"]["assistant_binding_mode"] == "snapshot_v1"
+
+
+def test_postgres_workspace_delete_rejects_caller_owned_driver_transaction(db: CharactersRAGDB) -> None:
+    if db.backend_type != BackendType.POSTGRESQL:
+        pytest.skip("PostgreSQL driver transaction behavior")
+    db.execute_query(
+        "UPDATE workspaces SET name = ? WHERE id = ?",
+        ("Uncommitted rename", "workspace-one"),
+        commit=False,
+    )
+    raw = db.get_connection()._connection
+    assert raw.info.transaction_status.name == "INTRANS"
+    try:
+        with pytest.raises(ConflictError, match="outermost transaction"):
+            db.delete_workspace("workspace-one", expected_version=1)
+        assert raw.info.transaction_status.name == "INTRANS"
+    finally:
+        raw.rollback()
+    assert db.get_workspace("workspace-one")["name"] == "Workspace One"
+
+
+def test_workspace_delete_guard_reads_postgres_driver_transaction_status() -> None:
+    raw = SimpleNamespace(info=SimpleNamespace(transaction_status=SimpleNamespace(name="INTRANS")))
+    backend = SimpleNamespace(_tx_depth=lambda _connection: 0)
+    fake_db = SimpleNamespace(
+        backend_type=BackendType.POSTGRESQL,
+        backend=backend,
+        get_connection=lambda: SimpleNamespace(_connection=raw, _backend=backend),
+        _connection_state=lambda: SimpleNamespace(tx_depth=0),
+    )
+    with pytest.raises(ConflictError, match="outermost transaction"):
+        CharactersRAGDB._require_outermost_workspace_delete(fake_db, "workspace-one")
 
 
 def test_active_only_restore_validation_never_reactivates_a_deleted_chat(db):

@@ -3,20 +3,28 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
 from tldw_Server_API.app.api.v1.schemas.native_fork_schemas import NativeScopeV1
 from tldw_Server_API.app.core.Chat.native_fork_projection import AuthorizedNativeOwner
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
-from tldw_Server_API.app.core.DB_Management.chacha.native_fork_store import NativeAttempt
+from tldw_Server_API.app.core.DB_Management.chacha.native_fork_store import (
+    NativeAttempt,
+    NativeForkStoreError,
+    NativeOperationResult,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+
+pytestmark = pytest.mark.integration
 
 
 @pytest.fixture(params=["sqlite", "postgres"])
-def native_fork_db(request, tmp_path):
+def native_fork_db(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[CharactersRAGDB]:
     kwargs = {"db_path": str(tmp_path / "operations.sqlite"), "client_id": "alice"}
     if request.param == "postgres":
         kwargs["backend"] = DatabaseBackendFactory.create_backend(request.getfixturevalue("pg_database_config"))
@@ -27,17 +35,19 @@ def native_fork_db(request, tmp_path):
         kwargs["backend"].get_pool().close_all()
 
 
-def owner(owner_key="native:alice"):
+def owner(owner_key: str = "native:alice") -> AuthorizedNativeOwner:
     return AuthorizedNativeOwner("alice", owner_key, NativeScopeV1(kind="global"))
 
 
-def workspace_owner():
+def workspace_owner() -> AuthorizedNativeOwner:
     return AuthorizedNativeOwner(
         "alice", "native:alice", NativeScopeV1(kind="workspace", workspace_id="workspace-one")
     )
 
 
-def reserve(db, digest="sha256:one", operation_id="fork-one"):
+def reserve(
+    db: CharactersRAGDB, digest: str = "sha256:one", operation_id: str = "fork-one"
+) -> NativeOperationResult:
     with db.transaction() as conn:
         return db.native_forks.reserve_operation(
             owner(), "native_fork_v1", operation_id, digest, {"title": "A"}, conn=conn
@@ -50,10 +60,11 @@ def test_same_key_replays_original_receipt_and_changed_digest_conflicts(native_f
     assert original.state == "preparing"
     assert reserve(db) == original
     with db.transaction() as conn:
-        with pytest.raises(ValueError, match="operation_id_conflict"):
+        with pytest.raises(NativeForkStoreError, match="operation_id_conflict") as conflict:
             db.native_forks.reserve_operation(
                 owner(), "native_fork_v1", "fork-one", "sha256:changed", {"title": "A"}, conn=conn
             )
+        assert conflict.value.code == "operation_id_conflict"
         with pytest.raises(ValueError, match="operation_owner_mismatch"):
             db.native_forks.resolve_operation(owner("native:other"), "native_fork_v1", "fork-one", "sha256:one", conn=conn)
         assert db.native_forks.resolve_operation(owner(), "native_fork_v1", "fork-one", "sha256:one", conn=conn) == original
