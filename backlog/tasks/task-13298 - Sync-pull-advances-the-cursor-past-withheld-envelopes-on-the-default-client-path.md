@@ -3,9 +3,10 @@ id: TASK-13298
 title: >-
   Sync pull advances the cursor past withheld envelopes on the default client
   path
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-22 04:51'
+updated_date: '2026-09-23 19:34'
 labels:
   - bug
   - sync
@@ -49,6 +50,18 @@ Found by the comprehensive core-module review (Sync reviewer, reproduced end-to-
 - [ ] #3 has_more is computed consistently with the filtered list on both paths
 - [ ] #4 The v2 path's existing test still passes (no regression)
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Duplicate of TASK-13300 (filed twice during the 2026-09-22 review). Work and status are tracked there.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Closed as duplicate of TASK-13300.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

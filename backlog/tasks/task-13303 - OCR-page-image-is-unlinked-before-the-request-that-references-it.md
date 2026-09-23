@@ -1,9 +1,10 @@
 ---
 id: TASK-13303
 title: OCR page image is unlinked before the request that references it
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-22 04:52'
+updated_date: '2026-09-23 19:34'
 labels:
   - bug
   - ingestion
@@ -49,6 +50,18 @@ Found by the comprehensive core-module review; independently verified by the orc
 - [ ] #3 The temp file is removed after the request on both success and failure paths
 - [ ] #4 An empty OCR result no longer counts as success -- zero extracted pages reports failure
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Duplicate of TASK-13307 (filed twice during the 2026-09-22 review). Work and status are tracked there.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Closed as duplicate of TASK-13307.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

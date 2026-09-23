@@ -3,9 +3,10 @@ id: TASK-13313
 title: >-
   create_session_with_retries returns a different class under pytest than in
   production
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-22 04:54'
+updated_date: '2026-09-23 19:34'
 labels:
   - bug
   - llm
@@ -50,6 +51,18 @@ Found by the comprehensive core-module review; independently verified by the orc
 - [ ] #4 A test sets LLM_ADAPTERS_NATIVE_HTTP_<P> to a false value and asserts the documented behaviour rather than an unhandled RuntimeError
 - [ ] #5 The 14 provider call sites no longer short-circuit their own kill switch under test
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Duplicate of TASK-13316 (filed twice during the 2026-09-22 review). Work and status are tracked there.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Closed as duplicate of TASK-13316.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
