@@ -79,7 +79,6 @@ RAW_SQL_BASELINE: dict[str, int] = {
     "notes.py": 2,
     "outputs_templates.py": 1,
     "prompt_studio/prompt_studio_evaluations.py": 8,
-    "prompt_studio/prompt_studio_status.py": 2,
     "sync.py": 7,
     "users.py": 4,
     "vector_stores_openai.py": 1,
