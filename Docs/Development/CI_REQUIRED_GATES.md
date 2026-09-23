@@ -73,15 +73,29 @@ four were landed with the procedure below.
 ### Configuration change, 2026-09-23
 
 `LICENSE_FIRST_CI_ENABLED=true` was set at 05:14:57Z, which is the first of the two
-resolutions TASK-13355 offers. `admission` will now run on `workflow_run` events instead
-of skipping, so the observations above describe the *previous* configuration.
+resolutions TASK-13355 offers. It was then tested on PR #2988 and **it does not unblock
+pull requests.** What it changes and what it does not:
 
-Whether that makes the gates report has **not** been confirmed yet -- it needs one PR to
-pass through and be watched. Use the check below rather than assuming either way. Two
-things could still go wrong: admission may *deny* a PR, in which case the gates skip by
-design and the PR cannot merge, or the pull-request run may still be cancelled while the
-admitted run does the work, which is the intended behaviour but only helps if the
-admitted run actually reports.
+- `admission` now succeeds instead of skipping. Confirmed: run `35821927623`
+  (`event=workflow_run`, created 05:19:24Z) shows `admission / admission:
+  completed/success`, where the same job was `SKIPPED` before.
+- The admitted run then does the real work and passes. Confirmed: the same run reached
+  `completed/success` on all three jobs including `backend-required` itself.
+- **But its status never reaches the pull request.** That run's `head_sha` is
+  `c2bab8a5`, the tip of `main`, not the PR head `116c9314`. `gh pr checks 2988` still
+  lists exactly one check named `backend-required`, the `CANCELLED` one from the
+  `pull_request` run.
+
+The cause is a permissions asymmetry. `frontend-license-gate.yml` holds
+`statuses: write` and posts its status explicitly against the PR head, which is why
+`frontend-license-policy/trusted/dev` does appear on the PR. The six required workflows
+hold only `contents: read` and rely on GitHub's implicit check run, which attaches to
+their own `head_sha` -- and for a `workflow_run` event that is the default branch.
+
+So only the `pull_request` run can report to a pull request, and that is the run the
+admitted one cancels. Enabling the variable makes each PR run the gates twice, neither
+occurrence of which unblocks it. **This is a design gap, not a configuration gap**, which
+is why resolution A alone is insufficient.
 
 ### Mechanism
 
@@ -114,19 +128,34 @@ is given.
 The run that would have reported a status was cancelled by a run that then reported
 nothing.
 
-### Checking whether this is still happening
+### Checking the current state
 
-Do not trust the prose above; check. The signature is a required workflow running on
-`workflow_run` and skipping:
+Do not trust the prose above; check. The question that matters is whether the six
+required check *names* reach a conclusion on the pull request, so ask the pull request:
 
 ```bash
-gh api "repos/rmusser01/tldw_server/actions/runs?event=workflow_run&per_page=20" \
-  --template '{{range .workflow_runs}}{{.name}} {{.status}}/{{.conclusion}}{{"\n"}}{{end}}' \
+gh pr checks <pr> --json name,state \
+  --template '{{range .}}{{.state}} {{.name}}{{"\n"}}{{end}}' \
   | grep -E "required|container-build-check"
 ```
 
-`completed/skipped` for the required lanes means the admission path is declining to do
-the work, and gates will not report. Anything else means it is live.
+- `SUCCESS` for all six: gates are reporting, nothing to work around.
+- `CANCELLED`: the run that would have reported was superseded. Use the landing
+  procedure below.
+- A name missing entirely: that lane never started for this head.
+
+To see whether the admitted path is doing the work, and against which commit:
+
+```bash
+gh api "repos/rmusser01/tldw_server/actions/runs?event=workflow_run&per_page=20" \
+  --template '{{range .workflow_runs}}{{.name}} {{.conclusion}} {{.head_sha}}{{"\n"}}{{end}}' \
+  | grep -E "required|container-build-check"
+```
+
+`skipped` means admission is declining. A conclusion paired with a `head_sha` that is the
+default-branch tip rather than the PR head means the work ran but the status landed
+somewhere the pull request cannot see -- which is the state recorded above for
+2026-09-23.
 
 ### Landing a pull request when gates do not report
 
