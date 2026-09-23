@@ -3,10 +3,10 @@ id: TASK-13354
 title: >-
   SQL backends cannot signal WHICH failure occurred; typed exceptions, not
   message changes
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-23 02:35'
-updated_date: '2026-09-23 02:55'
+updated_date: '2026-09-23 03:31'
 labels:
   - db
   - diagnostics
@@ -66,24 +66,46 @@ Source: found while fixing TASK-13352/13344 follow-ups; corrected twice while at
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Callers can distinguish a constraint violation from other backend failures without re-running the query
-- [ ] #2 Done via typed exceptions; the redacted message strings and their anchored tests are unchanged
+- [x] #1 Callers can distinguish a constraint violation from other backend failures without re-running the query
+- [x] #2 Done via typed exceptions; the redacted message strings and their anchored tests are unchanged
 - [ ] #3 profile.py:552's blanket remap to personal_context_snapshot_unavailable is assessed separately
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-CORRECTION to the description: one sentence lost its content to shell backtick substitution when this task was filed. It should read:
+AC1 and AC2 DONE in bcf6e2b5ed. AC3 (profile.py:552) is left open deliberately -- see below.
 
-Fix is small: raise the wrapper with a 'raise ... from exc' chain so the original is preserved, and ideally include the driver message in the wrapper text. Callers that deliberately hide SQL from logs can still do so -- chaining does not force anything into a log line, it just stops the information being destroyed.
+WHAT SHIPPED. ConstraintViolationError sits between DatabaseError and UniqueConstraintError in backends/base.py, so:
+    except DatabaseError            catches everything it did before
+    except UniqueConstraintError    catches exactly what it did before
+    except ConstraintViolationError is new, and catches both
+SQLite maps sqlite3.IntegrityError (CHECK, NOT NULL, FOREIGN KEY, UNIQUE). PostgreSQL maps SQLSTATE class 23, with 23505 still preferring UniqueConstraintError. No message anywhere was changed.
+
+TWO EARLIER ATTEMPTS WERE WRONG AND WERE REVERTED, not shipped:
+1. 'raise ... from exc', this task's original proposal, would reintroduce precisely the leak the redaction pattern exists to prevent. The raise sits OUTSIDE the except block behind a redacted_failure flag on purpose.
+2. Appending the driver class to the message -- 'SQLite query execution failed (IntegrityError)' -- leaks no data and was implemented and working, then reverted on discovering that test_media_postgres_support.py:328,356 and test_postgres_unique_conflict.py:94,160 pin the strings with ^anchors^ and equality. Those assertions exist to guarantee the message is bare; changing it is a security-contract decision, not a refactor.
+
+VERIFIED, not assumed:
+- a sensitive parameter value and the SQL text appear nowhere in the raised error, and __cause__ is still None with context suppressed
+- the three message-pinning files still pass (47 tests)
+- the one real hazard of widening a base class, exact-type comparisons: the two 'type(x) is DatabaseError' assertions in the tree use the db_errors class rather than the backend one, and pass (116 tests)
+- DB_Management 23 failed / 3059 passed, IDENTICAL failure set with and without the change (baseline taken by restoring all three files from HEAD and re-running just the 23). Those 23 are pre-existing.
+
+AC3 LEFT OPEN. core/Sync/v2/profile.py:552 maps any unrecognised SyncStoreError to 'personal_context_snapshot_unavailable'. It has no redaction justification -- SyncStoreError messages are the product's own -- and it hid two real bugs for weeks (TASK-13351). It is the stronger candidate for change, but it is a Sync-layer decision rather than a DB-backend one, so it should not ride along on this commit.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Constraint violations are now distinguishable by exception type, using the mechanism the module already had for uniqueness, with every redacted message and its anchored tests untouched. Two more obvious fixes were implemented and reverted first: chaining reintroduces the leak the pattern prevents, and appending the driver class breaks assertions that exist to guarantee the message is bare.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
 - [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
