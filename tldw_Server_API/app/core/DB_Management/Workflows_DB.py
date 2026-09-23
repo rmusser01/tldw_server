@@ -677,6 +677,24 @@ class WorkflowsDatabase:
         except _WORKFLOWS_DB_NONCRITICAL_EXCEPTIONS as e:
             logger.warning(f"Failed to enable WAL on workflows DB: {e}")
 
+    def health_probe(self) -> dict[str, int | None]:
+        """Run a trivial query; report schema/expected versions (backend deployments only).
+
+        Raises on connectivity failure. A failure to read the version is not fatal.
+        """
+        if not self._using_backend():
+            self._conn.cursor().execute("SELECT 1").fetchone()
+            return {"schema_version": None, "expected_version": None}
+        with self.backend.transaction() as conn:  # type: ignore[union-attr]
+            self._execute_backend("SELECT 1", None, connection=conn)
+            try:
+                return {
+                    "schema_version": int(self._get_backend_schema_version(conn)),
+                    "expected_version": int(self._CURRENT_SCHEMA_VERSION),
+                }
+            except Exception:  # noqa: BLE001 - version is informational
+                return {"schema_version": None, "expected_version": None}
+
     def _get_backend_schema_version(self, conn) -> int:
         if not self.backend:
             return 0

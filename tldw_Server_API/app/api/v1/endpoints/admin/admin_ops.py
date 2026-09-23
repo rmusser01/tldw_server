@@ -4,7 +4,7 @@ import asyncio
 import os
 import time
 from collections.abc import Awaitable
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Callable
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -42,6 +42,7 @@ from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
     WebhookUpdateRequest,
 )
 from tldw_Server_API.app.api.v1.schemas.auth_schemas import MessageResponse
+from tldw_Server_API.app.core.AuthNZ import compliance_stats
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.rbac_repo import AuthnzRbacRepo
@@ -1311,28 +1312,12 @@ async def get_compliance_posture(
     _require_platform_admin(principal)
 
     pool = await get_db_pool()
-    is_pg = bool(getattr(pool, "pool", None))
 
     # --- MFA adoption ----------------------------------------------------------
     mfa_enabled = 0
     total_users = 0
     try:
-        if is_pg:
-            row = await pool.fetchone(
-                "SELECT COUNT(*) AS total,"
-                " COUNT(*) FILTER (WHERE COALESCE(two_factor_enabled, FALSE) = TRUE) AS mfa_on"
-                " FROM users WHERE is_active = TRUE"
-            )
-        else:
-            row = await pool.fetchone(
-                "SELECT COUNT(*) AS total,"
-                " SUM(CASE WHEN COALESCE(two_factor_enabled, 0) = 1 THEN 1 ELSE 0 END) AS mfa_on"
-                " FROM users WHERE is_active = 1"
-            )
-        if row:
-            r = dict(row) if hasattr(row, "keys") or isinstance(row, dict) else {"total": row[0], "mfa_on": row[1]}
-            total_users = int(r.get("total") or 0)
-            mfa_enabled = int(r.get("mfa_on") or 0)
+        total_users, mfa_enabled = await compliance_stats.mfa_adoption(pool)
     except Exception:
         logger.warning("compliance/posture: MFA query failed")
 
@@ -1342,27 +1327,8 @@ async def get_compliance_posture(
     keys_needing_rotation = 0
     rotation_threshold_days = 180
     try:
-        now = datetime.now(timezone.utc)
-        if is_pg:
-            row = await pool.fetchone(
-                "SELECT COUNT(*) AS total,"
-                " COUNT(*) FILTER (WHERE created_at >= $1) AS compliant"
-                " FROM api_keys WHERE status = 'active'",
-                now - timedelta(days=rotation_threshold_days),
-            )
-        else:
-            threshold_iso = (now - timedelta(days=rotation_threshold_days)).isoformat()
-            row = await pool.fetchone(
-                "SELECT COUNT(*) AS total,"
-                " SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS compliant"
-                " FROM api_keys WHERE status = 'active'",
-                threshold_iso,
-            )
-        if row:
-            r = dict(row) if hasattr(row, "keys") or isinstance(row, dict) else {"total": row[0], "compliant": row[1]}
-            keys_total = int(r.get("total") or 0)
-            keys_compliant = int(r.get("compliant") or 0)
-            keys_needing_rotation = keys_total - keys_compliant
+        keys_total, keys_compliant = await compliance_stats.api_key_rotation(pool, rotation_threshold_days)
+        keys_needing_rotation = keys_total - keys_compliant
     except Exception:
         logger.warning("compliance/posture: API key rotation query failed")
 

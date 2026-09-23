@@ -1576,6 +1576,12 @@ class DatabasePool:
                 row = await cursor.fetchone()
                 return row[0] if row else None
 
+    async def sqlite_has_table(self, name: str) -> bool:
+        """Whether a SQLite AuthNZ database has this table (always False on PostgreSQL)."""
+        if self.pool is not None:
+            return False
+        return await self.fetchval("SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?", name) is not None
+
     @asynccontextmanager
     async def acquire_openai_credential_lock_connection(
         self,

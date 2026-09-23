@@ -412,6 +412,13 @@ class TestDocumentGeneratorService:
             "custom_prompt": "Custom summary prompt",
         }
 
+    def test_has_custom_prompt_reflects_saved_active_prompt(self, service, real_db):
+        """What the prompt-config endpoint reports as is_custom (TASK-13317)."""
+        assert service.has_custom_prompt(DocumentType.SUMMARY) is False
+        assert service.save_user_prompt_config(DocumentType.SUMMARY, "System", "User")
+        assert service.has_custom_prompt(DocumentType.SUMMARY) is True
+        assert service.has_custom_prompt(DocumentType.QA) is False
+
     def test_get_prompt_config(self, service, real_db):
 
         """Test retrieving custom prompt configuration."""

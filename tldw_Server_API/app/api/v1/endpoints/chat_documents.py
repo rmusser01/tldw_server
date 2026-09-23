@@ -1126,12 +1126,7 @@ async def get_prompt_config(
 
         is_custom = False
         try:
-            with db.get_connection() as conn:
-                cursor = conn.execute(
-                    "SELECT 1 FROM user_prompts WHERE document_type = ? AND is_active = 1",
-                    (doc_type.value,),
-                )
-                is_custom = cursor.fetchone() is not None
+            is_custom = service.has_custom_prompt(doc_type)
         except sqlite3.OperationalError as e:
             logger.warning(
                 "Database operational error checking custom prompts error_type={}",

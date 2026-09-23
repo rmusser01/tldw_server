@@ -497,6 +497,15 @@ class DocumentGeneratorService:
 
         return context
 
+    def has_custom_prompt(self, document_type: DocumentType) -> bool:
+        """Whether the user saved an active custom prompt for this document type."""
+        with self.db.get_connection() as conn:
+            cursor = conn.execute(
+                "SELECT 1 FROM user_prompts WHERE document_type = ? AND is_active = 1",
+                (document_type.value,),
+            )
+            return cursor.fetchone() is not None
+
     def get_user_prompt_config(self, document_type: DocumentType) -> dict[str, Any]:
         """
         Get user-specific prompt configuration or default.
