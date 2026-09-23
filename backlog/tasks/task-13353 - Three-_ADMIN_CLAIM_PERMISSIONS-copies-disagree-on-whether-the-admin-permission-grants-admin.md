@@ -3,9 +3,10 @@ id: TASK-13353
 title: >-
   Three _ADMIN_CLAIM_PERMISSIONS copies disagree on whether the 'admin'
   permission grants admin
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-23 01:21'
+updated_date: '2026-09-23 07:55'
 labels:
   - authnz
   - security
@@ -39,17 +40,23 @@ Source: TASK-13345.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A single decision is recorded for whether the 'admin' permission confers administrator status
-- [ ] #2 The permission sets agree, or each divergence carries a stated reason
-- [ ] #3 ADR-048's MCP divergence still holds
+- [x] #1 A single decision is recorded for whether the 'admin' permission confers administrator status
+- [x] #2 The permission sets agree, or each divergence carries a stated reason
+- [x] #3 ADR-048's MCP divergence still holds
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Decided and done: the 'admin' permission is the service-account admin grant (service tokens have no roles) and is honoured everywhere AuthNZ decides platform admin. All 25 copies of the permission set, three of them inline literals, now use one canonical set with the role/permission distinction documented; MCP stays narrower per ADR-048.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
