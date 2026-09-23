@@ -4,12 +4,15 @@ title: 144 MCP_unified test files run in no CI job
 status: To Do
 assignee: []
 created_date: '2026-09-22 04:34'
-updated_date: '2026-09-22 15:29'
+updated_date: '2026-09-23 15:05'
 labels:
   - ci
   - mcp
   - testing
-dependencies: []
+dependencies:
+  - TASK-13356
+  - TASK-13357
+  - TASK-13358
 references:
   - '.github/workflows/ci.yml:1759'
   - 'pyproject.toml:638'
@@ -46,24 +49,52 @@ Found by the comprehensive core-module review; independently verified by the orc
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-TRIAGE (2026-09-22), per this task's own requirement not to gate blind.
+TRIAGE DONE (2026-09-23), which this task required before gating. Two fixes shipped; the
+gate itself is blocked on 13 remaining failures, now all filed.
 
-Collection is healthy: 3,351 tests collect from tldw_Server_API/app/core/MCP_unified/tests in 6.4s.
+BASELINE, app/core/MCP_unified/tests on dev 91e8bbf: 14 failed, 8 errors, 3324 passed,
+5 skipped. After the two fixes below: 13 failed, 0 errors, 3325 passed, 13 skipped.
 
-But the tree CANNOT currently be run as a single pytest session. It aborts partway with a native error:
-  libc++abi: terminating due to uncaught exception of type std::__1::system_error: recursive_mutex lock failed: Invalid argument
-No summary line is produced. Run file-by-file it is fine -- test_filesystem_module.py alone gives 103 passed plus the one known red test -- so this is a cross-test interaction, not a single bad test. Reproduced on macOS/py3.12; unknown on the Linux runners.
+FIX 1 -- 8 of the 22 were not regressions. build_standalone_distributions runs
+`python -m build --no-isolation` under PIP_NO_INDEX=1, so every build-system requirement
+must be installed WITH dist-info metadata. A venv where setuptools is importable but
+unregistered makes the build fail with "Backend 'setuptools.build_meta' is not
+available", and every dependent test ERRORed. test_runtime_package_boundary already had a
+guard but called it at one site only -- its module-scoped fixture built without it, and
+test_gateway_protocol_artifact_consumer had no guard at all. The check now lives in the
+shared helper both build through. Verified conditional: skips when metadata is absent,
+does not skip when present, so CI still runs these.
 
-Second blocker, independent: test_runtime_package_boundary.py shells out to 'python -m build' and fails with "Backend 'setuptools.build_meta' is not available". That is environment-dependent and would need the build backend present on the runner, or those tests marked and excluded.
+FIX 2 -- test_filesystem_glob_marks_file_size_unavailable, the test this task cites as
+proof of the gap (red since 5009fc8b95, 2026-06-03), is green. The size block already
+tolerated OSError, but candidate.is_symlink() above it was bare; on 3.12 that routes
+through Path.stat(follow_symlinks=False), the same call the size block guards. One
+unreadable entry aborted the whole fs.glob. Probed: removing the guard turns it red again.
 
-CONSEQUENCE FOR THIS TASK: adding the tree to the platform-mcp-core shard is NOT the one-line change the original description assumed. The gating path is:
-  1. Reproduce the native abort on a Linux runner (it may be macOS-only).
-  2. If it reproduces, shard the tree so no single session runs all 3,351, or isolate the interacting tests.
-  3. Decide on test_runtime_package_boundary.py: install the build backend on the runner, or mark those tests and exclude them.
-  4. Fix or quarantine test_filesystem_glob_marks_file_size_unavailable (red since 2026-06-03, finding mcp-unified-5, unguarded is_symlink at filesystem_module.py:1778).
-  5. Only then add the paths to the shard.
+TWO SECURITY/LICENSING FINDINGS, both invisible because of exactly this gap:
+- TASK-13357 (high, supply-chain): mcp-unified-publish.yml's publish-pypi job has a
+  `github.event_name == 'push'` branch requiring neither target == 'pypi' nor the
+  confirm_publish typed string the manual path requires, the pypi environment has
+  protection_rules: [] (no reviewers), and publish-testpypi has no push branch. So a
+  merge to main that bumps apps/mcp-unified/pyproject.toml publishes to production PyPI
+  with no confirmation and without staging to TestPyPI.
+  test_mcp_unified_publish_workflow_is_manual_and_gated exists to prevent this and is red.
+- TASK-13356 (high, licensing): apps/mcp-unified/LICENSE ships full GPL-3.0 text. The
+  project is GPL-2.0 (9a34da262a) and the root LICENSE became a licensing-boundary
+  document in da0ec87d7d (TASK-12976), so the shipped file matches neither.
 
-Related evidence: the shard-coverage guard reports baseline=130 test files already grandfathered as unshared repo-wide, so this tree is the largest instance of a standing problem rather than a one-off.
+REMAINING 13, all filed:
+- 5 in test_runtime_package_boundary: 1 -> TASK-13356, 4 -> TASK-13357.
+- 8 others -> TASK-13358, with a per-test triage table. Flagged first:
+  test_flashcards_export_rejects_cross_workspace_card_in_apkg_path fails with
+  KeyError 'rows' before reaching its isolation check, so that cross-workspace property
+  is currently unverified in either direction.
+
+THE SHARD CHANGE IS NOT IN THIS PR. Gating the tree requires the 13 resolved, and two of
+them are owner decisions (what licence the published artifact carries; whether a
+version-bump push is meant to publish). Adding the shard now would mean either a red
+required gate or 13 xfails -- and batch-xfailing them would reproduce the invisibility
+this task exists to end. Blocked on TASK-13356, TASK-13357, TASK-13358.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
