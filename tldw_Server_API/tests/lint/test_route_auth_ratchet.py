@@ -55,7 +55,7 @@ def _baseline_entries() -> list[str]:
 class _FakeDependant:
     """Minimal stand-in for a FastAPI ``Dependant`` for traversal tests."""
 
-    def __init__(self, call: object | None, dependencies: list["_FakeDependant"] | None = None):
+    def __init__(self, call: object | None, dependencies: list[_FakeDependant] | None = None):
         self.call = call
         self.dependencies = dependencies or []
 

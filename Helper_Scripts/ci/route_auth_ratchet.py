@@ -26,8 +26,9 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BASELINE_PATH = Path(__file__).resolve().parent / "route_auth_baseline.txt"
