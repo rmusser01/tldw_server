@@ -4,7 +4,7 @@ title: Plan and implement paired Docker distribution and runtime gateway
 status: In Progress
 assignee: []
 created_date: '2026-09-23 06:15'
-updated_date: '2026-09-23 06:23'
+updated_date: '2026-09-23 06:31'
 labels:
   - distribution
   - docker
@@ -43,6 +43,8 @@ Execute the eight tasks and four stages in Docs/superpowers/plans/2026-09-22-com
 Written specification approved on 2026-09-22. Planning WP1 as a separate reviewable slice; initial codebase mapping found build-time Next rewrites, fixed CSRF cookie names in backend/browser, and existing Docker Compose dependency on source checkout plus Postgres/Redis. The WP1 plan will cover those boundaries and local CI artifact qualification; publication remains gated.
 
 WP1 implementation plan completed and self-reviewed: four stages, eight tasks, file/interface map, TDD steps, exact commands, and G2/G4/G10/relevant-G12 mapping. Corrected CSRF accessor signature, WebSocket upgrade authorization, and release signing responsibility. Verified plan structure, placeholders, whitespace and scoped diff. Documentation/task-only update: application tests and Bandit do not apply to this planning commit. Implementation criteria AC2-AC4 remain open.
+
+In isolated worktree codex/complete-app-wp1, Task 1 signed-manifest verifier implemented test-first. The focused test first failed because the Release module was absent, then passed 15 cases after implementation. Existing release-helper baseline passed 43 tests. Black formatting applied; Bandit found 0 issues in new Release source. The verifier uses only stdlib plus cryptography so WP3 can package its single maintained source in the small launcher without importing the backend; the plan records this handoff. WP1 implementation remains in progress.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

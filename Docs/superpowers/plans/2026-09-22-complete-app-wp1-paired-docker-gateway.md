@@ -26,7 +26,7 @@
 
 | Unit | Files and responsibility |
 | --- | --- |
-| Release contract | `tldw_Server_API/app/core/Release/manifest.py` parses/verifies exact manifest bytes, signature, platform, compatibility, and artifact digests; `tldw_Server_API/tests/Release/test_manifest.py` covers tampering/keys/platforms. `tldw_Server_API/scripts/app_bundle_control.py` is its narrow container CLI. `Dockerfiles/app-bundle/manifest.schema.json` documents canonical fields. |
+| Release contract | `tldw_Server_API/app/core/Release/manifest.py` parses/verifies exact manifest bytes, signature, platform, compatibility, and artifact digests using only the standard library and `cryptography`; `tldw_Server_API/tests/Release/test_manifest.py` covers tampering/keys/platforms. `tldw_Server_API/scripts/app_bundle_control.py` is its narrow container CLI. `Dockerfiles/app-bundle/manifest.schema.json` documents canonical fields. WP3's launcher build must package this same source under its own namespace and prove its hash matches; the launcher must not import `tldw_Server_API`. |
 | Managed WebUI mode | `apps/tldw-frontend/scripts/validate-networking-config.mjs`, `next.config.mjs`, `pages/api/_tldw-webui/runtime-auth-policy.ts`, `runtime-config.ts`, and shared `apps/packages/ui/src/services/tldw/browser-networking.ts` plus their existing tests. Managed browser requests stay same origin; the private backend origin is read by server code at runtime. |
 | Instance cookie names | `tldw_Server_API/app/core/AuthNZ/settings.py` and `csrf_protection.py` supply a configurable CSRF cookie name; Next `session.ts` filters the configured names; shared/browser request call sites read one runtime cookie-name accessor. Tests cover two instances on one host. |
 | Gateway | `apps/tldw-frontend/gateway/routes.mjs` classifies destinations; `gateway/server.mjs` validates Host/Origin, strips untrusted forwarding/control headers, injects one private gateway hop token to Next, proxies HTTP/upgrade, and serves a bounded status/maintenance response; `gateway/__tests__/*.test.mjs` exercises real local upstreams. |
@@ -40,7 +40,7 @@ The code paths above are the planned ownership boundaries. If an existing helper
 **Goal:** Define verified pairing and build a standalone WebUI whose browser API URLs do not depend on private build-time ports.
 **Success Criteria:** A signed test manifest rejects tampering and wrong platform; the managed Next build contains no private backend rewrite or public key; one build works against two private backend origins.
 **Tests:** Manifest pytest; networking and Next config tests; runtime-config/session Vitest; standalone asset inspection.
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 1: Define and verify the paired release manifest
 
@@ -48,7 +48,7 @@ The code paths above are the planned ownership boundaries. If an existing helper
 
 **Interfaces:** `verify_manifest(manifest_bytes: bytes, signature_bytes: bytes, trusted_keys: Mapping[str, bytes], *, platform: str, current_version: str | None = None) -> ReleaseManifest`; `verify_artifact(path: Path, artifact: Artifact) -> None`. `ReleaseManifest` exposes typed `version`, `source_commit`, `platforms`, `artifacts`, `compatibility`, and `qualifications` fields. Later control/helper tasks consume these exact interfaces.
 
-- [ ] **Step 1: Write failing tests** for a valid Ed25519 fixture and for one-byte tampering, unknown signer, duplicate artifact IDs, wrong `linux/arm64` tuple, missing role/digest/size, and an escaping artifact path. Example:
+- [x] **Step 1: Write failing tests** for a valid Ed25519 fixture and for one-byte tampering, unknown signer, duplicate artifact IDs, wrong `linux/arm64` tuple, missing role/digest/size, and an escaping artifact path. Example:
 
   ```python
   def test_wrong_platform_is_rejected(signed_manifest, trusted_keys):
@@ -56,17 +56,17 @@ The code paths above are the planned ownership boundaries. If an existing helper
           verify_manifest(*signed_manifest, trusted_keys, platform="linux/arm64")
   ```
 
-- [ ] **Step 2: Run** `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Release/test_manifest.py -q`; expect the import/test to fail before adding implementation.
-- [ ] **Step 3: Implement** strict JSON field/type validation, exact-byte signature verification via `cryptography.hazmat.primitives.asymmetric.ed25519`, trusted key lookup by signer ID, platform/upgrade checks, SHA-256 streaming verification, and rejection of non-canonical paths. Schema requires all identity, compatibility, artifact, dependency/data, and qualification field groups from spec section 11. It must reject unknown schema versions and duplicate JSON keys.
+- [x] **Step 2: Run** `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Release/test_manifest.py -q`; expect the import/test to fail before adding implementation.
+- [x] **Step 3: Implement** strict JSON field/type validation, exact-byte signature verification via `cryptography.hazmat.primitives.asymmetric.ed25519`, trusted key lookup by signer ID, platform/upgrade checks, SHA-256 streaming verification, and rejection of non-canonical paths. Schema requires all identity, compatibility, artifact, dependency/data, and qualification field groups from spec section 11. It must reject unknown schema versions and duplicate JSON keys.
 
   ```python
   public_key = Ed25519PublicKey.from_public_bytes(trusted_keys[signer_id])
   public_key.verify(signature_bytes, manifest_bytes)
-  return ReleaseManifest.from_mapping(parsed, platform=platform, current_version=current_version)
+  return _manifest(parsed, platform=platform, current_version=current_version)
   ```
 
-- [ ] **Step 4: Run** the same pytest file; expect pass. Then run `python -m bandit -r tldw_Server_API/app/core/Release -f json -o /tmp/bandit_task13343_manifest.json` in the activated venv and inspect findings.
-- [ ] **Step 5: Commit** only these files and the current TASK-13343/plan progress with `feat: verify paired application release manifests (TASK-13343)`.
+- [x] **Step 4: Run** the same pytest file; expect pass. Then run `python -m bandit -r tldw_Server_API/app/core/Release -f json -o /tmp/bandit_task13343_manifest.json` in the activated venv and inspect findings.
+- [x] **Step 5: Commit** only these files and the current TASK-13343/plan progress with `feat: verify paired application release manifests (TASK-13343)`.
 
 ### Task 2: Add a managed same-origin WebUI build mode
 
@@ -165,7 +165,7 @@ The code paths above are the planned ownership boundaries. If an existing helper
 
 **Interfaces:** `app_bundle_control init --state /state --manifest /bundle/manifest.json --signature /bundle/manifest.sig --platform linux/amd64|linux/arm64` verifies first, then creates private config if absent; `verify` checks exact image/artifact digests and compatibility without changing state. Config records stable Compose project ID, unique session/CSRF names, API key, gateway hop secret, and pinned image references. Control exits nonzero if existing state conflicts with the signed release.
 
-- [ ] **Step 1: Write failing pytest** using a temporary state directory: first init creates mode-0600 files, second init leaves keys byte-identical, malformed signature leaves state untouched, existing data with mismatched identity is rejected, and no secret appears in stdout. Add a Dockerfile content test that checks Node 24 and copied standalone `public`/`static` assets.
+- [ ] **Step 1: Write failing pytest** using a temporary state directory: first init creates mode-0600 files, second init leaves keys byte-identical, malformed signature leaves state untouched, existing data with mismatched identity is rejected, and no secret appears in stdout. The later image smoke must execute Node 24 and request a copied `public`/`static` asset from the running WebUI; inspecting Dockerfile text is insufficient.
 
   ```python
   first = initialize_bundle(state_dir, verified_release)
@@ -239,6 +239,6 @@ The code paths above are the planned ownership boundaries. If an existing helper
 
 ## Plan self-review checklist
 
-- Sections 5/10/11 and gates G2/G4/G10/G12 map to Tasks 1–8. Backend dependency slimming and complete storage inventory are WP2; native lifecycle is WP3; automatic update/backup/restore is WP4; guided heavy components and final public promotion are WP5.
+- Sections 5/10/11 and gates G2/G4/G10/G12 map to Tasks 1–8. Backend dependency slimming and complete storage inventory are WP2; native lifecycle and the single-source verifier packaging check are WP3; automatic update/backup/restore is WP4; guided heavy components and final public promotion are WP5.
 - Verify exact code symbols in the interface blocks when implementing each task; preserve existing quickstart/hosted paths and test both managed and legacy modes.
 - Do not claim G2/G4/G10/G12 complete until candidate artifacts pass the corresponding tests. This plan is executable work, not evidence that they already pass.

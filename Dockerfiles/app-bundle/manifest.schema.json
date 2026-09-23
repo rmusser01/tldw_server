@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "tldw complete-application release manifest v1",
+  "description": "The detached Ed25519 signature covers the exact UTF-8 bytes of this document. Runtime validation is implemented by tldw_Server_API.app.core.Release.manifest.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "version", "source_commit", "created_at", "channel", "signer_id", "platforms", "compatibility", "artifacts", "dependencies", "data", "qualifications"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$"},
+    "source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "channel": {"type": "string", "minLength": 1},
+    "signer_id": {"type": "string", "minLength": 1},
+    "platforms": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z0-9_]+/[a-z0-9_]+$"}},
+    "compatibility": {
+      "type": "object", "additionalProperties": false,
+      "required": ["min_launcher", "python_version", "node_version", "backend_generation", "browser_generation", "allowed_upgrade_sources", "components"],
+      "properties": {
+        "min_launcher": {"type": "string"}, "python_version": {"type": "string"}, "node_version": {"type": "string"},
+        "backend_generation": {"type": "integer", "minimum": 1}, "browser_generation": {"type": "integer", "minimum": 1},
+        "allowed_upgrade_sources": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}},
+        "components": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}}
+      }
+    },
+    "artifacts": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "kind", "role", "platform", "location", "size_bytes", "installed_size_bytes", "sha256"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1}, "kind": {"enum": ["file", "oci"]},
+          "role": {"type": "string", "minLength": 1}, "platform": {"type": "string"},
+          "location": {"type": "string", "minLength": 1}, "path": {"type": "string", "minLength": 1},
+          "image_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+          "size_bytes": {"type": "integer", "minimum": 1}, "installed_size_bytes": {"type": "integer", "minimum": 1},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        },
+        "allOf": [
+          {"if": {"properties": {"kind": {"const": "file"}}}, "then": {"required": ["path"], "not": {"required": ["image_digest"]}}},
+          {"if": {"properties": {"kind": {"const": "oci"}}}, "then": {"required": ["image_digest"], "not": {"required": ["path"]}}}
+        ]
+      }
+    },
+    "dependencies": {
+      "type": "object", "additionalProperties": false, "required": ["lock_digests"],
+      "properties": {"lock_digests": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}}
+    },
+    "data": {
+      "type": "object", "additionalProperties": false,
+      "required": ["inventory_schema", "migration_generation", "rollback_eligible", "component_catalog_digest"],
+      "properties": {
+        "inventory_schema": {"type": "integer", "minimum": 1}, "migration_generation": {"type": "integer", "minimum": 1},
+        "rollback_eligible": {"type": "boolean"}, "component_catalog_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "qualifications": {
+      "type": "object", "additionalProperties": false, "required": ["gates", "evidence_links"],
+      "properties": {
+        "gates": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "boolean"}},
+        "evidence_links": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+      }
+    }
+  }
+}
