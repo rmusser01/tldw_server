@@ -4,7 +4,7 @@ title: 144 MCP_unified test files run in no CI job
 status: In Progress
 assignee: []
 created_date: '2026-09-22 04:34'
-updated_date: '2026-09-23 19:38'
+updated_date: '2026-09-23 23:10'
 labels:
   - ci
   - mcp
@@ -57,6 +57,8 @@ VERIFICATION: extracted the exact paths value from the parsed YAML and ran the r
 QUARANTINE: 10 files were ALREADY red when the tree was wired in (21 entries total) and carry --ignore with a comment saying the list may only shrink. 13 of those 21 are the two distribution-building files, which build sdists and shell out and do not belong in a unit shard anyway. The other 8 are genuine product/test drift accumulated while the tree was unwatched - e.g. refresh_token() missing a required positional argument, a changed result shape (KeyError: rows). Follow-up task filed to drain the quarantine.
 
 2026-09-23 reconciliation: AC1 met (prior note records the local run and triage: 21 red entries in 10 files, categorized; quarantine since fully drained by TASK-13343, 9c21dc31bf/64c253c0c3). AC2 met (filesystem_module.py:1777-1789 wraps candidate.is_symlink() in except OSError; test_filesystem_glob_marks_file_size_unavailable passes today). AC3 met (own shard platform-mcp-inapp added beside platform-mcp-core in all 5 matrix copies of ci.yml, e.g. :1771; runs the whole tree with no --ignore). Caveat: like platform-mcp-core, the full-suite shards feed 'Full Suite (Ubuntu / Python 3.12)', not one of the six rulesets checks in CI_REQUIRED_GATES.md (backend-required only runs tests/unit). AC5 met (ci.yml comment at :1761-1770 explains the in-app tree vs tests/MCP_unified and why they are separate shards; not mirrored in Docs/). AC4 NOT met: only a local run of the shard command is recorded (2948 passed, and that was with the since-removed quarantine); commits 7c348a05ae/9c21dc31bf are not on any remote branch, so no CI run of platform-mcp-inapp exists yet. Bandit on filesystem_module.py: no issues.
+
+2026-09-23 (post-quarantine-drain) local re-run of the exact CI shard command (DATABASE_URL=sqlite:///./Databases/users.db, TEST_DATABASE_URL/POSTGRES_TEST_DB unset, -p pytest_asyncio.plugin -m 'not jobs and not e2e', PYTEST_DISABLE_PLUGIN_AUTOLOAD=1) on tldw_Server_API/app/core/MCP_unified/tests at ea1cbc6941+: exit 0, 3343 passed, 14 skipped, 0 failed, wall 179s serial; slowest single test 2.9s. Sizing: ~3 min locally vs the 60-minute shard timeout, so one shard is ample even at a 5-10x CI slowdown; no split needed. check_shard_coverage.py: OK (new_uncovered=0). AC4 still open: it needs a real CI run, which needs this branch pushed (commits are local-only; gh run list for fix/core-module-review-batch-1 returns nothing). Not pushed by this agent - pushing is the owner's call. Once pushed, record the 'Full Suite shard (Ubuntu / Python 3.12 / platform-mcp-inapp)' result here and close.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
