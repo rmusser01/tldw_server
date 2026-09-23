@@ -6464,11 +6464,16 @@ def _get_knowledge_qa_share_signing_key() -> bytes:
     explicit = (os.getenv("KNOWLEDGE_QA_SHARE_LINK_SECRET") or "").strip()
     if explicit:
         return explicit.encode("utf-8")
+    # Fail closed: no weaker fallback key. lru_cache does not cache exceptions, so a
+    # transient derivation failure is retried on the next call rather than pinned.
     try:
         return derive_hmac_key()
-    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
-        fallback = (os.getenv("JWT_SECRET_KEY") or "knowledge_qa_share_link_default")
-        return fallback.encode("utf-8")
+    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
+        logger.error("Knowledge-QA share-link signing key unavailable: {}", type(exc).__name__)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Share links are unavailable: signing key is not configured",
+        ) from exc
 
 
 def _urlsafe_b64encode(value: bytes) -> str:
