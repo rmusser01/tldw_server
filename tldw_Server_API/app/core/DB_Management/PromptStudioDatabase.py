@@ -1152,6 +1152,11 @@ class _BackendPromptStudioDatabase(BackendPromptStudioDatabaseBase):
             else:
                 raise DatabaseError("Unable to convert row to dict; missing column metadata")  # noqa: TRY003
 
+        # The tsvector columns are search plumbing that SQLite keeps in separate FTS
+        # tables; `SELECT *` / `RETURNING *` must not leak them to callers.
+        for fts_column in self._fts_columns.values():
+            result.pop(fts_column, None)
+
         for field in self._JSON_FIELDS:
             if field in result and isinstance(result[field], str):
                 with suppress(TypeError, ValueError):

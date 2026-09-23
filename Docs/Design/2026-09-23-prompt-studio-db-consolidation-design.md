@@ -62,18 +62,18 @@ Align the seven mismatches and rely on the parity ratchet.
 | Stage | Scope | Gate |
 |---|---|---|
 | 0 | Parity ratchet | **done** — `test_prompt_studio_backend_parity.py` |
-| 1 | Package skeleton: `prompt_studio_db/{__init__,session,errors}.py`; the facade keeps its public surface and imports | no behaviour change; existing suites pass |
-| 2 | Behavioural parity harness: run each public method against both implementations over the same fixture data and compare results | exists before any aggregate moves |
+| 1 | Package skeleton — **folded into Stage 3**: the package is created with its first repository rather than empty. The session is the legacy object itself (as in `media_db`): both classes already expose `transaction()`, `get_connection()`, `_cursor_exec(conn, sql, params)` with `?` placeholders, `_row_to_dict`, `_log_sync_event`, `client_id`, `backend_type` | no behaviour change; existing suites pass |
+| 2 | Behavioural parity harness — **done**: `tests/prompt_studio/test_backend_behaviour_parity.py`, one scenario per aggregate on SQLite and live PostgreSQL. Found PostgreSQL leaking its `*_tsv` columns from 8 read paths; fixed in `_row_to_dict` | exists before any aggregate moves |
 | 3 | Move the smallest aggregates first: test runs, prompt versions, evaluations | parity harness green on both backends |
-| 4 | Signatures, projects, prompts — resolve `get_prompt`'s `include_deleted` mismatch here | as above |
-| 5 | Test cases — resolve `_format_test_case` arity and `create_bulk_test_cases(client_id=)` | as above |
+| 4 | Signatures, projects, prompts | as above |
+| 5 | Test cases — resolve `_format_test_case` arity | as above |
 | 6 | Optimizations and jobs — decide the busy-retry policy once for both backends | as above; job lease tests on both |
 | 7 | Delete both old classes; the facade becomes a typed façade with explicit signatures (no `*args/**kwargs`) | mypy sees real signatures |
 
 Each stage removes that aggregate's entries from `KNOWN_SIGNATURE_DRIFT` in the parity test as they are resolved.
 
-## Open questions
+## Decisions (2026-09-23)
 
-1. Busy-retry: should the unified implementation retry on both backends, or rely on `DatabaseBackend` for PostgreSQL? (Stage 6.)
-2. Should the four latent public mismatches be aligned now, ahead of the refactor, as a small safe change? They have no callers today.
-3. PostgreSQL test coverage is plumbing-level only (9 of 34 test files touch PostgreSQL). Stage 2's parity harness needs a PostgreSQL job in CI to be meaningful.
+1. Busy-retry: the unified implementation retries on both backends when the database reports busy (Stage 6).
+2. The four latent public mismatches were aligned ahead of the refactor (commit bcd56dc9bc); `KNOWN_SIGNATURE_DRIFT` now holds only the three private entries.
+3. PostgreSQL coverage: CI's `product-prompt-studio` shard runs in `full-suite-linux-312-shards`, which has a PostgreSQL service, so the Stage 2 harness runs against a real server there.
