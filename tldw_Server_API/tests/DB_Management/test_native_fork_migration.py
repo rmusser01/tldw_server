@@ -128,7 +128,7 @@ def test_native_schema_failure_rolls_back_tables_and_version(
     method_name = "_migrate_from_v75_to_v76_postgres" if backend_name == "postgres" else "_migrate_from_v71_to_v72"
     migrate = getattr(CharactersRAGDB, method_name)
 
-    def interrupted(self, conn):
+    def interrupted(self: CharactersRAGDB, conn: Any) -> None:
         migrate(self, conn)
         raise RuntimeError("native migration interrupted")
 

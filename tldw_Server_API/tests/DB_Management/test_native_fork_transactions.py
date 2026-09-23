@@ -7,12 +7,14 @@ from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from tldw_Server_API.app.api.v1.schemas.native_fork_schemas import NativeScopeV1
 from tldw_Server_API.app.core.Chat.native_fork_projection import AuthorizedNativeOwner
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha.native_chat_asset_store import NativeCandidate
 from tldw_Server_API.app.core.DB_Management.chacha.native_fork_store import (
     NativeAttempt,
     NativeForkStoreError,
@@ -54,7 +56,7 @@ def reserve(
         )
 
 
-def test_same_key_replays_original_receipt_and_changed_digest_conflicts(native_fork_db):
+def test_same_key_replays_original_receipt_and_changed_digest_conflicts(native_fork_db: CharactersRAGDB) -> None:
     db = native_fork_db
     original = reserve(db)
     assert original.state == "preparing"
@@ -70,7 +72,7 @@ def test_same_key_replays_original_receipt_and_changed_digest_conflicts(native_f
         assert db.native_forks.resolve_operation(owner(), "native_fork_v1", "fork-one", "sha256:one", conn=conn) == original
 
 
-def test_reservation_rollback_leaves_key_unrecorded(native_fork_db):
+def test_reservation_rollback_leaves_key_unrecorded(native_fork_db: CharactersRAGDB) -> None:
     db = native_fork_db
     with pytest.raises(RuntimeError, match="rollback"):
         with db.transaction() as conn:
@@ -81,7 +83,7 @@ def test_reservation_rollback_leaves_key_unrecorded(native_fork_db):
     assert result.state == "not_recorded"
 
 
-def test_deleted_child_operation_never_becomes_fresh(native_fork_db):
+def test_deleted_child_operation_never_becomes_fresh(native_fork_db: CharactersRAGDB) -> None:
     db = native_fork_db
     child = db.add_conversation({"character_id": 1, "title": "Child"})
     reserve(db)
@@ -102,7 +104,7 @@ def test_deleted_child_operation_never_becomes_fresh(native_fork_db):
     assert result.state == "gone"
 
 
-def test_soft_delete_then_restore_does_not_revive_creation_key(native_fork_db):
+def test_soft_delete_then_restore_does_not_revive_creation_key(native_fork_db: CharactersRAGDB) -> None:
     db = native_fork_db
     child = db.add_conversation({"character_id": 1, "title": "Restorable child"})
     reserve(db)
@@ -120,7 +122,7 @@ def test_soft_delete_then_restore_does_not_revive_creation_key(native_fork_db):
     assert result.state == "gone"
 
 
-def test_reserve_replay_reconciles_missing_child_before_disclosing_map(native_fork_db):
+def test_reserve_replay_reconciles_missing_child_before_disclosing_map(native_fork_db: CharactersRAGDB) -> None:
     db = native_fork_db
     child = db.add_conversation({"character_id": 1, "title": "Child"})
     reserve(db)
@@ -135,7 +137,7 @@ def test_reserve_replay_reconciles_missing_child_before_disclosing_map(native_fo
     assert reserve(db).state == "gone"
 
 
-def test_committed_replay_requires_protected_child_binding(native_fork_db):
+def test_committed_replay_requires_protected_child_binding(native_fork_db: CharactersRAGDB) -> None:
     db = native_fork_db
     child = db.add_conversation({"character_id": 1, "title": "Child"})
     reserve(db)
@@ -160,7 +162,7 @@ def test_committed_replay_requires_protected_child_binding(native_fork_db):
     assert reserve(db).state == "committed"
 
 
-def test_incomplete_committed_receipt_fails_closed(native_fork_db):
+def test_incomplete_committed_receipt_fails_closed(native_fork_db: CharactersRAGDB) -> None:
     db = native_fork_db
     reserve(db)
     with db.transaction() as conn:
@@ -172,7 +174,7 @@ def test_incomplete_committed_receipt_fails_closed(native_fork_db):
         reserve(db)
 
 
-def test_conflict_after_absent_observation_reconciles_winning_receipt(native_fork_db, monkeypatch):
+def test_conflict_after_absent_observation_reconciles_winning_receipt(native_fork_db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch) -> None:
     db = native_fork_db
     reserve(db)
     with db.transaction() as conn:
@@ -183,7 +185,7 @@ def test_conflict_after_absent_observation_reconciles_winning_receipt(native_for
     original = db.native_forks._row
     observations = 0
 
-    def stale_first_read(*args, **kwargs):
+    def stale_first_read(*args: Any, **kwargs: Any) -> dict[str, Any] | None:
         nonlocal observations
         observations += 1
         return None if observations == 1 else original(*args, **kwargs)
@@ -192,7 +194,7 @@ def test_conflict_after_absent_observation_reconciles_winning_receipt(native_for
     assert reserve(db).state == "gone"
 
 
-def test_claim_attempt_leases_one_generation_and_rotates_after_expiry(native_fork_db):
+def test_claim_attempt_leases_one_generation_and_rotates_after_expiry(native_fork_db: CharactersRAGDB) -> None:
     db = native_fork_db
     reserve(db)
     now = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -211,7 +213,7 @@ def test_claim_attempt_leases_one_generation_and_rotates_after_expiry(native_for
     assert second.generation == 2
 
 
-def test_expired_attempt_with_candidate_requires_reconciliation(native_fork_db):
+def test_expired_attempt_with_candidate_requires_reconciliation(native_fork_db: CharactersRAGDB) -> None:
     db = native_fork_db
     reserve(db)
     now = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -233,14 +235,14 @@ def test_expired_attempt_with_candidate_requires_reconciliation(native_fork_db):
     assert result.state == "reconciliation_required"
 
 
-def test_postgres_concurrent_claim_has_one_active_generation(pg_database_config):
+def test_postgres_concurrent_claim_has_one_active_generation(pg_database_config: object) -> None:
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
     db = CharactersRAGDB(db_path=":memory:", client_id="alice", backend=backend)
     reserve(db)
     now = datetime(2026, 1, 1, tzinfo=timezone.utc)
     barrier = threading.Barrier(2)
 
-    def claim():
+    def claim() -> NativeAttempt | NativeOperationResult:
         barrier.wait(timeout=10)
         with db.transaction() as conn:
             return db.native_forks.claim_attempt(
@@ -258,7 +260,7 @@ def test_postgres_concurrent_claim_has_one_active_generation(pg_database_config)
         backend.get_pool().close_all()
 
 
-def test_candidate_reservation_replays_exact_inputs_and_rejects_changed_hash(native_fork_db):
+def test_candidate_reservation_replays_exact_inputs_and_rejects_changed_hash(native_fork_db: CharactersRAGDB) -> None:
     db = native_fork_db
     reserve(db)
     now = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -266,7 +268,7 @@ def test_candidate_reservation_replays_exact_inputs_and_rejects_changed_hash(nat
         attempt = db.native_forks.claim_attempt(owner(), "native_fork_v1", "fork-one", "sha256:one", now=now, conn=conn)
     assert isinstance(attempt, NativeAttempt)
 
-    def candidate(content_hash: str):
+    def candidate(content_hash: str) -> NativeCandidate:
         with db.transaction() as conn:
             return db.native_assets.reserve_candidate(
                 owner(), "native_fork_v1", "fork-one", "sha256:one", attempt.generation,
@@ -281,7 +283,7 @@ def test_candidate_reservation_replays_exact_inputs_and_rejects_changed_hash(nat
         candidate("b" * 64)
 
 
-def test_expired_worker_cannot_reserve_candidate_after_new_generation(native_fork_db):
+def test_expired_worker_cannot_reserve_candidate_after_new_generation(native_fork_db: CharactersRAGDB) -> None:
     db = native_fork_db
     reserve(db)
     now = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -301,7 +303,7 @@ def test_expired_worker_cannot_reserve_candidate_after_new_generation(native_for
             )
 
 
-def test_candidate_preparation_requires_matching_descriptor_and_live_generation(native_fork_db):
+def test_candidate_preparation_requires_matching_descriptor_and_live_generation(native_fork_db: CharactersRAGDB) -> None:
     db = native_fork_db
     reserve(db)
     now = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -336,7 +338,7 @@ def test_candidate_preparation_requires_matching_descriptor_and_live_generation(
             )
 
 
-def test_expired_unclaimed_candidate_reclaims_before_new_generation(native_fork_db):
+def test_expired_unclaimed_candidate_reclaims_before_new_generation(native_fork_db: CharactersRAGDB) -> None:
     db = native_fork_db
     reserve(db)
     now = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -380,7 +382,7 @@ def test_expired_unclaimed_candidate_reclaims_before_new_generation(native_fork_
         ).generation == 2
 
 
-def test_active_or_claimed_candidate_cannot_enter_reclamation(native_fork_db):
+def test_active_or_claimed_candidate_cannot_enter_reclamation(native_fork_db: CharactersRAGDB) -> None:
     db = native_fork_db
     reserve(db)
     now = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -413,7 +415,7 @@ def test_active_or_claimed_candidate_cannot_enter_reclamation(native_fork_db):
             )
 
 
-def test_reclamation_waits_for_confirmed_quota_release(native_fork_db):
+def test_reclamation_waits_for_confirmed_quota_release(native_fork_db: CharactersRAGDB) -> None:
     db = native_fork_db
     reserve(db)
     now = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -476,7 +478,7 @@ def test_reclamation_waits_for_confirmed_quota_release(native_fork_db):
         )
 
 
-def test_gone_adopted_candidate_waits_for_claim_release_even_after_workspace_closure(native_fork_db):
+def test_gone_adopted_candidate_waits_for_claim_release_even_after_workspace_closure(native_fork_db: CharactersRAGDB) -> None:
     db = native_fork_db
     db.upsert_workspace("workspace-one", "Workspace One")
     authorized = workspace_owner()
@@ -531,7 +533,7 @@ def test_gone_adopted_candidate_waits_for_claim_release_even_after_workspace_clo
 
 
 @pytest.mark.parametrize("workspace_state", ["open", "closed", "deleted", "staged"])
-def test_workspace_candidate_admission_requires_open_owned_scope(native_fork_db, workspace_state):
+def test_workspace_candidate_admission_requires_open_owned_scope(native_fork_db: CharactersRAGDB, workspace_state: str) -> None:
     db = native_fork_db
     db.upsert_workspace("workspace-one", "Workspace One")
     authorized = workspace_owner()
@@ -572,7 +574,7 @@ def test_workspace_candidate_admission_requires_open_owned_scope(native_fork_db,
             ).fetchone()["n"] == 0
 
 
-def test_workspace_closure_blocks_prepared_transition(native_fork_db):
+def test_workspace_closure_blocks_prepared_transition(native_fork_db: CharactersRAGDB) -> None:
     db = native_fork_db
     db.upsert_workspace("workspace-one", "Workspace One")
     authorized = workspace_owner()
@@ -607,7 +609,7 @@ def test_workspace_closure_blocks_prepared_transition(native_fork_db):
 
 
 @pytest.mark.parametrize("workspace_state", ["closed", "missing", "foreign"])
-def test_unavailable_workspace_rejects_new_operation_without_reserving_key(native_fork_db, workspace_state):
+def test_unavailable_workspace_rejects_new_operation_without_reserving_key(native_fork_db: CharactersRAGDB, workspace_state: str) -> None:
     db = native_fork_db
     if workspace_state == "closed":
         db.upsert_workspace("workspace-one", "Workspace One")
@@ -632,7 +634,7 @@ def test_unavailable_workspace_rejects_new_operation_without_reserving_key(nativ
         ).fetchone()["n"] == 0
 
 
-def test_closed_workspace_cannot_claim_another_attempt(native_fork_db):
+def test_closed_workspace_cannot_claim_another_attempt(native_fork_db: CharactersRAGDB) -> None:
     db = native_fork_db
     db.upsert_workspace("workspace-one", "Workspace One")
     authorized = workspace_owner()
@@ -659,7 +661,7 @@ def test_closed_workspace_cannot_claim_another_attempt(native_fork_db):
         ).fetchone()["attempt_generation"] == 0
 
 
-def test_postgres_candidate_admission_serializes_with_workspace_closure(pg_database_config, monkeypatch):
+def test_postgres_candidate_admission_serializes_with_workspace_closure(pg_database_config: object, monkeypatch: pytest.MonkeyPatch) -> None:
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
     db = CharactersRAGDB(db_path=":memory:", client_id="alice", backend=backend)
     db.upsert_workspace("workspace-one", "Workspace One")
@@ -678,19 +680,19 @@ def test_postgres_candidate_admission_serializes_with_workspace_closure(pg_datab
     original_admission = db.native_forks.lock_open_workspace
     original_delete_lock = db._lock_native_workspace_delete
 
-    def pause_after_admission(owner, *, conn):
+    def pause_after_admission(owner: AuthorizedNativeOwner, *, conn: Any) -> None:
         original_admission(owner, conn=conn)
         admitted.set()
         assert release_admission.wait(timeout=10)
 
-    def observe_delete_lock(conn, workspace_id):
+    def observe_delete_lock(conn: Any, workspace_id: str) -> Any:
         delete_attempted.set()
         return original_delete_lock(conn, workspace_id)
 
     monkeypatch.setattr(db.native_forks, "lock_open_workspace", pause_after_admission)
     monkeypatch.setattr(db, "_lock_native_workspace_delete", observe_delete_lock)
 
-    def admit_candidate():
+    def admit_candidate() -> None:
         with db.transaction() as conn:
             db.native_assets.reserve_candidate(
                 authorized, "native_fork_v1", "fork-one", "sha256:one", attempt.generation,
@@ -699,7 +701,7 @@ def test_postgres_candidate_admission_serializes_with_workspace_closure(pg_datab
             )
         db.close_connection()
 
-    def delete_workspace():
+    def delete_workspace() -> bool:
         try:
             return db.delete_workspace("workspace-one", expected_version=1)
         finally:
@@ -723,14 +725,14 @@ def test_postgres_candidate_admission_serializes_with_workspace_closure(pg_datab
         backend.get_pool().close_all()
 
 
-def test_postgres_concurrent_same_key_reserves_one_receipt(pg_database_config, monkeypatch):
+def test_postgres_concurrent_same_key_reserves_one_receipt(pg_database_config: object, monkeypatch: pytest.MonkeyPatch) -> None:
     """Two transactions that both observe absence converge on the same key."""
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
     db = CharactersRAGDB(db_path=":memory:", client_id="alice", backend=backend)
     barrier = threading.Barrier(2)
     original = db.native_forks._row
 
-    def observe_absence(*args, **kwargs):
+    def observe_absence(*args: Any, **kwargs: Any) -> dict[str, Any] | None:
         row = original(*args, **kwargs)
         if row is None:
             barrier.wait(timeout=10)

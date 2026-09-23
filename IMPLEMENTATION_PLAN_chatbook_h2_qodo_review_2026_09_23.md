@@ -19,3 +19,9 @@
 **Success Criteria:** No actionable P1/P2 issue remains and GitHub confirms final checks and merge ancestry.
 **Tests:** `git diff --check`, Ruff, Bandit, targeted SQLite/PostgreSQL tests, required GitHub checks.
 **Status:** In Progress
+
+All new functions in the three H2 migration, transaction, and workspace-lifecycle
+test modules now have parameter and return annotations. The focused suite passed
+64 SQLite cases; 68 PostgreSQL parametrizations skipped because PostgreSQL was
+unavailable locally. Ruff and `git diff --check` passed. Final PostgreSQL and
+required CI evidence is still pending.
