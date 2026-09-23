@@ -28,8 +28,8 @@ import argparse
 import ast
 import re
 import sys
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 APP_ROOT = REPO_ROOT / "tldw_Server_API" / "app"
@@ -53,20 +53,28 @@ class RatchetError(RuntimeError):
     """Raised when the source tree cannot be read or parsed."""
 
 
-def _guarded_scope(test: ast.expr) -> str | None:
-    """Return the scope name for a bare truthiness test, else None.
+def guarded_scopes(test: ast.expr) -> set[str]:
+    """Return every scope name tested for bare truthiness in *test*.
 
-    Only ``if user_id:`` and ``if self.user_id:`` count.  An explicit
-    ``if user_id is not None:`` is a deliberate check, not the footgun.
+    ``if user_id:`` and ``if self.user_id:`` count, and so does a compound
+    guard such as ``if user_id and has_user_id:`` -- the migration helpers use
+    that form, and it drops the predicate on a falsy scope exactly like the
+    bare one.  An explicit ``if user_id is not None:`` is a deliberate check
+    rather than the footgun, so a Compare operand contributes nothing.
     """
+    if isinstance(test, ast.BoolOp):
+        found: set[str] = set()
+        for operand in test.values:
+            found |= guarded_scopes(operand)
+        return found
     if isinstance(test, ast.Name) and test.id in SCOPE_NAMES:
-        return test.id
+        return {test.id}
     if isinstance(test, ast.Attribute) and test.attr in SCOPE_NAMES:
-        return test.attr
-    return None
+        return {test.attr}
+    return set()
 
 
-def _adds_predicate_on(block: list[ast.stmt], name: str) -> bool:
+def adds_predicate_on(block: list[ast.stmt], name: str) -> bool:
     """True when the block contributes a SQL comparison on *name*."""
     pattern = re.compile(rf"\b{re.escape(name)}\b\s*(=|==|!=|\bIN\b|\bLIKE\b)", re.IGNORECASE)
     for statement in block:
@@ -97,10 +105,10 @@ def iter_findings(root: Path = APP_ROOT) -> Iterator[str]:
         for node in ast.walk(tree):
             if not isinstance(node, ast.If):
                 continue
-            name = _guarded_scope(node.test)
-            if name is None or not _adds_predicate_on(node.body, name):
-                continue
-            yield f"{path.relative_to(REPO_ROOT)}:{node.lineno} if {name}"
+            for name in sorted(guarded_scopes(node.test)):
+                if not adds_predicate_on(node.body, name):
+                    continue
+                yield f"{path.relative_to(REPO_ROOT)}:{node.lineno} if {name}"
 
 
 def read_baseline(path: Path = BASELINE_PATH) -> set[str]:

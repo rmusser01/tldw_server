@@ -25,10 +25,14 @@ tldw_Server_API/app/core/Jobs/manager.py:5542 if owner_user_id
 tldw_Server_API/app/core/Jobs/manager.py:5572 if owner_user_id
 tldw_Server_API/app/core/Jobs/manager.py:5720 if owner_user_id
 tldw_Server_API/app/core/Jobs/manager.py:5743 if owner_user_id
+tldw_Server_API/app/core/Jobs/manager.py:6229 if owner_user_id
 tldw_Server_API/app/core/Jobs/operations/postgres/lifecycle.py:384 if owner_user_id
+tldw_Server_API/app/core/Jobs/operations/postgres/lifecycle.py:493 if owner_user_id
 tldw_Server_API/app/core/Jobs/operations/sqlite/lifecycle.py:161 if owner_user_id
 tldw_Server_API/app/core/Jobs/operations/sqlite/lifecycle.py:180 if owner_user_id
+tldw_Server_API/app/core/Jobs/operations/sqlite/lifecycle.py:423 if owner_user_id
 tldw_Server_API/app/core/RAG/rag_service/security_filters.py:640 if user_id
+tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py:3818 if user_id
 tldw_Server_API/app/core/Sandbox/store.py:2493 if user_id
 tldw_Server_API/app/core/Sandbox/store.py:2584 if user_id
 tldw_Server_API/app/core/Sandbox/store.py:4029 if user_id
