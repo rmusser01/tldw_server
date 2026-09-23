@@ -179,7 +179,6 @@ POST /api/v1/auth/resend-verification
 POST /api/v1/auth/reset-password
 POST /api/v1/chunking/templates/validate
 POST /api/v1/config/validate-provider
-POST /api/v1/flashcards/generate
 POST /api/v1/mcp/auth/refresh
 POST /api/v1/mcp/auth/token
 POST /api/v1/mcp/catalog/test-connection

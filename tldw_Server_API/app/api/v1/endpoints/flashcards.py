@@ -2559,8 +2559,22 @@ async def respond_flashcard_assistant(
     response_model=FlashcardGenerateResponse,
     dependencies=[Depends(check_rate_limit)],
 )
-async def generate_flashcards(payload: FlashcardGenerateRequest):
-    """Generate flashcards from free text using the workflows flashcard_generate adapter."""
+async def generate_flashcards(
+    payload: FlashcardGenerateRequest,
+    current_user: User = Depends(get_request_user),
+) -> FlashcardGenerateResponse:
+    """Generate flashcards from free text using the workflows flashcard_generate adapter.
+
+    Args:
+        payload: Source text and generation options.
+        current_user: Authenticated caller. Generation is not scoped per user,
+            but it spends the operator's configured LLM provider credits, so it
+            must not be reachable anonymously. Every other route on this router
+            already resolves a user.
+
+    Returns:
+        The generated cards.
+    """
     try:
         provider = _resolve_flashcard_generation_provider(payload.provider)
         result = await run_flashcard_generate_adapter(
