@@ -260,7 +260,7 @@ async def create_output(
                 )
                 items = []
             if not items:
-                mids = _select_media_ids_for_run(media_db, payload.run_id, 1000)
+                mids = _select_media_ids_for_run(current_user.id, payload.run_id, 1000)
                 if not mids:
                     # No content_items and no run mapping tables to resolve items.
                     raise HTTPException(status_code=422, detail="run_selection_not_supported")
