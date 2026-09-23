@@ -30,7 +30,6 @@ FACADE = psd.PromptStudioDatabase
 # is private and goes away with the consolidation.
 KNOWN_SIGNATURE_DRIFT: dict[str, str] = {
     "__init__": "legitimate: the backend variant takes tenant/backend/config",
-    "_format_test_case": "ARITY differs, (row) vs (cursor, row): wrong on one side if shared",
     "_row_to_dict": "row is optional on the backend, required on SQLite",
 }
 

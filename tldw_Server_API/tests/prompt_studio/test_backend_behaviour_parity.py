@@ -191,6 +191,56 @@ def _prompts(db: PromptStudioDatabase) -> dict[str, Any]:
     }
 
 
+def _test_cases(db: PromptStudioDatabase) -> dict[str, Any]:
+    ids = _seed(db)  # project with test case "c"
+    project = ids["project"]
+    sig = db.create_signature(project, "sig", input_schema=[], output_schema=[])
+    golden = db.create_test_case(
+        project, "golden one", inputs={"q": "capital of France"}, expected_outputs={}, description="Geography Quiz",
+        tags=["geo", "easy"], is_golden=True, signature_id=sig["id"],
+    )
+    plain = db.create_test_case(project, "plain", inputs={"q": 2}, tags=["math"], is_generated=True)
+
+    def names(rows: Any) -> list[str]:
+        return [r["name"] for r in (rows["test_cases"] if isinstance(rows, dict) else rows)]
+
+    return {
+        "create": golden,
+        "create_duplicate": _outcome(lambda: db.create_test_case(project, "plain", inputs={})),
+        "create_blank": _outcome(lambda: db.create_test_case(project, "  ", inputs={})),
+        "create_missing_project": _outcome(lambda: db.create_test_case(99999, "orphan", inputs={})),
+        "get_missing": _outcome(lambda: db.get_test_case(99999)),
+        "by_ids": names(db.get_test_cases_by_ids([plain["id"], golden["id"], plain["id"]])),
+        "list_golden_first": names(db.list_test_cases(project)),
+        "list_golden_only": names(db.list_test_cases(project, is_golden=True)),
+        "list_by_signature": names(db.list_test_cases(project, signature_id=sig["id"])),
+        "list_tags": names(db.list_test_cases(project, tags=["math"])),
+        "list_search": names(db.list_test_cases(project, search="QUIZ")),
+        "list_paged": db.list_test_cases(project, page=2, per_page=1, return_pagination=True)["pagination"],
+        "search_fts": names(db.search_test_cases(project, "France")),
+        "by_signature": names(db.get_test_cases_by_signature(sig["id"])),
+        "golden": names(db.get_golden_test_cases(project)),
+        "stats": _outcome(lambda: db.get_test_case_stats(project)),
+        "update": _outcome(
+            lambda: db.update_test_case(plain["id"], {"expected_outputs": {"a": 4}, "tags": ["x"], "is_golden": True, "bogus": 1})
+        ),
+        "update_rename_to_duplicate": _outcome(lambda: db.update_test_case(plain["id"], {"name": "c"})),
+        "update_noop": db.update_test_case(plain["id"], {"bogus": 1})["name"],
+        "update_missing": _outcome(lambda: db.update_test_case(99999, {"name": "x"})),
+        "soft_delete": db.delete_test_case(plain["id"]),
+        "soft_delete_again": db.delete_test_case(plain["id"]),
+        "reuse_deleted_name": _outcome(lambda: db.create_test_case(project, "plain", inputs={})["name"]),
+        "update_deleted": _outcome(lambda: db.update_test_case(plain["id"], {"name": "y"})),
+        "hard_delete": db.delete_test_case(golden["id"], hard_delete=True),
+        "hard_delete_missing": db.delete_test_case(golden["id"], hard_delete=True),
+        "bulk": names(db.create_bulk_test_cases(project, [{"name": "b1", "inputs": {}}, {"name": "b2", "inputs": {"z": 1}}])),
+        "bulk_with_duplicate": _outcome(
+            lambda: names(db.create_bulk_test_cases(project, [{"name": "b3", "inputs": {}}, {"name": "b1", "inputs": {}}]))
+        ),
+        "bulk_is_atomic": "b3" in names(db.list_test_cases(project, per_page=100)),
+    }
+
+
 def _reads(db: PromptStudioDatabase) -> dict[str, Any]:
     # Read paths shared by the later aggregates; pins that PostgreSQL does not leak
     # its tsvector columns through `SELECT *` / `RETURNING *`.
@@ -212,6 +262,7 @@ SCENARIOS: dict[str, Callable[[PromptStudioDatabase], dict[str, Any]]] = {
     "projects": _projects,
     "prompts": _prompts,
     "reads": _reads,
+    "test_cases": _test_cases,
     "signatures": _signatures,
 }
 
