@@ -6,7 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-09-23 00:52'
-updated_date: '2026-09-23 01:42'
+updated_date: '2026-09-23 02:13'
 labels:
   - tests
   - sync
@@ -76,10 +76,66 @@ Source: TASK-13344 triage, corrected while working the fix.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Family A's shared cause is resolved: prepare_notes_suggestion_authority and bootstrap_personal_context agree on the dataset contract
+- [x] #1 Family A's shared cause is resolved: prepare_notes_suggestion_authority and bootstrap_personal_context agree on the dataset contract
 - [ ] #2 The three Family B failures are each classified and fixed or filed
 - [ ] #3 The PoolTimeout test is checked for a connection leak, since it is about two connections racing
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+AC1 DONE in c09e47c98e -- Family A's shared cause resolved; it was TWO bugs, not one. tests/Sync 14 failures to 8. AC2 and AC3 remain.
+
+Both bugs sat on the path bootstrap_personal_context -> _bind_personal_context_dataset -> prepare_notes_suggestion_authority, and both surfaced as "personal_context_snapshot_unavailable" because profile.py:552 maps any other SyncStoreError to it. That mapping is why this looked like a snapshot problem for so long.
+
+BUG 1 -- the fence demanded the chatbook default of a dataset not required to be one.
+  Sync_DB.personal_context_bootstrap_transaction (Sync_DB.py:4433) deliberately selects
+  bound_rows[0] as the authority whatever its markers, and line 4432 sets
+  require_chatbook_default = not bound_rows and bool(default_rows) -- an explicit
+  relaxation for precisely that case. That landed 2026-09-04 (0507921d63), the same day
+  as the test asserting it. The fence call was added to _bind_personal_context_dataset
+  13 days later (f0536ee5cf, 2026-09-17) and applied the default requirement
+  unconditionally, refusing a legitimately bound non-default authority.
+  Fix: prepare_notes_suggestion_authority takes require_default, still True by default,
+  and the caller passes `existing_state is None` -- the binding it already computed one
+  line earlier at profile.py:700.
+
+BUG 2 -- a Postgres-only transaction-visibility defect.
+  The fence read through self.store, while the dataset existed only inside the bootstrap
+  guard's transaction. On PostgreSQL that uncommitted row is invisible to any other
+  connection, so get_dataset returned None and the fence refused a dataset that plainly
+  existed. On SQLite it resolved, which is why only the postgres-parametrised cases
+  failed after Bug 1 was fixed.
+  Fix: the fence reads through a store passed by the caller; _bind_personal_context_dataset
+  hands it selected_store, which carries the transaction. That required moving the
+  selected_store assignment above the fence call, where it had been one line below.
+
+METHOD. Both were found by instrumenting the five conditions rather than reasoning about
+them. First pass: metadata carried only ['personal_context'], default markers absent ->
+Bug 1. Second pass, after fixing Bug 1: actual_is_none True with store_has_connection
+False -> Bug 2. Worth recording because the first instrumentation attempt printed nothing
+and I nearly concluded the code path was not reached; writing the diagnostic to a file
+instead of stdout is what made it visible under pytest.
+
+SECURITY NOTE. Bug 1's fix relaxes a fence, so its boundary is pinned separately in
+tests/Sync/test_sync_v2_notes_suggestion_authority_fence.py: ownership and personal scope
+are unconditional and asserted under BOTH values of require_default, as is the
+dataset-not-visible case. Those tests were verified to be capable of failing -- deleting
+the owner check from the fence trips two of them, and it restores clean. The strict
+behaviour remains the default, so any new caller gets the full fence.
+
+STILL OPEN (Family B):
+  AC2 -- store::test_postgres_personal_context_receipt_locks_binding_before_upsert
+         (personal_context_link_binding_stale) and
+         notes_organization_postgres_contract::test_postgres_predecessor_selector_uses_
+         dataset_cursor_and_nonapplied_status (ran on SQLite, compared Postgres SQL).
+  AC3 -- certification::test_postgres_two_connections_choose_exactly_one_existing_authority
+         still times out. It sets pool_size = 2, max_overflow = 0 and is ABOUT two
+         connections racing for one authority, so a 30s PoolTimeout means either a
+         connection is never released or the test's expectation of the pool is wrong.
+         It also costs 30 seconds of every suite run. Given Bug 2 above was a connection
+         -scoping defect on this same path, a leak is plausible and worth checking first.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
