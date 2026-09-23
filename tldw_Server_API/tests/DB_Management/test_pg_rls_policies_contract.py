@@ -557,7 +557,11 @@ def test_core_chat_tables_are_policied_and_forced():
     for table in (
         "conversations",
         "messages",
-        "keywords",
+        # chacha_keywords, not keywords: PostgreSQL namespaces this relation and
+        # renames any legacy `keywords` into it. Policying the wrong name aborts
+        # the whole install transaction, since DROP POLICY has no IF EXISTS for
+        # the table.
+        "chacha_keywords",
         "keyword_collections",
         "sync_log",
     ):
@@ -585,7 +589,7 @@ def test_every_core_chat_policy_has_a_with_check():
     """USING alone filters reads; WITH CHECK is what stops cross-tenant writes."""
     sql = "\n".join(build_chacha_rls_sql())
 
-    for table in ("conversations", "messages", "keywords", "sync_log"):
+    for table in ("conversations", "messages", "chacha_keywords", "sync_log"):
         start = sql.index(f"CREATE POLICY {table}_tenant_isolation")
         policy = sql[start : sql.index(";", start)]
         assert "WITH CHECK" in policy, f"{table} policy must constrain writes too"

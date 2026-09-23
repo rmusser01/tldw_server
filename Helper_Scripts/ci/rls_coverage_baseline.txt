@@ -117,6 +117,7 @@ kanban_boards
 kanban_cards
 kanban_comments
 kanban_lists
+keywords
 llm_usage_daily
 llm_usage_log
 managed_secret_refs

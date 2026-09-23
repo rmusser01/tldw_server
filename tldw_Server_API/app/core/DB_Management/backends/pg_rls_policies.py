@@ -454,12 +454,18 @@ def build_core_chat_rls_sql() -> list[str]:
         """
     )
 
-    add("ALTER TABLE IF EXISTS keywords ENABLE ROW LEVEL SECURITY;")
-    add("ALTER TABLE IF EXISTS keywords FORCE ROW LEVEL SECURITY;")
-    add("DROP POLICY IF EXISTS keywords_tenant_isolation ON keywords;")
+    # chacha_keywords, not keywords. PostgreSQL creates this relation under the
+    # namespaced name and renames any legacy `keywords` into it during the v55
+    # migration; plain `keywords` only exists on SQLite, which needs no policy.
+    # Targeting the wrong name is not a no-op: DROP POLICY has no IF EXISTS for
+    # the *table*, so an undefined relation aborts the transaction and rolls back
+    # every policy installed before it, including conversations and messages.
+    add("ALTER TABLE IF EXISTS chacha_keywords ENABLE ROW LEVEL SECURITY;")
+    add("ALTER TABLE IF EXISTS chacha_keywords FORCE ROW LEVEL SECURITY;")
+    add("DROP POLICY IF EXISTS chacha_keywords_tenant_isolation ON chacha_keywords;")
     add(
         f"""
-        CREATE POLICY keywords_tenant_isolation ON keywords
+        CREATE POLICY chacha_keywords_tenant_isolation ON chacha_keywords
           USING ({tenant})
           WITH CHECK ({tenant});
         """
