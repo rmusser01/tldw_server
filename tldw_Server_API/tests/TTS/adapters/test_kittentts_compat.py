@@ -29,6 +29,26 @@ def test_missing_dependency_helpers_preserve_context_and_log(monkeypatch):
     assert "onnxruntime" in warnings[0]
 
 
+
+def test_missing_phonemizer_wrapper_raises_import_error_not_name_error(monkeypatch):
+    """The fallback EspeakWrapper runs after its except block has unbound `exc`."""
+    import importlib
+    import sys
+
+    from tldw_Server_API.app.core.TTS.vendors import kittentts_compat as mod
+
+    monkeypatch.setitem(sys.modules, "phonemizer", None)
+    monkeypatch.setitem(sys.modules, "phonemizer.backend.espeak.wrapper", None)
+    try:
+        fallback = importlib.reload(mod)
+        with pytest.raises(ImportError, match="phonemizer is required"):
+            fallback.EspeakWrapper.set_library("/nowhere")
+        with pytest.raises(ImportError, match="phonemizer is required"):
+            fallback.EspeakWrapper.set_data_path("/nowhere")
+    finally:
+        monkeypatch.undo()
+        importlib.reload(mod)
+
 def test_initialize_espeak_paths_uses_espeakng_loader(monkeypatch):
     from tldw_Server_API.app.core.TTS.vendors import kittentts_compat as mod
 
