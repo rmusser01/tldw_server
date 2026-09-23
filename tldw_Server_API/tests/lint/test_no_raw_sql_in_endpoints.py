@@ -71,7 +71,6 @@ RAW_SQL_BASELINE: dict[str, int] = {
     "admin/admin_tenant_provisioning.py": 4,
     "chat_documents.py": 1,
     "health.py": 1,
-    "jobs_admin.py": 32,
     "media/debug.py": 2,
     "media/listing.py": 2,
     "media/navigation.py": 2,
@@ -193,3 +192,26 @@ def test_baseline_counts_are_exact() -> None:
         "These files execute LESS raw SQL than the baseline, which is good. Lower "
         f"their entries in RAW_SQL_BASELINE to lock the gain in (baseline, now): {improved}"
     )
+
+
+# --- Database-internals reaches (TASK-13317 AC3) ------------------------------------
+# Endpoints must not open connections or cursors on a core owner's behalf; the owner
+# exposes a method instead. These private names are the ones that did exactly that.
+_DB_INTERNALS = frozenset({"_connect", "_pg_cursor", "_execute", "_coerce_bool_flag", "_cursor_exec"})
+
+
+def test_no_endpoint_reaches_database_internals() -> None:
+    offenders = []
+    for path in sorted(ENDPOINTS_ROOT.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            name = None
+            if isinstance(node, ast.Attribute) and node.attr in _DB_INTERNALS:
+                # self._x inside an endpoint's own helper class is not a core reach.
+                if not (isinstance(node.value, ast.Name) and node.value.id == "self"):
+                    name = node.attr
+            elif isinstance(node, ast.ImportFrom) and (node.module or "").startswith("tldw_Server_API.app.core"):
+                name = next((a.name for a in node.names if a.name in _DB_INTERNALS), None)
+            if name:
+                offenders.append(f"{path.relative_to(ENDPOINTS_ROOT)}:{node.lineno} {name}")
+    assert not offenders, offenders
