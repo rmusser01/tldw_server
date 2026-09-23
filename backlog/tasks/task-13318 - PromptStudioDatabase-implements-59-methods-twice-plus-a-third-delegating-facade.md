@@ -6,7 +6,7 @@ title: >-
 status: In Progress
 assignee: []
 created_date: '2026-09-22 04:55'
-updated_date: '2026-09-23 15:15'
+updated_date: '2026-09-23 15:30'
 labels:
   - duplication
   - db
@@ -54,6 +54,8 @@ AC2 done in 0205612478 (signature-parity ratchet, 7 known mismatches frozen, ver
 2026-09-23: Stage 4 done (4ec9f9c515 signatures, b50dbf10dc projects, this: prompts). Harness found & fixed on PG: uniqueness conflicts surfacing as DatabaseError (cursor wrapper matched redacted message; now typed -> ConflictError, repairs all PG writes); get_signature/get_prompt TypeError on missing rows; ensure_prompt_stub not advancing the id sequence (false ConflictError on next create). SQLite aligned: project name validation, InputError on missing-row updates, no swallowed DB errors in get_prompt*. Next: Stage 5 test cases.
 
 2026-09-23: AC3 met. Stages 5-6 + helpers: 32c01e4105 test cases, dee169a794 optimizations, 689fb6d072 jobs (+ SQLite transaction() override that never issued BEGIN, found by the multiprocess acquisition test), 87e1cb21a2 sync-log/idempotency once. PromptStudioDatabase.py 7426 -> ~1700 lines; the two classes hold only connection/schema/execution/row-decoding infrastructure. ADR-051 Accepted. Open: Stage 7 typed facade (facade still forwards *args/**kwargs to repositories) - ergonomics, not correctness, since nothing is duplicated to drift.
+
+2026-09-23: Stage 7 done (typed facade, signatures pinned to repositories). All stages complete.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
