@@ -63,7 +63,6 @@ class ProviderConfig(BaseModel):
     capability_override: dict[str, Any] = Field(default_factory=dict)
     device: str = "cpu"
     timeout: int = 60
-    max_retries: int = 3
     sample_rate: int = 24000
     max_concurrent_generations: Optional[int] = None
     use_fp16: bool = False

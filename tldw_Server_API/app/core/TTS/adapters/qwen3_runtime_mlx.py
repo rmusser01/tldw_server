@@ -208,7 +208,6 @@ class Qwen3MlxRuntime:
 
         audio_bytes = await self.adapter.convert_audio_format(
             pcm_audio,
-            source_format=AudioFormat.PCM,
             target_format=request.format,
             sample_rate=sample_rate,
         )

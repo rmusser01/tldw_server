@@ -6963,10 +6963,8 @@ class SyncV2Service:
                                 resolution_envelope=resolution_envelope,
                                 resolved_by_device_id=device_id,
                                 notes=None,
-                                personal_context_exchange=personal_context_exchange,
                                 _conflict=conflict,
                                 _store=guarded_store,
-                                _verified_personal_context_exchange=verified_exchange,
                             )
                 except Exception as exc:  # noqa: BLE001 - preserve per-item API outcomes.
                     # Keep the per-item outcome contract, but do not discard the cause.
@@ -7009,11 +7007,8 @@ class SyncV2Service:
         resolved_by_envelope_id: str | None = None,
         resolved_by_device_id: str | None = None,
         notes: str | None = None,
-        require_personal_context_conflict: bool = False,
-        personal_context_exchange: object | None = None,
         _conflict: SyncConflict | None = None,
         _store: SyncV2Store | None = None,
-        _verified_personal_context_exchange: PersonalContextExchangeProof | None = None,
     ) -> SyncConflict:
         active_store = _store or self.store
         conflict = _conflict or active_store.get_conflict(conflict_id)
@@ -7021,8 +7016,6 @@ class SyncV2Service:
             raise SyncStoreError("Sync conflict was not found or is not accessible")
         if dataset_id is not None and conflict.dataset_id != dataset_id:
             raise SyncStoreError("Sync conflict was not found or is not accessible")
-        if require_personal_context_conflict and not conflict.domain.startswith("personal_context."):
-            raise SyncStoreError("Personal Context conflict identity is not valid for this conflict")
         if conflict.domain in PERSONAL_CONTEXT_SYNC_DOMAINS:
             raise SyncStoreError("Personal Context conflict resolution requires an exact batched review")
         try:
@@ -7033,17 +7026,6 @@ class SyncV2Service:
             )
         except SyncStoreError as exc:
             raise SyncStoreError("Sync conflict was not found or is not accessible") from exc
-        if (
-            conflict.domain in PERSONAL_CONTEXT_SYNC_DOMAINS
-            and _verified_personal_context_exchange is None
-        ):
-            self.require_active_exchange(
-                dataset=dataset,
-                user_id=user_id,
-                device_id=resolved_by_device_id,
-                exchange=personal_context_exchange,
-                store=active_store,
-            )
         if action not in {"overwrite", "duplicate_rename", "skip"}:
             raise SyncStoreError(f"Sync conflict resolution action is not supported: {action}")
         if conflict.status != "unresolved":

@@ -198,7 +198,7 @@ Set `TEST_MODE=1` in the environment when running tests to disable background lo
 5. **Streaming changes**: update `StreamingResponseHandler` to handle new SSE formats; keep `_extract_text_from_upstream_sse` tolerant to provider quirks.
 6. **Document generator**: extend `DocumentType` and default prompts, ensure chat history retrieval is efficient (batch DB reads).
 
-Always update this README and `REFACTORING_PLAN.md` when architectural decisions change. Import from the focused modules (`chat_orchestrator`, `chat_history`, `chat_dictionary`, `chat_characters`) for new work and keep compatibility paths in the registry as the single legacy surface.
+Always update this README when architectural decisions change. Import from the focused modules (`chat_orchestrator`, `chat_history`, `chat_dictionary`, `chat_characters`) for new work and keep compatibility paths in the registry as the single legacy surface.
 
 ---
 

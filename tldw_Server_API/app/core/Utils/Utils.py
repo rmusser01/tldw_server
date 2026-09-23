@@ -1,14 +1,11 @@
 # Utils.py
 from __future__ import annotations
 
-import contextlib
 import hashlib
 import json
 import mimetypes
 import os
 import re
-import tempfile
-import time
 import unicodedata
 import uuid
 import zipfile
@@ -145,7 +142,6 @@ def cleanup_downloads():
 #
 
 
-
 def get_project_root() -> str:
     """Return the absolute path to the repository root directory.
 
@@ -238,9 +234,6 @@ global_search_engines = [
 ]
 
 openai_tts_voices = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"]
-
-
-
 
 
 def format_api_name(api):
@@ -783,47 +776,6 @@ def get_db_config():
 #
 # File Handling Functions
 
-# Track temp files for cleanup
-temp_files = []
-
-def save_temp_file(file):
-    """Persist an uploaded file-like object to a unique path in the system temp directory."""
-    global temp_files
-    temp_dir = tempfile.gettempdir()
-
-    original_name = getattr(file, "name", "") or ""
-    safe_name = os.path.basename(original_name)
-    stem, ext = os.path.splitext(safe_name)
-    if not stem:
-        stem = "upload"
-    unique_name = f"{stem}_{uuid.uuid4().hex}{ext}"
-
-    temp_path = os.path.join(temp_dir, unique_name)
-    if hasattr(file, "seek"):
-        with contextlib.suppress(OSError, RuntimeError, ValueError):
-            file.seek(0)
-    data = file.read()
-    if isinstance(data, str):
-        data = data.encode('utf-8')
-    with open(temp_path, 'wb') as f:
-        f.write(data)
-    if hasattr(file, "seek"):
-        with contextlib.suppress(OSError, RuntimeError, ValueError):
-            file.seek(0)
-    temp_files.append(temp_path)
-    return temp_path
-
-def cleanup_temp_files():
-    """Delete temporary files recorded by save_temp_file."""
-    global temp_files
-    for file_path in temp_files:
-        if os.path.exists(file_path):
-            try:
-                os.remove(file_path)
-                logging.info(f"Removed temporary file: {file_path}")
-            except OSError as e:
-                logging.exception(f"Failed to remove temporary file {file_path}: {e}")
-    temp_files.clear()
 
 def generate_unique_id():
     """Return a unique uploaded-file identifier."""
