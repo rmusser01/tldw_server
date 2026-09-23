@@ -1350,7 +1350,7 @@ def test_add_media_file_save_error(mock_save_files, test_api_client, db_session,
 
 # Use the provided TempDirManager class in the endpoint now
 # @patch('tempfile.TemporaryDirectory') # No longer need to mock tempfile directly
-@patch("tldw_Server_API.app.api.v1.endpoints.media.TempDirManager")
+@patch("tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing.TempDirManager")
 def test_add_media_temp_dir_creation_error(mock_temp_dir_manager_class, test_api_client, db_session, create_upload_file, dummy_headers): # Added db_session
     """Test failure during temporary directory creation using TempDirManager."""
     if not SAMPLE_AUDIO_PATH.exists(): pytest.skip(f"Test file not found: {SAMPLE_AUDIO_PATH}")

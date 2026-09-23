@@ -97,7 +97,7 @@ class TestMediaEndpointContextualIntegration:
             "context_window_size": "750"
         }
 
-        with patch('tldw_Server_API.app.api.v1.endpoints.media.process_document_content') as mock_process:
+        with patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files.process_document_content') as mock_process:
             mock_process.return_value = {"success": True, "media_id": 123}
 
             response = test_client.post(
@@ -127,7 +127,7 @@ class TestMediaEndpointContextualIntegration:
             "enable_contextual_chunking": "false"  # Explicitly disable
         }
 
-        with patch('tldw_Server_API.app.api.v1.endpoints.media.process_document_content') as mock_process:
+        with patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files.process_document_content') as mock_process:
             mock_process.return_value = {"success": True, "media_id": 123}
 
             response = test_client.post(
@@ -154,7 +154,7 @@ class TestMediaEndpointContextualIntegration:
             # No contextual options specified - should use defaults
         }
 
-        with patch('tldw_Server_API.app.api.v1.endpoints.media.process_document_content') as mock_process:
+        with patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files.process_document_content') as mock_process:
             mock_process.return_value = {"success": True, "media_id": 123}
 
             response = test_client.post(
@@ -193,7 +193,7 @@ class TestMediaEndpointContextualIntegration:
         with patch(
             "tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing.save_uploaded_files"
         ) as mock_upload:
-            with patch('tldw_Server_API.app.api.v1.endpoints.media.process_document_content') as mock_process:
+            with patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files.process_document_content') as mock_process:
                 mock_upload.return_value = (["/tmp/test.txt"], [])  # nosec B108
                 mock_process.return_value = {"success": True, "media_id": 124}
 
@@ -238,14 +238,14 @@ class TestMediaEndpointContextualIntegration:
         # For video/audio, patch the orchestrator-level batch helper to avoid
         # importing heavyweight STT/transcription dependencies during tests.
         process_target = {
-            "document": "tldw_Server_API.app.api.v1.endpoints.media.process_document_content",
+            "document": "tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files.process_document_content",
             "pdf": "tldw_Server_API.app.api.v1.endpoints.media.process_pdf_task",
             "ebook": "tldw_Server_API.app.api.v1.endpoints.media.process_epub",
             "video": "tldw_Server_API.app.core.Ingestion_Media_Processing.persistence.process_batch_media",
             "audio": "tldw_Server_API.app.core.Ingestion_Media_Processing.persistence.process_batch_media",
         }.get(
             media_type,
-            "tldw_Server_API.app.api.v1.endpoints.media.process_document_content",
+            "tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files.process_document_content",
         )
 
         patch_kwargs = {"new_callable": AsyncMock} if media_type in {"video", "audio"} else {}
@@ -283,7 +283,7 @@ class TestMediaEndpointContextualIntegration:
             "contextual_llm_model": "claude-opus-4.1"
         }
 
-        with patch('tldw_Server_API.app.api.v1.endpoints.media.process_document_content') as mock_process:
+        with patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files.process_document_content') as mock_process:
             mock_process.return_value = {"success": True, "media_id": 126}
 
             # Avoid real network: mock _download_url_async to create a temporary file inside provided temp_dir
@@ -365,7 +365,7 @@ class TestMediaEndpointContextualIntegration:
             "contextual_llm_model": "gpt-4"
         }
 
-        with patch('tldw_Server_API.app.api.v1.endpoints.media.process_document_content') as mock_process:
+        with patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files.process_document_content') as mock_process:
             mock_process.return_value = {"success": True, "media_id": 127}
 
             response = test_client.post(
