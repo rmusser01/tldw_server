@@ -62,14 +62,35 @@ async def test_tool_name_strict_regex_blocks_invalid():
 
 
 @pytest.mark.asyncio
-async def test_deep_argument_sanitization_blocks_nested_patterns():
+async def test_deep_argument_sanitization_reaches_nested_values():
+    """Sanitization recurses, and what it does at depth is strip control characters.
+
+    This previously asserted that a nested "/* injected */" raised ValueError, which
+    pinned a defect rather than a contract. The base sanitizer carried a denylist of
+    SQL-injection substrings ("--", "/*", "*/", "xp_", "sp_" and friends) applied to
+    data that is bound to parameterised queries, so it blocked nothing an attacker
+    would do while rejecting a filename containing "xp_", every glob, every markdown
+    rule and every git pathspec. See TASK-13294.
+
+    Its "safe" fixture was os.urandom(4).hex(), which cannot contain any denied
+    substring, so nothing here asserted that legitimate content survived. It does now.
+    """
     mod = InlineSanitizeModule(ModuleConfig(name="inline"))
-    # Safe case
-    msg = os.urandom(4).hex()
-    out = await mod.execute_tool("echo_sanitize", {"message": msg})
-    assert out == msg  # nosec B101
-    # Nested dangerous pattern should raise
-    with pytest.raises(ValueError):
-        await (
-            mod.execute_tool("echo_sanitize", {"message": "ok", "nested": {"bad": "/* injected */"}})
-        )
+
+    # Legitimate content that the old denylist rejected must pass through untouched.
+    for message in ("src/*.py", "git log -- path", "exp_data.csv", "--- rule"):
+        assert await mod.execute_tool("echo_sanitize", {"message": message}) == message  # nosec B101
+
+    # Recursion still happens: a control character nested two levels down is removed.
+    out = await mod.execute_tool(
+        "echo_sanitize",
+        {"message": "ok", "nested": {"deep": ["a\x01b"]}},
+    )
+    assert out == "ok"  # nosec B101
+
+    # And the depth guard is still the thing that rejects abuse.
+    nested: Any = "leaf"
+    for _ in range(25):
+        nested = {"k": nested}
+    with pytest.raises(ValueError, match="too deeply nested"):
+        await mod.execute_tool("echo_sanitize", {"message": "ok", "nested": nested})
