@@ -6,7 +6,7 @@ title: >-
 status: Done
 assignee: []
 created_date: '2026-09-22 04:53'
-updated_date: '2026-09-23 20:43'
+updated_date: '2026-09-23 21:08'
 labels:
   - bug
   - ingestion
@@ -63,6 +63,8 @@ Also fixed the test leak from the earlier reconciliation: test_stt_execution_pla
 Suite (tests/Audio + every test file that imports these modules, 12 targets): HEAD 1742 passed / 58 failed / 14 errors / 17 skipped; after 1746 passed / 56 failed / 14 errors / 17 skipped. The after failure set is a strict subset of HEAD's (no new failures). The two that now pass are TestParakeetMLX::test_model_loading and test_model_loading_with_custom_path, which had been broken by the None-cache leak. The remaining failures are pre-existing and unrelated (hotwords, TTS policy, WS, persona whisper errors, and nemo/onnx tests that need the real toolkits).
 Bandit: uvx bandit -q -ll on the three touched source files reported no issues (only pre-existing nosec B615 notices).
 Docs: no user-facing behaviour change, so no doc update needed.
+
+2026-09-23 follow-up ef819cbc1f: the MLX cache left unlocked in the close-out now has _mlx_model_cache_lock with re-check; test_mlx_loader_concurrent_same_key_loads_once red on HEAD (2 loads), green now; test_parakeet_mlx.py 28 passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
