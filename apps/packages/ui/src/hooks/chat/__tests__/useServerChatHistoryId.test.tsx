@@ -90,6 +90,25 @@ describe("useServerChatHistoryId", () => {
     expect(setHistoryId).not.toHaveBeenCalled()
   })
 
+  it("accepts an in-flight selected-owner mirror when another call binds the same local history", async () => {
+    const firstLink = deferred<string>()
+    ownedLink.mockReturnValueOnce(firstLink.promise).mockResolvedValueOnce("history-owned")
+    const setHistoryId = vi.fn()
+    const { result, rerender } = renderHook(
+      ({ historyId }) => useServerChatHistoryId({
+        serverChatId: "chat", historyId, setHistoryId, temporaryChat: false,
+        t: vi.fn() as unknown as TFunction
+      }),
+      { initialProps: { historyId: null as string | null } }
+    )
+    const owner = { ownerKey: "owner:A", validateLease: () => true }
+    const first = result.current.ensureServerChatHistoryId("chat", "Cedar", undefined, owner)
+    await expect(result.current.ensureServerChatHistoryId("chat", "Cedar", undefined, owner)).resolves.toBe("history-owned")
+    rerender({ historyId: "history-owned" })
+    firstLink.resolve("history-owned")
+    await expect(first).resolves.toBe("history-owned")
+  })
+
   it.each([true, false])("requires a validated current persisted session for legacy adoption (%s)", async valid => {
     usePlaygroundSessionStore.getState().saveSession({ historyId: "legacy", serverChatId: "chat", scopeKey: valid ? "scope-A" : "scope-B" })
     const { result } = renderHook(() => useServerChatHistoryId({ serverChatId: "chat", historyId: "legacy", setHistoryId: vi.fn(), temporaryChat: false, t: ((_key: string) => "Cedar") as TFunction }))
@@ -195,4 +214,18 @@ describe("useServerChatHistoryId", () => {
     })
     expect(ownedLink).toHaveBeenCalledTimes(2)
   })
+})
+
+vi.mock("@/hooks/chat/useHistorySelection", () => ({ useHistorySelectionContext: () => null }))
+it("scopes identical server IDs by verified owner and never adopts the current local chat", async () => {
+  ownedLink.mockImplementation(async ({ ownerKey }) => `mirror-${ownerKey}`)
+  const setHistoryId = vi.fn()
+  const { result } = renderHook(() => useServerChatHistoryId({ serverChatId: "same", historyId: "local-owned", setHistoryId, temporaryChat: false, t: ((key: string) => key) as any }))
+  let first: unknown, second: unknown
+  await act(async () => {
+    first = await result.current.ensureServerChatHistoryId("same", "Title", undefined, { ownerKey: "account-a", validateLease: () => true })
+    second = await result.current.ensureServerChatHistoryId("same", "Title", undefined, { ownerKey: "account-b", validateLease: () => true })
+  })
+  expect([first, second]).toEqual(["mirror-account-a", "mirror-account-b"])
+  expect(ownedLink.mock.calls.every(([input]) => !input.legacyHistoryId)).toBe(true)
 })

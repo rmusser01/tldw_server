@@ -7,7 +7,7 @@ import { runChatPersistenceTransaction } from "./chat-persistence-transaction"
 import type { Message } from "./types"
 
 /** Full verified target/owner identity; never stores bearer tokens or API keys. */
-export const serverChatMirrorOwnerKey = (snapshot: ServicePromptSnapshot): string => {
+export const serverChatMirrorOwnerKey = (snapshot: Pick<ServicePromptSnapshot, "requestScope">): string => {
   const { config, userId } = snapshot.requestScope
   return JSON.stringify([
     config.serverUrl.trim().replace(/\/+$/, ""), config.authMode,
@@ -92,17 +92,18 @@ const recoverCorrelatedUsers = (current: ChatMessage[], incoming: ChatMessage[])
   })
 }
 
-/** Recover only a local user paired to an acknowledged saved reply. Text alone is never identity. */
+/** Recover only through an acknowledged reply and its explicit canonical remote parent. */
 const recoverAnchoredUsers = (current: ChatMessage[], incoming: ChatMessage[]): ChatMessage[] => {
   current = recoverCorrelatedUsers(current, incoming)
   const claims = new Map<string, string[]>()
-  for (let index = 1; index < incoming.length; index++) {
-    const reply = incoming[index]
-    const user = incoming[index - 1]
+  for (const reply of incoming) {
     const replyId = canonicalId(reply)
-    const userId = canonicalId(user)
-    if (!reply.isBot || (reply.role && reply.role !== "assistant") || user.isBot || (user.role && user.role !== "user") || !replyId || !userId) continue
-    if (reply.parentMessageId && reply.parentMessageId !== userId && reply.parentMessageId !== user.id) continue
+    if (!reply.isBot || (reply.role && reply.role !== "assistant") || !replyId || !reply.parentMessageId) continue
+    const parents = incoming.filter(message => canonicalId(message) === reply.parentMessageId)
+    if (parents.length !== 1) continue
+    const user = parents[0]
+    const userId = canonicalId(user)!
+    if (user.isBot || (user.role && user.role !== "user")) continue
     if (current.some(message => canonicalId(message) === userId || message.id === userId)) continue
     const anchors = current.filter(message => message.isBot && canonicalId(message) === replyId)
     if (anchors.length !== 1 || !anchors[0].parentMessageId) continue
@@ -227,4 +228,21 @@ export const reconcileServerChatMirror = async ({
     localIds.set(serverMessageId, id)
   }
   return { localIds, rows: await db.messages.where("history_id").equals(historyId).toArray() }
+})
+
+/** H1 translates a clicked local mirror ID before native capture. No text/position inference. */
+export const resolveServerMirrorCursor = async ({
+  historyId, chatId, ownerKey, cursor, signal
+}: {
+  historyId: string; chatId: string; ownerKey: string
+  cursor: import('@/types/history-selection').HistoryCursorV1; signal?: AbortSignal
+}): Promise<import('@/types/history-selection').HistoryCursorV1> => runChatPersistenceTransaction(signal, async () => {
+  const history = await db.chatHistories.get(historyId)
+  if (history?.server_chat_id !== chatId || history.server_scope_key !== ownerKey) throw createServicePromptScopeChangedError()
+  if (cursor.kind === 'empty') return { kind: 'empty' }
+  const row = await db.messages.get(cursor.message_id)
+  if (!row || row.history_id !== historyId || !row.serverMessageId?.trim()) throw new Error('missing_canonical_message_id')
+  const rows = await db.messages.where('history_id').equals(historyId).toArray()
+  if (rows.filter(candidate => candidate.serverMessageId === row.serverMessageId).length !== 1) throw new Error('ambiguous_canonical_message_id')
+  return { kind: cursor.kind, message_id: row.serverMessageId }
 })

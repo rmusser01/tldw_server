@@ -16,7 +16,13 @@
 DELETE /api/v1/auth/single-user/session
 GET /
 GET /api/v1/audio-studio/media-tickets/{token}
+GET /api/v1/audio/health
+GET /api/v1/audio/providers
 GET /api/v1/audio/realtime/capabilities
+GET /api/v1/audio/stream/status
+GET /api/v1/audio/transcriptions/health
+GET /api/v1/audio/tts/providers/{provider}/model-info
+GET /api/v1/audio/voices/catalog
 GET /api/v1/auth/federation/{provider_slug}/callback
 GET /api/v1/auth/federation/{provider_slug}/login
 GET /api/v1/auth/verify-email

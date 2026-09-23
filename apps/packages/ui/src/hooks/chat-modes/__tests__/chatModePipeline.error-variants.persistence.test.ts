@@ -102,6 +102,7 @@ describe("failed Retry variant persistence", () => {
     for (let retry = 0; retry < 2; retry++) {
       if (reloadBetweenRetries) await restore()
       await createRegenerateLastMessage({
+        allowOrdinaryRetry: true,
         validateBeforeSubmitFn: () => true, history: transcript, messages,
         setHistory, setMessages, onSubmit: submit
       })()

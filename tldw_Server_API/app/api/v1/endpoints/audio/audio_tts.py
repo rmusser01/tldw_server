@@ -1742,7 +1742,7 @@ async def list_tts_voices(
         ) from e
 
 
-@router.post("/reset-metrics")
+@router.post("/reset-metrics", dependencies=[Depends(RequireRole("admin"))])
 async def reset_tts_metrics(
     request: Request,
     provider: Optional[str] = None,

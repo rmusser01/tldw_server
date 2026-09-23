@@ -937,3 +937,12 @@ def test_message_store_counts_and_soft_delete_roundtrip(db):
     assert store.get_message_by_id(child_message_id) is None
     assert store.count_messages_for_conversation(conversation_id) == 2
     assert store.count_messages_for_conversation(conversation_id, include_deleted=True) == 3
+
+
+def test_history_snapshot_preserves_equal_text_distinct_ids(db):
+    owner_db = db["db"]
+    conversation_id = db["conversation_id"]
+    first = owner_db.add_message({"conversation_id": conversation_id, "sender": "user", "content": "repeat"})
+    second = owner_db.add_message({"conversation_id": conversation_id, "sender": "user", "content": "repeat"})
+    snapshot = owner_db.get_conversation_history_snapshot(conversation_id, owner_client_id="message-store-user")
+    assert {row["id"] for row in snapshot.nodes} == {first, second}

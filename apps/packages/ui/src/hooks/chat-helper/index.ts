@@ -1,3 +1,5 @@
+import type { HistorySendTurn } from "@/types/chat-modes"
+import { settleAcceptedAssistant } from "@/services/chat-history-selection"
 import {
   getLastChatHistory,
   saveHistory,
@@ -34,12 +36,10 @@ const generateTitleWithFallback = async (
 ): Promise<string> => {
   try {
     const title = requestScope
-      ? await generateTitle(
-          selectedModel,
-          userMessage,
-          userMessage,
-          { requestScope, signal }
-        )
+      ? await generateTitle(selectedModel, userMessage, userMessage, {
+          requestScope,
+          signal
+        })
       : await generateTitle(selectedModel, userMessage, userMessage)
     const trimmed = typeof title === "string" ? title.trim() : ""
     return trimmed.length > 0 ? trimmed : buildFallbackHistoryTitle(userMessage)
@@ -63,14 +63,18 @@ const resolveHistorySetter = (
 
   if (!didLogSetHistoryMissing) {
     didLogSetHistoryMissing = true
-    console.error("[chat] saveMessageOnError could not resolve setHistory setter", {
-      setHistoryType: typeof candidate
-    })
+    console.error(
+      "[chat] saveMessageOnError could not resolve setHistory setter",
+      {
+        setHistoryType: typeof candidate
+      }
+    )
   }
   return null
 }
 
 export const saveMessageOnError = async ({
+  historyTurn,
   e,
   history,
   setHistory,
@@ -109,6 +113,7 @@ export const saveMessageOnError = async ({
   shouldAbortForScopeChange,
   deferHistoryMetadata = false
 }: {
+  historyTurn?: HistorySendTurn
   e: any
   setHistory: (history: ChatHistory) => void
   history: ChatHistory
@@ -150,12 +155,26 @@ export const saveMessageOnError = async ({
   shouldAbortForScopeChange?: () => boolean
   deferHistoryMetadata?: boolean
 }) => {
-  const isAbort = (
+  if (historyTurn) {
+    await historyTurn.recover(
+      {
+        content: botMessage,
+        assistantId: assistantMessageId!,
+        createdAt: historyTurn.createdAt!
+      },
+      e
+    )
+    return (
+      historyTurn.capture?.view.conversation_id ??
+      historyTurn.admission?.conversation_id ??
+      historyId
+    )
+  }
+  const isAbort =
     e?.name === "AbortError" ||
     e?.message === "AbortError" ||
     e?.name?.includes?.("AbortError") ||
     e?.message?.includes?.("AbortError")
-  )
 
   const assistantContent = buildAssistantErrorContent(botMessage, e)
   const safeSetHistory = resolveHistorySetter(setHistory)
@@ -205,12 +224,10 @@ export const saveMessageOnError = async ({
     const persistedHistoryId = await runChatPersistenceTransaction(
       scopeInvalidatedSignal,
       async () => {
-        const targetHistoryId = historyId ?? (
-          await saveHistory(title!, false, message_source)
-        ).id
-        const shouldSaveUser = !isRegenerating && (
-          !historyId || !isAbort || !isContinue
-        )
+        const targetHistoryId =
+          historyId ?? (await saveHistory(title!, false, message_source)).id
+        const shouldSaveUser =
+          !isRegenerating && (!historyId || !isAbort || !isContinue)
 
         if (isRegenerating && retryFailedTurn && userMessageId && userServerMessageId) {
           await acknowledgeSavedUserMessage(targetHistoryId, userMessageId, userServerMessageId, userMessage)
@@ -477,6 +494,7 @@ export const saveMessageOnError = async ({
 }
 
 export const saveMessageOnSuccess = async ({
+  historyTurn,
   historyId,
   setHistoryId,
   isRegenerate,
@@ -514,6 +532,7 @@ export const saveMessageOnSuccess = async ({
   deferHistoryMetadata = false,
   sessionFilesToAdd = []
 }: {
+  historyTurn?: HistorySendTurn
   historyId: string | null
   setHistoryId: (
     historyId: string,
@@ -554,6 +573,55 @@ export const saveMessageOnSuccess = async ({
   deferHistoryMetadata?: boolean
   sessionFilesToAdd?: UploadedFile[]
 }) => {
+  if (historyTurn) {
+    if (!historyTurn.admission) throw new Error("missing_history_admission")
+    const native = historyTurn.owner.kind === "native"
+    if (
+      native &&
+      (source?.length ||
+        assistantMetadataExtra ||
+        generationInfo ||
+        reasoning_time_taken > 0)
+    ) {
+      throw new Error("unsupported_history_native_result_metadata")
+    }
+    const assistant = {
+      id: assistantMessageId!,
+      history_id:
+        historyTurn.owner.kind === "unavailable"
+          ? ""
+          : historyTurn.owner.conversation_id,
+      role: "assistant",
+      name: selectedModel ?? "Assistant",
+      content: fullText,
+      createdAt: historyTurn.createdAt!,
+      images: assistantImages ?? [],
+      parent_message_id: historyTurn.admission.input_message_id,
+      ...(!native
+        ? {
+            sources: source,
+            generationInfo,
+            metadataExtra: {
+              ...assistantMetadataExtra,
+              ...(Array.isArray(generationInfo?.tool_calls)
+                ? { tool_calls: generationInfo.tool_calls }
+                : {})
+            },
+            reasoning_time_taken,
+            modelId,
+            messageType: assistantMessageType ?? message_type
+          }
+        : {})
+    }
+    await settleAcceptedAssistant(
+      historyTurn.owner,
+      historyTurn.admission,
+      assistant
+    )
+    await historyTurn.complete?.()
+    historyTurn.resultId = assistant.id
+    return historyId ?? assistant.history_id
+  }
   if (scopeInvalidatedSignal?.aborted) {
     const error = new Error("Request scope changed")
     error.name = "AbortError"
@@ -563,20 +631,17 @@ export const saveMessageOnSuccess = async ({
   const title = historyId
     ? null
     : scopeSignal || requestScope
-      ? await generateTitle(
-          selectedModel,
-          message,
-          message,
-          { signal: scopeInvalidatedSignal, requestScope }
-        )
+      ? await generateTitle(selectedModel, message, message, {
+          signal: scopeInvalidatedSignal,
+          requestScope
+        })
       : await generateTitle(selectedModel, message, message)
 
   const persistedHistoryId = await runChatPersistenceTransaction(
     scopeInvalidatedSignal,
     async () => {
-      const targetHistoryId = historyId ?? (
-        await saveHistory(title!, false, message_source)
-      ).id
+      const targetHistoryId =
+        historyId ?? (await saveHistory(title!, false, message_source)).id
 
       if (isRegenerate && retryFailedTurn && userMessageId && userServerMessageId) {
         await acknowledgeSavedUserMessage(targetHistoryId, userMessageId, userServerMessageId, message)

@@ -515,6 +515,7 @@ async def _run_execute_non_stream_call(
     refresh_provider_params=None,
     on_success=None,
     conversation_id: str = "conv-123",
+    assistant_parent_message_id: str | None = None,
     moderation_getter=None,
 ) -> dict[str, Any]:
     cleaned_args = {
@@ -548,6 +549,7 @@ async def _run_execute_non_stream_call(
         templated_llm_payload=[{"role": "user", "content": "hi"}],
         should_persist=True,
         final_conversation_id=conversation_id,
+        assistant_parent_message_id=assistant_parent_message_id,
         character_card_for_context={"name": "Test"},
         chat_db=SimpleNamespace(),
         save_message_fn=save_message_fn,
@@ -1763,6 +1765,7 @@ async def test_non_stream_auto_continue_runs_once_when_enabled(monkeypatch: pyte
     response = await _run_execute_non_stream_call(
         llm_call_func=_build_llm_response_with_tool_calls,
         save_message_fn=save_message_fn,
+        assistant_parent_message_id="accepted-input",
     )
 
     assert autoexec_called["count"] == 1
@@ -1774,6 +1777,7 @@ async def test_non_stream_auto_continue_runs_once_when_enabled(monkeypatch: pyte
     assert continuation_messages[-1]["tool_call_id"] == "c1"
 
     assert [p["role"] for p in saved_payloads] == ["assistant", "tool", "assistant"]
+    assert [p["parent_message_id"] for p in saved_payloads if p["role"] == "assistant"] == ["accepted-input", "accepted-input"]
     assert response["choices"][0]["message"]["content"] == "Final answer from continuation"
     assert response["tldw_tool_results"][0]["tool_call_id"] == "c1"
     assert response["tldw_tool_auto_continue"] == {"attempted": True, "succeeded": True}

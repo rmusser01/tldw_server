@@ -1,7 +1,11 @@
+import { HistorySelectionProvider, useHistorySelectionContext, parseHistorySelectionHandoff } from "@/hooks/chat/useHistorySelection";
+import { HistorySelectionReview } from "@/components/Common/Playground/HistorySelectionReview";
+import { formatSelectedHistory } from "@/db/dexie/helpers";
 import { resolveServicePromptScope } from "@/services/service-prompts";
 import React from "react";
 import { PlaygroundForm } from "./PlaygroundForm";
 import { PlaygroundChat } from "./PlaygroundChat";
+import type { ChatTimelineNavigation } from "./VirtualChatTimeline";
 import {
   PlaygroundCockpitShell,
   type PlaygroundCockpitMode,
@@ -95,7 +99,7 @@ import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings";
 import { useMcpToolsStore } from "@/store/mcp-tools";
 import { useDesktop, useMobile } from "@/hooks/useMediaQuery";
 import { useDarkMode } from "@/hooks/useDarkmode";
-import { useLoadLocalConversation } from "@/hooks/useLoadLocalConversation";
+import { useLoadLocalConversation, restoreReadableLocalComparison } from "@/hooks/useLoadLocalConversation";
 import { tldwClient } from "@/services/tldw/TldwApiClient";
 import { resolvePlaygroundShortcutAction } from "./playground-shortcuts";
 import {
@@ -387,6 +391,15 @@ const normalizeChatWorkflowMode = (
   value === "character" ? "character" : "standard";
 
 export const Playground = () => {
+  return <HistorySelectionProvider storageKey="tldw-h1-playground-reference" onCapture={capture => {
+    const display = formatSelectedHistory(capture);
+    useStoreMessageOption.getState().setHistory(display.history);
+    useStoreMessageOption.getState().setMessages(display.messages);
+  }}><PlaygroundContent /></HistorySelectionProvider>;
+};
+
+const PlaygroundContent = () => {
+  const historySelection = useHistorySelectionContext()!;
   const drop = React.useRef<HTMLDivElement>(null);
   const artifactsTriggerRef = React.useRef<HTMLButtonElement>(null);
   const artifactsEdgeExpandRef = React.useRef<HTMLButtonElement>(null);
@@ -578,7 +591,7 @@ export const Playground = () => {
     setServerChatAssistantId,
     setServerChatPersonaMemoryMode,
     setServerChatMetaLoaded,
-  } = useMessageOption();
+  } = useMessageOption({ hydrateServerChat: true });
   const setUploadedFiles = useStoreMessageOption(
     (state) => state.setUploadedFiles,
   );
@@ -673,7 +686,7 @@ export const Playground = () => {
     },
     [],
   );
-  const { containerRef, isAutoScrollToBottom, autoScrollToBottom } =
+  const { containerRef, isAutoScrollToBottom, autoScrollToBottom, pauseAutoScroll } =
     useSmartScroll(messages, streaming, 120, {
       bottomOffsetPx: composerBottomOffsetPx,
     });
@@ -695,9 +708,6 @@ export const Playground = () => {
   const feedbackTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
-  const timelineActionRetryTimeoutRef = React.useRef<ReturnType<
-    typeof setTimeout
-  > | null>(null);
   const initializePlaygroundRef = React.useRef(false);
   const initializePlaygroundCallbackRef = React.useRef<
     () => Promise<void>
@@ -1411,9 +1421,6 @@ export const Playground = () => {
       if (feedbackTimerRef.current) {
         clearTimeout(feedbackTimerRef.current);
       }
-      if (timelineActionRetryTimeoutRef.current) {
-        clearTimeout(timelineActionRetryTimeoutRef.current);
-      }
       pendingTimelineActionRef.current = null;
     };
   }, []);
@@ -1438,10 +1445,13 @@ export const Playground = () => {
       pinned: AttachedResearchContext | null,
       history: AttachedResearchContext[],
     ) => {
-      if (!serverChatId || !stableHistoryId) {
-        return;
-      }
+      const settingsMode = historySelection.settingsMode(serverChatId);
+      if (!serverChatId || settingsMode === "pending" || (!stableHistoryId && settingsMode !== "fork")) return;
       try {
+        const patch = {deepResearchAttachment: context ? toPersistedDeepResearchAttachment(context) : null,
+          deepResearchPinnedAttachment: pinned ? toPersistedDeepResearchAttachment(pinned) : null,
+          deepResearchAttachmentHistory: history.map(entry => toPersistedDeepResearchAttachment(entry, entry.attached_at))};
+        if (settingsMode === "fork") {await historySelection.updateForkSettings(patch); return;}
         await applyChatSettingsPatch({
           historyId: stableHistoryId,
           serverChatId,
@@ -1461,11 +1471,11 @@ export const Playground = () => {
         // Attachment persistence is best-effort and should never block chat use.
       }
     },
-    [serverChatId, stableHistoryId],
+    [serverChatId, stableHistoryId, historySelection],
   );
 
   React.useEffect(() => {
-    if (!playgroundReady || !serverChatId) {
+    if (!playgroundReady || !serverChatId || historySelection.settingsMode(serverChatId) === "pending") {
       return;
     }
     let cancelled = false;
@@ -1473,10 +1483,9 @@ export const Playground = () => {
 
     const restorePersistedAttachment = async () => {
       try {
-        const settings = await syncChatSettingsForServerChat({
-          historyId: stableHistoryId,
-          serverChatId,
-        });
+        const settings = historySelection.settingsMode(serverChatId) === "fork"
+          ? historySelection.forkSettings
+          : await syncChatSettingsForServerChat({historyId: stableHistoryId, serverChatId});
         if (cancelled || previousThreadRef.current !== threadKey) {
           return;
         }
@@ -1516,7 +1525,7 @@ export const Playground = () => {
     return () => {
       cancelled = true;
     };
-  }, [playgroundReady, serverChatId, stableHistoryId]);
+  }, [playgroundReady, serverChatId, stableHistoryId, historySelection.status, historySelection.forkCandidate, historySelection.forkSettings]);
 
   const handleAttachResearchContext = React.useCallback(
     (context: AttachedResearchContext) => {
@@ -1755,6 +1764,59 @@ export const Playground = () => {
   ]);
 
   const initializePlayground = React.useCallback(async () => {
+    let handoff;
+    let handoffInHash = false;
+    let storedHistoryReference;
+    try {
+      handoff = parseHistorySelectionHandoff(location.search || "");
+      if (!handoff) {
+        handoff = parseHistorySelectionHandoff(extractHashSearch(location.hash).split("#")[0]);
+        handoffInHash = Boolean(handoff);
+      }
+      storedHistoryReference = historySelection.getStoredReference();
+    }
+    catch { await historySelection.open({ kind: "unavailable", code: "invalid_history_reference" }); return; }
+    if (handoff) {
+      const loaded = await historySelection.loadConversation(handoff.owner_kind === "local" ? { historyId: handoff.conversation_id } : { serverChatId: handoff.conversation_id }, handoff);
+      if (loaded && historySelection.getCurrent().capture) {
+        setHistoryId(handoff.owner_kind === "local" ? handoff.conversation_id : null);
+        setServerChatId(handoff.owner_kind === "native" ? handoff.conversation_id : null);
+        const handoffCurrent = historySelection.fence();
+        await restoreReadableLocalComparison(historySelection, display => { setHistory(display.history); setMessages(display.messages); });
+        if (!handoffCurrent()) return;
+        // The frozen address initializes this writer once. Reload then uses its
+        // own saved address, including the original pending-confirmation pointer.
+        const url = new URL(window.location.href);
+        const initialSearch = handoffInHash ? location.hash : location.search;
+        const initialValue = new URLSearchParams(
+          (initialSearch || "").replace(/^.*\?/, "").split("#")[0],
+        ).get("historySelection");
+        // HashRouter exposes its hash query as location.search. Locate the
+        // matching parameter in the browser URL rather than assuming the same slot.
+        const consumeFromHash = url.searchParams.get("historySelection") !== initialValue;
+        const hashQueryStart = url.hash.indexOf("?");
+        const currentSearch = consumeFromHash
+          ? url.hash.slice(hashQueryStart + 1)
+          : url.search;
+        const fragmentStart = currentSearch.indexOf("#");
+        const trailingFragment = fragmentStart < 0 ? "" : currentSearch.slice(fragmentStart);
+        const params = new URLSearchParams(
+          fragmentStart < 0 ? currentSearch : currentSearch.slice(0, fragmentStart),
+        );
+        // Preserve a different handoff received while this owner was loading.
+        if (params.get("historySelection") === initialValue) {
+          params.delete("historySelection");
+          const query = params.toString();
+          if (consumeFromHash) {
+            url.hash = url.hash.slice(0, hashQueryStart) + (query ? `?${query}` : "") + trailingFragment;
+          } else {
+            url.search = query;
+          }
+          window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+        }
+      }
+      return;
+    }
     if (routeCharacterIntentChatId) {
       if (serverChatId !== routeCharacterIntentChatId) {
         setServerChatId(routeCharacterIntentChatId);
@@ -1784,7 +1846,7 @@ export const Playground = () => {
     }
 
     // 1. Try session persistence first (restores exact state from nav-away)
-    if (shouldRestorePersistedSessionOnInit) {
+    if (storedHistoryReference || shouldRestorePersistedSessionOnInit) {
       const restoreOutcome = await restoreSession();
       if (restoreOutcome !== "not-restored") return;
     }
@@ -1803,8 +1865,11 @@ export const Playground = () => {
       const recentChat = await getRecentChatFromWebUI();
       if (recentChat) {
         setHistoryId(recentChat.history.id);
-        setHistory(formatToChatHistory(recentChat.messages));
-        setMessages(formatToMessage(recentChat.messages));
+        await historySelection.loadConversation({ historyId: recentChat.history.id });
+        if (historySelection.getCurrent().capture?.status !== "captured") {
+          setHistory(formatToChatHistory(recentChat.messages));
+          setMessages(formatToMessage(recentChat.messages));
+        }
 
         const lastUsedPrompt = recentChat?.history?.last_used_prompt;
         if (lastUsedPrompt) {
@@ -2232,31 +2297,41 @@ export const Playground = () => {
     [messages],
   );
 
+  const chatTimelineRef = React.useRef<ChatTimelineNavigation | null>(null);
   const scrollToMessage = React.useCallback(
-    (messageId: string) => {
+    async (messageId: string) => {
+      const current = historySelection.fence();
+      const index = findMessageIndex(messageId);
+      if (index < 0) return false;
+      pauseAutoScroll();
+      if (chatTimelineRef.current && !await chatTimelineRef.current.reveal(index)) return false;
       const container = containerRef.current;
-      if (!container) return false;
+      if (!current() || !container) return false;
       const target = container.querySelector<HTMLElement>(
         `[data-message-id="${messageId}"], [data-server-message-id="${messageId}"]`,
       );
       if (!target) return false;
-      target.scrollIntoView({ block: "center", behavior: "smooth" });
+      target.scrollIntoView({ block: "center", behavior: messages.length > 100 ? "auto" : "smooth" });
       return true;
     },
-    [containerRef],
+    [containerRef, findMessageIndex, historySelection, messages.length, pauseAutoScroll],
   );
   const scrollToMessageIndex = React.useCallback(
-    (index: number) => {
+    async (index: number) => {
+      const current = historySelection.fence();
+      if (index < 0 || index >= messages.length) return false;
+      pauseAutoScroll();
+      if (chatTimelineRef.current && !await chatTimelineRef.current.reveal(index)) return false;
       const container = containerRef.current;
-      if (!container) return false;
+      if (!current() || !container) return false;
       const target = container.querySelector<HTMLElement>(
-        `[data-index="${index}"]`,
+        `[data-testid="chat-message"][data-index="${index}"]`,
       );
       if (!target) return false;
-      target.scrollIntoView({ block: "center", behavior: "smooth" });
+      target.scrollIntoView({ block: "center", behavior: messages.length > 100 ? "auto" : "smooth" });
       return true;
     },
-    [containerRef],
+    [containerRef, historySelection, messages.length, pauseAutoScroll],
   );
 
   const dispatchEditMessage = React.useCallback((messageId: string) => {
@@ -2276,42 +2351,26 @@ export const Playground = () => {
         if (messages.length === 0) return false;
         const index = findMessageIndex(detail.messageId);
         if (index < 0) return true;
-        void createChatBranch(index);
+        void createChatBranch(detail.messageId);
         return true;
       }
 
       if (!detail.messageId) return true;
 
-      const scrolled = scrollToMessage(detail.messageId);
-      if (!scrolled) {
-        if (!containerRef.current) return false;
-        if (timelineActionRetryTimeoutRef.current) {
-          clearTimeout(timelineActionRetryTimeoutRef.current);
-        }
-        timelineActionRetryTimeoutRef.current = setTimeout(() => {
-          timelineActionRetryTimeoutRef.current = null;
-          const retry = scrollToMessage(detail.messageId);
-          if (retry && detail.action === "edit") {
-            dispatchEditMessage(detail.messageId);
-          }
-        }, 80);
-        return true;
-      }
-
-      if (detail.action === "edit") {
-        dispatchEditMessage(detail.messageId);
-      }
+      const current = historySelection.fence();
+      void scrollToMessage(detail.messageId).then(scrolled => {
+        if (current() && scrolled && detail.action === "edit") dispatchEditMessage(detail.messageId!);
+      });
       return true;
     },
     [
-      containerRef,
       createChatBranch,
       dispatchEditMessage,
       findMessageIndex,
       historyId,
+      historySelection,
       messages.length,
       scrollToMessage,
-      timelineActionRetryTimeoutRef,
     ],
   );
 
@@ -2766,9 +2825,25 @@ export const Playground = () => {
     });
   }, [cockpitAssistantSelectTab]);
   const clearAssistantFromCockpit = React.useCallback(async () => {
+    const settingsMode = historySelection.settingsMode(serverChatId);
+    if (settingsMode === "pending") return;
+    const forkChild = settingsMode === "fork";
+    const current = historySelection.fence();
+    if (forkChild) {
+      try {
+        await historySelection.updateForkSettings({ assistantOverlay: null });
+      } catch {
+        return;
+      }
+      if (!current()) return;
+    }
     await setSelectedAssistant(null);
+    if (forkChild && !current()) return;
     await setSelectedCharacter(null);
-    await clearPersistedSession();
+    if (forkChild && !current()) return;
+    // Resetting selection is part of the intentional detach; keep the remaining state changes synchronous.
+    if (forkChild) clearPersistedSession();
+    else await clearPersistedSession();
     setServerChatCharacterId(null);
     setServerChatAssistantKind(null);
     setServerChatAssistantId(null);
@@ -2778,7 +2853,7 @@ export const Playground = () => {
     setCharacterModeIntentActive(false);
     void setChatWorkflowMode("standard");
     scheduleFocusFirstVisibleElement(COCKPIT_ASSISTANT_SELECT_TRIGGER_SELECTOR);
-    await applyChatSettingsPatch({
+    if (!forkChild) await applyChatSettingsPatch({
       historyId: stableHistoryId,
       serverChatId,
       patch: {
@@ -2786,6 +2861,7 @@ export const Playground = () => {
       },
     }).catch(() => undefined);
   }, [
+    historySelection,
     clearPersistedSession,
     serverChatId,
     setChatWorkflowMode,
@@ -4244,7 +4320,10 @@ export const Playground = () => {
             >
               <div className={`mx-auto w-full ${chatContentWidthClassName} pb-6`}>
                 <ChatErrorBoundary>
+                  <HistorySelectionReview selection={historySelection} onBind={() => void historySelection.loadConversation({ historyId, serverChatId, bindUnbound: true })} />
                   <PlaygroundChat
+                    scrollParentRef={containerRef}
+                    navigationRef={chatTimelineRef}
                     showStarterDeck={showStarterDeck}
                     searchQuery={threadSearchQuery.trim()}
                     matchedMessageIndices={threadSearchMatchSet}

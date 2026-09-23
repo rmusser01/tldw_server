@@ -75,7 +75,7 @@ def test_real_v68_upgrade_preserves_rows_and_owner_name_constraints(historical, 
             assert _version(backend) == CharactersRAGDB._POSTGRES_SCHEMA_VERSION
             assert _constraints(backend) == [{"conname": "decks_client_id_name_key", "columns": ["client_id", "name"]}]
             assert _rows(backend) == before
-            assert CharactersRAGDB._CURRENT_SCHEMA_VERSION == 68
+            assert CharactersRAGDB._CURRENT_SCHEMA_VERSION == 69
         first, second = instances[:2]
         with pytest.raises(ConflictError):
             first.add_deck("Citrine")

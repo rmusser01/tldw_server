@@ -564,6 +564,7 @@ describe("WorkspaceChatPanel", () => {
     )
 
     expect(chatHookState.useMessageOption).toHaveBeenCalledWith({
+      hydrateServerChat: true,
       scope: { type: "global" }
     })
     expect(screen.getByTestId("workspace-panel-message")).toHaveAttribute(

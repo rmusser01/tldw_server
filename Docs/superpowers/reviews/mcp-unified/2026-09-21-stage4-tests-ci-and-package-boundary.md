@@ -215,7 +215,7 @@ FINDING mcp-unified-12
   impact:      Medium: it does not break anything today, and the extraction ratchets are
                genuinely good work (they are the two highest-churn files in the module,
                which is the signature of a boundary being actively maintained rather than
-               neglected). It is filed because the placement is what causes finding 4 — 
+               neglected). It is filed because the placement is what causes finding 4 —
                39,533 LOC of tests for a package that CI's server shards have no reason to
                run sit in a directory CI's server shards do not run — and because
                README.md:3 tells the next reader the package does not exist.

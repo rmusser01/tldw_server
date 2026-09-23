@@ -5,8 +5,7 @@ import {
 } from "@/db/dexie/helpers"
 import { copilotResumeLastChat } from "@/services/app"
 import {
-  getChatSettingsStorageKey,
-  normalizeChatSettingsRecord,
+  getChatSettingsForKey,
   resolveChatSettingsKey
 } from "@/services/chat-settings"
 import type { SidepanelChatSnapshot, SidepanelChatTab } from "@/store/sidepanel-chat-tabs"
@@ -67,9 +66,7 @@ const hasOverlayDraftSettings = async (
     if (!resumeMarkerKey) return false
     return Boolean(await storage.get(resumeMarkerKey))
   }
-  const settingsKey = getChatSettingsStorageKey(chatKey)
-  const storedSettings = await storage.get(settingsKey)
-  return Boolean(normalizeChatSettingsRecord(storedSettings)?.assistantOverlay)
+  return Boolean((await getChatSettingsForKey(chatKey))?.assistantOverlay)
 }
 
 const hasRestorableSnapshot = async (

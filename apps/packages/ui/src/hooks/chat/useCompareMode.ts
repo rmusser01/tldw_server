@@ -36,11 +36,12 @@ export const useCompareMode = ({ historyId, forceEnabled }: UseCompareModeOption
     "compareMaxModels",
     MAX_COMPARE_MODELS
   )
-  const [compareFeatureEnabled, setCompareFeatureEnabled] = useFeatureFlag(
+  const [compareFeatureEnabled, setCompareFeatureEnabled, featureLoaded] = useFeatureFlag(
     FEATURE_FLAGS.COMPARE_MODE
   )
 
   const effectiveCompareEnabled = forceEnabled ? true : compareFeatureEnabled
+  const compareFeatureReady = Boolean(forceEnabled) || featureLoaded
   const compareModeActive = effectiveCompareEnabled && compareMode
   const compareModeActiveRef = React.useRef(compareModeActive)
   const compareFeatureEnabledRef = React.useRef(compareFeatureEnabled)
@@ -70,12 +71,12 @@ export const useCompareMode = ({ historyId, forceEnabled }: UseCompareModeOption
     React.useState(false)
 
   React.useEffect(() => {
-    if (!effectiveCompareEnabled && compareMode) {
+    if (compareFeatureReady && !effectiveCompareEnabled && compareMode) {
       setCompareMode(false)
       setCompareSelectedModels([])
       setCompareAutoDisabledFlag(true)
     }
-  }, [effectiveCompareEnabled, compareMode, setCompareMode, setCompareSelectedModels])
+  }, [compareFeatureReady, effectiveCompareEnabled, compareMode, setCompareMode, setCompareSelectedModels])
 
   React.useEffect(() => {
     if (compareModeActiveRef.current === compareModeActive) {
@@ -149,7 +150,7 @@ export const useCompareMode = ({ historyId, forceEnabled }: UseCompareModeOption
     if (!historyId || historyId === "temp") {
       return
     }
-    if (compareHydratingRef.current) {
+    if (!compareFeatureReady || compareHydratingRef.current) {
       return
     }
 
@@ -179,6 +180,7 @@ export const useCompareMode = ({ historyId, forceEnabled }: UseCompareModeOption
     }
   }, [
     historyId,
+    compareFeatureReady,
     compareMode,
     compareSelectedModels,
     compareSelectionByCluster,
@@ -199,6 +201,7 @@ export const useCompareMode = ({ historyId, forceEnabled }: UseCompareModeOption
     compareMode,
     setCompareMode,
     compareFeatureEnabled: effectiveCompareEnabled,
+    compareFeatureReady,
     setCompareFeatureEnabled,
     compareSelectedModels,
     setCompareSelectedModels,

@@ -403,3 +403,37 @@ describe("TldwApiClient captured request scope", () => {
     })
   })
 })
+
+describe('H1 native owner scope', () => {
+  it('carries captured lease and independent workspace through both history routes and settlement', async () => {
+    mocks.bgRequest.mockResolvedValue({})
+    const client = new TldwApiClient()
+    const options = { requestScope, scope: { type: 'workspace', workspaceId: '7' }, signal: new AbortController().signal }
+    await client.captureHistorySelection('chat', { view: {} as any, purpose: 'send' }, options as any)
+    await client.confirmHistoryProjection('chat', {} as any, options as any)
+    await client.persistCharacterCompletion('chat', { assistant_message_id: 'reply' }, options as any)
+    for (const [init] of mocks.bgRequest.mock.calls.slice(-3)) {
+      expect(init).toMatchObject({ ...expectedScopeFields, abortSignal: options.signal })
+      expect(init.path).toContain('workspace_id=7')
+    }
+  })
+})
+
+it.each([['composed', TldwApiClient], ['base', TldwApiClientBase]] as const)(
+  '%s streaming accepts frozen selected-history payload without mutating its request',
+  async (_name, Client) => {
+    mocks.bgStream.mockImplementation(async function* () {
+      yield '{"choices":[{"delta":{"content":"saved reply"}}]}'
+    })
+    const body = Object.freeze({
+      model: 'h1-model',
+      stream: false,
+      messages: [{ role: 'user' as const, content: 'selected input' }]
+    })
+    const chunks = []
+    for await (const chunk of new Client().streamChatCompletion(body, { requestScope })) chunks.push(chunk)
+    expect(chunks).toEqual([{ choices: [{ delta: { content: 'saved reply' } }] }])
+    expect(body.stream).toBe(false)
+    expect(mocks.bgStream.mock.calls.at(-1)?.[0].body).toEqual({ ...body, stream: true })
+  }
+)
