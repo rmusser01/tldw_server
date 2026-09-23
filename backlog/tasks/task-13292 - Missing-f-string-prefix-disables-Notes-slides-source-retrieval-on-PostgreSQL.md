@@ -1,9 +1,10 @@
 ---
 id: TASK-13292
 title: Missing f-string prefix disables Notes slides-source retrieval on PostgreSQL
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-22 04:36'
+updated_date: '2026-09-23 00:12'
 labels:
   - bug
   - rag
@@ -40,20 +41,26 @@ Found by the comprehensive core-module review (RAG reviewer); independently veri
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A PostgreSQL-backed test reproduces the failure before the fix (tests/RAG/conftest.py:dual_backend_env exists and is the starting point)
-- [ ] #2 The f-string prefix is added at database_retrievers.py:2719
-- [ ] #3 The three sibling methods use one consistent splicing convention, or each divergence is documented
-- [ ] #4 The bare except at :2778 no longer hides the backend and cause -- the error names both
-- [ ] #5 dual_backend_env coverage is extended to the Notes slides-source path so this class of divergence fails loudly next time
-- [ ] #6 Bandit run for touched scope
+- [x] #1 A PostgreSQL-backed test reproduces the failure before the fix (tests/RAG/conftest.py:dual_backend_env exists and is the starting point)
+- [x] #2 The f-string prefix is added at database_retrievers.py:2719
+- [x] #3 The three sibling methods use one consistent splicing convention, or each divergence is documented
+- [x] #4 The bare except at :2778 no longer hides the backend and cause -- the error names both
+- [x] #5 dual_backend_env coverage is extended to the Notes slides-source path so this class of divergence fails loudly next time
+- [x] #6 Bandit run for touched scope
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Fixed test-first and merged to dev in PR #2980 (merge commit 8045fa2956). A failing test reproduced the defect before any code changed, with controls pinning the behaviour that had to stay unchanged. Qodo review then found follow-on defects in three of this batch's fixes; those were corrected in the same PR before merge.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

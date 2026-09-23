@@ -4,6 +4,7 @@ title: Consolidate scalar and environment coercion behind one contract
 status: To Do
 assignee: []
 created_date: '2026-09-22 05:10'
+updated_date: '2026-09-23 00:11'
 labels:
   - refactor
   - security
@@ -44,6 +45,18 @@ Found by the comprehensive core-module review (TASK-13293). All three defects in
 - [ ] #6 No configuration key that parses today resolves to a different value after any stage
 - [ ] #7 Bandit run for touched scope
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+REOPENED. Closing this as a duplicate of TASK-13322 was wrong, and Qodo caught it on PR #2981.
+
+TASK-13322's file was added in commit 9b4d78bf46, which exists only on the branch fix/core-module-review-batch-1. That branch has no pull request and has not reached dev, so the file is absent from dev and from every branch that will merge. The backlog CLI resolves TASK-13322 because it reads state outside this branch, which is what made the duplicate look real.
+
+Net effect of the closure would have been to delete the only in-repo record of three fail-open coercion defects -- one of them an SSRF escape hatch, where TTS audio_cpp_config._as_bool ends 'return bool(value)' so allow_remote_base_url = n evaluates True and disables the loopback guard (ADR-026 governs). Qodo's description of the consequence was right; only its phrasing ('the claimed canonical duplicate is not represented in the repository') read as if the task had never existed, which is why I initially judged the finding wrong.
+
+This task stays open until either the work is done or TASK-13322 actually lands on dev. If 13322 lands, reconcile then: 13322 carries the root cause (core/testing.py:30 is_truthy imported by 140 production files from a module documented as test-mode helpers) and the OCR three-truthy-sets finding, while this task carries the google_adapter._env_flag and request_resolution._is_truthy_value defects and the explicit fail-closed acceptance criterion. Neither is a superset of the other.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

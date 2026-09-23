@@ -1,9 +1,10 @@
 ---
 id: TASK-13297
 title: Malformed share-token signature returns unauthenticated HTTP 500
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-22 04:45'
+updated_date: '2026-09-23 00:12'
 labels:
   - bug
   - chat
@@ -44,19 +45,25 @@ Found by the comprehensive core-module review; independently verified by the orc
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A failing test requests a share link whose signature segment is not valid base64 and asserts 400, not 500
-- [ ] #2 Both base64 decodes sit inside the guard, matching notes.py:857-912
-- [ ] #3 A malformed payload segment still returns 400 (no regression)
-- [ ] #4 A valid token still resolves (no regression)
-- [ ] #5 Bandit run for touched scope
+- [x] #1 A failing test requests a share link whose signature segment is not valid base64 and asserts 400, not 500
+- [x] #2 Both base64 decodes sit inside the guard, matching notes.py:857-912
+- [x] #3 A malformed payload segment still returns 400 (no regression)
+- [x] #4 A valid token still resolves (no regression)
+- [x] #5 Bandit run for touched scope
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Fixed test-first and merged to dev in PR #2980 (merge commit 8045fa2956). A failing test reproduced the defect before any code changed, with controls pinning the behaviour that had to stay unchanged. Qodo review then found follow-on defects in three of this batch's fixes; those were corrected in the same PR before merge.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

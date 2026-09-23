@@ -4,6 +4,7 @@ title: 'Comprehensive core-module code review: prompt, ledgers, synthesis'
 status: Done
 assignee: []
 created_date: '2026-09-22 04:42'
+updated_date: '2026-09-23 00:13'
 labels:
   - docs
   - review
@@ -30,10 +31,10 @@ Defects filed from this review: TASK-13287, TASK-13288, TASK-13289, TASK-13290, 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Review prompt committed under Docs/Development/Used_Prompts/Code_Review/
-- [ ] #2 Per-module ledgers and the cross-module synthesis committed under Docs/superpowers/reviews/
-- [ ] #3 No source file modified by the review
-- [ ] #4 Verified defects filed as individual Backlog tasks
+- [x] #1 Review prompt committed under Docs/Development/Used_Prompts/Code_Review/
+- [x] #2 Per-module ledgers and the cross-module synthesis committed under Docs/superpowers/reviews/
+- [x] #3 No source file modified by the review
+- [x] #4 Verified defects filed as individual Backlog tasks
 <!-- AC:END -->
 
 ## Final Summary
@@ -44,12 +45,12 @@ Read-only review of 10 modules. 6 defect tasks filed for independently-verified 
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
-- [ ] #7 Acceptance criteria completed
-- [ ] #8 Final summary added
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
+- [x] #7 Acceptance criteria completed
+- [x] #8 Final summary added
 <!-- DOD:END -->

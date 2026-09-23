@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-09-22 04:44'
+updated_date: '2026-09-22 14:28'
 labels:
   - bug
   - mcp
@@ -58,6 +59,16 @@ Found by the comprehensive core-module review; the tab-stripping behaviour indep
 - [ ] #6 filesystem_module's now-dead exemption table is removed or made reachable
 - [ ] #7 Bandit run for touched scope
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Whitespace half SHIPPED in PR #2980 (merge 8045fa2956): BaseModule.sanitize_input and the FilesystemModule override now preserve \t and \r, so fs.write no longer corrupts tab-significant files and fs.edit can match tab-indented content. Qodo correctly caught that fixing only the base class was ineffective, since the override shadows it on the production path.
+
+STILL OPEN - the dangerous_patterns denylist. It rejects '--', '/*', 'xp_', so ordinary Markdown rules, src/*.py pathspecs, git '-- path' and exp_ filenames are refused on data that is bound to parameterised queries. Removing it requires confirming all 22 inheriting modules actually parameterise, which is an owner decision rather than a drive-by edit.
+
+Also still divergent and out of scope for that change: sandbox_module.py strips \t, and run_command_module.py keeps \t but strips \r. Three predicates remain across the four overrides.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

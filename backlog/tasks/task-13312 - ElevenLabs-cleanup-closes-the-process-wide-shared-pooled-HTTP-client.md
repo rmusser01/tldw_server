@@ -1,9 +1,10 @@
 ---
 id: TASK-13312
 title: ElevenLabs cleanup closes the process-wide shared pooled HTTP client
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-22 04:54'
+updated_date: '2026-09-23 00:12'
 labels:
   - bug
   - tts
@@ -47,19 +48,25 @@ Found by the comprehensive core-module review; independently verified by the orc
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A failing test unloads the provider then issues a request and asserts it succeeds rather than raising client-has-been-closed
-- [ ] #2 The ElevenLabs _cleanup_resources override is deleted so it inherits the base no-op, matching openai_adapter
-- [ ] #3 If a provider genuinely needs pool teardown, it calls close_pool (which evicts) rather than aclose
-- [ ] #4 The existing test that pins the current behaviour is updated rather than left asserting the defect
-- [ ] #5 ADR-011's retry-after-cooldown property holds for ElevenLabs after the fix
+- [x] #1 A failing test unloads the provider then issues a request and asserts it succeeds rather than raising client-has-been-closed
+- [x] #2 The ElevenLabs _cleanup_resources override is deleted so it inherits the base no-op, matching openai_adapter
+- [x] #3 If a provider genuinely needs pool teardown, it calls close_pool (which evicts) rather than aclose
+- [x] #4 The existing test that pins the current behaviour is updated rather than left asserting the defect
+- [x] #5 ADR-011's retry-after-cooldown property holds for ElevenLabs after the fix
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Fixed test-first and merged to dev in PR #2980 (merge commit 8045fa2956). A failing test reproduced the defect before any code changed, with controls pinning the behaviour that had to stay unchanged. Qodo review then found follow-on defects in three of this batch's fixes; those were corrected in the same PR before merge.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

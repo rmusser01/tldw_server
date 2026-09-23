@@ -1,10 +1,10 @@
 ---
 id: TASK-13296
 title: Remove unreachable unscoped webhook query before a refactor activates it
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-22 04:45'
-updated_date: '2026-09-22 05:19'
+updated_date: '2026-09-23 00:12'
 labels:
   - security
   - evaluations
@@ -44,12 +44,12 @@ Found by the comprehensive core-module review; independently verified by the orc
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A failing test with TEST_MODE=1 and two users proves user A receives user B's webhook rows including secret
-- [ ] #2 The unscoped fallback query is removed, or gains a user_id predicate so it cannot cross tenants
-- [ ] #3 If any test depended on the fallback, it is replaced by explicit per-user fixture registration
-- [ ] #4 If a test-only relaxation is still wanted, it is gated on is_explicit_pytest_runtime rather than the env-var is_test_mode
-- [ ] #5 secret is not selected into any code path that does not need it
-- [ ] #6 Bandit run for touched scope
+- [x] #1 A failing test with TEST_MODE=1 and two users proves user A receives user B's webhook rows including secret
+- [x] #2 The unscoped fallback query is removed, or gains a user_id predicate so it cannot cross tenants
+- [x] #3 If any test depended on the fallback, it is replaced by explicit per-user fixture registration
+- [x] #4 If a test-only relaxation is still wanted, it is gated on is_explicit_pytest_runtime rather than the env-var is_test_mode
+- [x] #5 secret is not selected into any code path that does not need it
+- [x] #6 Bandit run for touched scope
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -66,12 +66,18 @@ What remains true and why this is still worth doing: an unscoped 'SELECT id, url
 Severity corrected High -> Medium: latent hazard and dead code, not a live disclosure. The is_test_mode-reads-an-env-var observation still stands as a general concern (see AUTHNZ-1, which documents four strictness levels for test-context detection), but it is not exploitable here.
 <!-- SECTION:NOTES:END -->
 
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Fixed test-first and merged to dev in PR #2980 (merge commit 8045fa2956). A failing test reproduced the defect before any code changed, with controls pinning the behaviour that had to stay unchanged. Qodo review then found follow-on defects in three of this batch's fixes; those were corrected in the same PR before merge.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
