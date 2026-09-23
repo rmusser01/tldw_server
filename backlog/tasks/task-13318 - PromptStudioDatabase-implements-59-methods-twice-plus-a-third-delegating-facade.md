@@ -3,9 +3,10 @@ id: TASK-13318
 title: >-
   PromptStudioDatabase implements 59 methods twice plus a third delegating
   facade
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-09-22 04:55'
+updated_date: '2026-09-23 12:27'
 labels:
   - duplication
   - db
@@ -34,10 +35,16 @@ Source: synthesis F20
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Design doc and ADR recorded before code changes
-- [ ] #2 A signature-parity test covers all paired methods
+- [x] #1 Design doc and ADR recorded before code changes
+- [x] #2 A signature-parity test covers all paired methods
 - [ ] #3 Business logic exists once, with only SQL differing per backend
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+AC2 done in 0205612478 (signature-parity ratchet, 7 known mismatches frozen, verified to bite). AC1 done: Docs/Design/2026-09-23-prompt-studio-db-consolidation-design.md + ADR-051 (Proposed). AC3 (logic exists once) is the multi-stage refactor the design stages; not started, pending the owner's choice of option. Notable finding: _BackendPromptStudioDatabase already branches on backend_type and could run on a SQLite DatabaseBackend -- a faster but riskier route, documented as Option A.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
