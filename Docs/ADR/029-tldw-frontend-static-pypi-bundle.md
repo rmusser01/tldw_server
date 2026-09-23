@@ -10,7 +10,7 @@
 The user approved a small PyPI launcher with managed prebuilt application bundles
 and a paired Docker distribution on 2026-09-20. That direction replaces this
 static-export proposal; see the [complete application distribution design](../Design/2026-09-20-complete-app-distribution-design.md)
-under TASK-13265. The consolidated specification is awaiting written-spec review.
+under TASK-13265. The consolidated specification was approved on 2026-09-22.
 The original proposal below is retained as history, not an instruction to begin
 its implementation. This update does not lift the frontend publication freeze.
 

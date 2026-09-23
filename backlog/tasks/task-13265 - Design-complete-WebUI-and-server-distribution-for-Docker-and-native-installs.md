@@ -1,10 +1,10 @@
 ---
 id: TASK-13265
 title: Design complete WebUI and server distribution for Docker and native installs
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-21 05:14'
-updated_date: '2026-09-21 06:10'
+updated_date: '2026-09-23 06:16'
 labels:
   - packaging
   - distribution
@@ -32,8 +32,8 @@ Resume the expired installation brainstorm and design a complete application dis
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 Record the approved native and Docker distribution architecture and supported-platform requirements.
-- [ ] #2 Agree on first-run behavior, lifecycle, data ownership, updates, optional components, and the tested OS and architecture matrix.
-- [ ] #3 Write and review a design under Docs/Design with repository evidence, security boundaries, failure recovery, release constraints, and acceptance checks.
+- [x] #2 Agree on first-run behavior, lifecycle, data ownership, updates, optional components, and the tested OS and architecture matrix.
+- [x] #3 Write and review a design under Docs/Design with repository evidence, security boundaries, failure recovery, release constraints, and acceptance checks.
 - [x] #4 Define implementation slices for Docker release bundles, lean native application packaging, and guided optional processing components.
 <!-- AC:END -->
 
@@ -51,14 +51,22 @@ Design review completed and saved in Docs/Design/2026-09-20-complete-app-distrib
 User authorized incorporating all design-review corrections ("ok do so"). Writing Docs/Design/2026-09-20-complete-app-distribution-design.md as the consolidated specification. Preserve approved UX and existing API-only distribution; resolve review items with explicit runtime control/routing, safe release transactions, whole managed-storage inventory, honest browser backup/rollback coverage, staged optional components, supported artifact/runtime matrix, and concrete release acceptance gates. Exact first-release platform targets and Docker host-helper behavior will be stated as specification defaults for final user review. This step edits design/tracking/policy cross-references only; implementation planning follows written-spec review.
 
 Consolidated specification written with 14 sections, R1-R10 correction traceability, G1-G12 release acceptance gates, and WP1-WP5 implementation decomposition. Updated ADR-029 to identify the superseded static-export technical proposal and linked the new direction from Packaging_and_Distribution_Strategy while preserving its publication gate. Self-review corrected draft-export ordering before the write barrier, specified gateway replacement under supervisor control, and distinguished managed uninstall from uv tool removal. Verified section/gate/work-package completeness, three local Markdown links, placeholder absence, and whitespace checks. Application tests and Bandit are not applicable: only design, policy cross-references, and task records changed. Proposed exact OS/architecture defaults and Docker host-helper update behavior remain visible for final written-spec review; no platforms certified and no runtime implementation or publication performed. AC2/AC3 remain pending written-spec review; AC4 is complete.
+
+User continued after receiving the committed written specification on 2026-09-22. Treat that response as approval of the written specification and its stated first-release platform and Docker host-helper defaults. WP1 planning and implementation moved to TASK-13343. Design approval and documentation verification complete; docs-only Bandit/application-test skip was previously recorded.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Approved complete-application distribution architecture and consolidated specification, addressed ten source-backed review findings, defined G1-G12 acceptance gates and WP1-WP5 delivery slices, and linked superseded ADR/publishing policy. No runtime implementation or publication belongs to this design task.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

@@ -17,7 +17,7 @@ post-freeze model, but it requires the later release-specific licensing gate.
 The approved application-distribution direction is a small PyPI launcher with
 managed matched runtime bundles plus a paired prebuilt Docker bundle. The
 [complete application distribution design](../Design/2026-09-20-complete-app-distribution-design.md)
-(TASK-13265, consolidated specification awaiting written-spec review) defines
+(TASK-13265, specification approved 2026-09-22) defines
 runtime routing, lean managed packaging, safe updates, recovery, and release
 qualification. It preserves the public `tldw-server` API-only package. The
 source-only/publication boundary above remains in force until its separate

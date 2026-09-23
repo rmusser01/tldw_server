@@ -2,7 +2,7 @@
 
 Date: 2026-09-20
 Task: TASK-13265
-Status: architecture and review corrections approved in conversation; consolidated specification awaiting written-spec review.
+Status: written specification approved in conversation on 2026-09-22; implementation planning in progress.
 Review: [2026-09-20-complete-app-distribution-review.md](2026-09-20-complete-app-distribution-review.md)
 
 ## 1. Product contract
