@@ -172,20 +172,20 @@ _EMBEDDINGS_STORAGE_ALLOWLIST_ROOT = Path(_allowlist_root_env or resolve_repo_re
 
 
 def _get_http_status_from_exception(exc: Exception) -> int | None:
-    direct_status = getattr(exc, "status_code", None)
-    try:
-        if direct_status is not None:
-            return int(direct_status)
-    except (TypeError, ValueError):
-        pass
-    response = getattr(exc, "response", None)
-    if response is None:
-        return None
-    status = getattr(response, "status_code", None)
-    try:
-        return int(status)
-    except (TypeError, ValueError):
-        return None
+    """Delegates to the one implementation; kept as a name for existing callers.
+
+    This copy diverged twice from the other three. It checked `exc.status_code` before
+    `exc.response.status_code`, so the two disagreed whenever an exception carried both,
+    and it did no NetworkError message parsing at all, so a status carried only in
+    "HTTP 429" text was lost here even after the regex was repaired elsewhere. Both are
+    resolved by delegating; the response now wins, which is the pinned precedence. See
+    TASK-13287.
+    """
+    from tldw_Server_API.app.core.LLM_Calls.error_utils import (
+        get_http_status_from_exception as _canonical,
+    )
+
+    return _canonical(exc)
 
 
 def _get_explicit_openai_embeddings_batch(

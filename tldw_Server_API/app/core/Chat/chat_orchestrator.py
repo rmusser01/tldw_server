@@ -23,6 +23,10 @@ from loguru import logger
 #
 # Local Imports
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import ResponseFormat
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    ProviderCallCredentials,
+)
 from tldw_Server_API.app.core.Chat import command_router
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatAPIError,
@@ -60,10 +64,6 @@ from tldw_Server_API.app.core.Chat.orchestrator.request_validation import (
 from tldw_Server_API.app.core.Chat.orchestrator.stream_execution import (
     execute_stream,
 )
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
-    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
-    ProviderCallCredentials,
-)
 from tldw_Server_API.app.core.config import load_and_log_configs
 from tldw_Server_API.app.core.exceptions import (
     NetworkError,
@@ -71,6 +71,9 @@ from tldw_Server_API.app.core.exceptions import (
     SyncCallInEventLoopError,
 )
 from tldw_Server_API.app.core.LLM_Calls.deprecation import log_legacy_once
+from tldw_Server_API.app.core.LLM_Calls.error_utils import (
+    get_http_status_from_exception as _canonical_get_http_status_from_exception,
+)
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
 from tldw_Server_API.app.core.testing import is_truthy as _shared_is_truthy
 
@@ -245,35 +248,13 @@ def _build_command_context(llm_user_identifier: Optional[str]) -> command_router
 
 
 def _get_http_status_from_exception(exc: Exception) -> Optional[int]:
-    response = getattr(exc, "response", None)
-    if response is not None:
-        status = getattr(response, "status_code", None)
-        if status is None:
-            status = getattr(response, "status", None)
-        if status is not None:
-            try:
-                return int(status)
-            except (TypeError, ValueError):
-                pass
-    status = getattr(exc, "status_code", None)
-    if status is None:
-        status = getattr(exc, "status", None)
-    if status is not None:
-        try:
-            return int(status)
-        except (TypeError, ValueError):
-            return None
-    if isinstance(exc, NetworkError):
-        import re
-        # See LLM_Calls/error_utils.py: the double-escaped form matched a literal
-        # backslash and could never match "HTTP 429".
-        match = re.search(r"HTTP\s+(\d{3})", str(exc))
-        if match:
-            try:
-                return int(match.group(1))
-            except ValueError:
-                return None
-    return None
+    """Delegates to the one implementation; kept as a name for existing callers.
+
+    This was one of four near-identical copies. Two carried a double-escaped regex that
+    could never match, and they disagreed on whether an exception attribute or the
+    response status wins. See TASK-13287.
+    """
+    return _canonical_get_http_status_from_exception(exc)
 
 
 def _get_http_error_text(exc: Exception) -> str:

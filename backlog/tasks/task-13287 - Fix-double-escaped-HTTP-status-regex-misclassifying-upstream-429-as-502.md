@@ -4,7 +4,7 @@ title: Fix double-escaped HTTP status regex misclassifying upstream 429 as 502
 status: To Do
 assignee: []
 created_date: '2026-09-22 03:55'
-updated_date: '2026-09-22 18:56'
+updated_date: '2026-09-23 13:08'
 labels:
   - llm
   - bug
@@ -40,11 +40,11 @@ Source: comprehensive core-module review prompt smoke run, findings LLM_Calls-2 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A failing test reproduces 429 -> 502 misclassification through a NetworkError carrying only message text, before any production edit
-- [ ] #2 The three copies of get_http_status_from_exception are reduced to one shared implementation with the working regex
+- [x] #1 A failing test reproduces 429 -> 502 misclassification through a NetworkError carrying only message text, before any production edit
+- [x] #2 The three copies of get_http_status_from_exception are reduced to one shared implementation with the working regex
 - [ ] #3 get_http_error_text (3 copies) and is_network_error (3 copies) are consolidated in the same pass, or the residual duplication is documented with a reason
-- [ ] #4 Behavioural divergences are preserved deliberately or fixed explicitly: Embeddings_Create.py:175-180 checks exc.status_code before exc.response.status_code while the others check response first
-- [ ] #5 Existing coverage in tests/Local_LLM/test_http_utils.py:105-107 still passes against the consolidated helper
+- [x] #4 Behavioural divergences are preserved deliberately or fixed explicitly: Embeddings_Create.py:175-180 checks exc.status_code before exc.response.status_code while the others check response first
+- [x] #5 Existing coverage in tests/Local_LLM/test_http_utils.py:105-107 still passes against the consolidated helper
 - [ ] #6 Bandit run for touched scope
 <!-- AC:END -->
 
@@ -60,6 +60,22 @@ Added a parity test across the live copies of this rule, since four independent 
 STILL OPEN, and pinned by a test so it is not forgotten: the Chat path cannot reach this extraction at all. NetworkError is absent from _CHAT_ORCHESTRATOR_PROVIDER_EXCEPTIONS (verified: issubclass -> False), so the handler calling the extractor never runs for a NetworkError and the ChatProviderError(504) branch downstream is unreachable. Fixing the regex does not fix the Chat path. Widening what the chat error handler catches is a behaviour change with its own blast radius -- it needs its own task and its own reasoning about what else that tuple would begin swallowing.
 
 Also still open from the original finding: consolidating the four copies (get_http_status_from_exception x4, get_http_error_text x3, is_network_error x3). The TTS reviewer argued separately that TTS's _is_http_status_error copies should NOT fold into this task -- they contain no regex at all, and routing a core/TTS adapter through core/LLM_Calls to classify an httpx exception would be a worse dependency than the duplication it removes.
+
+CONSOLIDATION DONE on branch fix/http-status-consolidation. The regex half landed earlier in PR #2981; this is the rest.
+
+Four copies of get_http_status_from_exception now delegate to the one in LLM_Calls/error_utils, which is the implementation whose regex was correct. The other three keep their public names as thin delegations so their importers are unaffected.
+
+TWO DIVERGENCES FOUND, one more than AC #4 flagged.
+
+1. Precedence, as filed: Embeddings_Create checked exc.status_code BEFORE exc.response.status_code while the other three checked the response first. They only disagree when an exception carries both, which is rare and silent when it happens. Fixed explicitly rather than preserved: the response wins, because it is the status actually returned on the wire whereas an attribute on the exception may have been set by a wrapper further up. Pinned by test_response_status_wins_over_an_exception_attribute so the order is a recorded decision, not an accident of which copy you reach.
+
+2. NOT in the task: Embeddings_Create did no NetworkError message parsing at all. It has no regex branch, so a status carried only in 'HTTP 429' text was lost there even after #2981 repaired the regex in the other copies. Extending the parity test to cover it is what surfaced this -- it failed all four extraction cases immediately. Resolved by the same delegation.
+
+AC #3 (get_http_error_text 3 copies, is_network_error 2 copies) is NOT done and is deliberately deferred. Those carry no known defect, the consolidation above is what closes the live one, and bundling more mechanical refactoring into a security-adjacent change makes it harder to review. Documented here as the residual duplication the AC allows.
+
+STILL OPEN, and separate: NetworkError remains absent from _CHAT_ORCHESTRATOR_PROVIDER_EXCEPTIONS, verified again here (tuple size 15, issubclass -> False). The Chat handler therefore still cannot reach the extractor. Worth noting the filed impact needs re-checking rather than restating: if the handler does not catch NetworkError then it is not converted to ChatProviderError at all, so '429 becomes 502' may not be the actual behaviour on that path -- the exception propagates somewhere else. Tracing that, and deciding whether to widen the tuple, is its own task. I did not widen it here: changing exception-catching tuples is exactly what leaked the sandbox WebSocket quota earlier in this session, and that blast radius deserves its own reproduction.
+
+Verification: 21 tests in the parity file, 6 failing before (the precedence case, all four Embeddings extraction cases, and the agreement test) and all green after. Local_LLM 15 failed / 79 passed identical with and without the change -- the PackageNotFoundError failures there are environmental. Chat/unit 1 pre-existing failure, also identical. ruff clean; the three findings my edit introduced (two I001 and an F401 for the now-unused 're') are fixed.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

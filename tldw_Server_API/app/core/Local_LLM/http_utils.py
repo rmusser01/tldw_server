@@ -7,7 +7,6 @@ readiness polling, and command redaction for safer logging.
 from __future__ import annotations
 
 import asyncio
-import re
 from collections.abc import Iterable
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -23,6 +22,9 @@ from tldw_Server_API.app.core.http_client import (
 )
 from tldw_Server_API.app.core.http_client import (
     create_async_client as _create_async_client,
+)
+from tldw_Server_API.app.core.LLM_Calls.error_utils import (
+    get_http_status_from_exception as _canonical_get_http_status_from_exception,
 )
 
 DEFAULT_TIMEOUT: float = 120.0
@@ -52,30 +54,12 @@ def _is_httpx_async_client(client: Any) -> bool:
 
 
 def get_http_status_from_exception(exc: Exception) -> int | None:
-    resp = getattr(exc, "response", None)
-    if resp is not None:
-        for attr in ("status_code", "status"):
-            status = getattr(resp, attr, None)
-            if status is not None:
-                try:
-                    return int(status)
-                except (TypeError, ValueError):
-                    pass
-    for attr in ("status_code", "status"):
-        status = getattr(exc, attr, None)
-        if status is not None:
-            try:
-                return int(status)
-            except (TypeError, ValueError):
-                pass
-    if isinstance(exc, NetworkError):
-        match = re.search(r"HTTP\s+(\d{3})", str(exc))
-        if match:
-            try:
-                return int(match.group(1))
-            except ValueError:
-                return None
-    return None
+    """Delegates to the one implementation; kept as a name for existing callers.
+
+    This module held the only correct regex of the four copies, which is why its
+    behaviour is what the shared implementation now has. See TASK-13287.
+    """
+    return _canonical_get_http_status_from_exception(exc)
 
 
 def get_http_error_text(exc: Exception) -> str:

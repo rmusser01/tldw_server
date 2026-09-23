@@ -32,8 +32,15 @@ pytestmark = pytest.mark.unit
 
 
 def _extractors():
-    """The live copies of this rule, by import path."""
+    """Every live entry point for this rule, by import path.
+
+    All four now resolve to the single implementation in `LLM_Calls/error_utils`; the
+    other three are kept as re-exports so their importers are unaffected. They stay
+    listed here because the point of the parity assertions is that a future edit to any
+    one of them is caught -- including an edit that re-introduces a local copy.
+    """
     from tldw_Server_API.app.core.Chat import chat_orchestrator
+    from tldw_Server_API.app.core.Embeddings.Embeddings_Server import Embeddings_Create
     from tldw_Server_API.app.core.LLM_Calls import error_utils
     from tldw_Server_API.app.core.Local_LLM import http_utils
 
@@ -41,7 +48,34 @@ def _extractors():
         "LLM_Calls/error_utils": error_utils.get_http_status_from_exception,
         "Chat/chat_orchestrator": chat_orchestrator._get_http_status_from_exception,
         "Local_LLM/http_utils": http_utils.get_http_status_from_exception,
+        "Embeddings/Embeddings_Create": Embeddings_Create._get_http_status_from_exception,
     }
+
+
+def test_response_status_wins_over_an_exception_attribute() -> None:
+    """Pin the precedence, because the four copies did not agree on it.
+
+    `Embeddings_Create` checked `exc.status_code` before `exc.response.status_code`;
+    the other three checked the response first. They only diverge when an exception
+    carries both and they disagree, which is rare but silent when it happens -- so the
+    order is now a recorded decision rather than an accident of which copy you hit.
+
+    The response wins: it is the status actually returned on the wire, whereas an
+    attribute on the exception may have been set by a wrapper further up.
+    """
+
+    class _Response:
+        status_code = 429
+
+    class _Both(Exception):
+        status_code = 500
+        response = _Response()
+
+    for name, fn in _extractors().items():
+        assert fn(_Both("upstream")) == 429, (
+            f"{name} preferred the exception attribute (500) over the response status "
+            "(429); the four copies disagreed on this and it is now pinned"
+        )
 
 
 @pytest.mark.parametrize("name", list(_extractors()))
