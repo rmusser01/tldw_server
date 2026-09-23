@@ -3,10 +3,10 @@ id: TASK-13351
 title: >-
   Six Sync failures share one bootstrap root cause; three are separate (not a
   Postgres skip problem)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-23 00:52'
-updated_date: '2026-09-23 02:13'
+updated_date: '2026-09-23 02:23'
 labels:
   - tests
   - sync
@@ -77,8 +77,8 @@ Source: TASK-13344 triage, corrected while working the fix.
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 Family A's shared cause is resolved: prepare_notes_suggestion_authority and bootstrap_personal_context agree on the dataset contract
-- [ ] #2 The three Family B failures are each classified and fixed or filed
-- [ ] #3 The PoolTimeout test is checked for a connection leak, since it is about two connections racing
+- [x] #2 The three Family B failures are each classified and fixed or filed
+- [x] #3 The PoolTimeout test is checked for a connection leak, since it is about two connections racing
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -135,13 +135,36 @@ STILL OPEN (Family B):
          connection is never released or the test's expectation of the pool is wrong.
          It also costs 30 seconds of every suite run. Given Bug 2 above was a connection
          -scoping defect on this same path, a leak is plausible and worth checking first.
+
+AC2 and AC3 DONE in d389329118. tests/Sync 8 failures to 5.
+
+AC3 -- the PoolTimeout was NOT a connection leak. The test deadlocks against itself: the pool is deliberately sized at 2 with no overflow so the two binds genuinely contend, the test checks out BOTH connections to drive the race, and then verified with list_datasets_for_user while still holding them. That method takes no connection argument and reaches for the pool, so it waited 30 seconds for a connection the test itself held. bind_personal_context_dataset threads its connection correctly throughout -- checked before concluding, because Bug 2 above made a leak plausible. The connections are now returned after the race and before verification; 30.11s to 0.98s, and every suite run gets 30 seconds back.
+
+AC2 -- both classified as test drift against deliberate product changes:
+  predecessor selector asserted one exact SQL string. The selector gained a clause
+  exempting personal-context envelopes under unresolved conflict review, so such an
+  envelope does not block projection. Each predicate the test is named for is now
+  asserted separately, plus the exemption, because a blob comparison only reports
+  'index 0 differs' and does not name the clause that moved.
+  link receipt: the fake backend's dataset row carried no link_state, which
+  complete_personal_context_link_receipt has required to be bootstrap_pending or
+  complete since 2026-09-03 (Sync_DB.py:3972). Added bootstrap_pending, the
+  pre-receipt state.
+
+Whole directory now 5 failed / 2995 passed: the three exchange-gate fixtures (TASK-13349), the registry inconsistency that is correctly failing (TASK-13350), and one known regex drift.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+All nine resolved or correctly reattributed. Six shared two real bugs in Personal Context bootstrap, one of them a Postgres-only transaction-visibility defect. Of the remaining three, the PoolTimeout was the test holding the pool it needed rather than a leak, and two were test drift against deliberate product changes. tests/Sync went 14 failures to 5 across this task.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
 - [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
