@@ -3372,14 +3372,24 @@ class SyncV2Service:
                     exception_type=type(error).__name__,
                 ).warning("Blob upload session expiry failed (error={})", type(error).__name__)
             else:
+                # Staged chunk files are otherwise only removed by complete and cancel.
+                for upload_id in expired_sessions if self.blob_store is not None else ():
+                    try:
+                        self.blob_store.discard_upload(upload_id)
+                    except (OSError, SyncBlobStoreError) as error:
+                        logger.bind(
+                            operation="sync_retention_blob_upload_expiry",
+                            dataset_id=dataset_id,
+                            upload_id=upload_id,
+                        ).warning("Expired upload chunk cleanup failed (error={})", type(error).__name__)
                 if expired_sessions:
                     logger.bind(
                         operation="sync_retention_blob_upload_expiry",
                         dataset_id=dataset_id,
-                        expired_session_count=expired_sessions,
+                        expired_session_count=len(expired_sessions),
                     ).info(
                         "Expired {} stale blob upload session(s)",
-                        expired_sessions,
+                        len(expired_sessions),
                     )
 
         blob_gc, revalidated_blob_blocked, blob_fence_mutated = (

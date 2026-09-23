@@ -83,3 +83,4 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-049](049-rag-cross-source-fusion.md) | Accepted | Multi-source RAG results are ordered by reciprocal rank fusion rescaled to (0,1]; single-source retrieval is unchanged. |
 | [ADR-050](050-chatops-shared-shell.md) | Accepted | Discord and Slack share one ChatOps shell under endpoints/_chatops/; only the signature algorithm and command parser stay per-protocol. |
 | [ADR-051](051-prompt-studio-db-single-implementation.md) | Accepted | One backend-neutral Prompt Studio DB implementation, moved aggregate by aggregate behind a parity harness. |
+| [ADR-052](052-sync-blob-upload-session-expiry.md) | Accepted | Sync blob upload sessions expire after a configurable TTL; quota ignores expired sessions at read time and the retention pass reaps them and their staged chunks. |

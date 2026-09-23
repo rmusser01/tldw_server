@@ -85,6 +85,7 @@ The server factory reads these environment variables:
 | `SYNC_V2_MAX_BLOB_BYTES` | `max_attachment_bytes` | Optional maximum logical blob size. |
 | `SYNC_V2_MAX_CHUNK_BYTES` | `4194304` | Maximum raw upload/download chunk size. |
 | `SYNC_V2_MAX_ACTIVE_BLOB_UPLOADS` | `8` | Maximum active upload sessions counted by quota. |
+| `SYNC_V2_BLOB_UPLOAD_SESSION_TTL_SECONDS` | `86400` | How long an unfinished upload session holds an active-upload slot and its reserved quota. |
 | `SYNC_V2_USER_BLOB_QUOTA_BYTES` | unset | Optional per-user blob quota. |
 
 ## Upload Flow
@@ -111,7 +112,9 @@ the same blob commit path. It is not a separate storage model.
 Quota accounting is DB-backed:
 
 - session creation reserves pending bytes;
-- cancellation or expiry releases reservations;
+- cancellation or expiry releases reservations: a session past its `expires_at`
+  stops counting immediately, and the retention pass (`apply_blob_gc`) marks it
+  `expired` and removes its staged chunks (ADR-052);
 - completion moves bytes from reserved to committed usage;
 - dedupe by dataset and full payload hash must not double-charge committed
   blobs.

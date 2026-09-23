@@ -818,6 +818,32 @@ def test_active_one_shot_upload_enforces_the_effective_sync_blob_limit(
 
 
 @pytest.mark.integration
+def test_active_one_shot_upload_releases_its_session_when_a_chunk_fails(
+    canonical_api: tuple[TestClient, CharactersRAGDB, SyncV2Service],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """TASK-13321: the upload_id never reaches the client, so the server must cancel
+    the session itself; otherwise each failure holds an active-upload slot."""
+    client, _, service = canonical_api
+
+    def _fail_chunk(**_kwargs: object) -> None:
+        raise OSError("disk went away")
+
+    monkeypatch.setattr(service, "upload_blob_chunk", _fail_chunk)
+
+    failed = client.post(
+        f"/api/v1/notes/{NOTE_ID}/attachments",
+        headers={"Idempotency-Key": "chunk-fails-1"},
+        files={"file": ("report.txt", b"payload", "text/plain")},
+    )
+
+    assert failed.status_code >= 500, failed.text
+    statuses = [row["status"] for row in service.store.db.execute("SELECT status FROM sync_blob_upload_sessions")]
+    assert statuses == ["cancelled"]
+    assert service.store.summarize_blob_quota(OWNER, dataset_id=DATASET_ID).active_upload_count == 0
+
+
+@pytest.mark.integration
 def test_active_one_shot_upload_rejects_noncanonical_media_type_before_blob_work(
     canonical_api: tuple[TestClient, CharactersRAGDB, SyncV2Service],
 ) -> None:

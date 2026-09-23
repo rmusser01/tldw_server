@@ -11974,7 +11974,7 @@ class SyncDatabase:
         *,
         dataset_id: str | None = None,
         limit: int = 500,
-    ) -> int:
+    ) -> list[str]:
         """Mark timed-out upload sessions expired, releasing slot and reserved quota.
 
         Nothing reaped these before. Sessions are capped at max_active_blob_uploads and
@@ -11986,7 +11986,7 @@ class SyncDatabase:
         on PostgreSQL. Rows with no expires_at are left alone -- they predate the TTL and
         releasing them here would be a silent change of meaning, not a repair.
 
-        Returns the number of sessions expired.
+        Returns the expired upload_ids so the caller can discard their staged chunks.
         """
 
         now = _parse_iso_datetime(utcnow_iso())
@@ -12025,11 +12025,12 @@ class SyncDatabase:
                 break
 
         if not stale:
-            return 0
+            return []
 
+        expired: list[str] = []
         with self.backend.transaction() as conn:
             for upload_id in stale:
-                self.execute(
+                updated = self.execute(
                     """
                     UPDATE sync_blob_upload_sessions
                        SET status = ?, updated_at = ?
@@ -12039,7 +12040,11 @@ class SyncDatabase:
                     ("expired", now_iso, upload_id),
                     connection=conn,
                 )
-        return len(stale)
+                # A session completed or cancelled since the SELECT is not ours to
+                # discard.
+                if updated.rowcount == 1:
+                    expired.append(upload_id)
+        return expired
 
     def get_blob_chunk(
         self,

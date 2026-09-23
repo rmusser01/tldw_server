@@ -463,6 +463,9 @@ def _sync_v2_settings_from_env() -> SyncV2Settings:
         max_blob_bytes=_sync_v2_optional_positive_int_env("SYNC_V2_MAX_BLOB_BYTES"),
         max_chunk_bytes=_sync_v2_positive_int_env("SYNC_V2_MAX_CHUNK_BYTES", default=4_194_304),
         max_active_blob_uploads=_sync_v2_positive_int_env("SYNC_V2_MAX_ACTIVE_BLOB_UPLOADS", default=8),
+        blob_upload_session_ttl_seconds=_sync_v2_positive_int_env(
+            "SYNC_V2_BLOB_UPLOAD_SESSION_TTL_SECONDS", default=86_400
+        ),
         user_blob_quota_bytes=_sync_v2_optional_positive_int_env("SYNC_V2_USER_BLOB_QUOTA_BYTES"),
         server_trusted_encryption=server_trusted_encryption_status_from_env(),
         personal_context=personal_context_sync_capabilities_from_env(),

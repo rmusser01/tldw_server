@@ -2241,7 +2241,7 @@ class SyncV2Store:
         *,
         dataset_id: str | None = None,
         limit: int = 500,
-    ) -> int:
+    ) -> list[str]:
         """Reap timed-out upload sessions, releasing slot and reserved quota."""
 
         return self.db.expire_blob_upload_sessions(dataset_id=dataset_id, limit=limit)

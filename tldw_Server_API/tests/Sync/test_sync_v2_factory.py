@@ -34,6 +34,7 @@ def test_sync_v2_factory_enables_blob_transfer_from_env(monkeypatch) -> None:
     monkeypatch.setenv("SYNC_V2_MAX_CHUNK_BYTES", "1024")
     monkeypatch.setenv("SYNC_V2_MAX_ACTIVE_BLOB_UPLOADS", "3")
     monkeypatch.setenv("SYNC_V2_USER_BLOB_QUOTA_BYTES", "8192")
+    monkeypatch.setenv("SYNC_V2_BLOB_UPLOAD_SESSION_TTL_SECONDS", "600")
 
     settings = _sync_v2_settings_from_env()
 
@@ -42,6 +43,7 @@ def test_sync_v2_factory_enables_blob_transfer_from_env(monkeypatch) -> None:
     assert settings.max_chunk_bytes == 1024
     assert settings.max_active_blob_uploads == 3
     assert settings.user_blob_quota_bytes == 8192
+    assert settings.blob_upload_session_ttl_seconds == 600
 
 
 @pytest.mark.parametrize(
@@ -55,6 +57,8 @@ def test_sync_v2_factory_enables_blob_transfer_from_env(monkeypatch) -> None:
         ("SYNC_V2_MAX_ACTIVE_BLOB_UPLOADS", "0"),
         ("SYNC_V2_USER_BLOB_QUOTA_BYTES", "not-a-number"),
         ("SYNC_V2_USER_BLOB_QUOTA_BYTES", "0"),
+        ("SYNC_V2_BLOB_UPLOAD_SESSION_TTL_SECONDS", "not-a-number"),
+        ("SYNC_V2_BLOB_UPLOAD_SESSION_TTL_SECONDS", "0"),
     ],
 )
 def test_sync_v2_factory_rejects_invalid_positive_integer_env(monkeypatch, name: str, value: str) -> None:
