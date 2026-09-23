@@ -2944,11 +2944,13 @@ class NotesDBRetriever(BaseRetriever):
                     self._retrieve_allowed_notes_via_chacha,
                     allowed_note_ids,
                     notebook_id,
+                    query,
                 )
             return await asyncio.to_thread(
                 self._retrieve_allowed_notes_via_sql,
                 allowed_note_ids,
                 notebook_id,
+                query,
             )
 
         if self.chacha_db is not None and not self.config.tags_filter:
@@ -2979,12 +2981,9 @@ class NotesDBRetriever(BaseRetriever):
 
         # Convert to documents
         for row in results:
-            # Calculate simple relevance score
-            title_match = query.lower() in row["title"].lower()
-            content_match = query.lower() in row["content"].lower()
-            score = (1.0 if title_match else 0.0) + (0.5 if content_match else 0.0)
-
-            documents.append(self._row_to_document(row, score=score))
+            documents.append(
+                self._row_to_document(row, score=self._text_match_score(query, row))
+            )
 
         # Sort by score
         documents.sort(key=lambda x: x.score, reverse=True)
@@ -3009,8 +3008,14 @@ class NotesDBRetriever(BaseRetriever):
         self,
         allowed_note_ids: list[str],
         notebook_id: Optional[int],
+        query: str = "",
     ) -> list[Document]:
-        """Retrieve selected notes by ID without requiring a text-search match."""
+        """Retrieve selected notes by ID without requiring a text-search match.
+
+        No text match is REQUIRED -- the include list is the filter -- but the rows are
+        still scored against the query so the caller gets relevance order rather than
+        the order the ids happened to arrive in. See _retrieve_allowed_notes_via_sql.
+        """
         documents: list[Document] = []
         for note_id in allowed_note_ids[: int(self.config.max_results)]:
             try:
@@ -3022,15 +3027,27 @@ class NotesDBRetriever(BaseRetriever):
                 continue
             if notebook_id and row.get("notebook_id") != notebook_id:
                 continue
-            documents.append(self._row_to_document(row, score=1.0))
+            documents.append(
+                self._row_to_document(row, score=self._text_match_score(query, row))
+            )
+        documents.sort(key=lambda document: document.score, reverse=True)
         return documents
 
     def _retrieve_allowed_notes_via_sql(
         self,
         allowed_note_ids: list[str],
         notebook_id: Optional[int],
+        query: str = "",
     ) -> list[Document]:
-        """Retrieve selected notes by ID through the raw SQL fallback."""
+        """Retrieve selected notes by ID through the raw SQL fallback.
+
+        The include list decides WHICH notes come back; the query decides their order
+        and their score. This used to stamp score=1.0 on every row and return them in
+        last_modified order, so a caller asking for relevance got recency wearing a
+        perfect-relevance score. Cross-source fusion (ADR-049) stopped those rows
+        crowding out other sources, but within a single-source notes query nothing
+        rescued the ordering.
+        """
         bounded_note_ids = allowed_note_ids[: int(self.config.max_results)]
         if not bounded_note_ids:
             return []
@@ -3049,9 +3066,33 @@ class NotesDBRetriever(BaseRetriever):
         if notebook_id is not None:
             sql += " AND n.notebook_id = ?"
             params.append(notebook_id)
+        # last_modified stays the TIE-BREAK, applied by the database; relevance is
+        # applied below, where the query text is available.
         sql += " ORDER BY n.last_modified DESC LIMIT ?"
         params.append(self.config.max_results)
-        return [self._row_to_document(row, score=1.0) for row in self._execute_query(sql, tuple(params))]
+        documents = [
+            self._row_to_document(row, score=self._text_match_score(query, row))
+            for row in self._execute_query(sql, tuple(params))
+        ]
+        documents.sort(key=lambda document: document.score, reverse=True)
+        return documents
+
+    @staticmethod
+    def _text_match_score(query: str, row: dict[str, Any]) -> float:
+        """Score a note row against the query: title match 1.0, content match 0.5.
+
+        The same formula the unrestricted notes path has always used, lifted here so
+        the include-list paths can share it instead of stamping 1.0 on everything.
+
+        An empty query scores every row equally at 1.0: there is no relevance to
+        measure, so claiming a difference would be worse than claiming none.
+        """
+        needle = (query or "").strip().lower()
+        if not needle:
+            return 1.0
+        title = str(row.get("title") or "").lower()
+        content = str(row.get("content") or "").lower()
+        return (1.0 if needle in title else 0.0) + (0.5 if needle in content else 0.0)
 
     def _row_to_document(self, row: dict[str, Any], *, score: float) -> Document:
         """Convert a note row into the RAG document shape."""
