@@ -26,6 +26,7 @@ See Docs/ADR/050-chatops-shared-shell.md.
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from typing import Any, Callable, Sequence
 
@@ -333,3 +334,78 @@ def action_route(runtime: ChatOpsPolicyRuntime, action: str) -> str:
         "status": "jobs.status",
     }
     return routes.get(action, "chat.ask")
+
+
+POLICY_DEFAULT_KEY = "__default__"
+
+
+class PolicyStore:
+    """Per-tenant policies over one default, normalised on every read and write.
+
+    The tenant is a Discord guild or a Slack workspace; ``None`` means the default.
+    """
+
+    def __init__(
+        self,
+        *,
+        normalize: Callable[..., dict[str, Any]],
+        default_policy: Callable[[], dict[str, Any]],
+        coerce: Callable[[Any], str | None],
+    ) -> None:
+        self._normalize = normalize
+        self._default_policy = default_policy
+        self._coerce = coerce
+        self._lock = threading.Lock()
+        self._policies: dict[str, dict[str, Any]] = {}
+
+    def _key(self, scope_id: str | None) -> str:
+        return self._coerce(scope_id) or POLICY_DEFAULT_KEY
+
+    def _default_locked(self) -> dict[str, Any]:
+        raw = self._policies.get(POLICY_DEFAULT_KEY)
+        return self._normalize(raw if isinstance(raw, dict) else None)
+
+    def get(self, scope_id: str | None) -> dict[str, Any]:
+        key = self._key(scope_id)
+        with self._lock:
+            default = self._default_locked()
+            if key == POLICY_DEFAULT_KEY:
+                return default
+            selected = self._policies.get(key)
+            return self._normalize(selected, base=default) if isinstance(selected, dict) else default
+
+    def set(self, scope_id: str | None, payload: dict[str, Any] | None) -> tuple[str | None, dict[str, Any]]:
+        key = self._key(scope_id)
+        with self._lock:
+            base = self._default_locked() if key != POLICY_DEFAULT_KEY else self._default_policy()
+            normalized = self._normalize(payload, base=base)
+            self._policies[key] = dict(normalized)
+        return self._coerce(scope_id), normalized
+
+    def clear(self) -> None:
+        with self._lock:
+            self._policies.clear()
+
+
+def resolve_actor_id(
+    policy: dict[str, Any],
+    requested_user_id: str | None,
+    *,
+    provider_label: str,
+    coerce: Callable[[Any], str | None],
+    http_status: Any,
+) -> tuple[str | None, dict[str, Any] | None]:
+    """Map a platform user to a local user id, or return a policy error."""
+    requested = coerce(requested_user_id)
+    user_mappings = policy.get("user_mappings") if isinstance(policy.get("user_mappings"), dict) else {}
+    mapped_user = user_mappings.get(requested) if requested else None
+    if mapped_user:
+        return coerce(mapped_user), None
+    service_user_id = coerce(policy.get("service_user_id"))
+    if bool(policy.get("strict_user_mapping")) and not service_user_id:
+        return None, {
+            "status_code": http_status.HTTP_403_FORBIDDEN,
+            "error": "unknown_user_mapping",
+            "message": f"{provider_label} user is not mapped to a local user and strict mapping is enabled",
+        }
+    return requested or service_user_id, None
