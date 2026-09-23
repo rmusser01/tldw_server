@@ -241,6 +241,40 @@ def _test_cases(db: PromptStudioDatabase) -> dict[str, Any]:
     }
 
 
+def _optimizations(db: PromptStudioDatabase) -> dict[str, Any]:
+    ids = _seed(db)
+    project, prompt = ids["project"], ids["prompt"]
+    opt = db.create_optimization(
+        project_id=project, name="o1", initial_prompt_id=prompt, optimizer_type="mipro",
+        optimization_config={"k": 1}, max_iterations=5, bootstrap_samples=2,
+    )
+    other = db.create_optimization(project_id=project, name="o2", initial_prompt_id=prompt, optimizer_type="bootstrap")
+    oid = opt["id"]
+    return {
+        "create": opt,
+        "get_missing": _outcome(lambda: db.get_optimization(99999)),
+        "running": db.set_optimization_status(oid, "running", mark_started=True)["status"],
+        "iteration_1": db.record_optimization_iteration(oid, iteration_number=1, prompt_variant={"v": 1}, metrics={"acc": 0.5}, tokens_used=3, cost=0.1, note="n"),
+        "iteration_2": db.record_optimization_iteration(oid, iteration_number=2, metrics={"acc": 0.7})["iteration_number"],
+        "iterations_page": db.list_optimization_iterations(oid, page=1, per_page=1),
+        "update_config": db.update_optimization(oid, {"optimization_config": {"k": 2}, "iterations_completed": 2})["optimization_config"],
+        "complete": db.complete_optimization(oid, optimized_prompt_id=prompt, iterations_completed=2, final_metrics={"acc": 0.7}, improvement_percentage=40.0),
+        "complete_again_is_guarded": _outcome(
+            lambda: db.complete_optimization(oid, iterations_completed=9, _return_transition_applied=True)[1]
+        ),
+        "fail_after_complete_is_guarded": db.set_optimization_status(oid, "failed", error_message="late")["status"],
+        "cancel_pending": db.set_optimization_status(other["id"], "cancelled")["status"],
+        "update_missing": _outcome(lambda: db.update_optimization(99999, {"status": "failed"})),
+        "update_bad_column": _outcome(lambda: db.update_optimization(oid, {"status = 'x', name": "y"})),
+        "update_expected_uuid_mismatch": _outcome(
+            lambda: db.update_optimization(other["id"], {"name": "z"}, expected_uuid="nope", _return_transition_applied=True)[1]
+        ),
+        "list": [o["name"] for o in db.list_optimizations(project_id=project)["optimizations"]],
+        "list_status": [o["name"] for o in db.list_optimizations(status="completed")["optimizations"]],
+        "list_paged": db.list_optimizations(page=2, per_page=1)["pagination"],
+    }
+
+
 def _reads(db: PromptStudioDatabase) -> dict[str, Any]:
     # Read paths shared by the later aggregates; pins that PostgreSQL does not leak
     # its tsvector columns through `SELECT *` / `RETURNING *`.
@@ -261,6 +295,7 @@ SCENARIOS: dict[str, Callable[[PromptStudioDatabase], dict[str, Any]]] = {
     "evaluations": _evaluations,
     "projects": _projects,
     "prompts": _prompts,
+    "optimizations": _optimizations,
     "reads": _reads,
     "test_cases": _test_cases,
     "signatures": _signatures,

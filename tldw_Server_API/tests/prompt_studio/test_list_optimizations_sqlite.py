@@ -14,10 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import (
-    PromptStudioDatabase,
-    _SQLitePromptStudioDatabase,
-)
+from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import PromptStudioDatabase
 
 
 @pytest.fixture
@@ -34,10 +31,11 @@ def db():
         target.unlink(missing_ok=True)
 
 
-def test_sqlite_impl_exposes_list_optimizations() -> None:
-    assert hasattr(_SQLitePromptStudioDatabase, "list_optimizations"), (
-        "the SQLite implementation is missing list_optimizations, so the facade "
-        "delegation raises AttributeError on the default backend"
+def test_facade_defines_list_optimizations_itself() -> None:
+    """Since TASK-13318 the method lives once, in the optimizations repository, and the
+    facade calls it directly -- it no longer depends on either implementation having it."""
+    assert "list_optimizations" in vars(PromptStudioDatabase), (
+        "list_optimizations must be defined on the facade, not reached via __getattr__"
     )
 
 
