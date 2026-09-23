@@ -17,11 +17,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.Evaluations_DB import EvaluationsDatabase
-
-# The converter does not touch `self`; call it unbound so the test needs no DB.
-def _ensure_unix_timestamp(value, **kwargs):
-    return EvaluationsDatabase._ensure_unix_timestamp(None, value, **kwargs)
+from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_datasets import _normalize_dataset_payload
+from tldw_Server_API.app.core.DB_Management.Evaluations_DB import to_unix_timestamp as _ensure_unix_timestamp
 
 # A fixed instant, written the way SQLite's CURRENT_TIMESTAMP writes it (naive UTC).
 SQLITE_NAIVE_UTC = "2026-09-21 21:06:55"
@@ -85,3 +82,14 @@ def test_offset_aware_input_still_correct(non_utc_timezone) -> None:
 def test_numeric_passthrough_unchanged(non_utc_timezone) -> None:
     assert _ensure_unix_timestamp("1790024815") == 1790024815
     assert _ensure_unix_timestamp(1790024815) == 1790024815
+
+
+def test_postgres_naive_datetime_is_read_as_utc(non_utc_timezone) -> None:
+    """PostgreSQL hands back datetimes, not strings; naive ones are UTC too."""
+    assert _ensure_unix_timestamp(datetime(2026, 9, 21, 21, 6, 55)) == EXPECTED_EPOCH
+
+
+def test_dataset_payload_converts_stored_created_at(non_utc_timezone) -> None:
+    """The datasets endpoint and pipeline presets use the same converter, not now()."""
+    for stored in (SQLITE_NAIVE_UTC, datetime(2026, 9, 21, 21, 6, 55)):
+        assert _normalize_dataset_payload({"created_at": stored})["created"] == EXPECTED_EPOCH
