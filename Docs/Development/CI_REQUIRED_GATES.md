@@ -43,7 +43,9 @@ See [Container Image Lifecycle](Container_Image_Lifecycle.md) for the full build
 
 ## Conditional Execution and No-op Behavior
 
-Each required gate always reports a status for deterministic branch protection behavior.
+Each required gate is *designed* to always report a status, so branch protection behaves
+deterministically. It currently does not -- see
+[Known Defect: Gates Are Cancelled Before They Report](#known-defect-gates-are-cancelled-before-they-report).
 
 - If relevant paths changed, the gate executes its full checks.
 - If relevant paths did not change, the gate exits with an explicit no-op success message.
@@ -53,6 +55,65 @@ Examples:
 - UI-only PRs no-op `backend-required` and `coverage-required`.
 - Backend-only PRs no-op `frontend-required`.
 - `e2e-required` runs on frontend changes and selected backend API/schema/auth paths.
+
+## Known Defect: Gates Are Cancelled Before They Report
+
+The section above says each required gate always reports a status. **In practice it
+usually does not**, and a pull request stays `BLOCKED` indefinitely until someone
+manually re-runs the gates. Measured 2026-09-22 across four PRs (#2981-#2984) and six
+pushes: every check went to `CANCELLED` within roughly 40 seconds of each push -- 45 to
+50 per PR, all six required gates included, with zero `FAILURE`. See TASK-13355.
+
+### Mechanism
+
+1. A pull-request event fires `Frontend License Gate Audit`, which triggers on
+   `pull_request_target` with types `[opened, reopened, synchronize, ready_for_review,
+   edited]`. **`edited` is included, so editing a PR description counts.**
+2. When that audit completes it fires every workflow declaring
+   `workflow_run: [Frontend License Gate Audit]`. Those runs are attributed to the
+   default branch, so they are invisible when listing runs for the PR branch.
+3. A `workflow_run` run resolves its concurrency group through
+   `github.event.workflow_run.pull_requests[0].number` -- the same PR number the
+   `pull_request` run used -- so both share one group and `cancel-in-progress: true`
+   kills the `pull_request` run.
+4. That `workflow_run` run's own `admission` job requires
+   `vars.LICENSE_FIRST_CI_ENABLED == 'true'`. No repository variables are currently set,
+   so it is `SKIPPED`.
+5. Each gate job requires `needs.admission.result == 'success'` for `workflow_run`
+   events, so it skips too. Directly observed: `event=workflow_run` runs of
+   `backend-required`, `coverage-required`, `frontend-required` and `pre-commit` all at
+   `completed/skipped`.
+
+The run that would have reported a status is cancelled by a run that then reports
+nothing.
+
+### Landing a pull request today
+
+Until TASK-13355 is resolved, this sequence works and nothing else reliably does:
+
+1. **Rebase onto the current `dev` and push.** `dev-core-required-gates` uses
+   strict/current-base enforcement, so a branch even one commit behind cannot merge, and
+   GitHub reports the required checks as "expected" rather than counting the ones that
+   already passed on the older base.
+2. **Wait for the audit on that exact head SHA to complete.** Not merely "the latest
+   audit" -- a rebase-push spawns a new one, and re-running gates while it is pending
+   gets them cancelled when it finishes.
+3. **Re-run the six gates individually, paced roughly 40 seconds apart.** Re-running
+   them in a burst makes them cancel each other; re-running one that is already queued
+   or in progress fails and silently skips it.
+4. **Merge once all six are green**, before anything else lands on `dev`.
+
+Two traps worth stating outright:
+
+- **Do not edit the PR description after opening it** if you want its gates to survive.
+  `pull_request_target` fires on `edited`, which spawns an audit and cancels every gate
+  run.
+- **`--admin` does not help.** `dev-core-required-gates` has no bypass actors, so
+  `gh pr merge --admin` is refused with "Repository rule violations found / 6 of 6
+  required status checks are expected". Merging through the GitHub UI as a user whose
+  own admin bypass applies does work.
+
+Note also that `--squash` is rejected repository-wide; merges must use `--merge`.
 
 ## Security Threshold Policy
 
