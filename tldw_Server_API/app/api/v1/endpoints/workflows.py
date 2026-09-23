@@ -121,6 +121,7 @@ from tldw_Server_API.app.core.Workflows.investigation import build_run_investiga
 from tldw_Server_API.app.core.Workflows.investigation import list_run_steps as build_run_steps
 from tldw_Server_API.app.core.Workflows.investigation import list_step_attempts as build_step_attempts
 from tldw_Server_API.app.core.Workflows.registry import StepTypeRegistry
+from tldw_Server_API.app.core.Utils.base64url import decode_opaque_cursor_segment
 
 _WORKFLOWS_NONCRITICAL_EXCEPTIONS = (
     asyncio.TimeoutError,
@@ -2188,25 +2189,22 @@ async def list_runs(
     cur_order_by = (order_by or "created_at")
     cur_order_desc = (str(order or "desc").lower() != "asc")
     if cursor:
+        # A bad cursor is a 400, not a silent restart from page 1 (Docs/API-related/Pagination_Cursors.md).
         try:
-            import base64
-            import json as _json
-            raw = base64.urlsafe_b64decode(cursor.encode("utf-8") + b"==").decode("utf-8")
-            tok = _json.loads(raw)
-            # Validate and adopt settings from token
-            token_ob = str(tok.get("order_by") or cur_order_by)
-            token_od = bool(tok.get("order_desc") if tok.get("order_desc") is not None else cur_order_desc)
+            tok = json.loads(decode_opaque_cursor_segment(cursor))
             token_ts = tok.get("last_ts")
             token_id = tok.get("last_id")
-            if token_ts and token_id:
-                cursor_ts = str(token_ts)
-                cursor_id = str(token_id)
-                cur_order_by = token_ob
-                cur_order_desc = token_od
-                # When using cursor, ignore provided offset
-                offset = 0
-        except _WORKFLOWS_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(f"Workflows runs: failed to parse cursor token; ignoring. Error: {e}")
+            if not (token_ts and token_id):
+                raise ValueError("cursor lacks last_ts/last_id")
+            # Adopt the ordering the cursor was minted under
+            cur_order_by = str(tok.get("order_by") or cur_order_by)
+            cur_order_desc = bool(tok.get("order_desc") if tok.get("order_desc") is not None else cur_order_desc)
+        except (ValueError, AttributeError) as e:
+            raise HTTPException(status_code=400, detail="Invalid cursor") from e
+        cursor_ts = str(token_ts)
+        cursor_id = str(token_id)
+        # When using cursor, ignore provided offset
+        offset = 0
 
     rows = db.list_runs(
         tenant_id=tenant_id,
@@ -2590,16 +2588,14 @@ async def get_run_events(
     types_norm = [t.strip() for t in (types or []) if str(t).strip()]
     # Cursor token overrides since
     if cursor:
+        # A bad cursor is a 400, not a silent restart from page 1 (Docs/API-related/Pagination_Cursors.md).
         try:
-            import base64
-            import json as _json
-            pad = "=" * (-len(cursor) % 4)
-            raw = base64.urlsafe_b64decode((cursor + pad).encode("utf-8")).decode("utf-8")
-            tok = _json.loads(raw)
-            if isinstance(tok.get("last_seq"), int):
-                since = int(tok["last_seq"])  # seek after this seq
-        except _WORKFLOWS_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(f"Workflows events: failed to parse cursor token; ignoring. Error: {e}")
+            last_seq = json.loads(decode_opaque_cursor_segment(cursor)).get("last_seq")
+        except (ValueError, AttributeError) as e:
+            raise HTTPException(status_code=400, detail="Invalid cursor") from e
+        if not isinstance(last_seq, int) or isinstance(last_seq, bool):
+            raise HTTPException(status_code=400, detail="Invalid cursor")
+        since = last_seq  # seek after this seq
     events = db.get_events(run_id, since=since, limit=limit, types=types_norm if types_norm else None)
     out: list[EventResponse] = []
     for e in events:

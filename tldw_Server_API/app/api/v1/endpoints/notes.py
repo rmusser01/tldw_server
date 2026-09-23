@@ -217,6 +217,7 @@ from tldw_Server_API.app.core.Sync.v2.server_origin_batch import (
     SyncServerOriginBatchMaterializationError,
 )
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service
+from tldw_Server_API.app.core.Utils.base64url import verify_signed_token
 from tldw_Server_API.app.core.Writing.note_title import TitleGenOptions, generate_note_title
 
 #
@@ -865,39 +866,16 @@ def _decode_attachment_cursor(
 
     if raw_cursor is None:
         return None
-    if len(raw_cursor.encode("utf-8")) > 512:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="Attachment cursor exceeds its size boundary",
-        )
     try:
         validate_notes_attachment_keyset_cursor(raw_cursor)
-        payload_segment, signature_segment = raw_cursor.split(".")
-        payload = base64.urlsafe_b64decode(
-            payload_segment + "=" * (-len(payload_segment) % 4)
+        payload = verify_signed_token(
+            raw_cursor, _attachment_cursor_secret(), max_encoded_len=512
         )
-        signature = base64.urlsafe_b64decode(
-            signature_segment + "=" * (-len(signature_segment) % 4)
-        )
-        if any(
-            base64.urlsafe_b64encode(decoded_segment)
-            .decode("ascii")
-            .rstrip("=")
-            != encoded_segment
-            for decoded_segment, encoded_segment in (
-                (payload, payload_segment),
-                (signature, signature_segment),
-            )
-        ):
-            raise ValueError("noncanonical base64url")
-        expected = hmac.digest(_attachment_cursor_secret(), payload, "sha256")
-        if not hmac.compare_digest(signature, expected):
-            raise ValueError("signature mismatch")
         decoded = json.loads(payload)
     except (UnicodeError, ValueError, TypeError, json.JSONDecodeError) as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid attachment cursor",
+            detail="Invalid cursor",
         ) from exc
     if not isinstance(decoded, dict) or decoded != {
         "v": 1,
@@ -909,13 +887,13 @@ def _decode_attachment_cursor(
     }:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid attachment cursor",
+            detail="Invalid cursor",
         )
     after = decoded.get("after")
     if not isinstance(after, str):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid attachment cursor",
+            detail="Invalid cursor",
         )
     return after
 

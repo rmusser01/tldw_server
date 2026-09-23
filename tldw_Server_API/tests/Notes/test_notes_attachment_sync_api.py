@@ -902,8 +902,15 @@ def test_canonical_keyset_pages_batch_availability_and_reject_bad_cursors(
         f"/api/v1/notes/{NOTE_ID}/attachments/canonical",
         params={"dataset_id": DATASET_ID, "cursor": "x" * 513},
     )
-    assert tampered.status_code == 400
-    assert oversized.status_code == 413
+    garbage = client.get(
+        f"/api/v1/notes/{NOTE_ID}/attachments/canonical",
+        params={"dataset_id": DATASET_ID, "cursor": "not!a!cursor"},
+    )
+    # One documented contract for every malformed cursor (Docs/API-related/Pagination_Cursors.md):
+    # 400 "Invalid cursor". Oversized used to be 413, a second contract for the same mistake.
+    for bad in (tampered, oversized, garbage):
+        assert bad.status_code == 400, bad.text
+        assert bad.json()["detail"] == "Invalid cursor"
 
 
 @pytest.mark.integration

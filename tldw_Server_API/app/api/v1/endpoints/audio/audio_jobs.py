@@ -30,6 +30,7 @@ from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_cursor_
 from tldw_Server_API.app.api.v1.schemas.pagination import CursorPaginationMeta
 
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_MAINTENANCE
+from tldw_Server_API.app.core.Utils.base64url import decode_opaque_cursor_segment
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
@@ -144,9 +145,7 @@ def _decode_audio_jobs_cursor(cursor: str) -> tuple[datetime, int]:
     if not cursor:
         raise ValueError("empty cursor")
     try:
-        padding = "=" * (-len(cursor) % 4)
-        raw = base64.urlsafe_b64decode((cursor + padding).encode("ascii")).decode("utf-8")
-        payload = json.loads(raw)
+        payload = json.loads(decode_opaque_cursor_segment(cursor))
         if int(payload.get("v", 0)) != _AUDIO_JOBS_CURSOR_VERSION:
             raise ValueError("unsupported cursor version")
         created_at = str(payload["created_at"])
