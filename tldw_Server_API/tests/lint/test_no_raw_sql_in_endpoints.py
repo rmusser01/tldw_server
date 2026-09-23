@@ -64,7 +64,6 @@ _EXECUTORS = frozenset({
 # Frozen at the 2026-09-21 review. Entries may shrink or disappear, never grow, and a
 # file that reaches zero must be deleted from this map -- that is what keeps it honest.
 RAW_SQL_BASELINE: dict[str, int] = {
-    "admin/admin_rbac.py": 56,
 }
 
 

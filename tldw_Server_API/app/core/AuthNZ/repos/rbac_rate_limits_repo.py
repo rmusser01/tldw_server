@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from tldw_Server_API.app.core.AuthNZ.repos._dual_backend import fetch_all
+
 _COLUMNS = ("scope", "id", "resource", "limit_per_min", "burst")
 _LIST_QUERIES = (
     "SELECT 'role' AS scope, role_id AS id, resource, limit_per_min, burst"
@@ -19,29 +21,8 @@ _LIST_QUERIES = (
 )
 
 
-def _as_dict(row: Any, columns: tuple[str, ...]) -> dict[str, Any]:
-    if row is None:
-        return {}
-    if isinstance(row, dict):
-        return row
-    if hasattr(row, "keys"):
-        return {str(key): row[key] for key in row.keys()}
-    return {key: row[idx] if idx < len(row) else None for idx, key in enumerate(columns)}
-
-
-def _dollar(sql: str) -> str:
-    """Rewrite ``?`` placeholders as ``$1..$n`` for asyncpg."""
-    parts = sql.split("?")
-    return "".join(part + (f"${i}" if i < len(parts) else "") for i, part in enumerate(parts, start=1))
-
-
 async def _fetch(conn: Any, is_postgres: bool, sql: str, args: tuple[Any, ...], columns: tuple[str, ...]) -> list[dict[str, Any]]:
-    if is_postgres:
-        rows = await conn.fetch(_dollar(sql), *args)
-    else:
-        cursor = await conn.execute(sql, args)
-        rows = await cursor.fetchall()
-    return [_as_dict(row, columns) for row in rows or []]
+    return await fetch_all(conn, is_postgres, sql, args, columns)
 
 
 async def _write(conn: Any, is_postgres: bool, pg_sql: str, sqlite_sql: str, args: tuple[Any, ...]) -> None:
