@@ -1,10 +1,10 @@
 ---
 id: TASK-13334
 title: Add an AST ratchet for core to api imports seeded at 106 files
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-22 04:58'
-updated_date: '2026-09-23 19:38'
+updated_date: '2026-09-23 20:59'
 labels:
   - architecture
   - tests
@@ -37,8 +37,8 @@ Source: synthesis F34
 <!-- AC:BEGIN -->
 - [x] #1 Ratchet test exists with a recorded baseline of 106 files
 - [x] #2 The 20 production true-inversion files are on a hard ban list
-- [ ] #3 persistence.py monkeypatch seam replaced with explicit DI
-- [ ] #4 DEFAULT_CHARACTER_NAME moved into core
+- [x] #3 persistence.py monkeypatch seam replaced with explicit DI
+- [x] #4 DEFAULT_CHARACTER_NAME moved into core
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -60,14 +60,22 @@ SYNTHESIS CORRECTION FILED IN THE SAME CHANGE: the "cheap sub-case - move DEFAUL
 Still open: the 20 true inversions themselves, particularly persistence.py where four of five exist only as monkeypatch seams.
 
 2026-09-23 reconciliation: AC1 met with a corrected number - tests/lint/test_core_to_api_import_boundary.py (commit 0dd37ea2bf) records CORE_TO_API_BASELINE of 105 files, not 106; the 106 was a grep overcount (a docstring in DB_Management/db_errors.py) and the AST scan is the correct figure. 3 passed on 2026-09-23. AC2 met - TRUE_INVERSION_BASELINE holds exactly 20 files, with its own test_no_new_true_inversions and test_baselines_only_shrink. Caveat: the ban works per file, so a new endpoints/API_Deps import added inside one of those 20 files is not caught. AC3 NOT met - Ingestion_Media_Processing/persistence.py still imports api.v1.endpoints.media (:2699, :4879), endpoints.media_embeddings (:2508) and API_Deps.validations_deps (:1887, :2709), and still resolves collaborators through the endpoints.media getattr seam. AC4 NOT met and its premise is wrong - chat_service.py:34, chat_history.py:29 and chat_helpers.py:13 still import DEFAULT_CHARACTER_NAME from API_Deps/ChaCha_Notes_DB_Deps.py:350 ('Helpful AI Assistant'), which is not the same as core Character_Chat/modules/character_utils.py:16 ('Character'). Just repointing the imports would change which character card gets looked up. The owner has to choose the value before the constant can move to core.
+
+2026-09-23: AC4 done (0eacb750fd) - owner chose 'Helpful AI Assistant'; DEFAULT_CHARACTER_NAME/DESCRIPTION now in core/Character_Chat/constants.py, API_Deps re-exports; chat_history left the core->api baseline, chat_history+chat_helpers left the true-inversion list (ratchet 3 passed). Distinct from character_utils.DEFAULT_CHARACTER_NAME ('Character'), which is the {{char}} placeholder. AC3 done (aaa444b83e) - persistence.add_media_orchestrate / process_document_like_item take file_validator, temp_dir_manager_cls, template_classifier, process_document_content as keyword args defaulting to core; no endpoints.media import or getattr seam remains; shared validator built in core (Upload_Sink.get_default_file_validator). Tests retargeted to the core modules. Media suites: identical failure sets vs HEAD. Remaining inversion in persistence.py: schedule_media_add_embeddings imports endpoints.media_embeddings (outside this AC). Bandit -ll: no findings.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Core->api import ratchet (baseline shrinking), true-inversion hard ban, default assistant name moved to core, and persistence's endpoints.media monkeypatch seam replaced with explicit injection.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
