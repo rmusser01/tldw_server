@@ -3482,11 +3482,7 @@ async def list_collection_keyword_links_endpoint(
                 headers={"Retry-After": str(meta.get("retry_after", 60))}
             )
 
-        cursor = db.execute_query(
-            "SELECT collection_id, keyword_id FROM collection_keywords ORDER BY collection_id ASC, keyword_id ASC LIMIT ? OFFSET ?",
-            (limit, offset),
-        )
-        rows = cursor.fetchall()
+        rows = db.list_collection_keyword_links(limit, offset)
         links = [
             {
                 "collection_id": int(row["collection_id"]),
@@ -3976,11 +3972,7 @@ async def list_conversation_keyword_links_endpoint(
             total = len(links)
             links = links[offset: offset + limit]
         else:
-            cursor = db.execute_query(
-                "SELECT conversation_id, keyword_id FROM conversation_keywords ORDER BY conversation_id ASC, keyword_id ASC LIMIT ? OFFSET ?",
-                (limit, offset),
-            )
-            rows = cursor.fetchall()
+            rows = db.list_conversation_keyword_links(limit, offset)
             links = [
                 {
                     "conversation_id": str(row["conversation_id"]),
