@@ -1,6 +1,17 @@
-# Routes that carry no authentication dependency.
-# Public by design (login, health, HMAC webhooks) or not yet fixed.
-# This list may shrink. It may never grow.
+# Routes whose dependency tree reaches no authenticator.
+#
+# Three kinds live here:
+#   1. Public by design -- login/register/reset, health, signed
+#      webhooks, token-bearer share links.
+#   2. Guarded by something that is not authentication -- the
+#      /setup/* routes authorize by network locality (loopback
+#      client, local Host header), so any anonymous caller that can
+#      reach loopback passes. Defensible for first-run setup, but it
+#      is not identity, so it is listed rather than hidden.
+#   3. Not yet fixed.
+#
+# The list must match the tree exactly: entries may be removed when a
+# route gains auth, and adding one is a reviewable diff.
 # Regenerate with: python Helper_Scripts/ci/route_auth_ratchet.py --write-baseline
 DELETE /api/v1/auth/single-user/session
 GET /
@@ -9,9 +20,6 @@ GET /api/v1/audio/realtime/capabilities
 GET /api/v1/auth/federation/{provider_slug}/callback
 GET /api/v1/auth/federation/{provider_slug}/login
 GET /api/v1/auth/verify-email
-GET /api/v1/benchmarks/list
-GET /api/v1/benchmarks/{benchmark_name}/info
-GET /api/v1/benchmarks/{benchmark_name}/samples
 GET /api/v1/characters/world-books/config
 GET /api/v1/chat/shared/conversations/{share_token}
 GET /api/v1/chatbooks/health
@@ -22,12 +30,9 @@ GET /api/v1/config/jobs
 GET /api/v1/config/providers
 GET /api/v1/config/quickstart
 GET /api/v1/config/tokenizer
-GET /api/v1/connectors/providers
-GET /api/v1/discord/oauth/callback
 GET /api/v1/embeddings/health
 GET /api/v1/embeddings/models
 GET /api/v1/evaluations/health
-GET /api/v1/guardian/wizard/invites/preview
 GET /api/v1/invites/preview
 GET /api/v1/llamafile/metrics
 GET /api/v1/llm/health
@@ -39,7 +44,6 @@ GET /api/v1/mcp/catalog
 GET /api/v1/mcp/health
 GET /api/v1/mcp/status
 GET /api/v1/media/transcription-models
-GET /api/v1/meetings/health
 GET /api/v1/notes/health
 GET /api/v1/ocr/backends
 GET /api/v1/paper-search/acm
@@ -122,7 +126,6 @@ GET /api/v1/paper-search/zenodo/oai
 GET /api/v1/persona/archetypes
 GET /api/v1/persona/archetypes/{key}
 GET /api/v1/persona/archetypes/{key}/preview
-GET /api/v1/personalization/explanations
 GET /api/v1/prompt-studio/background/pings/{ping_id}
 GET /api/v1/prompt-studio/optimizations/strategies
 GET /api/v1/prompts/health
@@ -136,11 +139,18 @@ GET /api/v1/rag/health/simple
 GET /api/v1/rag/vlm/backends
 GET /api/v1/research/semantic-scholar-search
 GET /api/v1/research/sources
-GET /api/v1/sandbox/health/public
-GET /api/v1/sandbox/runs/{run_id}/{rest:path}
-GET /api/v1/self-monitoring/crisis-resources
+GET /api/v1/setup/audio/readiness
+GET /api/v1/setup/audio/recommendations
+GET /api/v1/setup/config
+GET /api/v1/setup/first-run/mcp-tools/catalog
+GET /api/v1/setup/first-run/metadata
+GET /api/v1/setup/first-run/providers/catalog
+GET /api/v1/setup/first-run/state
+GET /api/v1/setup/install-status
+GET /api/v1/setup/readiness/profiles
+GET /api/v1/setup/readiness/status
+GET /api/v1/setup/status
 GET /api/v1/sharing/public/{token}
-GET /api/v1/slack/oauth/callback
 GET /api/v1/users/keys/openai/oauth/callback
 GET /api/v1/vlm/backends
 GET /api/v1/vn/vn-assets/starter-matrices
@@ -156,7 +166,6 @@ GET /favicon.ico
 GET /health
 GET /setup
 GET,HEAD /internal/ready
-GET,POST /api/v1/connectors/providers/{provider}/webhook
 HEAD /health
 POST /api/v1/acp/triggers/webhook/{trigger_id}
 POST /api/v1/auth/forgot-password
@@ -168,13 +177,9 @@ POST /api/v1/auth/refresh
 POST /api/v1/auth/register
 POST /api/v1/auth/resend-verification
 POST /api/v1/auth/reset-password
-POST /api/v1/benchmarks/simpleqa/evaluate
-POST /api/v1/benchmarks/{benchmark_name}/run
 POST /api/v1/chunking/templates/validate
 POST /api/v1/config/validate-provider
-POST /api/v1/discord/interactions
 POST /api/v1/flashcards/generate
-POST /api/v1/guardian/wizard/invites/accept/register
 POST /api/v1/llamacpp/inference
 POST /api/v1/mcp/auth/refresh
 POST /api/v1/mcp/auth/token
@@ -183,9 +188,28 @@ POST /api/v1/ocr/points/preload
 POST /api/v1/prompt-studio/background/ping
 POST /api/v1/prototype-promotions
 POST /api/v1/prototype-sessions
+POST /api/v1/setup/assistant
+POST /api/v1/setup/audio/packs/export
+POST /api/v1/setup/audio/packs/import
+POST /api/v1/setup/audio/provision
+POST /api/v1/setup/audio/readiness/reset
+POST /api/v1/setup/audio/verify
+POST /api/v1/setup/complete
+POST /api/v1/setup/config
+POST /api/v1/setup/first-run/audio-defaults
+POST /api/v1/setup/first-run/complete
+POST /api/v1/setup/first-run/first-chat
+POST /api/v1/setup/first-run/ingest-defaults
+POST /api/v1/setup/first-run/mcp-tools/apply
+POST /api/v1/setup/first-run/mcp-tools/validate
+POST /api/v1/setup/first-run/optional-advanced
+POST /api/v1/setup/first-run/providers
+POST /api/v1/setup/first-run/providers/validate
+POST /api/v1/setup/first-run/skip
+POST /api/v1/setup/first-run/state
+POST /api/v1/setup/readiness/preview
+POST /api/v1/setup/readiness/provision
+POST /api/v1/setup/readiness/verify
 POST /api/v1/sharing/public/{token}/prototype-session
 POST /api/v1/sharing/public/{token}/verify
-POST /api/v1/slack/commands
-POST /api/v1/slack/events
-POST /api/v1/telegram/webhook
 POST /api/v1/websub/callback/{user_id}/{callback_token}
