@@ -6,7 +6,7 @@ title: >-
 status: In Progress
 assignee: []
 created_date: '2026-09-22 04:52'
-updated_date: '2026-09-22 21:35'
+updated_date: '2026-09-23 19:36'
 labels:
   - bug
   - sync
@@ -33,8 +33,8 @@ Source: Docs/superpowers/reviews/2026-09-21-core-module-duplication-synthesis.md
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Legacy v1 pull path never advances the cursor past a withheld envelope
-- [ ] #2 Both pull paths share one watermark-advance helper
+- [x] #1 Legacy v1 pull path never advances the cursor past a withheld envelope
+- [x] #2 Both pull paths share one watermark-advance helper
 - [ ] #3 Regression test added for adapter_version=1 mirroring the existing v2 test
 <!-- AC:END -->
 
@@ -53,14 +53,16 @@ SECOND MISTAKE WORTH RECORDING: I first inserted the helper as a module-level de
 
 Tests: tests/Sync/test_pull_watermark_boundary.py, 8 cases - blocker, restore barrier, the page shortcut, barrier overriding the shortcut, everything-blocked, empty scan, and one documenting the liveness interaction.
 Regression: test_sync_v2_service.py back to 165 passed (the HEAD baseline). store/endpoints/conflicts show 6 failed / 389 passed BOTH with and without the change (stash-isolated) - pre-existing.
+
+2026-09-23 reconciliation: AC1 met - commit 0e0f57a97d; service.py legacy pull (~:5344) derives next_sequence from _safe_pull_boundary with blocker_cursor now returned by _scan_pull_page. Behaviourally verified with a scratch (not committed) mirror of test_versioned_pull_does_not_advance_past_unresolved_conflict using an adapter-v1-only device: first pull envelopes=[], next_cursor=0, has_more=False; after clearing the blocker the second pull delivers 'later'. AC2 met - both pull() (:5344) and _pull_versioned (:10356) call module-level _safe_pull_boundary (:1308). AC3 NOT met - tests/Sync/test_pull_watermark_boundary.py (8 passed) unit-tests the helper only; no service-level pull() test with an adapter_version=1 device exists in the repo mirroring test_sync_v2_service.py::test_versioned_pull_does_not_advance_past_unresolved_conflict. Remaining: add that test to test_sync_v2_service.py. v2 test + test_conflict_resolution_rebases_later_dependency_and_paginates_without_queued_history: 2 passed. Bandit on service.py: no findings.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
+- [x] #2 Tests or verification recorded
 - [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->

@@ -4,7 +4,7 @@ title: Delete dead and test-only helpers surfaced by the core-module review
 status: In Progress
 assignee: []
 created_date: '2026-09-22 05:00'
-updated_date: '2026-09-22 05:36'
+updated_date: '2026-09-23 19:38'
 labels:
   - dead-code
   - cleanup
@@ -65,6 +65,8 @@ CONFIRMED but NOT deleted - each is TEST-ONLY, so removing the helper means remo
 Note is_valid_url was safe to delete: its 2 apparent references are a NESTED local function in Web_Scraping/Article_Extractor_Lib.py:1243, not the Utils one.
 
 STILL OPEN: the unreachable PromptStudioDatabase.list_optimization_iterations duplicate, the dead Sync resolve_conflict branch, the TTS dead knobs, and Chat/REFACTORING_PLAN.md.
+
+2026-09-23 reconciliation: no ACs met. AC1 NOT met. Done: Utils.truncate_content, generate_unique_identifier and is_valid_url, and streaming.aiter_normalized_sse (0 references remain; the modules import). The duplicate PromptStudioDatabase.list_optimization_iterations is also gone, done under TASK-13318 (dee169a794; one def remains at :1937). Still present: RAG batch_utils.run_batch_indexed (:190), TTS tts_validation ProviderLimits.get_max_text_length (:220), TTS tts_config ProviderConfig.max_retries (:66), TTS adapters/base.py convert_audio_format source_format param (still unused in the body), Sync/v2/service.py resolve_conflict unreachable personal-context require_active_exchange branch (~:7036-7046, still shadowed by the unconditional raise above it) plus the dead require_personal_context_conflict and personal_context_exchange params, and streaming.aiter_sse_lines_httpx (:120). The suite has not been re-run for the finished set. AC2 NOT met - Utils.save_temp_file (:789) and its test are both still there. AC3 NOT met - core/Chat/REFACTORING_PLAN.md still exists.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

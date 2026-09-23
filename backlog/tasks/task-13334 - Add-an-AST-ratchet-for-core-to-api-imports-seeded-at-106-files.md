@@ -4,7 +4,7 @@ title: Add an AST ratchet for core to api imports seeded at 106 files
 status: In Progress
 assignee: []
 created_date: '2026-09-22 04:58'
-updated_date: '2026-09-22 20:42'
+updated_date: '2026-09-23 19:38'
 labels:
   - architecture
   - tests
@@ -35,8 +35,8 @@ Source: synthesis F34
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Ratchet test exists with a recorded baseline of 106 files
-- [ ] #2 The 20 production true-inversion files are on a hard ban list
+- [x] #1 Ratchet test exists with a recorded baseline of 106 files
+- [x] #2 The 20 production true-inversion files are on a hard ban list
 - [ ] #3 persistence.py monkeypatch seam replaced with explicit DI
 - [ ] #4 DEFAULT_CHARACTER_NAME moved into core
 <!-- AC:END -->
@@ -58,6 +58,8 @@ Deliberately excludes core/MCP_unified/tests/ from the true-inversion set - it i
 SYNTHESIS CORRECTION FILED IN THE SAME CHANGE: the "cheap sub-case - move DEFAULT_CHARACTER_NAME and clear 3 of the 20 files" recommendation is WRONG and acting on it would introduce a defect. There are two constants of that name with DIFFERENT VALUES - core/Character_Chat/modules/character_utils.py:16 is "Character", api/v1/API_Deps/ChaCha_Notes_DB_Deps.py:350 is "Helpful AI Assistant". chat_history.py:112 passes it to get_character_card_by_name(), a DB lookup on that exact string, so repointing would fetch the wrong character card. Consolidating them is owner-only and is a behaviour decision.
 
 Still open: the 20 true inversions themselves, particularly persistence.py where four of five exist only as monkeypatch seams.
+
+2026-09-23 reconciliation: AC1 met with a corrected number - tests/lint/test_core_to_api_import_boundary.py (commit 0dd37ea2bf) records CORE_TO_API_BASELINE of 105 files, not 106; the 106 was a grep overcount (a docstring in DB_Management/db_errors.py) and the AST scan is the correct figure. 3 passed on 2026-09-23. AC2 met - TRUE_INVERSION_BASELINE holds exactly 20 files, with its own test_no_new_true_inversions and test_baselines_only_shrink. Caveat: the ban works per file, so a new endpoints/API_Deps import added inside one of those 20 files is not caught. AC3 NOT met - Ingestion_Media_Processing/persistence.py still imports api.v1.endpoints.media (:2699, :4879), endpoints.media_embeddings (:2508) and API_Deps.validations_deps (:1887, :2709), and still resolves collaborators through the endpoints.media getattr seam. AC4 NOT met and its premise is wrong - chat_service.py:34, chat_history.py:29 and chat_helpers.py:13 still import DEFAULT_CHARACTER_NAME from API_Deps/ChaCha_Notes_DB_Deps.py:350 ('Helpful AI Assistant'), which is not the same as core Character_Chat/modules/character_utils.py:16 ('Character'). Just repointing the imports would change which character card gets looked up. The owner has to choose the value before the constant can move to core.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

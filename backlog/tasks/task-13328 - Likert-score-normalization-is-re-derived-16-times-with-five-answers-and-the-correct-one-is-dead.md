@@ -6,7 +6,7 @@ title: >-
 status: In Progress
 assignee: []
 created_date: '2026-09-22 04:57'
-updated_date: '2026-09-22 19:46'
+updated_date: '2026-09-23 19:39'
 labels:
   - duplication
   - evaluations
@@ -37,8 +37,8 @@ Source: synthesis F27
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [ ] #1 One normalizer with an explicit declared scale
-- [ ] #2 The chosen formula is recorded as a decision
-- [ ] #3 Tests cover the bottom of the range, not just the top
+- [x] #2 The chosen formula is recorded as a decision
+- [x] #3 Tests cover the bottom of the range, not just the top
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -60,6 +60,11 @@ Tests: tests/Evaluations/unit/test_scoring_normalization.py, 21 cases including 
 IMPACT SO FAR: baseline for tests/Evaluations/unit + property was 259 passed / 0 failed; after the change 280 passed / 0 failed. Exactly ONE assertion changed - test_response_quality_provider_boundary asserted 0.8 for a judge score of 4; the correct value is (4-1)/4 = 0.75. Updated WITH the reason in a comment, not silently; the score is incidental to that test, which covers executor bypass.
 
 The wider tests/Evaluations dir shows 9 failed vs a 6-failed baseline, so ~3 further tests appear affected. Identifying them precisely before claiming otherwise.
+
+2026-09-23 reconciliation:
+AC2 met - decision recorded as an explicit DECISION section in the core/Evaluations/scoring.py module docstring (affine (raw-min)/(max-min); commit 8c1a637a2d). No ADR exists; if an ADR is required, that is a follow-up, but the AC wording is satisfied.
+AC3 met - tests/Evaluations/unit/test_scoring_normalization.py (21 passed, none skipped with or without RUN_EVALUATIONS=1) includes test_the_bottom_of_the_range_is_zero_not_a_floor, clamping below min, and parity with the old _normalize_score for 0..6.
+AC1 NOT met - normalize_likert exists with declared scale and the 11 raw/5.0 sites in rag_evaluator/response_quality_evaluator use it, but independent schemes remain: eval_runner.py:1429-1439 (raw/max_score, max=3 for fluency, still the dict/string branch inconsistency), recipes/summarization_quality.py:289 _normalize_score(value, max_score), evaluation_manager.py:613,632 (/10.0), and a site the earlier notes missed: recipes/rag_answer_quality_execution.py:1112 _coerce_unit_score returns numeric/5.0 for values >1 (the same 20%-floor bug). Also unresolved from the previous note: ~3 extra failures in the wider tests/Evaluations run were never identified.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

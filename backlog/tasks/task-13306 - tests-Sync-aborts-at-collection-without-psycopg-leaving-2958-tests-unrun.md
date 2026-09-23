@@ -4,7 +4,7 @@ title: tests/Sync aborts at collection without psycopg leaving 2958 tests unrun
 status: In Progress
 assignee: []
 created_date: '2026-09-22 04:53'
-updated_date: '2026-09-22 07:22'
+updated_date: '2026-09-23 19:38'
 labels:
   - bug
   - tests
@@ -33,9 +33,9 @@ Source: synthesis F8
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Both files guarded with pytest.importorskip("psycopg")
-- [ ] #2 pytest tldw_Server_API/tests/Sync collects and runs without psycopg installed
-- [ ] #3 The red link_state test is fixed or explicitly quarantined with a reason
+- [x] #1 Both files guarded with pytest.importorskip("psycopg")
+- [x] #2 pytest tldw_Server_API/tests/Sync collects and runs without psycopg installed
+- [x] #3 The red link_state test is fixed or explicitly quarantined with a reason
 - [ ] #4 tests/Sync assigned to a CI shard
 <!-- AC:END -->
 
@@ -53,12 +53,14 @@ DID IN THIS PASS: made the swallow diagnosable. core/Sync/v2/service.py:resolve_
 HYPOTHESIS RAISED AND DISPROVED: I suspected the connection-threading split (62 of 125 store forwarders omit connection=self._connection) caused a read inside a guard to miss uncommitted writes. Both get_envelope_by_server_cursor (store.py:1407) and get_envelope_by_client_id (store.py:1413) DO thread it. Not the cause; the identity checks at personal_context_conflicts.py:194-202 are the remaining candidate.
 
 AC#4 REVISED - "assign tests/Sync to a CI shard" is WRONG AS WRITTEN. The directory takes 3h 01m; it cannot sit in a PR gate. It needs a scoped gate-able subset or a nightly. Triage of the 12 filed separately.
+
+2026-09-23 reconciliation: AC1 met - both postgres_contract files have pytest.importorskip("psycopg") at :10 before the psycopg import (commit 7c348a05ae). AC2 met for collection - with psycopg/psycopg_pool forced to None in sys.modules, pytest --collect-only tests/Sync reports '2997 tests collected' with the two files SKIPPED and no collection errors (previously 'Interrupted: 2 errors'). Full run not repeated here (3h); the earlier note records a completed run. AC3 met - test_sync_v2_store.py::test_postgres_personal_context_receipt_locks_binding_before_upsert passes (1 passed); fixture fixed across 4cccc56a8a/95689eb714/d389329118. AC4 NOT checked - premise is off: tests/Sync has been in ci.yml shard 'gap-verified-2' since 5e5c6664d2 (2026-06-21), i.e. before the review. But that shard is in ci.yml (not backend-required/coverage-required), path-filter gated, with timeout-minutes: 60 against a ~3h directory runtime, so it is not an effective gate. Remaining: a gate-able scoped subset of tests/Sync in a required workflow plus the full directory on a nightly (or pytest-split it), then re-word/check AC4. DoD4 bandit skipped: only test files + a logging change were touched for this task.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
+- [x] #2 Tests or verification recorded
 - [ ] #3 Documentation updated when relevant
 - [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
 - [ ] #5 Final summary added

@@ -1,10 +1,10 @@
 ---
 id: TASK-13339
 title: media_metadata and source_cache materializers are 187 identical lines
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-22 05:00'
-updated_date: '2026-09-22 18:58'
+updated_date: '2026-09-23 19:38'
 labels:
   - duplication
   - sync
@@ -31,9 +31,9 @@ Source: synthesis F38
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 One parameterised metadata-only materializer
-- [ ] #2 Error code strings unchanged
-- [ ] #3 One table-driven suite covers both domains
+- [x] #1 One parameterised metadata-only materializer
+- [x] #2 Error code strings unchanged
+- [x] #3 One table-driven suite covers both domains
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -54,14 +54,22 @@ This is also the first dedicated materializer coverage source_cache has ever had
 One branch could NOT be characterised and is preserved verbatim: `envelope.server_cursor is None` is unreachable through the model, because SyncEnvelope.__post_init__ raises "server_cursor is required". Noted in the test.
 
 REGRESSION: test_sync_v2_service 165 passed; media_compat + factory + parity 101 passed. test_sync_v2_domain_adapters shows 3 failed / 48 passed BOTH with and without the refactor (stash-isolated) - those are 3 of the 12 pre-existing failures catalogued in TASK-13344, not caused here.
+
+2026-09-23 reconciliation: AC1 met - Sync/v2/materializers/metadata_only.py MetadataOnlyMaterializer(domain, code_prefix, label, lower_label, noun); media_metadata.py (33 lines) and source_cache.py (27 lines) are thin factories (commit 8c1a637a2d). AC2 met - I diffed the pre-refactor files (8c1a637a2d^) against the templates: all 28 differing lines map to {code_prefix}_projection_failed/_tombstoned/_hash_mismatch/_object_id and the label/lower_label/noun message forms, and they reconstruct byte-exactly. AC3 met - tests/Sync/test_metadata_only_materializer_parity.py is parametrised over both domains (CASES media/source_cache) with literal expected strings; together with test_sync_v2_media_compat.py and test_sync_v2_factory.py, 53 passed on 2026-09-23. Bandit on the 3 materializer files: no issues. Known: the envelope.server_cursor is None branch cannot be reached through SyncEnvelope and is not characterised; the 3 test_sync_v2_domain_adapters failures predate this change (TASK-13344).
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+media_metadata and source_cache materializers now construct one parameterised MetadataOnlyMaterializer (core/Sync/v2/materializers/metadata_only.py, commit 8c1a637a2d). The old public names are kept as factory functions, so factory.py and the other call sites are unchanged. Every client-visible error code, conflict metadata key and message is byte-identical: I checked this by diffing the pre-refactor files against the parameter templates. A table-driven parity suite (tests/Sync/test_metadata_only_materializer_parity.py) covers both domains on every failure path; with media_compat and factory tests, 53 passed on 2026-09-23. Bandit is clean. The one uncharacterised branch (server_cursor None) cannot be reached through the model.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

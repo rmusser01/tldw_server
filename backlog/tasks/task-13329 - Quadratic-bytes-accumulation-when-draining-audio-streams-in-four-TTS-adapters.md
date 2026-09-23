@@ -1,10 +1,10 @@
 ---
 id: TASK-13329
 title: Quadratic bytes accumulation when draining audio streams in four TTS adapters
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-22 04:58'
-updated_date: '2026-09-22 16:48'
+updated_date: '2026-09-23 19:39'
 labels:
   - efficiency
   - tts
@@ -31,8 +31,8 @@ Source: synthesis F29
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 All five sites use bytearray
-- [ ] #2 Existing adapter tests still pass
+- [x] #1 All five sites use bytearray
+- [x] #2 Existing adapter tests still pass
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -45,14 +45,25 @@ Each carries a comment naming the measured cost (1032x at 8000 chunks, ~1.1s of 
 RETURN TYPE PRESERVED - the one real risk. Every changed return now wraps with bytes(): four plain returns plus kokoro second site which returns a tuple (bytes(all_audio), alignment_payload). A caller doing isinstance(x, bytes) would have broken on a raw bytearray; none can.
 
 Regression, stash-isolated: tests/TTS is 54 failed / 549 passed BOTH with and without the change - identical, so pre-existing and unrelated (the TTS/TTS_NEW split and env gaps the review flagged). No behaviour change, as expected for a pure accumulation fix.
+
+2026-09-23 reconciliation:
+AC1 met - commit 8c1a637a2d: all five sites use bytearray and return bytes(...): dia_adapter.py:483-486, higgs_adapter.py:500-503, kokoro_adapter.py:1103-1106 and 1123-1137 (tuple return bytes(all_audio), alignment_payload), vibevoice_adapter.py:1126-1129. No remaining 'all_audio = b""' in adapters/.
+AC2 met - targeted adapter suites (dia/kokoro/higgs/vibevoice mock, kokoro_alignment, vibevoice_adapter_unit, kokoro_health_and_errors, higgs_integration_stub): 89 passed, 1 skipped (torch not available), 2 failed. Both failures are test_higgs_adapter_integration_stub.py asserting adapter.initialize() is True; it returns False because torch is not installed in this venv (higgs_adapter.py:183 'torch unavailable; disabling provider') - environmental, before the accumulation code, unrelated to this change.
+DoD3: no docs affected (internal accumulation change). DoD4: uvx bandit on the four adapter files - No issues identified.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+The five quadratic bytes += accumulation sites in the dia, higgs, kokoro (x2) and vibevoice TTS adapters now accumulate into a bytearray and return bytes(...) (commit 8c1a637a2d), preserving the bytes return type including kokoro's (bytes, alignment) tuple. Verified by reading each site; targeted adapter tests 89 passed / 1 skipped, with 2 higgs stub failures caused solely by torch missing in this venv (initialize() returns False before any accumulation). Bandit on the touched files reported no issues. Known skip: torch-dependent higgs/kokoro tests cannot run in this environment.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

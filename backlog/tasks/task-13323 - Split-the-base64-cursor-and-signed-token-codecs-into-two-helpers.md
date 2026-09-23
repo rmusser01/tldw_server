@@ -4,7 +4,7 @@ title: Split the base64 cursor and signed-token codecs into two helpers
 status: In Progress
 assignee: []
 created_date: '2026-09-22 04:56'
-updated_date: '2026-09-22 21:21'
+updated_date: '2026-09-23 19:39'
 labels:
   - duplication
   - security
@@ -33,7 +33,7 @@ Source: synthesis F22
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [ ] #1 Two separate helpers exist; the signed one cannot be used without signature verification
-- [ ] #2 api_key_crypto gains a length bound and alphabet validation
+- [x] #2 api_key_crypto gains a length bound and alphabet validation
 - [ ] #3 Malformed cursors produce one documented status, not six
 <!-- AC:END -->
 
@@ -61,6 +61,11 @@ ALSO MIGRATED:
 Tests: tests/Utils/test_base64url_codecs.py, 17 cases, including one that DEMONSTRATES the defect the 16 lax copies carry by calling the stdlib the way they do and showing it silently accepts a tampered segment.
 
 STILL OPEN: 20 of the 23 sites, 7 of them owner-only under app/api/v1/**. Two notational spellings exist in the wild, so a grep-based sweep will miss sites - enumerate by AST.
+
+2026-09-23 reconciliation:
+AC2 met - commit dddcbd3469: api_key_crypto._b64decode now calls decode_signed_token_segment(max_encoded_len=_MAX_HASH_SEGMENT_LEN=512) (validate=True + altchars, pre-decode length bound, canonical form); tests/AuthNZ/unit/test_api_key_kdf_hash_robustness.py covers out-of-alphabet and empty segments. With tests/Utils/test_base64url_codecs.py: 28 passed.
+AC1 NOT met - two helpers exist (core/Utils/base64url.py: decode_opaque_cursor_segment, decode_signed_token_segment), but the second clause fails by design: decode_signed_token_segment does not verify any signature (its docstring says so) and can be called with no key. Only naming separates them. Meeting the AC needs a signed-token helper that takes the key and does hmac.compare_digest itself (Sync/v2/service.py:10488-10530 pattern), or an AC amendment if naming is accepted as the guard.
+AC3 NOT met - only 3 of 23 sites migrated (api_key_crypto, MCP prompts_catalog, chacha shared_workspace_chat_store). endpoints/workflows.py:2194 and :2597 still use bare urlsafe_b64decode and the six divergent malformed-cursor contracts are untouched; no single documented status exists.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

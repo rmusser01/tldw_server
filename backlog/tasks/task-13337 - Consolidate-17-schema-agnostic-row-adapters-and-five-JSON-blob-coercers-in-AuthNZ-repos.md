@@ -6,7 +6,7 @@ title: >-
 status: In Progress
 assignee: []
 created_date: '2026-09-22 04:59'
-updated_date: '2026-09-22 14:41'
+updated_date: '2026-09-23 19:38'
 labels:
   - duplication
   - authnz
@@ -54,6 +54,8 @@ Test: tests/AuthNZ/unit/test_data_subject_json_field_clamp.py - 12 cases (dict-f
 Regression, stash-isolated on tests/AuthNZ/unit: WITHOUT the change 18 failed / 1193 passed; WITH it 9 failed / 1202 passed. Fixed 9, broke 0. The remaining 9 are pre-existing.
 
 STILL OPEN - the consolidation itself: repos/row_mapping.py does not exist, 20 _row_to_dict definitions remain across the repos package (17 sharing the byte-identical schema-agnostic signature, split two ways on the None guard), and the other four JSON coercers are unmigrated.
+
+2026-09-23 reconciliation: no ACs met. AC1 NOT met - repos/row_mapping.py does not exist; 20 _row_to_dict definitions still in core/AuthNZ/repos/. AC2 NOT met - JSON coercers still live in 5 repos (shared_workspace, managed_secret_refs, mcp_hub, data_subject_requests, prototype_workspaces); only the data_subject_requests copy was fixed to clamp (8c1a637a2d). AC3 NOT met - tests/AuthNZ/unit/test_data_subject_json_field_clamp.py (12 passed today) covers only the data_subject copy, and it tests None, malformed and wrong-shaped input but no bytes. Left: build row_mapping.py (a row adapter with the None guard built in, plus a clamping coercer), migrate the 17 schema-agnostic adapters and 5 coercers, and add a test that includes bytes.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

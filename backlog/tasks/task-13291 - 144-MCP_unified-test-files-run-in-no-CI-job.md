@@ -4,7 +4,7 @@ title: 144 MCP_unified test files run in no CI job
 status: In Progress
 assignee: []
 created_date: '2026-09-22 04:34'
-updated_date: '2026-09-22 06:13'
+updated_date: '2026-09-23 19:38'
 labels:
   - ci
   - mcp
@@ -36,11 +36,11 @@ Found by the comprehensive core-module review; independently verified by the orc
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The in-app tree is run locally and every current failure is triaged and recorded before any gating change
-- [ ] #2 The known red test (filesystem glob / unguarded is_symlink at filesystem_module.py:1778) is fixed or explicitly quarantined with a reason
-- [ ] #3 tldw_Server_API/app/core/MCP_unified/tests is added to the platform-mcp-core shard (ci.yml:1758-1761 and its four siblings) or another required gate
+- [x] #1 The in-app tree is run locally and every current failure is triaged and recorded before any gating change
+- [x] #2 The known red test (filesystem glob / unguarded is_symlink at filesystem_module.py:1778) is fixed or explicitly quarantined with a reason
+- [x] #3 tldw_Server_API/app/core/MCP_unified/tests is added to the platform-mcp-core shard (ci.yml:1758-1761 and its four siblings) or another required gate
 - [ ] #4 A green run of that gate is recorded with its observed output
-- [ ] #5 The naming collision between tests/MCP_unified and app/core/MCP_unified/tests is documented so the next reader does not assume the gate covers both
+- [x] #5 The naming collision between tests/MCP_unified and app/core/MCP_unified/tests is documented so the next reader does not assume the gate covers both
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -55,14 +55,16 @@ DONE. Two parts.
 VERIFICATION: extracted the exact paths value from the parsed YAML and ran the real shard command locally. platform-mcp-inapp => exit 0, 2948 passed, 0 failures, 2m14s. All 5 duplicated matrix copies updated identically (the matrix is duplicated 5x in ci.yml - a separate problem).
 
 QUARANTINE: 10 files were ALREADY red when the tree was wired in (21 entries total) and carry --ignore with a comment saying the list may only shrink. 13 of those 21 are the two distribution-building files, which build sdists and shell out and do not belong in a unit shard anyway. The other 8 are genuine product/test drift accumulated while the tree was unwatched - e.g. refresh_token() missing a required positional argument, a changed result shape (KeyError: rows). Follow-up task filed to drain the quarantine.
+
+2026-09-23 reconciliation: AC1 met (prior note records the local run and triage: 21 red entries in 10 files, categorized; quarantine since fully drained by TASK-13343, 9c21dc31bf/64c253c0c3). AC2 met (filesystem_module.py:1777-1789 wraps candidate.is_symlink() in except OSError; test_filesystem_glob_marks_file_size_unavailable passes today). AC3 met (own shard platform-mcp-inapp added beside platform-mcp-core in all 5 matrix copies of ci.yml, e.g. :1771; runs the whole tree with no --ignore). Caveat: like platform-mcp-core, the full-suite shards feed 'Full Suite (Ubuntu / Python 3.12)', not one of the six rulesets checks in CI_REQUIRED_GATES.md (backend-required only runs tests/unit). AC5 met (ci.yml comment at :1761-1770 explains the in-app tree vs tests/MCP_unified and why they are separate shards; not mirrored in Docs/). AC4 NOT met: only a local run of the shard command is recorded (2948 passed, and that was with the since-removed quarantine); commits 7c348a05ae/9c21dc31bf are not on any remote branch, so no CI run of platform-mcp-inapp exists yet. Bandit on filesystem_module.py: no issues.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
+- [x] #2 Tests or verification recorded
 - [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->

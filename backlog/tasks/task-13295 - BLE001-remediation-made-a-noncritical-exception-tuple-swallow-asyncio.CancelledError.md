@@ -6,7 +6,7 @@ title: >-
 status: In Progress
 assignee: []
 created_date: '2026-09-22 04:45'
-updated_date: '2026-09-22 05:08'
+updated_date: '2026-09-23 19:40'
 labels:
   - bug
   - ingestion
@@ -45,10 +45,10 @@ Found by the comprehensive core-module review; the MRO and subclass relationship
 <!-- AC:BEGIN -->
 - [ ] #1 A failing test cancels a task mid-persistence and asserts CancelledError propagates rather than being suppressed
 - [ ] #2 A failing test asserts an over-quota upload returns 413 rather than 200/207
-- [ ] #3 asyncio.CancelledError is removed from _PERSISTENCE_NONCRITICAL_EXCEPTIONS
+- [x] #3 asyncio.CancelledError is removed from _PERSISTENCE_NONCRITICAL_EXCEPTIONS
 - [ ] #4 HTTPException is removed from the tuple, or every suppress site that must not swallow it is narrowed
-- [ ] #5 The two sibling tuples in Audio/ are corrected in the same pass
-- [ ] #6 A tests/lint/ AST rule rejects any BaseException-derived member in a *_NONCRITICAL_EXCEPTIONS tuple, seeded so it cannot regress
+- [x] #5 The two sibling tuples in Audio/ are corrected in the same pass
+- [x] #6 A tests/lint/ AST rule rejects any BaseException-derived member in a *_NONCRITICAL_EXCEPTIONS tuple, seeded so it cannot regress
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -61,6 +61,8 @@ Done: all 39 removed; new AST ratchet at tldw_Server_API/tests/lint/test_noncrit
 HTTPException: NOT removed from the tuple - 130 sites catch _PERSISTENCE_NONCRITICAL_EXCEPTIONS and a wholesale removal is not a zero-risk change. Instead the specific 413 path was fixed surgically with "except HTTPException: raise" immediately before the tuple catch (persistence.py:5078), matching the file own idiom at :2815, :2975, :3041.
 
 asyncio.TimeoutError was checked and deliberately LEFT - it is an alias of the builtin TimeoutError, an Exception subclass, so it is safe.
+
+2026-09-23 reconciliation: AC3 met (9f5373725b; persistence.py _PERSISTENCE_NONCRITICAL_EXCEPTIONS no longer lists CancelledError). AC5 met (Audio_Streaming_Unified/Audio_Transcription_Lib tuples clean; ratchet covers all of app/). AC6 met (tests/lint/test_noncritical_exception_tuples.py passes, zero offenders; caveat: no positive-control fixture, and it only inspects plain Assign of a literal tuple, not AnnAssign or tuple concatenation). Bandit on the 37 app files touched by 9f5373725b: no issues. AC1 NOT met: no test cancels a task mid-persistence; only the structural lint ratchet exists. AC2 NOT met: persistence.py:5078 'except HTTPException: raise' fixes the 413 path, but no test drives an over-quota upload through persistence and asserts 413 (the only rejecting-quota tests are test_video_ingestion.py:617 / test_audio_files_preflight.py:336, a different path). AC4 NOT met: HTTPException is still in the tuple and only the one 413 site was narrowed; the other ~130 catch/suppress sites were not audited.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
@@ -68,7 +70,7 @@ asyncio.TimeoutError was checked and deliberately LEFT - it is an alias of the b
 - [ ] #1 Acceptance criteria completed
 - [ ] #2 Tests or verification recorded
 - [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->
