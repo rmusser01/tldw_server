@@ -1,10 +1,10 @@
 ---
 id: TASK-13317
 title: Raw SQL in 20 endpoint files violates the no-raw-SQL-in-endpoints rule
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-22 04:54'
-updated_date: '2026-09-23 17:27'
+updated_date: '2026-09-23 17:28'
 labels:
   - duplication
   - api
@@ -112,12 +112,18 @@ itself a safety net for when a dollar-style query slips through.
 2026-09-23: AC1 done - every endpoint file except admin/admin_rbac.py now routes SQL through a core owner; RAW_SQL_BASELINE holds only admin_rbac.py (56). AC2 done - rbac_role/user_rate_limits -> core/AuthNZ/repos/rbac_rate_limits_repo.py (endpoint, simulator service, auth_deps enforcement); password_history -> PasswordService.set_password (was untrimmed on the change-password path); user_prompts -> DocumentGeneratorService.has_custom_prompt. Bugs found on the way: notes keyword-link listings leaked other tenants' links on PostgreSQL (c53fe19d83); outputs run selection read the Media DB for a Watchlists table so always returned nothing (75124ce509); rate-limit simulator joined nonexistent rbac_roles/rbac_user_roles and used ? with asyncpg (61e838d402). Verification: Media, Notes_NEW, Jobs(RUN_JOBS=1), Admin/Watchlists/Health, AuthNZ unit suites each diffed against HEAD with no new failures. Follow-up: admin_rbac.py (18 endpoints, 56 statements) filed separately.
 <!-- SECTION:NOTES:END -->
 
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+All four ACs met. Endpoints no longer run raw SQL except admin/admin_rbac.py (split to TASK-13362); the ratchet baseline holds that one file, and a new lint test forbids endpoints touching _connect/_pg_cursor/_execute/_cursor_exec/_coerce_bool_flag. New/extended core owners: core/Jobs/{admin_operations,queue_stats}.py, core/AuthNZ/{compliance_stats,tenant_provisioning}.py, core/AuthNZ/repos/rbac_rate_limits_repo.py, core/Sync/server_sync_processor.py, plus methods on PromptStudio repositories, media_db/api.py, keyword_store, Collections_DB, vector_store_batches_db, Watchlists (existing list_run_media_ids), PasswordService, DocumentGeneratorService, WorkflowsDatabase, DatabasePool, AuthnzOrgsTeamsRepo, JobManager. Bugs fixed on the way: PG cross-tenant keyword-link listing leak; outputs run selection always empty; rate-limit simulator never showing role limits; untrimmed password history on change-password; jobs stale-groups PG dict-row unpacking. Verification: per-suite diffs against HEAD (Media, Notes_NEW, Jobs with RUN_JOBS=1, Admin/Watchlists/Health, AuthNZ unit/SQLite, prompt_studio) showed no new failures; bandit clean on new modules. Known: 51 private-name imports from core remain in 20 endpoint files (outside AC3's named list), not ratcheted.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
