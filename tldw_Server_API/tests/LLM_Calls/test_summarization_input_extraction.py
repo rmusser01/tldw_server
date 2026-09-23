@@ -194,3 +194,65 @@ def test_transcription_list_is_joined() -> None:
 
     assert "alpha" in result
     assert "beta" in result
+
+
+# ---------------------------------------------------------------------------
+# The dead pair that carried a second copy of the same file read.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "name", ["extract_metadata_and_content", "format_input_with_metadata"]
+)
+def test_the_dead_metadata_helpers_are_gone(name: str) -> None:
+    """Neither helper had a caller anywhere in the repo, and one was a live hazard.
+
+    `extract_metadata_and_content` did `os.path.exists(input_data)` ->
+    `open(input_data)` -> `json.load(file)`: the same caller-controlled file read this
+    task removed from `extract_text_from_input`, sitting unreferenced in the same module
+    waiting for someone to wire it up. `format_input_with_metadata` only formatted its
+    output, so the pair goes together.
+
+    Deleting them is the point rather than tidiness -- AC#6 offered "removed, or retained
+    with a documented reason", and "it reads any file the caller names" is not a reason
+    to retain dead code.
+    """
+    assert not hasattr(_module, name), (
+        f"{name} is back. It had no callers and carried a caller-controlled file read; "
+        "if it is genuinely needed, it must not resolve strings as filesystem paths. "
+        "See TASK-13288."
+    )
+
+
+def test_no_caller_controlled_path_probe_remains_in_the_module() -> None:
+    """Ratchet: nothing here may test a caller-supplied value for being a path.
+
+    Both removed hazards had the same shape -- an `os.path` existence check on a plain
+    argument, followed by `open()` on it.
+
+    Deliberately an AST walk rather than a substring scan. A scan cannot tell code from
+    prose, so it trips on the docstrings that explain the removal and could equally be
+    dodged by reformatting the call across two lines.
+    """
+    import ast
+    import pathlib
+
+    tree = ast.parse(pathlib.Path(_module.__file__).read_text(encoding="utf-8"))
+
+    offenders = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        if node.func.attr not in {"isfile", "exists", "isdir"}:
+            continue
+        # Only flag a probe on a bare argument name, which is what "caller-supplied"
+        # looks like here; a probe on a locally-constructed path is not this defect.
+        if node.args and isinstance(node.args[0], ast.Name):
+            offenders.append(f"line {node.lineno}: os.path.{node.func.attr}({node.args[0].id})")
+
+    assert not offenders, (
+        "a caller-supplied value is being resolved as a filesystem path in "
+        f"Summarization_General_Lib: {offenders}. analyze() passes caller-supplied "
+        "input_data straight through, so this is the arbitrary file read removed in "
+        "TASK-13288 -- the one TASK-2425 believed was inactive because of shadowing."
+    )

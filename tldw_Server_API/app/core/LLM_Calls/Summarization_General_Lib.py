@@ -802,49 +802,6 @@ def analyze(
 
 
 
-def extract_metadata_and_content(input_data):
-    metadata = {}
-    content = ""
-
-    if isinstance(input_data, str):
-        if os.path.exists(input_data):
-            with open(input_data, encoding='utf-8') as file:
-                data = json.load(file)
-        else:
-            try:
-                data = json.loads(input_data)
-            except json.JSONDecodeError:
-                return {}, input_data
-    elif isinstance(input_data, dict):
-        data = input_data
-    else:
-        return {}, str(input_data)
-
-    # Extract metadata
-    metadata['title'] = data.get('title', 'No title available')
-    metadata['author'] = data.get('author', 'Unknown author')
-
-    # Extract content
-    if 'transcription' in data:
-        content = extract_text_from_segments(data['transcription'])
-    elif 'segments' in data:
-        content = extract_text_from_segments(data['segments'])
-    elif 'content' in data:
-        content = data['content']
-    else:
-        content = json.dumps(data)
-
-    return metadata, content
-
-
-def format_input_with_metadata(metadata, content):
-    formatted_input = f"Title: {metadata.get('title', 'No title available')}\n"
-    formatted_input += f"Author: {metadata.get('author', 'Unknown author')}\n\n"
-    formatted_input += content
-    return formatted_input
-
-
-
 def extract_text_from_input(input_data):
     """Extract usable text from a caller-supplied payload.
 
