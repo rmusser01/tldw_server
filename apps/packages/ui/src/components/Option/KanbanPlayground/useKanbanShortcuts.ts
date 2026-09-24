@@ -3,6 +3,7 @@ import {
   useKeyboardShortcuts,
   type KeyboardShortcutConfig
 } from "@/hooks/keyboard/useKeyboardShortcuts"
+import { isEditableTarget } from "@/utils/editable-target"
 
 interface KanbanShortcutActions {
   onNewCard?: () => void
@@ -11,21 +12,12 @@ interface KanbanShortcutActions {
   onClosePanel?: () => void
 }
 
-function isInputFocused(): boolean {
-  const active = document.activeElement
-  if (!active) return false
-  const tag = active.tagName.toLowerCase()
-  if (tag === "input" || tag === "textarea" || tag === "select") return true
-  if ((active as HTMLElement).isContentEditable) return true
-  return false
-}
-
 export const useKanbanShortcuts = (actions: KanbanShortcutActions) => {
   const [helpOpen, setHelpOpen] = useState(false)
 
   const guard = useCallback(
     (fn?: () => void) => () => {
-      if (isInputFocused()) return
+      if (isEditableTarget(document.activeElement)) return
       fn?.()
     },
     []

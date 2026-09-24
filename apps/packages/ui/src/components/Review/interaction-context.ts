@@ -1,3 +1,5 @@
+import { isEditableTarget } from "@/utils/editable-target"
+
 const INPUT_TAGS = new Set(["input", "textarea", "select", "option"])
 const INTERACTIVE_TAGS = new Set(["button", "a", "summary"])
 
@@ -42,8 +44,7 @@ export function shouldHandleGlobalShortcut(target: EventTarget | null): boolean 
   if (INPUT_TAGS.has(tag)) return false
   if (INTERACTIVE_TAGS.has(tag)) return false
   if (element.getAttribute("role") === "button") return false
-  if (element.isContentEditable) return false
-  if (element.closest("input, textarea, select, [contenteditable='true']")) return false
+  if (isEditableTarget(element)) return false
   if (element.closest(INTERACTIVE_SHORTCUT_SELECTORS)) return false
   if (element.closest(SHORTCUT_SUPPRESSION_SELECTORS)) return false
 

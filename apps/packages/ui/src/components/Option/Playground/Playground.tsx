@@ -97,7 +97,6 @@ import { useDarkMode } from "@/hooks/useDarkmode";
 import { useLoadLocalConversation } from "@/hooks/useLoadLocalConversation";
 import { tldwClient } from "@/services/tldw/TldwApiClient";
 import {
-  isEditableTarget,
   resolvePlaygroundShortcutAction,
   shouldOpenShortcutsHelp,
 } from "./playground-shortcuts";
@@ -166,6 +165,7 @@ import {
 } from "@/utils/chat-model-availability";
 import type { Character } from "@/types/character";
 import { getAssistantSelectionMode } from "@/types/assistant-selection";
+import { isEditableTarget } from "@/utils/editable-target"
 
 const readSidepanelChatWebUiHandoffFromLocation = () => {
   if (typeof window === "undefined") return null;

@@ -2,6 +2,7 @@ import React, { useCallback, useRef } from "react"
 import { useTranslation } from "react-i18next"
 import { Loader2 } from "lucide-react"
 import type { QuickIngestTab, TabBadgeState } from "./types"
+import { isEditableTarget } from "@/utils/editable-target"
 
 type QuickIngestTabsProps = {
   activeTab: QuickIngestTab
@@ -30,13 +31,7 @@ export const QuickIngestTabs: React.FC<QuickIngestTabsProps> = ({
 
   // Keyboard navigation: 1/2/3 keys switch tabs (except in text inputs)
   const handleTabListKeyDown = (e: React.KeyboardEvent) => {
-    const target = e.target as HTMLElement
-    const isTextInput =
-      target.tagName === "INPUT" ||
-      target.tagName === "TEXTAREA" ||
-      target.isContentEditable
-
-    if (isTextInput) return
+    if (isEditableTarget(e.target)) return
 
     if (e.key === "1") {
       e.preventDefault()

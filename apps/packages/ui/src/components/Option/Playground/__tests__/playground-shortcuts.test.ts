@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest"
+import { isEditableTarget } from "@/utils/editable-target"
 import {
-  isEditableTarget,
   resolvePlaygroundShortcutAction,
   shouldOpenShortcutsHelp
 } from "../playground-shortcuts"

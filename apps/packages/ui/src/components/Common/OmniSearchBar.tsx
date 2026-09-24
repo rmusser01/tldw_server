@@ -10,6 +10,7 @@ import {
   type OmniSearchResult
 } from "@/utils/omni-search"
 import { useTranslation } from "react-i18next"
+import { isEditableTarget } from "@/utils/editable-target"
 
 type Props = {
   deps: OmniSearchDependencies
@@ -132,16 +133,7 @@ export const OmniSearchBar: React.FC<Props> = ({ deps }) => {
     const handler = (event: KeyboardEvent) => {
       const key = event.key.toLowerCase()
       const meta = event.metaKey || event.ctrlKey
-      const target = event.target as HTMLElement | null
-      const tag = target?.tagName
-
-      if (
-        meta &&
-        key === "k" &&
-        tag !== "INPUT" &&
-        tag !== "TEXTAREA" &&
-        target?.getAttribute("contenteditable") !== "true"
-      ) {
+      if (meta && key === "k" && !isEditableTarget(event.target)) {
         event.preventDefault()
         inputRef.current?.focus()
         setOpen(true)

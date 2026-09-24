@@ -3,6 +3,7 @@ import type { MediaResultItem } from '../types'
 import { buildReadAlongSegments } from '../read-along/media-read-along-segments'
 import type { ReadAlongSegment } from '../read-along/types'
 import { parseLeadingTranscriptTiming } from '@/utils/media-transcript-display'
+import { isEditableTarget } from "@/utils/editable-target"
 
 export const LARGE_PLAIN_CONTENT_THRESHOLD_CHARS = 120_000
 export const LARGE_PLAIN_CONTENT_CHUNK_CHARS = 32_000
@@ -582,11 +583,7 @@ export function useTranscriptDisplay(deps: UseTranscriptDisplayDeps) {
       if (event.key.toLowerCase() !== 'f') return
 
       const target = event.target as HTMLElement | null
-      const isTypingTarget =
-        target instanceof HTMLInputElement ||
-        target instanceof HTMLTextAreaElement ||
-        Boolean(target?.isContentEditable)
-      if (isTypingTarget) return
+      if (isEditableTarget(target)) return
 
       const root = rootContainerRef.current
       if (

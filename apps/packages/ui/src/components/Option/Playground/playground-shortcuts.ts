@@ -1,3 +1,5 @@
+import { isEditableTarget } from "@/utils/editable-target"
+
 export type PlaygroundShortcutAction =
   | "toggle_artifacts"
   | "toggle_compare"
@@ -13,14 +15,6 @@ type ShortcutEvent = {
   target?: EventTarget | null
 }
 
-export const isEditableTarget = (
-  target: EventTarget | null | undefined
-): boolean => {
-  if (!target || !(target instanceof HTMLElement)) return false
-  if (target.isContentEditable) return true
-  const tagName = target.tagName.toLowerCase()
-  return tagName === "input" || tagName === "textarea" || tagName === "select"
-}
 
 /**
  * Whether a keydown should open the playground shortcuts help panel.

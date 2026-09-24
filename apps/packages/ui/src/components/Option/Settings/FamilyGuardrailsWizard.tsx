@@ -49,6 +49,7 @@ import {
   type FamilyGuardrailsWizardTelemetryCohort,
   type FamilyGuardrailsWizardTelemetryStep
 } from "@/utils/family-guardrails-wizard-telemetry"
+import { isEditableTarget } from "@/utils/editable-target"
 
 const { Title, Text, Paragraph } = Typography
 
@@ -229,13 +230,6 @@ const isFamilyWizardDraftsUnsupported = (error: unknown): boolean => {
   const status = getFamilyWizardErrorStatus(error)
   if (status == null) return false
   return UNSUPPORTED_FAMILY_WIZARD_STATUS_CODES.has(status)
-}
-
-const isEditableTarget = (target: EventTarget | null): boolean => {
-  if (!(target instanceof HTMLElement)) return false
-  if (target.isContentEditable) return true
-  const tagName = target.tagName
-  return tagName === "INPUT" || tagName === "TEXTAREA" || tagName === "SELECT"
 }
 
 const normalizeMemberUserId = (userId: string): string => userId.trim().toLowerCase()
