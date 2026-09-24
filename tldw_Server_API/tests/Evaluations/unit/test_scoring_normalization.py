@@ -110,7 +110,16 @@ def test_rag_answer_quality_reference_score_uses_the_geval_scales() -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "reply,expected",
-    [("Score: 1", 0.0), ('{"score": 1}', 0.0), ("Score: 10", 1.0), ('{"score": 0.8}', 0.8), ("Score: 0.8", 0.8)],
+    [
+        ("Score: 1", 0.0),
+        ('{"score": 1}', 0.0),
+        ("Score: 5", 4 / 9),
+        ('{"score": 5}', 4 / 9),
+        ("Score: 10", 1.0),
+        ('{"score": 10}', 1.0),
+        ('{"score": 0.8}', 0.8),
+        ("Score: 0.8", 0.8),
+    ],
 )
 async def test_evaluation_manager_custom_metric_uses_its_declared_1_to_10_scale(reply, expected) -> None:
     """The prompt asks for 1-10. Regex "Score: 1" scored 1.0 (worst became perfect) and JSON

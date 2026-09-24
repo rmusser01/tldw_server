@@ -26,7 +26,8 @@ type ShortcutEvent = {
  */
 export const shouldOpenShortcutsHelp = (event: ShortcutEvent): boolean => {
   if (event.altKey || event.ctrlKey || event.metaKey) return false
-  if (!event.shiftKey) return false
+  // Rely on the resolved character, not on Shift: some keyboard layouts type "?"
+  // without it.
   if (event.key !== "?") return false
   return !isEditableTarget(event.target)
 }

@@ -14,7 +14,7 @@ from datetime import datetime
 from typing import Any, Optional, Union
 
 from loguru import logger
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 from tldw_Server_API.app.core.Character_Chat.constants import MAX_CHAT_DICTIONARY_TEXT_LENGTH
@@ -261,24 +261,30 @@ def parse_timed_effects(value: Any) -> TimedEffects | None:
     - TimedEffects -> returned as-is
     - dict -> TimedEffects(**dict) when possible
     - JSON string containing a dict payload
+
+    Malformed stored values fall back to None (so one bad row cannot fail a whole
+    listing) but are logged, so they are not indistinguishable from "no effects".
     """
     if value is None:
         return None
     if isinstance(value, TimedEffects):
         return value
-    if isinstance(value, dict):
-        try:
-            return TimedEffects(**value)
-        except Exception:
+    payload: Any = value
+    if isinstance(value, str):
+        if not value.strip():
             return None
-    if isinstance(value, str) and value.strip():
         try:
-            parsed = json.loads(value)
-            if isinstance(parsed, dict):
-                return TimedEffects(**parsed)
-        except Exception:
+            payload = json.loads(value)
+        except ValueError as exc:  # json.JSONDecodeError is a ValueError
+            logger.warning("Ignoring unparseable timed_effects: {}", type(exc).__name__)
             return None
-    return None
+    if not isinstance(payload, dict):
+        return None
+    try:
+        return TimedEffects(**payload)
+    except (ValidationError, TypeError) as exc:
+        logger.warning("Ignoring invalid timed_effects: {}", type(exc).__name__)
+        return None
 
 
 class DictionaryEntryBase(BaseModel):

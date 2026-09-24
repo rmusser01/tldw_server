@@ -104,9 +104,11 @@ describe("shouldOpenShortcutsHelp", () => {
     expect(shouldOpenShortcutsHelp({ shiftKey: true, key: "?", altKey: true })).toBe(false)
   })
 
-  it("requires the shift flag a physical \"?\" keystroke carries", () => {
-    // A synthetic event without shiftKey is exactly why this shipped untested.
-    expect(shouldOpenShortcutsHelp({ key: "?" })).toBe(false)
+  it("uses the resolved \"?\" key, not Shift, so layouts without Shift work", () => {
+    expect(shouldOpenShortcutsHelp({ key: "?" })).toBe(true)
+    expect(
+      shouldOpenShortcutsHelp({ key: "?", target: document.createElement("textarea") })
+    ).toBe(false)
   })
 })
 
