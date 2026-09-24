@@ -7,6 +7,7 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+from tldw_Server_API.app.core.AuthNZ.repos.datetime_utils import _strip_tzinfo
 
 _SQLITE_CORRUPTION_SIGNATURES = (
     "database disk image is malformed",
@@ -238,8 +239,8 @@ class AuthnzUsageRepo:
 
             if getattr(self.db_pool, "pool", None) is not None:
                 # Postgres path: ensure naive UTC timestamps for comparison
-                _start = start_dt.replace(tzinfo=None)
-                _end = end_dt.replace(tzinfo=None)
+                _start = _strip_tzinfo(start_dt)
+                _end = _strip_tzinfo(end_dt)
                 row = await self.db_pool.fetchone(
                     """
                     SELECT
@@ -300,7 +301,7 @@ class AuthnzUsageRepo:
         try:
             async with self.db_pool.transaction() as conn:
                 if self._is_postgres_backend():
-                    cutoff_param = cutoff.replace(tzinfo=None) if getattr(cutoff, "tzinfo", None) else cutoff
+                    cutoff_param = _strip_tzinfo(cutoff)
                     rows = await conn.fetch(
                         "DELETE FROM llm_usage_log WHERE ts < $1 RETURNING 1",
                         cutoff_param,
@@ -326,7 +327,7 @@ class AuthnzUsageRepo:
         try:
             async with self.db_pool.transaction() as conn:
                 if self._is_postgres_backend():
-                    cutoff_param = cutoff.replace(tzinfo=None) if getattr(cutoff, "tzinfo", None) else cutoff
+                    cutoff_param = _strip_tzinfo(cutoff)
                     rows = await conn.fetch(
                         "DELETE FROM usage_log WHERE ts < $1 RETURNING 1",
                         cutoff_param,

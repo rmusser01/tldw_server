@@ -10,6 +10,7 @@ from loguru import logger
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 from tldw_Server_API.app.core.AuthNZ.exceptions import TransactionError
 from tldw_Server_API.app.core.AuthNZ.repos._dual_backend import row_dict
+from tldw_Server_API.app.core.AuthNZ.repos.datetime_utils import _strip_tzinfo
 from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
     ProviderCredentialAliasConflictError,
     fold_provider_credential_rows,
@@ -65,7 +66,7 @@ class AuthnzOrgProviderSecretsRepo:
 
     @staticmethod
     def _normalize_datetime_for_postgres(dt: datetime) -> datetime:
-        return dt.replace(tzinfo=None) if getattr(dt, "tzinfo", None) else dt
+        return _strip_tzinfo(dt)
 
     _row_to_dict = staticmethod(row_dict)
 
