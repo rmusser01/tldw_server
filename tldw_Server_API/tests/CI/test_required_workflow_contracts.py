@@ -955,9 +955,9 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "llm-local-backends",
         }.issubset(shard_names)
         chat_core_shards = {
-            "chat-legacy-integration",
-            "chat-legacy-unit-a-l",
-            "chat-legacy-unit-m-z",
+            "chat-integration",
+            "chat-unit-a-l",
+            "chat-unit-m-z",
             "chat-new-integration-property",
             "chat-new-unit-a-l",
             "chat-new-unit-m-z",
@@ -1160,14 +1160,14 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         assert "tldw_Server_API/tests/Characters" not in shard_path_sets["chat-character-db-core"]
         assert "tldw_Server_API/tests/Characters" not in shard_path_sets["chat-character-db-api"]
         assert "tldw_Server_API/tests/Character_Chat_NEW/unit" not in shard_path_sets["chat-character-property"]
-        assert shard_path_sets["chat-legacy-integration"] == {
+        assert shard_path_sets["chat-integration"] == {
             "tldw_Server_API/tests/Chat/test*.py",
             "tldw_Server_API/tests/Chat/integration",
         }
-        assert shard_path_sets["chat-legacy-unit-a-l"] == {
+        assert shard_path_sets["chat-unit-a-l"] == {
             "tldw_Server_API/tests/Chat/unit/test_[a-l]*.py"
         }
-        assert shard_path_sets["chat-legacy-unit-m-z"] == {
+        assert shard_path_sets["chat-unit-m-z"] == {
             "tldw_Server_API/tests/Chat/unit/test_[m-z]*.py"
         }
         assert shard_path_sets["chat-new-integration-property"] == {
