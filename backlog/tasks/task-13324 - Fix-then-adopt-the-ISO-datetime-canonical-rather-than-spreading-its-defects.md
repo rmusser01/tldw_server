@@ -1,10 +1,10 @@
 ---
 id: TASK-13324
 title: Fix then adopt the ISO datetime canonical rather than spreading its defects
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-22 04:56'
-updated_date: '2026-09-24 00:02'
+updated_date: '2026-09-24 00:15'
 labels:
   - duplication
   - correctness
@@ -37,7 +37,7 @@ Source: synthesis F23
 <!-- AC:BEGIN -->
 - [x] #1 parse_timed_effects split out of datetime_utils
 - [x] #2 A corrected parser exists whose awareness does not depend on input format and which never substitutes now()
-- [ ] #3 AuthNZ _strip_tzinfo fixed to the correct semantics before its 11 copies adopt it
+- [x] #3 AuthNZ _strip_tzinfo fixed to the correct semantics before its 11 copies adopt it
 - [x] #4 Migration is staged, not a single sweep
 <!-- AC:END -->
 
@@ -45,14 +45,22 @@ Source: synthesis F23
 
 <!-- SECTION:NOTES:BEGIN -->
 Commit 5921509761. Destination is core/Utils/iso_datetime.py, not api/v1/utils/iso_datetime.py as the description suggested: services and core modules are the adopters, and core -> api/v1 imports are the inversion the DB_Management review forbids. parse_iso_utc: datetime or ISO string (T or space, fractional, Z, offsets) -> aware UTC; naive taken as UTC; None/blank/garbage/non-str -> None (never now()). utc_now_iso: datetime.now(timezone.utc).isoformat(). AC1: parse_timed_effects moved into schemas/chat_dictionary_schemas.py beside TimedEffects; api/v1/utils/datetime_utils.py deleted (only importer was chat_dictionaries). chat_dictionaries keeps a local coerce_datetime that uses parse_iso_utc and makes the required-field now() fallback explicit + logged; _coerce_optional_datetime = parse_iso_utc. AC4 stage 1 adopters (bound under their old names so monkeypatching still works): _coerce_datetime in telegram_support, mcp_credential_broker_service, integrations_control_plane_service (identical semantics); _utc_now/_utc_now_iso/_utcnow_iso in Setup/{readiness_store,audio_readiness_store,readiness_service,audio_pack_service}, Workspaces/source_preview, Watchlists/briefing_fulfillment, Research_Workspace/output_jobs (byte-identical bodies). Dead utcnow _now_iso removed from workflows_webhook_dlq_service. Not migrated on purpose: second-truncated, Z/millisecond and isoformat(sep=' ') variants (different wire formats, which the DB_Management stage-3 review assigns to core/DB_Management/timestamps.py), and chat.py's _coerce_datetime. Red-before/green-after: _entry_dict_to_response on SQLite-format created_at returned a naive datetime on 4a84d02b55 (fails) and aware UTC now; tests/Utils/test_iso_datetime.py 18 pass. Suite diff: see TASK-13322 notes (same runs), zero new failures. Bandit -ll: clean. FINDING (not fixed, out of scope): workflows_webhook_dlq_service.py:379 writes next_attempt_at as naive 'YYYY-MM-DDTHH:MM:SS.ffffff' but Workflows_DB.list_webhook_dlq_due compares it lexically against SQLite datetime('now') 'YYYY-MM-DD HH:MM:SS', so a retry due later the same day always sorts after now ('T' > ' ') and waits until the date rolls over. OPEN: AC3 (AuthNZ repos/datetime_utils._strip_tzinfo should convert to UTC before dropping tzinfo: dt.astimezone(timezone.utc).replace(tzinfo=None)) not done: core/AuthNZ/repos/ is owned by another agent in this batch, so it is left to that owner.
+
+2026-09-23: AC3 done. _strip_tzinfo now astimezone(utc) before dropping tzinfo (test_strip_tzinfo_utc.py red on old code, green now); the remaining inline copies in org_provider_secrets_repo and usage_repo (5 sites) adopt it. datetime.now(timezone.utc).replace(tzinfo=None) sites were already correct and left alone. AuthNZ suites: no new failures.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+One aware-UTC ISO parser in core/Utils/iso_datetime.py adopted by the matching copies, and AuthNZ's naive-storage helper now converts to UTC before stripping; remaining divergent-format copies are later-stage migrations.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
