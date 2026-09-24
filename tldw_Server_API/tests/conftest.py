@@ -1092,6 +1092,19 @@ def _shutdown_executors_and_evaluations_pool():
 
 
 @pytest.fixture(autouse=True)
+def _clear_reranker_model_cache():
+    """Reranker models are cached per process; tests stub the model classes, so start clean."""
+    def _clear() -> None:
+        mod = sys.modules.get("tldw_Server_API.app.core.RAG.rag_service.advanced_reranking")
+        if mod is not None:
+            mod.clear_reranker_model_cache()
+
+    _clear()
+    yield
+    _clear()
+
+
+@pytest.fixture(autouse=True)
 def _reset_workflow_scheduler():
     """Reset WorkflowScheduler singleton state between tests to avoid stale queues/active counts."""
     try:

@@ -45198,6 +45198,7 @@ for _persona_state_store_method in (
     "list_persona_scope_rules",
     "replace_persona_scope_rules",
     "list_persona_policy_rules",
+    "list_persona_policy_rules_for_personas",
     "replace_persona_policy_rules",
     "create_persona_session",
     "get_persona_session",
