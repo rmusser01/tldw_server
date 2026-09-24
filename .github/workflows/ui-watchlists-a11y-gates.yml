@@ -51,9 +51,19 @@ jobs:
       pull-requests: read
       statuses: read
 
+  # The pull_request path reports to the PR, so it is the one branch protection
+  # sees -- but it used to start every gate immediately, in parallel with the
+  # license audit it is supposed to follow. This makes it wait for the verdict.
+  await_license:
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/license-first-await.yml
+    permissions:
+      contents: read
+      statuses: read
+
   watchlists-a11y-gate:
     name: Watchlists Accessibility Gate
-    needs: admission
+    needs: [admission, await_license]
     if: >-
       always() && !cancelled() &&
       (
@@ -62,7 +72,13 @@ jobs:
           needs.admission.result == 'success' &&
           needs.admission.outputs.should_run == 'true'
         ) ||
-        github.event_name != 'workflow_run'
+        (
+          github.event_name != 'workflow_run' &&
+          (
+            needs.await_license.result == 'skipped' ||
+            needs.await_license.outputs.license_passed == 'true'
+          )
+        )
       )
     runs-on: ubuntu-latest
     timeout-minutes: 25

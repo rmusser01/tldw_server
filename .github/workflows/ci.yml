@@ -43,9 +43,19 @@ jobs:
       pull-requests: read
       statuses: read
 
+  # The pull_request path reports to the PR, so it is the one branch protection
+  # sees -- but it used to start every gate immediately, in parallel with the
+  # license audit it is supposed to follow. This makes it wait for the verdict.
+  await_license:
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/license-first-await.yml
+    permissions:
+      contents: read
+      statuses: read
+
   http-client-patch-guard:
     name: HTTP Client Patch Guard
-    needs: admission
+    needs: [admission, await_license]
     if: >-
       always() && !cancelled() &&
       (
@@ -54,7 +64,13 @@ jobs:
           needs.admission.result == 'success' &&
           needs.admission.outputs.should_run == 'true'
         ) ||
-        github.event_name != 'workflow_run'
+        (
+          github.event_name != 'workflow_run' &&
+          (
+            needs.await_license.result == 'skipped' ||
+            needs.await_license.outputs.license_passed == 'true'
+          )
+        )
       )
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -73,7 +89,7 @@ jobs:
           python Helper_Scripts/checks/guard_http_client_patching.py
   syntax-check:
     name: Syntax Check (compileall)
-    needs: admission
+    needs: [admission, await_license]
     if: >-
       always() && !cancelled() &&
       (
@@ -82,7 +98,13 @@ jobs:
           needs.admission.result == 'success' &&
           needs.admission.outputs.should_run == 'true'
         ) ||
-        github.event_name != 'workflow_run'
+        (
+          github.event_name != 'workflow_run' &&
+          (
+            needs.await_license.result == 'skipped' ||
+            needs.await_license.outputs.license_passed == 'true'
+          )
+        )
       )
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -136,7 +158,7 @@ jobs:
             tldw_Server_API/tests/Web_Scraping/test_phase3_preflight_browser_analyzers.py
   shard-coverage:
     name: Shard coverage guard
-    needs: admission
+    needs: [admission, await_license]
     if: >-
       always() && !cancelled() &&
       (
@@ -145,7 +167,13 @@ jobs:
           needs.admission.result == 'success' &&
           needs.admission.outputs.should_run == 'true'
         ) ||
-        github.event_name != 'workflow_run'
+        (
+          github.event_name != 'workflow_run' &&
+          (
+            needs.await_license.result == 'skipped' ||
+            needs.await_license.outputs.license_passed == 'true'
+          )
+        )
       )
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -168,7 +196,7 @@ jobs:
         run: python Helper_Scripts/ci/check_shard_coverage.py --ci-file .github/workflows/ci.yml
   quickstart-dry-run:
     name: Quickstart Dry-Run Smoke
-    needs: admission
+    needs: [admission, await_license]
     if: >-
       always() && !cancelled() &&
       (
@@ -177,7 +205,13 @@ jobs:
           needs.admission.result == 'success' &&
           needs.admission.outputs.should_run == 'true'
         ) ||
-        github.event_name != 'workflow_run'
+        (
+          github.event_name != 'workflow_run' &&
+          (
+            needs.await_license.result == 'skipped' ||
+            needs.await_license.outputs.license_passed == 'true'
+          )
+        )
       )
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -196,7 +230,7 @@ jobs:
           make -n quickstart-install
   lint:
     name: Lint & Type Check
-    needs: admission
+    needs: [admission, await_license]
     if: >-
       always() && !cancelled() &&
       (
@@ -205,7 +239,13 @@ jobs:
           needs.admission.result == 'success' &&
           needs.admission.outputs.should_run == 'true'
         ) ||
-        github.event_name != 'workflow_run'
+        (
+          github.event_name != 'workflow_run' &&
+          (
+            needs.await_license.result == 'skipped' ||
+            needs.await_license.outputs.license_passed == 'true'
+          )
+        )
       )
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -240,7 +280,7 @@ jobs:
 
   frontend-lint:
     name: Frontend Lint (Next.js)
-    needs: admission
+    needs: [admission, await_license]
     if: >-
       always() && !cancelled() &&
       (
@@ -249,7 +289,13 @@ jobs:
           needs.admission.result == 'success' &&
           needs.admission.outputs.should_run == 'true'
         ) ||
-        github.event_name != 'workflow_run'
+        (
+          github.event_name != 'workflow_run' &&
+          (
+            needs.await_license.result == 'skipped' ||
+            needs.await_license.outputs.license_passed == 'true'
+          )
+        )
       )
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -282,7 +328,7 @@ jobs:
 
   wizard-tests:
     name: Wizard Tests (Coverage Gate)
-    needs: admission
+    needs: [admission, await_license]
     if: >-
       always() && !cancelled() &&
       (
@@ -291,7 +337,13 @@ jobs:
           needs.admission.result == 'success' &&
           needs.admission.outputs.should_run == 'true'
         ) ||
-        github.event_name != 'workflow_run'
+        (
+          github.event_name != 'workflow_run' &&
+          (
+            needs.await_license.result == 'skipped' ||
+            needs.await_license.outputs.license_passed == 'true'
+          )
+        )
       )
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -405,7 +457,7 @@ jobs:
 
   changes:
     name: Detect changed areas
-    needs: admission
+    needs: [admission, await_license]
     if: >-
       always() && !cancelled() &&
       (
@@ -414,7 +466,13 @@ jobs:
           needs.admission.result == 'success' &&
           needs.admission.outputs.should_run == 'true'
         ) ||
-        github.event_name != 'workflow_run'
+        (
+          github.event_name != 'workflow_run' &&
+          (
+            needs.await_license.result == 'skipped' ||
+            needs.await_license.outputs.license_passed == 'true'
+          )
+        )
       )
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -2164,7 +2222,7 @@ jobs:
   full-suite-linux-312-summary:
     name: Full Suite (Ubuntu / Python 3.12)
     runs-on: ubuntu-latest
-    needs: [full-suite-linux-312-shards, changes, admission]
+    needs: [full-suite-linux-312-shards, changes, admission, await_license]
     if: >-
       always() && !cancelled() &&
       (
@@ -2173,7 +2231,13 @@ jobs:
           needs.admission.result == 'success' &&
           needs.admission.outputs.should_run == 'true'
         ) ||
-        github.event_name != 'workflow_run'
+        (
+          github.event_name != 'workflow_run' &&
+          (
+            needs.await_license.result == 'skipped' ||
+            needs.await_license.outputs.license_passed == 'true'
+          )
+        )
       ) &&
       (
         (github.event_name != 'pull_request' &&
@@ -3613,7 +3677,7 @@ jobs:
   full-suite-linux-313-summary:
     name: Full Suite (Ubuntu / Python 3.13)
     runs-on: ubuntu-latest
-    needs: [full-suite-linux-313-shards, changes, admission]
+    needs: [full-suite-linux-313-shards, changes, admission, await_license]
     if: >-
       always() && !cancelled() &&
       (
@@ -3622,7 +3686,13 @@ jobs:
           needs.admission.result == 'success' &&
           needs.admission.outputs.should_run == 'true'
         ) ||
-        github.event_name != 'workflow_run'
+        (
+          github.event_name != 'workflow_run' &&
+          (
+            needs.await_license.result == 'skipped' ||
+            needs.await_license.outputs.license_passed == 'true'
+          )
+        )
       ) &&
       (
         (github.event_name != 'pull_request' &&
@@ -4913,7 +4983,7 @@ jobs:
   full-suite-macos-312-summary:
     name: Full Suite (macos-latest / Python 3.12)
     runs-on: ubuntu-latest
-    needs: [full-suite-macos-312-shards, changes, admission]
+    needs: [full-suite-macos-312-shards, changes, admission, await_license]
     if: >-
       always() && !cancelled() &&
       (
@@ -4922,7 +4992,13 @@ jobs:
           needs.admission.result == 'success' &&
           needs.admission.outputs.should_run == 'true'
         ) ||
-        github.event_name != 'workflow_run'
+        (
+          github.event_name != 'workflow_run' &&
+          (
+            needs.await_license.result == 'skipped' ||
+            needs.await_license.outputs.license_passed == 'true'
+          )
+        )
       ) &&
       (
         (github.event_name != 'pull_request' &&
@@ -6217,7 +6293,7 @@ jobs:
   full-suite-windows-312-summary:
     name: Full Suite (windows-latest / Python 3.12)
     runs-on: ubuntu-latest
-    needs: [full-suite-windows-312-shards, changes, admission]
+    needs: [full-suite-windows-312-shards, changes, admission, await_license]
     if: >-
       always() && !cancelled() &&
       (
@@ -6226,7 +6302,13 @@ jobs:
           needs.admission.result == 'success' &&
           needs.admission.outputs.should_run == 'true'
         ) ||
-        github.event_name != 'workflow_run'
+        (
+          github.event_name != 'workflow_run' &&
+          (
+            needs.await_license.result == 'skipped' ||
+            needs.await_license.outputs.license_passed == 'true'
+          )
+        )
       ) &&
       (
         (github.event_name != 'pull_request' &&
