@@ -238,10 +238,7 @@ async def discord_interactions(request: Request) -> JSONResponse:
     return JSONResponse(status_code=200, content={"ok": True, "status": "accepted"})
 
 
-@router.get(
-    "/jobs/{job_id}",
-    dependencies=[Depends(RequireRole("admin"))],
-)
+@router.get("/jobs/{job_id}")
 async def discord_job_status(
     job_id: int,
     user: User = Depends(get_request_user),

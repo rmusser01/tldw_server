@@ -164,7 +164,13 @@ async def job_status_payload(
         raise not_found
     repo = await get_installations_repo()
     for org_id in org_ids:
-        for installation in await repo.list_installations(org_id=org_id, provider=domain) or []:
+        # A disabled installation no longer grants its org's members access to the
+        # tenant's jobs; the job owner keeps access through the check above.
+        for installation in (
+            await repo.list_installations(org_id=org_id, provider=domain, include_disabled=False) or []
+        ):
+            if installation.get("disabled"):
+                continue
             if coerce(installation.get("external_id")) == tenant_id:
                 return body
     raise not_found

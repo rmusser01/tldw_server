@@ -32,10 +32,16 @@ class _JobManager:
         return _JOBS.get(int(job_id))
 
 
+_DISABLED: set[str] = set()
+
+
 class _InstallationsRepo:
-    async def list_installations(self, *, org_id: int, provider: str | None = None, **_: Any) -> list[dict[str, Any]]:
+    async def list_installations(
+        self, *, org_id: int, provider: str | None = None, include_disabled: bool = True, **_: Any
+    ) -> list[dict[str, Any]]:
         installed = {(5, "discord"): ["g-1"], (5, "slack"): ["T1"]}
-        return [{"external_id": ext} for ext in installed.get((org_id, provider), [])]
+        rows = [{"external_id": ext, "disabled": ext in _DISABLED} for ext in installed.get((org_id, provider), [])]
+        return [r for r in rows if include_disabled or not r["disabled"]]
 
 
 @pytest.fixture()
@@ -109,3 +115,15 @@ def test_single_user_mode_sees_every_job_of_the_integration(client_for, monkeypa
     client = client_for(1)
     assert client.get("/api/v1/discord/jobs/13").status_code == 200
     assert client.get("/api/v1/discord/jobs/14").status_code == 404  # still domain-checked
+
+
+def test_disabled_installation_no_longer_grants_member_access(client_for) -> None:
+    """Disabling a guild/workspace revokes its org members' view of the tenant's jobs."""
+    _DISABLED.update({"g-1", "T1"})
+    try:
+        client = client_for(7)
+        assert client.get("/api/v1/discord/jobs/12").status_code == 404  # member via disabled guild
+        assert client.get("/api/v1/slack/jobs/21").status_code == 404  # member via disabled workspace
+        assert client.get("/api/v1/discord/jobs/11").status_code == 200  # owner keeps access
+    finally:
+        _DISABLED.clear()

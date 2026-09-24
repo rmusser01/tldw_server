@@ -96,10 +96,9 @@ def test_discord_command_parse_rag_route(discord_client: tuple[TestClient, Ed255
     assert isinstance(job_id, int)
     assert data["response_mode"] == "ephemeral"
 
-    # The REST job lookup is an admin-only ops route: it reads the global jobs
-    # table with no tenant scope, so an unauthenticated caller used to be able
-    # to enumerate every tenant's jobs. Users get status from the signed
-    # in-band "status" command instead, which scopes by actor. The fixture signs a
+    # The REST job lookup requires login and scopes to the job owner or an active
+    # member of the org that installed the tenant (TASK-13364); an unauthenticated
+    # caller used to be able to enumerate every tenant's jobs. The fixture signs a
     # web user in for the scoping tests; drop that so this call is unauthenticated.
     client.app.dependency_overrides.clear()
     job_status = client.get(f"/api/v1/discord/jobs/{job_id}")

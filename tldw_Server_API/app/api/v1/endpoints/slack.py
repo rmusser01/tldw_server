@@ -327,10 +327,7 @@ async def slack_commands(request: Request) -> JSONResponse:
     )
 
 
-@router.get(
-    "/jobs/{job_id}",
-    dependencies=[Depends(RequireRole("admin"))],
-)
+@router.get("/jobs/{job_id}")
 async def slack_job_status(
     job_id: int,
     user: User = Depends(get_request_user),
