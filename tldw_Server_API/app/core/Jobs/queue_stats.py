@@ -1,62 +1,46 @@
 """Job-queue statistics for one (domain, queue[, owner]) slice of the jobs table.
 
-Moved out of the Prompt Studio status endpoint (TASK-13317): the SQL belongs with the
-Jobs owner, which is also the only place allowed to use JobManager's connection
-helpers. Both backends are supported; the dialect differs only in placeholders and
-time arithmetic.
+Moved out of the Prompt Studio status endpoint (TASK-13317). The SQL and connection
+handling live in ``DB_Management/jobs_queue_stats_repository.py``; this module turns
+the raw aggregates into typed numbers.
+
+Conversion contract: NULL (an empty aggregate) is 0. A value that is present but not
+numeric is corruption, not zero: it is logged by metric name and the ValueError
+propagates, so callers report a failed read instead of a healthy-looking empty queue.
 """
 
 from __future__ import annotations
 
-import contextlib
-from typing import Any, Optional
+from typing import Any
 
+from loguru import logger
+
+from tldw_Server_API.app.core.DB_Management.jobs_queue_stats_repository import JobsQueueStatsRepository
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 
-
-def build_job_filters(
-    *,
-    backend: str,
-    domain: str,
-    queue: str,
-    owner_user_id: Optional[str],
-) -> tuple[str, list[Any]]:
-    token = "%s" if backend == "postgres" else "?"
-    clauses: list[str] = [f"domain = {token}", f"queue = {token}"]
-    params: list[Any] = [domain, queue]
-    if owner_user_id is not None:
-        clauses.append(f"owner_user_id = {token}")
-        params.append(owner_user_id)
-    return " AND ".join(clauses), params
+_CONVERSION_ERRORS = (TypeError, ValueError, OverflowError)
 
 
-def fetch_all(jm: JobManager, sql: str, params: list[Any]) -> list[Any]:
-    conn = jm._connect()
+def _to_int(value: Any, metric: str) -> int:
+    """Convert an aggregate count; NULL is 0, anything non-numeric raises ValueError."""
+    if value is None:
+        return 0
     try:
-        if jm.backend == "postgres":
-            with jm._pg_cursor(conn) as cur:
-                cur.execute(sql, params)
-                return list(cur.fetchall() or [])
-        return list(conn.execute(sql, params).fetchall() or [])
-    finally:
-        with contextlib.suppress(Exception):
-            conn.close()
+        return int(value)
+    except _CONVERSION_ERRORS as exc:
+        logger.warning("Jobs queue stats: non-numeric value for {}", metric)
+        raise ValueError(f"non-numeric jobs queue stat: {metric}") from exc  # noqa: TRY003
 
 
-def fetch_one(jm: JobManager, sql: str, params: list[Any]) -> Optional[Any]:
-    rows = fetch_all(jm, sql, params)
-    return rows[0] if rows else None
-
-
-def row_value(row: Any, key: str, index: int, default: Any = None) -> Any:
-    if row is None:
-        return default
-    if isinstance(row, dict):
-        return row.get(key, default)
+def _to_float(value: Any, metric: str) -> float:
+    """Convert an aggregate measure; NULL is 0.0, anything non-numeric raises ValueError."""
+    if value is None:
+        return 0.0
     try:
-        return row[index]
-    except Exception:
-        return default
+        return float(value)
+    except _CONVERSION_ERRORS as exc:
+        logger.warning("Jobs queue stats: non-numeric value for {}", metric)
+        raise ValueError(f"non-numeric jobs queue stat: {metric}") from exc  # noqa: TRY003
 
 
 def get_by_status(
@@ -64,26 +48,11 @@ def get_by_status(
     *,
     domain: str,
     queue: str,
-    owner_user_id: Optional[str],
+    owner_user_id: str | None,
 ) -> dict[str, int]:
-    where_sql, params = build_job_filters(
-        backend=jm.backend,
-        domain=domain,
-        queue=queue,
-        owner_user_id=owner_user_id,
-    )
-    sql = f"SELECT status, COUNT(*) AS c FROM jobs WHERE {where_sql} GROUP BY status"  # nosec B608
-    rows = fetch_all(jm, sql, params)
-    counts: dict[str, int] = {}
-    for row in rows:
-        status = row_value(row, "status", 0)
-        count = row_value(row, "c", 1, 0)
-        if status:
-            try:
-                counts[str(status)] = int(count or 0)
-            except Exception:
-                counts[str(status)] = 0
-    return counts
+    """Return ``{status: job count}`` for the slice."""
+    rows = JobsQueueStatsRepository(jm).count_by_status(domain=domain, queue=queue, owner_user_id=owner_user_id)
+    return {str(row["status"]): _to_int(row["c"], "by_status") for row in rows if row.get("status")}
 
 
 def get_by_type_and_status(
@@ -91,37 +60,25 @@ def get_by_type_and_status(
     *,
     domain: str,
     queue: str,
-    owner_user_id: Optional[str],
+    owner_user_id: str | None,
 ) -> tuple[dict[str, int], dict[str, int], dict[str, int]]:
-    where_sql, params = build_job_filters(
-        backend=jm.backend,
-        domain=domain,
-        queue=queue,
-        owner_user_id=owner_user_id,
+    """Return per-job-type (total, queued, processing) counts for the slice."""
+    rows = JobsQueueStatsRepository(jm).count_by_type_and_status(
+        domain=domain, queue=queue, owner_user_id=owner_user_id
     )
-    sql = """
-        SELECT job_type, status, COUNT(*) AS c
-        FROM jobs
-        WHERE {where_sql}
-        GROUP BY job_type, status
-    """.format_map(locals())  # nosec B608
-    rows = fetch_all(jm, sql, params)
     totals: dict[str, int] = {}
     queued: dict[str, int] = {}
     processing: dict[str, int] = {}
     for row in rows:
-        job_type = row_value(row, "job_type", 0)
-        status = row_value(row, "status", 1)
-        count = row_value(row, "c", 2, 0)
-        if not job_type:
+        if not row.get("job_type"):
             continue
-        job_type_str = str(job_type)
-        count_int = int(count or 0)
-        totals[job_type_str] = totals.get(job_type_str, 0) + count_int
-        if status == "queued":
-            queued[job_type_str] = queued.get(job_type_str, 0) + count_int
-        if status == "processing":
-            processing[job_type_str] = processing.get(job_type_str, 0) + count_int
+        job_type = str(row["job_type"])
+        count = _to_int(row["c"], "by_type")
+        totals[job_type] = totals.get(job_type, 0) + count
+        if row.get("status") == "queued":
+            queued[job_type] = queued.get(job_type, 0) + count
+        if row.get("status") == "processing":
+            processing[job_type] = processing.get(job_type, 0) + count
     return totals, queued, processing
 
 
@@ -130,30 +87,13 @@ def get_avg_processing_time_seconds(
     *,
     domain: str,
     queue: str,
-    owner_user_id: Optional[str],
+    owner_user_id: str | None,
 ) -> float:
-    where_sql, params = build_job_filters(
-        backend=jm.backend,
-        domain=domain,
-        queue=queue,
-        owner_user_id=owner_user_id,
+    """Return mean seconds from start to completion over completed jobs (0.0 if none)."""
+    value = JobsQueueStatsRepository(jm).avg_processing_seconds(
+        domain=domain, queue=queue, owner_user_id=owner_user_id
     )
-    if jm.backend == "postgres":
-        sql = (
-            "SELECT AVG(EXTRACT(EPOCH FROM (completed_at - started_at))) AS avg_seconds "  # nosec B608
-            f"FROM jobs WHERE {where_sql} AND status = 'completed' AND started_at IS NOT NULL AND completed_at IS NOT NULL"
-        )
-    else:
-        sql = (
-            "SELECT AVG((julianday(completed_at) - julianday(started_at)) * 86400.0) AS avg_seconds "  # nosec B608
-            f"FROM jobs WHERE {where_sql} AND status = 'completed' AND started_at IS NOT NULL AND completed_at IS NOT NULL"
-        )
-    row = fetch_one(jm, sql, params)
-    value = row_value(row, "avg_seconds", 0)
-    try:
-        return float(value) if value is not None else 0.0
-    except Exception:
-        return 0.0
+    return _to_float(value, "avg_processing_time_seconds")
 
 
 def get_success_rate(
@@ -161,34 +101,11 @@ def get_success_rate(
     *,
     domain: str,
     queue: str,
-    owner_user_id: Optional[str],
+    owner_user_id: str | None,
 ) -> float:
-    where_sql, params = build_job_filters(
-        backend=jm.backend,
-        domain=domain,
-        queue=queue,
-        owner_user_id=owner_user_id,
-    )
-    if jm.backend == "postgres":
-        sql = (
-            "SELECT "  # nosec B608
-            "COUNT(*) FILTER (WHERE status = 'completed') * 100.0 / "
-            "NULLIF(COUNT(*) FILTER (WHERE status IN ('completed', 'failed')), 0) AS success_rate "
-            f"FROM jobs WHERE {where_sql} AND status IN ('completed', 'failed')"
-        )
-    else:
-        sql = (
-            "SELECT "  # nosec B608
-            "SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) * 100.0 / "
-            "NULLIF(SUM(CASE WHEN status IN ('completed', 'failed') THEN 1 ELSE 0 END), 0) AS success_rate "
-            f"FROM jobs WHERE {where_sql} AND status IN ('completed', 'failed')"
-        )
-    row = fetch_one(jm, sql, params)
-    value = row_value(row, "success_rate", 0)
-    try:
-        return float(value) if value is not None else 0.0
-    except Exception:
-        return 0.0
+    """Return the completed share of finished jobs as a percentage (0.0 if none finished)."""
+    value = JobsQueueStatsRepository(jm).success_rate(domain=domain, queue=queue, owner_user_id=owner_user_id)
+    return _to_float(value, "success_rate")
 
 
 def get_lease_stats(
@@ -196,37 +113,15 @@ def get_lease_stats(
     *,
     domain: str,
     queue: str,
-    owner_user_id: Optional[str],
+    owner_user_id: str | None,
     warn_seconds: int,
 ) -> dict[str, int]:
-    where_sql, params = build_job_filters(
-        backend=jm.backend,
-        domain=domain,
-        queue=queue,
-        owner_user_id=owner_user_id,
-    )
+    """Return active / expiring-soon / stale-processing lease counts.
+
+    ``warn_seconds`` is clamped to 1..3600 before it reaches the query.
+    """
     warn_seconds = max(1, min(3600, int(warn_seconds)))
-    if jm.backend == "postgres":
-        sql = (
-            "SELECT "  # nosec B608
-            "COUNT(*) FILTER (WHERE status = 'processing' AND leased_until IS NOT NULL AND leased_until > NOW()) AS active, "
-            "COUNT(*) FILTER (WHERE status = 'processing' AND leased_until IS NOT NULL AND leased_until > NOW() "
-            f"AND leased_until <= NOW() + INTERVAL '{warn_seconds} seconds') AS expiring_soon, "
-            "COUNT(*) FILTER (WHERE status = 'processing' AND (leased_until IS NULL OR leased_until <= NOW())) AS stale_processing "
-            f"FROM jobs WHERE {where_sql}"
-        )
-    else:
-        sql = (
-            "SELECT "  # nosec B608
-            "SUM(CASE WHEN status = 'processing' AND leased_until IS NOT NULL AND leased_until > DATETIME('now') THEN 1 ELSE 0 END) AS active, "
-            "SUM(CASE WHEN status = 'processing' AND leased_until IS NOT NULL AND leased_until > DATETIME('now') "
-            f"AND leased_until <= DATETIME('now', '+{warn_seconds} seconds') THEN 1 ELSE 0 END) AS expiring_soon, "
-            "SUM(CASE WHEN status = 'processing' AND (leased_until IS NULL OR leased_until <= DATETIME('now')) THEN 1 ELSE 0 END) AS stale_processing "
-            f"FROM jobs WHERE {where_sql}"
-        )
-    row = fetch_one(jm, sql, params)
-    return {
-        "active": int(row_value(row, "active", 0, 0) or 0),
-        "expiring_soon": int(row_value(row, "expiring_soon", 1, 0) or 0),
-        "stale_processing": int(row_value(row, "stale_processing", 2, 0) or 0),
-    }
+    row = JobsQueueStatsRepository(jm).lease_counts(
+        domain=domain, queue=queue, owner_user_id=owner_user_id, warn_seconds=warn_seconds
+    )
+    return {key: _to_int(row.get(key), f"leases.{key}") for key in ("active", "expiring_soon", "stale_processing")}
