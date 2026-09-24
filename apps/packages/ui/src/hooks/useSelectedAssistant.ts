@@ -1,10 +1,8 @@
 import React from "react"
 import { useStorage } from "@plasmohq/storage/hook"
+import { useChatDraftOwner } from "@/hooks/useChatDraftOwner"
 import type { AssistantSelection } from "@/types/assistant-selection"
 import {
-  assistantSelectionToCharacter,
-  characterToAssistantSelection,
-  getAssistantSelectionMode,
   normalizeAssistantSelection,
   preserveAssistantSelectionMode
 } from "@/types/assistant-selection"
@@ -16,12 +14,26 @@ import {
 } from "@/utils/selected-assistant-storage"
 import {
   SELECTED_CHARACTER_STORAGE_KEY,
-  parseSelectedCharacterValue,
   selectedCharacterStorage,
   selectedCharacterSyncStorage
 } from "@/utils/selected-character-storage"
 
-type Subscriber = (value: AssistantSelection | null) => void
+type OwnedSelection = { ownerKey: string; selection: AssistantSelection | null }
+type Subscriber = (value: OwnedSelection) => void
+
+// Plasmo does not reset isLoading when a key changes. Stamp even an empty read
+// so readiness proves the current owner's key has actually finished loading.
+const ownedAssistantStorage = {
+  get: async (key: string) => {
+    const saved = await selectedAssistantStorage.get<OwnedSelection>(key)
+    const ownerKey = key.slice(`${SELECTED_ASSISTANT_STORAGE_KEY}:owner:`.length)
+    return saved?.ownerKey === ownerKey ? saved : { ownerKey, selection: null }
+  },
+  set: (key: string, value: OwnedSelection) => selectedAssistantStorage.set(key, value),
+  remove: (key: string) => selectedAssistantStorage.remove(key),
+  watch: (callbacks: Parameters<typeof selectedAssistantStorage.watch>[0]) => selectedAssistantStorage.watch(callbacks),
+  unwatch: (callbacks: Parameters<typeof selectedAssistantStorage.unwatch>[0]) => selectedAssistantStorage.unwatch(callbacks)
+} as typeof selectedAssistantStorage
 
 const selectedAssistantSubscribers = new Set<Subscriber>()
 let selectedAssistantOperationRevision = 0
@@ -33,76 +45,57 @@ export type SelectedAssistantCommitOptions = {
   isCurrent?: () => boolean
 }
 
-const notifySelectedAssistantSubscribers = (value: AssistantSelection | null) => {
+const notifySelectedAssistantSubscribers = (value: OwnedSelection) => {
   selectedAssistantSubscribers.forEach((subscriber) => {
     subscriber(value)
   })
 }
 
-const syncLegacyCharacterSelectionMirror = async (
-  selection: AssistantSelection | null
-) => {
-  if (getAssistantSelectionMode(selection) === "overlay") {
-    await selectedCharacterStorage
-      .remove(SELECTED_CHARACTER_STORAGE_KEY)
-      .catch(() => {})
-    await selectedCharacterSyncStorage
-      .remove(SELECTED_CHARACTER_STORAGE_KEY)
-      .catch(() => {})
-    return
-  }
-
-  const legacyCharacter =
-    assistantSelectionToCharacter<Record<string, unknown>>(selection)
-
-  if (legacyCharacter) {
-    await selectedCharacterStorage
-      .set(SELECTED_CHARACTER_STORAGE_KEY, legacyCharacter)
-      .catch(() => {})
-  } else {
-    await selectedCharacterStorage
-      .remove(SELECTED_CHARACTER_STORAGE_KEY)
-      .catch(() => {})
-  }
-
-  await selectedCharacterSyncStorage
-    .remove(SELECTED_CHARACTER_STORAGE_KEY)
-    .catch(() => {})
-}
-
-const clearAssistantSyncSelection = async () => {
-  await selectedAssistantSyncStorage
-    .remove(SELECTED_ASSISTANT_STORAGE_KEY)
-    .catch(() => {})
-}
-
 export const useSelectedAssistant = (
   initialValue: AssistantSelection | null = null
 ) => {
+  const { ownerKey, isCurrent } = useChatDraftOwner(() => {
+    // Invalidate queued writers before another principal can use this hook.
+    selectedAssistantOperationRevision++
+  })
+  const assistantKey = `${SELECTED_ASSISTANT_STORAGE_KEY}:owner:${ownerKey ?? "unresolved"}`
   const normalizedInitialValue = React.useMemo(
     () => normalizeAssistantSelection(initialValue),
     [initialValue]
   )
-  const storageResult = useStorage<AssistantSelection | null>(
-    { key: SELECTED_ASSISTANT_STORAGE_KEY, instance: selectedAssistantStorage },
-    normalizedInitialValue
+  const storageResult = useStorage<OwnedSelection | null>(
+    { key: assistantKey, instance: ownedAssistantStorage },
+    null
   ) as readonly [
-    AssistantSelection | null,
-    (value: AssistantSelection | null) => Promise<void> | void,
+    OwnedSelection | null,
+    (value: OwnedSelection | null) => Promise<void> | void,
     | {
         isLoading?: boolean
-        setRenderValue?: (value: AssistantSelection | null) => void
+        setRenderValue?: (value: OwnedSelection | null) => void
       }
     | undefined
   ]
-  const [selectedAssistant, setSelectedAssistant, meta] = storageResult
-  const migratedRef = React.useRef(false)
+  const [record, setSelectedAssistant, meta] = storageResult
+  // A keyed storage hook may briefly retain its previous key's render value.
+  const selectedAssistant = isCurrent() && record?.ownerKey === ownerKey
+    ? record.selection
+    : null
   const latestSelectedAssistantRef = React.useRef<AssistantSelection | null>(
     normalizedInitialValue
   )
   const setRenderValueRef = React.useRef(
     meta?.setRenderValue ?? (() => undefined)
   )
+
+  React.useEffect(() => {
+    // Earlier releases saved private payloads without ownership. Never adopt them.
+    void Promise.all([
+      selectedAssistantStorage.remove(SELECTED_ASSISTANT_STORAGE_KEY),
+      selectedAssistantSyncStorage.remove(SELECTED_ASSISTANT_STORAGE_KEY),
+      selectedCharacterStorage.remove(SELECTED_CHARACTER_STORAGE_KEY),
+      selectedCharacterSyncStorage.remove(SELECTED_CHARACTER_STORAGE_KEY)
+    ]).catch(() => {})
+  }, [])
 
   React.useEffect(() => {
     setRenderValueRef.current = meta?.setRenderValue ?? (() => undefined)
@@ -116,14 +109,15 @@ export const useSelectedAssistant = (
 
   React.useEffect(() => {
     const subscriber: Subscriber = (value) => {
-      latestSelectedAssistantRef.current = value
+      if (!isCurrent() || value.ownerKey !== ownerKey) return
+      latestSelectedAssistantRef.current = value.selection
       setRenderValueRef.current(value)
     }
     selectedAssistantSubscribers.add(subscriber)
     return () => {
       selectedAssistantSubscribers.delete(subscriber)
     }
-  }, [])
+  }, [ownerKey, isCurrent])
 
   const setSelectedAssistantWithBroadcast = React.useCallback(
     async (
@@ -131,6 +125,10 @@ export const useSelectedAssistant = (
       options: SelectedAssistantCommitOptions = {}
     ) => {
       if (options.isCurrent && !options.isCurrent()) return
+      if (!ownerKey || !isCurrent()) {
+        if (next) throw new Error("Wait for account verification before selecting an assistant.")
+        return
+      }
       const normalizedCurrent = normalizeAssistantSelection(
         parseSelectedAssistantValue(latestSelectedAssistantRef.current)
       )
@@ -140,7 +138,7 @@ export const useSelectedAssistant = (
       )
       const operationRevision = ++selectedAssistantOperationRevision
       const isOperationCurrent = () =>
-        operationRevision === selectedAssistantOperationRevision
+        operationRevision === selectedAssistantOperationRevision && isCurrent()
       const isCallerCurrent = () => options.isCurrent?.() ?? true
 
       const persistSelection = async (
@@ -148,24 +146,9 @@ export const useSelectedAssistant = (
         shouldContinue: () => boolean
       ): Promise<boolean> => {
         latestSelectedAssistantRef.current = selection
-        if (!selection) {
-          await syncLegacyCharacterSelectionMirror(null)
-          if (!shouldContinue()) return false
-          await clearAssistantSyncSelection()
-          if (!shouldContinue()) return false
-          await setSelectedAssistant(null)
-          if (!shouldContinue()) return false
-          notifySelectedAssistantSubscribers(null)
-          return true
-        }
-
-        await setSelectedAssistant(selection)
+        await setSelectedAssistant({ ownerKey, selection })
         if (!shouldContinue()) return false
-        await clearAssistantSyncSelection()
-        if (!shouldContinue()) return false
-        await syncLegacyCharacterSelectionMirror(selection)
-        if (!shouldContinue()) return false
-        notifySelectedAssistantSubscribers(selection)
+        notifySelectedAssistantSubscribers({ ownerKey, selection })
         return true
       }
 
@@ -183,83 +166,31 @@ export const useSelectedAssistant = (
       selectedAssistantCommitChain = operation.catch(() => undefined)
       await operation
     },
-    [setSelectedAssistant]
+    [setSelectedAssistant, ownerKey, isCurrent]
   )
-
-  React.useEffect(() => {
-    if (meta?.isLoading || migratedRef.current) return
-
-    const normalizedLocalSelection = normalizeAssistantSelection(
-      parseSelectedAssistantValue(selectedAssistant)
-    )
-    if (normalizedLocalSelection) {
-      migratedRef.current = true
-      void clearAssistantSyncSelection()
-      void syncLegacyCharacterSelectionMirror(normalizedLocalSelection)
-      return
-    }
-
-    migratedRef.current = true
-    let cancelled = false
-
-    const migrate = async () => {
-      try {
-        const assistantSyncRaw =
-          await selectedAssistantSyncStorage.get<AssistantSelection | null>(
-            SELECTED_ASSISTANT_STORAGE_KEY
-          )
-        const assistantSyncSelection = normalizeAssistantSelection(
-          parseSelectedAssistantValue(assistantSyncRaw)
-        )
-        if (assistantSyncSelection && !cancelled) {
-          await setSelectedAssistantWithBroadcast(assistantSyncSelection)
-          return
-        }
-
-        const legacyLocalRaw =
-          await selectedCharacterStorage.get<Record<string, unknown> | null>(
-            SELECTED_CHARACTER_STORAGE_KEY
-          )
-        const legacyLocalSelection = characterToAssistantSelection(
-          parseSelectedCharacterValue<Record<string, unknown>>(legacyLocalRaw)
-        )
-        if (legacyLocalSelection && !cancelled) {
-          await setSelectedAssistantWithBroadcast(legacyLocalSelection)
-          return
-        }
-
-        const legacySyncRaw =
-          await selectedCharacterSyncStorage.get<Record<string, unknown> | null>(
-            SELECTED_CHARACTER_STORAGE_KEY
-          )
-        const legacySyncSelection = characterToAssistantSelection(
-          parseSelectedCharacterValue<Record<string, unknown>>(legacySyncRaw)
-        )
-        if (legacySyncSelection && !cancelled) {
-          await setSelectedAssistantWithBroadcast(legacySyncSelection)
-        }
-      } catch {
-        // ignore migration failures
-      }
-    }
-
-    void migrate()
-    return () => {
-      cancelled = true
-    }
-  }, [meta?.isLoading, selectedAssistant, setSelectedAssistantWithBroadcast])
 
   const normalizedSelectedAssistant = React.useMemo(
     () => normalizeAssistantSelection(parseSelectedAssistantValue(selectedAssistant)),
     [selectedAssistant]
   )
+  const readSelection = React.useCallback(async () => {
+    if (!ownerKey || !isCurrent()) return null
+    const saved = await selectedAssistantStorage.get<OwnedSelection>(assistantKey)
+    if (!isCurrent() || saved?.ownerKey !== ownerKey) return null
+    return normalizeAssistantSelection(parseSelectedAssistantValue(saved.selection))
+  }, [ownerKey, isCurrent, assistantKey])
 
   return [
     normalizedSelectedAssistant,
     setSelectedAssistantWithBroadcast,
     {
-      isLoading: meta?.isLoading ?? false,
-      setRenderValue: meta?.setRenderValue ?? (() => undefined)
+      isLoading: !ownerKey || record?.ownerKey !== ownerKey || (meta?.isLoading ?? false),
+      assistantKey: ownerKey ? assistantKey : null,
+      isCurrent,
+      readSelection,
+      setRenderValue: (selection: AssistantSelection | null) => {
+        if (ownerKey && isCurrent()) meta?.setRenderValue?.({ ownerKey, selection })
+      }
     }
   ] as const
 }

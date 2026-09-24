@@ -1078,8 +1078,12 @@ def list_chunking_templates(
             params.append(include_builtin)
 
         if user_id:
-            conditions.append("user_id = ?")
-            params.append(user_id)
+            # Built-in templates are a shared catalog with no owner, so an owner
+            # filter must not hide them. Keyed on is_builtin rather than on a
+            # NULL owner: "owner IS NULL" would also match unowned *custom* rows,
+            # which is the widening that makes such predicates fail open.
+            conditions.append("(user_id = ? OR is_builtin = ?)")
+            params.extend([user_id, True])
 
         query = "SELECT * FROM ChunkingTemplates"
         if conditions:

@@ -40,6 +40,15 @@ describe("owned server Chat mirror", () => {
     await expect(acknowledgePromotedChatMessage({ historyId: "alice", chatId: "chat-1", ownerKey: "A", source: { ...incoming("source", "Greeting"), role: "assistant", isBot: true }, serverMessageId: "canonical", signal: signal.signal, isCurrent: () => kind !== "target" })).rejects.toThrow()
     expect(state.messages.get("source")?.serverMessageId).toBe(kind === "ack" ? "other-server" : undefined)
   })
+  it.each([
+    { role: "user" as const, isBot: false, expectedName: "You" },
+    { role: "assistant" as const, isBot: true, expectedName: "Assistant" }
+  ])("uses a role-appropriate name for unnamed $role messages", async ({ role, isBot, expectedName }) => {
+    state.histories.set("alice", history("alice", "A"))
+    await reconcileServerChatMirror({ historyId: "alice", chatId: "chat-1", ownerKey: "A", messages: [{ ...incoming("saved", "Hello"), role, isBot, name: undefined }] })
+    expect([...state.messages.values()][0]).toMatchObject({ role, name: expectedName })
+  })
+
   it("persists an exact acknowledged synthetic source ID while preserving a distinct equal row", async () => {
     state.histories.set("alice", history("alice", "A"))
     state.messages.set("distinct", { ...row("distinct", "alice", "Greeting"), role: "assistant" })
@@ -170,6 +179,44 @@ describe("owned server Chat mirror", () => {
     expect(result.map(message => [message.id, message.message, message.serverMessageId])).toEqual([
       ["local-question", "Newer question", "question"], ["answer", "08:30", "answer"], ["draft", "Unsent", undefined]
     ])
+  })
+  it.each(["acknowledged", "canonical ID only"])("does not reappend an original answer already in a collapsed variant group: %s", identity => {
+    const user = incoming("question", "Describe the icon")
+    const original = { ...incoming("answer-1", "A speech bubble"), role: "assistant", isBot: true, parentMessageId: user.id,
+      ...(identity === "canonical ID only" ? { serverMessageId: undefined } : {}) }
+    const latest = { ...incoming("answer-2", "An icon with dots"), role: "assistant", isBot: true, parentMessageId: user.id }
+    const grouped = { ...latest, variants: [{ ...original, serverMessageId: "answer-1" }, latest], activeVariantIndex: 1 }
+    const result = reconcileServerChatMessages([user, original, latest], [user, grouped])
+    expect(result.map(message => message.id)).toEqual(["question", "answer-2"])
+    expect(result[1].variants?.map(variant => variant.id)).toEqual(["answer-1", "answer-2"])
+  })
+  it.each(["text", "image", "distinct ID"])("preserves local variant work that the collapsed server group does not represent: %s", change => {
+    const original = { ...incoming("answer-1", "Original answer"), role: "assistant", isBot: true, parentMessageId: "question" }
+    const latest = { ...incoming("answer-2", "New answer"), role: "assistant", isBot: true, parentMessageId: "question" }
+    const local = { ...original,
+      ...(change === "text" ? { message: "Unsynced edit" } : {}),
+      ...(change === "image" ? { images: ["data:image/png;base64,local"] } : {}),
+      ...(change === "distinct ID" ? { id: "local-draft", serverMessageId: undefined } : {}) }
+    const result = reconcileServerChatMessages([local, latest], [{ ...latest, variants: [original, latest], activeVariantIndex: 1 }])
+    expect(result).toContainEqual(local)
+  })
+  it.each(["draft", "edited text", "edited image"])("preserves an inactive local variant while a saved original is selected: %s", change => {
+    const original = { ...incoming("answer-1", "Original answer"), role: "assistant", isBot: true, parentMessageId: "question" }
+    const latest = { ...incoming("answer-2", "New answer"), role: "assistant", isBot: true, parentMessageId: "question" }
+    const inactive = { ...latest,
+      ...(change === "draft" ? { id: "local-draft", serverMessageId: undefined } : {}),
+      ...(change === "edited text" ? { message: "Unsynced edit" } : {}),
+      ...(change === "edited image" ? { images: ["data:image/png;base64,local"] } : {}) }
+    const local = { ...original, variants: [original, inactive], activeVariantIndex: 0 }
+    const result = reconcileServerChatMessages([local], [{ ...latest, variants: [original, latest], activeVariantIndex: 1 }])
+    expect(result).toContainEqual(local)
+  })
+  it("collapses an original selected locally when all its variants are saved unchanged", () => {
+    const original = { ...incoming("answer-1", "Original answer"), role: "assistant", isBot: true, parentMessageId: "question" }
+    const latest = { ...incoming("answer-2", "New answer"), role: "assistant", isBot: true, parentMessageId: "question" }
+    const local = { ...original, variants: [original, latest], activeVariantIndex: 0 }
+    const grouped = { ...latest, variants: [original, latest], activeVariantIndex: 1 }
+    expect(reconcileServerChatMessages([local], [grouped])).toEqual([grouped])
   })
   it("preserves unsynced drafts and newer acknowledged rows", async () => {
     state.histories.set("alice", history("alice", "A"))

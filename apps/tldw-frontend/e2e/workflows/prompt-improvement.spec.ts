@@ -397,7 +397,7 @@ test.describe("WebUI prompt improvement parity", () => {
         }),
       ).toBe(true)
 
-      const clusterHeight = await cluster.evaluate((element) => element.offsetHeight)
+      const clusterHeight = await cluster.evaluate((element) => (element as HTMLElement).offsetHeight)
       await page.getByTestId("chat-input").first().fill(USER_DRAFT)
       await trigger.click()
       const menu = page.getByRole("group", {
@@ -429,7 +429,7 @@ test.describe("WebUI prompt improvement parity", () => {
       expect(feedbackBox!.x + feedbackBox!.width).toBeLessThanOrEqual(
         viewport.width,
       )
-      await expect.poll(() => cluster.evaluate((element) => element.offsetHeight)).toBe(
+      await expect.poll(() => cluster.evaluate((element) => (element as HTMLElement).offsetHeight)).toBe(
         clusterHeight,
       )
     })

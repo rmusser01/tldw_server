@@ -5,6 +5,7 @@
 import { hasLowMeasuredRelevance } from "./sourceListUtils"
 
 import React, { type ReactNode, useEffect, useMemo, useRef, useState } from "react"
+import { useTranslation } from "react-i18next"
 import { Sparkles, AlertCircle, Loader2, ThumbsUp, ThumbsDown } from "lucide-react"
 import { useKnowledgeQA } from "./KnowledgeQAProvider"
 import { cn } from "@/libs/utils"
@@ -172,6 +173,7 @@ function sourceHealthNeedsAttention(
 }
 
 export function AnswerPanel({ className }: AnswerPanelProps) {
+  const { t } = useTranslation(["knowledge", "sidepanel"])
   const {
     answer,
     answerTrustState = "unknown_trust",
@@ -190,7 +192,6 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
     messages = [],
     setSettingsPanelOpen,
     updateSetting,
-    preset,
     settings,
     rerunWithTokenLimit,
     retrySync,
@@ -281,9 +282,11 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
         generationProvider: settings?.generation_provider,
         generationModel: settings?.generation_model,
         sourceHealthCaveatCount,
+        sourceStatus: searchDetails?.sourceStatus,
         trustState: answerTrustState,
-      }),
+      }, t),
     [
+      t,
       answerTrustState,
       citations.length,
       results.length,
@@ -294,6 +297,7 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
       settings?.generation_provider,
       settings?.sources,
       sourceHealthCaveatCount,
+      searchDetails?.sourceStatus,
     ]
   )
   const lowConfidenceRecovery = useMemo(() => {
@@ -625,26 +629,6 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
     }
   }
 
-  const loadingStageLabel = useMemo(() => {
-    if (loadingElapsedSeconds < 5) return "Searching documents..."
-    if (loadingElapsedSeconds < 10) return "Reranking results..."
-    if (loadingElapsedSeconds < 20) return "Generating answer..."
-    return "Verifying citations..."
-  }, [loadingElapsedSeconds])
-
-  const presetLatencyHint = useMemo(() => {
-    if (preset === "fast") {
-      return "Fast preset usually completes in a few seconds."
-    }
-    if (preset === "balanced") {
-      return "Balanced preset typically completes within about 10 seconds."
-    }
-    if (preset === "thorough") {
-      return "Deep preset may take up to 30 seconds."
-    }
-    return "Custom preset timing varies with your settings."
-  }, [preset])
-
   // Loading state
   if (isSearching && !normalizedAnswer) {
     return (
@@ -653,13 +637,15 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
           <Loader2 className="w-5 h-5 animate-spin text-primary" />
           <div>
             <p className="font-medium">
-              {loadingStageLabel}{" "}
+              {t("answerPanel.loading", { defaultValue: "Working on your question..." })}{" "}
               {loadingElapsedSeconds > 0 && (
                 <span className="text-text-muted">({loadingElapsedSeconds}s)</span>
               )}
             </p>
             <p className="text-sm text-text-muted">
-              {presetLatencyHint}
+              {t("answerPanel.modelReadiness", {
+                defaultValue: "Response time depends on your sources and model readiness.",
+              })}
             </p>
           </div>
         </div>

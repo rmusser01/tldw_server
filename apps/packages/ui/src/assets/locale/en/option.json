@@ -1032,6 +1032,9 @@
     "reviewRunLabel": "Review",
     "review.warnLongTime": "Processing may take a while ({{time}})",
     "review.summary": "{{count}} items | {{preset}} preset | {{time}} estimated",
+    "review.summaryWithoutEstimate": "{count, plural, one {# item} other {# items}} | {preset} preset",
+    "wizard.configureItems": "Configure {count, plural, one {# item} other {# items}}",
+    "wizard.summary.addCount": "{count, plural, one {# item} other {# items}}",
     "reviewDraftsCreated": "Drafts ready for review.",
     "reviewDraftsFailedTitle": "Review drafts couldn't be created.",
     "reviewDraftsFailedFallback": "Failed to create review drafts.",
@@ -1837,6 +1840,7 @@
     "recentStudySessionsViewingCompleted": "Viewing completed session",
     "recentStudySessionsViewCompleted": "View completed session",
     "reviewedToday": "Reviewed today",
+    "analyticsDayBoundary": "Daily statistics and study streak use UTC days, starting at midnight UTC. Recent sessions show dates in your local time.",
     "retentionRate": "Retention rate",
     "lapseRate": "Lapse rate",
     "averageAnswerTime": "Avg answer time",
@@ -2159,6 +2163,7 @@
     "assistantMessageAria": "Assistant message"
   },
   "quiz": {
+    "osceRecommendedMinutes": "{{minutes}} min recommended",
     "itemsPerPage": "items/page",
     "editQuizTitle": "Edit Quiz",
     "updateSuccess": "Quiz updated successfully",

@@ -94,6 +94,25 @@ const resolveTokenUserClaim = (token?: string | null): string | null => {
   return null
 }
 
+/** Read workspace hints from server-issued claims; authorization remains server-side. */
+export const deriveTokenOrgId = (token: string): number | undefined => {
+  const payload = decodeJwtPayload(token)
+  if (!payload) return undefined
+  const isOrgId = (value: unknown): value is number =>
+    typeof value === "number" && Number.isSafeInteger(value) && value > 0
+  const orgIds = Array.isArray(payload.org_ids)
+    ? payload.org_ids.filter(isOrgId)
+    : []
+  if (isOrgId(payload.active_org_id) &&
+      (!Array.isArray(payload.org_ids) || orgIds.includes(payload.active_org_id))) {
+    return payload.active_org_id
+  }
+  // The former organization list preferred newest records. Use newest ID when
+  // multiple memberships have no active selection in the token.
+  return orgIds.reduce<number | undefined>((latest, id) =>
+    latest === undefined || id > latest ? id : latest, undefined)
+}
+
 export const coerceMediaNavigationFormat = (
   value: unknown,
   fallback: MediaNavigationFormat = "auto"

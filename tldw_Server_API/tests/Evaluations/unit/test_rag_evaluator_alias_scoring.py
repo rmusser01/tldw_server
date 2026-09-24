@@ -16,7 +16,11 @@ The alias keys must stay in the response; they simply must not be scored twice.
 
 import pytest
 
+
 from tldw_Server_API.app.core.Evaluations.rag_evaluator import RAGEvaluator
+
+# Suite marker: these are fast, isolated regression guards.
+pytestmark = pytest.mark.unit
 
 
 def _evaluator() -> RAGEvaluator:
@@ -71,6 +75,52 @@ def test_explicit_weights_are_still_honoured() -> None:
     # relevance weighted 3:1 against faithfulness -> 0.75
     weights = {"relevance": 3.0, "faithfulness": 1.0}
     assert ev._calculate_overall_score(aliased, weights) == pytest.approx(0.75)
+
+
+def test_alias_only_weights_still_apply_to_the_canonical_metric() -> None:
+    """Weights supplied under an alias key must survive the alias being dropped.
+
+    `evaluate()` treats an alias request as a request for the canonical computation,
+    so a caller may legitimately supply `metric_weights={"answer_relevance": ...}`.
+    Dropping the alias entry without carrying its weight across leaves the retained
+    canonical metric unweighted, and the aggregate collapses to 0.0.
+    """
+    ev = _evaluator()
+
+    metrics = {"relevance": {"score": 1.0}, "faithfulness": {"score": 0.0}}
+    metrics["answer_relevance"] = metrics["relevance"]
+
+    # relevance weighted 3:1 against faithfulness, but keyed under the alias
+    weights = {"answer_relevance": 3.0, "faithfulness": 1.0}
+
+    score = ev._calculate_overall_score(metrics, weights)
+    assert score == pytest.approx(0.75), (
+        f"alias-keyed weight was discarded (got {score}); the canonical metric it "
+        "refers to contributed no weight"
+    )
+
+
+def test_canonical_weight_wins_when_both_forms_are_supplied() -> None:
+    ev = _evaluator()
+
+    metrics = {"relevance": {"score": 1.0}, "faithfulness": {"score": 0.0}}
+    metrics["answer_relevance"] = metrics["relevance"]
+
+    # canonical says 1.0, alias says 99.0 -- canonical must win
+    weights = {"relevance": 1.0, "answer_relevance": 99.0, "faithfulness": 1.0}
+
+    assert ev._calculate_overall_score(metrics, weights) == pytest.approx(0.5)
+
+
+def test_alias_only_weights_do_not_collapse_the_score_to_zero() -> None:
+    """The specific regression shape: every retained metric unweighted."""
+    ev = _evaluator()
+
+    metrics = {"relevance": {"score": 0.8}}
+    metrics["answer_relevance"] = metrics["relevance"]
+
+    score = ev._calculate_overall_score(metrics, {"answer_relevance": 1.0})
+    assert score == pytest.approx(0.8), f"score collapsed to {score}"
 
 
 def test_crossing_the_pass_threshold() -> None:

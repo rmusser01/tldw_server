@@ -1,5 +1,4 @@
 import React from "react"
-import type { InputRef } from "antd"
 import { useStorage } from "@plasmohq/storage/hook"
 import { shallow } from "zustand/shallow"
 import {
@@ -55,8 +54,6 @@ export interface UseRagSearchStateDeps {
 
 export function useRagSearchState(deps: UseRagSearchStateDeps) {
   const { currentMessage, t } = deps
-
-  const searchInputRef = React.useRef<InputRef | null>(null)
 
   const [preset, setPreset] = useStorage<RagPresetName>(
     "ragSearchPreset",
@@ -231,8 +228,6 @@ export function useRagSearchState(deps: UseRagSearchStateDeps) {
   }
 
   return {
-    // refs
-    searchInputRef,
     // storage-backed state
     preset,
     storedSettings,

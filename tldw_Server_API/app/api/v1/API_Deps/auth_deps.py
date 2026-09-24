@@ -374,7 +374,17 @@ def _activate_scope_context(
     try:
         active_org = getattr(request.state, "active_org_id", None)
         active_team = getattr(request.state, "active_team_id", None)
-        token = set_scope(
+        # No reset token is kept, and none is needed. Starlette runs each request
+        # in its own copied context -- for threadpool handlers as well as async
+        # ones -- so a scope set here cannot reach another request. See
+        # tests/API_Deps/test_content_scope_does_not_leak_between_requests.py,
+        # which pins that invariant rather than leaving it assumed.
+        #
+        # Work that outlives the request is a different matter: a task spawned
+        # here captures the context as it was at creation, and resetting here
+        # would not affect it. Such workers must establish their own scope, as
+        # services/media_ingest_jobs_worker.py does with scoped_context.
+        set_scope(
             user_id=user_id,
             org_ids=org_ids or (),
             team_ids=team_ids or (),
@@ -382,7 +392,6 @@ def _activate_scope_context(
             active_team_id=active_team,
             is_admin=is_admin,
         )
-        request.state._content_scope_token = token
     except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS as exc:
         logger.debug(
             "Unable to establish content scope context: {}",

@@ -4,6 +4,7 @@ import asyncio
 import re
 import types
 from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import aclosing
 from dataclasses import dataclass
 from typing import Any, Literal, TypedDict
 
@@ -29,6 +30,7 @@ from tldw_Server_API.app.core.RAG.rag_service.retrieval_plan import RetrievalPla
 from tldw_Server_API.app.core.RAG.rag_service.runtime_provider_call import (
     close_provider_stream,
 )
+from tldw_Server_API.app.core.RAG.rag_service.source_health import CANONICAL_KNOWLEDGE_SOURCE_IDS
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import (
     normalize_documents_for_generation,
     unified_rag_pipeline,
@@ -61,6 +63,7 @@ _RAG_STREAM_SCHEMA_VERSION = 1
 _RAG_REPLAY_CERTIFICATION_CODE = "stream_transport_unavailable"
 _RAG_TERMINAL_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _MAX_TERMINAL_MESSAGE_LENGTH = 240
+_RETRIEVAL_HEARTBEAT_SECONDS = 15.0
 _RAG_PROVIDER_ERROR_MESSAGES = {
     "provider_request_invalid": "The selected provider or model is invalid.",
     "provider_authentication_failed": "The selected provider credentials could not be authenticated.",
@@ -332,6 +335,32 @@ class _PrefetchedEvidence:
     documents: list[Any]
     clarification_answer: str | None = None
     security_filter: dict[str, int] | None = None
+    source_status: dict[str, dict[str, Any]] | None = None
+
+
+def _public_source_status(raw: Any) -> dict[str, dict[str, Any]] | None:
+    """Expose only canonical source names and bounded retrieval diagnostics."""
+    if not isinstance(raw, dict):
+        return None
+    result = {}
+    for source in CANONICAL_KNOWLEDGE_SOURCE_IDS:
+        entry = raw.get(source)
+        if not isinstance(entry, dict):
+            continue
+        status, count = entry.get("status"), entry.get("count")
+        if status not in ("searched", "empty", "unavailable", "error"):
+            continue
+        if type(count) is not int or count < 0:
+            continue
+        safe = {"status": status, "count": count}
+        reason = entry.get("reason")
+        if reason in ("no_retriever_configured", "retrieval_failed", "no_matching_entries"):
+            safe["reason"] = reason
+        filtered_count = entry.get("filtered_artifact_count")
+        if type(filtered_count) is int and filtered_count >= 0:
+            safe["filtered_artifact_count"] = filtered_count
+        result[source] = safe
+    return result or None
 
 
 async def _retrieve_standard_documents(
@@ -397,6 +426,7 @@ async def _retrieve_standard_documents(
         documents=normalize_documents_for_generation(documents),
         clarification_answer=answer,
         security_filter=safe_filter_outcome,
+        source_status=_public_source_status(metadata.get("source_status")) if isinstance(metadata, dict) else None,
     )
 
 
@@ -433,7 +463,13 @@ async def _retrieve_with_progress_events(
     pending_error: Exception | None = None
     try:
         while True:
-            queued = await progress_queue.get()
+            try:
+                queued = await asyncio.wait_for(progress_queue.get(), _RETRIEVAL_HEARTBEAT_SECONDS)
+            except asyncio.TimeoutError:
+                # Cold local model loading can exceed a proxy's idle budget.
+                # Keep retrieval connected without certifying evidence or an answer.
+                yield {"type": "heartbeat"}
+                continue
             if queued is done_marker:
                 break
             if isinstance(queued, tuple) and len(queued) == 2 and queued[0] is error_marker:
@@ -456,7 +492,7 @@ async def _retrieve_with_progress_events(
     yield docs
 
 
-async def _prefetch_documents(
+def _prefetch_documents(
     *,
     resolved_request: ResolvedRAGRequest,
     retrieval_plan: RetrievalPlan,
@@ -464,25 +500,13 @@ async def _prefetch_documents(
     pipeline_kwargs: dict[str, Any],
     payload: dict[str, Any],
 ) -> AsyncIterator[RAGStreamEvent | _PrefetchedEvidence]:
-    if bool(payload.get("enable_research_progress", False)):
-        async for item in _retrieve_with_progress_events(
-            resolved_request=resolved_request,
-            retrieval_plan=retrieval_plan,
-            standard_pipeline=standard_pipeline,
-            pipeline_kwargs=pipeline_kwargs,
-            payload=payload,
-        ):
-            yield item
-        return
-
-    docs = await _retrieve_standard_documents(
+    return _retrieve_with_progress_events(
         resolved_request=resolved_request,
         retrieval_plan=retrieval_plan,
         standard_pipeline=standard_pipeline,
         pipeline_kwargs=pipeline_kwargs,
         payload=payload,
     )
-    yield docs
 
 
 async def _run_agentic_prefetch(
@@ -548,6 +572,7 @@ def _context_events(
     payload: dict[str, Any],
     request_defaults: dict[str, Any],
     security_filter: dict[str, int] | None = None,
+    source_status: dict[str, dict[str, Any]] | None = None,
 ) -> list[RAGStreamEvent]:
     top_k_requested = _value(payload, request_defaults, "top_k", 10)
     top_k_limit = min(10, _to_int(top_k_requested, 10))
@@ -611,6 +636,7 @@ def _context_events(
             "contexts": top_contexts,
             "why": why,
             **({"security_filter": security_filter} if security_filter is not None else {}),
+            **({"source_status": source_status} if source_status is not None else {}),
         },
         {"type": "reasoning", **rationale},
     ]
@@ -729,6 +755,7 @@ async def stream_rag_events(
 
         docs: list[Any] = []
         security_filter = None
+        source_status = None
         if str(resolved_request.strategy).strip().lower() == "agentic":
             try:
                 docs, agentic_events = await _run_agentic_prefetch(
@@ -754,23 +781,25 @@ async def stream_rag_events(
                 docs = []
         else:
             try:
-                async for item in _prefetch_documents(
+                async with aclosing(_prefetch_documents(
                     resolved_request=resolved_request,
                     retrieval_plan=retrieval_plan,
                     standard_pipeline=standard_pipeline,
                     pipeline_kwargs=pipeline_kwargs,
                     payload=payload,
-                ):
-                    if isinstance(item, _PrefetchedEvidence):
-                        if item.clarification_answer:
-                            yield {"type": "clarification", "required": True, "stage": "pre_retrieval"}
-                            yield {"type": "delta", "text": item.clarification_answer}
-                            yield rag_complete_event(output_emitted=True)
-                            return
-                        docs = item.documents
-                        security_filter = item.security_filter
-                    else:
-                        yield item
+                )) as prefetch:
+                    async for item in prefetch:
+                        if isinstance(item, _PrefetchedEvidence):
+                            if item.clarification_answer:
+                                yield {"type": "clarification", "required": True, "stage": "pre_retrieval"}
+                                yield {"type": "delta", "text": item.clarification_answer}
+                                yield rag_complete_event(output_emitted=True)
+                                return
+                            docs = item.documents
+                            security_filter = item.security_filter
+                            source_status = item.source_status
+                        else:
+                            yield item
             except asyncio.CancelledError:
                 raise
             except Exception as prefetch_error:  # noqa: BLE001 - preserve retrieval failure as a terminal event
@@ -801,6 +830,7 @@ async def stream_rag_events(
             payload=payload,
             request_defaults=request_defaults,
             security_filter=security_filter,
+            source_status=source_status,
         ):
             yield event
 

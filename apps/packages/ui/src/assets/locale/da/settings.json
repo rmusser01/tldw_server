@@ -1000,6 +1000,7 @@
     }
   },
   "onboarding": {
+    "loginSettingsError": "Loginindstillingerne kunne ikke åbnes. Prøv igen.",
     "title": "Velkommen — Lad os få dig forbundet",
     "description": "Konfigurer din server og godkendelse. Vi verificerer forbindelsen og RAG-sundheden undervejs.",
     "learnMoreTldw": "Lær hvordan tldw-serveren fungerer",

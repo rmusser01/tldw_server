@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: backend-required-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || github.ref || github.run_id }}
+  group: backend-required-${{ github.event_name }}-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || github.ref || github.run_id }}
   cancel-in-progress: true
 
 jobs:
@@ -193,6 +193,99 @@ jobs:
           pytest -q --disable-warnings -p pytest_asyncio.plugin \
             -m "unit and not e2e and not jobs" \
             tldw_Server_API/tests/unit
+
+      # Timezone axis. Every other job and step runs on UTC, where a naive-vs-aware
+      # datetime bug has a delta of exactly zero and is therefore invisible. TASK-13299
+      # shipped a 7-hour error in OpenAI-compatible `created` timestamps for precisely
+      # that reason, on a product whose target deployment is a user's own machine.
+      #
+      # This lives in the required lane deliberately. It was first added as a standalone
+      # job in ci.yml, whose result is not part of protected-branch enforcement, so a
+      # timestamp regression could fail it without blocking the merge — the guard was
+      # decorative. `backend-required` is enforced gate 1 of 6 per
+      # Docs/Development/CI_REQUIRED_GATES.md.
+      - name: Confirm the runner is not on UTC
+        if: needs.changes.outputs.backend_changed == 'true'
+        env:
+          TZ: America/Los_Angeles
+        shell: bash
+        run: |
+          set -euo pipefail
+          OFFSET="$(python -c 'import time; print(time.strftime("%z"))')"
+          echo "TZ=$TZ offset=$OFFSET"
+          if [ "$OFFSET" = "+0000" ]; then
+            echo "The timezone guard below is pointless on a UTC offset -- TZ did not take effect." >&2
+            exit 1
+          fi
+
+      # Seeded from the test files that assert on utcnow / timezone.utc /
+      # fromtimestamp / .timestamp(). Verified green under BOTH UTC and
+      # America/Los_Angeles before being gated (678 passed), so this starts as a pure
+      # regression guard rather than a backlog to work off.
+      #
+      # Five files are deliberately excluded because they fail identically under both
+      # timezones, i.e. they are pre-existing and unrelated to this axis:
+      #   tests/http_client/test_http_client_retry_after.py
+      #   tests/http_client/test_http_client_stream_timeouts.py
+      #   tests/Sharing/test_shared_workspace_clone_endpoints.py
+      #   tests/Sharing/test_shared_workspace_recipient_endpoints.py
+      #   tests/test_authnz_backends_improved.py
+      # Grow this list as timestamp coverage grows; shrink the exclusions as those five
+      # get fixed.
+      - name: Timestamp-sensitive tests under a non-UTC timezone
+        if: needs.changes.outputs.backend_changed == 'true'
+        env:
+          TZ: America/Los_Angeles
+          PYTHONPATH: .
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Plugins are named explicitly because setup-python-deps writes
+          # PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 into $GITHUB_ENV ("Enforce pytest plugin
+          # isolation"), which applies to every later step in the job. Without this,
+          # --timeout is an unrecognised argument and the step dies with exit 4 before
+          # running a single test -- which is exactly how this guard first failed, and
+          # would have failed the same way in its original ci.yml home had it ever been
+          # allowed to run.
+          python -m pytest -q \
+            -p pytest_asyncio.plugin \
+            -p pytest_timeout \
+            --timeout=300 \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_admin_endpoints_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_api_keys_repo_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_llm_provider_overrides_repo_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_mfa_repo_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_monitoring_repo_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_org_provider_secrets_repo_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_rate_limits_repo_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_sessions_repo_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_token_blacklist_repo_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_usage_repo_rollups_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_usage_repo_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_user_provider_secrets_repo_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_byok_endpoints_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_byok_oauth_state_repo_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_byok_rotation_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_byok_runtime_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_llm_budget_402_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_scheduler_auth_failure_monitor_sqlite.py \
+            tldw_Server_API/tests/Discord/test_discord_oauth_lifecycle.py \
+            tldw_Server_API/tests/Embeddings/test_request_signing_nonce_cleanup.py \
+            tldw_Server_API/tests/Flashcards/test_flashcards_endpoint_integration.py \
+            tldw_Server_API/tests/Flashcards/test_flashcards_timestamp_contract.py \
+            tldw_Server_API/tests/Flashcards/test_review_response_timestamp_contract.py \
+            tldw_Server_API/tests/Flashcards/test_source_review_plans_api.py \
+            tldw_Server_API/tests/Flashcards/test_study_response_timestamp_contract.py \
+            tldw_Server_API/tests/Media_DB/test_media_clone_snapshot_repository.py \
+            tldw_Server_API/tests/Personalization/test_companion_derivations.py \
+            tldw_Server_API/tests/Personalization/test_companion_proactive_policy.py \
+            tldw_Server_API/tests/Personalization/test_companion_reflection_jobs.py \
+            tldw_Server_API/tests/Personalization/test_personalization_endpoints.py \
+            tldw_Server_API/tests/Research/test_research_broker.py \
+            tldw_Server_API/tests/Research/test_research_discovery_legacy_execution_contract.py \
+            tldw_Server_API/tests/Sharing/test_shared_workspace_chat_endpoint.py \
+            tldw_Server_API/tests/Sharing/test_shared_workspace_clone_operations.py \
+            tldw_Server_API/tests/Sharing/test_shared_workspace_recipient_security_matrix.py
 
       # Boots the app in a DEPLOYMENT-SHAPED (scrubbed) environment — no
       # TEST_MODE, no conftest env forcing — and probes /health. Catches the

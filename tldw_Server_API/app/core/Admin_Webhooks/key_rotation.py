@@ -17,6 +17,7 @@ from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
     WebhookRepositoryError,
     WebhookRepositoryErrorCode,
 )
+from tldw_Server_API.app.core.exceptions import WebhookKeyError
 from tldw_Server_API.app.services import admin_system_ops_service as system_ops
 
 from .audit import (
@@ -27,7 +28,7 @@ from .audit import (
     WebhookOperationalReasonCode,
 )
 from .catalog import EVENT_API_VERSION
-from .crypto import WebhookKeyError, WebhookKeyRing
+from .crypto import WebhookKeyRing
 from .domain import (
     PendingIncidentWebhookMarker,
     WebhookError,

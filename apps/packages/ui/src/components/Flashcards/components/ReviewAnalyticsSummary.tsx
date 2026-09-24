@@ -49,6 +49,11 @@ export const ReviewAnalyticsSummary: React.FC<ReviewAnalyticsSummaryProps> = ({
 
   return (
     <Card className="mb-4" data-testid="flashcards-review-analytics-summary">
+      <p className="mb-3 text-xs text-text-muted">
+        {t("option:flashcards.analyticsDayBoundary", {
+          defaultValue: "Daily statistics and study streak use UTC days, starting at midnight UTC. Recent sessions show dates in your local time."
+        })}
+      </p>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <div className="rounded border border-border p-2">
           <Text type="secondary" className="block text-xs">

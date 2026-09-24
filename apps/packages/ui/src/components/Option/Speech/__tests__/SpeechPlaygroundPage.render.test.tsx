@@ -1,12 +1,16 @@
 // @vitest-environment jsdom
 
 import React from "react"
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 type QueryOptions = {
   queryKey?: readonly unknown[]
 }
+
+type VoicePickerProps = React.ComponentProps<
+  typeof import("../VoicePickerModal").VoicePickerModal
+>
 
 const updateStoredValue = (
   storageValues: Map<string, unknown>,
@@ -55,6 +59,7 @@ const {
   audioPresetControlPropsRef,
   tldwConfigRef,
   ttsAdvancedPropsRef,
+  voicePickerPropsRef,
 } =
   vi.hoisted(() => ({
     invalidateQueriesMock: vi.fn(),
@@ -116,6 +121,7 @@ const {
       } as Record<string, unknown>,
     },
     ttsAdvancedPropsRef: { current: null as any },
+    voicePickerPropsRef: { current: null as VoicePickerProps | null },
   }))
 
 const { storageValues, setSpeechModeMock, setSpeechHistoryMock, tMock } = vi.hoisted(() => ({
@@ -351,7 +357,10 @@ vi.mock("@/components/Option/Audio/AudioPresetControls", () => ({
 }))
 
 vi.mock("@/components/Option/Speech/VoicePickerModal", () => ({
-  VoicePickerModal: () => <div data-testid="voice-picker-modal" />,
+  VoicePickerModal: (props: VoicePickerProps) => {
+    voicePickerPropsRef.current = props
+    return <div data-testid="voice-picker-modal" />
+  },
 }))
 
 vi.mock("@/hooks/useTtsPlayground", () => ({
@@ -518,6 +527,7 @@ describe("SpeechPlaygroundPage", () => {
     setTTSSettingsMock.mockClear()
     audioPresetControlPropsRef.current = null
     ttsAdvancedPropsRef.current = null
+    voicePickerPropsRef.current = null
     inferTldwProviderFromModelMock.mockReset()
     inferTldwProviderFromModelMock.mockReturnValue(null)
     isTimeoutLikeErrorMock.mockReset()
@@ -543,6 +553,30 @@ describe("SpeechPlaygroundPage", () => {
     setSpeechModeMock.mockReset()
     setSpeechHistoryMock.mockReset()
     tMock.mockClear()
+  })
+
+  it("persists only voice preference fields when a selection includes credentials", (): void => {
+    render(<SpeechPlaygroundPage />)
+    const selection = {
+      provider: "tldw",
+      backend: "kokoro",
+      voice: "af_heart",
+      model: "kokoro-v1",
+      apiKey: "fixture-secret",
+      credentials: { token: "fixture-token" },
+    }
+
+    act(() => {
+      voicePickerPropsRef.current!.onSelect(selection)
+    })
+
+    expect(JSON.parse(localStorage.getItem("tts-last-render-config")!)).toEqual({
+      provider: "tldw",
+      backend: "kokoro",
+      voice: "af_heart",
+      model: "kokoro-v1",
+      allowFallback: true,
+    })
   })
 
   it("renders without triggering a temporal dead zone error", (): void => {

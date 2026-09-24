@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import Field
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
     get_chacha_db_for_user,
 )
@@ -44,7 +45,13 @@ from tldw_Server_API.app.services.osce_practice import (
     reconcile_station_update,
 )
 
-router = APIRouter(tags=["quizzes"])
+
+async def _enforce_osce_rate_limit(request: Request) -> None:
+    """Apply finite ingress admission without exposing internal limiter hooks as query fields."""
+    await check_rate_limit(request)
+
+
+router = APIRouter(tags=["quizzes"], dependencies=[Depends(_enforce_osce_rate_limit)])
 
 
 OsceAttemptResponse = Annotated[
@@ -54,10 +61,12 @@ OsceAttemptResponse = Annotated[
 
 
 def _not_found(detail: str) -> HTTPException:
+    """Build the consistent missing-resource response for OSCE operations."""
     return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
 
 
 def _require_osce_quiz(db: CharactersRAGDB, quiz_id: int) -> None:
+    """Reject missing quizzes and prevent OSCE operations on other activity types."""
     quiz = db.get_quiz(quiz_id)
     if quiz is None:
         raise _not_found("Quiz not found")
@@ -69,12 +78,14 @@ def _require_osce_quiz(db: CharactersRAGDB, quiz_id: int) -> None:
 
 
 def _project_attempt(row: dict[str, Any]) -> OsceAttemptResponse:
+    """Reveal marking material only after the candidate phase has ended."""
     if row["state"] == OsceAttemptState.IN_PROGRESS.value:
         return project_candidate_attempt(row)
     return project_revealed_attempt(row)
 
 
 def _project_station_authoring(row: dict[str, Any]) -> OsceStationAuthoringResponse:
+    """Expose only fields declared by the station authoring response contract."""
     return OsceStationAuthoringResponse.model_validate(
         {
             field_name: row[field_name]
@@ -84,6 +95,7 @@ def _project_station_authoring(row: dict[str, Any]) -> OsceStationAuthoringRespo
 
 
 def _raise_osce_error(exc: Exception, *, default_detail: str) -> None:
+    """Map expected validation and persistence failures to their HTTP contracts."""
     if isinstance(exc, ConflictError):
         raise map_db_error_to_http(exc, conflict_status_code=409) from exc
     if isinstance(exc, (InputError, OsceStationIdentityError, ValueError)):
@@ -346,6 +358,7 @@ def _transition_attempt(
     request: OsceAttemptTransition,
     target_state: OsceAttemptState,
 ) -> OsceAttemptResponse:
+    """Apply a versioned phase transition and project its permitted response."""
     row = db.transition_osce_attempt(
         attempt_id,
         target_state,

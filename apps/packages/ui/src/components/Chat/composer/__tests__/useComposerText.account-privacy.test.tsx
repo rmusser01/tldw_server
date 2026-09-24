@@ -22,7 +22,6 @@ import { useComposerText } from "../hooks/useComposerText"
 const draftKey = "tldw:playgroundChatDraft"
 const ownerRecordKeys = () => Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index)!)
   .filter(key => key.startsWith(`registry:draft:${draftKey}:owner:`))
-const mount = () => renderHook(() => useComposerText({ draftKey, textareaRef: React.createRef<HTMLTextAreaElement>() }))
 const settle = async () => {
   await act(async () => { await vi.dynamicImportSettled() })
   await act(async () => { await vi.advanceTimersByTimeAsync(COMPOSER_CONSTANTS.DRAFT_SAVE_DEBOUNCE_MS + 1) })
@@ -38,8 +37,9 @@ const switchTo = async (user: string) => {
   })
 }
 
-describe("composer account ownership using the real draft registry", () => {
-  beforeEach(() => { vi.useFakeTimers(); localStorage.clear(); authority.user = "alice"; authority.org = null; authority.error = null })
+describe.each([false, true])("composer account ownership using the real draft registry (tabScoped=%s)", tabScopedDraft => {
+  const mount = () => renderHook(() => useComposerText({ draftKey, tabScopedDraft, textareaRef: React.createRef<HTMLTextAreaElement>() }))
+  beforeEach(() => { vi.useFakeTimers(); localStorage.clear(); sessionStorage.clear(); authority.user = "alice"; authority.org = null; authority.error = null })
   afterEach(() => vi.useRealTimers())
 
   it("rejects unowned raw and registry drafts from earlier releases", async () => {
@@ -48,6 +48,8 @@ describe("composer account ownership using the real draft registry", () => {
     const { result } = mount()
     await settle()
     expect(result.current.form.values.message).toBe("")
+    expect(localStorage.getItem(draftKey)).toBeNull()
+    expect(localStorage.getItem(`registry:draft:${draftKey}`)).toBeNull()
   })
 
   it("clears an active message and image on logout and never restores them for Bob", async () => {
@@ -183,6 +185,8 @@ describe("composer account ownership using the real draft registry", () => {
     await settle()
     const key = ownerRecordKeys()[0]
     view.unmount()
+    // A newly opened tab must read the durable fallback before it can pin it.
+    sessionStorage.clear()
     let release!: () => void
     const held = new Promise<void>(resolve => { release = resolve })
     let blocked = false

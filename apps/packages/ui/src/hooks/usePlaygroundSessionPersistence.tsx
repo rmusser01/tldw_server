@@ -19,20 +19,9 @@ import {
   resolveEffectiveAssistantState
 } from "@/hooks/chat/effective-assistant-state"
 import {
-  characterToAssistantSelection,
   getAssistantSelectionMode,
   normalizeAssistantSelection
 } from "@/types/assistant-selection"
-import {
-  SELECTED_ASSISTANT_STORAGE_KEY,
-  parseSelectedAssistantValue,
-  selectedAssistantStorage
-} from "@/utils/selected-assistant-storage"
-import {
-  SELECTED_CHARACTER_STORAGE_KEY,
-  parseSelectedCharacterValue,
-  selectedCharacterStorage
-} from "@/utils/selected-character-storage"
 
 const DEBOUNCE_MS = 1000
 
@@ -60,7 +49,7 @@ export function usePlaygroundSessionPersistence() {
   const clearSession = usePlaygroundSessionStore((s) => s.clearSession)
   const isSessionValid = usePlaygroundSessionStore((s) => s.isSessionValid)
   const [currentScopeKey, setCurrentScopeKey] = useState<string | null>(null)
-  const [sessionScopeReady, setSessionScopeReady] = useState(false)
+  const [connectionScopeReady, setSessionScopeReady] = useState(false)
   const persistenceRevision = sessionStore.restoreRevision
   const isCurrentPersistence = useCallback(
     () => usePlaygroundSessionStore.getState().restoreRevision === persistenceRevision,
@@ -156,7 +145,9 @@ export function usePlaygroundSessionPersistence() {
   )
 
   const { setSystemPrompt } = useStoreChatModelSettings()
-  const [selectedAssistant, setSelectedAssistant] = useSelectedAssistant(null)
+  const [selectedAssistant, setSelectedAssistant, assistantMeta] = useSelectedAssistant(null)
+  const sessionScopeReady = connectionScopeReady && !assistantMeta?.isLoading
+  const readOwnedSelection = assistantMeta?.readSelection
   // Form handoffs can arrive before initial hydration starts or while its DB
   // read is pending, even with identical values. Observe accepted intent, not
   // value equality; this baseline is used only for the initial saved target.
@@ -369,13 +360,7 @@ export function usePlaygroundSessionPersistence() {
       }
 
       try {
-        const storedAssistant = normalizeAssistantSelection(
-          parseSelectedAssistantValue(
-            await selectedAssistantStorage.get<unknown>(
-              SELECTED_ASSISTANT_STORAGE_KEY
-            )
-          )
-        )
+        const storedAssistant = await readOwnedSelection?.()
         if (
           storedAssistant &&
           getAssistantSelectionMode(storedAssistant) === "tracked" &&
@@ -392,40 +377,12 @@ export function usePlaygroundSessionPersistence() {
           }
         }
       } catch {
-        // ignore tracked assistant storage hydration failures during session save
-      }
-
-      if (snapshot.trackedAssistantKind === "character") {
-        try {
-          const legacyCharacterSelection = characterToAssistantSelection(
-            parseSelectedCharacterValue<Record<string, unknown>>(
-              await selectedCharacterStorage.get<unknown>(
-                SELECTED_CHARACTER_STORAGE_KEY
-              )
-            )
-          )
-          if (
-            legacyCharacterSelection &&
-            legacyCharacterSelection.id === snapshot.trackedAssistantId
-          ) {
-            return {
-              ...snapshot,
-              trackedAssistantSelection: legacyCharacterSelection,
-              trackedAssistantDisplayName:
-                legacyCharacterSelection.name ?? snapshot.trackedAssistantDisplayName,
-              trackedAssistantAvatarUrl:
-                legacyCharacterSelection.avatar_url ??
-                snapshot.trackedAssistantAvatarUrl
-            }
-          }
-        } catch {
-          // ignore legacy character storage hydration failures during session save
-        }
+        // Keep canonical metadata when owned selection storage is unavailable.
       }
 
       return snapshot
     },
-    []
+    [readOwnedSelection]
   )
 
   useEffect(() => {
@@ -564,6 +521,7 @@ export function usePlaygroundSessionPersistence() {
 
   // Restore session from persisted state
   const restoreSession = useCallback(async (): Promise<PlaygroundSessionRestoreOutcome> => {
+    if (!sessionScopeReady) return "cancelled"
     const initialSelection = initialSourceSelectionRef.current
     const selectionBeforeRestore =
       !initialRestoreSettledRef.current &&
@@ -730,6 +688,7 @@ export function usePlaygroundSessionPersistence() {
       initialRestoreSettledRef.current = true
     }
   }, [
+    sessionScopeReady,
     isSessionValid,
     sessionStore,
     clearSession,

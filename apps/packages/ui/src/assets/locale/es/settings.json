@@ -1000,6 +1000,7 @@
     }
   },
   "onboarding": {
+    "loginSettingsError": "No se pudo abrir la configuración de inicio de sesión. Inténtalo de nuevo.",
     "title": "Bienvenido: vamos a conectarte",
     "description": "Configura tu servidor y la autenticación. Verificaremos en línea la conexión y el estado de RAG.",
     "learnMoreTldw": "Aprende cómo funciona el servidor tldw",

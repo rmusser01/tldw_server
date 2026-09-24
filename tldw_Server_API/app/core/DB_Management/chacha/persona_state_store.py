@@ -110,7 +110,7 @@ class PersonaStateStore:
             )  # noqa: TRY003
         return status
 
-    def _ensure_persona_live_voice_session_summaries_table(self) -> None:
+    def _ensure_persona_live_voice_session_summaries_table(self, *, connection: Any | None = None) -> None:
         if self.backend_type == BackendType.SQLITE:
             self.execute_query(
                 """
@@ -179,13 +179,15 @@ class PersonaStateStore:
                   thinking_recovery_count INTEGER NOT NULL DEFAULT 0,
                   UNIQUE(user_id, persona_id, session_id)
                 )
-                """
+                """,
+                connection=connection,
             )
             self.backend.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_persona_live_voice_session_summaries_persona_time
                 ON persona_live_voice_session_summaries(persona_id, started_at, updated_at)
-                """
+                """,
+                connection=connection,
             )
             return
 

@@ -63,6 +63,9 @@ const playgroundFormConnectionState = vi.hoisted(() => ({
   isConnected: true
 }))
 const selectedAssistantMock = vi.hoisted(() => ({
+  isLoading: false,
+  defaultCharacter: null as Character | null,
+  ownedDefaultCharacter: null as Character | null,
   initialSelection: null as any,
   setSelectedAssistant: vi.fn(async (_next: unknown) => undefined)
 }))
@@ -173,6 +176,10 @@ vi.mock("react-i18next", () => ({
   })
 }))
 
+vi.mock("@/hooks/useChatDraftOwner", () => ({
+  useChatDraftOwner: () => ({ ownerKey: "account-a", isCurrent: () => true })
+}))
+
 vi.mock("@tanstack/react-query", () => ({
   useQuery: () => ({ data: [] }),
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
@@ -198,8 +205,8 @@ vi.mock("@tanstack/react-query", () => ({
   })
 }))
 
-vi.mock("antd", () => {
-  const React = require("react") as typeof import("react")
+vi.mock("antd", async () => {
+  const React = await import("react")
 
   const InputComponent = React.forwardRef<HTMLInputElement, any>(
     (
@@ -412,7 +419,7 @@ vi.mock("antd", () => {
 })
 
 vi.mock("@plasmohq/storage/hook", () => ({
-  useStorage: (key: unknown, defaultValue: unknown) => React.useState(key === "playgroundStartupTemplateBundles" ? savedSetupFixture.raw : defaultValue)
+  useStorage: (key: unknown, defaultValue: unknown) => React.useState(key === "playgroundStartupTemplateBundles" ? savedSetupFixture.raw : (key as { key?: string })?.key === "defaultCharacterSelection:owner:account-a" ? { ownerKey: "account-a", selection: selectedAssistantMock.ownedDefaultCharacter } : (key as { key?: string })?.key === "defaultCharacterSelection" ? selectedAssistantMock.defaultCharacter : defaultValue)
 }))
 
 vi.mock("react-router-dom", () => ({
@@ -637,7 +644,7 @@ vi.mock("@/hooks/useSelectedAssistant", () => ({
     return [
       selectedAssistant,
       setSelectedAssistantWithBroadcast,
-      { isLoading: false, setRenderValue: setSelectedAssistant }
+      { isLoading: selectedAssistantMock.isLoading, setRenderValue: setSelectedAssistant }
     ] as const
   }
 }))
@@ -1050,6 +1057,9 @@ vi.mock("@/hooks/playground", () => ({
 }))
 
 beforeEach(() => {
+  selectedAssistantMock.isLoading = false
+  selectedAssistantMock.defaultCharacter = null
+  selectedAssistantMock.ownedDefaultCharacter = null
   savedSetupFixture.raw = "[]"
   saveActorSettingsMock.mockReset().mockResolvedValue(true)
   viewportState.mobile = false
@@ -1088,6 +1098,23 @@ const renderRolePlayStarterHarness = () =>
   )
 
 describe("PlaygroundForm role-play starter", () => {
+  it("does not adopt an unowned default Character while this account preference is unresolved", async () => {
+    selectedAssistantMock.defaultCharacter = { id: "4", name: "Alice private default", system_prompt: "Alice private prompt" }
+    render(<PlaygroundForm droppedFiles={[]} />)
+    await act(async () => { await Promise.resolve() })
+    expect(selectedAssistantMock.setSelectedAssistant).not.toHaveBeenCalled()
+  })
+
+  it("waits for account verification before applying the configured default Character", async () => {
+    selectedAssistantMock.isLoading = true
+    selectedAssistantMock.ownedDefaultCharacter = { id: "7", name: "Default Archivist" }
+    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    expect(selectedAssistantMock.setSelectedAssistant).not.toHaveBeenCalled()
+    selectedAssistantMock.isLoading = false
+    view.rerender(<PlaygroundForm droppedFiles={[]} />)
+    await waitFor(() => expect(selectedAssistantMock.setSelectedAssistant).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ kind: "character", id: "7", name: "Default Archivist" })))
+  })
+
   it("restores the opening control after the conditionally mounted setup drawer closes", async () => {
     const user = userEvent.setup()
     render(<PlaygroundForm droppedFiles={[]} />)

@@ -5,7 +5,6 @@ from __future__ import annotations
 import base64
 import contextlib
 from collections.abc import Iterator
-from dataclasses import dataclass, field
 import http.client
 import json
 import os
@@ -13,9 +12,12 @@ import platform
 import re
 import signal
 import tempfile
-from threading import RLock
 import time
+from dataclasses import dataclass, field
+from threading import RLock
 from typing import Any, Mapping, Sequence
+
+from tldw_Server_API.app.core.Utils.Utils import logging
 
 
 def _parse_bool(value: Any, default: bool = False) -> bool:
@@ -70,12 +72,18 @@ def image_payload(image_bytes: bytes, *, use_data_url: bool) -> Iterator[dict[st
         yield {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}}
         return
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as handle:
-        handle.write(image_bytes)
+        # Record the path before writing, so a write that fails (full disk) is still
+        # cleaned up; discard_staged_page_image reports removal failures.
+        path = handle.name
+        try:
+            handle.write(image_bytes)
+        except BaseException:
+            discard_staged_page_image(path)
+            raise
     try:
-        yield {"type": "image_url", "image_url": {"url": handle.name}}
+        yield {"type": "image_url", "image_url": {"url": path}}
     finally:
-        with contextlib.suppress(OSError):
-            os.unlink(handle.name)
+        discard_staged_page_image(path)
 
 
 def _pick_positive_cap(*caps: int | None) -> int | None:
@@ -458,3 +466,28 @@ def load_ocr_runtime_profiles(
         active = cli
 
     return OCRRuntimeProfiles(remote=remote, managed=managed, cli=cli, active=active)
+
+
+def discard_staged_page_image(path: str | None) -> None:
+    """Remove a staged OCR page image, reporting rather than swallowing failures.
+
+    Backends that hand a filesystem path to an OCR server must create the file with
+    ``delete=False``, because the request happens after the file object is closed and
+    ``delete=True`` unlinks it first -- the server is then handed a path that no longer
+    exists. That makes removal the caller's job, and a silent
+    ``contextlib.suppress(OSError)`` around it leaves a per-page leak with no diagnostic
+    when deletion fails on permissions, a read-only mount, or an open handle.
+
+    Callers should record the path *before* writing to it, so that a write that fails on
+    a full filesystem is still cleaned up by this function.
+    """
+    if not path:
+        return
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        return
+    except OSError as unlink_error:
+        logging.warning(
+            f"OCR: failed to remove staged page image {path}: {unlink_error}"
+        )

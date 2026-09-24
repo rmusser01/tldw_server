@@ -191,7 +191,7 @@ def test_rag_source_health_user_id_falls_back_to_single_user_id(
     assert rag_ep._resolve_source_health_user_id(None) == "7"
 
 
-def test_rag_source_health_marks_non_file_media_backend_available() -> None:
+def test_rag_source_health_marks_non_file_content_backend_available() -> None:
     import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
 
     configured, empty = rag_ep._build_source_health_source_sets(
@@ -201,7 +201,8 @@ def test_rag_source_health_marks_non_file_media_backend_available() -> None:
 
     assert "media_db" in configured
     assert "media_db" not in empty
-    assert {"notes", "chats", "characters", "world_books", "dictionaries"}.issubset(empty)
+    assert {"notes", "chats", "characters", "world_books", "dictionaries"}.issubset(configured)
+    assert empty == {"prompts", "kanban"}
 
 
 def test_rag_source_health_marks_absent_lazy_sqlite_sources_empty() -> None:

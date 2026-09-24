@@ -1712,82 +1712,87 @@ async function* bgStreamDirectUnsafe<
     })
   }
 
-  let resp = await fetchStream()
-  if (
-    !shouldSkipAuth &&
-    !hostedMode &&
-    resp.status === 401 &&
-    cfg?.authMode === "multi-user" &&
-    cfg?.refreshToken
-  ) {
-    try {
-      if (servicePromptConfig) {
-        await refreshAuthDirect(storage, servicePromptConfig, cfg)
-        const latestCfg = await resolveCurrentServicePromptConfig(
-          storage,
-          servicePromptConfig
-        )
-        if (latestCfg.accessToken) {
-          resolvedHeaders["Authorization"] = `Bearer ${latestCfg.accessToken}`
-          resp = await fetchStream()
-        }
-      } else {
-        const refreshResp = await fetch(`${baseUrl}/api/v1/auth/refresh`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ refresh_token: cfg.refreshToken }),
-          signal: controller.signal
-        })
-        if (refreshResp.ok) {
-          const tokens = await refreshResp.json().catch(() => null)
-          if (tokens?.access_token && !controller.signal.aborted) {
-            const latestCfg = await commitDirectRefresh(
-              storage,
-              cfg,
-              String(cfg.accessToken || "").trim(),
-              String(cfg.refreshToken || "").trim(),
-              {
-                accessToken: tokens.access_token,
-                refreshToken: tokens.refresh_token || cfg.refreshToken
-              }
-            )
-            resolvedHeaders["Authorization"] =
-              `Bearer ${latestCfg.accessToken}`
-            resp = await fetchStream()
-          }
-        }
-      }
-    } catch (error) {
-      if (isRequestConfigScopeChangedError(error)) {
-        throw error
-      }
-      // ignore refresh failures and continue with original response
-    }
-  }
-
-  if (!resp.ok) {
-    const errorInfo = await parseStreamError(resp)
-    const error = new Error(
-      formatErrorMessage(errorInfo.message, `HTTP ${resp.status}`)
-    ) as Error & { status?: number; details?: unknown; retryAfter?: number }
-    error.status = resp.status
-    if (errorInfo.details) error.details = errorInfo.details
-    const retryAfterMs = parseRetryAfter(resp.headers.get("retry-after"))
-    if (typeof retryAfterMs === "number" && retryAfterMs > 0) {
-      error.retryAfter = retryAfterMs / 1_000
-    }
-    throw error
-  }
-  if (!resp.body) {
-    throw new Error("No response body")
-  }
-
-  onOpen?.()
-  const reader = resp.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ""
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
   resetIdle()
   try {
+    let resp = await fetchStream()
+    if (
+      !shouldSkipAuth &&
+      !hostedMode &&
+      resp.status === 401 &&
+      cfg?.authMode === "multi-user" &&
+      cfg?.refreshToken
+    ) {
+      try {
+        if (servicePromptConfig) {
+          await refreshAuthDirect(storage, servicePromptConfig, cfg)
+          const latestCfg = await resolveCurrentServicePromptConfig(
+            storage,
+            servicePromptConfig
+          )
+          if (latestCfg.accessToken) {
+            resolvedHeaders["Authorization"] = `Bearer ${latestCfg.accessToken}`
+            resp = await fetchStream()
+          }
+        } else {
+          const refreshResp = await fetch(`${baseUrl}/api/v1/auth/refresh`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ refresh_token: cfg.refreshToken }),
+            signal: controller.signal
+          })
+          if (refreshResp.ok) {
+            const tokens = await refreshResp.json()
+            if (tokens?.access_token && !controller.signal.aborted) {
+              const latestCfg = await commitDirectRefresh(
+                storage,
+                cfg,
+                String(cfg.accessToken || "").trim(),
+                String(cfg.refreshToken || "").trim(),
+                {
+                  accessToken: tokens.access_token,
+                  refreshToken: tokens.refresh_token || cfg.refreshToken
+                }
+              )
+              resolvedHeaders["Authorization"] =
+                `Bearer ${latestCfg.accessToken}`
+              resp = await fetchStream()
+            }
+          }
+        }
+      } catch (error) {
+        if (isRequestAbort(error, controller.signal)) {
+          throw createAbortError(readErrorMessage(error))
+        }
+        if (isRequestConfigScopeChangedError(error)) {
+          throw error
+        }
+        // ignore refresh failures and continue with original response
+      }
+    }
+
+    if (!resp.ok) {
+      const errorInfo = await parseStreamError(resp)
+      const error = new Error(
+        formatErrorMessage(errorInfo.message, `HTTP ${resp.status}`)
+      ) as Error & { status?: number; details?: unknown; retryAfter?: number }
+      error.status = resp.status
+      if (errorInfo.details) error.details = errorInfo.details
+      const retryAfterMs = parseRetryAfter(resp.headers.get("retry-after"))
+      if (typeof retryAfterMs === "number" && retryAfterMs > 0) {
+        error.retryAfter = retryAfterMs / 1_000
+      }
+      throw error
+    }
+    if (!resp.body) {
+      throw new Error("No response body")
+    }
+
+    onOpen?.()
+    reader = resp.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ""
+    resetIdle()
     while (true) {
       const { done, value } = await reader.read()
       if (done) break
@@ -1834,7 +1839,7 @@ async function* bgStreamDirectUnsafe<
     if (idleTimer) clearTimeout(idleTimer)
     try {
       // An errored response body rejects cancellation too; preserve the primary error.
-      await reader.cancel()
+      await reader?.cancel()
     } catch {}
     if (abortSignal) {
       try {

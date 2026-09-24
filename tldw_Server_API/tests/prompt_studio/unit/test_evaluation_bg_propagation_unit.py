@@ -21,7 +21,6 @@ from tldw_Server_API.app.api.v1.schemas.prompt_studio_schemas import (
 from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
 )
-from tldw_Server_API.app.main import app
 
 
 def _install_owned_worker_cancellation_ack(
@@ -1234,7 +1233,7 @@ class _StubDB:
 
 
 @pytest.fixture
-def override_ps_deps(monkeypatch):
+def override_ps_deps(app, monkeypatch):
     async def _override_db():
         return _StubDB()
 
@@ -1297,6 +1296,7 @@ def override_ps_deps(monkeypatch):
     ],
 )
 def test_evaluation_endpoint_rejects_ambiguous_provider_model_config_with_422(
+    app,
     payload: dict[str, Any],
     override_ps_deps: None,
 ) -> None:
@@ -1311,7 +1311,7 @@ def test_evaluation_endpoint_rejects_ambiguous_provider_model_config_with_422(
     assert response.status_code == 422, response.text
 
 
-def test_evaluation_async_add_task_receives_request_id(monkeypatch, override_ps_deps):
+def test_evaluation_async_add_task_receives_request_id(app, monkeypatch, override_ps_deps):
 
 
     # Force scheduling branch (not inline) by removing PyTest env hint and disabling TEST_MODE

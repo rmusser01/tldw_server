@@ -55,6 +55,26 @@ describe("TldwApiClient captured request scope", () => {
     mocks.bgStream.mockReset()
   })
 
+  it("pins default Character reads and writes to the captured account", async () => {
+    const client = new TldwApiClient()
+    const signal = new AbortController().signal
+    mocks.bgRequest.mockResolvedValueOnce({ preferences: { "preferences.chat.default_character_id": { value: 7 } } })
+    expect(await client.getDefaultCharacterPreference({ requestScope, signal })).toBe("7")
+    expect(mocks.bgRequest.mock.calls[0][0]).toMatchObject({
+      path: "/api/v1/users/me/profile?sections=preferences", method: "GET",
+      headers: { "X-TLDW-Expected-User-ID": "42" },
+      servicePromptConfig: expectedScopeFields.servicePromptConfig, abortSignal: signal
+    })
+    mocks.bgRequest.mockResolvedValueOnce({ applied: [], skipped: [] })
+    await client.setDefaultCharacterPreference(" 7 ", { requestScope, signal })
+    expect(mocks.bgRequest.mock.calls[1][0]).toMatchObject({
+      path: "/api/v1/users/me/profile", method: "PATCH",
+      headers: { "X-TLDW-Expected-User-ID": "42" },
+      servicePromptConfig: expectedScopeFields.servicePromptConfig, abortSignal: signal,
+      body: { updates: [{ key: "preferences.chat.default_character_id", value: "7" }] }
+    })
+  })
+
   it.each([undefined, [], ["data:image/png;base64,aW1hZ2U="]].map(images => ({ images })))("preserves optional complete attachment lists from the actual domain adapter: $images", ({ images }) => {
     mocks.bgRequest.mockResolvedValue({ messages: [{ id: "owned-user", sender: "user", content: "Question", timestamp: "2026-09-16T00:00:00Z", ...(images === undefined ? {} : { images }) }] })
     return new TldwApiClient().listChatMessages("owned", { include_images: true }, { requestScope }).then(rows => {

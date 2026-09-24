@@ -1,28 +1,29 @@
+import { useMemo } from "react"
 import { App, notification as staticNotification } from "antd"
-import type { NotificationInstance } from "antd/es/notification/interface"
-import {
-  patchNotificationApi,
-  patchStaticAntdNotificationCompat
-} from "@/utils/antd-notification-compat"
-
-patchStaticAntdNotificationCompat()
+import type { ArgsProps, NotificationInstance } from "antd/es/notification/interface"
+import { normalizeNotificationConfig } from "@/utils/antd-notification-compat"
 
 export const useAntdNotification = (): NotificationInstance => {
   const { notification } = App.useApp()
-  const base = (notification || staticNotification) as NotificationInstance
-  const api: any = base
-  if (typeof api?.open !== "function") {
-    return staticNotification as NotificationInstance
-  }
-  const ensureMethod = (type: "success" | "info" | "warning" | "error") => {
-    if (typeof api[type] !== "function") {
-      api[type] = (config: any) => api.open({ ...config, type })
+  const base = typeof notification?.open === "function" ? notification : staticNotification
+
+  return useMemo(() => {
+    const normalize = (config: ArgsProps) => normalizeNotificationConfig(config) as ArgsProps
+    const method = (type: "success" | "info" | "warning" | "error") =>
+      (config: ArgsProps) => {
+        if (typeof base[type] === "function") {
+          base[type](normalize(config))
+        } else {
+          base.open({ ...normalize(config), type })
+        }
+      }
+    return {
+      open: (config: ArgsProps) => base.open(normalize(config)),
+      success: method("success"),
+      info: method("info"),
+      warning: method("warning"),
+      error: method("error"),
+      destroy: (key?: React.Key) => base.destroy(key)
     }
-  }
-  ensureMethod("success")
-  ensureMethod("info")
-  ensureMethod("warning")
-  ensureMethod("error")
-  patchNotificationApi(api)
-  return api as NotificationInstance
+  }, [base])
 }

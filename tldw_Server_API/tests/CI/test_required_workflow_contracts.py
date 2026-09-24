@@ -1109,6 +1109,7 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_utils_time_conversion.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_video_*.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_visual_ingestion.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_whisper_model_path_resolution.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_xml_ingestion.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_yt_dlp_support.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_youtube_audio_downloads.py",

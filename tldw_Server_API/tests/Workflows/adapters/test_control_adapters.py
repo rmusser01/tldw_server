@@ -823,7 +823,7 @@ class TestCacheResultAdapter:
         # Mock collection resolver to indicate cache unavailable
         monkeypatch.setattr(
             "tldw_Server_API.app.core.Workflows.adapters.control.state._get_workflow_cache_collection",
-            lambda _name: None,
+            lambda _name, _user_id: None,
         )
 
         config = {
@@ -846,7 +846,7 @@ class TestCacheResultAdapter:
 
         monkeypatch.setattr(
             "tldw_Server_API.app.core.Workflows.adapters.control.state._get_workflow_cache_collection",
-            lambda _name: mock_collection,
+            lambda _name, _user_id: mock_collection,
         )
 
         config = {
@@ -871,7 +871,7 @@ class TestCacheResultAdapter:
 
         monkeypatch.setattr(
             "tldw_Server_API.app.core.Workflows.adapters.control.state._get_workflow_cache_collection",
-            lambda _name: mock_collection,
+            lambda _name, _user_id: mock_collection,
         )
 
         result = await run_cache_result_adapter(
@@ -895,7 +895,7 @@ class TestCacheResultAdapter:
 
         monkeypatch.setattr(
             "tldw_Server_API.app.core.Workflows.adapters.control.state._get_workflow_cache_collection",
-            lambda _name: BadCollection(),
+            lambda _name, _user_id: BadCollection(),
         )
 
         result = await run_cache_result_adapter({"key": "test_key"}, {})

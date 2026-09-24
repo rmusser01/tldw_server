@@ -197,7 +197,8 @@ def _clear_local_model_caches(monkeypatch):
     getattr(atlib, "_qwen2audio_plan_cache", {}).clear()
     nemo._model_cache.clear()
     parakeet_onnx._onnx_model_cache.clear()
-    parakeet_mlx._mlx_model_cache.clear()
+    parakeet_mlx._mlx_model_cache = None
+    parakeet_mlx._mlx_model_cache_key = None
     yield
     atlib.whisper_model_cache.clear()
     atlib.qwen_processor = None
@@ -205,7 +206,8 @@ def _clear_local_model_caches(monkeypatch):
     getattr(atlib, "_qwen2audio_plan_cache", {}).clear()
     nemo._model_cache.clear()
     parakeet_onnx._onnx_model_cache.clear()
-    parakeet_mlx._mlx_model_cache.clear()
+    parakeet_mlx._mlx_model_cache = None
+    parakeet_mlx._mlx_model_cache_key = None
 
 
 @pytest.mark.unit

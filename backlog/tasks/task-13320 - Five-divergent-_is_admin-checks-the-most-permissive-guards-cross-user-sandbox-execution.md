@@ -66,6 +66,31 @@ Found by the comprehensive core-module review; the five definitions, the sandbox
 
 <!-- SECTION:NOTES:BEGIN -->
 Duplicate of TASK-13338, fixed in c49b56c281 before this task was picked up. Verified on ea1cbc6941: one predicate, protocol_types.metadata_has_admin_claims, reached via BaseModule.caller_is_admin; media/notes/kanban/sandbox call it, mcp_discovery._is_admin calls it then falls back to user_roles. Decision recorded in Docs/ADR/048-mcp-admin-claims.md: platform admin roles (admin/owner/super_admin, imported from AuthNZ _PLATFORM_ADMIN_ROLES) or the '*' permission; system.configure deliberately NOT admin in MCP (narrower than AuthNZ's frozenset({'*','system.configure'}) named in AC#1). Dead context.is_admin probes removed (test_dead_is_admin_attribute_is_not_consulted). Bare-string roles: matrix row {'roles': 'owner'} -> True for the shared predicate. Red-before: restoring the pre-c49b56c281 sandbox_module fails 3 tests in test_sandbox_module_auth_binding.py incl. test_sandbox_run_denies_system_configure_cross_user_override. Added 4c45412ab9: behavioural parity test for mcp_discovery's claims half (the one module not covered by the structural 'no re-declared _is_admin' test); fails on the pre-c49b56c281 discovery module ([owner] case), 32/32 pass now; admin matrix + sandbox binding 37 -> 42 pass. Bandit -ll clean on the test file. Breaking change carried from 13338: an API key whose only admin-ish claim is system.configure lost cross-user sandbox session access and needs a platform admin role.
+
+
+Notes recorded on dev by the parallel core-review work (merged 2026-09-23):
+REFRAMED after verification. Design doc: Docs/Design/2026-09-22-mcp-capability-checks-design.md
+The filed framing -- five divergent _is_admin checks, 'four of the five are wrong' -- does not survive looking at what each one gates. The five sites ask FOUR DIFFERENT QUESTIONS:
+  may I read another user's data?   sandbox:142 (another user's session), media:2077 (ownership bypass on every media access)
+  may I destroy data irreversibly?  media:1847, notes:2010 (permanent hard delete)
+  may I control workflow execution? kanban:1753,1763,1773,1802 (pause/resume/drain/force-reassign)
+  what scope should I list?         mcp_discovery:157 (arguably not an authz question at all)
+There is no claim set that is simultaneously correct for 'may read another tenant's data' and 'may pause a board', so unifying on any single definition necessarily leaves some call site wrong. That is why they drifted and why nothing records which is intended. The defect is that five distinct capability checks were collapsed onto one undifferentiated role name.
+Note media:2077 is a SECOND cross-user boundary the description did not mention -- and it sits on the NARROWEST of the five checks, the opposite of the filed 'the broadest check guards the most dangerous operation'.
+The vocabulary already exists and is unused: rbac_seed.py:30-53 seeds resource-scoped names, MCP has a Resource x Action enum and AuthNZRBAC.check_permission backed by the AuthNZ DB, failing closed. No module uses any of it for these decisions; all five read raw JWT metadata, bypassing the RBAC layer one directory over.
+Adopting that layer as-is would not fix it either: authnz_rbac.py:_map_to_permission resolves Action.ADMIN to 'system.configure' for EVERY resource, so the five would collapse onto one permission again, and Resource has no SANDBOX or board member -- it cannot name two of the four questions.
+THREE SUPPORTING CLAIMS DID NOT HOLD UP.
+1. The cited test does not exist. tests/.../test_protocol_scope_enforcement.py is not in the repository; it was the only evidence offered for 'the protocol accepts the string shape'. The claim is true -- protocol_types.py:113 returns (value,) for a str -- but it was cited against a file that is not there.
+2. The bare-string roles split is latent, not live. All three producers are safe: server.py:1486 and :1592 wrap in list(), and :1615 assigns token_data.roles, a Pydantic list[str] field that rejects a bare string rather than coercing it. A string-shaped roles claim can only arrive from a directly constructed RequestContext.
+3. The system.configure cross-user reach is narrow. _build_role_grants (rbac_seed.py:112) gives it to the admin role only -- user, moderator, viewer and reviewer do not receive it. Single-user mode grants it (User_DB_Handling.py:291) but also sets roles=['admin'] and is_admin=True. The set of principals holding system.configure without already being admin-by-role is empty unless granted deliberately as an override.
+Severity is therefore lower than filed: a consistency defect on two cross-user boundaries, not an active breach. Confirmed as filed: the five definitions and their three axes of divergence, and that getattr(context,'is_admin',False) is dead against the real type (zero occurrences of is_admin in protocol_types.py).
+No code changed. Every permission name in the doc's D2 table needs approval before implementation, because each option moves a cross-user boundary. All 36 file:line citations in the doc were verified to resolve -- deliberately, given claim 1 above.
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

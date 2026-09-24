@@ -1781,15 +1781,29 @@ class MCPServer:
             with suppress(_MCP_SERVER_NONCRITICAL_EXCEPTIONS):
                 self.metrics_collector.record_connection_error("websocket", "exception")
         finally:
-            # Stop WS background tasks (ping/idle loops) to avoid leaks
-            if stream is not None:
-                with suppress(_MCP_SERVER_NONCRITICAL_EXCEPTIONS):
-                    await stream.stop()
-            # Remove connection
+            # Remove the connection before stopping the background tasks. `stream.stop()`
+            # is an await, and an await inside a finally that is already unwinding a
+            # cancellation re-raises immediately -- which would abandon the rest of this
+            # block, leaving the connection in the registry and its per-IP count never
+            # decremented, so that client's connection quota leaks for the life of the
+            # process. Deregistration is the load-bearing half; stopping the ping/idle
+            # loops is best effort.
+            # Deregister before stopping the background tasks. An await inside a finally
+            # that is already unwinding a cancellation re-raises immediately, abandoning
+            # everything after it -- which here would leave a stale entry in
+            # self.connections and an undecremented per-IP count, so that client's
+            # connection quota leaks for the life of the process. An ordinary client
+            # disconnect arrives as WebSocketDisconnect rather than a cancellation, so
+            # this is hardening for the cancelled paths (shutdown, task.cancel) rather
+            # than a fix for a reproduced leak; deregistration is the load-bearing half
+            # either way and stopping the ping/idle loops is best effort.
             async with self.connection_lock:
                 removed = self.connections.pop(connection_id, None)
                 if removed is not None:
                     self._decrement_ip_connection_count(client_ip)
+            if stream is not None:
+                with suppress(_MCP_SERVER_NONCRITICAL_EXCEPTIONS):
+                    await stream.stop()
 
             logger.bind(connection_id=connection_id).info(f"WebSocket cleanup complete: {connection_id}")
             # Update connection gauge

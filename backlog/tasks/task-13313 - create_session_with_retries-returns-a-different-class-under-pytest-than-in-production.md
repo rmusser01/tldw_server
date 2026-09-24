@@ -56,6 +56,21 @@ Found by the comprehensive core-module review; independently verified by the orc
 
 <!-- SECTION:NOTES:BEGIN -->
 Duplicate of TASK-13316 (filed twice during the 2026-09-22 review). Work and status are tracked there.
+
+
+Notes recorded on dev by the parallel core-review work (merged 2026-09-23):
+Fixed on branch fix/llm-test-env-gating (off dev).
+Two test files, both red first.
+tests/LLM_Adapters/unit/test_native_http_kill_switch_reachable.py -- 16 failed / 19 passed before, 35 passed after. The red pattern was self-diagnosing: openai, parametrised as the control because it already uses the bare 'if self._use_native_http():' form, passed all seven cases; groq and openrouter failed only the chat/stream reachability cases; anthropic and custom_openai additionally failed the spelling cases, because their short-circuit sits inside _use_native_http() itself and bypasses the 0/false/no/off parsing entirely.
+tests/LLM_Adapters/unit/test_session_shim_is_the_tested_object.py -- 3 failed / 2 passed before, 5 passed after. The failure message named the object it actually got: _RetrySession.
+AC #5 fix, with a count correction: 11 sites across 4 adapters, not 14. Six were 'if _prefer_httpx_in_tests() or os.getenv("PYTEST_CURRENT_TEST") or self._use_native_http():' (groq, openrouter, anthropic, two each), two were 'if os.getenv("PYTEST_CURRENT_TEST"): return True' opening _use_native_http (anthropic, custom_openai), and three were the _prefer_httpx_in_tests helper definitions. All now read 'if self._use_native_http():', which is what openai, bedrock and the other adapters already did -- this is conformance to the existing majority pattern, not a new one.
+Worth recording: the first two terms were the same check written twice. _prefer_httpx_in_tests() is defined as bool(os.getenv("PYTEST_CURRENT_TEST")), so 'A or A or B' was the literal shape.
+The change is behaviour-neutral for every existing test, because each _use_native_http() defaults to True when its env var is unset -- which is why the regression run came back exactly at baseline.
+AC #2 fix: the branch in create_session_with_retries is gone; it always returns _SessionShim now. log_runtime_deprecation is still called on the shim's streaming path, so the 'llm_chat_legacy_session' key stays live and tests/lint/test_no_new_runtime_compat_markers.py still passes.
+TWO CLAIMS IN THE DESCRIPTION NEED QUALIFYING.
+1. 'The two have different POST paths (dedicated client vs default transport), so any defect introduced into the production path is undetectable by CI.' The paths converge: _RetrySession.post and _SessionShim.post both end at http_client.fetch(method="POST", ...) and from there at the same _get_transport_adapter("httpx").request(). The only difference is that _RetrySession passes client=<create_client() instance> and the shim does not. For streaming they are identical, because the shim delegates to _RetrySession. So the risk was never divergent behaviour; it is that _SessionShim was never constructed under test, so a future edit to it is unobserved. That is still worth fixing, and is what makes removing the branch safe.
+2. 'An operator ... hits an unhandled RuntimeError on every chat call.' The RuntimeError is deliberate and documented -- openai_adapter.py carries the comment 'If disabled explicitly, raise clear error rather than falling back'. The defect is that the switch could not be exercised by any test, not that the error is unhandled. The new test asserts that documented behaviour, which is what AC #4 asked for.
+Verification: LLM_Adapters + LLM_Calls on this branch = 18 failed / 1230 passed. Baseline on origin/dev by detached checkout = 18 failed / 1195 passed, the identical 18 failures (all local adapters -- ollama, vllm, llamacpp, ooba, tabbyapi, aphrodite, local-llm -- none of which import any file changed here). Delta is +35 passing, exactly the new tests. Zero regressions. Adding tests/lint to the run gives 19 failed / 1242 passed; the extra is test_endpoint_auth_deps_import_boundary, also confirmed failing on a clean tree. ruff clean on all seven touched files.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

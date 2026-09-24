@@ -36,6 +36,13 @@ _DEFAULT_CLOSE_TIMEOUT_S = 5.0
 _SESSION_HEADER = "mcp-session-id"
 _PROTOCOL_VERSION_HEADER = "mcp-protocol-version"
 _ACCEPT_BOTH = "application/json, text/event-stream"
+_RESERVED_RUNTIME_HEADER_NAMES = frozenset(
+    {
+        _SESSION_HEADER, _PROTOCOL_VERSION_HEADER, "content-type", "accept", "host",
+        "content-length", "transfer-encoding", "connection", "te", "trailer",
+        "upgrade", "proxy-connection", "accept-encoding",
+    }
+)
 _SENSITIVE_HEADER_NAMES = frozenset(
     {"authorization", "proxy-authorization", "cookie", "x-api-key", "api-key"}
 )
@@ -266,12 +273,18 @@ class _HttpExternalTransportBase:
             Header names/values to merge into the outgoing request.
 
         Raises:
-            HttpExternalTransportError: ``insecure_url`` when a credential
-                header would be sent over plain http to a non-loopback host.
+            HttpExternalTransportError: ``invalid_runtime_headers`` for reserved
+                transport headers, or ``insecure_url`` when a credential header
+                would be sent over plain http to a non-loopback host.
         """
         if runtime_auth is None or not runtime_auth.headers:
             return {}
         headers = {str(k): str(v) for k, v in runtime_auth.headers.items()}
+        if {name.lower() for name in headers} & _RESERVED_RUNTIME_HEADER_NAMES:
+            raise self._error(
+                "Brokered credentials contain transport-owned headers",
+                reason_code="invalid_runtime_headers",
+            )
         if self._plain_http_non_loopback:
             sensitive = {name.lower() for name in headers}
             if sensitive & _SENSITIVE_HEADER_NAMES:
@@ -309,6 +322,16 @@ class _HttpExternalTransportBase:
                 reason_code="invalid_request",
                 method=method,
             ) from exc
+
+    def _validate_jsonrpc_response(self, payload: Any, method: str) -> dict[str, Any]:
+        """Require the JSON-RPC 2.0 envelope for a decoded upstream response."""
+        if not isinstance(payload, dict) or payload.get("jsonrpc") != "2.0":
+            raise self._error(
+                "External HTTP response is not a JSON-RPC 2.0 object",
+                reason_code="invalid_response",
+                method=method,
+            )
+        return payload
 
     def _tool_call_result(
         self, tool_name: str, response: dict[str, Any]
@@ -503,7 +526,7 @@ class StreamableHttpExternalTransport(_HttpExternalTransportBase):
             await self.connect()
 
     def _base_headers(self, extra_headers: dict[str, str] | None) -> httpx.Headers:
-        """Build request headers: static first, protocol values winning, extras last."""
+        """Merge static headers, transport state, then validated credentials."""
         headers = httpx.Headers(self._static_headers)
         headers["accept"] = _ACCEPT_BOTH
         headers["content-type"] = "application/json"
@@ -627,7 +650,7 @@ class StreamableHttpExternalTransport(_HttpExternalTransportBase):
             except json.JSONDecodeError:
                 continue
             if isinstance(payload, dict) and payload.get("id") == request_id:
-                return payload
+                return self._validate_jsonrpc_response(payload, method)
         raise self._error(
             "External HTTP SSE response ended without a matching response",
             reason_code="connection_closed",
@@ -644,13 +667,7 @@ class StreamableHttpExternalTransport(_HttpExternalTransportBase):
                 reason_code="invalid_response",
                 method=method,
             ) from exc
-        if not isinstance(payload, dict):
-            raise self._error(
-                "External HTTP response is not a JSON-RPC object",
-                reason_code="invalid_response",
-                method=method,
-            )
-        return payload
+        return self._validate_jsonrpc_response(payload, method)
 
     async def _notify(self, method: str, params: dict[str, Any]) -> None:
         """POST one JSON-RPC notification, accepting any 2xx response."""
@@ -1005,6 +1022,7 @@ class SseExternalTransport(_HttpExternalTransportBase):
         finally:
             self._pending.pop(request_id, None)
 
+        response = self._validate_jsonrpc_response(response, method)
         if response.get("error") and raise_on_error:
             raise self._error(
                 f"External SSE request failed for method '{method}'",

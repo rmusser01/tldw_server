@@ -55,7 +55,7 @@ def test_minting_fails_instead_of_issuing_weak_token(broken_key_derivation) -> N
 
 
 def test_transient_failure_is_not_pinned(broken_key_derivation, monkeypatch) -> None:
-    with pytest.raises(HTTPException):
+    with pytest.raises(RuntimeError):
         chat_mod._get_knowledge_qa_share_signing_key()
     good = b"k" * 32
     monkeypatch.setattr(chat_mod, "derive_hmac_key", lambda *a, **k: good)

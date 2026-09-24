@@ -116,12 +116,29 @@ def create_session_with_retries(
     status_forcelist: Optional[list[int]] = None,
     allowed_methods: Optional[list[str]] = None,
 ):
-    """Return the session object used for provider POSTs, in tests and production alike.
+    """Return a session facade for provider POSTs.
 
-    Provider POSTs are single-attempt until an idempotency contract exists.
-    Non-streaming POSTs route through the centralized HTTP client (egress
-    policy, TLS pinning); streaming uses the legacy session facade for
-    iter_lines semantics.
+    Non-streaming POSTs go through the centralized HTTP client, which is what applies
+    egress policy and TLS pinning. Streaming delegates to the legacy session facade to
+    preserve ``iter_lines()`` semantics.
+
+    Args:
+        total: Accepted and ignored. Provider POSTs are single-attempt until an
+            idempotency contract exists, so no value here enables retries.
+        backoff_factor: Accepted and ignored, for the same reason.
+        status_forcelist: Accepted and ignored, for the same reason.
+        allowed_methods: Accepted and ignored, for the same reason.
+
+    All four exist only so callers written against the ``urllib3.Retry`` signature keep
+    working. ``_SessionShim`` pins ``RetryPolicy(attempts=1)`` regardless; a caller that
+    needs retries must establish idempotency first, not pass a number here.
+
+    Returns:
+        A ``_SessionShim``, always. This used to return the legacy facade instead
+        whenever ``PYTEST_CURRENT_TEST`` was set, which meant the object every production
+        call receives was never constructed by the test suite. Tests that need to control
+        the session monkeypatch this function directly, so that branch bought nothing the
+        seam did not already provide.
     """
     return _SessionShim(
         total=total,

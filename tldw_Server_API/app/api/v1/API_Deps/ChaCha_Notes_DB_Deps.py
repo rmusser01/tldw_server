@@ -767,7 +767,9 @@ async def warm_chacha_db_for_user(user_id: int, client_id: str | None = None) ->
         logger.debug("ChaChaNotes shutdown in progress; skipping warmup for user {}", user_id)
         return
     try:
-        db_instance = await _get_or_init_db_instance_from_runtime(user_id, client_id or str(user_id))
+        db_instance = await _get_or_init_db_instance_from_runtime(
+            user_id, _tenant_client_id(user_id, client_id)
+        )
         with _CHACHA_HEALTH_LOCK:
             _CHACHA_HEALTH["warm_startups"] += 1
         task = asyncio.create_task(_ensure_default_character_async(db_instance, user_id))
@@ -775,6 +777,35 @@ async def warm_chacha_db_for_user(user_id: int, client_id: str | None = None) ->
         task.add_done_callback(_chacha_default_char_tasks.discard)
     except (HTTPException, OSError, RuntimeError, ValueError, TypeError) as e:
         logger.warning("Warm-up for ChaChaNotes failed ({})", type(e).__name__)
+
+
+def _tenant_client_id(user_id: int, client_id: str | None) -> str:
+    """Return the client_id to bind this instance to, which is always the user.
+
+    client_id is not a free-form label. On PostgreSQL it becomes
+    app.current_user_id (ChaChaNotes_DB._set_session_client_id), and every
+    ChaCha row-level security policy compares client_id against that setting,
+    so it is the tenant identity.
+
+    Callers had been passing descriptive strings: "voice_assistant" is a
+    constant shared by every user, which pooled them all into one tenant on
+    PostgreSQL, and "chat-macro-worker-<id>" is per-user but does not match the
+    user's normal tenant, so rows written under it were invisible to them
+    afterwards. The instance cache compounds it: its key is the user directory
+    alone, so whichever caller initialised a user first fixed that user's
+    tenant for the life of the process.
+
+    Attribution belongs in logs, not in the tenant key.
+    """
+    resolved = str(user_id)
+    if client_id is not None and str(client_id) != resolved:
+        logger.debug(
+            "Ignoring non-tenant client_id {!r} for user {}; client_id is the "
+            "PostgreSQL tenant key and must be the user id",
+            client_id,
+            user_id,
+        )
+    return resolved
 
 
 async def get_chacha_db_for_user_id(user_id: int, client_id: str | None = None) -> CharactersRAGDB:
@@ -790,7 +821,9 @@ async def get_chacha_db_for_user_id(user_id: int, client_id: str | None = None) 
             detail="Invalid owner_user_id.",
         )
 
-    db_instance = await _get_or_init_db_instance_from_runtime(user_id, client_id or str(user_id))
+    db_instance = await _get_or_init_db_instance_from_runtime(
+        user_id, _tenant_client_id(user_id, client_id)
+    )
     if not _is_chacha_shutting_down():
         task = asyncio.create_task(_ensure_default_character_async(db_instance, user_id))
         _chacha_default_char_tasks.add(task)
@@ -835,7 +868,9 @@ async def get_chacha_db_for_user(current_user: User = Depends(get_request_user))
         )
 
     user_id = current_user.id
-    db_instance = await _get_or_init_db_instance_from_runtime(user_id, str(current_user.id))
+    db_instance = await _get_or_init_db_instance_from_runtime(
+        user_id, _tenant_client_id(user_id, None)
+    )
     if not _is_chacha_shutting_down():
         task = asyncio.create_task(_ensure_default_character_async(db_instance, user_id))
         _chacha_default_char_tasks.add(task)
@@ -855,7 +890,9 @@ async def get_chacha_db_for_owner(owner_user_id: int) -> CharactersRAGDB:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid owner_user_id.",
         )
-    return await _get_or_init_db_instance_from_runtime(owner_user_id, str(owner_user_id))
+    return await _get_or_init_db_instance_from_runtime(
+        owner_user_id, _tenant_client_id(owner_user_id, None)
+    )
 
 
 def close_all_chacha_db_instances():

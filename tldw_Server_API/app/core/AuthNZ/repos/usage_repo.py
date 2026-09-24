@@ -74,6 +74,37 @@ class AuthnzUsageRepo:
         """
         return bool(getattr(self.db_pool, "pool", None))
 
+    async def sum_org_api_requests(self, *, org_id: int, day: date) -> int:
+        """Sum the UTC daily rollup, assigning each user to one primary org.
+
+        The aggregate stores user/day counts, not request-time org or API-key
+        attribution. Use active memberships only and follow billing's user-scoped
+        LLM convention: earliest dated membership, then lowest org ID. Undated
+        legacy memberships are ignored, as in the existing SQLite LLM attribution query.
+        Counts reflect rollup freshness.
+        Source failures propagate so the caller retains its failure policy.
+        """
+        day_param = day if self._is_postgres_backend() else day.isoformat()
+        result = await self.db_pool.fetchval(
+            """
+            WITH primary_org AS (
+                SELECT user_id, org_id,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY user_id ORDER BY added_at ASC, org_id ASC
+                       ) AS rank
+                FROM org_members
+                WHERE added_at IS NOT NULL
+                  AND LOWER(TRIM(status)) = 'active'
+            )
+            SELECT COALESCE(SUM(u.requests), 0)
+            FROM usage_daily AS u
+            JOIN primary_org AS po ON po.user_id = u.user_id AND po.rank = 1
+            WHERE po.org_id = ? AND u.day = ?
+            """,
+            org_id, day_param,
+        )
+        return int(result or 0)
+
     async def summarize_key_day(
         self,
         *,

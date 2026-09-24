@@ -5,6 +5,8 @@ import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
+  realSelection: false,
+  ownerReady: null as Promise<void> | null,
   listAllCharacters: vi.fn(async () => []),
   listPersonaProfiles: vi.fn(async () => []),
   getPersonaProfile: vi.fn(async () => null),
@@ -47,9 +49,16 @@ vi.mock("react-i18next", () => ({
   })
 }))
 
-vi.mock("@plasmohq/storage/hook", () => ({
-  useStorage: (_key: string, defaultValue: unknown) =>
-    React.useState(defaultValue)
+vi.mock("@plasmohq/storage", () => import("../../../../../../tldw-frontend/extension/shims/plasmo-storage"))
+vi.mock("@plasmohq/storage/hook", () => import("../../../../../../tldw-frontend/extension/shims/plasmo-storage-hook"))
+vi.mock("@/services/service-prompts", async importOriginal => ({
+  ...await importOriginal<typeof import("@/services/service-prompts")>(),
+  resolveServicePromptScope: async () => {
+    await mocks.ownerReady
+    return { scopeKey: "alice", userId: "alice", config: {
+      serverUrl: "http://localhost:8000", authMode: "multi-user", authSource: "manual", orgId: 2
+    } }
+  }
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
@@ -62,13 +71,14 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   }
 }))
 
-vi.mock("@/hooks/useSelectedAssistant", () => ({
-  useSelectedAssistant: () => [
+vi.mock("@/hooks/useSelectedAssistant", async importOriginal => {
+  const actual = await importOriginal<typeof import("@/hooks/useSelectedAssistant")>()
+  return { useSelectedAssistant: () => mocks.realSelection ? actual.useSelectedAssistant() : [
     mocks.selectedAssistant.value,
     mocks.setSelectedAssistant,
     { isLoading: false, setRenderValue: vi.fn() }
-  ]
-}))
+  ] }
+})
 
 vi.mock("@/store/option", () => ({
   useStoreMessageOption: Object.assign(
@@ -185,7 +195,10 @@ const renderAssistantSelect = (
 
 describe("AssistantSelect behavior", () => {
   beforeEach(() => {
+    localStorage.clear()
     vi.clearAllMocks()
+    mocks.realSelection = false
+    mocks.ownerReady = null
     mocks.selectedAssistant.value = null
     state.option = {
       historyId: "history-overlay-1",
@@ -222,6 +235,50 @@ describe("AssistantSelect behavior", () => {
       avatar_url: "https://example.com/alpha-full.png",
       system_prompt: "Character full prompt"
     })
+  })
+
+  it("waits for verified ownership before accepting a picker choice or replacing Chat", async () => {
+    localStorage.clear()
+    mocks.realSelection = true
+    let release!: () => void
+    mocks.ownerReady = new Promise<void>(resolve => { release = resolve })
+    const complete = vi.fn()
+    const user = userEvent.setup()
+    renderAssistantSelect({ onSelectionComplete: complete })
+    await user.click(screen.getByRole("button", { name: "Select character or persona" }))
+    const choice = await screen.findByRole("button", { name: "Alpha" })
+    expect(choice).toBeDisabled()
+    await user.click(choice)
+    expect(state.option.setServerChatId).not.toHaveBeenCalled()
+    expect(complete).not.toHaveBeenCalled()
+    await act(async () => { release() })
+    await waitFor(() => expect(choice).toBeEnabled())
+    await user.click(choice)
+    await waitFor(() => expect(complete).toHaveBeenCalledWith(expect.objectContaining({ id: "char-1" })))
+  })
+
+  it.each(["javascript:alert(1)", "data:image/svg+xml,<svg onload='alert(1)'/>"])(
+    "does not render an unsafe assistant avatar: %s",
+    async (avatar_url) => {
+      mocks.listAllCharacters.mockResolvedValue([
+        { id: "char-1", name: "Alpha", avatar_url }
+      ])
+      renderAssistantSelect({ variant: "inline" })
+
+      await screen.findByRole("button", { name: "Alpha" })
+      expect(screen.queryByRole("img", { name: "Alpha" })).not.toBeInTheDocument()
+    }
+  )
+
+  it("renders an allowed assistant avatar", async () => {
+    mocks.listAllCharacters.mockResolvedValue([
+      { id: "char-1", name: "Alpha", avatar_url: "https://example.com/alpha.png" }
+    ])
+    renderAssistantSelect({ variant: "inline" })
+
+    expect(await screen.findByRole("img", { name: "Alpha" })).toHaveAttribute(
+      "src", "https://example.com/alpha.png"
+    )
   })
 
   it("stages a controlled selection without changing the active chat or stored assistant", async () => {

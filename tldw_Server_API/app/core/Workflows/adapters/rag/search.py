@@ -22,6 +22,7 @@ from tldw_Server_API.app.core.http_client import create_client as _wf_create_cli
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
 from tldw_Server_API.app.core.Security.egress import is_url_allowed, is_url_allowed_for_tenant
 from tldw_Server_API.app.core.testing import is_test_mode, is_truthy
+from tldw_Server_API.app.core.Workflows.adapters._common import resolve_context_user_id
 from tldw_Server_API.app.core.Workflows.adapters._registry import registry
 from tldw_Server_API.app.core.Workflows.adapters.rag._config import (
     RAGSearchConfig,
@@ -86,10 +87,15 @@ async def run_rag_search_adapter(config: dict[str, Any], context: dict[str, Any]
     top_k = int(config.get("top_k", 10))
     hybrid_alpha = float(config.get("hybrid_alpha", 0.7))
 
-    # Default DB path for media; prefer per-user default
+    # Media DB path for the account running this step. This previously read
+    # get_single_user_id() unconditionally, so every workflow rag.search --
+    # whoever ran it -- searched user 1's library and returned user 1's content.
+    user_id = resolve_context_user_id(context)
+    if not user_id:
+        return {"documents": [], "metadata": {"error": "missing_user_id"}}
     try:
         from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-        media_db_path = str(DatabasePaths.get_media_db_path(DatabasePaths.get_single_user_id()))
+        media_db_path = str(DatabasePaths.get_media_db_path(user_id))
     except Exception as exc:
         logger.error("Failed to resolve Media DB path for workflow search")
         raise RuntimeError("Failed to resolve Media DB path for workflow search") from exc

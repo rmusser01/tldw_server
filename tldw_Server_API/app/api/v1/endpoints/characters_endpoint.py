@@ -8,7 +8,7 @@ import os
 import pathlib
 import struct
 import zlib
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Literal, Optional
 
 #
@@ -202,6 +202,7 @@ from tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_embeddings
     delete_character_exemplar_embeddings,
 )
 from tldw_Server_API.app.core.Character_Chat.world_book_manager import WorldBookService
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -358,12 +359,14 @@ def _build_character_version_diff_fields(
     return changed_fields
 
 
-# --- Helper Functions (Keep _convert_db_char_to_response_model as is) ---
+# --- Helper Functions ---
 def _convert_db_char_to_response_model(
         char_dict_from_db: dict[str, Any],
         *,
+        backend_type: BackendType,
         include_image_base64: bool = True
 ) -> CharacterResponse:
+    """Serialize Character dates with SQLite UTC defaults made explicit."""
     response_data = char_dict_from_db.copy()
     if response_data.get('image') and isinstance(response_data['image'], bytes):
         if include_image_base64:
@@ -386,7 +389,13 @@ def _convert_db_char_to_response_model(
     if response_data.get("last_modified") is None:
         response_data["last_modified"] = response_data.get("updated_at")
     response_data.pop('image', None)
-    return CharacterResponse.model_validate(response_data)
+    response = CharacterResponse.model_validate(response_data)
+    if backend_type == BackendType.SQLITE:
+        for field in ("created_at", "updated_at", "last_modified"):
+            value = getattr(response, field)
+            if value is not None and value.utcoffset() is None:
+                setattr(response, field, value.replace(tzinfo=timezone.utc))
+    return response
 
 
 def _build_conflict_import_response(
@@ -421,7 +430,7 @@ def _build_conflict_import_response(
             f"Character '{existing_name}' already exists (ID: {existing_id}). "
             "Details provided."
         ),
-        character=_convert_db_char_to_response_model(existing_char_db),
+        character=_convert_db_char_to_response_model(existing_char_db, backend_type=db.backend_type),
     )
 
 
@@ -877,7 +886,7 @@ async def import_character_endpoint(
             id=char_id,
             name=imported_char.get('name', 'Unknown'),
             message=f"Character '{imported_char.get('name', 'Unknown')}' imported successfully",
-            character=_convert_db_char_to_response_model(imported_char)
+            character=_convert_db_char_to_response_model(imported_char, backend_type=db.backend_type)
         )
     except ConflictError as e:  # Character with same name already exists
         # The library function might return the ID of the existing char if we want that behavior.
@@ -927,7 +936,7 @@ async def list_all_characters(  # Renamed from list_characters to avoid conflict
         # Using the interop library function that calls db.list_character_cards
         # but get_character_list_for_ui returns simplified data. We need full data here.
         raw_cards = db.list_character_cards(limit=limit, offset=offset)  # Direct DB call for full data
-        return [_convert_db_char_to_response_model(card) for card in raw_cards]
+        return [_convert_db_char_to_response_model(card, backend_type=db.backend_type) for card in raw_cards]
     except CharactersRAGDBError as e:
         logger.error(f"DB error listing characters: {e}", exc_info=True)
         raise map_db_error_to_http(e, default_detail="Failed to list characters") from e
@@ -987,6 +996,7 @@ async def query_characters(
         items = [
             _convert_db_char_to_response_model(
                 card,
+                backend_type=db.backend_type,
                 include_image_base64=include_image_base64
             )
             for card in raw_cards
@@ -1057,7 +1067,7 @@ async def create_new_character_endpoint(
         if not created_char_db:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                                 detail="Failed to retrieve character after creation.")
-        return _convert_db_char_to_response_model(created_char_db)
+        return _convert_db_char_to_response_model(created_char_db, backend_type=db.backend_type)
     except (InputError, ConflictError) as e:  # Propagated from lib
         logger.warning(f"Error creating character: {e}")
         raise map_db_error_to_http(e) from e
@@ -1097,7 +1107,7 @@ async def filter_characters_by_tags(
         # If no tags specified, return all characters
         if not tags:
             results = db.list_character_cards(limit=limit, offset=offset)
-            return [_convert_db_char_to_response_model(char) for char in results]
+            return [_convert_db_char_to_response_model(char, backend_type=db.backend_type) for char in results]
 
         # Get all characters (we'll filter in memory for now)
         all_characters = db.list_character_cards(limit=1000, offset=0)
@@ -1129,7 +1139,7 @@ async def filter_characters_by_tags(
         # Apply pagination
         paginated = filtered[offset:offset+limit]
 
-        return [_convert_db_char_to_response_model(char) for char in paginated]
+        return [_convert_db_char_to_response_model(char, backend_type=db.backend_type) for char in paginated]
 
     except _CHARACTERS_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Error filtering characters by tags: {e}", exc_info=True)
@@ -1580,7 +1590,7 @@ async def get_character_by_id_endpoint(  # Renamed from get_character
         if not char_db:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                                 detail=f"Character with ID {character_id} not found.")
-        return _convert_db_char_to_response_model(char_db)
+        return _convert_db_char_to_response_model(char_db, backend_type=db.backend_type)
     except CharactersRAGDBError as e:
         logger.error(f"DB error getting character {character_id}: {e}", exc_info=True)
         raise map_db_error_to_http(e, default_detail="Failed to get character") from e
@@ -1777,7 +1787,7 @@ async def revert_character_to_version_endpoint(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Character reverted but could not be retrieved.",
             )
-        return _convert_db_char_to_response_model(updated_char)
+        return _convert_db_char_to_response_model(updated_char, backend_type=db.backend_type)
     except InputError as e:
         logger.warning(f"Validation error reverting character {character_id}: {e}")
         raise map_db_error_to_http(e) from e
@@ -1826,7 +1836,7 @@ async def update_character_endpoint(  # Renamed from update_character
         if not updated_char_db:  # Should not happen if update was successful
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                                 detail="Failed to retrieve character after update.")
-        return _convert_db_char_to_response_model(updated_char_db)
+        return _convert_db_char_to_response_model(updated_char_db, backend_type=db.backend_type)
 
     except (InputError, ConflictError) as e:
         logger.warning(f"Error updating character {character_id}: {e}")
@@ -1919,7 +1929,7 @@ async def restore_character_endpoint(
 
         logger.info(f"Character '{restored_char.get('name', 'Unknown')}' (ID: {character_id}) restored successfully")
 
-        return _convert_db_char_to_response_model(restored_char)
+        return _convert_db_char_to_response_model(restored_char, backend_type=db.backend_type)
 
     except RestoreWindowExpiredError as e:
         logger.info(
@@ -1965,7 +1975,7 @@ async def search_characters_endpoint(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Search query cannot be empty.")
     try:
         results_db = search_characters_by_query_text(db, query, limit=limit)
-        return [_convert_db_char_to_response_model(card) for card in results_db]
+        return [_convert_db_char_to_response_model(card, backend_type=db.backend_type) for card in results_db]
     except CharactersRAGDBError as e:
         logger.error(f"DB error searching characters for '{query}': {e}", exc_info=True)
         raise map_db_error_to_http(e, default_detail="Failed to search characters") from e

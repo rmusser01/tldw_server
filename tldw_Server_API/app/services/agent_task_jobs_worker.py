@@ -14,13 +14,12 @@ import os
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Jobs.manager import JobManager
-from tldw_Server_API.app.core.Scheduled_Tasks.agent_task_jobs import (
-    RUN_EXECUTION_TIMEOUT_SECONDS,
-)
+from tldw_Server_API.app.core.exceptions import ScheduledTaskClaimBusy, ScheduledTaskPersistenceError
+from tldw_Server_API.app.core.Jobs.worker_utils import jobs_manager_from_env
 from tldw_Server_API.app.core.Scheduled_Tasks.agent_task_jobs import (
     AUTOMATION_DOMAIN,
     AUTOMATION_JOB_TYPE,
+    RUN_EXECUTION_TIMEOUT_SECONDS,
     handle_agent_task_job,
 )
 from tldw_Server_API.app.core.testing import env_flag_enabled
@@ -44,7 +43,7 @@ def agent_task_jobs_queue() -> str:
 
 async def run_agent_task_jobs_worker(stop_event: asyncio.Event | None = None) -> None:
     """Poll the automation queue and consume agent_task_run Jobs until stopped."""
-    jm = JobManager()
+    jm = jobs_manager_from_env()
     worker_id = "agent-task-jobs-worker"
     queue = agent_task_jobs_queue()
     poll_sleep = float(os.getenv("JOBS_POLL_INTERVAL_SECONDS", "1.0") or "1.0")
@@ -96,7 +95,7 @@ async def run_agent_task_jobs_worker(stop_event: asyncio.Event | None = None) ->
                 continue
 
             try:
-                result = await handle_agent_task_job(job)
+                result = await handle_agent_task_job(job, jobs_manager=jm)
                 jm.complete_job(
                     int(job["id"]),
                     result=result,
@@ -104,11 +103,16 @@ async def run_agent_task_jobs_worker(stop_event: asyncio.Event | None = None) ->
                     lease_id=lease_id,
                     completion_token=lease_id,
                 )
+            except ScheduledTaskClaimBusy as exc:
+                # A duplicate may share the active executor's very same Jobs
+                # lease. Neither complete nor fail/release that lease here.
+                logger.warning("Automation Job {} needs execution reconciliation: {}", job["id"], exc)
+                continue
             except _AGENT_WORKER_NONCRITICAL_EXCEPTIONS as exc:
                 jm.fail_job(
                     int(job["id"]),
                     error=str(exc),
-                    retryable=False,
+                    retryable=isinstance(exc, ScheduledTaskPersistenceError),
                     worker_id=worker_id,
                     lease_id=lease_id,
                     completion_token=lease_id,

@@ -81,6 +81,18 @@ Verification:
 - tests/MCP + MCP_Hub + MCP_unified: 4 failed, unchanged
 - tests/sandbox + Services: 24 failed, identical with and without the change (stash-isolated)
 - AC7 bandit: clean over the five touched files, no issues at any severity. Run via `uvx bandit`; bandit is CI-only (security-required.yml), not a declared local dependency, so the venv was left untouched.
+
+
+Notes recorded on dev by the parallel core-review work (merged 2026-09-23):
+Whitespace half SHIPPED in PR #2980 (merge 8045fa2956): BaseModule.sanitize_input and the FilesystemModule override now preserve \t and \r, so fs.write no longer corrupts tab-significant files and fs.edit can match tab-indented content. Qodo correctly caught that fixing only the base class was ineffective, since the override shadows it on the production path.
+STILL OPEN - the dangerous_patterns denylist. It rejects '--', '/*', 'xp_', so ordinary Markdown rules, src/*.py pathspecs, git '-- path' and exp_ filenames are refused on data that is bound to parameterised queries. Removing it requires confirming all 22 inheriting modules actually parameterise, which is an owner decision rather than a drive-by edit.
+Also still divergent and out of scope for that change: sandbox_module.py strips \t, and run_command_module.py keeps \t but strips \r. Three predicates remain across the four overrides.
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

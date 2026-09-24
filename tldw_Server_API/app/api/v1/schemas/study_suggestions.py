@@ -1,9 +1,9 @@
 """Shared Pydantic schemas for study-suggestion status and action contracts."""
 
+from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
-
+from pydantic import BaseModel, Field, field_validator
 
 SuggestionApiStatus = Literal["none", "pending", "ready", "failed"]
 
@@ -63,6 +63,12 @@ class SuggestionSnapshotResource(BaseModel):
     refreshed_from_snapshot_id: int | None = None
     created_at: str | None = None
     last_modified: str | None = None
+
+    @field_validator("created_at", "last_modified", mode="before")
+    @classmethod
+    def _serialize_timestamps(cls, value: Any) -> Any:
+        """Keep database datetimes compatible with the public string contract."""
+        return value.isoformat() if isinstance(value, datetime) else value
 
 
 class SuggestionSnapshotResponse(BaseModel):

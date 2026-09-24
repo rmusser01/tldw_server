@@ -636,6 +636,9 @@
     }
   },
   "admin": {
+    "users": {
+      "passwordGuidance": "Use a long, unique password with uppercase and lowercase letters, a number, and a symbol. Avoid your username and sequences or repeats of three characters."
+    },
     "adminGuardForbiddenTitle": "Admin access required for these controls",
     "adminGuardNotFoundTitle": "Admin APIs are not available on this server",
     "adminGuardForbiddenBody": "Sign in as an admin user on your tldw server to view and manage users, roles, and system statistics.",
@@ -2337,6 +2340,7 @@
   "saveFailed": "Failed to save settings",
   "siteAccessGranted": "Host permission granted for {{origin}}",
   "onboarding": {
+    "loginSettingsError": "Login settings could not be opened. Try again.",
     "title": "Welcome to tldw Browser Assistant— Let’s get you connected",
     "description": "Connect this extension to your tldw server (a separate app running on your machine or server). We’ll walk through adding the URL, API key, and checking that everything is reachable.",
     "exploreWithoutServer": "You can explore the UI without a server; some features (chat, media ingest, Knowledge search) will stay disabled until you connect.",

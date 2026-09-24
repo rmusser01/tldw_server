@@ -1547,6 +1547,44 @@ def _sqlite_path_from_url(database_url: str, default_path: Path) -> Path | str:
     return Path(resolved)
 
 
+def _reject_shared_sync_store_in_multi_user_mode(target: str) -> None:
+    """Refuse a sync store that every account would share.
+
+    Sync v2 isolates accounts by storage location: each user gets their own
+    SQLite file under their database directory. The schema cannot isolate them
+    any other way -- the core tables carry no owner column at all
+    (sync_envelopes, sync_object_state, sync_current_heads, sync_device_cursors,
+    sync_conflicts, sync_attachments, sync_blob_chunks, sync_domain_state), and
+    no query in this module filters on one. Ownership exists only on the
+    periphery: datasets, devices, blobs.
+
+    SYNC_V2_DATABASE_URL and SYNC_V2_SQLITE_PATH both override that location
+    with a single fixed target and drop the user id, so in multi-user mode every
+    account's synced content -- notes, chat messages, attachments -- lands in one
+    store with no way to tell it apart afterwards.
+
+    Adding predicates would not fix it; the columns to filter on do not exist.
+    So this refuses the configuration rather than silently commingling. Single-
+    user mode is unaffected: there is only one account to isolate.
+    """
+    from tldw_Server_API.app.core.AuthNZ.settings import is_single_user_mode
+
+    try:
+        single_user = is_single_user_mode()
+    except Exception:  # noqa: BLE001 - treat an unknown auth mode as multi-user
+        single_user = False
+    if single_user:
+        return
+    raise SyncStoreError(
+        "Sync v2 is configured with a shared store "
+        f"({target!r}) while running in multi-user mode. Sync isolates accounts "
+        "by storage location and its core tables carry no owner column, so a "
+        "shared store would commingle every account's synced content with no "
+        "way to separate it. Unset SYNC_V2_DATABASE_URL and SYNC_V2_SQLITE_PATH "
+        "to use the per-user database directory."
+    )
+
+
 def _default_sync_db_path(user_id: int | str | None) -> Path:
     user_dir = DatabasePaths.get_user_base_directory(user_id)
     return user_dir / SYNC_DB_FILENAME
@@ -2437,6 +2475,9 @@ class SyncDatabase:
         default_path = _default_sync_db_path(user_id)
         custom_url = os.getenv("SYNC_V2_DATABASE_URL", "").strip()
         custom_path = sqlite_path or os.getenv("SYNC_V2_SQLITE_PATH", "").strip()
+
+        if user_id is not None and (custom_url or custom_path):
+            _reject_shared_sync_store_in_multi_user_mode(custom_url or str(custom_path))
 
         if custom_url:
             parsed = urlparse(custom_url)

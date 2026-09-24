@@ -4,6 +4,7 @@ import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
+  assistantLoading: false,
   getConfig: vi.fn(),
   getFullChatData: vi.fn(),
   getPromptById: vi.fn(),
@@ -42,7 +43,7 @@ vi.mock("@/hooks/useConnectionState", () => ({
 }))
 
 vi.mock("@/hooks/useSelectedAssistant", () => ({
-  useSelectedAssistant: () => [null, mocks.setSelectedAssistant]
+  useSelectedAssistant: () => [null, mocks.setSelectedAssistant, { isLoading: mocks.assistantLoading }]
 }))
 
 import { usePlaygroundSessionPersistence } from "../usePlaygroundSessionPersistence"
@@ -53,6 +54,7 @@ import type { ServerChatSummary } from "@/services/tldw/TldwApiClient"
 
 describe("usePlaygroundSessionPersistence", () => {
   beforeEach(() => {
+    mocks.assistantLoading = false
     localStorage.clear()
     vi.clearAllMocks()
     mocks.getConfig.mockResolvedValue(null)
@@ -83,6 +85,24 @@ describe("usePlaygroundSessionPersistence", () => {
       temporaryChat: false
     })
     usePlaygroundSessionStore.getState().clearSession()
+  })
+
+  it("waits for the assistant account before restoring a saved conversation", async () => {
+    mocks.assistantLoading = true
+    usePlaygroundSessionStore.getState().saveSession({
+      historyId: null, serverChatId: "saved-chat", serverChatTitle: "Saved",
+      chatMode: "normal", scopeKey: "global"
+    })
+    const view = renderHook(() => usePlaygroundSessionPersistence())
+    await act(async () => { await Promise.resolve() })
+    expect(view.result.current.sessionScopeReady).toBe(false)
+    await expect(view.result.current.restoreSession()).resolves.toBe("cancelled")
+    expect(useStoreMessageOption.getState().serverChatId).toBeNull()
+    mocks.assistantLoading = false
+    view.rerender()
+    await waitFor(() => expect(view.result.current.sessionScopeReady).toBe(true))
+    await act(async () => { await expect(view.result.current.restoreSession()).resolves.toBe("restored") })
+    expect(useStoreMessageOption.getState().serverChatId).toBe("saved-chat")
   })
 
   it("does not stamp a pending private session save with the next account on unmount", async () => {

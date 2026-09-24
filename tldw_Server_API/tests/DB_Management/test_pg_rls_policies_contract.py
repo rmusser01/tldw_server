@@ -541,3 +541,55 @@ def test_run_pg_rls_auto_ensure_logs_success_only_after_both_installers_pass(mon
         pytest.fail("expected startup helper to log the combined RLS result")
     if "PG RLS ensure invoked" not in logged_messages[0][0]:
         pytest.fail("expected startup helper to log the combined RLS result")
+
+
+def test_core_chat_tables_are_policied_and_forced():
+    """conversations and messages had no policy at all until now.
+
+    They sat next to `notes`, which has had one since the beginning, and were
+    already referenced *inside* other tables' policies -- so their ownership was
+    understood; they simply never got policies of their own. On SQLite that is
+    invisible because each account holds its own file. On PostgreSQL the whole
+    ChaCha schema lives in one shared database.
+    """
+    sql = "\n".join(build_chacha_rls_sql())
+
+    for table in (
+        "conversations",
+        "messages",
+        # chacha_keywords, not keywords: PostgreSQL namespaces this relation and
+        # renames any legacy `keywords` into it. Policying the wrong name aborts
+        # the whole install transaction, since DROP POLICY has no IF EXISTS for
+        # the table.
+        "chacha_keywords",
+        "keyword_collections",
+        "sync_log",
+    ):
+        assert f"ALTER TABLE IF EXISTS {table} ENABLE ROW LEVEL SECURITY" in sql
+        assert f"ALTER TABLE IF EXISTS {table} FORCE ROW LEVEL SECURITY" in sql
+        assert f"CREATE POLICY {table}_tenant_isolation ON {table}" in sql
+
+
+def test_message_policy_is_scoped_through_its_conversation():
+    """A message must belong to the caller AND hang off a conversation that does.
+
+    Without the parent check, a row whose own client_id matches but whose
+    conversation belongs to someone else would still be readable.
+    """
+    sql = "\n".join(build_chacha_rls_sql())
+    start = sql.index("CREATE POLICY messages_tenant_isolation")
+    policy = sql[start : start + 700]
+
+    assert "messages.client_id = current_setting('app.current_user_id', true)" in policy
+    assert "FROM conversations AS parent" in policy
+    assert "parent.client_id = messages.client_id" in policy
+
+
+def test_every_core_chat_policy_has_a_with_check():
+    """USING alone filters reads; WITH CHECK is what stops cross-tenant writes."""
+    sql = "\n".join(build_chacha_rls_sql())
+
+    for table in ("conversations", "messages", "chacha_keywords", "sync_log"):
+        start = sql.index(f"CREATE POLICY {table}_tenant_isolation")
+        policy = sql[start : sql.index(";", start)]
+        assert "WITH CHECK" in policy, f"{table} policy must constrain writes too"

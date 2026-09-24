@@ -6,11 +6,11 @@ import os
 from collections.abc import AsyncIterator, Iterable
 from typing import Any
 
-from tldw_Server_API.app.core.LLM_Calls.capability_registry import validate_payload
 from tldw_Server_API.app.core.LLM_Calls.cache_intents import (
     apply_billing_prompt_cache_intent,
     attach_cache_intent_metadata,
 )
+from tldw_Server_API.app.core.LLM_Calls.capability_registry import validate_payload
 from tldw_Server_API.app.core.LLM_Calls.payload_utils import merge_extra_body, merge_extra_headers
 from tldw_Server_API.app.core.LLM_Calls.sse import (
     finalize_stream,
@@ -58,8 +58,6 @@ else:
     )
 
 
-def _prefer_httpx_in_tests() -> bool:
-    return bool(os.getenv("PYTEST_CURRENT_TEST"))
 from tldw_Server_API.app.core.http_client import (
     create_client as _hc_create_client,
 )
@@ -79,9 +77,6 @@ class AnthropicAdapter(ChatProvider):
         }
 
     def _use_native_http(self) -> bool:
-        import os
-        if os.getenv("PYTEST_CURRENT_TEST"):
-            return True
         v = (os.getenv("LLM_ADAPTERS_NATIVE_HTTP_ANTHROPIC") or "").strip().lower()
         if v in {"0", "false", "no", "off"}:
             return False
@@ -90,7 +85,6 @@ class AnthropicAdapter(ChatProvider):
         return True
 
     def _anthropic_base_url(self) -> str:
-        import os
         return os.getenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com/v1")
 
     def _resolve_base_url(self, request: dict[str, Any]) -> str:
@@ -389,7 +383,7 @@ class AnthropicAdapter(ChatProvider):
     def chat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
         request = self._bind_request_credentials(request)
         request = validate_payload(self.name, request or {})
-        if _prefer_httpx_in_tests() or os.getenv("PYTEST_CURRENT_TEST") or self._use_native_http():
+        if self._use_native_http():
             api_key = request.get("api_key")
             url = f"{self._resolve_base_url(request).rstrip('/')}/messages"
             headers = self._headers(api_key)
@@ -443,7 +437,7 @@ class AnthropicAdapter(ChatProvider):
     def stream(self, request: dict[str, Any], *, timeout: float | None = None) -> Iterable[str]:
         request = self._bind_request_credentials(request)
         request = validate_payload(self.name, request or {})
-        if _prefer_httpx_in_tests() or os.getenv("PYTEST_CURRENT_TEST") or self._use_native_http():
+        if self._use_native_http():
             api_key = request.get("api_key")
             url = f"{self._resolve_base_url(request).rstrip('/')}/messages"
             headers = self._headers(api_key)

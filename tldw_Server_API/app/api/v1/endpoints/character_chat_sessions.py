@@ -6761,7 +6761,11 @@ async def character_chat_completion(
                     yield sse_data(tail)
                     yield sse_done()
                 except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as e:
-                    yield sse_data({'error': str(e)})
+                    logger.debug(
+                        "Character buffered stream failure error_type={}",
+                        type(e).__name__,
+                    )
+                    yield sse_data({'error': 'An internal error has occurred.'})
                     yield sse_done()
 
             return StreamingResponse(_stream_text(), media_type="text/event-stream", headers=sse_headers)

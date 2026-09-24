@@ -40,7 +40,19 @@ export function useMediaNavigationState(deps: UseMediaNavigationStateDeps) {
   const location = useLocation()
 
   const [selected, setSelected] = useState<MediaResultItem | null>(null)
-  const lifetime = useMediaRequestLifetime()
+  const lifetime = useMediaRequestLifetime(() => {
+    detailGeneration.current += 1
+    pendingDetailRequestRef.current = null
+    setSelected(null)
+    setSelectedContent('')
+    setSelectedDetail(null)
+    setDetailLoading(false)
+    setDetailFetchError(null)
+    setStaleSelectionNotice(null)
+    setLastFetchedId(null)
+    setPendingInitialMediaId(null)
+    setPendingInitialMediaIdSource(null)
+  })
   const selectionRef = useRef(selected)
   selectionRef.current = selected
   const detailGeneration = useRef(0)

@@ -6,6 +6,7 @@ import ViewMediaPage from '../ViewMediaPage'
 import { MEDIA_REVIEW_SELECTION_SETTING } from '@/services/settings/ui-settings'
 
 const mocks = vi.hoisted(() => ({
+  queryClient: { removeQueries: vi.fn() },
   queryData: [] as Array<any>,
   refetch: vi.fn(),
   bgRequest: vi.fn(),
@@ -43,6 +44,7 @@ vi.mock('react-i18next', () => ({
 }))
 
 vi.mock('@tanstack/react-query', () => ({
+  useQueryClient: () => mocks.queryClient,
   useQuery: () => ({
     data: mocks.queryData,
     refetch: mocks.refetch,

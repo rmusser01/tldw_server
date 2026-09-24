@@ -1,0 +1,2021 @@
+{
+  "files": 5161,
+  "counts": {
+    "react-hooks/refs": 105,
+    "react-hooks/set-state-in-effect": 90,
+    "react-hooks/immutability": 21,
+    "react-hooks/preserve-manual-memoization": 49
+  },
+  "total": 265,
+  "findings": [
+    {
+      "file": "apps/packages/ui/src/components/Agent/DiffViewer.tsx",
+      "line": 289,
+      "column": 5,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Agent/DiffViewer.tsx",
+      "line": 306,
+      "column": 5,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Chat/composer/PromptAssistComposerAction.tsx",
+      "line": 70,
+      "column": 3,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Chat/composer/hooks/useComposerVoiceChat.ts",
+      "line": 158,
+      "column": 3,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Chat/composer/hooks/useComposerVoiceChat.ts",
+      "line": 160,
+      "column": 3,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Chat/composer/hooks/useComposerVoiceChat.ts",
+      "line": 162,
+      "column": 3,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Chat/composer/hooks/useComposerVoiceChat.ts",
+      "line": 371,
+      "column": 3,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Chat/composer/hooks/useComposerVoiceChat.ts",
+      "line": 372,
+      "column": 3,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Chat/composer/hooks/useComposerVoiceChat.ts",
+      "line": 373,
+      "column": 3,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/CodeBlock.tsx",
+      "line": 99,
+      "column": 8,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/CodeBlock.tsx",
+      "line": 105,
+      "column": 8,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/CodeBlock.tsx",
+      "line": 111,
+      "column": 8,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/CodeBlock.tsx",
+      "line": 117,
+      "column": 27,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/CodeBlock.tsx",
+      "line": 117,
+      "column": 27,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/CodeBlock.tsx",
+      "line": 117,
+      "column": 27,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/CodeBlock.tsx",
+      "line": 118,
+      "column": 29,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/CodeBlock.tsx",
+      "line": 118,
+      "column": 29,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/CodeBlock.tsx",
+      "line": 118,
+      "column": 29,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/CodeBlock.tsx",
+      "line": 119,
+      "column": 28,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/CodeBlock.tsx",
+      "line": 119,
+      "column": 28,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/CodeBlock.tsx",
+      "line": 121,
+      "column": 59,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/CodeBlock.tsx",
+      "line": 125,
+      "column": 55,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/CodeBlock.tsx",
+      "line": 298,
+      "column": 6,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/CommandPalette.tsx",
+      "line": 214,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/CommandPalette.tsx",
+      "line": 652,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/CommandPalette.tsx",
+      "line": 675,
+      "column": 5,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/CommandPalette.tsx",
+      "line": 685,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/Markdown.tsx",
+      "line": 299,
+      "column": 32,
+      "rule": "react-hooks/immutability",
+      "message": "Error: Cannot access variable before it is declared"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/MermaidPreviewDialog.tsx",
+      "line": 69,
+      "column": 5,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/ModelSelectOption.tsx",
+      "line": 29,
+      "column": 38,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/PageHelpModal.tsx",
+      "line": 235,
+      "column": 5,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/PersonaBuddy/IndependentBuddyHost.tsx",
+      "line": 608,
+      "column": 5,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/PersonaBuddy/IndependentBuddyHost.tsx",
+      "line": 608,
+      "column": 5,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/PersonaBuddy/IndependentBuddyHost.tsx",
+      "line": 610,
+      "column": 5,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/PersonaBuddy/IndependentBuddyHost.tsx",
+      "line": 610,
+      "column": 48,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/PersonaBuddy/IndependentBuddyHost.tsx",
+      "line": 614,
+      "column": 35,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/Playground/CompactMessage.tsx",
+      "line": 167,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/Playground/CompactMessage.tsx",
+      "line": 192,
+      "column": 5,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/Playground/CompactMessage.tsx",
+      "line": 264,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/PromptAssist/PromptAssistPanel.tsx",
+      "line": 116,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/PromptAssist/__tests__/PromptAssistPanel.test.tsx",
+      "line": 91,
+      "column": 8,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/PromptAssist/__tests__/PromptAssistPanel.test.tsx",
+      "line": 108,
+      "column": 34,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/PromptAssist/__tests__/PromptAssistPanel.test.tsx",
+      "line": 109,
+      "column": 14,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/PromptSelect.tsx",
+      "line": 95,
+      "column": 3,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/PromptSelect.tsx",
+      "line": 107,
+      "column": 3,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/PromptSelect.tsx",
+      "line": 119,
+      "column": 7,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/PromptSelect.tsx",
+      "line": 120,
+      "column": 5,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/PromptSelect.tsx",
+      "line": 121,
+      "column": 5,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/PromptSelect.tsx",
+      "line": 121,
+      "column": 5,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/PromptSelect.tsx",
+      "line": 465,
+      "column": 13,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/PromptSelect.tsx",
+      "line": 491,
+      "column": 13,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/PromptSelect.tsx",
+      "line": 577,
+      "column": 16,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/PromptSelect.tsx",
+      "line": 585,
+      "column": 9,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/PromptSelect.tsx",
+      "line": 586,
+      "column": 21,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/QuickIngest/FloatingProgressWidget.tsx",
+      "line": 194,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/QuickIngest/ItemMetadataTable.tsx",
+      "line": 65,
+      "column": 5,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/QuickIngest/useIngestSSE.ts",
+      "line": 292,
+      "column": 11,
+      "rule": "react-hooks/immutability",
+      "message": "Error: Cannot access variable before it is declared"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/QuickIngestWizardModal.tsx",
+      "line": 1000,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/QuickIngestWizardModal.tsx",
+      "line": 1622,
+      "column": 10,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/QuickIngestWizardModal.tsx",
+      "line": 1728,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/Settings/CurrentChatModelSettings.tsx",
+      "line": 743,
+      "column": 5,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/Settings/CurrentChatModelSettings.tsx",
+      "line": 743,
+      "column": 5,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/Settings/CurrentChatModelSettings.tsx",
+      "line": 743,
+      "column": 5,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/Settings/CurrentChatModelSettings.tsx",
+      "line": 743,
+      "column": 5,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/Settings/ThemeAdvancedEditor.tsx",
+      "line": 176,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/SplashScreen/engine/useAnimationFrame.ts",
+      "line": 29,
+      "column": 44,
+      "rule": "react-hooks/immutability",
+      "message": "Error: Cannot access variable before it is declared"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/TableBlock.tsx",
+      "line": 38,
+      "column": 9,
+      "rule": "react-hooks/immutability",
+      "message": "Error: This value cannot be modified"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/Workflow/WorkflowLanding.tsx",
+      "line": 74,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Common/Workflow/steps/AnalyzeBookWorkflow.tsx",
+      "line": 750,
+      "column": 9,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/DocumentWorkspace/DocumentViewer/PdfViewer/PdfDocument.tsx",
+      "line": 281,
+      "column": 5,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/DocumentWorkspace/DocumentViewer/PdfViewer/PdfDocument.tsx",
+      "line": 281,
+      "column": 17,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/DocumentWorkspace/DocumentViewer/PdfViewer/PdfDocument.tsx",
+      "line": 284,
+      "column": 47,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/DocumentWorkspace/DocumentViewer/PdfViewer/PdfDocument.tsx",
+      "line": 284,
+      "column": 65,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/DocumentWorkspace/DocumentViewer/PdfViewer/PdfDocument.tsx",
+      "line": 296,
+      "column": 27,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/DocumentWorkspace/DocumentViewer/PdfViewer/PdfDocument.tsx",
+      "line": 389,
+      "column": 6,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/DocumentWorkspace/DocumentViewer/PdfViewer/PdfDocument.tsx",
+      "line": 389,
+      "column": 39,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/DocumentWorkspace/DocumentViewer/PdfViewer/PdfDocument.tsx",
+      "line": 474,
+      "column": 19,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/DocumentWorkspace/DocumentViewer/TextSelectionPopover.tsx",
+      "line": 72,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/DocumentWorkspace/SyncStatusIndicator.tsx",
+      "line": 35,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/SchedulerTab.tsx",
+      "line": 276,
+      "column": 40,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Flashcards/tabs/TemplatesTab.tsx",
+      "line": 205,
+      "column": 42,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Knowledge/KnowledgePanel.tsx",
+      "line": 283,
+      "column": 50,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Knowledge/KnowledgePanel.tsx",
+      "line": 283,
+      "column": 50,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Layouts/Layout.tsx",
+      "line": 771,
+      "column": 5,
+      "rule": "react-hooks/immutability",
+      "message": "Error: This value cannot be modified"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Layouts/QuickIngestButton.tsx",
+      "line": 317,
+      "column": 5,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Layouts/QuickIngestButton.tsx",
+      "line": 330,
+      "column": 5,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Media/DiffViewModal.tsx",
+      "line": 95,
+      "column": 5,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Media/DiffViewModal.tsx",
+      "line": 120,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Media/FilterPanel.tsx",
+      "line": 286,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Media/MediaSectionNavigator.tsx",
+      "line": 190,
+      "column": 47,
+      "rule": "react-hooks/immutability",
+      "message": "Error: Cannot access variable before it is declared"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Media/Pagination.tsx",
+      "line": 34,
+      "column": 5,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Media/hooks/useReadingProgress.tsx",
+      "line": 245,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Media/hooks/useReadingProgress.tsx",
+      "line": 264,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Media/hooks/useTranscriptDisplay.tsx",
+      "line": 419,
+      "column": 5,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Media/read-along/useContentSelectionActions.ts",
+      "line": 115,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/NotesEditorHeader.tsx",
+      "line": 135,
+      "column": 57,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/NotesEditorHeader.tsx",
+      "line": 135,
+      "column": 57,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/NotesGraphCanvas.tsx",
+      "line": 70,
+      "column": 5,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/NotesGraphCanvas.tsx",
+      "line": 71,
+      "column": 5,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/NotesGraphCanvas.tsx",
+      "line": 72,
+      "column": 5,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/NotesGraphWorkspace.tsx",
+      "line": 54,
+      "column": 7,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/NotesGraphWorkspace.tsx",
+      "line": 55,
+      "column": 5,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/NotesGraphWorkspace.tsx",
+      "line": 61,
+      "column": 5,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/NotesGraphWorkspace.tsx",
+      "line": 64,
+      "column": 5,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/NotesGraphWorkspace.tsx",
+      "line": 116,
+      "column": 44,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/NotesGraphWorkspace.tsx",
+      "line": 120,
+      "column": 25,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/NotesGraphWorkspace.tsx",
+      "line": 245,
+      "column": 27,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/hooks/useNotesGraphSuggestions.tsx",
+      "line": 407,
+      "column": 5,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/hooks/useNotesGraphSuggestions.tsx",
+      "line": 408,
+      "column": 5,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/hooks/useNotesGraphSuggestions.tsx",
+      "line": 410,
+      "column": 5,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/hooks/useNotesGraphSuggestions.tsx",
+      "line": 413,
+      "column": 14,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/hooks/useNotesGraphSuggestions.tsx",
+      "line": 431,
+      "column": 5,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/hooks/useNotesGraphSuggestions.tsx",
+      "line": 433,
+      "column": 5,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/hooks/useNotesGraphSuggestions.tsx",
+      "line": 435,
+      "column": 5,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/hooks/useNotesGraphSuggestions.tsx",
+      "line": 438,
+      "column": 14,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/hooks/useNotesGraphSuggestions.tsx",
+      "line": 455,
+      "column": 7,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/hooks/useNotesGraphSuggestions.tsx",
+      "line": 456,
+      "column": 5,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/hooks/useNotesListManagement.tsx",
+      "line": 66,
+      "column": 9,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/hooks/useNotesListManagement.tsx",
+      "line": 87,
+      "column": 10,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/ACPPlayground/ACPPermissionModal.tsx",
+      "line": 40,
+      "column": 5,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/ACPPlayground/ACPSessionCreateModal.tsx",
+      "line": 247,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/AudiobookStudio/Output/AudiobookPlayer.tsx",
+      "line": 43,
+      "column": 5,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/AudiobookStudio/Output/AudiobookPlayer.tsx",
+      "line": 89,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/AudiobookStudio/ProjectManagement/ProjectMetadataForm.tsx",
+      "line": 49,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Characters/CharacterGalleryCard.tsx",
+      "line": 70,
+      "column": 5,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Characters/CharacterPreview.tsx",
+      "line": 44,
+      "column": 5,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Characters/Manager.tsx",
+      "line": 738,
+      "column": 9,
+      "rule": "react-hooks/immutability",
+      "message": "Error: This value cannot be modified"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Characters/Manager.tsx",
+      "line": 754,
+      "column": 11,
+      "rule": "react-hooks/immutability",
+      "message": "Error: Cannot access variable before it is declared"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Characters/Manager.tsx",
+      "line": 757,
+      "column": 11,
+      "rule": "react-hooks/immutability",
+      "message": "Error: Cannot access variable before it is declared"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Characters/hooks/useCharacterVersionHistory.tsx",
+      "line": 77,
+      "column": 5,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/ChunkingPlayground/ChunkingTemplatesPanel.tsx",
+      "line": 176,
+      "column": 6,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/ChunkingPlayground/CompareView.tsx",
+      "line": 120,
+      "column": 5,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Collections/ImportExport/ImportExportPanel.tsx",
+      "line": 240,
+      "column": 16,
+      "rule": "react-hooks/immutability",
+      "message": "Error: Cannot access variable before it is declared"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Collections/index.tsx",
+      "line": 32,
+      "column": 3,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/DataTables/DataTablesPage.tsx",
+      "line": 33,
+      "column": 3,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/DataTables/EditableCell.tsx",
+      "line": 100,
+      "column": 5,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/DataTables/TablePreview.tsx",
+      "line": 241,
+      "column": 5,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/DataTables/TablePreview.tsx",
+      "line": 262,
+      "column": 5,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/DataTables/TablePreview.tsx",
+      "line": 307,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Dictionaries/components/useDictionaryEntryCreate.ts",
+      "line": 78,
+      "column": 5,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Dictionaries/components/useDictionaryEntryEdit.ts",
+      "line": 107,
+      "column": 5,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Dictionaries/components/useDictionaryEntryManagerShortcutBindings.ts",
+      "line": 19,
+      "column": 49,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Evaluations/EvaluationsPage.tsx",
+      "line": 63,
+      "column": 3,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Evaluations/components/VisualSpecBuilder.tsx",
+      "line": 62,
+      "column": 5,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Evaluations/tabs/RunsTab.tsx",
+      "line": 167,
+      "column": 5,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Evaluations/tabs/RunsTab.tsx",
+      "line": 173,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Evaluations/tabs/RunsTab.tsx",
+      "line": 181,
+      "column": 9,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/KanbanPlayground/BoardView.tsx",
+      "line": 134,
+      "column": 5,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/KanbanPlayground/CardDetailPanel.tsx",
+      "line": 106,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/KnowledgeQA/HistorySidebar.tsx",
+      "line": 123,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/KnowledgeQA/SearchBar.tsx",
+      "line": 235,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/KnowledgeQA/SettingsPanel/index.tsx",
+      "line": 111,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/KnowledgeQA/SettingsPanel/index.tsx",
+      "line": 118,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/KnowledgeQA/empty/KnowledgeReadyState.tsx",
+      "line": 183,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/KnowledgeQA/evidence/EvidenceRail.tsx",
+      "line": 33,
+      "column": 5,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/KnowledgeQA/hooks/useLayoutMode.ts",
+      "line": 62,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/KnowledgeQA/index.tsx",
+      "line": 129,
+      "column": 5,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/KnowledgeQA/layout/KnowledgeQALayout.tsx",
+      "line": 388,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/KnowledgeQA/panels/AnswerWorkspace.tsx",
+      "line": 139,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/KnowledgeQA/panels/AnswerWorkspace.tsx",
+      "line": 155,
+      "column": 5,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/MCPHub/DeploymentDiagnosticsPanel.tsx",
+      "line": 120,
+      "column": 5,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/ModerationPlayground/BlocklistStudioPanel.tsx",
+      "line": 335,
+      "column": 26,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/ModerationPlayground/BlocklistStudioPanel.tsx",
+      "line": 341,
+      "column": 27,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/ModerationPlayground/BlocklistStudioPanel.tsx",
+      "line": 345,
+      "column": 7,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/ModerationPlayground/BlocklistStudioPanel.tsx",
+      "line": 346,
+      "column": 24,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/ModerationPlayground/BlocklistStudioPanel.tsx",
+      "line": 374,
+      "column": 7,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Playground/ComposerToolbar.tsx",
+      "line": 228,
+      "column": 5,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Playground/ComposerToolbar.tsx",
+      "line": 228,
+      "column": 5,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Playground/ComposerToolbar.tsx",
+      "line": 228,
+      "column": 5,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Playground/ComposerToolbar.tsx",
+      "line": 247,
+      "column": 5,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Playground/ComposerToolbar.tsx",
+      "line": 587,
+      "column": 45,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Playground/Playground.tsx",
+      "line": 2253,
+      "column": 9,
+      "rule": "react-hooks/immutability",
+      "message": "Error: This value cannot be modified"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Playground/Playground.tsx",
+      "line": 2271,
+      "column": 7,
+      "rule": "react-hooks/immutability",
+      "message": "Error: This value cannot be modified"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Playground/PlaygroundChat.tsx",
+      "line": 364,
+      "column": 44,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Playground/PlaygroundChat.tsx",
+      "line": 994,
+      "column": 42,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Playground/hooks/usePlaygroundContextItems.ts",
+      "line": 111,
+      "column": 47,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Playground/hooks/usePlaygroundRawPreview.ts",
+      "line": 242,
+      "column": 5,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Playground/hooks/usePlaygroundRawPreview.ts",
+      "line": 242,
+      "column": 5,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/PresentationStudio/ExtensionStartPanel.tsx",
+      "line": 326,
+      "column": 3,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/PresentationStudio/__tests__/PresentationStudioPage.offline-standalone.test.tsx",
+      "line": 102,
+      "column": 5,
+      "rule": "react-hooks/immutability",
+      "message": "Error: This value cannot be modified"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/PresentationStudio/__tests__/StandaloneHtmlSourceEditor.test.tsx",
+      "line": 27,
+      "column": 5,
+      "rule": "react-hooks/immutability",
+      "message": "Error: This value cannot be modified"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/PresentationStudio/__tests__/StandaloneHtmlWorkspace.test.tsx",
+      "line": 88,
+      "column": 5,
+      "rule": "react-hooks/immutability",
+      "message": "Error: This value cannot be modified"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Prompt/Studio/Prompts/ExecutePlayground.tsx",
+      "line": 88,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Prompt/Studio/Prompts/PromptEditorDrawer.tsx",
+      "line": 90,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Prompt/hooks/usePromptCollections.tsx",
+      "line": 52,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Prompt/index.tsx",
+      "line": 429,
+      "column": 3,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Prompt/useContextualHints.ts",
+      "line": 73,
+      "column": 5,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/ResearchWorkspace/PaneResizer.tsx",
+      "line": 79,
+      "column": 21,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/ResearchWorkspace/PaneResizer.tsx",
+      "line": 88,
+      "column": 23,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/SourceFolderTree.tsx",
+      "line": 202,
+      "column": 22,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/ResearchWorkspace/StudioPane/index.tsx",
+      "line": 1547,
+      "column": 15,
+      "rule": "react-hooks/immutability",
+      "message": "Error: Cannot access variable before it is declared"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/ResearchWorkspace/StudioPane/index.tsx",
+      "line": 1581,
+      "column": 15,
+      "rule": "react-hooks/immutability",
+      "message": "Error: Cannot access variable before it is declared"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/ResearchWorkspace/WorkspaceSandboxDiagnosticsPanel.tsx",
+      "line": 85,
+      "column": 5,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/STT/ComparisonPanel.tsx",
+      "line": 55,
+      "column": 5,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/STT/ComparisonPanel.tsx",
+      "line": 235,
+      "column": 3,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/STT/InlineSettingsPanel.tsx",
+      "line": 98,
+      "column": 3,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/STT/RecordingStrip.tsx",
+      "line": 67,
+      "column": 9,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/STT/RecordingStrip.tsx",
+      "line": 68,
+      "column": 27,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/STT/RecordingStrip.tsx",
+      "line": 69,
+      "column": 7,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/STT/RecordingStrip.tsx",
+      "line": 73,
+      "column": 7,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/STT/SttPlaygroundPage.tsx",
+      "line": 116,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/ScheduledTasks/ReminderScheduleControls.tsx",
+      "line": 79,
+      "column": 9,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Settings/health-summary.tsx",
+      "line": 53,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Settings/health-summary.tsx",
+      "line": 66,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Settings/health-summary.tsx",
+      "line": 77,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Settings/health-summary.tsx",
+      "line": 87,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Settings/tldw-settings-tabs.tsx",
+      "line": 38,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Skills/SkillDrawer.tsx",
+      "line": 206,
+      "column": 3,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Skills/SkillDrawer.tsx",
+      "line": 837,
+      "column": 40,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/TTS/TtsPlaygroundPage.tsx",
+      "line": 197,
+      "column": 11,
+      "rule": "react-hooks/immutability",
+      "message": "Error: Cannot access variable before it is declared"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Watchlists/JobsTab/JobPreviewModal.tsx",
+      "line": 56,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Watchlists/JobsTab/SchedulePicker.tsx",
+      "line": 125,
+      "column": 5,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Watchlists/OutputsTab/OutputPreviewDrawer.tsx",
+      "line": 82,
+      "column": 3,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/Watchlists/shared/useWatchlistsViewport.ts",
+      "line": 23,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/WritingPlayground/WritingActionBar.tsx",
+      "line": 130,
+      "column": 5,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/WritingPlayground/WritingAnnotationsTab.tsx",
+      "line": 102,
+      "column": 3,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/WritingPlayground/hooks/useWritingGenerationSettings.ts",
+      "line": 138,
+      "column": 5,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Option/WritingPlayground/hooks/useWritingRevisions.ts",
+      "line": 52,
+      "column": 3,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Quiz/hooks/useQuizTimer.ts",
+      "line": 82,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Review/MediaReviewPage.tsx",
+      "line": 26,
+      "column": 3,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Select/index.tsx",
+      "line": 94,
+      "column": 29,
+      "rule": "react-hooks/immutability",
+      "message": "Error: Cannot access variable before it is declared"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Sidepanel/Chat/empty.tsx",
+      "line": 183,
+      "column": 7,
+      "rule": "react-hooks/immutability",
+      "message": "Error: This value cannot be modified"
+    },
+    {
+      "file": "apps/packages/ui/src/components/StudySuggestions/StudySuggestionsPanel.tsx",
+      "line": 253,
+      "column": 40,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/components/StudySuggestions/hooks/useStudySuggestions.ts",
+      "line": 83,
+      "column": 5,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/StudySuggestions/hooks/useStudySuggestions.ts",
+      "line": 90,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/StudySuggestions/hooks/useStudySuggestions.ts",
+      "line": 119,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/WorkflowEditor/ExecutionPanel.tsx",
+      "line": 134,
+      "column": 5,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/WorkflowEditor/NodePalette.tsx",
+      "line": 237,
+      "column": 5,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/components/ui/state/ActionGroup.tsx",
+      "line": 39,
+      "column": 16,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/ui/state/ActionGroup.tsx",
+      "line": 41,
+      "column": 20,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/ui/state/ActionGroup.tsx",
+      "line": 42,
+      "column": 20,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/ui/state/ActionGroup.tsx",
+      "line": 43,
+      "column": 21,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/ui/state/ActionGroup.tsx",
+      "line": 44,
+      "column": 22,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/components/ui/state/ActionGroup.tsx",
+      "line": 47,
+      "column": 12,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/entries/shared/apps.tsx",
+      "line": 110,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/entries/shared/options-app.tsx",
+      "line": 26,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/entries/shared/route-leave-prompt.tsx",
+      "line": 26,
+      "column": 3,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/entries/shared/router-utils.tsx",
+      "line": 24,
+      "column": 3,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/hooks/document-workspace/useAnnotationSync.ts",
+      "line": 125,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/hooks/useAudiobookProjects.ts",
+      "line": 109,
+      "column": 5,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/hooks/useAudiobookProjects.ts",
+      "line": 109,
+      "column": 5,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/hooks/useChatMoodBadgePreference.ts",
+      "line": 120,
+      "column": 23,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/hooks/useChatMoodBadgePreference.ts",
+      "line": 120,
+      "column": 23,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/hooks/useChatMoodBadgePreference.ts",
+      "line": 120,
+      "column": 23,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/hooks/useFormDraft.ts",
+      "line": 102,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/hooks/useKeyboardShortcuts.ts",
+      "line": 157,
+      "column": 3,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/hooks/useKeyboardShortcuts.ts",
+      "line": 209,
+      "column": 3,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/hooks/useLoadLocalConversation.ts",
+      "line": 50,
+      "column": 8,
+      "rule": "react-hooks/refs",
+      "message": "Error: Cannot access refs during render"
+    },
+    {
+      "file": "apps/packages/ui/src/hooks/useMediaQuery.ts",
+      "line": 24,
+      "column": 5,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/hooks/useMediaReadingProgress.ts",
+      "line": 237,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/hooks/useSidepanelInit.ts",
+      "line": 25,
+      "column": 5,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    },
+    {
+      "file": "apps/packages/ui/src/hooks/useSpeechRecognition.tsx",
+      "line": 173,
+      "column": 9,
+      "rule": "react-hooks/immutability",
+      "message": "Error: Cannot access variable before it is declared"
+    },
+    {
+      "file": "apps/packages/ui/src/routes/hooks/usePersonaIncomingPayload.ts",
+      "line": 82,
+      "column": 5,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/routes/hooks/usePersonaIncomingPayload.ts",
+      "line": 82,
+      "column": 5,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/routes/hooks/usePersonaIncomingPayload.ts",
+      "line": 82,
+      "column": 5,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/routes/hooks/usePersonaIncomingPayload.ts",
+      "line": 82,
+      "column": 5,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/routes/hooks/usePersonaIncomingPayload.ts",
+      "line": 82,
+      "column": 5,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/routes/hooks/usePersonaIncomingPayload.ts",
+      "line": 82,
+      "column": 5,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/routes/hooks/usePersonaIncomingPayload.ts",
+      "line": 82,
+      "column": 5,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/routes/hooks/usePersonaIncomingPayload.ts",
+      "line": 82,
+      "column": 5,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/routes/hooks/usePersonaIncomingPayload.ts",
+      "line": 82,
+      "column": 5,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/routes/hooks/usePersonaIncomingPayload.ts",
+      "line": 82,
+      "column": 5,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/routes/hooks/usePersonaIncomingPayload.ts",
+      "line": 82,
+      "column": 5,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/routes/hooks/usePersonaIncomingPayload.ts",
+      "line": 82,
+      "column": 5,
+      "rule": "react-hooks/preserve-manual-memoization",
+      "message": "Compilation Skipped: Existing memoization could not be preserved"
+    },
+    {
+      "file": "apps/packages/ui/src/routes/sidepanel-agent.tsx",
+      "line": 125,
+      "column": 7,
+      "rule": "react-hooks/set-state-in-effect",
+      "message": "Error: Calling setState synchronously within an effect can trigger cascading renders"
+    }
+  ],
+  "captured_date": "2026-09-10",
+  "source_base_revision": "0929b44a5af3bed60142550719f610d048bec3e2",
+  "source_state": "Includes the reviewed RAG input-ref relocation; file hashes bind the remaining findings to inspected source bytes.",
+  "scopes": [
+    "apps/packages/ui/src",
+    "apps/tldw-frontend/pages"
+  ],
+  "rule_overrides": {
+    "react-hooks/refs": "error",
+    "react-hooks/set-state-in-effect": "error",
+    "react-hooks/immutability": "error",
+    "react-hooks/preserve-manual-memoization": "error"
+  },
+  "config_sha256": "5efb966f0ba73f3c6f583830ed38e88872bffa190acc8cfa9da5059d0cd90da9",
+  "file_sha256": {
+    "apps/packages/ui/src/components/Agent/DiffViewer.tsx": "da413f38185057cf5c6e5e72f060e182241858065c70343006a8cd666f31ebf9",
+    "apps/packages/ui/src/components/Chat/composer/PromptAssistComposerAction.tsx": "0b9dcad27c58a16f0f059c3c784201b9f071489b0e5d73e0c38628c505a1214e",
+    "apps/packages/ui/src/components/Chat/composer/hooks/useComposerVoiceChat.ts": "d4e5c2dac8ca0352acc1ad57577fc6d680064f0a4e958b306ef6f2cae9862715",
+    "apps/packages/ui/src/components/Common/CodeBlock.tsx": "235028bacdbab3816ec42746bd21a31aff871209fec6acc8e4a3fc49d3afb18a",
+    "apps/packages/ui/src/components/Common/CommandPalette.tsx": "9283719278f23ae6d6cbfcc6fb323a4a6e1c33b7121e3da4980ecaef4da377ac",
+    "apps/packages/ui/src/components/Common/Markdown.tsx": "53867ca03e06fff19bb9034ddd3e71ecef031a4eaaf64fa97e0295a65aad7ced",
+    "apps/packages/ui/src/components/Common/MermaidPreviewDialog.tsx": "8e0417ee9b55d527730fc8de05d0c684ad30f2fbbeba26cfed94ac98bedae02a",
+    "apps/packages/ui/src/components/Common/ModelSelectOption.tsx": "46eeb1db5c12031c50d750b9f1a5bf70e3367a63a008f5ff48f794a15db383ed",
+    "apps/packages/ui/src/components/Common/PageHelpModal.tsx": "4f5f5c2dc11f7a6108b794b2b367105a6ce3d7d565789e24f1b337c181ea26e4",
+    "apps/packages/ui/src/components/Common/PersonaBuddy/IndependentBuddyHost.tsx": "44c07290779bd9b181272f07ab8553a1940b492371af81237f8a2ea0c8182b2f",
+    "apps/packages/ui/src/components/Common/Playground/CompactMessage.tsx": "742977e1ec74b13be1fa648f1f93026306b0b2b89ab9b7838456ef108cda985e",
+    "apps/packages/ui/src/components/Common/PromptAssist/PromptAssistPanel.tsx": "4a4efbc2ef4e899d2b18a43d84f570a9ace86b7fe2b5c967f717d0e73dd490c7",
+    "apps/packages/ui/src/components/Common/PromptAssist/__tests__/PromptAssistPanel.test.tsx": "76c132f9d938a5f917608ebc7e5a674c5d8beeca3823f52f1e98f5df0c10ef26",
+    "apps/packages/ui/src/components/Common/PromptSelect.tsx": "a660bb5b047db117dad0fa289ac0f90f394c2a4a46aefed25f5ed85d0b9cbcc0",
+    "apps/packages/ui/src/components/Common/QuickIngest/FloatingProgressWidget.tsx": "31fa8ef0bf2b127772f6f6303f93fa74d8a785373cdda544e1eed283eb653dca",
+    "apps/packages/ui/src/components/Common/QuickIngest/ItemMetadataTable.tsx": "cd6cb0223631df1643b3a7fd218bd5c1a05425b439fc477a34dba0e93f4dfe86",
+    "apps/packages/ui/src/components/Common/QuickIngest/useIngestSSE.ts": "a9e7bef23fd0d07da4bf1b342709c0aec6c60d90b8cbc83c29f2f90627361b5e",
+    "apps/packages/ui/src/components/Common/QuickIngestWizardModal.tsx": "0af862fe05de02bc29a5e16b8d7049770f0936d2ff5cd5920824567f81e6197d",
+    "apps/packages/ui/src/components/Common/Settings/CurrentChatModelSettings.tsx": "a8735a4427653397a6ae0b11f61c677795ee8d591de4b449171d98ae9cd0f7d2",
+    "apps/packages/ui/src/components/Common/Settings/ThemeAdvancedEditor.tsx": "821bb9d43604edcb141542afb471f6c4303214289efaf06a81b754ddc0f85e3e",
+    "apps/packages/ui/src/components/Common/SplashScreen/engine/useAnimationFrame.ts": "a652055bf70016fb02eb744362284741e6cd220f58d7a17a04a50a640af29bd0",
+    "apps/packages/ui/src/components/Common/TableBlock.tsx": "8fdd3fe88785f8fa51c698b0b43fdec073c91657f16486d063618d4066ca293c",
+    "apps/packages/ui/src/components/Common/Workflow/WorkflowLanding.tsx": "374bc90ed5d2a9fc9e6755e1eba5436cd34036c834b8c56c5c5ec6fccecf3164",
+    "apps/packages/ui/src/components/Common/Workflow/steps/AnalyzeBookWorkflow.tsx": "d2706f96879dec6e16e249c423531d01f811a3754b9ca2d6e7430464e2998f49",
+    "apps/packages/ui/src/components/DocumentWorkspace/DocumentViewer/PdfViewer/PdfDocument.tsx": "332e1005c271931cd921d3dcc34b329f8457a8fb58547bf2a192a5763338df45",
+    "apps/packages/ui/src/components/DocumentWorkspace/DocumentViewer/TextSelectionPopover.tsx": "5b7095215b76496907cb94b05d74458effa4c5eb14d6af36e38f17ba2fdc2ccd",
+    "apps/packages/ui/src/components/DocumentWorkspace/SyncStatusIndicator.tsx": "a9b3ec42db2848a2d706afbe65f3d8e0e292431d7e3d15af74682562f0ea2182",
+    "apps/packages/ui/src/components/Flashcards/tabs/SchedulerTab.tsx": "1086531807d98ee717b794a62e11cca9bf4293970416da84b13922de258b7515",
+    "apps/packages/ui/src/components/Flashcards/tabs/TemplatesTab.tsx": "c38728dbdbf786cde51292d0fd781310df2d096686f19b429e412678d15856e5",
+    "apps/packages/ui/src/components/Knowledge/KnowledgePanel.tsx": "96d7bd32bce0937196b3e41b0c0ac731fa62f7101de3238d47fdba5686175d9c",
+    "apps/packages/ui/src/components/Layouts/Layout.tsx": "d3a493b282d9273150cced37173d8d62de4f377901a0d3ced9f6f101786ce92c",
+    "apps/packages/ui/src/components/Layouts/QuickIngestButton.tsx": "4d6769ad81134d95a66806728ace7a3978e816493219ebc54dfde6adc99edeae",
+    "apps/packages/ui/src/components/Media/DiffViewModal.tsx": "58e72ef81cc8393c698862986a486485ad7c48b0ffb7b17ea52026d59a61f84e",
+    "apps/packages/ui/src/components/Media/FilterPanel.tsx": "4df39bb7d1efe48bd901b842923081d89e6e34a9ceaa903e9d453c29854fcbdd",
+    "apps/packages/ui/src/components/Media/MediaSectionNavigator.tsx": "2c6939367422617bda50abe96f762d008597b1676794c1687ee234c18ed8189c",
+    "apps/packages/ui/src/components/Media/Pagination.tsx": "029fe7f258d1af6ff92243bd987dd4182851f474108d2cf66579dbebedd3a6bc",
+    "apps/packages/ui/src/components/Media/hooks/useReadingProgress.tsx": "b3af058fe978972c639708aac5384ed878b2b0ec0db283ec4af8cd77f87fb361",
+    "apps/packages/ui/src/components/Media/hooks/useTranscriptDisplay.tsx": "ef3fb9cd071bd3036c9350917b38d61d41656c8609d6b0c21de11a30ed3f9d52",
+    "apps/packages/ui/src/components/Media/read-along/useContentSelectionActions.ts": "b8509b25ca5af55f5ede94a1b823f624c26cc4a0ac7881e972a56bcbb419162d",
+    "apps/packages/ui/src/components/Notes/NotesEditorHeader.tsx": "144e9af5f432b71985a2be1d00cb5b17567091b0b8ff129a0686b58aea300354",
+    "apps/packages/ui/src/components/Notes/NotesGraphCanvas.tsx": "a24b659fb807cf0f43b7c2742a63973a8555d321e16a9b184cb5f3f73768b5be",
+    "apps/packages/ui/src/components/Notes/NotesGraphWorkspace.tsx": "27f216682a2cf28fcc5817856f820eaa4942f39a3e46aaa06998fb4579a4fa92",
+    "apps/packages/ui/src/components/Notes/hooks/useNotesGraphSuggestions.tsx": "13d0663500e03784576304e60b3999039b83d121be6b96dfb60214b12bb3c1d8",
+    "apps/packages/ui/src/components/Notes/hooks/useNotesListManagement.tsx": "a1dc4e0c4de0812a13af89ec9faa2ecf3530112b3fc449cc489d58d9b69f7454",
+    "apps/packages/ui/src/components/Option/ACPPlayground/ACPPermissionModal.tsx": "ee376257d6d69a4fa5e560b1ec4760243ccac20c4c1e15e828c908c784c60ee0",
+    "apps/packages/ui/src/components/Option/ACPPlayground/ACPSessionCreateModal.tsx": "e1ee7a30f51a12052c216ea444d14f15adc9fc5a49c84540a39dcfb6884734bf",
+    "apps/packages/ui/src/components/Option/AudiobookStudio/Output/AudiobookPlayer.tsx": "0c433c5725b513cf8e384c4a9d7cd1cb9a097cbb694a00a7d41738a8745f64ff",
+    "apps/packages/ui/src/components/Option/AudiobookStudio/ProjectManagement/ProjectMetadataForm.tsx": "34f6c4babf519cd558760ebe9fa4950ae45f2d8c9a961572a721e7c489bb491d",
+    "apps/packages/ui/src/components/Option/Characters/CharacterGalleryCard.tsx": "0c1a2439ea8dce913a9af23c524a9e8b58780c739704d50e183d300389c8feb4",
+    "apps/packages/ui/src/components/Option/Characters/CharacterPreview.tsx": "c29e4109fd1a9f2bde0e96314bb115d29920d7a42c6db0ab99870ff0174377e0",
+    "apps/packages/ui/src/components/Option/Characters/Manager.tsx": "fcc114c06924a2c8befa801d2c5b30349cba9b3954eb4b30d7e141eb5cbd9b3d",
+    "apps/packages/ui/src/components/Option/Characters/hooks/useCharacterVersionHistory.tsx": "3ed8d0a24cdd4b11a905c71002179403fa7b3cf302b7910e08900c1e372c2fe2",
+    "apps/packages/ui/src/components/Option/ChunkingPlayground/ChunkingTemplatesPanel.tsx": "a63777b6d5cc57c8bc130772961648045dfa21ca3dc9217b5571b863eca3500b",
+    "apps/packages/ui/src/components/Option/ChunkingPlayground/CompareView.tsx": "19aca2a333f885f727154b2278ba97c57692e667d3f9a412f5f17b0109194e6b",
+    "apps/packages/ui/src/components/Option/Collections/ImportExport/ImportExportPanel.tsx": "9788ece5f5ba1b4e7f38c43166719e2a242db920fa299b68dc59f93e9b500165",
+    "apps/packages/ui/src/components/Option/Collections/index.tsx": "8fd8c521062f5762b34a1e129c2593bb0dc6546ac165ff18d00d024727ae0a19",
+    "apps/packages/ui/src/components/Option/DataTables/DataTablesPage.tsx": "23c243a18cbd9a22a26388daf85e69ae8a17a0e886011063aff7990a47692563",
+    "apps/packages/ui/src/components/Option/DataTables/EditableCell.tsx": "be5d1081b3e4531218735b5a149b5ba72d2c67624496ff036cca1bb021bd336f",
+    "apps/packages/ui/src/components/Option/DataTables/TablePreview.tsx": "3d29447eae1be41b7d773199ef20b2eead311861232725e9c4784c55275c8ea2",
+    "apps/packages/ui/src/components/Option/Dictionaries/components/useDictionaryEntryCreate.ts": "cb24246412bedcdaf076ce25d0dcad47688ca03c7f31829732b2b9d8b7e3b9f3",
+    "apps/packages/ui/src/components/Option/Dictionaries/components/useDictionaryEntryEdit.ts": "e35dc5e9e90c166e3711fb2563c46904305430639e25124607eff96ebf62096f",
+    "apps/packages/ui/src/components/Option/Dictionaries/components/useDictionaryEntryManagerShortcutBindings.ts": "4ea8f91ab1b029d0423d1e82777cc9e99bef22f36b1ae102e5eba171ef32a7bc",
+    "apps/packages/ui/src/components/Option/Evaluations/EvaluationsPage.tsx": "bb28b1a9eda677fb3ed8ed623a8481755dc7a68247eb57dec9507bc536e0fd26",
+    "apps/packages/ui/src/components/Option/Evaluations/components/VisualSpecBuilder.tsx": "649b6a5abc02a36cfdffc3fe754653cd72babf23cf95632d06a983813d0d7c1b",
+    "apps/packages/ui/src/components/Option/Evaluations/tabs/RunsTab.tsx": "ddb23d3bb1bdb0679aba1d361378168ca49bb71809ca55e963bcb0aa4d0156ec",
+    "apps/packages/ui/src/components/Option/KanbanPlayground/BoardView.tsx": "191112621c49113aeb259345955230b85dec9289df19e64e8fc089cf36cde880",
+    "apps/packages/ui/src/components/Option/KanbanPlayground/CardDetailPanel.tsx": "1474e37d9a68fa3f5b62e0dce6ddfaf896cb35c48ad0ab3c2cc12728e72f6064",
+    "apps/packages/ui/src/components/Option/KnowledgeQA/HistorySidebar.tsx": "c495f3a27c2c4783605460f71488d6d07fce2c0386820c6599a07e241e78a8f0",
+    "apps/packages/ui/src/components/Option/KnowledgeQA/SearchBar.tsx": "30a6b94a2cf712284141ae2a6d630636622c08787d60746ba965e03288775029",
+    "apps/packages/ui/src/components/Option/KnowledgeQA/SettingsPanel/index.tsx": "87aa17e7e40ae8e6a0d654908274d3437b979c477b9bb3c4616ce03f2991db4c",
+    "apps/packages/ui/src/components/Option/KnowledgeQA/empty/KnowledgeReadyState.tsx": "cc93d3248d6cbb11e0a0676d91c7493e53f8eb1c6334a647d68e265a52ecbff3",
+    "apps/packages/ui/src/components/Option/KnowledgeQA/evidence/EvidenceRail.tsx": "33d88971e22be0b8499c4d21fb912bcbc95e0e4de60f88141126d03987a0815c",
+    "apps/packages/ui/src/components/Option/KnowledgeQA/hooks/useLayoutMode.ts": "a1e7ff89283663fd819e0a73a79e9ea8f2267c1e7ca2a30bc1eb58cb15ef7175",
+    "apps/packages/ui/src/components/Option/KnowledgeQA/index.tsx": "ee6e850b7e3c192061d94d85fde33ec531a29f13bd7de9e505d10512e1239e24",
+    "apps/packages/ui/src/components/Option/KnowledgeQA/layout/KnowledgeQALayout.tsx": "9b94a96276c5edea543a412f46f0844bb695b748630672192958c2b0c5748856",
+    "apps/packages/ui/src/components/Option/KnowledgeQA/panels/AnswerWorkspace.tsx": "dbe1767930053617b10686142cbcd42fb183a17ae1a03136baf05588fe16f5cd",
+    "apps/packages/ui/src/components/Option/MCPHub/DeploymentDiagnosticsPanel.tsx": "be49c4dece33a94ff10a491d3976c703f496ae589a034526e6df4cf294501e0b",
+    "apps/packages/ui/src/components/Option/ModerationPlayground/BlocklistStudioPanel.tsx": "fc19bebcf35376bc5be0a6c9ed5837a2fe1ae6f4f8912429b1003c7978f52c72",
+    "apps/packages/ui/src/components/Option/Playground/ComposerToolbar.tsx": "0925e4e18d2363d7bbfcf9d0a0a6f7d7c470291eea2a81c1fdd87a53ad635460",
+    "apps/packages/ui/src/components/Option/Playground/Playground.tsx": "ab2ba4cadc61d30a43d045f33016fb5926dd1c97a1dc41d147955dd40dd27b9a",
+    "apps/packages/ui/src/components/Option/Playground/PlaygroundChat.tsx": "6dbc88c03cc0519903233520ab5d3008dc7ec83efc42f0bc0c0b327871932431",
+    "apps/packages/ui/src/components/Option/Playground/hooks/usePlaygroundContextItems.ts": "a7be547b59e51d3d8f6dcd8ab549bb341008bc9f0c648dceed0e2dab50f99710",
+    "apps/packages/ui/src/components/Option/Playground/hooks/usePlaygroundRawPreview.ts": "3baaf476f04d4f4c14ff515689eaad314dc51758e6cfade979b3277219707919",
+    "apps/packages/ui/src/components/Option/PresentationStudio/ExtensionStartPanel.tsx": "327d2950544e15b5abc38f36395fc07a0d147b6621bc0581ec54cc7fad2725f6",
+    "apps/packages/ui/src/components/Option/PresentationStudio/__tests__/PresentationStudioPage.offline-standalone.test.tsx": "a81d98c86940c4ac95fcd1a1aa94a1b99edf78c9836cdb27b4701356f093f1b6",
+    "apps/packages/ui/src/components/Option/PresentationStudio/__tests__/StandaloneHtmlSourceEditor.test.tsx": "9e9bdd8be1184a551a0d9eee72c59aa144879fc3e8acc64f806d5084cc869d77",
+    "apps/packages/ui/src/components/Option/PresentationStudio/__tests__/StandaloneHtmlWorkspace.test.tsx": "d96113b95f955fb0bf8b2c9e6de227484143f2afd3c036bfad4c370376220b4d",
+    "apps/packages/ui/src/components/Option/Prompt/Studio/Prompts/ExecutePlayground.tsx": "f729ce04d653cce4f4c76d3ecf8ca136a8636e8f22836f010a3d09512500cf9c",
+    "apps/packages/ui/src/components/Option/Prompt/Studio/Prompts/PromptEditorDrawer.tsx": "744878f08b56796094b7cf4099531eee8456e655cea914cab6ed307853b8cae9",
+    "apps/packages/ui/src/components/Option/Prompt/hooks/usePromptCollections.tsx": "5372cf5786244716f4814040b807ec128a0c04b7be4fd89c66b74144fa62a669",
+    "apps/packages/ui/src/components/Option/Prompt/index.tsx": "6e1a493548e482fd7c0aa786830031bf612591ed06e6606e72da8811be2133f4",
+    "apps/packages/ui/src/components/Option/Prompt/useContextualHints.ts": "4b36acf4c523e89569534b62d9be01c18e152a5f71e7d80c905f7406311b29ab",
+    "apps/packages/ui/src/components/Option/ResearchWorkspace/PaneResizer.tsx": "b085c6c29accac41981eec48628935547c6e6a4d1e9d897a5343fe314ca3d934",
+    "apps/packages/ui/src/components/Option/ResearchWorkspace/SourcesPane/SourceFolderTree.tsx": "15b3cc7e53493ae8d9c3e6d430c1c44c8152bb846d34ba83daf00cb7ccbe5a3c",
+    "apps/packages/ui/src/components/Option/ResearchWorkspace/StudioPane/index.tsx": "40a23559d64ad22fc8f9d0c9179c33938d2d88c99b57271bb903cfac1bfe989d",
+    "apps/packages/ui/src/components/Option/ResearchWorkspace/WorkspaceSandboxDiagnosticsPanel.tsx": "f53e282c67898918f4855f57b2c83ef89b08c1575a37a4368320f735986d171b",
+    "apps/packages/ui/src/components/Option/STT/ComparisonPanel.tsx": "e2c4bf9a575d5ceb89dd8012ae0668ae3567774051a9ab9528ce38ea13251065",
+    "apps/packages/ui/src/components/Option/STT/InlineSettingsPanel.tsx": "6bd283ca222cdecfdee8e4a3ba2a80a8ce62181d8c639b84033602bf27b671af",
+    "apps/packages/ui/src/components/Option/STT/RecordingStrip.tsx": "e0c7fbd3a833e45fcf6f36a5ef0db074b66ced7b16a44c584dbd6d763f20d69a",
+    "apps/packages/ui/src/components/Option/STT/SttPlaygroundPage.tsx": "a4d2efd5388c5b613180ece78856be73c37117e91cb1603289032512e79d3b70",
+    "apps/packages/ui/src/components/Option/ScheduledTasks/ReminderScheduleControls.tsx": "19bd5fd3fb60a8ecdaea3025167467099fd008e5e75fa96096e012f7ca19783c",
+    "apps/packages/ui/src/components/Option/Settings/health-summary.tsx": "a949c7f2835d4c573fd4a91bfb6c1a37f6e381fb5e03aeca7e7978682b285119",
+    "apps/packages/ui/src/components/Option/Settings/tldw-settings-tabs.tsx": "d7e5f19cf90a90e9340b4cebef0336dab46e8b68ac97fd905e6f4f483beb121c",
+    "apps/packages/ui/src/components/Option/Skills/SkillDrawer.tsx": "6861900b07b7b5dab77999d8b928ab0d2004ca743c237ecd38236b4aa1c5bffe",
+    "apps/packages/ui/src/components/Option/TTS/TtsPlaygroundPage.tsx": "8a2595530676b33efaf8c88fc0d31fd2e5ceb126a4f7b195ba09fdeff2f74f2b",
+    "apps/packages/ui/src/components/Option/Watchlists/JobsTab/JobPreviewModal.tsx": "f6b5059899cd432c2d1fd4f2f09e3cd7a9f6f8a2f1b47814f6f02d67c462a225",
+    "apps/packages/ui/src/components/Option/Watchlists/JobsTab/SchedulePicker.tsx": "ad8636a2c8c00c37dbc87b06c764e5a43387b8e290c5cfe3203c926fd775eb04",
+    "apps/packages/ui/src/components/Option/Watchlists/OutputsTab/OutputPreviewDrawer.tsx": "b676368ac4d99e7cf07b987cfb07c0cdf8f984d7e277fea6ea26e3b5ff732ec7",
+    "apps/packages/ui/src/components/Option/Watchlists/shared/useWatchlistsViewport.ts": "986f49416cd4225bddb844bd794c37c2359dace912380e1fc3e4b196f24853da",
+    "apps/packages/ui/src/components/Option/WritingPlayground/WritingActionBar.tsx": "74210b0ee211d856a202d7ed714964c585cf423cf753d19d811d0f4ca093a275",
+    "apps/packages/ui/src/components/Option/WritingPlayground/WritingAnnotationsTab.tsx": "eea7a83cd01d49ac38927acdd181653d81530a3360a93d8580f0bb0c046dde5d",
+    "apps/packages/ui/src/components/Option/WritingPlayground/hooks/useWritingGenerationSettings.ts": "9aeeaea71f025050730af6ed8f138cfe23f2a558f36798e3c4c5f9644812d558",
+    "apps/packages/ui/src/components/Option/WritingPlayground/hooks/useWritingRevisions.ts": "e289b929477bebda2a2beca501282a51327c2ee3a2160e9484e0e4b3fb8e7e6c",
+    "apps/packages/ui/src/components/Quiz/hooks/useQuizTimer.ts": "439a4fcb2b78ccbcf82486064335fdc965a0eb5691d5263a99c1f8b806772266",
+    "apps/packages/ui/src/components/Review/MediaReviewPage.tsx": "641609c4056d43bd3ce42c59abd650e4e6b24762167b94d6ff1cfd4c52d1e802",
+    "apps/packages/ui/src/components/Select/index.tsx": "6c50ef87b3daad00240979b1a05dbd683cd56aaac9a49df35cc4ca88505b2911",
+    "apps/packages/ui/src/components/Sidepanel/Chat/empty.tsx": "b2dea22425db6c74985d74fa1404edd5bed7dac29ad27bffe522c8d882219ace",
+    "apps/packages/ui/src/components/StudySuggestions/StudySuggestionsPanel.tsx": "e141d2dc09e088928e4b4d7bee62540af3d94862982c2c349d33ff8e54f4fdf4",
+    "apps/packages/ui/src/components/StudySuggestions/hooks/useStudySuggestions.ts": "06b0c44f2deabc4132f7ee074a409afc80fa5e08cfe4f65216102cdf0b9a7f01",
+    "apps/packages/ui/src/components/WorkflowEditor/ExecutionPanel.tsx": "d42657c1a4579222355d35871a01e81e7eb3d4e8d23aecef7f8da78613443c85",
+    "apps/packages/ui/src/components/WorkflowEditor/NodePalette.tsx": "f8d59afb296588bd0c96ea33e6d93a4141c6652a631abacb9f6daf15d6e05166",
+    "apps/packages/ui/src/components/ui/state/ActionGroup.tsx": "c0a1952e298b17968535b21feb7b98b63c10557ee1a4702c6af1c67aa3c56dc0",
+    "apps/packages/ui/src/entries/shared/apps.tsx": "2398a22712e8751361b7f3391025e4d7ba8929dc829609163aa5d4ba94b9e8b2",
+    "apps/packages/ui/src/entries/shared/options-app.tsx": "b8dd9ded477093450dd40e524e019bc7df184e84b027dfd37c98f9058e55c883",
+    "apps/packages/ui/src/entries/shared/route-leave-prompt.tsx": "edeb56465734644dff9ebb03fb3261612763cd91842d4f70ac9991629a249e3c",
+    "apps/packages/ui/src/entries/shared/router-utils.tsx": "a52aa1b8acd2334b3a45d7994b7b45bd96df09bf418edfee825123ce013cf02f",
+    "apps/packages/ui/src/hooks/document-workspace/useAnnotationSync.ts": "62473be95f3d3bc14736ea3a9bc27c3696fa909981e5934311a348ee558ddf72",
+    "apps/packages/ui/src/hooks/useAudiobookProjects.ts": "425e5cfe1501c715af10494ed4f5a76f55f779da49bd17f388c3878e398cac89",
+    "apps/packages/ui/src/hooks/useChatMoodBadgePreference.ts": "1ed6b61a560338df039ac55ed152d9457a04041d95c4d748a54e7e90357de12a",
+    "apps/packages/ui/src/hooks/useFormDraft.ts": "12ba2f7c3fe98e13076ca70da63756b063ba5f7f693eeb2e0f05d5a645035d80",
+    "apps/packages/ui/src/hooks/useKeyboardShortcuts.ts": "4fd5085d2bbaa9580c1863160ba12698df8725c3cc2816747aad7ddd1143848d",
+    "apps/packages/ui/src/hooks/useLoadLocalConversation.ts": "620387fb8d2fec2899e56d28ad5f01fbc51eef2cd6fabe79a7cec5e698c54970",
+    "apps/packages/ui/src/hooks/useMediaQuery.ts": "a979edeafabbf2ba008385017620a6efd3648f41e2842ba4adc3b34e236c7902",
+    "apps/packages/ui/src/hooks/useMediaReadingProgress.ts": "fcd942a972a438c1acea358f2c7cbe2e2bf63e5096b706f298e40b78b80eb36a",
+    "apps/packages/ui/src/hooks/useSidepanelInit.ts": "99f76aa98283616053585733d30c51fe1c1c51d46de9a855cc2c05efa5233194",
+    "apps/packages/ui/src/hooks/useSpeechRecognition.tsx": "4ff8a6d1f0750553b72284db66cb655087f6fc606167e857be9a42d17e82d8fc",
+    "apps/packages/ui/src/routes/hooks/usePersonaIncomingPayload.ts": "5b2e3037702f8995db4c20ee553bb9774544e02ff4163c11d02679eaa94da153",
+    "apps/packages/ui/src/routes/sidepanel-agent.tsx": "9d7ef3ebb3cfeaf6593c0a26c5a9c62a35bc1295d847eae8b11e080befb7c117"
+  }
+}

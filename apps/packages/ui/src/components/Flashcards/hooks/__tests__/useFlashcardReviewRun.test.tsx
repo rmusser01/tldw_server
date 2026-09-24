@@ -98,6 +98,18 @@ describe("review run with real scope lease, mutations and outbound transport", (
   })
   afterEach(async () => { await act(async () => cleanup()); queryClient.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs() })
 
+  it.each([null, undefined])("does not send or close an absent session ID (%s)", async missing => {
+    const base = boundary.fetch.getMockImplementation()!
+    boundary.fetch.mockImplementation((url, init) => String(url).endsWith("/flashcards/review")
+      ? Promise.resolve(response({ review_session_id: missing, interval_days: 1 })) : base(url, init))
+    const { result } = setup()
+    await submit(result, "first")
+    await submit(result, "second")
+    expect(ratingCalls().map(([, init]) => JSON.parse(init.body).review_session_id)).toEqual([undefined, undefined])
+    await act(async () => { expect(await result.current.complete()).toBeNull() })
+    expect(endCalls()).toHaveLength(0)
+  })
+
   it("sends seven explicit global ratings with one retained ID and ends that ID", async () => {
     const { result } = setup()
     for (let i = 0; i < 7; i++) await submit(result, `mixed-${i}`)

@@ -2804,11 +2804,14 @@ def _validate_explicit_model_availability(provider: str, model: str) -> dict[str
 
 async def _process_content_for_db_sync(
     content_iterable: Any, # Can be list of dicts or string
-    conversation_id: str # For logging
+    conversation_id: str, # For logging
+    *,
+    image_details: list[str] | None = None,
 ) -> tuple[list[str], list[tuple[bytes, str]]]:
     """
     Async helper to process message content, including base64 decoding.
     Runs within the event loop (uses async image processor when available).
+    When supplied, image_details receives one option per successfully decoded image.
     """
     text_parts_sync: list[str] = []
     images_sync: list[tuple[bytes, str]] = []   # (bytes, mime)
@@ -2884,6 +2887,9 @@ async def _process_content_for_db_sync(
                 if not isinstance(url_dict, dict):
                     url_dict = {"url": getattr(url_dict, "url", "")}
             url_str = url_dict.get("url", "")
+            detail = url_dict.get("detail")
+            if not isinstance(detail, str) or detail not in {"auto", "high", "low"}:
+                detail = "auto"
 
             if url_str.startswith("data:"):
                 # Use chunked image processor for large images
@@ -2894,6 +2900,8 @@ async def _process_content_for_db_sync(
                     )
                     if is_valid and decoded_bytes:
                         images_sync.append((decoded_bytes, mime_type))
+                        if image_details is not None:
+                            image_details.append(detail)
                         logger.debug("[DB SYNC] Successfully processed large image for conv={}", conversation_id)
                     else:
                         logger.warning(
@@ -2906,6 +2914,8 @@ async def _process_content_for_db_sync(
                     is_valid, mime_type, decoded_bytes = validate_image_url(url_str)
                     if is_valid and decoded_bytes:
                         images_sync.append((decoded_bytes, mime_type))
+                        if image_details is not None:
+                            image_details.append(detail)
                         logger.debug("[DB SYNC] Successfully validated and decoded image for conv={}", conversation_id)
                     else:
                         logger.warning(
@@ -3048,7 +3058,10 @@ async def _save_message_turn_to_db(
         # Track image processing if content contains images
         image_start_time = time.time()
         # Call async function directly instead of using run_in_executor
-        text_parts, images = await _process_content_for_db_sync(content, conversation_id)
+        image_details: list[str] = []
+        text_parts, images = await _process_content_for_db_sync(
+            content, conversation_id, image_details=image_details,
+        )
 
         # Track image processing metrics if images were processed
         if images:
@@ -3150,6 +3163,11 @@ async def _save_message_turn_to_db(
         if normalized_images:
             primary_image_data = normalized_images[0]["data"]
             primary_image_mime = normalized_images[0]["mime"]
+
+    if normalized_images:
+        if serialized_extra is None:
+            serialized_extra = {}
+        serialized_extra["image_details"] = image_details
 
     if not text_parts and normalized_images:
         text_parts = [f"<Image attachment x{len(normalized_images)}>"]
@@ -6465,12 +6483,30 @@ def _get_knowledge_qa_share_signing_key() -> bytes:
     explicit = (os.getenv("KNOWLEDGE_QA_SHARE_LINK_SECRET") or "").strip()
     if explicit:
         return explicit.encode("utf-8")
-    # Fail closed: no weaker fallback key. lru_cache does not cache exceptions, so a
-    # transient derivation failure is retried on the next call rather than pinned.
     try:
         return derive_hmac_key()
-    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
-        logger.error("Knowledge-QA share-link signing key unavailable: {}", type(exc).__name__)
+    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+        # Fall back only to a real deployment secret. This previously ended with
+        # `or "knowledge_qa_share_link_default"` -- a constant published in this
+        # open-source repository -- so any deployment that reached this branch signed
+        # every share token with a key anybody could read. Fail closed instead. Note
+        # lru_cache does not memoize exceptions, so a transient derivation failure is
+        # retried on the next call rather than pinned for the process lifetime.
+        fallback = (os.getenv("JWT_SECRET_KEY") or "").strip()
+        if not fallback:
+            raise RuntimeError(
+                "Cannot sign knowledge-QA share links: key derivation failed and "
+                "neither KNOWLEDGE_QA_SHARE_LINK_SECRET nor JWT_SECRET_KEY is set."
+            ) from None
+        return fallback.encode("utf-8")
+
+
+def _share_signing_key_or_503() -> bytes:
+    """The share-link key, or HTTP 503 when no real secret is configured."""
+    try:
+        return _get_knowledge_qa_share_signing_key()
+    except RuntimeError as exc:
+        logger.error("Knowledge-QA share-link signing key unavailable")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Share links are unavailable: signing key is not configured",
@@ -6486,7 +6522,7 @@ def _build_knowledge_qa_share_token(payload: dict[str, Any]) -> str:
         json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
     )
     signature = hmac.new(
-        _get_knowledge_qa_share_signing_key(),
+        _share_signing_key_or_503(),
         encoded_payload.encode("utf-8"),
         hashlib.sha256,
     ).digest()
@@ -6500,7 +6536,7 @@ def _decode_knowledge_qa_share_token(token: str) -> dict[str, Any]:
     try:
         raw_payload = verify_signed_token(
             token,
-            _get_knowledge_qa_share_signing_key(),
+            _share_signing_key_or_503(),
             sign_encoded_payload=True,
         )
     except SignatureMismatchError as exc:

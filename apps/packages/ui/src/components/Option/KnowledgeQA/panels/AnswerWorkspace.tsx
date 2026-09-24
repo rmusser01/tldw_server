@@ -1,8 +1,11 @@
 import { hasLowMeasuredRelevance } from "../sourceListUtils"
 import React, { useEffect, useMemo, useRef, useState } from "react"
+import { useTranslation } from "react-i18next"
 import { Loader2 } from "lucide-react"
 import { cn } from "@/libs/utils"
+import { isRagSource } from "@/services/rag/sourceMetadata"
 import type { QueryStage } from "../types"
+import { buildSourceFailureSummary } from "../trustSummary"
 import { useKnowledgeQA } from "../KnowledgeQAProvider"
 import { ConversationThread } from "../ConversationThread"
 import { AnswerPanel } from "../AnswerPanel"
@@ -13,7 +16,7 @@ type AnswerWorkspaceProps = {
   className?: string
 }
 
-const STAGE_COPY: Record<QueryStage, string> = {
+const STAGE_COPY: Record<Exclude<QueryStage, "cancelled">, string> = {
   idle: "Ready to search",
   searching: "Searching selected sources",
   ranking: "Ranking best evidence",
@@ -43,7 +46,10 @@ function truncatePreview(value: string, maxLength = 140): string {
 }
 
 export function AnswerWorkspace({ queryStage, className }: AnswerWorkspaceProps) {
+  const { t } = useTranslation(["knowledge", "sidepanel"])
   const {
+    answer = null,
+    searchDetails = null,
     results = [],
     error = null,
     queryWarning = null,
@@ -52,7 +58,15 @@ export function AnswerWorkspace({ queryStage, className }: AnswerWorkspaceProps)
     settings,
   } = useKnowledgeQA()
   const isActiveStage =
-    queryStage !== "idle" && queryStage !== "complete" && queryStage !== "error"
+    queryStage !== "idle" && queryStage !== "complete" && queryStage !== "error" && queryStage !== "cancelled"
+  const sourceFailureLines =
+    queryStage === "complete" && results.length > 0 && !answer?.trim()
+      ? buildSourceFailureSummary(
+          Object.keys(searchDetails?.sourceStatus ?? {}).filter(isRagSource),
+          searchDetails?.sourceStatus,
+          t
+        )
+      : []
   const [politeAnnouncement, setPoliteAnnouncement] = useState("")
   const [assertiveAnnouncement, setAssertiveAnnouncement] = useState("")
   const previousStageRef = useRef<QueryStage | null>(null)
@@ -125,6 +139,13 @@ export function AnswerWorkspace({ queryStage, className }: AnswerWorkspaceProps)
   }, [queryStage, results, citations, settings?.strip_min_relevance])
 
   useEffect(() => {
+    if (queryStage === "cancelled") {
+      previousStageRef.current = queryStage
+      setPoliteAnnouncement(t("answerWorkspace.cancelledAnnouncement", {
+        defaultValue: "Search cancelled. You can ask again when ready.",
+      }))
+      return
+    }
     if (queryStage === previousStageRef.current) return
     previousStageRef.current = queryStage
 
@@ -143,7 +164,7 @@ export function AnswerWorkspace({ queryStage, className }: AnswerWorkspaceProps)
     if (stageMessage) {
       setPoliteAnnouncement(stageMessage)
     }
-  }, [queryStage, results.length, queryWarning])
+  }, [queryStage, results.length, queryWarning, t])
 
   useEffect(() => {
     setAssertiveAnnouncement(error ? `Search error. ${error}` : "")
@@ -151,7 +172,15 @@ export function AnswerWorkspace({ queryStage, className }: AnswerWorkspaceProps)
 
   return (
     <div className={cn("space-y-6", className)}>
-      <div className="sr-only" aria-live="polite" aria-atomic="true">
+      <div
+        className={queryStage === "cancelled" ? "rounded-lg border border-border bg-muted/20 px-3 py-2 text-sm text-text-muted" : "sr-only"}
+        role={queryStage === "cancelled" ? "status" : undefined}
+        aria-label={queryStage === "cancelled"
+          ? t("answerWorkspace.cancelled", { defaultValue: "Search cancelled" })
+          : undefined}
+        aria-live="polite"
+        aria-atomic="true"
+      >
         {politeAnnouncement}
       </div>
       <div className="sr-only" aria-live="assertive" aria-atomic="true">
@@ -198,6 +227,16 @@ export function AnswerWorkspace({ queryStage, className }: AnswerWorkspaceProps)
       ) : null}
 
       <ConversationThread />
+      {sourceFailureLines.length > 0 ? (
+        <div role="status" className="rounded-lg border border-warn/25 bg-warn/10 px-4 py-3 text-sm">
+          {sourceFailureLines.map((line) => <p key={line}>{line}</p>)}
+          <p className="mt-1 text-text-muted">
+            {t("answerWorkspace.retainedSources", {
+              defaultValue: "Retrieved sources are still available.",
+            })}
+          </p>
+        </div>
+      ) : null}
       <AnswerPanel />
       <FollowUpInput mode={isLowQualityResult ? "recovery" : "default"} />
     </div>

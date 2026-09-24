@@ -29,13 +29,14 @@ def test_batch_renew_complete_fail_sqlite(monkeypatch, tmp_path):
         ids.append(int(j["id"]))
 
     acquired = []
+    # Test batch operations with live leases; expiry/reclaim has separate tests.
     for jid in ids:
-        acq = jm.acquire_next_job(domain="d", queue="default", lease_seconds=1, worker_id="w1")
+        acq = jm.acquire_next_job(domain="d", queue="default", lease_seconds=60, worker_id="w1")
         assert acq and int(acq["id"]) == jid
         acquired.append(acq)
 
     # Batch renew
-    items = [{"job_id": int(a["id"]), "worker_id": a.get("worker_id") or "w1", "lease_id": a.get("lease_id"), "seconds": 2} for a in acquired]
+    items = [{"job_id": int(a["id"]), "worker_id": a.get("worker_id") or "w1", "lease_id": a.get("lease_id"), "seconds": 120} for a in acquired]
     n = jm.batch_renew_leases(items)
     assert n >= 1
 

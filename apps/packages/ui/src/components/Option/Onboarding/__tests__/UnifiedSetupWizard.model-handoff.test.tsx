@@ -1,4 +1,5 @@
 import React from "react";
+import "@/i18n";
 import {
   act,
   fireEvent,
@@ -97,7 +98,7 @@ vi.mock("@/hooks/useSetupOnboarding", () => ({
     refresh: mocks.refresh,
     verifyFirstChat: mocks.verify,
     complete: mocks.complete,
-    loadProviderCatalog: vi.fn(),
+    loadProviderCatalog: vi.fn().mockResolvedValue([]),
     loadMcpToolsCatalog: vi.fn(),
     loadAudioRecommendations: vi.fn(),
   }),
@@ -186,6 +187,13 @@ describe("verified setup model handoff through the real WebUI owner", () => {
     ]);
   });
   afterEach(() => vi.restoreAllMocks());
+  it("offers provider reselection when anonymous resume redacts the saved model", () => {
+    render(<Parent setupState={{
+      ...initial,
+      step_data: { ...initial.step_data, providers: { default_provider: "llamacpp" } },
+    }} />);
+    expect(document.querySelector("section[aria-labelledby='provider-setup-title']")).toBeInTheDocument();
+  });
   it("finishes with the verified model before a browser key permits the protected catalog", async () => {
     const { TldwApiClient } = await vi.importActual<
       typeof import("@/services/tldw/TldwApiClient")

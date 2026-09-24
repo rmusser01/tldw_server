@@ -1,5 +1,9 @@
 // @vitest-environment jsdom
 import React from "react";
+import "@/i18n";
+import { createInstance } from "i18next";
+import { I18nextProvider } from "react-i18next";
+import settingsEs from "@/assets/locale/es/settings.json";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -380,6 +384,23 @@ describe("UnifiedSetupWizard", () => {
     expect(setupHookMocks.setConfigPartial).toHaveBeenCalledWith({ authMode: "multi-user" });
     expect(setupHookMocks.skip).not.toHaveBeenCalled();
     expect(setupHookMocks.saveStep).not.toHaveBeenCalled();
+  });
+
+  it.each(["configuration", "navigation"] as const)("reports safe %s sign-in diagnostics and translates the retry alert", async stage => {
+    setupHookMocks.authMode = "multi_user";
+    const failure = new TypeError("secret-api-key and private-account@example.com");
+    failure.name = "secret-error-name";
+    if (stage === "configuration") setupHookMocks.setConfigPartial.mockRejectedValueOnce(failure);
+    else setupHookMocks.navigate.mockImplementationOnce(() => { throw failure; });
+    const i18n = createInstance();
+    await i18n.init({ lng: "es", resources: { es: { settings: settingsEs } } });
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+    render(<I18nextProvider i18n={i18n}><UnifiedSetupWizard /></I18nextProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("No se pudo abrir la configuración de inicio de sesión. Inténtalo de nuevo."));
+    expect(screen.getByRole("button", { name: "Sign in" })).toBeEnabled();
+    expect(console.error).toHaveBeenCalledWith("Setup sign-in failed", { stage, errorType: "TypeError" });
+    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toMatch(/secret|private-account/);
   });
 
   it("requires privacy and security acknowledgement before provider setup", async () => {

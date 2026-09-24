@@ -106,6 +106,7 @@ export const TableBlock: FC<TableProps> = ({ children }) => {
 
   const handleDownloadCSV = () => {
     const csvContent = convertToCSV()
+    // eslint-disable-next-line react-hooks/purity -- TASK-12116: this click handler timestamps the download when requested, never during render.
     downloadFile(csvContent, `table-${Date.now()}.csv`, "text/csv")
   }
 

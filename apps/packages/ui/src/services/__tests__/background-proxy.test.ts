@@ -2853,6 +2853,44 @@ describe("background proxy fallback safety", () => {
     }
   })
 
+  it("bounds direct stream response acquisition before any headers arrive", async () => {
+    vi.useFakeTimers()
+    mocks.runtimeId = null
+    mocks.storageGet.mockImplementation(async (key: string) => key === "tldwConfig" ? {
+      serverUrl: "http://127.0.0.1:19999", authMode: "single-user", apiKey: "synthetic-test-key",
+      credentialSource: "manual", apiKeyPersistence: "device", apiKeyServerOrigin: "http://127.0.0.1:19999"
+    } : null)
+    const requestState: { signal: AbortSignal | null } = { signal: null }
+    const fetchSpy = vi.fn((_input: unknown, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      requestState.signal = init!.signal!
+      requestState.signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true })
+    }))
+    vi.stubGlobal("fetch", fetchSpy)
+    const caller = new AbortController()
+    try {
+      const { bgStream } = await importProxy()
+      const consume = async () => {
+        for await (const chunk of bgStream({
+          path: "/api/v1/rag/search/stream", method: "POST", body: { query: "Cedar" },
+          streamIdleTimeoutMs: 50, abortSignal: caller.signal, sanitizeRagProviderStreamError: true
+        })) { void chunk }
+      }
+      const handled = consume().catch((error: Error) => error)
+      await vi.advanceTimersByTimeAsync(51)
+      const timedOut = requestState.signal?.aborted
+      // Baseline cleanup must also terminate the deliberately unanswered fetch.
+      if (!timedOut) caller.abort()
+      const error = await handled
+      expect(timedOut).toBe(true)
+      expect(error).toMatchObject({ message: expect.stringMatching(/timed out/i) })
+      expect(fetchSpy).toHaveBeenCalledTimes(1)
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+      vi.unstubAllGlobals()
+    }
+  })
+
   it.each(["idle", "caller"] as const)("owns errored-body cancellation after %s abort", async (cause) => {
     mocks.runtimeId = null
     mocks.storageGet.mockImplementation(async (key: string) => key === "tldwConfig" ? {

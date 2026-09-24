@@ -11,6 +11,7 @@ import { getFlashcardSourceMeta } from '@/components/Flashcards/utils/source-ref
 import { useReadingProgress, type UseReadingProgressDeps } from '@/components/Media/hooks/useReadingProgress'
 
 const mocks = vi.hoisted(() => ({
+  queryClient: { removeQueries: vi.fn() },
   ownerScope: 'alice-scope' as string | null,
   canDelete: true,
   readingProbe: false,
@@ -53,6 +54,7 @@ vi.mock('react-i18next', () => ({
 }))
 
 vi.mock('@tanstack/react-query', () => ({
+  useQueryClient: () => mocks.queryClient,
   useQuery: () => ({
     data: mocks.queryData,
     refetch: mocks.refetch,
@@ -1262,11 +1264,12 @@ describe('Media stale-selection callback lifetime', () => {
       await act(async () => {
         useConnectionStore.setState(({ state }) => ({ state: { ...state, isConnected: false } }))
         useConnectionStore.setState(({ state }) => ({ state: { ...state, isConnected: true } }))
-        reject({ status: 404 })
       })
+      expect(hook.result.current.selected).toBeNull()
+      await act(async () => { reject({ status: 404 }) })
       expect(mocks.messageWarning).not.toHaveBeenCalled()
       expect(hook.refetch).not.toHaveBeenCalled()
-      expect(hook.result.current.selected?.id).toBe(1)
+      expect(hook.result.current.selected).toBeNull()
     } finally { hook.unmount(); hook.timer.mockRestore() }
   })
   it('keeps a newer selected source when deletion recovery refetch resolves late', async () => {

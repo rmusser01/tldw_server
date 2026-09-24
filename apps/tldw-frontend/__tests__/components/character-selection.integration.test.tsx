@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, renderHook, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AssistantSelect } from '@/components/Common/AssistantSelect';
@@ -12,11 +12,11 @@ import {
   characterToAssistantSelection,
   getAssistantSelectionMode,
 } from '@/types/assistant-selection';
-import { selectedAssistantStorage } from '@/utils/selected-assistant-storage';
 import { selectedCharacterStorage } from '@/utils/selected-character-storage';
 import type { Character } from '@/types/character';
 
 const mocks = vi.hoisted(() => ({
+  apiKey: 'test-key' as string | null,
   getCharacter: vi.fn(),
   getChat: vi.fn(),
   listChatMessages: vi.fn(),
@@ -31,11 +31,14 @@ vi.mock('@/services/tldw/TldwApiClient', () => ({
     listChatMessages: mocks.listChatMessages,
     listAllCharacters: mocks.listAllCharacters,
     listPersonaProfiles: async () => [],
-    ensureConfigForRequest: async () => ({
-      serverUrl: 'http://127.0.0.1:8000',
-      authMode: 'single-user',
-      apiKey: 'test-key',
-    }),
+    ensureConfigForRequest: async () => {
+      if (!mocks.apiKey) throw new Error('Signed out');
+      return {
+        serverUrl: 'http://127.0.0.1:8000',
+        authMode: 'single-user',
+        apiKey: mocks.apiKey,
+      };
+    },
   },
 }));
 vi.mock('@/db/dexie/helpers', () => ({
@@ -123,14 +126,20 @@ function SelectionWorkspace() {
 describe('character picker with greeting and server hydration', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
+    mocks.apiKey = 'test-key';
     localStorage.clear();
     useStoreMessageOption.setState(useStoreMessageOption.getInitialState(), true);
-    await selectedAssistantStorage.set('selectedAssistant', characterToAssistantSelection(cedar));
-    await selectedCharacterStorage.set('selectedCharacter', cedar);
     mocks.listAllCharacters.mockResolvedValue([cedar, robot]);
     mocks.getCharacter.mockImplementation(async (id) => (String(id) === '4' ? cedar : robot));
     mocks.getChat.mockResolvedValue({ id: 'cedar-chat', character_id: 4, name: 'Cedar chat' });
     mocks.listChatMessages.mockResolvedValue([]);
+
+    const selection = renderHook(() => useSelectedAssistant());
+    await waitFor(() => expect(selection.result.current[2].isLoading).toBe(false));
+    await act(async () => {
+      await selection.result.current[1](characterToAssistantSelection(cedar));
+    });
+    selection.unmount();
   });
   afterEach(() => vi.restoreAllMocks());
 
@@ -203,14 +212,15 @@ describe('character picker with greeting and server hydration', () => {
   });
 
   it.each([
-    ['tldw:auth-principal-changed', { kind: 'logout' }],
-    ['tldw:config-updated', { authorityChanged: true }],
-  ])('ignores a pending profile after the %s account boundary', async (eventName, detail) => {
+    ['tldw:auth-principal-changed', { kind: 'logout' }, null],
+    ['tldw:config-updated', { authorityChanged: true }, 'replacement-key'],
+  ] as const)('ignores a pending profile after the %s account boundary', async (eventName, detail, apiKey) => {
     const oldProfile = deferred<Character>();
     mocks.getCharacter.mockReturnValue(oldProfile.promise);
     render(<SelectionWorkspace />);
     await waitFor(() => expect(mocks.getCharacter).toHaveBeenCalledWith('4'));
     await act(async () => {
+      mocks.apiKey = apiKey;
       window.dispatchEvent(new CustomEvent(eventName, { detail }));
       oldProfile.resolve({ ...cedar, greeting: 'Previous account private greeting' });
       await oldProfile.promise;

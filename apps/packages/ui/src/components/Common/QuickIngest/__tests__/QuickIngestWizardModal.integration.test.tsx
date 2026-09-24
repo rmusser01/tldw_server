@@ -20,20 +20,19 @@ const capabilityMocks = vi.hoisted(() => ({
 }))
 
 // react-i18next
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (key: string, defaultOrOpts?: any) => {
-      if (typeof defaultOrOpts === "string") return defaultOrOpts
-      if (defaultOrOpts?.defaultValue) {
-        return defaultOrOpts.defaultValue.replace(
-          /\{\{(\w+)\}\}/g,
-          (_: string, token: string) => String(defaultOrOpts[token] ?? "")
-        )
-      }
-      return key
-    },
-  }),
-}))
+vi.mock("react-i18next", async () => {
+  const { createInstance } = await import("i18next")
+  const { default: ICU } = await import("@/i18n/icu-format")
+  const { default: option } = await import("@/assets/locale/en/option.json")
+  const i18n = createInstance().use(ICU)
+  await i18n.init({
+    lng: "en",
+    defaultNS: "option",
+    resources: { en: { option } },
+    interpolation: { escapeValue: false },
+  })
+  return { useTranslation: () => ({ t: i18n.t.bind(i18n) }) }
+})
 
 // antd — mock to simple HTML elements
 vi.mock("antd", () => ({
@@ -458,6 +457,7 @@ import {
 import { AddContentStep } from "@/components/Common/QuickIngest/AddContentStep"
 import { WizardConfigureStep } from "@/components/Common/QuickIngest/WizardConfigureStep"
 import { ReviewStep } from "@/components/Common/QuickIngest/ReviewStep"
+import { IngestWizardStepper } from "@/components/Common/QuickIngest/IngestWizardStepper"
 import { ProcessingStep } from "@/components/Common/QuickIngest/ProcessingStep"
 import { WizardResultsStep } from "@/components/Common/QuickIngest/WizardResultsStep"
 import { useQuickIngestSessionStore } from "@/store/quick-ingest-session"
@@ -672,6 +672,30 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
     expect(screen.getByText(/Add URLs or files/i)).toBeInTheDocument()
     expect(screen.getByText(/Media/i)).toBeInTheDocument()
     expect(screen.getByText(/Knowledge/i)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Configure 0 items" })).toBeDisabled()
+  })
+
+  it.each([
+    { count: 1, items: "1 item", summary: "1 item | Standard preset" },
+    { count: 2, items: "2 items", summary: "2 items | Standard preset" },
+  ])("uses consistent count wording in completed Add and Review for $count", ({ count, items, summary }) => {
+    const queueItems = Array.from({ length: count }, (_, index) => ({
+      id: `source-${index}`,
+      kind: "url" as const,
+      url: `https://example.com/source-${index}`,
+      detectedType: "web" as const,
+      icon: "Globe",
+      fileSize: 0,
+      validation: { valid: true },
+    }))
+    render(
+      <IngestWizardProvider initialState={{ currentStep: 3, highestStep: 3, queueItems }}>
+        <IngestWizardStepper />
+        <ReviewStep />
+      </IngestWizardProvider>
+    )
+    expect(screen.getByRole("button", { name: "Step 1: Add (completed)" })).toHaveTextContent(new RegExp(`${items}$`))
+    expect(screen.getByText(summary, { exact: true })).toBeInTheDocument()
   })
 
   it("Step 1 — focuses file upload when first-source file choice opens quick ingest", async () => {
@@ -761,8 +785,8 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
     // The textarea should be cleared after adding
     expect(textarea).toHaveValue("")
 
-    // "Configure 1 items >" button should appear
-    const configureButton = screen.getByText(/Configure 1 items/i)
+    // The single queued source uses the singular accessible action label.
+    const configureButton = screen.getByRole("button", { name: "Configure 1 item" })
     expect(configureButton).toBeTruthy()
     expect(configureButton).not.toBeDisabled()
   })
@@ -799,7 +823,7 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
     expect(retryConnection).toHaveBeenCalledTimes(1)
 
     const configureButton = screen.getByRole("button", {
-      name: /configure 1 items/i,
+      name: /configure 1 item\b/i,
     })
     expect(configureButton).not.toBeDisabled()
     await user.click(processButton)
@@ -908,7 +932,7 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
     })
 
     // Click configure button to go to step 2
-    const configureButton = screen.getByText(/Configure 1 items/i)
+    const configureButton = screen.getByText(/Configure 1 item\b/i)
     await user.click(configureButton)
 
     // Step 2: Preset cards should be visible (Quick, Standard, Deep)
@@ -1161,7 +1185,7 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
       ).toBeTruthy()
     })
 
-    await user.click(screen.getByText(/Configure 1 items/i))
+    await user.click(screen.getByText(/Configure 1 item\b/i))
 
     // Wait for step 2
     await waitFor(() => {
@@ -1213,7 +1237,7 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
       />
     )
 
-    const summary = screen.getByText(/1 items \| Standard preset/i)
+    const summary = screen.getByText(/1 item \| Standard preset/i)
     expect(summary).not.toHaveTextContent(/estimated|~\d+/i)
     expect(screen.getByText(/Processing time depends on the content, selected options, and server/i)).toBeInTheDocument()
     expect(screen.getByText(/large-video.mp4 is 400 MB/)).toBeInTheDocument()
@@ -1234,7 +1258,7 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
     const textarea = screen.getByPlaceholderText(/https:\/\/example\.com/i)
     await user.type(textarea, "https://example.com/review-offline")
     await user.click(screen.getByRole("button", { name: /Add URLs to queue/i }))
-    await user.click(screen.getByRole("button", { name: /Configure 1 items/i }))
+    await user.click(screen.getByRole("button", { name: /Configure 1 item\b/i }))
 
     await waitFor(() => {
       expect(
@@ -1281,7 +1305,7 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
       expect(screen.getByText("https://example.com/doc.pdf")).toBeTruthy()
     })
 
-    await user.click(screen.getByText(/Configure 1 items/i))
+    await user.click(screen.getByText(/Configure 1 item\b/i))
 
     await waitFor(() => {
       expect(
@@ -1439,7 +1463,7 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
       expect(screen.getByText("https://example.com/article")).toBeTruthy()
     })
 
-    await user.click(screen.getByText(/Configure 1 items/i))
+    await user.click(screen.getByText(/Configure 1 item\b/i))
 
     await waitFor(() => {
       expect(
@@ -1528,7 +1552,7 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
       expect(screen.getByText("https://example.com/article")).toBeTruthy()
     })
 
-    await user.click(screen.getByText(/Configure 1 items/i))
+    await user.click(screen.getByText(/Configure 1 item\b/i))
 
     await waitFor(() => {
       expect(
@@ -1645,7 +1669,7 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
     })
 
     // The configure button should reference 2 items
-    expect(screen.getByText(/Configure 2 items/i)).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Configure 2 items" })).toBeTruthy()
   })
 
   it("captures shared conference metadata for a 34-talk batch and shows it in review", async () => {
@@ -1802,7 +1826,7 @@ describe("QuickIngestWizardModal — real configure step", () => {
       ).toBeTruthy()
     })
 
-    await user.click(screen.getByText(/Configure 1 items/i))
+    await user.click(screen.getByText(/Configure 1 item\b/i))
 
     await waitFor(() => {
       expect(
@@ -1842,7 +1866,7 @@ describe("QuickIngestWizardModal — real configure step", () => {
       "https://example.com/library/article"
     )
     await user.click(screen.getByRole("button", { name: /Add URLs to queue/i }))
-    await user.click(screen.getByText(/Configure 1 items/i))
+    await user.click(screen.getByText(/Configure 1 item\b/i))
 
     await waitFor(() => {
       expect(
@@ -1869,7 +1893,7 @@ describe("QuickIngestWizardModal — real configure step", () => {
       "https://example.com/library/article"
     )
     await user.click(screen.getByRole("button", { name: /Add URLs to queue/i }))
-    await user.click(screen.getByText(/Configure 1 items/i))
+    await user.click(screen.getByText(/Configure 1 item\b/i))
 
     await user.click(await screen.findByRole("button", { name: "Manual" }))
 
@@ -1907,7 +1931,7 @@ describe("QuickIngestWizardModal — real configure step", () => {
       "https://example.com/library/article"
     )
     await user.click(screen.getByRole("button", { name: /Add URLs to queue/i }))
-    await user.click(screen.getByText(/Configure 1 items/i))
+    await user.click(screen.getByText(/Configure 1 item\b/i))
     await user.click(await screen.findByRole("button", { name: "Manual" }))
 
     await user.clear(screen.getByLabelText("Chunk size"))
@@ -1930,7 +1954,7 @@ describe("QuickIngestWizardModal — real configure step", () => {
       "https://example.com/library/video.mkv"
     )
     await user.click(screen.getByRole("button", { name: /Add URLs to queue/i }))
-    await user.click(screen.getByText(/Configure 1 items/i))
+    await user.click(screen.getByText(/Configure 1 item\b/i))
 
     await expandAdvancedOptions(user)
 
@@ -1968,7 +1992,7 @@ describe("QuickIngestWizardModal — real configure step", () => {
       expect(screen.getByText("https://example.com/research-paper.pdf")).toBeTruthy()
     })
 
-    await user.click(screen.getByText(/Configure 1 items/i))
+    await user.click(screen.getByText(/Configure 1 item\b/i))
 
     await expandAdvancedOptions(user)
 
@@ -1997,7 +2021,7 @@ describe("QuickIngestWizardModal — real configure step", () => {
       ).toBeTruthy()
     })
 
-    await user.click(screen.getByText(/Configure 1 items/i))
+    await user.click(screen.getByText(/Configure 1 item\b/i))
 
     await expandAdvancedOptions(user)
 
@@ -2028,7 +2052,7 @@ describe("QuickIngestWizardModal — real configure step", () => {
       ).toBeTruthy()
     })
 
-    await user.click(screen.getByText(/Configure 1 items/i))
+    await user.click(screen.getByText(/Configure 1 item\b/i))
 
     await expandAdvancedOptions(user)
 
@@ -2070,7 +2094,7 @@ describe("QuickIngestWizardModal — real configure step", () => {
       ).toBeTruthy()
     })
 
-    await user.click(screen.getByText(/Configure 1 items/i))
+    await user.click(screen.getByText(/Configure 1 item\b/i))
 
     await expandAdvancedOptions(user)
 
@@ -2110,7 +2134,7 @@ describe("QuickIngestWizardModal — real configure step", () => {
       ).toBeTruthy()
     })
 
-    await user.click(screen.getByText(/Configure 1 items/i))
+    await user.click(screen.getByText(/Configure 1 item\b/i))
 
     await expandAdvancedOptions(user)
 
@@ -2161,7 +2185,7 @@ describe("QuickIngestWizardModal — real configure step", () => {
       ).toBeTruthy()
     })
 
-    await user.click(screen.getByText(/Configure 1 items/i))
+    await user.click(screen.getByText(/Configure 1 item\b/i))
 
     await expandAdvancedOptions(user)
 
@@ -2203,7 +2227,7 @@ describe("QuickIngestWizardModal — real configure step", () => {
       ).toBeTruthy()
     })
 
-    await user.click(screen.getByText(/Configure 1 items/i))
+    await user.click(screen.getByText(/Configure 1 item\b/i))
 
     await expandAdvancedOptions(user)
 
@@ -2248,7 +2272,7 @@ describe("QuickIngestWizardModal — real configure step", () => {
       ).toBeTruthy()
     })
 
-    await user.click(screen.getByText(/Configure 1 items/i))
+    await user.click(screen.getByText(/Configure 1 item\b/i))
 
     await expandAdvancedOptions(user)
 
@@ -2296,7 +2320,7 @@ describe("QuickIngestWizardModal — real configure step", () => {
       ).toBeTruthy()
     })
 
-    await user.click(screen.getByText(/Configure 1 items/i))
+    await user.click(screen.getByText(/Configure 1 item\b/i))
 
     await expandAdvancedOptions(user)
 
@@ -2341,7 +2365,7 @@ describe("QuickIngestWizardModal — real configure step", () => {
       ).toBeTruthy()
     })
 
-    await user.click(screen.getByText(/Configure 1 items/i))
+    await user.click(screen.getByText(/Configure 1 item\b/i))
 
     await expandAdvancedOptions(user)
 
@@ -2385,7 +2409,7 @@ describe("QuickIngestWizardModal — real configure step", () => {
       ).toBeTruthy()
     })
 
-    await user.click(screen.getByText(/Configure 1 items/i))
+    await user.click(screen.getByText(/Configure 1 item\b/i))
 
     await expandAdvancedOptions(user)
 

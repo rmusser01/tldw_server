@@ -1782,7 +1782,9 @@ async def download_chatbook(
             import hashlib
             import hmac
 
-            msg = f"{job_id}:{exp_int}".encode()
+            # The owner is part of the signed message, so a token minted for one
+            # account cannot be replayed by another even if it leaks.
+            msg = f"{job_id}:{exp_int}:{job.user_id}".encode()
             expected = hmac.new(secret.encode("utf-8"), msg, hashlib.sha256).hexdigest()
             if not hmac.compare_digest(expected, token):
                 raise HTTPException(status_code=403, detail="Invalid signature")

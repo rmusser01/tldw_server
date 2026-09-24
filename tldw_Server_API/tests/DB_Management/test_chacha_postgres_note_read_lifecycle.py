@@ -229,3 +229,39 @@ def test_sqlite_notes_read_chain_keeps_existing_behavior(tmp_path, operation):
         assert db.get_note_by_id(note_id)["title"] == "Committed title"
     finally:
         db.close_connection()
+
+
+def test_note_duplicate_and_projection_unique_errors_remain_distinct(pg_notes, monkeypatch):
+    from tldw_Server_API.app.core.DB_Management.backends.base import UniqueConstraintError
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError
+
+    db, note_id = pg_notes
+    with pytest.raises(ConflictError, match="already exists"):
+        db.add_note("Replacement", "replacement body", note_id=note_id)
+    assert db.get_note_by_id(note_id)["title"] == "Committed title"
+
+    def failed_projection(**kwargs):
+        raise UniqueConstraintError("PostgreSQL query execution failed")
+
+    monkeypatch.setattr(db.note_graph_projection_store, "replace_projection", failed_projection)
+    with pytest.raises(CharactersRAGDBError) as error:
+        db.add_note("Projection failure", "body", note_id="projection-failure")
+    assert not isinstance(error.value, ConflictError)
+    assert db.get_note_by_id("projection-failure") is None
+
+
+@pytest.mark.parametrize("delete_method", ["soft_delete_note", "delete_note"])
+def test_owned_note_mutations_and_keyword_reads_use_postgres_booleans(pg_notes, delete_method):
+    db, note_id = pg_notes
+    keyword_id = db.get_keywords_for_note(note_id)[0]["id"]
+    assert db.update_note(note_id, {"title": "Updated title"}, expected_version=1)
+    assert db.get_note_by_id(note_id)["title"] == "Updated title"
+    assert [row["id"] for row in db.get_keywords_for_notes([note_id])[note_id]] == [keyword_id]
+    assert [row["id"] for row in db.get_notes_for_keyword(keyword_id)] == [note_id]
+
+    assert getattr(db, delete_method)(note_id, expected_version=2)
+    assert db.get_note_by_id(note_id) is None
+    assert db.get_notes_for_keyword(keyword_id) == []
+    assert db.restore_note(note_id, expected_version=3)
+    assert db.get_note_by_id(note_id)["version"] == 4
+    assert [row["id"] for row in db.get_notes_for_keyword(keyword_id)] == [note_id]

@@ -57,7 +57,7 @@ export const IngestWizardStepper: React.FC = () => {
         case 1: {
           const count = queueItems.length
           if (count === 0) return null
-          return qi("wizard.summary.addCount", "{{count}} items", { count })
+          return qi("wizard.summary.addCount", "{count, plural, one {# item} other {# items}}", { count })
         }
         case 2: {
           const presetLabel = selectedPreset.charAt(0).toUpperCase() + selectedPreset.slice(1)

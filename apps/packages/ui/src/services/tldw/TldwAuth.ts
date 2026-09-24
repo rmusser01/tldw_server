@@ -7,7 +7,7 @@ import { clearSourceReviewHandoffs } from "@/services/tldw/source-review-handoff
 import { clearFlashcardsGenerateHandoffs } from "@/services/tldw/flashcards-generate-handoff"
 import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 import { clearStandaloneHtmlSessionRecords } from "@/services/tldw/standalone-html-session-records"
-import { deriveScopedUserId } from "@/utils/media-navigation-scope"
+import { deriveScopedUserId, deriveTokenOrgId } from "@/utils/media-navigation-scope"
 
 export interface LoginCredentials {
   username: string
@@ -23,10 +23,6 @@ export interface TokenResponse {
 
 type OrgListResponse = {
   items?: Array<{ id: number }>
-}
-
-type OrgDetailResponse = {
-  id: number
 }
 
 export interface UserInfo {
@@ -69,7 +65,7 @@ export class TldwAuthService {
     return isHostedTldwDeployment()
   }
 
-  private async ensureOrgId(): Promise<void> {
+  private async ensureHostedOrgId(): Promise<void> {
     try {
       const orgs = await bgRequest<OrgListResponse>({
         path: "/api/v1/orgs",
@@ -81,38 +77,21 @@ export class TldwAuthService {
         return
       }
     } catch {
-      // ignore and continue to hosted fallback or self-host create below
-    }
-
-    if (this.isHostedMode()) {
-      try {
-        const profile = await tldwClient.getCurrentUserProfile({
-          includeRaw: true
-        })
-        const activeOrgId = Number(
-          profile?.active_org_id ??
-          profile?.org_id ??
-          profile?.raw?.active_org_id ??
-          0
-        )
-        if (Number.isFinite(activeOrgId) && activeOrgId > 0) {
-          await tldwClient.updateConfig({ orgId: activeOrgId })
-        }
-      } catch {
-        // best-effort only
-      }
-      return
+      // Continue to the hosted profile fallback below.
     }
 
     try {
-      const created = await bgRequest<OrgDetailResponse>({
-        path: "/api/v1/orgs",
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: { name: "Personal Workspace" }
+      const profile = await tldwClient.getCurrentUserProfile({
+        includeRaw: true
       })
-      if (created?.id) {
-        await tldwClient.updateConfig({ orgId: created.id })
+      const activeOrgId = Number(
+        profile?.active_org_id ??
+        profile?.org_id ??
+        profile?.raw?.active_org_id ??
+        0
+      )
+      if (Number.isFinite(activeOrgId) && activeOrgId > 0) {
+        await tldwClient.updateConfig({ orgId: activeOrgId })
       }
     } catch {
       // best-effort only
@@ -145,10 +124,11 @@ export class TldwAuthService {
     await tldwClient.updateConfig({
       authMode: 'multi-user',
       accessToken: hostedMode ? undefined : tokens.access_token,
-      refreshToken: hostedMode ? undefined : tokens.refresh_token
+      refreshToken: hostedMode ? undefined : tokens.refresh_token,
+      ...(hostedMode ? {} : { orgId: deriveTokenOrgId(tokens.access_token) })
     })
 
-    await this.ensureOrgId()
+    if (hostedMode) await this.ensureHostedOrgId()
 
     if (!hostedMode && tokens.expires_in) {
       this.setupTokenRefresh(tokens.expires_in)
@@ -197,10 +177,11 @@ export class TldwAuthService {
     await tldwClient.updateConfig({
       authMode: 'multi-user',
       accessToken: hostedMode ? undefined : tokens.access_token,
-      refreshToken: hostedMode ? undefined : tokens.refresh_token
+      refreshToken: hostedMode ? undefined : tokens.refresh_token,
+      ...(hostedMode ? {} : { orgId: deriveTokenOrgId(tokens.access_token) })
     })
 
-    await this.ensureOrgId()
+    if (hostedMode) await this.ensureHostedOrgId()
 
     if (!hostedMode && tokens.expires_in) {
       this.setupTokenRefresh(tokens.expires_in)

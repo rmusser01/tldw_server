@@ -1,4 +1,7 @@
 {
+  "onboarding_loginSettingsError": {
+    "message": "無法開啟登入設定。請再試一次。"
+  },
   "navigation_serverAndAuth": {
     "message": "伺服器與驗證"
   },

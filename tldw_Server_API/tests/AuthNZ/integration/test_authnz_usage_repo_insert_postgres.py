@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
+
 
 pytestmark = pytest.mark.integration
 
@@ -15,21 +17,14 @@ async def test_authnz_usage_repo_insert_usage_log_postgres(test_db_pool):
     repo = AuthnzUsageRepo(pool)
 
     # Seed a user and API key to satisfy Postgres FKs on usage_log
+    users = UsersDB(pool)
+    await users.initialize(ensure_schema=False)
+    user = await users.create_user(
+        username="pg-usage-user", email="pg-usage-user@example.com",
+        password_hash="hashed", role="user", is_active=True, is_verified=True,
+    )
+    user_id = int(user["id"])
     async with pool.acquire() as conn:
-        user_id = await conn.fetchval(
-            """
-            INSERT INTO users (
-                uuid, username, email, password_hash, role,
-                is_active, is_verified, storage_quota_mb, storage_used_mb
-            )
-            VALUES (gen_random_uuid(), $1, $2, $3, $4, TRUE, TRUE, 5120, 0.0)
-            RETURNING id
-            """,
-            "pg-usage-user",
-            "pg-usage-user@example.com",
-            "hashed",
-            "user",
-        )
         key_id = await conn.fetchval(
             """
             INSERT INTO api_keys (user_id, key_hash, key_prefix, scope, status)

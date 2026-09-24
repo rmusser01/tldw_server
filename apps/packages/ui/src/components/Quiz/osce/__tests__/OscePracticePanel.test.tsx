@@ -20,8 +20,8 @@ const online = vi.hoisted(() => ({ value: true }))
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (_key: string, value?: string | { defaultValue?: string }) =>
-      typeof value === "string" ? value : value?.defaultValue ?? _key
+    t: (_key: string, value?: string | { defaultValue?: string; minutes?: number }) =>
+      _key === "option:quiz.osceRecommendedMinutes" && typeof value === "object" ? `${value.minutes} translated minutes` : typeof value === "string" ? value : value?.defaultValue ?? _key
   })
 }))
 
@@ -107,6 +107,11 @@ const revealed: OsceAttempt = {
 }
 
 describe("OSCE timer", () => {
+  it.each(["", "invalid"])("treats unparseable timestamps as absent (%s)", value => {
+    expect(computeElapsedSeconds({ startedAt: value, serverNow: "2026-09-11T10:05:00Z" })).toBe(0)
+    expect(computeElapsedSeconds({ startedAt: "2026-09-11T10:00:00Z", serverNow: value })).toBe(0)
+  })
+
   it("uses server timestamps across reload, local clock jumps, background suspension, reveal, and resume", () => {
     expect(computeElapsedSeconds({
       startedAt: "2026-09-11T10:00:00Z",
@@ -192,6 +197,26 @@ describe("OscePracticePanel", () => {
     expect(screen.queryByText("Hidden answer")).not.toBeInTheDocument()
     expect(screen.queryByText("Hidden checklist")).not.toBeInTheDocument()
     expect(screen.queryByText("Hidden rubric")).not.toBeInTheDocument()
+  })
+
+  it("translates recommended duration with its minute value", () => {
+    render(<OscePracticePanel attemptId={7} userScope="user-42" />)
+    expect(screen.getByText("8 translated minutes")).toBeInTheDocument()
+  })
+
+  it("does not schedule delayed error focus after an in-flight reveal unmounts", async () => {
+    let reject!: (error: Error) => void
+    begin.mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail }))
+    const user = userEvent.setup()
+    const view = render(<OscePracticePanel attemptId={7} userScope="user-42" />)
+    await user.click(screen.getByRole("button", { name: "Begin self-assessment" }))
+    await user.click(await screen.findByRole("button", { name: "Reveal marking guide" }))
+    await waitFor(() => expect(begin).toHaveBeenCalled())
+    view.unmount()
+    const timers = vi.spyOn(window, "setTimeout")
+    await act(async () => { reject(new Error("late save error")) })
+    expect(timers).not.toHaveBeenCalled()
+    timers.mockRestore()
   })
 
   it("focuses an accessible reveal confirmation and flushes notes before transition", async () => {

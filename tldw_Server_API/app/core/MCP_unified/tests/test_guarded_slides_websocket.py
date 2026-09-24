@@ -91,6 +91,7 @@ def _guarded_transport_module():
     return guarded_slides_websocket
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_guarded_websocket_replays_large_fragmented_message_exactly_without_compression(
     monkeypatch: pytest.MonkeyPatch,

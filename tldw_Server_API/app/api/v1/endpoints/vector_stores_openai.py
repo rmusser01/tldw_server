@@ -1441,14 +1441,24 @@ async def upsert_vectors_batch(
     current_user: User = Depends(get_request_user)
 ):
     batch_id = f"vsb_{uuid.uuid4().hex[:20]}"
-    _BATCH_STATUS[batch_id] = {"id": batch_id, "status": "processing", "upserted": 0, "error": None}
+    # Stamp the owner: _BATCH_STATUS is a process-global dict keyed by batch id
+    # alone, and the status endpoint reads it before falling back to the
+    # owner-scoped database record.
+    _batch_owner = resolve_user_id_for_request(
+        current_user,
+        allow_none=True,
+        error_status=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+    )
+    _BATCH_STATUS[batch_id] = {
+        "id": batch_id,
+        "status": "processing",
+        "upserted": 0,
+        "error": None,
+        "user_id": None if _batch_owner is None else str(_batch_owner),
+    }
     # Persist creation
     try:
-        uid = resolve_user_id_for_request(
-            current_user,
-            allow_none=True,
-            error_status=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-        )
+        uid = _batch_owner
         init_batches_db(uid)
         db_create_batch(
             batch_id=batch_id,
@@ -1492,16 +1502,18 @@ async def get_batch_status(
     batch_id: str = Path(...),
     current_user: User = Depends(get_request_user)
 ):
-    if batch_id in _BATCH_STATUS:
-        return _BATCH_STATUS[batch_id]
-    # Fallback to persisted status
-    rec = db_get_batch(
-        batch_id,
-        user_id=resolve_user_id_for_request(
-            current_user,
-            error_status=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-        ),
+    caller = resolve_user_id_for_request(
+        current_user,
+        error_status=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
     )
+    cached = _BATCH_STATUS.get(batch_id)
+    if cached is not None and str(cached.get("user_id") or "") == str(caller):
+        # Only the owner may read the in-memory entry. This previously returned
+        # for any caller who knew a batch id, short-circuiting the owner-scoped
+        # database lookup immediately below it.
+        return cached
+    # Fallback to persisted status
+    rec = db_get_batch(batch_id, user_id=caller)
     if not rec:
         raise HTTPException(404, detail="Batch not found")
     return {

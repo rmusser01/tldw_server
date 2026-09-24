@@ -1,6 +1,7 @@
+import asyncio
+from time import perf_counter
 from typing import Optional
 
-import asyncio
 import pytest
 
 from tldw_Server_API.app.core.Chat import command_router
@@ -58,6 +59,44 @@ def test_core_parse_still_only_returns_registered_core_commands():
     assert command_router.parse_slash_command("/time") == ("time", None)
     assert command_router.parse_slash_command("/wrapup") is None
     assert "time" in command_router.reserved_core_command_names()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("parser", [command_router.extract_slash_candidate, command_router.parse_slash_command])
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        (" \t/TIME\n ", ("time", None)),
+        ("/time\t\u2003Europe/Paris  ", ("time", "Europe/Paris")),
+        ("/time\n\t Europe/Paris", ("time", "Europe/Paris")),
+        ("/time first\tsecond", ("time", "first\tsecond")),
+        ("/time first\rsecond", ("time", "first\rsecond")),
+        ("/time first\nsecond", None),
+        ("/time! args", None),
+        ("/ time", None),
+        ("/", None),
+        (None, None),
+    ],
+)
+def test_slash_parsing_preserves_whitespace_and_argument_semantics(parser, message, expected):
+    assert parser(message) == expected
+
+
+@pytest.mark.unit
+def test_slash_candidate_preserves_unicode_command_names():
+    assert command_router.extract_slash_candidate("/CAFÉ_２\u2003résumé") == ("café_２", "résumé")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("parser", [command_router.extract_slash_candidate, command_router.parse_slash_command])
+def test_slash_parsing_rejects_multiline_arguments_without_quadratic_backtracking(parser):
+    message = "/time " + " " * 32_000 + "first\nsecond"
+    started = perf_counter()
+    result = parser(message)
+    elapsed = perf_counter() - started
+    assert result is None
+    # Linear parsing takes milliseconds; leave ample room for loaded CI runners.
+    assert elapsed < 1.0
 
 
 @pytest.mark.asyncio

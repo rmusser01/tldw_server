@@ -109,7 +109,11 @@ async def test_resolve_revoked_share_raises(repo, resolver, mock_dbs):
     )
     await repo.revoke_share(share["id"])
 
-    with pytest.raises(PermissionError, match="revoked"):
+    # Access now runs through get_active_share_for_user, whose query already
+    # excludes revoked rows. A revoked share is therefore indistinguishable
+    # from one that never existed or that this accessor may not use, which is
+    # the right answer: the error should not tell a stranger which it was.
+    with pytest.raises(PermissionError, match="not found"):
         await resolver.resolve(
             share["id"],
             accessor_user_id=2,

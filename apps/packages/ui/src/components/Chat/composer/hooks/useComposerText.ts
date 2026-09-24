@@ -28,6 +28,8 @@ import React from "react"
 export interface UseComposerTextOptions {
   /** Persistence key for draft messages. Each surface uses its own key. */
   draftKey: string
+  /** Keep active browser tabs from replacing each other's unsent text. */
+  tabScopedDraft?: boolean
   /** Textarea ref owned by the caller (usually the composer component). */
   textareaRef: React.RefObject<HTMLTextAreaElement>
   /** Pro mode gets a taller textarea (160px) vs casual (120px). */
@@ -89,6 +91,7 @@ export function useComposerText(
 ): UseComposerTextResult {
   const {
     draftKey,
+    tabScopedDraft = false,
     textareaRef,
     isProMode = false,
     maxHeight: explicitMaxHeight,
@@ -172,6 +175,7 @@ export function useComposerText(
 
   const { draftSaved, clearDraft } = useDraftPersistence({
     storageKey: `${draftKey}:owner:${ownerKey ?? "unresolved"}`,
+    tabScoped: tabScopedDraft,
     legacyStorageKey: draftKey,
     isCurrent,
     getValue: () => form.values.message,

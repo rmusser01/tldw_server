@@ -1,3 +1,4 @@
+import { useDefaultCharacterSelection } from "@/hooks/useDefaultCharacterSelection"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import React from "react"
 import useDynamicTextareaSize from "~/hooks/useDynamicTextareaSize"
@@ -142,8 +143,6 @@ import {
 } from "@/utils/chat-model-availability"
 import { createSafeStorage } from "@/utils/safe-storage"
 import {
-  DEFAULT_CHARACTER_STORAGE_KEY,
-  defaultCharacterStorage,
   isFreshChatState,
   resolveCharacterSelectionId,
   shouldApplyDefaultCharacter,
@@ -186,9 +185,7 @@ type Props = {
   ) => Promise<void> | void
 }
 
-type DefaultCharacterPreferenceQueryResult = {
-  defaultCharacterId: string | null
-}
+
 
 type SidepanelQueuedSourceContext = {
   documents?: ChatDocuments
@@ -229,25 +226,10 @@ export const SidepanelForm = ({
     false
   )
   const [imageBackendDefault] = useStorage("imageBackendDefault", "")
-  const [storedCharacter, setStoredCharacter] =
+  const [storedCharacter, setStoredCharacter, characterMeta] =
     useSelectedCharacter<Character | null>(null)
-  const [defaultCharacter, setDefaultCharacter] = useStorage<Character | null>(
-    {
-      key: DEFAULT_CHARACTER_STORAGE_KEY,
-      instance: defaultCharacterStorage
-    },
-    null
-  )
-  const { data: defaultCharacterPreference } = useQuery<DefaultCharacterPreferenceQueryResult>({
-    queryKey: ["tldw:defaultCharacterPreference:chat"],
-    queryFn: async () => {
-      await tldwClient.initialize()
-      const defaultCharacterId = await tldwClient.getDefaultCharacterPreference()
-      return { defaultCharacterId }
-    },
-    staleTime: 60 * 1000,
-    throwOnError: false
-  })
+  const [defaultCharacter, setDefaultCharacter, defaultCharacterMeta] = useDefaultCharacterSelection()
+  const defaultCharacterPreference = defaultCharacterMeta.preference
   const [contextFileMaxSizeMb] = useSetting(CONTEXT_FILE_SIZE_MB_SETTING)
   const maxContextFileSizeBytes = React.useMemo(
     () => contextFileMaxSizeMb * 1024 * 1024,
@@ -1298,7 +1280,7 @@ export const SidepanelForm = ({
   }, [isFreshChat])
 
   React.useEffect(() => {
-    if (!effectiveDefaultCharacter || !effectiveDefaultCharacterId) return
+    if (characterMeta?.isLoading || defaultCharacterMeta.isLoading || !effectiveDefaultCharacter || !effectiveDefaultCharacterId) return
     if (
       !shouldApplyDefaultCharacter({
         defaultCharacterId: effectiveDefaultCharacterId,
@@ -1313,6 +1295,8 @@ export const SidepanelForm = ({
     defaultCharacterBootstrapAppliedRef.current = true
     void setStoredCharacter(effectiveDefaultCharacter)
   }, [
+    characterMeta?.isLoading,
+    defaultCharacterMeta.isLoading,
     effectiveDefaultCharacter,
     effectiveDefaultCharacterId,
     isFreshChat,

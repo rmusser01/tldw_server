@@ -243,6 +243,16 @@ const buildRequestMessages = (
     withSystemPrompt = sanitizedMessages
   }
 
+  if (options.regenerateFromMessageId) {
+    // Saved regeneration uses canonical server history. Sending the local
+    // prefix again would turn response variants into new persisted turns.
+    const originalUser = withSystemPrompt.at(-1)
+    if (originalUser?.role !== "user") {
+      throw new Error("Reload the saved user turn before regenerating its reply.")
+    }
+    withSystemPrompt = [...withSystemPrompt.filter(message => message.role === "system"), originalUser]
+  }
+
   return normalizeMessagesForProvider(
     withSystemPrompt,
     options.apiProvider,
@@ -268,6 +278,7 @@ export interface TldwChatOptions {
   saveToDb?: boolean
   retryFailedTurn?: boolean
   clientMessageId?: string
+  regenerateFromMessageId?: string
   conversationId?: string
   historyMessageLimit?: number
   historyMessageOrder?: string
@@ -384,9 +395,10 @@ export class TldwChatService {
             }
           : {}),
         save_to_db: options.saveToDb,
-        ...(options.retryFailedTurn || options.clientMessageId ? { metadata: {
+        ...(options.retryFailedTurn || options.clientMessageId || options.regenerateFromMessageId ? { metadata: {
           ...(options.retryFailedTurn ? { tldw_retry_failed_turn: true } : {}),
-          ...(options.clientMessageId ? { tldw_client_message_id: options.clientMessageId } : {})
+          ...(options.clientMessageId ? { tldw_client_message_id: options.clientMessageId } : {}),
+          ...(options.regenerateFromMessageId ? { tldw_regenerate_from_message_id: options.regenerateFromMessageId } : {})
         } } : {}),
         conversation_id: options.conversationId,
         history_message_limit: options.historyMessageLimit,
@@ -511,9 +523,10 @@ export class TldwChatService {
             }
           : {}),
         save_to_db: options.saveToDb,
-        ...(options.retryFailedTurn || options.clientMessageId ? { metadata: {
+        ...(options.retryFailedTurn || options.clientMessageId || options.regenerateFromMessageId ? { metadata: {
           ...(options.retryFailedTurn ? { tldw_retry_failed_turn: true } : {}),
-          ...(options.clientMessageId ? { tldw_client_message_id: options.clientMessageId } : {})
+          ...(options.clientMessageId ? { tldw_client_message_id: options.clientMessageId } : {}),
+          ...(options.regenerateFromMessageId ? { tldw_regenerate_from_message_id: options.regenerateFromMessageId } : {})
         } } : {}),
         conversation_id: options.conversationId,
         history_message_limit: options.historyMessageLimit,

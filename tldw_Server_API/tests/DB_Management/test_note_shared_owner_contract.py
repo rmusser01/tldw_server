@@ -34,6 +34,14 @@ def note_owners(request, tmp_path):
             backend.get_pool().close_all()
 
 
+def test_duplicate_note_id_is_a_conflict_and_preserves_original(note_owners):
+    original = note_owners.alice.get_note_by_id(note_owners.private)
+    with pytest.raises(ConflictError, match="already exists"):
+        note_owners.alice.add_note("Replacement", "Must not be saved", note_id=note_owners.private)
+    assert note_owners.alice.get_note_by_id(note_owners.private) == original
+    assert note_owners.bob.get_note_by_id(note_owners.private) is None
+
+
 @pytest.mark.parametrize("operation", ["list", "count", "detail", "deleted", "batch", "search"])
 def test_note_reads_exclude_foreign_owner(note_owners, operation):
     db = note_owners.bob
@@ -359,7 +367,7 @@ def test_owned_organization_reuse_and_transaction_controls(note_owners, operatio
 
 
 @pytest.mark.parametrize("note_owners", ["postgres"], indirect=True)
-@pytest.mark.parametrize("operation", ["single", "batch", "reverse", "counts", "search", "search-count", "merge"])
+@pytest.mark.parametrize("operation", ["single", "foreign-note", "batch", "reverse", "foreign-keyword", "counts", "search", "search-count", "merge"])
 def test_malformed_note_keyword_links_do_not_cross_owners(note_owners, operation):
     f = note_owners
     foreign = f.alice.add_keyword("Foreign amber")
@@ -377,12 +385,16 @@ def test_malformed_note_keyword_links_do_not_cross_owners(note_owners, operation
         )
     if operation == "single":
         assert [k["id"] for k in f.bob.get_keywords_for_note(f.own)] == [own]
+    elif operation == "foreign-note":
+        assert f.bob.get_keywords_for_note(f.private) == []
     elif operation == "batch":
         rows = f.bob.get_keywords_for_notes([f.own, f.private])
         assert [k["id"] for k in rows[f.own]] == [own]
         assert rows[f.private] == []
     elif operation == "reverse":
         assert [n["id"] for n in f.bob.get_notes_for_keyword(own)] == [f.own]
+    elif operation == "foreign-keyword":
+        assert f.bob.get_notes_for_keyword(foreign) == []
     elif operation == "counts":
         assert f.bob.get_note_counts_for_keywords([own, foreign]) == {own: 1}
     elif operation == "search":

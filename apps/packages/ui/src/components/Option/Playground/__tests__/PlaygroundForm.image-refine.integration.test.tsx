@@ -965,7 +965,8 @@ vi.mock("@/utils/resolve-api-provider", () => ({
   resolveApiProviderForModel: vi.fn(async () => "custom")
 }))
 
-vi.mock("@/services/service-prompts", () => ({
+vi.mock("@/services/service-prompts", async importOriginal => ({
+  ...await importOriginal<typeof import("@/services/service-prompts")>(),
   loadServicePromptSnapshot: vi.fn(async () => ({
     definitions: {
       "image.prompt.refinement": {

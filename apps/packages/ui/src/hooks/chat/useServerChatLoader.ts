@@ -624,7 +624,7 @@ export const useServerChatLoader = ({
   t,
   scope
 }: UseServerChatLoaderOptions) => {
-  const [selectedAssistant, setSelectedAssistant] = useSelectedAssistant(null)
+  const [selectedAssistant, setSelectedAssistant, assistantMeta] = useSelectedAssistant(null)
   const {
     messages,
     streaming,
@@ -718,7 +718,7 @@ export const useServerChatLoader = ({
   }, [])
 
   React.useEffect(() => {
-    if (!serverChatId) return
+    if (!serverChatId || assistantMeta?.isLoading) return
     if (
       shouldSkipLoadedServerChatReload({
         activeServerChatId: serverChatId,
@@ -822,6 +822,7 @@ export const useServerChatLoader = ({
                 setMessages([])
                 setHistory([])
                 setServerChatTitle(null)
+                setIsLoading(false)
                 setServerChatId(null)
                 return
               }
@@ -1146,7 +1147,10 @@ export const useServerChatLoader = ({
             setServerChatTitle(null)
             updatePageTitle()
           }
-          if (!isAbort && isMissingServerChatReferenceError(e) && canCommitCurrentLoad()) {
+          if (!isAbort &&
+            (isMissingServerChatReferenceError(e) || isDeniedServerChatError(e)) &&
+            canCommitCurrentLoad()) {
+            setIsLoading(false)
             setServerChatId(null)
             return
           }
@@ -1192,6 +1196,7 @@ export const useServerChatLoader = ({
       }
     }
   }, [
+    assistantMeta?.isLoading,
     ensureServerChatHistoryId,
     notification,
     serverChatAssistantId,

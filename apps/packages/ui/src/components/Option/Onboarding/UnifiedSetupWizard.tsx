@@ -1,4 +1,5 @@
 import React from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 
 import { PageAssistLoader } from "@/components/Common/PageAssistLoader";
@@ -124,6 +125,7 @@ export function UnifiedSetupWizard({
   onComplete,
 }: UnifiedSetupWizardProps = {}) {
   const navigate = useNavigate();
+  const { t } = useTranslation("settings");
   const { setConfigPartial } = useConnectionActions();
   const { setSelectedModel } = useSelectedModel();
   const handoffRef = React.useRef<SetupModelHandoff | null>(null);
@@ -235,16 +237,31 @@ export function UnifiedSetupWizard({
   const [stepError, setStepError] = React.useState<string | null>(null);
   const [loginPending, setLoginPending] = React.useState(false);
   const isMultiUserServer = metadata?.auth_mode === "multi_user";
-  const activeStep = isMultiUserServer ? "multi_user_exit" : step;
+  // Public progress can omit a saved local path. Keep anonymous resume actionable.
+  const activeStep = isMultiUserServer
+    ? "multi_user_exit"
+    : step === "first_chat" && !providerSelection ? "provider_setup" : step;
 
   const handleSignIn = async () => {
     setLoginPending(true);
     setStepError(null);
+    let stage = "configuration";
     try {
       await setConfigPartial({ authMode: "multi-user" });
+      stage = "navigation";
       navigate("/settings/tldw");
-    } catch {
-      setStepError("Login settings could not be opened. Try again.");
+    } catch (error) {
+      // Config/navigation errors can contain credentials. Report only the
+      // operation and built-in type; omit payload, stack, and custom names.
+      console.error("Setup sign-in failed", {
+        stage,
+        errorType:
+          error instanceof TypeError ? "TypeError" :
+          error instanceof Error ? "Error" : "NonError",
+      });
+      setStepError(t("onboarding.loginSettingsError", {
+        defaultValue: "Login settings could not be opened. Try again.",
+      }));
     } finally {
       setLoginPending(false);
     }
@@ -258,12 +275,12 @@ export function UnifiedSetupWizard({
   }, [state]);
 
   React.useEffect(() => {
-    if (step !== "provider_setup" || providerCatalog.length > 0) return;
+    if (activeStep !== "provider_setup" || providerCatalog.length > 0) return;
     void loadProviderCatalog().catch((err) => {
       console.error("Provider catalog could not be loaded", err);
       setStepError("Provider catalog could not be loaded. Try again.");
     });
-  }, [loadProviderCatalog, providerCatalog.length, step]);
+  }, [loadProviderCatalog, providerCatalog.length, activeStep]);
 
   React.useEffect(() => {
     if (step !== "audio_defaults" || audioRecommendations.length > 0) return;

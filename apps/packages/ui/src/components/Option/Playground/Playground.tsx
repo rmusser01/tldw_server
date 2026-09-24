@@ -1,3 +1,4 @@
+import { resolveServicePromptScope } from "@/services/service-prompts";
 import React from "react";
 import { PlaygroundForm } from "./PlaygroundForm";
 import { PlaygroundChat } from "./PlaygroundChat";
@@ -558,6 +559,7 @@ export const Playground = () => {
     isSearchingInternet,
     selectedCharacter,
     setSelectedCharacter,
+    assistantSelectionMeta,
     compareMode,
     compareFeatureEnabled,
     temporaryChat,
@@ -1033,8 +1035,14 @@ export const Playground = () => {
   }, [routeLocationKey, routeCharacterIntentChatId, serverChatId, setServerChatId]);
 
   React.useEffect(() => {
+    routeCharacterIntentAppliedRef.current = null;
+    routeCharacterIntentInFlightRef.current = null;
+    routeCharacterIntentRequestRef.current += 1;
+  }, [assistantSelectionMeta?.assistantKey]);
+
+  React.useEffect(() => {
     if (retiredRouteLocationRef.current === routeLocationKey) return;
-    if (!routeCharacterIntentId) return;
+    if (assistantSelectionMeta?.isLoading || !routeCharacterIntentId) return;
     if (routeCharacterIntentChatId) return;
     if (routeCharacterIntentAppliedRef.current === routeCharacterIntentId) {
       return;
@@ -1071,40 +1079,47 @@ export const Playground = () => {
       id: routeCharacterIntentId,
       name: fallbackCharacterName,
     };
-    void tldwClient
-      .getCharacter(routeCharacterIntentId)
-      .then((character) => {
-        if (routeCharacterIntentRequestRef.current !== requestId) return;
+    const isCurrentSelection = assistantSelectionMeta?.isCurrent ?? (() => true);
+    const loadCharacter = async () => {
+      const scope = await resolveServicePromptScope();
+      if (!isCurrentSelection()) return null;
+      return tldwClient.getCharacter(routeCharacterIntentId, { requestScope: { config: scope.config, userId: scope.userId } });
+    };
+    void loadCharacter()
+      .then(async (character) => {
+        if (!isCurrentSelection() || routeCharacterIntentRequestRef.current !== requestId) return;
         routeCharacterIntentAppliedRef.current = routeCharacterIntentId;
         if (character) {
           setRouteCharacterRecovery(null);
-          void setSelectedCharacter(withTrackedCharacterSelectionMode(character));
+          await setSelectedCharacter(withTrackedCharacterSelectionMode(character));
           return;
         }
         setRouteCharacterRecovery({
           id: routeCharacterIntentId,
           reason: "missing",
         });
-        void setSelectedCharacter(
+        await setSelectedCharacter(
           withTrackedCharacterSelectionMode(fallbackCharacter),
         );
       })
-      .catch(() => {
-        if (routeCharacterIntentRequestRef.current !== requestId) return;
+      .catch(async () => {
+        if (!isCurrentSelection() || routeCharacterIntentRequestRef.current !== requestId) return;
         routeCharacterIntentAppliedRef.current = routeCharacterIntentId;
         setRouteCharacterRecovery({
           id: routeCharacterIntentId,
           reason: "load-error",
         });
-        void setSelectedCharacter(
+        await setSelectedCharacter(
           withTrackedCharacterSelectionMode(fallbackCharacter),
         );
       })
       .finally(() => {
-        if (routeCharacterIntentRequestRef.current !== requestId) return;
+        if (!isCurrentSelection() || routeCharacterIntentRequestRef.current !== requestId) return;
         routeCharacterIntentInFlightRef.current = null;
       });
   }, [
+    assistantSelectionMeta?.isLoading,
+    assistantSelectionMeta?.isCurrent,
     clearPersistedSession,
     routeLocationKey,
     routeCharacterIntentChatId,

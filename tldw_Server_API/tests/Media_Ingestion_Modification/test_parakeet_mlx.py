@@ -821,7 +821,8 @@ def _fake_mlx_loader(monkeypatch, stt_cfg):
     monkeypatch.setattr(mlx_mod, "check_mlx_available", lambda: True)
     monkeypatch.setattr(mlx_mod, "check_parakeet_mlx_installed", lambda: True)
     monkeypatch.setattr(config_mod, "get_stt_config", lambda: stt_cfg)
-    monkeypatch.setattr(mlx_mod, "_mlx_model_cache", {})
+    monkeypatch.setattr(mlx_mod, "_mlx_model_cache", None)
+    monkeypatch.setattr(mlx_mod, "_mlx_model_cache_key", None)
     _install_fake_mlx_core(monkeypatch)
     return mlx_mod, fake.from_pretrained
 
@@ -837,7 +838,8 @@ def test_mlx_loader_cache_discriminates_by_model_path(monkeypatch):
 
     assert model_a is not None and model_b is not None
     assert model_a is not model_b
-    assert mlx_mod.load_parakeet_mlx_model(model_path="org/model-a") is model_a
+    # Single slot (models are 1-3 GB): the resident model is reused only for its own key.
+    assert mlx_mod.load_parakeet_mlx_model(model_path="org/model-b") is model_b
     assert from_pretrained.call_count == 2
 
 

@@ -40,13 +40,21 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_con
 # Check if we're on macOS
 IS_MACOS = sys.platform == 'darwin'
 
-# Global model cache, keyed by the inputs that select a distinct model.
-# A bare single-slot cache returned whichever model happened to be loaded first,
-# so a request for a different model_path silently received the wrong weights
-# while the requested name was still reported upstream.
-_mlx_model_cache: dict[tuple[str, Optional[str]], Any] = {}
-# ponytail: one lock per module, so loads of different models serialize; per-key locks if that matters.
+# Global model cache
+_mlx_model_cache: Optional[Any] = None
+# Identity of the model held in _mlx_model_cache, as (model_id, cache_dir). Without
+# this the first model loaded in a process was returned for every later request,
+# regardless of which model was asked for. Kept as a single slot rather than a dict
+# on purpose: these models are 1-3 GB, so holding several resident would trade a
+# wrong-model bug for a memory regression. None means "no keyed entry" — an entry
+# assigned directly to _mlx_model_cache by a caller is honoured as-is.
+_mlx_model_cache_key: Optional[tuple[str, Optional[str]]] = None
+# Guards the (_mlx_model_cache, _mlx_model_cache_key) pair. The loader is synchronous
+# and runs on worker threads, so the two globals must be read and published together
+# or a reader can observe one model paired with another model's key.
 _mlx_model_cache_lock = threading.Lock()
+# Serializes check-load-publish so one request loads a model and the rest reuse it.
+_mlx_model_load_lock = threading.Lock()
 _DEFAULT_MLX_MODEL_ID = "mlx-community/parakeet-tdt-0.6b-v3"
 
 
@@ -329,7 +337,7 @@ def load_parakeet_mlx_model(
     Returns:
         Loaded model instance or None if loading fails
     """
-    global _mlx_model_cache
+    global _mlx_model_cache, _mlx_model_cache_key
 
     if execution_route is not None:
         raise STTExecutionUnsupportedError(
@@ -346,43 +354,13 @@ def load_parakeet_mlx_model(
         logger.error("Parakeet MLX is only supported on macOS with Apple Silicon")
         return None
 
-    try:
-        from tldw_Server_API.app.core.config import get_stt_config
+    # An entry assigned straight to _mlx_model_cache carries no key; honour it as
+    # before. A keyed entry is checked further down, once the requested model
+    # identity is known — checking here cannot distinguish which model was asked for.
+    if _mlx_model_cache is not None and _mlx_model_cache_key is None and not force_reload:
+        logger.debug("Using cached Parakeet MLX model")
+        return _mlx_model_cache
 
-        stt_cfg: dict[str, Any] = get_stt_config() or {}
-    except Exception:
-        stt_cfg = {}
-
-    # Key the cache on what is actually loaded (config fallbacks included),
-    # not the raw args, or a config change would keep serving the old model.
-    # Default model from the parakeet-mlx CLI (v3)
-    model_id = (
-        model_path
-        or str(stt_cfg.get("mlx_model_id", "")).strip()
-        or _DEFAULT_MLX_MODEL_ID
-    )
-    model_cache_dir = cache_dir or str(stt_cfg.get("mlx_cache_dir", "")).strip() or None
-    cache_key = (model_id, model_cache_dir)
-    cached_model = _mlx_model_cache.get(cache_key)
-    if cached_model is not None and not force_reload:
-        logger.debug("Using cached Parakeet MLX model for {}", cache_key[0])
-        return cached_model
-
-    # Re-check under the lock so concurrent requests for one key load it once.
-    with _mlx_model_cache_lock:
-        cached_model = _mlx_model_cache.get(cache_key)
-        if cached_model is not None and not force_reload:
-            return cached_model
-        return _load_parakeet_mlx_uncached(model_id, model_cache_dir, cache_key, allow_download)
-
-
-def _load_parakeet_mlx_uncached(
-    model_id: str,
-    model_cache_dir: Optional[str],
-    cache_key: tuple[str, Optional[str]],
-    allow_download: bool,
-) -> Optional[Any]:
-    """Load ``model_id`` and store it under ``cache_key``; the caller holds the lock."""
     # Check MLX availability (tests may monkeypatch this to True)
     if not check_mlx_available():
         logger.error("MLX is not available. Install with: pip install mlx")
@@ -397,6 +375,12 @@ def _load_parakeet_mlx_uncached(
 
     try:
         import parakeet_mlx
+        try:
+            from tldw_Server_API.app.core.config import get_stt_config
+
+            stt_cfg: dict[str, Any] = get_stt_config() or {}
+        except Exception:
+            stt_cfg = {}
 
         # dtype is optional for tests; if mlx is unavailable, proceed without dtype
         try:
@@ -407,37 +391,71 @@ def _load_parakeet_mlx_uncached(
 
         logger.info("Loading Parakeet MLX model...")
 
-        from_pretrained_kwargs: dict[str, Any] = {}
-        if _dtype is not None and _supports_kwarg(parakeet_mlx.from_pretrained, "dtype"):
-            from_pretrained_kwargs["dtype"] = _dtype
-        if model_cache_dir and _supports_kwarg(parakeet_mlx.from_pretrained, "cache_dir"):
-            from_pretrained_kwargs["cache_dir"] = model_cache_dir
+        # Initialize the model
+        # The parakeet-mlx library handles model downloading and caching
+        # Try to load from Hugging Face model ID
+        # Default model from the parakeet-mlx CLI (v3)
+        model_id = (
+            model_path
+            or str(stt_cfg.get("mlx_model_id", "")).strip()
+            or _DEFAULT_MLX_MODEL_ID
+        )
+        model_cache_dir = cache_dir or str(stt_cfg.get("mlx_cache_dir", "")).strip() or None
 
-        try:
-            # Try to load the model from Hugging Face
-            logger.info(f"Loading model from: {model_id}")
-            model = parakeet_mlx.from_pretrained(model_id, **from_pretrained_kwargs)
-        except FileNotFoundError:
-            if not allow_download:
-                raise STTExecutionUnsupportedError(
-                    "Planned Parakeet MLX artifact was not available locally"
-                ) from None
-            # Model might need to be downloaded first
-            logger.info("Model not found locally, downloading from Hugging Face...")
+        # Serve from cache only when the resident model is the one being asked for.
+        # The key and the model are two globals, so they must be read together under
+        # the lock: this function is synchronous and is reached from worker threads,
+        # where an interleaved publish between the two reads could otherwise pair
+        # model B with key A and hand back a model the caller did not ask for.
+        # One load at a time: without this, concurrent first requests for the same
+        # model each ran from_pretrained (1-3 GB) before either published.
+        # ponytail: global load lock, so loads of different models also serialize.
+        with _mlx_model_load_lock:
+            cache_key = (model_id, model_cache_dir)
+            with _mlx_model_cache_lock:
+                cached_model = _mlx_model_cache
+                cached_key = _mlx_model_cache_key
+            if not force_reload and cached_model is not None and cached_key == cache_key:
+                logger.debug(f"Using cached Parakeet MLX model: {model_id}")
+                return cached_model
+
+            from_pretrained_kwargs: dict[str, Any] = {}
+            if _dtype is not None and _supports_kwarg(parakeet_mlx.from_pretrained, "dtype"):
+                from_pretrained_kwargs["dtype"] = _dtype
+            if model_cache_dir and _supports_kwarg(parakeet_mlx.from_pretrained, "cache_dir"):
+                from_pretrained_kwargs["cache_dir"] = model_cache_dir
+
             try:
-                # The model will be downloaded automatically
+                # Try to load the model from Hugging Face
+                logger.info(f"Loading model from: {model_id}")
                 model = parakeet_mlx.from_pretrained(model_id, **from_pretrained_kwargs)
-            except Exception as e2:
-                logger.exception(f"Failed to download/load model: {e2}")
+            except FileNotFoundError:
+                if not allow_download:
+                    raise STTExecutionUnsupportedError(
+                        "Planned Parakeet MLX artifact was not available locally"
+                    ) from None
+                # Model might need to be downloaded first
+                logger.info("Model not found locally, downloading from Hugging Face...")
+                try:
+                    # The model will be downloaded automatically
+                    model = parakeet_mlx.from_pretrained(model_id, **from_pretrained_kwargs)
+                except Exception as e2:
+                    logger.exception(f"Failed to download/load model: {e2}")
+                    return None
+            except Exception as e:
+                logger.exception(f"Failed to load model {model_id}: {e}")
                 return None
-        except Exception as e:
-            logger.exception(f"Failed to load model {model_id}: {e}")
-            return None
 
-        _mlx_model_cache[cache_key] = model
-        logger.info("Successfully loaded Parakeet MLX model for {}", cache_key[0])
+            # Publish the pair atomically so no reader can observe a key/model mismatch.
+            # Two threads that raced to load different models each return their own local
+            # `model`, so every caller still gets what it asked for; the cache simply ends
+            # up holding whichever pair was published last, consistently.
+            with _mlx_model_cache_lock:
+                _mlx_model_cache = model
+                _mlx_model_cache_key = cache_key
+            logger.info(f"Successfully loaded Parakeet MLX model: {model_id}")
 
-        return model
+            return model
 
     except STTExecutionUnsupportedError:
         raise
@@ -826,12 +844,17 @@ def transcribe_streaming_mlx(
 
 def unload_parakeet_mlx_model():
     """Unload the cached Parakeet MLX model to free memory."""
-    global _mlx_model_cache
+    global _mlx_model_cache, _mlx_model_cache_key
 
-    if _mlx_model_cache:
+    # Invalidate the key first, and under the lock, so a concurrent reader can never
+    # match a key whose model is mid-teardown.
+    with _mlx_model_cache_lock:
+        _mlx_model_cache_key = None
+    if _mlx_model_cache is not None:
         try:
             # MLX models can be deleted directly
-            _mlx_model_cache.clear()
+            del _mlx_model_cache
+            _mlx_model_cache = None
 
             # MLX specific cleanup
             try:

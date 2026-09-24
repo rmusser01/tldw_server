@@ -15,8 +15,12 @@ from typing import Any
 
 import pytest
 
+
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import NotesDBRetriever
+
+# Suite marker: these are fast, isolated regression guards.
+pytestmark = pytest.mark.unit
 
 
 class _EmptyCursor:
