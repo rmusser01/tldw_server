@@ -3422,7 +3422,9 @@ class WorkflowsDatabase:
             """
             SELECT id, tenant_id, run_id, url, body_json, attempts, next_attempt_at, last_error, created_at
             FROM workflow_webhook_dlq
-            WHERE next_attempt_at IS NULL OR next_attempt_at <= datetime('now')
+            -- datetime() normalises the ISO 'T' form the worker writes; compared as raw text
+            -- 'T' sorts after ' ', so a retry due later today looked not-due until tomorrow.
+            WHERE next_attempt_at IS NULL OR datetime(next_attempt_at) <= datetime('now')
             ORDER BY COALESCE(next_attempt_at, created_at) ASC, id ASC
             LIMIT ?
             """,
