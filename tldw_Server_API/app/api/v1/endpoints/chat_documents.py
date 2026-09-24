@@ -72,6 +72,7 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError, InputError
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import provider_auth_is_resolved
 from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
+from tldw_Server_API.app.core.LLM_Calls.sse import is_done_line
 from tldw_Server_API.app.core.testing import env_flag_enabled
 
 router = APIRouter()
@@ -139,9 +140,7 @@ def _classify_document_stream_chunk(chunk: Any) -> tuple[str, bool, str | None]:
 
     payload = _normalize_document_stream_chunk(chunk)
     control = payload.strip().lower()
-    if control == "[done]" or (
-        control.startswith("data:") and control.removeprefix("data:").strip() == "[done]"
-    ):
+    if control == "[done]" or is_done_line(payload):
         return "[DONE]", False, "done"
     return payload, bool(control), None
 

@@ -644,11 +644,6 @@ class GoogleAdapter(ChatProvider):
                         stripped = line.strip()
                         if stripped.startswith("data:"):
                             payload_text = stripped[len("data:"):].strip()
-                            if payload_text.lower() == "[done]":
-                                if not seen_done:
-                                    seen_done = True
-                                    yield sse_done()
-                                continue
                             try:
                                 event = json.loads(payload_text)
                             except (TypeError, ValueError, json.JSONDecodeError):

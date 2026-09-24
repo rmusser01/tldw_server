@@ -39,3 +39,60 @@ async def test_lowercase_provider_done_is_suppressed_not_forwarded():
     done_frames = [m for m in messages if is_done_line(m)]
     assert done_frames == ["data: [DONE]\n\n"]
     assert handler.error_occurred is False
+
+
+# TASK-13370: the remaining hand-rolled DONE checks route through is_done_line.
+_DONE_SPELLINGS = ["data: [done]", "data:[DONE]", "data:  [Done]"]
+
+
+@pytest.mark.parametrize("line", _DONE_SPELLINGS)
+def test_anthropic_messages_parser_treats_any_done_spelling_as_done(line):
+    from tldw_Server_API.app.core.LLM_Calls.anthropic_messages import _parse_openai_sse_line
+
+    assert _parse_openai_sse_line(line) == {"_done": True}
+
+
+@pytest.mark.parametrize("line", _DONE_SPELLINGS)
+def test_chat_endpoint_inspector_marks_any_done_spelling_complete(line):
+    from tldw_Server_API.app.api.v1.endpoints.chat import _inspect_provider_stream_chunk
+
+    assert _inspect_provider_stream_chunk(f"{line}\n\n") == (None, False, True)
+
+
+@pytest.mark.parametrize("line", _DONE_SPELLINGS)
+def test_chat_documents_classifier_treats_any_done_spelling_as_done(line):
+    from tldw_Server_API.app.api.v1.endpoints.chat_documents import _classify_document_stream_chunk
+
+    assert _classify_document_stream_chunk(line) == ("[DONE]", False, "done")
+
+
+@pytest.mark.parametrize("line", _DONE_SPELLINGS)
+def test_audio_chat_stream_done_is_not_content(line):
+    from tldw_Server_API.app.api.v1.endpoints.audio.audio_streaming import (
+        _audio_provider_chunk_has_nonempty_content,
+    )
+
+    assert _audio_provider_chunk_has_nonempty_content(line) is False
+
+
+@pytest.mark.parametrize("line", _DONE_SPELLINGS)
+def test_character_stream_done_is_not_semantic_output(line):
+    from tldw_Server_API.app.api.v1.endpoints.character_chat_sessions import (
+        _character_stream_line_has_semantic_output,
+    )
+
+    assert _character_stream_line_has_semantic_output(line) is False
+
+
+@pytest.mark.parametrize("line", _DONE_SPELLINGS)
+def test_rag_stream_text_ignores_any_done_spelling(line):
+    from tldw_Server_API.app.core.RAG.rag_service.generation import _extract_stream_text
+
+    assert _extract_stream_text(line) is None
+
+
+@pytest.mark.parametrize("line", _DONE_SPELLINGS)
+def test_realtime_pipeline_ignores_any_done_spelling(line):
+    from tldw_Server_API.app.core.Audio.Realtime.default_pipeline import _extract_text_from_string_chunk
+
+    assert _extract_text_from_string_chunk(line) == ""

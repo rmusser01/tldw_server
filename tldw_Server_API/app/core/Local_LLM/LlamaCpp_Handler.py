@@ -15,6 +15,7 @@ from typing import Any, Optional
 from tldw_Server_API.app.core.exceptions import NetworkError, RetryExhaustedError
 from tldw_Server_API.app.core.LLM_Calls.sse import (
     ensure_sse_line,
+    is_done_line,
     openai_delta_chunk,
     sse_data,
     sse_done,
@@ -717,9 +718,12 @@ class LlamaCppHandler(BaseLLMHandler):
                         l = line.strip()
                         if not l:
                             continue
-                        if l.startswith("data:"):
-                            if l.strip().lower() == "data: [done]".lower():
+                        if is_done_line(l):
+                            if not done_sent:
                                 done_sent = True
+                                yield sse_done()
+                            continue
+                        if l.startswith("data:"):
                             yield ensure_sse_line(l)
                         else:
                             yield openai_delta_chunk(l)

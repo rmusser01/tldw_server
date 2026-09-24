@@ -238,7 +238,7 @@ from tldw_Server_API.app.core.LLM_Calls.routing import (
 from tldw_Server_API.app.core.LLM_Calls.routing.candidate_pool import (
     build_candidate_pool,
 )
-from tldw_Server_API.app.core.LLM_Calls.sse import sse_data, sse_done
+from tldw_Server_API.app.core.LLM_Calls.sse import is_done_line, sse_data, sse_done
 from tldw_Server_API.app.core.Chat.provider_manager import get_provider_manager
 from tldw_Server_API.app.core.Chat.rate_limiter import get_rate_limiter
 from tldw_Server_API.app.core.Chat.request_queue import RequestPriority, get_request_queue
@@ -1337,7 +1337,7 @@ def _inspect_provider_stream_chunk(chunk: Any) -> tuple[str | None, bool, bool]:
             if not line.startswith("data:"):
                 continue
             payload_text = line[len("data:") :].strip()
-            if payload_text == "[DONE]":
+            if is_done_line(line):
                 is_complete = True
                 continue
             try:

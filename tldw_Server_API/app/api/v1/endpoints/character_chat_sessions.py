@@ -231,7 +231,13 @@ from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requir
 from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import provider_auth_is_resolved
 from tldw_Server_API.app.core.Research.service import ResearchService
-from tldw_Server_API.app.core.LLM_Calls.sse import ensure_sse_line, normalize_provider_line, sse_data, sse_done
+from tldw_Server_API.app.core.LLM_Calls.sse import (
+    ensure_sse_line,
+    is_done_line,
+    normalize_provider_line,
+    sse_data,
+    sse_done,
+)
 from tldw_Server_API.app.core.Persona.exemplar_prompt_assembly import (
     PersonaExemplarPromptAssembly,
     assemble_persona_exemplar_prompt,
@@ -416,7 +422,7 @@ def _character_stream_line_has_semantic_output(line: str) -> bool:
         if not stripped.lower().startswith("data:"):
             continue
         payload_text = stripped.partition(":")[2].strip()
-        if not payload_text or payload_text.lower() == "[done]":
+        if not payload_text or is_done_line(stripped):
             continue
         try:
             payload = json.loads(payload_text)
@@ -6648,7 +6654,7 @@ async def character_chat_completion(
                     if not line.lower().startswith("data:"):
                         continue
                     payload_text = line.partition(":")[2].strip()
-                    if not payload_text or payload_text.lower() == "[done]":
+                    if not payload_text or is_done_line(line):
                         continue
                     if payload_text.lower().startswith("error:"):
                         payload = provider_stream_error_payload("provider_unavailable")
@@ -6859,7 +6865,7 @@ async def character_chat_completion(
                         await stream.done()
                         return False
 
-                    if line.strip().lower() == "data: [done]":
+                    if is_done_line(line):
                         await stream.done()
                         return False
 
@@ -6970,13 +6976,13 @@ async def character_chat_completion(
                             yield ensure_sse_line(line)
                             break
 
-                        normalized = line.strip().lower()
-                        done_sent = normalized == "data: [done]"
+                        if is_done_line(line):
+                            done_sent = True
+                            yield sse_done()
+                            break
                         if _character_stream_line_has_semantic_output(line):
                             stream_success_state["successful"] = True
                         yield ensure_sse_line(line)
-                        if done_sent:
-                            break
                 except asyncio.CancelledError:
                     raise
                 except ChatAPIError as exc:
