@@ -1280,6 +1280,33 @@ _CREATE_AUTHNZ_CORE_TABLES = [
         (),
     ),
     ("CREATE INDEX IF NOT EXISTS idx_team_members_user ON public.team_members(user_id)", ()),
+    (
+        """
+        CREATE TABLE IF NOT EXISTS public.storage_quotas (
+            id SERIAL PRIMARY KEY,
+            org_id INTEGER REFERENCES public.organizations(id) ON DELETE CASCADE,
+            team_id INTEGER REFERENCES public.teams(id) ON DELETE CASCADE,
+            quota_mb INTEGER NOT NULL DEFAULT 10240,
+            used_mb DOUBLE PRECISION DEFAULT 0,
+            soft_limit_pct INTEGER DEFAULT 80,
+            hard_limit_pct INTEGER DEFAULT 100,
+            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+            CHECK (org_id IS NULL OR team_id IS NULL)
+        )
+        """,
+        (),
+    ),
+    (
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_storage_quotas_org_unique "
+        "ON public.storage_quotas(org_id) WHERE org_id IS NOT NULL",
+        (),
+    ),
+    (
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_storage_quotas_team_unique "
+        "ON public.storage_quotas(team_id) WHERE team_id IS NOT NULL",
+        (),
+    ),
     # Profile candidate overrides depend on the hierarchy above.
     (
         """
