@@ -1,4 +1,4 @@
-"""Startup authorization uses the owner of a real alias-initialized cached DB."""
+"""Startup authorization uses the owner of a real caller-initialized cached DB."""
 
 from __future__ import annotations
 
@@ -45,11 +45,11 @@ async def owner_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> AsyncI
 
 @pytest_asyncio.fixture(params=["voice_assistant", "study-pack-worker-42"])
 async def alias_db(owner_cache: None, request: pytest.FixtureRequest) -> CharactersRAGDB:
-    """Initialize as voice/a worker, then use the real REST dependency cache hit."""
+    """A service caller label cannot replace the cached database's tenant key."""
     first = await deps.get_chacha_db_for_user_id(42, client_id=request.param)
     rest = await deps.get_chacha_db_for_user(SimpleNamespace(id=42))
     assert rest is first
-    assert rest.client_id == request.param
+    assert (rest.owner_user_id, rest.client_id) == ("42", "42")
     return rest
 
 
@@ -88,23 +88,22 @@ def _insert_history(db: CharactersRAGDB, character_id: int | None = None) -> str
     )
 
 
-async def test_alias_first_rest_creation_preserves_owner_and_client_attribution(alias_db: CharactersRAGDB) -> None:
-    """The owner can start a Persona without replacing the cached writer alias."""
+async def test_service_first_rest_creation_preserves_tenant_owner(alias_db: CharactersRAGDB) -> None:
+    """The owner can start a Persona after a service caller opened the cached DB."""
     db = alias_db
-    alias = db.client_id
     _seed(db)
     legacy = db.add_conversation({"title": "Legacy", "client_id": "42"})
     assert db.get_conversation_by_id(legacy)["client_id"] == "42"
     row = db.get_conversation_by_id(_create(db))
     assert (row["client_id"], row["assistant_id"], row["title"]) == ("42", "persona", "Researcher Chat (stamp)")
     assert decode_assistant_startup(row["assistant_startup_json"]).workspace_id == "origin"
-    assert db.client_id == alias
+    assert db.client_id == "42"
     attributed = db.add_conversation({"title": "Attributed"})
-    assert db.get_conversation_by_id(attributed)["client_id"] == alias
+    assert db.get_conversation_by_id(attributed)["client_id"] == "42"
 
 
-async def test_alias_first_rest_projection_reads_real_history(alias_db: CharactersRAGDB) -> None:
-    """REST owner projection succeeds on the healthy cached alias handle."""
+async def test_service_first_rest_projection_reads_real_history(alias_db: CharactersRAGDB) -> None:
+    """REST owner projection succeeds on the healthy cached tenant handle."""
     _seed(alias_db)
     cid = _insert_history(alias_db)
     raw = alias_db.get_conversation_by_id(cid)["assistant_startup_json"]
@@ -114,7 +113,7 @@ async def test_alias_first_rest_projection_reads_real_history(alias_db: Characte
 
 
 @pytest.mark.parametrize("surface", ["detail", "list"])
-async def test_alias_first_character_library_projects_and_redacts(
+async def test_service_first_character_library_projects_and_redacts(
     alias_db: CharactersRAGDB, surface: str,
 ) -> None:
     """Library projection uses DB ownership while retaining explicit client filters."""
@@ -127,7 +126,7 @@ async def test_alias_first_character_library_projects_and_redacts(
         """Exercise the public read facade, not its private projection helper."""
         if surface == "detail":
             return get_conversation_metadata(db, cid)
-        assert list_character_conversations(db, character_id, client_id=db.client_id) == []
+        assert list_character_conversations(db, character_id, client_id="voice_assistant") == []
         return list_character_conversations(db, character_id, client_id="42")[0]
 
     assert read()["assistant_startup"]["workspace_id"] == "origin"
@@ -138,14 +137,14 @@ async def test_alias_first_character_library_projects_and_redacts(
     assert db.get_conversation_by_id(cid) == stored
 
 
-@pytest.mark.parametrize("wrong_owner", ["43", "caller-alias"])
-async def test_alias_is_not_owner_authority(alias_db: CharactersRAGDB, wrong_owner: str) -> None:
-    """Neither another owner nor the writer alias may authorize this DB's origin."""
+@pytest.mark.parametrize("wrong_owner", ["43", "voice_assistant", "study-pack-worker-42"])
+async def test_caller_label_is_not_owner_authority(alias_db: CharactersRAGDB, wrong_owner: str) -> None:
+    """Neither another owner nor a service caller label may authorize this DB's origin."""
     db = alias_db
     _seed(db)
     cid = _insert_history(db)
     raw = db.get_conversation_by_id(cid)["assistant_startup_json"]
-    caller = db.client_id if wrong_owner == "caller-alias" else wrong_owner
+    caller = wrong_owner
     with pytest.raises(InputError, match="owner"):
         _create(db, caller)
     with pytest.raises(InputError, match="owner"):
@@ -163,11 +162,11 @@ async def test_payload_cannot_replace_trusted_owner(alias_db: CharactersRAGDB) -
     assert alias_db.get_conversation_by_id("created") is None
 
 
-async def test_same_alias_keeps_distinct_owner_databases(alias_db: CharactersRAGDB) -> None:
-    """An identical service alias never coalesces different owners' cache entries."""
+async def test_service_callers_keep_distinct_owner_databases(alias_db: CharactersRAGDB) -> None:
+    """Service callers cannot coalesce different owners' cache entries."""
     _seed(alias_db)
     cid = _insert_history(alias_db)
-    other = await deps.get_chacha_db_for_user_id(43, client_id=alias_db.client_id)
+    other = await deps.get_chacha_db_for_user_id(43, client_id="voice_assistant")
     assert other is not alias_db
     assert other.get_conversation_by_id(cid) is None
     assert other.get_workspace("origin") is None
@@ -175,7 +174,7 @@ async def test_same_alias_keeps_distinct_owner_databases(alias_db: CharactersRAG
 
 
 async def test_shutdown_reopen_rebinds_owner_without_rewriting_history(alias_db: CharactersRAGDB) -> None:
-    """A fresh handle gets the same owner and its new first caller attribution."""
+    """A fresh handle keeps the same tenant owner despite a new caller label."""
     _seed(alias_db)
     cid = _insert_history(alias_db)
     stored = alias_db.get_conversation_by_id(cid)
@@ -183,13 +182,13 @@ async def test_shutdown_reopen_rebinds_owner_without_rewriting_history(alias_db:
     deps.reset_chacha_shutdown_state()
     reopened = await deps.get_chacha_db_for_user_id(42, client_id="reopened-worker")
     assert reopened is not alias_db
-    assert reopened.client_id == "reopened-worker"
+    assert reopened.client_id == "42"
     assert reopened.get_conversation_by_id(cid) == stored
     projected = assistant_defaults.project_assistant_startup(reopened, raw=stored["assistant_startup_json"], user_id="42")
     assert projected.workspace_id == "origin"
 
 
-async def test_concurrent_rest_waiter_receives_owner_bound_alias_handle(
+async def test_concurrent_rest_waiter_receives_owner_bound_tenant_handle(
     owner_cache: None, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Observe the real initialization waiter before publishing the prepared DB."""
@@ -228,7 +227,7 @@ async def test_concurrent_rest_waiter_receives_owner_bound_alias_handle(
         first_db, rest_db = await asyncio.gather(*tasks)
         assert first_db is rest_db
         assert handles == [rest_db]
-        assert (rest_db.owner_user_id, rest_db.client_id) == ("42", "voice_assistant")
+        assert (rest_db.owner_user_id, rest_db.client_id) == ("42", "42")
         _seed(rest_db)
         assert rest_db.get_conversation_by_id(_create(rest_db))["assistant_id"] == "persona"
     finally:

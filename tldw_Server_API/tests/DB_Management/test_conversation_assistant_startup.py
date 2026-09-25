@@ -62,14 +62,14 @@ def test_fresh_untrusted_insertion_stores_no_origin(db_factory: Callable[[], Cha
     assert db_factory().get_conversation_by_id(cid)[ORIGIN_COLUMN] is None
 
 
-def test_v68_upgrade_keeps_existing_identity_and_unknown_origin(
+def test_pre_provenance_upgrade_keeps_existing_identity_and_unknown_origin(
     db_factory: Callable[[], CharactersRAGDB],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Upgrade genuine old storage without fabricating or changing its identity."""
     with monkeypatch.context() as historical:
-        historical.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 68)
-        historical.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 68)
+        historical.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 69)
+        historical.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 73)
         legacy = db_factory()
     with legacy.transaction() as conn:
         conn.execute(
@@ -106,14 +106,14 @@ def test_storage_limit_counts_utf8_bytes_and_rolls_back_rejected_update(
     assert db.get_conversation_by_id(cid)[ORIGIN_COLUMN] == accepted
 
 
-def test_failed_v69_migration_rolls_back_column_and_preserves_old_row(
+def test_failed_provenance_migration_rolls_back_column_and_preserves_old_row(
     db_factory: Callable[[], CharactersRAGDB],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An error after real DDL leaves v68 storage readable and unchanged."""
+    """An error after real DDL leaves preceding storage readable and unchanged."""
     with monkeypatch.context() as historical:
-        historical.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 68)
-        historical.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 68)
+        historical.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 69)
+        historical.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 73)
         legacy = db_factory()
     with legacy.transaction() as conn:
         conn.execute(
@@ -121,7 +121,7 @@ def test_failed_v69_migration_rolls_back_column_and_preserves_old_row(
             ("legacy", "legacy", "Retained", "user-1"),
         )
     method = (
-        "_migrate_from_v68_to_v69_postgres" if legacy.backend_type.value == "postgresql" else "_migrate_from_v68_to_v69"
+        "_migrate_from_v73_to_v74_postgres" if legacy.backend_type.value == "postgresql" else "_migrate_from_v69_to_v70"
     )
     migrate = getattr(CharactersRAGDB, method)
     legacy.close_all_connections()
@@ -136,8 +136,8 @@ def test_failed_v69_migration_rolls_back_column_and_preserves_old_row(
         with pytest.raises(CharactersRAGDBError, match="injected startup migration failure"):
             db_factory()
     with monkeypatch.context() as historical:
-        historical.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 68)
-        historical.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 68)
+        historical.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 69)
+        historical.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 73)
         rolled_back = db_factory()
     row = rolled_back.get_conversation_by_id("legacy")
     assert ORIGIN_COLUMN not in row

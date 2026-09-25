@@ -18231,7 +18231,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         ]
         for statement in statements:
             self.backend.execute(statement, connection=conn)
-        if self._get_schema_version_postgres(conn) >= 69:
+        if self._get_schema_version_postgres(conn) >= 74:
             self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, self.backend))
             return
         for statement in (
@@ -25068,11 +25068,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         with backend.transaction() as conn:
             self._configure_notes_moodboard_studio_v61_postgres_transaction(conn)
             if self._postgres_schema_is_current(conn):
+                if target_version >= 74:
+                    self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend))
                 return
 
         with postgres_schema_migration(backend, self._NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT) as conn:
             self._configure_notes_moodboard_studio_v61_postgres_transaction(conn)
             if self._postgres_schema_is_current(conn):
+                if target_version >= 74:
+                    self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend))
                 return
             schema_exists = backend.table_exists('db_schema_version', connection=conn)
 
