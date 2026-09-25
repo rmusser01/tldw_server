@@ -25,3 +25,9 @@ test modules now have parameter and return annotations. The focused suite passed
 64 SQLite cases; 68 PostgreSQL parametrizations skipped because PostgreSQL was
 unavailable locally. Ruff and `git diff --check` passed. Final PostgreSQL and
 required CI evidence is still pending.
+
+On 2026-09-24, H2 was restacked onto H1 `a7a89a80db`, which descends server
+`dev` `91c32e3126`. The focused post-restack run passed 172 tests, with 68
+PostgreSQL-dependent parametrizations skipped locally; `git diff --check`
+passed. The current PR head is `0f308f49b3` before this documentation update.
+Required GitHub checks and final H1 merge ancestry remain pending.
