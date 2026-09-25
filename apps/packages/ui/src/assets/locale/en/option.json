@@ -245,6 +245,9 @@
     "hidePages": "Hide pages",
     "pageNavigator": "Pages"
   },
+  "calendar": {
+    "nav": "Calendar"
+  },
   "skills": {
     "activeModeFilter": "Mode: {{value}}",
     "activeModelFilter": "Model: {{value}}",
