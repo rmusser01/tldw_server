@@ -1,4 +1,8 @@
-"""Opt-in real VM proof that an absent guest agent fails before execution."""
+"""Opt-in Apple Silicon drill for absent guest-agent startup and recovery.
+
+It provisions real local VMs through an isolated helper, mutates only disposable
+image clones, and explicitly cleans up owned VM and session resources.
+"""
 
 from __future__ import annotations
 
@@ -78,6 +82,7 @@ def _read_startup_proof(path: Path, nonce: str, mode: str, expected_vm_id: str) 
     ],
 )
 def test_startup_proof_rejects_wrong_guest_or_mode(tmp_path: Path, proof: Any) -> None:
+    """Reject markers from stale, unrelated, or wrong-mode VM starts."""
     path = tmp_path / "proof.json"
     path.write_text(json.dumps(proof))
     with pytest.raises(pytest.fail.Exception, match="Invalid startup proof"):
@@ -87,6 +92,7 @@ def test_startup_proof_rejects_wrong_guest_or_mode(tmp_path: Path, proof: Any) -
 @pytest.mark.unit
 @pytest.mark.parametrize("raw", [None, "not json", " " * 4097])
 def test_startup_proof_requires_bounded_json(tmp_path: Path, raw: str | None) -> None:
+    """Reject missing, malformed, or oversized startup markers."""
     path = tmp_path / "proof.json"
     if raw is not None:
         path.write_text(raw)
@@ -98,6 +104,7 @@ def test_startup_proof_requires_bounded_json(tmp_path: Path, raw: str | None) ->
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX proof files")
 @pytest.mark.timeout(2, method="signal")
 def test_startup_proof_rejects_fifo_without_blocking(tmp_path: Path) -> None:
+    """Do not block on a FIFO substituted for the proof file."""
     path = tmp_path / "proof.json"
     os.mkfifo(path)
     with pytest.raises(pytest.fail.Exception, match="Invalid startup proof"):
@@ -106,6 +113,7 @@ def test_startup_proof_rejects_fifo_without_blocking(tmp_path: Path) -> None:
 
 @pytest.mark.unit
 def test_startup_proof_rejects_symlink(tmp_path: Path) -> None:
+    """Do not follow a proof-file symlink outside the workspace."""
     target = tmp_path / "target.json"
     target.write_text(json.dumps({"nonce": "fresh", "vm_id": "vm-1", "mode": "no-agent"}))
     path = tmp_path / "proof.json"
@@ -114,7 +122,7 @@ def test_startup_proof_rejects_symlink(tmp_path: Path) -> None:
         _read_startup_proof(path, "fresh", "no-agent", "vm-1")
 
 
-@pytest.mark.unit
+@pytest.mark.integration
 def test_startup_launcher_proves_service_reached_guest_workspace(tmp_path: Path) -> None:
     """The real test fixture writes a fresh proof before refusing to start VSock."""
     import subprocess  # nosec B404 - launch only this checked-in test fixture
@@ -126,7 +134,7 @@ def test_startup_launcher_proves_service_reached_guest_workspace(tmp_path: Path)
     environment = {**os.environ, "TLDW_AGENT_GUEST_WORKSPACE_ROOT": str(tmp_path), "TLDW_AGENT_GUEST_VM_ID": "AB12-34"}
     process = subprocess.Popen(["/bin/sh", str(launcher)], env=environment)  # nosec B603
     try:
-        deadline = time.monotonic() + 3
+        deadline = time.monotonic() + 10
         while not (tmp_path / _PROOF).exists() and process.poll() is None and time.monotonic() < deadline:
             time.sleep(0.02)
         _expect(
@@ -141,6 +149,7 @@ def test_startup_launcher_proves_service_reached_guest_workspace(tmp_path: Path)
 
 @pytest.mark.unit
 def test_missing_agent_drill_requires_separate_opt_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep this real-VM drill gated independently of ordinary VZ smoke tests."""
     monkeypatch.setenv("TLDW_SANDBOX_VZ_LINUX_E2E", "1")
     monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_MISSING_AGENT_DRILL", raising=False)
     with pytest.raises(pytest.skip.Exception, match="MISSING_AGENT_DRILL"):
@@ -184,6 +193,7 @@ def test_vz_linux_missing_agent_then_healthy_session_reuse(monkeypatch: pytest.M
     original_exec = VZLinuxRunner.helper_client_cls.exec_guest
 
     def record_create(client: Any, request: dict[str, Any]) -> Any:
+        """Record create attempts and verify fresh proof from the fault guest."""
         attempt = {field: request[field] for field in ("owner", "runtime", "run_id", "session_id")}
         attempt["expected_vm_id"] = request["vm_name"]
         evidence["attempted_creates"].append(attempt)
@@ -208,6 +218,7 @@ def test_vz_linux_missing_agent_then_healthy_session_reuse(monkeypatch: pytest.M
                 evidence["startup_proof"] = _read_startup_proof(proof_path, nonce, mode, request["vm_name"])
 
     def record_exec(client: Any, **kwargs: Any) -> Any:
+        """Record whether execution was dispatched and to which VM."""
         evidence["exec_vm_ids"].append(kwargs["vm_id"])
         return original_exec(client, **kwargs)
 
@@ -215,6 +226,7 @@ def test_vz_linux_missing_agent_then_healthy_session_reuse(monkeypatch: pytest.M
     monkeypatch.setattr(VZLinuxRunner.helper_client_cls, "exec_guest", record_exec)
 
     def run(session_id: str, bundle: str, token: str, startup_timeout: int) -> tuple[Any, str]:
+        """Run one sandbox command and retain its observable result and stdout."""
         command = ["/bin/echo", token]
         result = service.start_run_scaffold(
             user_id="e2e-user",
@@ -239,6 +251,7 @@ def test_vz_linux_missing_agent_then_healthy_session_reuse(monkeypatch: pytest.M
         return result, stdout
 
     def check_empty(label: str) -> None:
+        """Require reconciliation and helper inventory to be empty after cleanup."""
         report = service.macos_diagnostics()["reconciliation"]
         evidence[label] = report
         _expect(

@@ -80,6 +80,24 @@ skipped for a prepared-host evidence packet.
   workspace mount/path-escape isolation, or host reboot recovery. Retained
   evidence includes disposable disks and logs; review before deleting them.
 
+## 2026-09-25: Missing-Agent PR Review Rerun (Accepted)
+
+- On `codex/vz-missing-agent-startup-drill`, Qodo review found that the portable
+  orchestration mock still modeled four profiles. The mock and expectations
+  now cover the fifth `missing_agent` profile; the subprocess fixture is an
+  integration test with a less brittle startup deadline. No production runtime
+  behavior changed in this review pass.
+- Reused the rebuilt Debian arm64 source bundle and signed isolated helper
+  documented above. The fresh real-VM workflow exited 0 with ten accepted
+  cases, no skips or errors, empty VM inventory, closed disposable disks,
+  helper stop, removed private runtime, and unchanged canonical/fault-source
+  hashes. Its `input_sha256` for the reviewed missing-agent host test is
+  `fdc36061bf104274aa37034c58f7f7c3df3a986d19377600cd4a08881f596fd8`.
+  Receipt: `~/Library/Logs/tldw/vz-failure-missing-agent-20260925-pr-review-r1/receipt.json`.
+- Portable review suite: 219 passed, 11 host-gated skipped. Ruff and Black
+  passed. Bandit found no medium/high issues; low findings were pytest asserts
+  in test code. GitHub CI was still queued at the time of this local rerun.
+
 ## 2026-09-25: Missing-Agent Startup Drill Preflight (Not Accepted)
 
 - TASK-13243.9 adds a test-only guest launcher and a fifth case to the manual
