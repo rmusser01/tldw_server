@@ -68,3 +68,10 @@ Required CI is pending on the new head.
 Server `dev` subsequently advanced to `a2f5e1b816cfe189db7f553a1ccf8d481dc2edbe`.
 H1 rebased cleanly; all nine prior commits remain unchanged by range-diff.
 The 811-shard coverage guard and diff check pass. Required CI must rerun.
+The latest H1 `frontend-required` gate found two TypeScript errors in
+`HistorySelectionReview`: the review identity accessed conversation fields on
+the `unavailable` owner variant. The CI error reproduced locally with `tsc`.
+The owner identity now excludes that unavailable variant, allowing its review
+state to reset. The same full typecheck passed with CI's 8 GB Node heap;
+14 focused review tests and `git diff --check` pass. The required remote gate
+must rerun on the repaired head.

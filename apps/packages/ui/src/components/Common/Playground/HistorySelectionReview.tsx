@@ -54,7 +54,7 @@ export function HistorySelectionReview({
   const scroller = React.useRef<HTMLDivElement>(null)
   const errorRegion = React.useRef<HTMLDivElement>(null)
   const identity = React.useId()
-  const reviewOwner = selection.owner
+  const reviewOwner = selection.owner && selection.owner.kind !== "unavailable"
     ? `${selection.owner.kind}:${selection.owner.owner_key}:${selection.owner.conversation_id}`
     : null
   const previousReviewOwner = React.useRef(reviewOwner)
