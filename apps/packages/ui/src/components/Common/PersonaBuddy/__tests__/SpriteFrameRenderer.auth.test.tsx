@@ -2,18 +2,32 @@ import React from "react";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { SpriteFrameRenderer } from "../SpriteFrameRenderer";
+import type { PersonaVisualAsset } from "@/types/persona-visuals";
 const fetchWithAuth = vi.hoisted(() => vi.fn());
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: { fetchWithAuth },
 }));
 const path =
   "/api/v1/persona/profiles/migu/visual-packs/pack/assets/frame/content";
-const assets = {
+const assets: Record<string, PersonaVisualAsset> = {
   frame: {
     id: "frame",
+    pack_id: "pack",
+    persona_id: "migu",
     url: path,
     mime_type: "image/png",
     asset_role: "frame" as const,
+    storage_key: "frame",
+    original_filename: "frame.png",
+    byte_size: 3,
+    checksum_sha256: "0".repeat(64),
+    width: null,
+    height: null,
+    duration_ms: null,
+    provenance: "test",
+    created_at: "2026-01-01T00:00:00Z",
+    last_modified: "2026-01-01T00:00:00Z",
+    version: 1,
   },
 };
 const manifest = {

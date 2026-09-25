@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
+
+from tldw_Server_API.app.core.exceptions import PersonaBuddyValidationError
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -80,16 +83,14 @@ def derive_persona_buddy_core(profile: dict[str, Any]) -> dict[str, Any]:
 
 
 def normalize_persona_buddy_overlay_preferences(
-    overlay_preferences: dict[str, Any] | None,
+    overlay_preferences: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
-    """Normalize overlay preferences to known optional keys."""
-    overlay = overlay_preferences or {}
-    accessory_id = overlay.get("accessory_id")
-    eye_style = overlay.get("eye_style")
-    return {
-        "accessory_id": None if accessory_id is None else str(accessory_id),
-        "eye_style": None if eye_style is None else str(eye_style),
-    }
+    """Preserve overlay preferences while validating the ambient mode contract."""
+    normalized = dict(overlay_preferences or {})
+    ambient_mode = normalized.get("ambient_mode")
+    if ambient_mode is not None and ambient_mode not in {"off", "expressive", "roaming"}:
+        raise PersonaBuddyValidationError("ambient_mode must be off, expressive, or roaming")
+    return normalized
 
 
 def resolve_persona_buddy_profile(
