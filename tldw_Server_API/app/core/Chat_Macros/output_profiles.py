@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -18,6 +19,7 @@ DEFAULT_PROFILE_SECTIONS = [
 MAX_PROFILE_SECTIONS = 10
 MAX_SECTION_NAME_LENGTH = 64
 MAX_SECTION_TITLE_LENGTH = 128
+SECTION_TITLE_CONTROLS = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]")
 VALID_PROFILE_FORMATS = {"structured_sections", "single_response"}
 
 
@@ -71,7 +73,7 @@ def normalize_output_profile(name: str, raw: Mapping[str, Any] | None = None) ->
         section_name = str(section)
         if section_name not in normalized_sections:
             raise MacroValidationError(f"output profile section_titles contains unknown section: {section_name}")
-        if not isinstance(title, str):
+        if not isinstance(title, str) or SECTION_TITLE_CONTROLS.search(title):
             raise MacroValidationError("invalid output profile section title")
         title = title.strip()
         if not title or len(title) > MAX_SECTION_TITLE_LENGTH:
