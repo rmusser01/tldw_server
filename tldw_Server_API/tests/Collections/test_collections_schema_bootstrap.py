@@ -94,3 +94,31 @@ def test_schema_memo_verifier_accepts_sqlite_mapping_rows(
         backend.get_pool().close_all()
 
     assert ensure_calls == [1]
+
+
+def test_cached_postgres_adapter_does_not_write_sqlite_fts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cached PostgreSQL bootstrap must still disable SQLite-only FTS writes."""
+    executed_sql: list[str] = []
+    backend = types.SimpleNamespace(
+        backend_type=BackendType.POSTGRESQL,
+        execute=lambda query, *_args: executed_sql.append(query),
+    )
+    key = "cached-postgres-fts-probe"
+    monkeypatch.setattr(CollectionsDatabase, "_backend_target_key", lambda self, _backend: key)
+    CollectionsDatabase._bootstrapped_backend_targets.add(key)
+    try:
+        db = CollectionsDatabase.from_backend(user_id="1", backend=backend)
+        db._update_content_fts_entry(
+            1,
+            title="Synthetic",
+            summary="Synthetic",
+            notes=None,
+            tags=None,
+            metadata_json=None,
+        )
+    finally:
+        CollectionsDatabase._bootstrapped_backend_targets.discard(key)
+
+    assert executed_sql == []
