@@ -36,3 +36,6 @@ GitHub checks and final H1 merge ancestry remain pending.
 After server `dev` advanced to `0db48866a5`, H2 was restacked onto H1
 `f3bbacf367`. All six existing H2 commits are unchanged by range-diff,
 and the stacked diff check passes. Required CI is pending on the new head.
+Server `dev` then advanced to `a2f5e1b816` and H2 was restacked onto H1
+`fa3a36997c`. All seven prior H2 commits are unchanged by range-diff;
+the stacked diff check passes. Required CI must rerun on the new head.
