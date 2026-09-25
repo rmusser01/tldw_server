@@ -26,12 +26,17 @@ pytestmark = pytest.mark.integration
 
 
 @pytest_asyncio.fixture
-async def single_user_cookie_client(tmp_path, monkeypatch):
+async def single_user_cookie_client(tmp_path, monkeypatch, request):
     db_path = tmp_path / "authnz_single_user_cookie.db"
     api_key = "test_single_user_cookie_api_key_123"
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("SINGLE_USER_API_KEY", api_key)
+    cookie_names = getattr(request, "param", None)
+    if cookie_names:
+        session_cookie_name, csrf_cookie_name = cookie_names
+        monkeypatch.setenv("SINGLE_USER_SESSION_COOKIE_NAME", session_cookie_name)
+        monkeypatch.setenv("CSRF_COOKIE_NAME", csrf_cookie_name)
     monkeypatch.setenv("SESSION_ENCRYPTION_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
     monkeypatch.setenv("SESSION_COOKIE_SECURE", "false")
     monkeypatch.setenv("CSRF_ENABLED", "1")
@@ -109,6 +114,27 @@ def test_mint_returns_no_token_and_sets_exact_cookie(single_user_cookie_client):
     assert "SameSite=lax" in cookie
     assert "Path=/api" in cookie
     assert api_key not in response.text + cookie
+
+
+@pytest.mark.parametrize(
+    "single_user_cookie_client",
+    [("tldw_session_a1", "tldw_csrf_a1")],
+    indirect=True,
+)
+def test_custom_instance_cookie_pair_mints_and_validates(single_user_cookie_client):
+    client, api_key = single_user_cookie_client
+
+    response = _mint(client, api_key)
+
+    assert response.status_code == 200
+    assert "tldw_session_a1=" in response.headers["set-cookie"]
+    assert "tldw_csrf_a1" in client.cookies
+    assert "csrf_token" not in client.cookies
+    assert client.delete(
+        "/api/v1/auth/single-user/session",
+        headers={"X-CSRF-Token": client.cookies["tldw_csrf_a1"]},
+    ).status_code == 200
+    assert "tldw_csrf_a1" not in client.cookies
 
 
 def test_cookie_principal_authenticates_existing_http_dependencies(single_user_cookie_client):

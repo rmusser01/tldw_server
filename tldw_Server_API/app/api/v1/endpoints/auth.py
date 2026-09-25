@@ -1343,6 +1343,12 @@ async def delete_single_user_cookie_session(
 
     response.headers["Cache-Control"] = "no-store"
     clear_single_user_session_cookie(response)
+    response.delete_cookie(
+        key=get_settings().CSRF_COOKIE_NAME,
+        path="/",
+        secure=get_settings().SESSION_COOKIE_SECURE,
+        samesite=get_settings().SESSION_COOKIE_SAMESITE,
+    )
     return SingleUserSessionLogoutResponse(authenticated=False)
 
 

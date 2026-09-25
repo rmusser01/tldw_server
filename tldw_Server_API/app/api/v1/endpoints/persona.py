@@ -3623,7 +3623,7 @@ def _persona_conversation_headers(
         # exact trusted-Origin check. HTTP revalidates expiry, ownership and CSRF.
         if cookie := ws.headers.get("cookie"):
             headers["cookie"] = cookie
-        if csrf_token := ws.cookies.get("csrf_token"):
+        if csrf_token := ws.cookies.get(get_settings().CSRF_COOKIE_NAME):
             headers["x-csrf-token"] = csrf_token
     return headers
 

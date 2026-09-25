@@ -57,6 +57,51 @@ def test_csrf_no_binding(monkeypatch):
     assert mgr.validate_token(token, token, user_id=None) is True
 
 
+def test_custom_csrf_cookie_name_controls_mint_and_read(monkeypatch):
+    from starlette.responses import Response
+    from tldw_Server_API.app.core.AuthNZ.csrf_protection import get_csrf_token
+
+    monkeypatch.setenv("CSRF_COOKIE_NAME", "tldw_csrf_a1")
+    reset_settings()
+    try:
+        manager = CSRFTokenManager()
+        response = Response()
+        manager.set_cookie(response, "custom-token")
+        request = types.SimpleNamespace(cookies={"tldw_csrf_a1": "custom-token"})
+
+        assert "tldw_csrf_a1=custom-token" in response.headers["set-cookie"]
+        assert get_csrf_token(request) == "custom-token"
+    finally:
+        reset_settings()
+
+
+def test_distinct_instance_cookie_names_ignore_other_instance(monkeypatch):
+    from tldw_Server_API.app.core.AuthNZ.csrf_protection import get_csrf_token
+
+    try:
+        for suffix, other in (("a1", "b2"), ("b2", "a1")):
+            monkeypatch.setenv("AUTH_MODE", "single_user")
+            monkeypatch.setenv("SINGLE_USER_SESSION_COOKIE_NAME", f"tldw_session_{suffix}")
+            monkeypatch.setenv("CSRF_COOKIE_NAME", f"tldw_csrf_{suffix}")
+            reset_settings()
+            manager = CSRFTokenManager()
+            request = types.SimpleNamespace(
+                method="POST",
+                headers={"content-type": "application/json"},
+                url=types.SimpleNamespace(path="/api/v1/notes"),
+                state=types.SimpleNamespace(),
+                cookies={
+                    f"tldw_session_{other}": "foreign-session",
+                    f"tldw_csrf_{other}": "foreign-csrf",
+                },
+            )
+
+            assert manager.should_protect(request) is False
+            assert get_csrf_token(request) is None
+    finally:
+        reset_settings()
+
+
 def test_csrf_single_user_bearer_skips_protection(monkeypatch):
 
 

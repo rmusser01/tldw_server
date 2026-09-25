@@ -4,6 +4,7 @@ import { getApiBearer, getApiKey, getSessionAccessToken, hasEnvApiAuth } from '@
 import { buildApiBaseUrl, resolvePublicApiOrigin } from '@web/lib/api-base';
 import { captureSessionIdFromHeaders, getOrCreateSessionId, SESSION_HEADER_NAME } from '@web/lib/session';
 import { isExplicitRequestCancellation } from '@/services/request-events';
+import { getRuntimeCsrfCookieName } from '@/services/tldw/runtime-auth-override';
 import type { ApiErrorResponse, ApiRequestConfig, ApiRequestConfigWithMetadata } from '@web/types/common';
 
 type ApiResponse<T = unknown> = {
@@ -335,7 +336,7 @@ function applyBrowserHeaders(headers: Headers, method: RequestMethod): void {
   // CSRF token for modifying requests when not using X-API-KEY auth
   const needsCsrf = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) && !xApiKey;
   if (needsCsrf && !headers.has('X-CSRF-Token')) {
-    const csrf = getCookie('csrf_token');
+    const csrf = getCookie(getRuntimeCsrfCookieName());
     if (csrf) {
       headers.set('X-CSRF-Token', csrf);
     }
@@ -777,7 +778,7 @@ export function buildAuthHeaders(method: string = 'GET', contentType?: string): 
         const match = document.cookie.match(new RegExp('(?:^|; )' + name.replace(/([.$?*|{}()[\]\\/+^])/g, '\\$1') + '=([^;]*)'));
         return match ? decodeURIComponent(match[1]) : null;
       };
-      const csrf = cookie('csrf_token');
+      const csrf = cookie(getRuntimeCsrfCookieName());
       if (csrf) headers['X-CSRF-Token'] = csrf;
     }
   }

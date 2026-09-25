@@ -66,10 +66,12 @@ const importAndAwaitBootstrap = async () => {
 
 const stubCookieRuntimeFetch = ({
   bootstrapOk = true,
-  probeOk = true
+  probeOk = true,
+  csrfCookieName = "csrf_token"
 }: {
   bootstrapOk?: boolean
   probeOk?: boolean
+  csrfCookieName?: string
 } = {}) => {
   const fetchMock = vi.fn(async (
     input: RequestInfo | URL,
@@ -83,7 +85,8 @@ const stubCookieRuntimeFetch = ({
           runtimeAuth: {
             available: true,
             authMode: "single-user",
-            transport: "cookie-session"
+            transport: "cookie-session",
+            csrfCookieName
           },
           networking: {
             deploymentMode: "quickstart",
@@ -428,6 +431,16 @@ describe("runtime-bootstrap chrome shim", () => {
     expect(signals).toHaveLength(3)
     expect(signals.every((signal) => signal instanceof AbortSignal)).toBe(true)
     expect(new Set(signals)).toHaveLength(3)
+  })
+
+  it("configures the instance CSRF cookie before cookie-session traffic", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "managed"
+    stubCookieRuntimeFetch({ csrfCookieName: "tldw_csrf_a1" })
+
+    await importAndAwaitBootstrap()
+
+    const { getRuntimeCsrfCookieName } = await import("@/services/tldw/runtime-auth-override")
+    expect(getRuntimeCsrfCookieName()).toBe("tldw_csrf_a1")
   })
 
   it.each([

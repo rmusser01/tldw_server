@@ -55,7 +55,8 @@ vi.mock("@/utils/safe-storage", () => ({
   })
 }))
 
-vi.mock("@/services/tldw/runtime-auth-override", () => ({
+vi.mock("@/services/tldw/runtime-auth-override", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/services/tldw/runtime-auth-override")>(),
   getRuntimeSingleUserApiKeyOverride: (...args: unknown[]) =>
     (mocks.getRuntimeSingleUserApiKeyOverride as (...args: unknown[]) => unknown)(...args),
   isCookieSessionConfigInvalidated: () => false

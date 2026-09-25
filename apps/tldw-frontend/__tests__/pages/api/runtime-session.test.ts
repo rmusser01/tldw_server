@@ -14,6 +14,7 @@ const ORIGINAL_ENV = {
   NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE: process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE,
   TLDW_INTERNAL_API_ORIGIN: process.env.TLDW_INTERNAL_API_ORIGIN,
   SINGLE_USER_SESSION_COOKIE_NAME: process.env.SINGLE_USER_SESSION_COOKIE_NAME,
+  CSRF_COOKIE_NAME: process.env.CSRF_COOKIE_NAME,
 };
 
 const restoreEnv = () => {
@@ -33,6 +34,7 @@ const configureRuntimeAuth = () => {
   process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = 'quickstart';
   process.env.TLDW_INTERNAL_API_ORIGIN = BACKEND_ORIGIN;
   delete process.env.SINGLE_USER_SESSION_COOKIE_NAME;
+  delete process.env.CSRF_COOKIE_NAME;
 };
 
 const backendResponse = ({
@@ -151,6 +153,53 @@ describe('WebUI runtime session bootstrap API', () => {
         },
       })
     );
+  });
+
+  it('forwards only the two configured instance cookies', async () => {
+    process.env.SINGLE_USER_SESSION_COOKIE_NAME = 'tldw_session_a1';
+    process.env.CSRF_COOKIE_NAME = 'tldw_csrf_a1';
+    mockFetch.mockResolvedValue(backendResponse({
+      cookies: [
+        'tldw_session_a1=rotated; Path=/api; HttpOnly',
+        'tldw_csrf_a1=new-token; Path=/',
+        'csrf_token=foreign-token; Path=/',
+      ],
+    }));
+
+    const res = await callRoute({
+      headers: {
+        cookie: 'tldw_session_a1=existing; tldw_csrf_a1=token; csrf_token=foreign-token',
+      },
+    });
+
+    expect(mockFetch.mock.calls[0]?.[1]?.headers).toMatchObject({
+      Cookie: 'tldw_session_a1=existing; tldw_csrf_a1=token',
+    });
+    expect(res.headers['set-cookie']).toEqual([
+      'tldw_session_a1=rotated; Path=/api; HttpOnly',
+      'tldw_csrf_a1=new-token; Path=/',
+    ]);
+  });
+
+  it('keeps same-host installations on different ports to their own cookie pair', async () => {
+    const bothPairs =
+      'tldw_session_a1=session-a; tldw_csrf_a1=csrf-a; ' +
+      'tldw_session_b2=session-b; tldw_csrf_b2=csrf-b';
+
+    for (const [port, suffix] of [[8080, 'a1'], [8081, 'b2']] as const) {
+      process.env.SINGLE_USER_SESSION_COOKIE_NAME = `tldw_session_${suffix}`;
+      process.env.CSRF_COOKIE_NAME = `tldw_csrf_${suffix}`;
+      const origin = `http://127.0.0.1:${port}`;
+
+      const res = await callRoute({
+        headers: { host: `127.0.0.1:${port}`, origin, cookie: bothPairs },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(mockFetch.mock.lastCall?.[1]?.headers).toMatchObject({
+        Cookie: `tldw_session_${suffix}=session-${suffix[0]}; tldw_csrf_${suffix}=csrf-${suffix[0]}`,
+      });
+    }
   });
 
   it('forwards separate auth and csrf cookies while preserving safe attributes', async () => {

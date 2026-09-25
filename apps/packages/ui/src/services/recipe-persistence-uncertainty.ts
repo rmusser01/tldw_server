@@ -10,7 +10,7 @@ import {
   resolveRecipeRequestSnapshot
 } from "@/services/tldw/recipe-request-snapshot"
 import { readBrowserCookie, tldwRequest } from "@/services/tldw/request-core"
-import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
+import { getRuntimeCsrfCookieName, getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
 import { createSafeStorage } from "@/utils/safe-storage"
 import { browser } from "wxt/browser"
 
@@ -178,7 +178,7 @@ export async function resolveRecipeOwnerWithConfig(
       path: "/api/v1/prompts/",
       method: "POST",
       runtimeApiKey: getRuntimeSingleUserApiKeyOverride(),
-      csrfToken: readBrowserCookie("csrf_token")
+      csrfToken: readBrowserCookie(getRuntimeCsrfCookieName())
     }
     const resolved = resolveRecipeRequestSnapshot(input)
     if (resolved.authenticationError) return null

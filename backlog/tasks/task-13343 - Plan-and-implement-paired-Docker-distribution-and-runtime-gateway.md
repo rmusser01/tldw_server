@@ -4,7 +4,7 @@ title: Plan and implement paired Docker distribution and runtime gateway
 status: In Progress
 assignee: []
 created_date: '2026-09-23 06:15'
-updated_date: '2026-09-25 16:28'
+updated_date: '2026-09-25 16:38'
 labels:
   - distribution
   - docker
@@ -47,6 +47,8 @@ WP1 implementation plan completed and self-reviewed: four stages, eight tasks, f
 In isolated worktree codex/complete-app-wp1, Task 1 signed-manifest verifier implemented test-first. The focused test first failed because the Release module was absent, then passed 15 cases after implementation. Existing release-helper baseline passed 43 tests. Black formatting applied; Bandit found 0 issues in new Release source. The verifier uses only stdlib plus cryptography so WP3 can package its single maintained source in the small launcher without importing the backend; the plan records this handoff. WP1 implementation remains in progress.
 
 WP1 Task 2 complete: managed same-origin WebUI mode and production build wrapper. Six focused Vitest files (64 tests) pass; managed Turbopack standalone build, token sync, and bundle budget pass; four URL/credential sentinels absent from generated static/server/standalone files. Full frontend typecheck remains red with 93 diagnostics in untouched files (baseline qualification issue). Task 3 cookie isolation in progress.
+
+WP1 Task 3 cookie isolation complete: backend CSRF cookie setting and logout clearing, Next runtime config/session cookie pair, browser runtime accessor and all affected readers. Verification: 32 AuthNZ unit tests; 6 focused HTTP/logout integration tests; 179 Next/runtime browser tests; 219 affected service tests. Two same-host ports filter to their own cookie pair. Frontend lint has one pre-existing any warning, typecheck remains 93 unrelated diagnostics. Bandit: 11 existing B106 findings in auth.py identical to HEAD; zero new findings. Gateway-level two-instance browser exercise is deferred to Task 4.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

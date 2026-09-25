@@ -104,7 +104,7 @@ The code paths above are the planned ownership boundaries. If an existing helper
 
 **Interfaces:** Backend setting `CSRF_COOKIE_NAME` defaults to `csrf_token`; `SINGLE_USER_SESSION_COOKIE_NAME` retains its existing setting. Managed configuration generates distinct validated names once and supplies both to backend and Next. `runtime-config` returns a public `csrfCookieName` only when runtime auth is available. Shared `setRuntimeCsrfCookieName(value: string | null): void` and `getRuntimeCsrfCookieName(): string` hold a validated name for WebUI requests and default to `csrf_token` until set. The extension has a separate bundle/runtime and keeps its legacy default. No API key appears in the response.
 
-- [ ] **Step 1: Write failing tests** for backend CSRF mint/validate/clear with two custom cookie names, Next session forwarding only the configured pair, public runtime config excluding the master key, and browser request helpers reading the configured CSRF name. Example:
+- [x] **Step 1: Write failing tests** for backend CSRF mint/validate/clear with two custom cookie names, Next session forwarding only the configured pair, public runtime config excluding the master key, and browser request helpers reading the configured CSRF name. Example:
 
   ```ts
   setRuntimeCsrfCookieName("tldw_csrf_a1")
@@ -113,16 +113,16 @@ The code paths above are the planned ownership boundaries. If an existing helper
   expect(getRuntimeCsrfCookieName()).toBe("csrf_token")
   ```
 
-- [ ] **Step 2: Run** the targeted backend pytest and WebUI Vitest files; expect failures at the new configuration seam.
-- [ ] **Step 3: Add** validated backend setting and replace fixed cookie identifiers in the CSRF manager/getters/WebSocket auth where applicable. Add the browser accessor and replace the fixed cookie reads. Have `runtime-config` expose only the public cookie identifier and initialize the accessor before authenticated API traffic; `session.ts` allows exactly the configured cookie names. Keep the legacy default in developer/extension/hosted modes.
+- [x] **Step 2: Run** the targeted backend pytest and WebUI Vitest files; expect failures at the new configuration seam.
+- [x] **Step 3: Add** validated backend setting and replace fixed cookie identifiers in the CSRF manager/getters/WebSocket auth where applicable. Add the browser accessor and replace the fixed cookie reads. Have `runtime-config` expose only the public cookie identifier and initialize the accessor before authenticated API traffic; `session.ts` allows exactly the configured cookie names. Keep the legacy default in developer/extension/hosted modes.
 
   ```python
   token_cookie_name = get_settings().CSRF_COOKIE_NAME
   # Validate with the existing HTTP cookie-token pattern and reject session-name equality.
   ```
 
-- [ ] **Step 4: Run** focused suites plus existing auth/session regression tests. Exercise two app origins on `127.0.0.1` with different ports and cookie names; assert neither app accepts the other's session/CSRF pair. Run scoped Python Bandit and frontend lint on touched files.
-- [ ] **Step 5: Commit** the backend/Next/shared UI cookie changes with `fix: isolate managed application session cookies (TASK-13343)`.
+- [x] **Step 4: Run** focused suites plus existing auth/session regression tests. Exercise two app origins on `127.0.0.1` with different ports and cookie names; assert neither app accepts the other's session/CSRF pair. Run scoped Python Bandit and frontend lint on touched files. Backend unit (32), custom HTTP integration and logout regression (6), Next runtime/session (179), and affected service tests (219) pass; gateway-level two-instance browser exercise remains in Task 4 after the gateway exists. Typecheck has 93 existing unrelated diagnostics; touched Python files were already outside Black format at HEAD. Bandit finds the same 11 existing B106 findings in `auth.py` as HEAD and no new findings.
+- [x] **Step 5: Commit** the backend/Next/shared UI cookie changes with `fix: isolate managed application session cookies (TASK-13343)`.
 
 ### Task 4: Implement the runtime gateway and trust boundary
 

@@ -22,7 +22,8 @@ import {
 import {
   activateCookieSessionConfig,
   clearRuntimeAuthOverride,
-  invalidateCookieSessionConfig
+  invalidateCookieSessionConfig,
+  setRuntimeCsrfCookieName
 } from "@/services/tldw/runtime-auth-override"
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
@@ -222,6 +223,7 @@ type RuntimeConfigPayload = {
     available?: boolean
     authMode?: "single-user" | string
     transport?: "cookie-session" | string
+    csrfCookieName?: string
   }
   networking?: {
     deploymentMode?: string
@@ -382,6 +384,7 @@ const seedTldwConfigFromRuntime = async (): Promise<void> => {
   if (typeof window === "undefined") return
 
   const storage = createSafeStorage()
+  setRuntimeCsrfCookieName(null)
   invalidateCookieSessionConfig()
   await storage.remove(COOKIE_SESSION_CONFIG_KEY).catch(() => undefined)
 
@@ -391,6 +394,12 @@ const seedTldwConfigFromRuntime = async (): Promise<void> => {
     payload.runtimeAuth.authMode !== "single-user" ||
     payload.runtimeAuth.transport !== "cookie-session"
   ) {
+    return
+  }
+
+  try {
+    setRuntimeCsrfCookieName(payload.runtimeAuth.csrfCookieName ?? null)
+  } catch {
     return
   }
 

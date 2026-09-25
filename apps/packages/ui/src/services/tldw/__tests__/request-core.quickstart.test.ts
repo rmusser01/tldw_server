@@ -98,6 +98,29 @@ describe("tldwRequest quickstart and advanced transport", () => {
     expect(new Headers(init.headers).get("X-CSRF-Token")).toBe("csrf-123")
   })
 
+  it("reads the runtime-configured CSRF cookie for managed mutations", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "managed"
+    document.cookie = "tldw_csrf_a1=instance-token; Path=/"
+    const fetchMock = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }))
+    const { setRuntimeCsrfCookieName } = await import("@/services/tldw/runtime-auth-override")
+    setRuntimeCsrfCookieName("tldw_csrf_a1")
+
+    const { tldwRequest } = await import("@/services/tldw/request-core")
+    await tldwRequest(
+      { path: "/api/v1/notes", method: "POST", body: { title: "Managed note" } },
+      {
+        getConfig: async () => ({
+          serverUrl: window.location.origin,
+          authMode: "single-user",
+          authSource: "cookie-session"
+        }),
+        fetchFn: fetchMock
+      }
+    )
+
+    expect(new Headers(fetchMock.mock.calls[0][1].headers).get("X-CSRF-Token")).toBe("instance-token")
+  })
+
   it("uses cookie auth on safe methods without attaching csrf", async () => {
     process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
     document.cookie = "csrf_token=csrf-123; Path=/"

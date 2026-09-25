@@ -59,3 +59,19 @@ def test_session_cookie_name_rejects_explicit_empty_environment(monkeypatch) -> 
 
     with pytest.raises(ValidationError, match="SINGLE_USER_SESSION_COOKIE_NAME"):
         make_settings()
+
+
+def test_csrf_cookie_name_defaults_to_legacy_name(monkeypatch) -> None:
+    monkeypatch.delenv("CSRF_COOKIE_NAME", raising=False)
+
+    assert make_settings().CSRF_COOKIE_NAME == "csrf_token"
+
+
+def test_csrf_cookie_name_accepts_distinct_instance_name() -> None:
+    assert make_settings(CSRF_COOKIE_NAME="tldw_csrf_a1").CSRF_COOKIE_NAME == "tldw_csrf_a1"
+
+
+@pytest.mark.parametrize("cookie_name", ["", "bad name", "a=b", "__Host-csrf", DEFAULT_COOKIE_NAME])
+def test_csrf_cookie_name_rejects_unsafe_or_colliding_values(cookie_name: str) -> None:
+    with pytest.raises(ValidationError, match="CSRF_COOKIE_NAME"):
+        make_settings(CSRF_COOKIE_NAME=cookie_name)

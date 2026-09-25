@@ -845,6 +845,11 @@ class Settings(BaseSettings):
         description="Host-only cookie name for opaque single-user sessions",
     )
 
+    CSRF_COOKIE_NAME: str = Field(
+        default="csrf_token",
+        description="Host-only readable cookie name for double-submit CSRF tokens",
+    )
+
     SINGLE_USER_SESSION_EXPIRE_DAYS: int = Field(
         default=30,
         ge=1,
@@ -1102,6 +1107,18 @@ class Settings(BaseSettings):
             raise ValueError("must be a non-empty RFC cookie token")
         if v == "csrf_token":
             raise ValueError("must not collide with the CSRF cookie name")
+        if v.lower().startswith(SINGLE_USER_SESSION_COOKIE_RESERVED_PREFIXES):
+            raise ValueError("must not use a reserved secure cookie prefix")
+        return v
+
+    @field_validator("CSRF_COOKIE_NAME")
+    @classmethod
+    def validate_csrf_cookie_name(cls, v: str, info) -> str:
+        """Reject unsafe CSRF names and collision with the session cookie."""
+        if not SINGLE_USER_SESSION_COOKIE_NAME_PATTERN.fullmatch(v):
+            raise ValueError("must be a non-empty RFC cookie token")
+        if v == info.data.get("SINGLE_USER_SESSION_COOKIE_NAME"):
+            raise ValueError("must not collide with the session cookie name")
         if v.lower().startswith(SINGLE_USER_SESSION_COOKIE_RESERVED_PREFIXES):
             raise ValueError("must not use a reserved secure cookie prefix")
         return v

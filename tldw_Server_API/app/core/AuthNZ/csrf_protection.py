@@ -77,7 +77,7 @@ class CSRFTokenManager:
         self.settings = get_settings()
         # Header and cookie names are public identifiers, not secrets.
         self.token_header_name = "X-CSRF-Token"  # nosec B105
-        self.token_cookie_name = "csrf_token"  # nosec B105
+        self.token_cookie_name = self.settings.CSRF_COOKIE_NAME
         self.token_length = 32
 
         # Methods that require CSRF protection
@@ -447,7 +447,7 @@ def get_csrf_token(request: Request) -> Optional[str]:
     Returns:
         CSRF token if present, None otherwise
     """
-    return request.cookies.get("csrf_token")
+    return request.cookies.get(get_settings().CSRF_COOKIE_NAME)
 
 
 def validate_csrf_token(request: Request) -> bool:

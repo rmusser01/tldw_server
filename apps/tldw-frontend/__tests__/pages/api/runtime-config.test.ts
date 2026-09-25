@@ -8,7 +8,8 @@ const ORIGINAL_ENV = {
   TLDW_WEBUI_EXPOSE_RUNTIME_AUTH: process.env.TLDW_WEBUI_EXPOSE_RUNTIME_AUTH,
   NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE: process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE,
   TLDW_INTERNAL_API_ORIGIN: process.env.TLDW_INTERNAL_API_ORIGIN,
-  SINGLE_USER_SESSION_COOKIE_NAME: process.env.SINGLE_USER_SESSION_COOKIE_NAME
+  SINGLE_USER_SESSION_COOKIE_NAME: process.env.SINGLE_USER_SESSION_COOKIE_NAME,
+  CSRF_COOKIE_NAME: process.env.CSRF_COOKIE_NAME
 }
 
 const restoreEnv = () => {
@@ -28,6 +29,7 @@ const configureRuntimeAuth = () => {
   process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
   process.env.TLDW_INTERNAL_API_ORIGIN = "http://app:8000"
   delete process.env.SINGLE_USER_SESSION_COOKIE_NAME
+  delete process.env.CSRF_COOKIE_NAME
 }
 
 const callRuntimeConfig = async (
@@ -81,9 +83,22 @@ describe("WebUI runtime config API", () => {
     expect(res.body.runtimeAuth).toEqual({
       available: true,
       authMode: "single-user",
-      transport: "cookie-session"
+      transport: "cookie-session",
+      csrfCookieName: "csrf_token"
     })
     expect(JSON.stringify(res.body ?? "")).not.toContain("runtime-single-user-key")
+  })
+
+  it("publishes only the configured CSRF cookie identifier with runtime auth", async () => {
+    process.env.CSRF_COOKIE_NAME = "tldw_csrf_a1"
+
+    const res = await callRuntimeConfig()
+
+    expect(res.body.runtimeAuth).toMatchObject({
+      available: true,
+      csrfCookieName: "tldw_csrf_a1"
+    })
+    expect(JSON.stringify(res.body)).not.toContain("runtime-single-user-key")
   })
 
   it.each(["custom_session", "CSRF_TOKEN"])(
@@ -97,7 +112,8 @@ describe("WebUI runtime config API", () => {
       expect(res.body.runtimeAuth).toEqual({
         available: true,
         authMode: "single-user",
-        transport: "cookie-session"
+        transport: "cookie-session",
+        csrfCookieName: "csrf_token"
       })
       expect(JSON.stringify(res.body)).not.toContain(cookieName)
     }
@@ -123,6 +139,18 @@ describe("WebUI runtime config API", () => {
       expect(res.statusCode).toBe(200)
       expect(res.body.runtimeAuth).toEqual({ available: false })
       if (cookieName) expect(JSON.stringify(res.body)).not.toContain(cookieName)
+      expect(JSON.stringify(res.body)).not.toContain("runtime-single-user-key")
+    }
+  )
+
+  it.each(["", "bad name", "a=b", "__Host-csrf", "tldw_single_user_session"])(
+    "returns unavailable for invalid CSRF cookie name %j",
+    async (cookieName) => {
+      process.env.CSRF_COOKIE_NAME = cookieName
+
+      const res = await callRuntimeConfig()
+
+      expect(res.body.runtimeAuth).toEqual({ available: false })
       expect(JSON.stringify(res.body)).not.toContain("runtime-single-user-key")
     }
   )

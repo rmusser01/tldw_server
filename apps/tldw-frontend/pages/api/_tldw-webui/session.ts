@@ -93,7 +93,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return;
   }
 
-  const allowedCookieNames = new Set([policy.sessionCookieName, 'csrf_token']);
+  const allowedCookieNames = new Set([policy.sessionCookieName, policy.csrfCookieName]);
   const headers: Record<string, string> = { 'X-API-KEY': policy.apiKey };
   const cookies = filteredRequestCookies(req.headers.cookie, allowedCookieNames);
   if (cookies) headers.Cookie = cookies;

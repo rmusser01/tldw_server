@@ -15,7 +15,7 @@ import {
   resolveBrowserRequestTransport,
   resolveRecipeRequestSnapshot
 } from "@/services/tldw/recipe-request-snapshot"
-import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
+import { getRuntimeCsrfCookieName, getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
 import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 import {
   ABSOLUTE_URL_BLOCK_ERROR,
@@ -364,7 +364,7 @@ const performTldwRequest = async (
       headers: h,
       noAuth,
       runtimeApiKey,
-      csrfToken: readBrowserCookie("csrf_token"),
+      csrfToken: readBrowserCookie(getRuntimeCsrfCookieName()),
       pageOrigin,
       absoluteAuthAllowed: sameOriginAbsoluteUrl,
       cookieSessionTransport: cookieSession
@@ -431,7 +431,7 @@ const performTldwRequest = async (
       }
     }
     if (!shouldSkipAuth && isUnsafeMethod(method)) {
-      const csrfToken = readBrowserCookie("csrf_token")
+      const csrfToken = readBrowserCookie(getRuntimeCsrfCookieName())
       if (csrfToken) h["X-CSRF-Token"] = csrfToken
     }
   } else if (!shouldSkipAuth) {
@@ -602,7 +602,7 @@ const performTldwRequest = async (
             runtime.useRuntimeAuthOverride === false
               ? ""
               : String(getRuntimeSingleUserApiKeyOverride() || "").trim(),
-          csrfToken: readBrowserCookie("csrf_token"),
+          csrfToken: readBrowserCookie(getRuntimeCsrfCookieName()),
           pageOrigin,
           absoluteAuthAllowed: sameOriginAbsoluteUrl,
           cookieSessionTransport: cookieSession

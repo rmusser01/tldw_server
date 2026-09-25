@@ -7,6 +7,7 @@ type RuntimeConfigResponse = {
         available: true;
         authMode: 'single-user';
         transport: 'cookie-session';
+        csrfCookieName: string;
       }
     | {
         available: false;
@@ -45,6 +46,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse<Runtim
       available: true,
       authMode: 'single-user',
       transport: 'cookie-session',
+      csrfCookieName: policy.csrfCookieName,
     },
     networking: {
       deploymentMode: getDeploymentMode(),

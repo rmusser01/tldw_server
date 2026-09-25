@@ -6,10 +6,12 @@ export type RuntimeAuthPolicy =
       apiKey: string;
       internalApiOrigin: string;
       sessionCookieName: string;
+      csrfCookieName: string;
     }
   | { available: false; reason: string };
 
 const DEFAULT_SESSION_COOKIE_NAME = 'tldw_single_user_session';
+const DEFAULT_CSRF_COOKIE_NAME = 'csrf_token';
 const COOKIE_NAME_PATTERN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 const RESERVED_COOKIE_PREFIX_PATTERN = /^__(?:Host|Http|Secure)-/i;
 
@@ -159,6 +161,18 @@ const resolvedSessionCookieName = (): string | null => {
   return value;
 };
 
+const resolvedCsrfCookieName = (sessionCookieName: string): string | null => {
+  const value = process.env.CSRF_COOKIE_NAME ?? DEFAULT_CSRF_COOKIE_NAME;
+  if (
+    !COOKIE_NAME_PATTERN.test(value) ||
+    value === sessionCookieName ||
+    RESERVED_COOKIE_PREFIX_PATTERN.test(value)
+  ) {
+    return null;
+  }
+  return value;
+};
+
 const validatedInternalOrigin = (): string | null => {
   const value = String(process.env.TLDW_INTERNAL_API_ORIGIN || '');
   try {
@@ -197,8 +211,11 @@ export const resolveRuntimeAuthPolicy = (req: NextApiRequest): RuntimeAuthPolicy
   const sessionCookieName = resolvedSessionCookieName();
   if (!sessionCookieName) return { available: false, reason: 'session-cookie-name' };
 
+  const csrfCookieName = resolvedCsrfCookieName(sessionCookieName);
+  if (!csrfCookieName) return { available: false, reason: 'csrf-cookie-name' };
+
   const internalApiOrigin = validatedInternalOrigin();
   if (!internalApiOrigin) return { available: false, reason: 'internal-origin' };
 
-  return { available: true, apiKey, internalApiOrigin, sessionCookieName };
+  return { available: true, apiKey, internalApiOrigin, sessionCookieName, csrfCookieName };
 };

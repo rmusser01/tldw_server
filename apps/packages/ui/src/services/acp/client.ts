@@ -23,6 +23,7 @@ import {
   resolveBrowserRequestTransport
 } from "@/services/tldw/request-core"
 import { isCookieSessionBrowserTransport } from "@/services/tldw/browser-networking"
+import { getRuntimeCsrfCookieName } from "@/services/tldw/runtime-auth-override"
 import {
   resolveCookieSessionWebSocketBase,
   resolveBrowserWebSocketBase,
@@ -79,7 +80,7 @@ export const fetchACPRequest = async (
     cookieHeaders.delete("X-API-KEY")
     cookieHeaders.delete("X-CSRF-Token")
     if (isUnsafeMethod(options.method || "GET")) {
-      const csrfToken = readBrowserCookie("csrf_token")
+      const csrfToken = readBrowserCookie(getRuntimeCsrfCookieName())
       if (csrfToken) cookieHeaders.set("X-CSRF-Token", csrfToken)
     }
   }

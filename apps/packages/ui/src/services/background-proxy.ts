@@ -15,7 +15,7 @@ import {
   isCookieSessionBrowserTransport,
   resolveAdvancedRequestTransportGuard
 } from "@/services/tldw/browser-networking"
-import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
+import { getRuntimeCsrfCookieName, getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
 import {
   resolveDirectBrowserConfig as resolveDirectConfig,
   type DirectRuntimeStorage
@@ -1638,7 +1638,7 @@ async function* bgStreamDirectUnsafe<
 
   if (cookieSession) {
     if (!shouldSkipAuth && isUnsafeMethod(String(method))) {
-      const csrfToken = readBrowserCookie("csrf_token")
+      const csrfToken = readBrowserCookie(getRuntimeCsrfCookieName())
       if (csrfToken) resolvedHeaders["X-CSRF-Token"] = csrfToken
     }
   } else if (!shouldSkipAuth && !hostedMode && cfg?.authMode === "single-user") {
