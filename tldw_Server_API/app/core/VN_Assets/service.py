@@ -66,6 +66,7 @@ from tldw_Server_API.app.core.VN_Assets.storage import (
     resolve_vn_asset_storage_path,
     unlink_vn_asset_storage_file,
 )
+from tldw_Server_API.app.core.VN_Assets.worker import build_slot_recipe, variant_seed
 
 VN_ASSET_APPROVED_CLEANUP_CONFIRMATION = "DELETE APPROVED VN ASSETS"
 
@@ -605,37 +606,52 @@ class VNAssetPackService:
         user_id: int | None = None,
         jobs_manager: Any | None = None,
     ) -> VNAssetGenerationStatusResponse:
-        self._require_pack(pack_id)
         request = request or VNAssetGenerationRequest()
         requested_by_user_id = self.owner_user_id if user_id is None else int(user_id)
         selected_slot_ids = set(request.slot_ids)
-        slots = self.repo.list_slots(pack_id)
-        if selected_slot_ids:
-            slots = [slot for slot in slots if int(slot["id"]) in selected_slot_ids]
-            if len(slots) != len(selected_slot_ids):
-                raise ValueError("slot_not_found")
-        if not slots:
-            raise ValueError("vn_asset_generation_no_slots")
+        with self.repo.db.transaction():
+            pack = self._require_pack(pack_id)
+            slots = self.repo.list_slots(pack_id)
+            if selected_slot_ids:
+                slots = [slot for slot in slots if int(slot["id"]) in selected_slot_ids]
+                if len(slots) != len(selected_slot_ids):
+                    raise ValueError("slot_not_found")
+            if not slots:
+                raise ValueError("vn_asset_generation_no_slots")
 
-        variant_count = request.variant_count
-        total_variants = sum(int(variant_count or slot["variant_count"]) for slot in slots)
-        self._enforce_item_limit(len(self.repo.list_items(pack_id)) + total_variants)
+            variant_count = request.variant_count
+            total_variants = sum(int(variant_count or slot["variant_count"]) for slot in slots)
+            self._enforce_item_limit(len(self.repo.list_items(pack_id)) + total_variants)
 
-        options = dict(request.options)
-        if selected_slot_ids:
-            options["slot_ids"] = sorted(selected_slot_ids)
-        if variant_count is not None:
-            options["variant_count"] = int(variant_count)
+            options = dict(request.options)
+            if selected_slot_ids:
+                options["slot_ids"] = sorted(selected_slot_ids)
+            if variant_count is not None:
+                options["variant_count"] = int(variant_count)
 
-        batch = self.repo.create_batch(
-            pack_id=pack_id,
-            requested_by_user_id=requested_by_user_id,
-            status="queued",
-            total_slots=len(slots),
-            total_variants=total_variants,
-            planned_count=total_variants,
-            options=options,
-        )
+            character = self.repo.get_character(int(pack["primary_character_id"]))
+            if character is None:
+                raise ValueError("primary_character_not_found")
+            recipes = []
+            for slot in slots:
+                slot_recipe = build_slot_recipe(self.repo, pack, slot, character)
+                for variant_index in range(int(variant_count or slot["variant_count"])):
+                    recipes.append({
+                        "slot_id": int(slot["id"]),
+                        "variant_index": variant_index,
+                        "recipe": {**slot_recipe, "seed": variant_seed(slot, variant_index)},
+                    })
+
+            batch = self.repo.create_batch(
+                pack_id=pack_id,
+                requested_by_user_id=requested_by_user_id,
+                status="queued",
+                total_slots=len(slots),
+                total_variants=total_variants,
+                planned_count=total_variants,
+                options=options,
+                recipes=recipes,
+            )
         try:
             job = create_enqueue_batch_job(
                 jobs_manager or self._require_jobs_manager(),

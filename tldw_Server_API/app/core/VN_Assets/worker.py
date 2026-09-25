@@ -23,9 +23,9 @@ from tldw_Server_API.app.core.VN_Assets.constants import (
     SLOT_STATUS_REVIEWING,
 )
 from tldw_Server_API.app.core.VN_Assets.jobs import (
-    VN_ASSETS_DOMAIN,
     VN_ASSET_ENQUEUE_BATCH_JOB_TYPE,
     VN_ASSET_GENERATE_VARIANT_JOB_TYPE,
+    VN_ASSETS_DOMAIN,
     VN_PACK_EXPORT_JOB_TYPE,
     VN_PACK_IMPORT_COMMIT_JOB_TYPE,
     VN_PACK_IMPORT_PREVIEW_JOB_TYPE,
@@ -77,29 +77,50 @@ class VNAssetGenerationWorker:
             raise ValueError("vn_asset_batch_not_found")
         if int(batch["requested_by_user_id"]) != user_id:
             raise ValueError("vn_asset_job_owner_mismatch")
+        recipe_version = int(batch.get("recipe_version") or 0)
+        if recipe_version not in (0, 1):
+            raise ValueError("vn_asset_recipe_version_unsupported")
 
-        slots = self.repo.list_slots(pack_id)
-        options = _loads_json(batch.get("options_json"), {})
-        slot_ids = {int(slot_id) for slot_id in options.get("slot_ids", [])}
-        if slot_ids:
-            slots = [slot for slot in slots if int(slot["id"]) in slot_ids]
-        variant_count_override = options.get("variant_count")
-        planned_count = sum(int(variant_count_override or slot["variant_count"]) for slot in slots)
+        if recipe_version == 1:
+            recipes = self.repo.list_batch_recipes(batch_id)
+            planned_count = int(batch["planned_count"])
+            if len(recipes) != planned_count:
+                self.repo.update_batch(batch_id, {
+                    "status": "failed",
+                    "enqueue_error": "vn_asset_recipe_count_mismatch",
+                })
+                raise ValueError("vn_asset_recipe_count_mismatch")
+            variants = [
+                (int(row["slot_id"]), int(row["variant_index"]))
+                for row in recipes
+            ]
+        else:
+            slots = self.repo.list_slots(pack_id)
+            options = _loads_json(batch.get("options_json"), {})
+            slot_ids = {int(slot_id) for slot_id in options.get("slot_ids", [])}
+            if slot_ids:
+                slots = [slot for slot in slots if int(slot["id"]) in slot_ids]
+            variant_count_override = options.get("variant_count")
+            variants = [
+                (int(slot["id"]), variant_index)
+                for slot in slots
+                for variant_index in range(int(variant_count_override or slot["variant_count"]))
+            ]
+            planned_count = len(variants)
+        total_slots = len({slot_id for slot_id, _ in variants})
 
         enqueued_count = 0
         try:
-            for slot in slots:
-                slot_variant_count = int(variant_count_override or slot["variant_count"])
-                for variant_index in range(slot_variant_count):
-                    create_generate_variant_job(
-                        self.jobs_manager,
-                        pack_id=pack_id,
-                        slot_id=int(slot["id"]),
-                        variant_index=variant_index,
-                        batch_id=batch_id,
-                        user_id=user_id,
-                    )
-                    enqueued_count += 1
+            for slot_id, variant_index in variants:
+                create_generate_variant_job(
+                    self.jobs_manager,
+                    pack_id=pack_id,
+                    slot_id=slot_id,
+                    variant_index=variant_index,
+                    batch_id=batch_id,
+                    user_id=user_id,
+                )
+                enqueued_count += 1
             self.repo.update_batch(
                 batch_id,
                 {
@@ -107,7 +128,7 @@ class VNAssetGenerationWorker:
                     "planned_count": planned_count,
                     "enqueued_count": enqueued_count,
                     "enqueue_error": None,
-                    "total_slots": len(slots),
+                    "total_slots": total_slots,
                     "total_variants": planned_count,
                 },
             )
@@ -127,7 +148,7 @@ class VNAssetGenerationWorker:
             "VN asset batch fanout completed: batch_id={} pack_id={} slots={} variants={}",
             batch_id,
             pack_id,
-            len(slots),
+            total_slots,
             enqueued_count,
         )
         return {
@@ -155,6 +176,9 @@ class VNAssetGenerationWorker:
             raise ValueError("vn_asset_batch_not_found")
         if int(batch["requested_by_user_id"]) != user_id:
             raise ValueError("vn_asset_job_owner_mismatch")
+        recipe_version = int(batch.get("recipe_version") or 0)
+        if recipe_version not in (0, 1):
+            raise ValueError("vn_asset_recipe_version_unsupported")
         if _is_terminal_batch_status(batch["status"]):
             self._cancel_terminal_batch_jobs(
                 user_id=user_id,
@@ -170,9 +194,17 @@ class VNAssetGenerationWorker:
         pack = self.repo.get_pack(pack_id)
         if pack is None or int(pack["owner_user_id"]) != user_id:
             raise ValueError("pack_not_found")
-        character = self.repo.get_character(int(pack["primary_character_id"]))
-        if character is None:
-            raise ValueError("primary_character_not_found")
+        recipe: Mapping[str, Any] | None = None
+        character: Mapping[str, Any] | None = None
+        if recipe_version == 1:
+            recipe = self.repo.get_batch_recipe(batch_id, slot_id, variant_index)
+            if recipe is None:
+                self.repo.update_batch(batch_id, {"status": "failed"})
+                raise ValueError("vn_asset_recipe_not_found")
+        else:
+            character = self.repo.get_character(int(pack["primary_character_id"]))
+            if character is None:
+                raise ValueError("primary_character_not_found")
 
         try:
             return await self._generate_variant(
@@ -180,6 +212,7 @@ class VNAssetGenerationWorker:
                 slot=slot,
                 batch=batch,
                 character=character,
+                recipe=recipe,
                 variant_index=variant_index,
                 user_id=user_id,
                 job=job,
@@ -553,7 +586,8 @@ class VNAssetGenerationWorker:
         pack: Mapping[str, Any],
         slot: Mapping[str, Any],
         batch: Mapping[str, Any],
-        character: Mapping[str, Any],
+        character: Mapping[str, Any] | None,
+        recipe: Mapping[str, Any] | None,
         variant_index: int,
         user_id: int,
         job: Mapping[str, Any] | None,
@@ -561,37 +595,32 @@ class VNAssetGenerationWorker:
         pack_id = int(pack["id"])
         slot_id = int(slot["id"])
         batch_id = int(batch["id"])
-        labels = _loads_json(slot.get("labels_json"), {})
-        negative_prompt = _join_prompt_parts(
-            pack.get("negative_prompt"),
-            slot.get("negative_prompt_template"),
-        )
-        preview = build_prompt_preview(
-            character=character,
-            pack_style=pack.get("style_prompt"),
-            pack_scenario=pack.get("scenario_notes"),
-            negative_prompt=negative_prompt,
-            style_lock=_loads_json(pack.get("style_lock_json"), {}),
-            slot_template=slot.get("prompt_template"),
-            labels=labels,
-            world_book_entries=_world_book_entries_for_pack(self.repo, pack),
-        )
-        backend = self._resolve_backend(pack, slot)
-        model = _first_text(slot.get("model_override"), pack.get("default_model"))
-        width, height, image_format, extra_params = _generation_shape(pack, slot)
+        if recipe is None:
+            if character is None:
+                raise ValueError("primary_character_not_found")
+            recipe = {
+                **build_slot_recipe(self.repo, pack, slot, character),
+                "seed": variant_seed(slot, variant_index),
+            }
+        labels = dict(recipe["labels"])
+        backend = self._resolve_backend(recipe.get("requested_backend"))
+        model = _first_text(recipe.get("model"))
+        width = _positive_int(recipe.get("width"))
+        height = _positive_int(recipe.get("height"))
+        image_format = str(recipe["format"])
         request = ImageGenRequest(
             backend=backend,
-            prompt=preview.prompt,
-            negative_prompt=preview.negative_prompt or None,
+            prompt=str(recipe["prompt"]),
+            negative_prompt=_first_text(recipe.get("negative_prompt")),
             width=width,
             height=height,
-            steps=_positive_int(extra_params.pop("steps", None)),
-            cfg_scale=_float_or_none(extra_params.pop("cfg_scale", None)),
-            seed=_variant_seed(slot, variant_index),
-            sampler=_first_text(extra_params.pop("sampler", None)),
+            steps=_positive_int(recipe.get("steps")),
+            cfg_scale=_float_or_none(recipe.get("cfg_scale")),
+            seed=_positive_int(recipe.get("seed")),
+            sampler=_first_text(recipe.get("sampler")),
             model=model,
             format=image_format,
-            extra_params=extra_params,
+            extra_params=dict(recipe.get("extra_params") or {}),
             request_id=f"vn_asset:{pack_id}:{slot_id}:{batch_id}:{variant_index}",
         )
 
@@ -605,19 +634,19 @@ class VNAssetGenerationWorker:
             image = await asyncio.to_thread(generation_result.generate, request)
 
         prompt_snapshot = {
-            "prompt": preview.prompt,
-            "negative_prompt": preview.negative_prompt,
-            "token_estimates": preview.token_estimates,
-            "omitted_source_counts": preview.omitted_source_counts,
-            "warnings": list(preview.warnings),
+            "prompt": recipe["prompt"],
+            "negative_prompt": recipe["negative_prompt"],
+            "token_estimates": recipe["token_estimates"],
+            "omitted_source_counts": recipe["omitted_source_counts"],
+            "warnings": recipe["warnings"],
         }
         context_snapshot = {
             "pack_id": pack_id,
             "slot_id": slot_id,
-            "slot_key": slot.get("slot_key"),
+            "slot_key": recipe["slot_key"],
             "batch_id": batch_id,
             "variant_index": variant_index,
-            "primary_character_id": pack.get("primary_character_id"),
+            "primary_character_id": recipe["primary_character_id"],
         }
         backend_metadata = {
             "backend": backend,
@@ -650,7 +679,7 @@ class VNAssetGenerationWorker:
                     image_format=_image_format_from_content_type(image.content_type, image_format),
                     pack_id=pack_id,
                     item_id=item_id,
-                    asset_type=str(slot["asset_type"]),
+                    asset_type=str(recipe["asset_type"]),
                     labels=labels,
                 )
             )
@@ -685,8 +714,8 @@ class VNAssetGenerationWorker:
             "generated_file_id": item["generated_file_id"],
         }
 
-    def _resolve_backend(self, pack: Mapping[str, Any], slot: Mapping[str, Any]) -> str:
-        requested_backend = _first_text(slot.get("backend_override"), pack.get("default_backend"))
+    def _resolve_backend(self, requested_backend: Any) -> str:
+        requested_backend = _first_text(requested_backend)
         resolver = getattr(self.image_registry, "resolve_backend", None)
         backend = resolver(requested_backend) if callable(resolver) else requested_backend
         if not backend:
@@ -855,7 +884,9 @@ def _join_prompt_parts(*values: Any) -> str | None:
     return joined or None
 
 
-def _generation_shape(pack: Mapping[str, Any], slot: Mapping[str, Any]) -> tuple[int | None, int | None, str, dict[str, Any]]:
+def _generation_shape(
+    pack: Mapping[str, Any], slot: Mapping[str, Any]
+) -> tuple[int | None, int | None, str, dict[str, Any]]:
     dimensions = _loads_json(pack.get("default_dimensions_json"), {})
     width = _positive_int(slot.get("width")) or _positive_int(dimensions.get("width"))
     height = _positive_int(slot.get("height")) or _positive_int(dimensions.get("height"))
@@ -869,7 +900,50 @@ def _generation_shape(pack: Mapping[str, Any], slot: Mapping[str, Any]) -> tuple
     return width, height, image_format.lower(), dict(extra_params)
 
 
-def _variant_seed(slot: Mapping[str, Any], variant_index: int) -> int | None:
+def build_slot_recipe(
+    repo: VNAssetPacksRepository,
+    pack: Mapping[str, Any],
+    slot: Mapping[str, Any],
+    character: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Freeze mutable story and image parameters before a batch is queued."""
+    labels = _loads_json(slot.get("labels_json"), {})
+    preview = build_prompt_preview(
+        character=character,
+        pack_style=pack.get("style_prompt"),
+        pack_scenario=pack.get("scenario_notes"),
+        negative_prompt=_join_prompt_parts(
+            pack.get("negative_prompt"), slot.get("negative_prompt_template")
+        ),
+        style_lock=_loads_json(pack.get("style_lock_json"), {}),
+        slot_template=slot.get("prompt_template"),
+        labels=labels,
+        world_book_entries=_world_book_entries_for_pack(repo, pack),
+    )
+    width, height, image_format, extra_params = _generation_shape(pack, slot)
+    return {
+        "prompt": preview.prompt,
+        "negative_prompt": preview.negative_prompt,
+        "token_estimates": preview.token_estimates,
+        "omitted_source_counts": preview.omitted_source_counts,
+        "warnings": list(preview.warnings),
+        "requested_backend": _first_text(slot.get("backend_override"), pack.get("default_backend")),
+        "model": _first_text(slot.get("model_override"), pack.get("default_model")),
+        "width": width,
+        "height": height,
+        "format": image_format,
+        "steps": _positive_int(extra_params.pop("steps", None)),
+        "cfg_scale": _float_or_none(extra_params.pop("cfg_scale", None)),
+        "sampler": _first_text(extra_params.pop("sampler", None)),
+        "extra_params": extra_params,
+        "labels": labels,
+        "asset_type": str(slot["asset_type"]),
+        "slot_key": slot.get("slot_key"),
+        "primary_character_id": pack.get("primary_character_id"),
+    }
+
+
+def variant_seed(slot: Mapping[str, Any], variant_index: int) -> int | None:
     seed_policy = _loads_json(slot.get("seed_policy_json"), {})
     seed = _positive_int(seed_policy.get("seed"))
     if seed is not None:

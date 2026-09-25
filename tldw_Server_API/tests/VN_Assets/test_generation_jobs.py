@@ -12,6 +12,7 @@ from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_
 from tldw_Server_API.app.api.v1.endpoints import vn_assets as vn_assets_endpoint
 from tldw_Server_API.app.api.v1.endpoints.vn_assets import router as vn_assets_router
 from tldw_Server_API.app.api.v1.schemas.vn_asset_schemas import (
+    VNAssetGenerationRequest,
     VNAssetPackCreate,
     VNAssetReviewRequest,
     VNAssetSlotCreate,
@@ -339,6 +340,23 @@ def test_fanout_uses_deterministic_child_idempotency(
     assert len(fake_jobs.created) == sum(slot.variant_count for slot in batch_with_slots.slots)
 
 
+def test_fanout_uses_original_variants_after_slot_edit(
+    fake_jobs: FakeJobs,
+    service: VNAssetPackService,
+    batch_with_slots: SimpleNamespace,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    first_slot = batch_with_slots.slots[0]
+    service.repo.update_slot(first_slot.id, {"variant_count": 3})
+    worker = VNAssetGenerationWorker(repo=service.repo, jobs_manager=fake_jobs)
+
+    worker.handle_enqueue_batch(batch_with_slots.job_payload)
+
+    assert len(fake_jobs.created) == sum(slot.variant_count for slot in batch_with_slots.slots)
+    assert all(job["payload"]["variant_index"] == 0 for job in fake_jobs.created)
+
+
 def test_fanout_rejects_payload_owner_mismatch(
     fake_jobs: FakeJobs,
     service: VNAssetPackService,
@@ -413,6 +431,141 @@ async def test_generate_variant_creates_draft_item_with_generated_file(
     assert service.repo.get_batch(batch["id"])["completed_count"] == 1
     assert service.repo.get_batch(batch["id"])["status"] == "completed"
     assert service.repo.get_slot(slot.id)["status"] == "reviewing"
+
+
+@pytest.mark.asyncio
+async def test_generation_uses_original_recipe_after_source_edits(
+    fake_jobs: FakeJobs,
+    service: VNAssetPackService,
+    pack_with_slots: SimpleNamespace,
+    chacha_db: CharactersRAGDB,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    slot = pack_with_slots.slots[0]
+    service.repo.update_pack(pack_with_slots.id, {
+        "style_prompt": "Original watercolor style",
+        "default_backend": "stable_diffusion_cpp",
+    })
+    service.repo.update_slot(slot.id, {
+        "prompt_template": "Original lantern scene",
+        "labels": {"expression": "thoughtful"},
+    })
+    batch = service.start_generation(
+        pack_with_slots.id,
+        user_id=1,
+        request=VNAssetGenerationRequest(slot_ids=[slot.id]),
+    )
+
+    service.repo.update_pack(pack_with_slots.id, {
+        "style_prompt": "Changed oil style",
+        "default_backend": "openrouter",
+    })
+    service.repo.update_slot(slot.id, {
+        "prompt_template": "Changed ocean scene",
+        "labels": {"expression": "angry"},
+    })
+    chacha_db.execute_query(
+        "UPDATE character_cards SET description = ? WHERE id = ?",
+        ("Changed character description", service.repo.get_pack(pack_with_slots.id)["primary_character_id"]),
+    )
+    adapter = FakeImageAdapter()
+    saver = RecordingVNSaver()
+    worker = VNAssetGenerationWorker(
+        repo=service.repo,
+        jobs_manager=fake_jobs,
+        image_registry=FakeImageRegistry(adapter),
+        backend_gate=FakeGenerationGate(),
+        save_vn_asset_image=saver,
+    )
+    await worker.handle_generate_variant({
+        "pack_id": pack_with_slots.id,
+        "slot_id": slot.id,
+        "variant_index": 0,
+        "batch_id": batch.batch_id,
+        "user_id": 1,
+    })
+
+    assert "Original lantern scene" in adapter.requests[0].prompt
+    assert "Original watercolor style" in adapter.requests[0].prompt
+    assert "Changed" not in adapter.requests[0].prompt
+    assert adapter.requests[0].backend == "stable_diffusion_cpp"
+    assert saver.calls[0]["labels"] == {"expression": "thoughtful"}
+
+
+@pytest.mark.asyncio
+async def test_versioned_batch_with_missing_recipe_fails_closed(
+    fake_jobs: FakeJobs,
+    service: VNAssetPackService,
+    pack_with_slots: SimpleNamespace,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    slot = pack_with_slots.slots[0]
+    batch = service.start_generation(
+        pack_with_slots.id,
+        user_id=1,
+        request=VNAssetGenerationRequest(slot_ids=[slot.id]),
+    )
+    service.repo.db.execute_query(
+        "DELETE FROM vn_asset_generation_recipes WHERE batch_id = ?",
+        (batch.batch_id,),
+    )
+    adapter = FakeImageAdapter()
+    worker = VNAssetGenerationWorker(
+        repo=service.repo,
+        jobs_manager=fake_jobs,
+        image_registry=FakeImageRegistry(adapter),
+        backend_gate=FakeGenerationGate(),
+        save_vn_asset_image=RecordingVNSaver(),
+    )
+
+    with pytest.raises(ValueError, match="vn_asset_recipe_not_found"):
+        await worker.handle_generate_variant({
+            "pack_id": pack_with_slots.id,
+            "slot_id": slot.id,
+            "variant_index": 0,
+            "batch_id": batch.batch_id,
+            "user_id": 1,
+        })
+    assert adapter.requests == []
+    assert service.repo.get_batch(batch.batch_id)["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_unknown_recipe_version_never_uses_mutable_sources(
+    fake_jobs: FakeJobs,
+    service: VNAssetPackService,
+    pack_with_slots: SimpleNamespace,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    slot = pack_with_slots.slots[0]
+    batch = service.start_generation(
+        pack_with_slots.id,
+        user_id=1,
+        request=VNAssetGenerationRequest(slot_ids=[slot.id]),
+    )
+    service.repo.db.execute_query(
+        "UPDATE vn_asset_batches SET recipe_version = 99 WHERE id = ?",
+        (batch.batch_id,),
+    )
+    adapter = FakeImageAdapter()
+    worker = VNAssetGenerationWorker(
+        repo=service.repo,
+        jobs_manager=fake_jobs,
+        image_registry=FakeImageRegistry(adapter),
+    )
+
+    with pytest.raises(ValueError, match="vn_asset_recipe_version_unsupported"):
+        await worker.handle_generate_variant({
+            "pack_id": pack_with_slots.id,
+            "slot_id": slot.id,
+            "variant_index": 0,
+            "batch_id": batch.batch_id,
+            "user_id": 1,
+        })
+    assert adapter.requests == []
 
 
 @pytest.mark.asyncio
