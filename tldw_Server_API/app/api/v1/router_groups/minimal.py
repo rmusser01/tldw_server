@@ -59,6 +59,7 @@ MINIMAL_REQUIRED_ROUTER_NAMES = (
     "admin",
     "billing",
     "workspace_eligibility",
+    "calendar",
 )
 MINIMAL_REQUIRED_ROUTER_OVERRIDES = {
     name: RouterSpecOverride(skip_exceptions=REQUIRED_ROUTER_SKIP_EXCEPTIONS) for name in MINIMAL_REQUIRED_ROUTER_NAMES

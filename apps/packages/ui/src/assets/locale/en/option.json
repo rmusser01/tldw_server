@@ -247,6 +247,9 @@
     "browsePages": "Browse pages",
     "closePageLauncher": "Close page launcher"
   },
+  "calendar": {
+    "nav": "Calendar"
+  },
   "skills": {
     "activeModeFilter": "Mode: {{value}}",
     "activeModelFilter": "Model: {{value}}",
