@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
@@ -102,6 +103,31 @@ def test_creation_records_omission_null_and_explicit_choices(
         "workspace_version": startup_api.db.get_workspace("ws")["version"] if source == "workspace_default" else None,
     }
     assert response.json()["assistant_startup"] == origin
+
+
+def test_workspace_preflight_does_not_block_the_event_loop(
+    startup_api: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The availability read runs off-loop before asynchronous quota admission."""
+    lookup_threads: list[int] = []
+    limiter_threads: list[int] = []
+    lookup = startup_api.db.get_workspace
+
+    def observed_lookup(*args: Any, **kwargs: Any) -> dict[str, Any] | None:
+        lookup_threads.append(threading.get_ident())
+        return lookup(*args, **kwargs)
+
+    async def observed_limit(*args: Any, **kwargs: Any) -> None:
+        limiter_threads.append(threading.get_ident())
+
+    monkeypatch.setattr(startup_api.db, "get_workspace", observed_lookup)
+    startup_api.limiter.check_rate_limit.side_effect = observed_limit
+    response = startup_api.client.post(
+        "/api/v1/chats/", json={"scope_type": "workspace", "workspace_id": "ws", "assistant_kind": None},
+    )
+    assert response.status_code == 201, response.text
+    assert lookup_threads and limiter_threads
+    assert lookup_threads[0] != limiter_threads[0]
 
 
 @pytest.mark.parametrize("source", ["workspace_default", "system_fallback"])

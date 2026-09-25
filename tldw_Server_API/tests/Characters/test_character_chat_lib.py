@@ -174,6 +174,7 @@ def db():
     db_instance.close_connection()
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("surface", ["metadata", "list", "search"])
 @pytest.mark.parametrize("hidden", [False, True])
 def test_public_library_projects_local_startup_without_exposing_raw_column(
@@ -209,6 +210,7 @@ def test_public_library_projects_local_startup_without_exposing_raw_column(
     assert db.get_conversation_by_id(cid) == stored
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("surface", ["metadata", "list", "search"])
 def test_library_startup_projection_copies_the_returned_database_row(
     db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch, surface: str,
@@ -236,6 +238,7 @@ def test_library_startup_projection_copies_the_returned_database_row(
     }
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("surface", ["metadata", "list", "search"])
 def test_library_startup_visibility_failure_retains_wrapper_error_boundary(
     db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch, surface: str,
@@ -263,6 +266,7 @@ def test_library_startup_visibility_failure_retains_wrapper_error_boundary(
     assert db.get_conversation_by_id(cid)["assistant_startup_json"] == raw
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("surface", ["list", "search"])
 def test_library_startup_cache_is_per_call_and_preserves_client_filter(
     db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch, surface: str,
@@ -301,6 +305,7 @@ def test_library_startup_cache_is_per_call_and_preserves_client_filter(
     assert reads == ["library-cache-origin"]
 
 
+@pytest.mark.integration
 def test_legacy_history_export_and_import_do_not_transport_local_startup(db: CharactersRAGDB) -> None:
     """Legacy history bytes omit local origin and the real factory distrusts forged input."""
     from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup, decode_assistant_startup
