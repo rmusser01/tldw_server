@@ -39,3 +39,6 @@ and the stacked diff check passes. Required CI is pending on the new head.
 Server `dev` then advanced to `a2f5e1b816` and H2 was restacked onto H1
 `fa3a36997c`. All seven prior H2 commits are unchanged by range-diff;
 the stacked diff check passes. Required CI must rerun on the new head.
+H1 later corrected an `unavailable` history-owner TypeScript narrowing error
+and moved to `63e95039db`. H2 restacked cleanly; all eight existing H2
+commits are unchanged by range-diff, and the stacked diff check passes.
