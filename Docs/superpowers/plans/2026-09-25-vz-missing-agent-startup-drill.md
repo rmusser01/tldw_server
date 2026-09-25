@@ -18,17 +18,21 @@ Task: TASK-13243.9. This extends the existing opt-in real Apple Silicon failure 
 **Goal**: Run the complete opt-in real VM workflow with a signed isolated helper.
 **Success Criteria**: The positive case has fresh guest-written startup proof, bounded `guest_transport_timeout`, no guest exec, and no reusable VM/control state. The negative case boots the preserved original agent and executes. Recovery runs two commands in one healthy VM. All VM/helper/disk cleanup and source hashes pass.
 **Tests**: Targeted portable pytest, formatter/lint, Bandit, and real host workflow with retained receipt and logs.
-**Status**: In Progress
+**Status**: Complete
 
-Preflight on 2026-09-25 found that the previously accepted canonical bundle's
-`rootfs.img` is absent. Portable tests passed, but live acceptance is pending a
-new or restored bootable source image and an isolated real helper run.
+The previously accepted canonical bundle lacked `rootfs.img`, so a new Debian
+bookworm arm64 bundle was built in the local Debian VM and copied to a separate
+private host directory. The 2026-09-25 ten-case real Apple Silicon workflow
+passed with the signed isolated helper. Its receipt verifies the missing-agent
+startup proof, bounded timeout, negative-control execution, healthy reuse,
+cleanup, and unchanged source hashes. See the dated accepted evidence packet in
+`Docs/Sandbox/vz-linux-prepared-host-evidence.md`.
 
 ## Stage 4: Review and record
 **Goal**: Update operator instructions and evidence, review the diff and test output, and commit the substantive slice.
 **Success Criteria**: Evidence names the exact input hashes, helper, faults, negative control, cleanup, and any remaining coverage limits. The Backlog task links the artifacts and verification.
 **Tests**: Fresh diff check and receipt integrity checks.
-**Status**: Not Started
+**Status**: Complete
 
 ## Design checks
 
