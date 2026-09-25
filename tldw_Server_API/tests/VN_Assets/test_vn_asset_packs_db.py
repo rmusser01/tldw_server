@@ -67,6 +67,75 @@ def test_existing_recipe_table_gains_outcome_columns(chacha_db: CharactersRAGDB)
     assert {"outcome_status", "item_id"}.issubset(columns)
 
 
+def test_existing_idempotency_table_gains_batch_link(chacha_db: CharactersRAGDB) -> None:
+    chacha_db.execute_query(
+        "CREATE TABLE vn_asset_idempotency_records ("
+        "id INTEGER PRIMARY KEY, owner_user_id INTEGER NOT NULL, scope TEXT NOT NULL, "
+        "resource_id TEXT NOT NULL, idempotency_key TEXT NOT NULL, "
+        "payload_hash TEXT NOT NULL, status TEXT NOT NULL, response_json TEXT NOT NULL)"
+    )
+
+    ensure_vn_asset_tables(chacha_db)
+
+    columns = {
+        row[1]
+        for row in chacha_db.execute_query(
+            "PRAGMA table_info(vn_asset_idempotency_records)"
+        ).fetchall()
+    }
+    assert "batch_id" in columns
+
+
+def test_batch_and_recipes_roll_back_without_matching_receipt(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    character_id = chacha_db.add_character_card({"name": "VN Primary"})
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    pack = repo.create_pack(owner_user_id=1, primary_character_id=character_id, title="Pack")
+    slot = repo.create_slot(pack_id=pack["id"], asset_type="sprite", slot_key="primary")
+
+    with pytest.raises(ValueError, match="vn_asset_generation_receipt_not_claimed"):
+        repo.create_batch(
+            pack_id=pack["id"], requested_by_user_id=1, total_variants=1,
+            recipes=[{"slot_id": slot["id"], "variant_index": 0, "recipe": {"prompt": "frozen"}}],
+            idempotency_receipt={
+                "scope": "vn_asset_generate", "resource_id": f"pack:{pack['id']}",
+                "idempotency_key": "missing", "payload_hash": "missing",
+            },
+        )
+
+    assert repo.list_batches(pack["id"]) == []
+
+
+def test_stale_unlinked_generation_claim_can_be_reclaimed(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    receipt = {
+        "owner_user_id": 1,
+        "scope": "vn_asset_generate",
+        "resource_id": "pack:7",
+        "idempotency_key": "stale-generation",
+        "payload_hash": "same-payload",
+    }
+    first, first_claimed = repo.claim_idempotency_record(**receipt)
+    _, immediate_claimed = repo.claim_idempotency_record(**receipt)
+    with chacha_db.transaction() as conn:
+        conn.execute(
+            "UPDATE vn_asset_idempotency_records SET updated_at = '2000-01-01 00:00:00' WHERE id = ?",
+            (first["id"],),
+        )
+
+    reclaimed, stale_claimed = repo.claim_idempotency_record(**receipt)
+
+    assert first_claimed is True
+    assert immediate_claimed is False
+    assert stale_claimed is True
+    assert reclaimed["id"] == first["id"]
+    with pytest.raises(ValueError, match="idempotency_key_conflict"):
+        repo.claim_idempotency_record(**{**receipt, "payload_hash": "different"})
+
+
 def test_duplicate_recipe_rolls_back_batch(chacha_db: CharactersRAGDB) -> None:
     character_id = chacha_db.add_character_card({"name": "VN Primary"})
     repo = VNAssetPacksRepository.initialized(chacha_db)

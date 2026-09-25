@@ -189,6 +189,7 @@ class VNAssetGenerationWorker:
                 variant_index=variant_index,
                 user_id=user_id,
                 pack_id=pack_id,
+                allow_publication=not _is_terminal_batch_status(batch["status"]),
             )
             if replay is not None:
                 return replay
@@ -247,12 +248,17 @@ class VNAssetGenerationWorker:
         variant_index: int,
         user_id: int,
         pack_id: int,
+        allow_publication: bool = True,
     ) -> dict[str, Any] | None:
         outcome = self.repo.get_variant_outcome(batch_id, slot_id, variant_index)
         if outcome is None:
             self.repo.update_batch(batch_id, {"status": "failed"})
             raise ValueError("vn_asset_recipe_not_found")
         if outcome["outcome_status"] == "failed":
+            if allow_publication:
+                raise ValueError("vn_asset_variant_failed")
+            return None
+        if outcome["outcome_status"] != "completed" and not allow_publication:
             return None
         item_id = _positive_int(outcome.get("item_id"))
         if item_id is None:
@@ -260,6 +266,10 @@ class VNAssetGenerationWorker:
         item = self.repo.get_item(item_id)
         if item is None or int(item["pack_id"]) != pack_id or int(item["slot_id"]) != slot_id:
             raise ValueError("vn_asset_recipe_item_missing")
+        if outcome["outcome_status"] == "completed":
+            if item.get("generated_file_id") is None:
+                raise ValueError("vn_asset_item_storage_missing")
+            return _generated_variant_result(item, batch_id=batch_id)
         if item.get("generated_file_id") is None:
             files_repo = self.generated_files_repo
             if files_repo is None:

@@ -12,6 +12,7 @@ from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_
 from tldw_Server_API.app.api.v1.endpoints import vn_assets as vn_assets_endpoint
 from tldw_Server_API.app.api.v1.endpoints.vn_assets import router as vn_assets_router
 from tldw_Server_API.app.api.v1.schemas.vn_asset_schemas import (
+    VNAssetBulkReviewRequest,
     VNAssetGenerationRequest,
     VNAssetPackCreate,
     VNAssetReviewRequest,
@@ -306,6 +307,57 @@ def test_start_generation_enforces_item_limit_against_existing_items(
 
     with pytest.raises(ValueError, match=ERROR_ITEM_LIMIT_EXCEEDED):
         limited_service.start_generation(pack.id, user_id=1)
+
+
+def test_unpublished_reserved_item_cannot_be_read_or_reviewed(
+    service: VNAssetPackService,
+    pack_with_slots: SimpleNamespace,
+) -> None:
+    slot = pack_with_slots.slots[0]
+    batch = service.start_generation(
+        pack_with_slots.id, user_id=1,
+        request=VNAssetGenerationRequest(slot_ids=[slot.id]),
+    )
+    item = service.repo.reserve_variant_item(
+        batch_id=batch.batch_id, slot_id=slot.id, variant_index=0,
+        item_fields={"pack_id": pack_with_slots.id, "generated_file_id": 77},
+    )
+
+    with pytest.raises(ValueError, match="item_not_found"):
+        service.get_item_for_pack(pack_with_slots.id, item["id"])
+    with pytest.raises(ValueError, match="item_not_found"):
+        service.review_item_for_pack(
+            pack_with_slots.id, item["id"], VNAssetReviewRequest(review_status="approved")
+        )
+    with pytest.raises(ValueError, match="item_not_found"):
+        service.bulk_review_items_for_pack(
+            pack_with_slots.id,
+            VNAssetBulkReviewRequest(item_ids=[item["id"]], review_status="approved"),
+        )
+
+
+def test_active_batch_prevents_deleting_frozen_slot(
+    service: VNAssetPackService,
+    character_id: int,
+) -> None:
+    pack = service.create_pack(
+        VNAssetPackCreate(title="Deletion Pack", primary_character_id=character_id)
+    )
+    slot = service.create_slot(
+        pack.id, VNAssetSlotCreate(asset_type="sprite", slot_key="primary", variant_count=1)
+    )
+    batch = service.start_generation(
+        pack.id, user_id=1, request=VNAssetGenerationRequest(slot_ids=[slot.id])
+    )
+
+    with pytest.raises(ValueError, match="slot_has_active_generation"):
+        service.delete_slot(pack.id, slot.id)
+
+    assert service.repo.get_slot(slot.id) is not None
+    assert service.repo.get_batch_recipe(batch.batch_id, slot.id, 0) is not None
+    service.cancel_generation(pack.id)
+    service.delete_slot(pack.id, slot.id)
+    assert service.repo.get_slot(slot.id) is None
 
 
 def test_fanout_uses_deterministic_child_idempotency(
@@ -622,12 +674,113 @@ async def test_completed_variant_redelivery_reuses_item_without_generating_again
     }
 
     first = await worker.handle_generate_variant(payload)
+    service.repo.update_item_review(first["item_id"], review_status="approved", preferred=True)
     second = await worker.handle_generate_variant(payload)
 
     assert second == first
     assert len(adapter.requests) == 1
     assert len(service.repo.list_items(pack_with_slots.id)) == 1
     assert service.repo.get_batch(batch.batch_id)["completed_count"] == 1
+    assert service.repo.get_item(first["item_id"])["review_status"] == "approved"
+    assert service.repo.get_item(first["item_id"])["preferred"] == 1
+
+
+@pytest.mark.asyncio
+async def test_cancelled_batch_does_not_publish_reserved_variant(
+    fake_jobs: FakeJobs,
+    service: VNAssetPackService,
+    pack_with_slots: SimpleNamespace,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    slot = pack_with_slots.slots[0]
+    batch = service.start_generation(
+        pack_with_slots.id, user_id=1,
+        request=VNAssetGenerationRequest(slot_ids=[slot.id]),
+    )
+    item = service.repo.reserve_variant_item(
+        batch_id=batch.batch_id, slot_id=slot.id, variant_index=0,
+        item_fields={"pack_id": pack_with_slots.id, "generated_file_id": 77},
+    )
+    service.repo.update_batch(batch.batch_id, {"status": "cancelled"})
+    worker = VNAssetGenerationWorker(repo=service.repo, jobs_manager=fake_jobs)
+
+    with pytest.raises(ValueError, match="vn_asset_batch_terminal"):
+        await worker.handle_generate_variant({
+            "pack_id": pack_with_slots.id, "slot_id": slot.id, "variant_index": 0,
+            "batch_id": batch.batch_id, "user_id": 1,
+        })
+
+    assert service.repo.get_item(item["id"])["review_status"] == "hidden"
+    assert service.repo.get_batch(batch.batch_id)["completed_count"] == 0
+
+
+def test_cancellation_before_publication_rejects_reserved_variant(
+    fake_jobs: FakeJobs,
+    service: VNAssetPackService,
+    pack_with_slots: SimpleNamespace,
+) -> None:
+    slot = pack_with_slots.slots[0]
+    batch = service.start_generation(
+        pack_with_slots.id, user_id=1,
+        request=VNAssetGenerationRequest(slot_ids=[slot.id]),
+    )
+    item = service.repo.reserve_variant_item(
+        batch_id=batch.batch_id, slot_id=slot.id, variant_index=0,
+        item_fields={"pack_id": pack_with_slots.id, "generated_file_id": 77},
+    )
+    service.repo.update_batch(batch.batch_id, {"status": "cancelled"})
+
+    with pytest.raises(ValueError, match="vn_asset_batch_terminal"):
+        service.repo.complete_variant(
+            batch_id=batch.batch_id, slot_id=slot.id, variant_index=0,
+            item_id=item["id"],
+        )
+
+    assert service.repo.get_item(item["id"])["review_status"] == "hidden"
+    assert service.repo.get_batch(batch.batch_id)["completed_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_failed_variant_does_not_strand_queued_sibling(
+    fake_jobs: FakeJobs,
+    service: VNAssetPackService,
+    pack_with_slots: SimpleNamespace,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    class FailOnceAdapter(FakeImageAdapter):
+        def generate(self, request: Any) -> ImageGenResult:
+            if not self.requests:
+                self.requests.append(request)
+                raise RuntimeError("first variant failed")
+            return super().generate(request)
+
+    slot = pack_with_slots.slots[0]
+    batch = service.start_generation(
+        pack_with_slots.id, user_id=1,
+        request=VNAssetGenerationRequest(slot_ids=[slot.id], variant_count=2),
+    )
+    worker = VNAssetGenerationWorker(
+        repo=service.repo, jobs_manager=fake_jobs,
+        image_registry=FakeImageRegistry(FailOnceAdapter()),
+        backend_gate=FakeGenerationGate(), save_vn_asset_image=RecordingVNSaver(),
+    )
+    payload = {
+        "pack_id": pack_with_slots.id, "slot_id": slot.id,
+        "batch_id": batch.batch_id, "user_id": 1,
+    }
+
+    with pytest.raises(RuntimeError, match="first variant failed"):
+        await worker.handle_generate_variant({**payload, "variant_index": 0})
+    after_failure = service.repo.get_batch(batch.batch_id)
+    sibling = await worker.handle_generate_variant({**payload, "variant_index": 1})
+
+    assert after_failure["status"] == "processing"
+    assert sibling["status"] == "draft_created"
+    assert service.repo.get_batch(batch.batch_id)["status"] == "failed"
+    assert service.repo.get_batch(batch.batch_id)["completed_count"] == 1
+    assert service.repo.get_batch(batch.batch_id)["failed_count"] == 1
 
 
 @pytest.mark.asyncio
@@ -1392,8 +1545,107 @@ def test_generation_api_replays_same_idempotency_key_and_conflicts_on_different_
     assert replay.status_code == 202
     assert replay.json() == first.json()
     assert len(fake_jobs.created) == 1
+    assert service.repo.get_idempotency_record(
+        owner_user_id=1, scope="vn_asset_generate", resource_id=f"pack:{pack.id}",
+        idempotency_key="generate-pack-1",
+    )["batch_id"] == first.json()["batch_id"]
     assert conflict.status_code == 409
     assert conflict.json()["detail"]["code"] == "idempotency_key_conflict"
+
+
+def test_generation_api_recovers_unfinished_response_receipt(
+    chacha_db: CharactersRAGDB,
+    character_id: int,
+    fake_jobs: FakeJobs,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = VNAssetPackService(chacha_db, owner_user_id=1, jobs_manager=fake_jobs)
+    pack = service.create_pack(VNAssetPackCreate(title="Receipt Pack", primary_character_id=character_id))
+    service.apply_matrix(pack.id, "starter", {"variant_count": 1})
+    app = FastAPI()
+    app.include_router(vn_assets_router, prefix="/api/v1/vn")
+
+    async def override_user() -> User:
+        return User(id=1, username="vn-generator")
+
+    async def override_chacha_db() -> CharactersRAGDB:
+        return chacha_db
+
+    app.dependency_overrides[get_request_user] = override_user
+    app.dependency_overrides[get_chacha_db_for_user] = override_chacha_db
+    app.dependency_overrides[vn_assets_endpoint._job_manager] = lambda: fake_jobs
+    original_record = vn_assets_endpoint._record_idempotency_response
+
+    def lost_response(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("response lost after batch commit")
+
+    monkeypatch.setattr(vn_assets_endpoint, "_record_idempotency_response", lost_response)
+    client = TestClient(app, raise_server_exceptions=False)
+    payload = {"idempotency_key": "recover-receipt-1"}
+    first = client.post(f"/api/v1/vn/vn-assets/packs/{pack.id}/generate", json=payload)
+    monkeypatch.setattr(vn_assets_endpoint, "_record_idempotency_response", original_record)
+    second = client.post(f"/api/v1/vn/vn-assets/packs/{pack.id}/generate", json=payload)
+
+    assert first.status_code == 500
+    assert second.status_code == 202
+    assert second.json()["batch_id"] == service.repo.list_batches(pack.id)[0]["id"]
+    assert len(service.repo.list_batches(pack.id)) == 1
+    assert len(fake_jobs.created) == 1
+
+
+def test_generation_receipt_recovers_parent_job_after_interruption(
+    chacha_db: CharactersRAGDB,
+    character_id: int,
+    fake_jobs: FakeJobs,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets import service as service_module
+
+    service = VNAssetPackService(chacha_db, owner_user_id=1, jobs_manager=fake_jobs)
+    pack = service.create_pack(VNAssetPackCreate(title="Queued Pack", primary_character_id=character_id))
+    slot = service.create_slot(
+        pack.id, VNAssetSlotCreate(asset_type="sprite", slot_key="primary", variant_count=1)
+    )
+    receipt = {
+        "scope": "vn_asset_generate",
+        "resource_id": f"pack:{pack.id}",
+        "idempotency_key": "interrupted-parent-1",
+        "payload_hash": "test-payload-hash",
+    }
+    service.repo.claim_idempotency_record(owner_user_id=1, **receipt)
+    original_enqueue = service_module.create_enqueue_batch_job
+
+    def interrupted_enqueue(*_args: Any, **_kwargs: Any) -> None:
+        raise KeyboardInterrupt("worker stopped before parent enqueue")
+
+    monkeypatch.setattr(service_module, "create_enqueue_batch_job", interrupted_enqueue)
+    with pytest.raises(KeyboardInterrupt):
+        service.start_generation(
+            pack.id, VNAssetGenerationRequest(slot_ids=[slot.id]),
+            idempotency_receipt=receipt,
+        )
+    monkeypatch.setattr(service_module, "create_enqueue_batch_job", original_enqueue)
+    record = service.repo.get_idempotency_record(owner_user_id=1, **{
+        key: receipt[key] for key in ("scope", "resource_id", "idempotency_key")
+    })
+    assert record is not None
+    assert record["batch_id"] is not None
+    assert fake_jobs.created == []
+
+    recovered = service.recover_generation_receipt(record, pack_id=pack.id, jobs_manager=fake_jobs)
+    again = service.recover_generation_receipt(record, pack_id=pack.id, jobs_manager=fake_jobs)
+
+    assert recovered.batch_id == record["batch_id"]
+    assert again.batch_id == recovered.batch_id
+    assert len(service.repo.list_batches(pack.id)) == 1
+    assert len(fake_jobs.created) == 1
+
+    other_service = VNAssetPackService(chacha_db, owner_user_id=2, jobs_manager=fake_jobs)
+    other_pack = other_service.create_pack(
+        VNAssetPackCreate(title="Other Pack", primary_character_id=character_id)
+    )
+    with pytest.raises(ValueError, match="vn_asset_generation_receipt_not_found"):
+        other_service.recover_generation_receipt(record, pack_id=other_pack.id)
 
 
 def test_retry_slot_api_replays_same_idempotency_key_and_conflicts_on_different_payload(
@@ -1432,6 +1684,10 @@ def test_retry_slot_api_replays_same_idempotency_key_and_conflicts_on_different_
     assert replay.status_code == 202
     assert replay.json() == first.json()
     assert len(fake_jobs.created) == 1
+    assert service.repo.get_idempotency_record(
+        owner_user_id=1, scope="vn_asset_slot_retry",
+        resource_id=f"pack:{pack.id}:slot:{slot.id}", idempotency_key="retry-slot-1",
+    )["batch_id"] == first.json()["batch_id"]
     assert conflict.status_code == 409
     assert conflict.json()["detail"]["code"] == "idempotency_key_conflict"
 
@@ -1473,5 +1729,9 @@ def test_regenerate_item_api_replays_same_idempotency_key_and_conflicts_on_diffe
     assert replay.status_code == 202
     assert replay.json() == first.json()
     assert len(fake_jobs.created) == 1
+    assert service.repo.get_idempotency_record(
+        owner_user_id=1, scope="vn_asset_item_regenerate",
+        resource_id=f"pack:{pack.id}:item:{item['id']}", idempotency_key="regenerate-item-1",
+    )["batch_id"] == first.json()["batch_id"]
     assert conflict.status_code == 409
     assert conflict.json()["detail"]["code"] == "idempotency_key_conflict"
