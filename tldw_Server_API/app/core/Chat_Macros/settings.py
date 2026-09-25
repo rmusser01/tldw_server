@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from copy import deepcopy
 from typing import Any
 
-from .output_profiles import DEFAULT_OUTPUT_PROFILE, normalize_output_profile, profile_to_dict
+from .output_profiles import DEFAULT_OUTPUT_PROFILE, SECTION_TITLE_CONTROLS, normalize_output_profile, profile_to_dict
 
 
 def default_settings() -> dict[str, Any]:
@@ -21,7 +21,7 @@ def default_settings() -> dict[str, Any]:
 
 
 def normalize_settings(raw: Mapping[str, Any] | None, *, from_storage: bool = False) -> dict[str, Any]:
-    """Normalize settings, repairing legacy empty profiles only on storage reads."""
+    """Normalize settings, repairing legacy profile values only on storage reads."""
     raw = raw or {}
     settings = deepcopy(dict(raw))
     settings.update(default_settings())
@@ -49,13 +49,17 @@ def normalize_settings(raw: Mapping[str, Any] | None, *, from_storage: bool = Fa
         for name, profile in raw_profiles.items():
             if isinstance(profile, Mapping):
                 if from_storage:
-                    # Older versions accepted empty sections and whitespace-only
-                    # headings. Keep those records readable so users can edit them.
+                    # Keep previously accepted empty sections and control-bearing
+                    # headings readable so users can edit them after upgrading.
                     profile = dict(profile)
                     if profile.get("sections") == []:
                         profile.pop("sections")
                     titles = profile.get("section_titles")
                     if isinstance(titles, Mapping):
+                        titles = {
+                            section: SECTION_TITLE_CONTROLS.sub(" ", title) if isinstance(title, str) else title
+                            for section, title in titles.items()
+                        }
                         profile["section_titles"] = {
                             section: title
                             for section, title in titles.items()

@@ -294,6 +294,24 @@ def test_output_profile_trims_custom_heading() -> None:
     assert profile.section_titles == {"summary": "Brief"}
 
 
+@pytest.mark.parametrize("separator", ["\n", "\r", "\t", "\x00", "\x7f", "\x85", "\u2028", "\u2029"])
+def test_output_profile_rejects_heading_controls(separator: str) -> None:
+    """A configured heading cannot introduce another Markdown line or control."""
+    with pytest.raises(MacroValidationError, match="section title"):
+        normalize_output_profile("bad", {"section_titles": {"summary": f"Brief{separator}extra"}})
+
+
+@pytest.mark.parametrize("separator", ["\n", "\r", "\t", "\x00", "\x7f", "\x85", "\u2028", "\u2029"])
+def test_stored_heading_controls_are_repaired_without_mutating_source(separator: str) -> None:
+    """Previously valid persisted titles remain editable after stricter validation."""
+    title = f"Brief{separator}extra"
+    original = {"output_profiles": {"default": {"section_titles": {"summary": title}}}}
+    settings = normalize_settings(original, from_storage=True)
+    assert settings["output_profiles"]["default"]["section_titles"] == {"summary": "Brief extra"}
+    assert original["output_profiles"]["default"]["section_titles"]["summary"] == title
+    assert normalize_settings(settings) == settings
+
+
 @pytest.mark.parametrize(
     "legacy_profile",
     [

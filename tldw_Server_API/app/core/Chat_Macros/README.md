@@ -123,8 +123,9 @@ The REST API is exposed under `/api/v1/chat/macros`:
 - `POST /api/v1/chat/macros/runs/{run_id}/cancel`: request cancellation.
 
 Previously stored empty section lists fall back to default sections on read,
-and whitespace-only headings fall back to generated headings. This keeps legacy
-settings editable; new writes still reject these empty values.
+and whitespace-only headings fall back to generated headings. Stored heading
+line breaks and control characters become spaces. This keeps legacy settings
+editable; new writes require nonblank, single-line, control-free headings.
 
 ## Execution And Jobs
 

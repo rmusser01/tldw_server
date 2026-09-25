@@ -233,6 +233,7 @@ def test_profile_only_update_preserves_recent_toggle(api_client: MacroApiClient)
     [
         {"sections": []},
         {"sections": ["summary"], "section_titles": {"summary": " \t "}},
+        {"sections": ["summary"], "section_titles": {"summary": "Brief\n# Injected"}},
     ],
 )
 @pytest.mark.parametrize("profile_only", [False, True])
