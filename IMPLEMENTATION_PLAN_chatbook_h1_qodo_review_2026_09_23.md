@@ -47,6 +47,10 @@ isolated Python 3.12 environment reproduced CI's exact schema hash
 `9ca1d044cc33…`; the regenerated fingerprint passes its drift check, and
 the generated TypeScript declaration builds. Seventeen capability tests,
 touched-source Ruff, Bandit, and diff checks pass after the latest-dev rebase.
+The range-diff exposed one overlap with newer `dev`: both the upstream change
+and H1 added the owner-scope chunking test to the same shard. Removing H1's
+duplicate leaves the two intended platform matrix entries. The shard coverage
+guard passes with zero newly-unshared files.
 
 ## Stage 4: Verify and integrate
 **Goal:** Recheck latest `origin/dev`, required CI and PR review status, then merge H1 followed by H2 only when both are qualified.
