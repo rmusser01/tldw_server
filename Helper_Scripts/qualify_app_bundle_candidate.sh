@@ -92,6 +92,8 @@ gateway_tag=localhost:5000/tldw/gateway:candidate
 control_tag=localhost:5000/tldw/control:candidate
 python_version=$(docker run --rm --platform "$platform" --entrypoint python "$backend_tag" \
   --version | sed 's/^Python //')
+docker run --rm --platform "$platform" --entrypoint python "$backend_tag" \
+  -c 'import tldw_profile_core'
 node_version=$(docker run --rm --platform "$platform" --entrypoint node "$webui_tag" \
   --version | sed 's/^v//')
 gateway_node_version=$(docker run --rm --platform "$platform" --entrypoint node "$gateway_tag" \

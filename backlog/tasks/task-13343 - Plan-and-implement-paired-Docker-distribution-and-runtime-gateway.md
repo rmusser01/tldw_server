@@ -4,7 +4,7 @@ title: Plan and implement paired Docker distribution and runtime gateway
 status: In Progress
 assignee: []
 created_date: '2026-09-23 06:15'
-updated_date: '2026-09-25 17:41'
+updated_date: '2026-09-25 19:55'
 labels:
   - distribution
   - docker
@@ -61,6 +61,8 @@ WP1 Task 7 candidate tooling and manual CI lane implemented: 45 lean Release tes
 WP1 final self-review recorded in Docs/superpowers/reviews/2026-09-25-complete-app-wp1-acceptance.md. AC2 gateway/managed WebUI implementation is complete and locally tested. AC3/AC4 and G2/G4/G10/G12 acceptance remain open: Docker Desktop cannot start on this host; native amd64/arm64 manual CI candidate runs have not executed; no measured image sizes/runtime patches/startup times or two-instance browser setup proof exists. Manual CI now keeps G2/G4/G12 false and verifies the promotion gate refuses provisional candidates. No protected publication occurred. Shell start now waits for Compose health before printing/opening the browser; PowerShell source matches but runtime is untested.
 
 WP1 review follow-up: 46 lean Release tests pass, Black/shell syntax/Compose config for amd64 and arm64/diff check pass, and scoped Bandit reports zero findings. Start helpers wait for service health and tear down partial services after failed readiness while retaining state. Candidate lane deliberately leaves G2/G4/G12 false and its promotion check must refuse it; live CI and full browser/two-instance/runtime evidence remain open.
+
+Docker Desktop recovered for a local linux/arm64 run. Four images built and a signed extracted bundle passed control verify/init; Compose failed because backend became unhealthy. Isolated reproduction showed ModuleNotFoundError for tldw_profile_core. Added that local package to the backend builder and an early image-import guard. Corrected image imports the package, includes 2 schemas/45 fixtures, and became healthy on fresh volumes in 30.29 seconds. Full corrected signed-bundle smoke, two-instance browser checks, amd64 CI, Windows runtime, and download/installed size measurements remain open. Local disk headroom is about 15 GiB after repeated builds; no protected publication occurred.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
