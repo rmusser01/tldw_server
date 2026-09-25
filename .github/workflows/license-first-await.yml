@@ -56,11 +56,19 @@ jobs:
 
           # The audit posts its verdict as a commit status on the PR head. Poll
           # until it is decided; a missing or pending status is not a pass.
+          #
+          # Read with real jq rather than `gh api --jq`: gh's built-in filter
+          # has no --arg, so passing one makes the call fail. Errors are NOT
+          # suppressed here -- swallowing them once already turned a working
+          # status into a permanent "missing" and skipped every gate.
           for attempt in $(seq 1 60); do
-            state="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}/status" \
-                      --jq --arg c "${CONTEXT}" \
-                      'first(.statuses[] | select(.context == $c) | .state) // "missing"' \
-                      2>/dev/null || echo "missing")"
+            if ! payload="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}/status")"; then
+              echo "::error::Could not read commit status for ${HEAD_SHA}."
+              echo "license_passed=false" >> "${GITHUB_OUTPUT}"
+              exit 0
+            fi
+            state="$(printf '%s' "${payload}" | jq -r --arg c "${CONTEXT}" \
+                      'first(.statuses[] | select(.context == $c) | .state) // "missing"')"
             case "${state}" in
               success)
                 echo "license audit passed for ${HEAD_SHA}"
