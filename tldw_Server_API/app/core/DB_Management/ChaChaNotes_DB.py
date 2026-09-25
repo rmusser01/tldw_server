@@ -7569,7 +7569,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         backend: DatabaseBackend | None = None,
         config: ConfigParser | None = None,
         owner_user_id: str | None = None,
-    ):
+    ) -> None:
         """
         Initializes the CharactersRAGDB instance.
 
@@ -17862,6 +17862,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         )
         if result.rowcount != 1 or self._get_schema_version_postgres(conn) != 69:
             raise SchemaError("Deck name PostgreSQL migration V68->V69 failed version verification.")  # noqa: TRY003
+
     def _migrate_from_v68_to_v69(self, conn: sqlite3.Connection) -> None:
         """Persist opt-out, conservatively protecting legacy null defaults in an offline upgrade."""
         for statement in split_sql_statements(self._MIGRATION_SQL_V68_TO_V69):

@@ -12,7 +12,17 @@ MAX_ASSISTANT_STARTUP_BYTES = 1024
 
 
 def reject_assistant_startup_input(value: object) -> object:
-    """Reject reserved origin keys without changing unrelated request-extra handling."""
+    """Reject reserved origin keys without changing unrelated request extras.
+
+    Args:
+        value: Incoming request payload before schema validation.
+
+    Returns:
+        The unchanged payload when no reserved key is present.
+
+    Raises:
+        ValueError: The payload contains a caller-supplied startup origin.
+    """
     if isinstance(value, Mapping) and {"assistant_startup", "assistant_startup_json"}.intersection(value):
         raise ValueError("Assistant startup provenance is read-only")
     return value

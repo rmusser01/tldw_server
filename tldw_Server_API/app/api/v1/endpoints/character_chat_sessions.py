@@ -39,6 +39,7 @@ from fastapi.responses import StreamingResponse
 from loguru import logger
 from pydantic import ValidationError
 from starlette.background import BackgroundTask
+from starlette.concurrency import run_in_threadpool
 
 # Database and authentication dependencies
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
@@ -4549,12 +4550,13 @@ async def create_chat_session(
     try:
         scope = _resolve_chat_scope(session_data.scope_type, session_data.workspace_id)
         from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup
-        from tldw_Server_API.app.core.Workspaces.assistant_defaults import create_workspace_persona_conversation
+        from tldw_Server_API.app.core.Workspaces.assistant_defaults import (
+            create_workspace_persona_conversation,
+            require_workspace_for_chat_creation,
+        )
 
         if scope.scope_type == "workspace":
-            workspace = db.get_workspace(scope.workspace_id)
-            if workspace is None or workspace.get("deleted"):
-                raise HTTPException(status_code=404, detail="Workspace not found")
+            await run_in_threadpool(require_workspace_for_chat_creation, db, scope.workspace_id)
         # Check rate limits
         rate_limiter = get_character_rate_limiter()
         await rate_limiter.check_rate_limit(current_user.id, "chat_create")

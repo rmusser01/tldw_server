@@ -151,6 +151,21 @@ class ResolvedConversationAssistant:
     display_name: str
 
 
+def require_workspace_for_chat_creation(
+    db: CharactersRAGDB, workspace_id: str, *, conn: Any = None,
+) -> dict[str, Any]:
+    """Return an available Workspace, including archived ones, or raise HTTP 404.
+
+    The caller supplies the already validated Workspace scope. A transaction
+    keeps the availability read locked through the subsequent selection.
+    """
+    connection_kwargs = {"conn": conn, "for_update": True} if conn is not None else {}
+    workspace = db.get_workspace(workspace_id, **connection_kwargs)
+    if workspace is None or workspace.get("deleted"):
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    return workspace
+
+
 def resolve_workspace_assistant_startup(
     db: CharactersRAGDB, *, user_id: str, request: ChatSessionCreate, conn: Any = None,
 ) -> ResolvedConversationAssistant:
@@ -163,10 +178,7 @@ def resolve_workspace_assistant_startup(
     """
     if request.scope_type != "workspace":
         return ResolvedConversationAssistant(request, AssistantStartup(), "Assistant")
-    connection_kwargs = {"conn": conn, "for_update": True} if conn is not None else {}
-    workspace = db.get_workspace(request.workspace_id, **connection_kwargs)
-    if workspace is None or workspace.get("deleted"):
-        raise HTTPException(status_code=404, detail="Workspace not found")
+    workspace = require_workspace_for_chat_creation(db, request.workspace_id, conn=conn)
     if request.parent_conversation_id or request.model_fields_set & {"assistant_kind", "assistant_id", "character_id"}:
         source = "fork" if request.parent_conversation_id else (
             "explicit" if request.assistant_kind is not None else "explicit_none"
