@@ -1,4 +1,5 @@
 import os
+from itertools import combinations
 from typing import Any
 
 import pytest
@@ -9,7 +10,6 @@ pytestmark = pytest.mark.unit
 from tldw_Server_API.app.core.exceptions import BadRequestError
 from tldw_Server_API.app.services import quiz_generator
 from tldw_Server_API.app.services.quiz_generator import (
-    QUIZ_GENERATION_PROMPT,
     _build_generation_profile_instruction,
     _coerce_question_types,
     get_quiz_generation_profiles,
@@ -26,23 +26,21 @@ def test_profile_normalization_accepts_available_osce_profile():
     assert quiz_generator._normalize_generation_profile("osce") == "osce_scenario"
 
 
-def test_quiz_generation_prompt_template_formats_with_literal_citation_object():
-    rendered_prompt = QUIZ_GENERATION_PROMPT.format(
+def test_quiz_generation_prompt_formats_with_literal_citation_object():
+    rendered_prompt = quiz_generator._format_quiz_generation_prompt(
         num_questions=3,
         content="Sample content",
         difficulty="mixed",
-        question_types="multiple_choice, true_false",
+        question_types=["multiple_choice", "true_false"],
         focus_instruction="- Focus on these topics: testing",
         source_contract="- Allowed sources for source_citations.source_type/source_id: note:note-1",
     )
 
     assert '"label": "Optional citation label"' in rendered_prompt
     assert '"source_type": "media" | "note" | "flashcard_deck" | "flashcard_card"' in rendered_prompt
-    assert '"group_id": "Optional EMQ group identifier"' in rendered_prompt
-    assert '"group_prompt": "Optional shared EMQ group prompt"' in rendered_prompt
-    assert '"correct_answer": 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9' in rendered_prompt
-    assert "For EMQ" in rendered_prompt
-    assert "at least two stems" in rendered_prompt
+    assert '"question_type": "multiple_choice"' in rendered_prompt
+    assert '"question_type": "true_false"' in rendered_prompt
+    assert "For EMQ" not in rendered_prompt
     assert "Allowed sources for source_citations.source_type/source_id: note:note-1" in rendered_prompt
     assert "{num_questions}" not in rendered_prompt
     assert "{content}" not in rendered_prompt
@@ -73,6 +71,140 @@ def test_quiz_generation_prompt_includes_all_planned_question_shapes():
     assert '"question_type": "multi_select"' in rendered_prompt
     assert '"question_type": "matching"' in rendered_prompt
     assert "options must be array of 4 strings" not in rendered_prompt
+
+
+@pytest.mark.parametrize(
+    ("plan_item", "expected_shape", "forbidden_shape"),
+    [
+        (
+            {"question_type": "multiple_choice", "count": 1, "option_count": 5},
+            '"options": ["A", "B", "C", "D", "E"]',
+            '"options": ["A", "B", "C", "D"],',
+        ),
+        (
+            {"question_type": "multi_select", "count": 1, "option_count": 2},
+            '"correct_answer": [0, 1]',
+            '"correct_answer": [0, 2]',
+        ),
+        (
+            {"question_type": "matching", "count": 1, "pair_count": 2},
+            '"options": ["A", "B"]',
+            '"options": ["CPU", "RAM", "Disk", "GPU"]',
+        ),
+    ],
+)
+def test_planned_prompt_examples_obey_selected_option_and_pair_counts(plan_item, expected_shape, forbidden_shape):
+    rendered_prompt = quiz_generator._format_quiz_generation_prompt(
+        num_questions=1,
+        content="Sample content",
+        difficulty="mixed",
+        question_types=None,
+        question_plan=[plan_item],
+        focus_instruction="",
+        source_contract="Allowed source: note:1",
+    )
+
+    assert expected_shape in rendered_prompt
+    assert forbidden_shape not in rendered_prompt
+
+
+@pytest.mark.parametrize(
+    "selected_types",
+    [
+        ["multiple_choice"],
+        ["true_false"],
+        ["fill_blank"],
+        ["multi_select"],
+        ["matching"],
+        ["multiple_choice", "true_false"],
+    ],
+)
+def test_quiz_prompt_advertises_only_selected_question_shapes(selected_types):
+    rendered_prompt = quiz_generator._format_quiz_generation_prompt(
+        num_questions=1,
+        content="The trial lasted 14 days.",
+        difficulty="mixed",
+        question_types=selected_types,
+        focus_instruction="",
+        source_contract="Allowed source: note:1",
+    )
+
+    for q_type in selected_types:
+        assert f'"question_type": "{q_type}"' in rendered_prompt
+    for q_type in set(quiz_generator.SUPPORTED_GENERATED_QUESTION_TYPES) - set(selected_types):
+        assert f'"question_type": "{q_type}"' not in rendered_prompt
+    assert "The trial lasted 14 days." in rendered_prompt
+
+
+@pytest.mark.parametrize(
+    "selected_types",
+    [
+        list(subset)
+        for count in range(1, 6)
+        for subset in combinations(
+            ["multiple_choice", "true_false", "fill_blank", "multi_select", "matching"],
+            count,
+        )
+    ],
+)
+def test_prompt_shape_choices_equal_selected_types_for_any_subset(selected_types):
+    rendered_prompt = quiz_generator._format_quiz_generation_prompt(
+        num_questions=1,
+        content="Source evidence",
+        difficulty="mixed",
+        question_types=selected_types,
+        focus_instruction="",
+        source_contract="Allowed source: note:1",
+    )
+
+    advertised = {
+        q_type
+        for q_type in quiz_generator.SUPPORTED_GENERATED_QUESTION_TYPES
+        if f'"question_type": "{q_type}"' in rendered_prompt
+    }
+    assert advertised == set(selected_types)
+
+
+@pytest.mark.parametrize("profile", ["best_of_five", "emq", "assertion_reasoning"])
+def test_quiz_prompt_preserves_locked_profile_instructions(profile):
+    rendered_prompt = quiz_generator._format_quiz_generation_prompt(
+        num_questions=2,
+        content="The trial lasted 14 days.",
+        difficulty="mixed",
+        question_types=["multiple_choice"],
+        focus_instruction=_build_generation_profile_instruction(profile),
+        source_contract="Allowed source: note:1",
+        generation_profile=profile,
+    )
+
+    assert '"question_type": "multiple_choice"' in rendered_prompt
+    if profile == "best_of_five":
+        assert "exactly five answer options" in rendered_prompt
+        assert '"options": ["A", "B", "C", "D", "E"]' in rendered_prompt
+    elif profile == "emq":
+        assert "shared option bank" in rendered_prompt
+        assert '"group_id": "group-1"' in rendered_prompt
+        assert '"group_prompt": "Shared question prompt"' in rendered_prompt
+    else:
+        assert "separate assertion and reason fields" in rendered_prompt
+        assert '"assertion": "An evidence-backed assertion"' in rendered_prompt
+        assert '"reason": "An evidence-backed reason"' in rendered_prompt
+        assert ('"options": ["' + quiz_generator.ASSERTION_REASONING_OPTIONS[0]) in rendered_prompt
+
+
+@pytest.mark.parametrize("q_type", ["multi_select", "matching"])
+def test_legacy_advanced_question_type_is_normalized(q_type):
+    raw = {
+        "question_type": q_type,
+        "question_text": "Which terms match the source?",
+        "options": ["A", "B", "C", "D"],
+        "correct_answer": [0, 2] if q_type == "multi_select" else {"A": "one", "B": "two", "C": "three", "D": "four"},
+    }
+
+    questions = quiz_generator._normalize_questions([raw], "note", "1")
+
+    assert len(questions) == 1
+    assert questions[0]["question_type"] == q_type
 
 
 def test_quiz_generation_prompt_preserves_source_content_when_removing_legacy_hints():
@@ -122,9 +254,7 @@ def test_locked_generation_profiles_reject_question_plan(profile: str) -> None:
     with pytest.raises(ValueError, match="question_plan is only supported"):
         quiz_generator._coerce_generation_plan(
             num_questions=1,
-            question_plan=[
-                {"question_type": "multiple_choice", "count": 1, "option_count": 5}
-            ],
+            question_plan=[{"question_type": "multiple_choice", "count": 1, "option_count": 5}],
             generation_profile=profile,
         )
 
@@ -182,8 +312,16 @@ def test_assertion_reasoning_profile_exposes_mcq_prompt_contract():
     assert "Do not provide hidden chain-of-thought" in instruction
 
 
-def test_common_prompt_supports_assertion_reasoning_fields_and_rules():
-    assert '"assertion": "Optional assertion for assertion_reasoning"' in QUIZ_GENERATION_PROMPT
-    assert '"reason": "Optional reason for assertion_reasoning"' in QUIZ_GENERATION_PROMPT
-    assert "For Assertion / Reasoning" in QUIZ_GENERATION_PROMPT
-    assert "Do not provide hidden chain-of-thought" in QUIZ_GENERATION_PROMPT
+def test_assertion_reasoning_prompt_supports_required_fields_and_rules():
+    rendered_prompt = quiz_generator._format_quiz_generation_prompt(
+        num_questions=1,
+        content="Sample content",
+        difficulty="mixed",
+        question_types=["multiple_choice"],
+        focus_instruction=_build_generation_profile_instruction("assertion_reasoning"),
+        source_contract="Allowed source: note:1",
+        generation_profile="assertion_reasoning",
+    )
+    assert "separate assertion and reason fields" in rendered_prompt
+    assert "For Assertion / Reasoning" in rendered_prompt
+    assert "Do not provide hidden chain-of-thought" in rendered_prompt
