@@ -26,7 +26,9 @@ Target: `origin/dev`
 **Goal**: Push a reviewable Calendar-only PR against `dev`.
 **Success Criteria**: PR targets `dev`, contains verification and manual-smoke limits, and is attached to the task.
 **Tests**: Inspect PR base/head and changed-file summary.
-**Status**: In Progress
+**Status**: Complete
+
+Draft PR: https://github.com/rmusser01/tldw_server/pull/3019 (`dev` <- `codex/calendar-dev-pr`)
 
 ## Verification Notes
 
