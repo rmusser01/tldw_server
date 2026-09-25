@@ -154,12 +154,7 @@ def validate_postgres_content_backend(
                 )
 
             required_policies = {
-                "media": [
-                    "media_scope_admin",
-                    "media_scope_personal",
-                    "media_scope_org",
-                    "media_scope_team",
-                ],
+                "media": ["media_visibility_access"],
                 "sync_log": [
                     "sync_scope_admin",
                     "sync_scope_personal",
