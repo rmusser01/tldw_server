@@ -106,7 +106,12 @@ if (!(globalThis as any).ResizeObserver) {
   }
 }
 
-describe("ResultsTab remediation panel", () => {
+// Suite-scoped timeout: the conversion flows drive antd modals, selects and a
+// confirm-and-retry round trip under jsdom. They take 3-7.5s locally and about
+// twice that on a loaded CI runner, where the old per-test 12s cap (below the
+// CI job's own 15s default) timed out with no assertion failing. Same pattern
+// as FamilyGuardrailsWizard and sidepanel-flashcards.
+describe("ResultsTab remediation panel", { timeout: 60_000 }, () => {
   const onRetakeQuiz = vi.fn()
   let assistantQueryState: any
   const assistantRefetchMock = vi.fn()
@@ -590,7 +595,7 @@ describe("ResultsTab remediation panel", () => {
         }
       })
     })
-  }, 12000)
+  })
 
   it("resubmits already-converted questions with replace_active when confirmed", async () => {
     mocks.convertRemediationQuestions
@@ -687,7 +692,7 @@ describe("ResultsTab remediation panel", () => {
         }
       })
     })
-  }, 12000)
+  })
 
   it("reuses the server-created deck when a new-deck conversion needs replace_active retry", async () => {
     mocks.convertRemediationQuestions
@@ -789,7 +794,7 @@ describe("ResultsTab remediation panel", () => {
         }
       })
     })
-  }, 12000)
+  })
 
   it("drops the deck filter when active remediation conversions span multiple decks", async () => {
     vi.mocked(useAttemptRemediationConversionsQuery).mockReturnValue({
