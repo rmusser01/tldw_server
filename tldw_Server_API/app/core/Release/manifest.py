@@ -243,9 +243,27 @@ def _manifest(value: Any, *, platform: str, current_version: str | None) -> Rele
     ids = [artifact.id for artifact in artifacts]
     if len(set(ids)) != len(ids):
         raise ManifestError("duplicate artifact ID")
-    file_paths = [artifact.path for artifact in artifacts if artifact.path is not None]
-    if len(set(file_paths)) != len(file_paths):
-        raise ManifestError("duplicate artifact path")
+    file_paths: dict[str, tuple[str, int, int, set[str]]] = {}
+    for artifact in artifacts:
+        if artifact.path is None:
+            continue
+        prior = file_paths.get(artifact.path)
+        if prior is None:
+            file_paths[artifact.path] = (
+                artifact.sha256,
+                artifact.size_bytes,
+                artifact.installed_size_bytes,
+                {artifact.platform},
+            )
+        elif (
+            artifact.sha256 != prior[0]
+            or artifact.size_bytes != prior[1]
+            or artifact.installed_size_bytes != prior[2]
+            or artifact.platform in prior[3]
+        ):
+            raise ManifestError("duplicate artifact path has conflicting contents or platform")
+        else:
+            prior[3].add(artifact.platform)
     dependencies = _object(item["dependencies"], frozenset({"lock_digests"}), "dependencies")
     locks = dependencies["lock_digests"]
     if not isinstance(locks, dict) or not locks:

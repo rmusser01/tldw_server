@@ -5,6 +5,8 @@ COPY Dockerfiles/gateway/package.json Dockerfiles/gateway/bun.lock ./
 RUN bun install --frozen-lockfile --production
 
 FROM node:24-bookworm-slim AS runtime
+ARG TLDW_SOURCE_COMMIT=unknown
+LABEL org.opencontainers.image.revision=${TLDW_SOURCE_COMMIT}
 ENV NODE_ENV=production \
     TLDW_GATEWAY_LISTEN_HOST=0.0.0.0 \
     TLDW_GATEWAY_LISTEN_PORT=8080

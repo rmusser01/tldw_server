@@ -35,6 +35,8 @@ WORKDIR /app/apps/tldw-frontend
 RUN bun scripts/validate-networking-config.mjs && bun run build:prod
 
 FROM node:24-bookworm-slim AS webui-runtime-base
+ARG TLDW_SOURCE_COMMIT=unknown
+LABEL org.opencontainers.image.revision=${TLDW_SOURCE_COMMIT}
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     HOSTNAME=0.0.0.0 \
@@ -44,7 +46,7 @@ RUN useradd -m -u 10002 webui
 USER webui
 WORKDIR /app/apps/tldw-frontend
 EXPOSE 3000
-HEALTHCHECK --interval=30s --timeout=5s --retries=5 CMD node -e "fetch('http://localhost:3000').then((r)=>process.exit(r.ok ? 0 : 1)).catch(()=>process.exit(1))"
+HEALTHCHECK --interval=30s --timeout=5s --retries=5 CMD node -e "fetch('http://127.0.0.1:3000/favicon.ico').then((r)=>process.exit(r.status === 200 ? 0 : 1)).catch(()=>process.exit(1))"
 CMD ["node", "server.js"]
 
 FROM webui-runtime-base AS managed-runtime

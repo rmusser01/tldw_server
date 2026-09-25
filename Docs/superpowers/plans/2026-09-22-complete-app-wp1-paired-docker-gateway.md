@@ -214,17 +214,17 @@ The code paths above are the planned ownership boundaries. If an existing helper
 
 **Interfaces:** `build_app_bundle.py --artifacts <inventory.json> --evidence <evidence.json> --signing-key <path> --output <directory>` produces the exact manifest bytes and detached Ed25519 signature using an ephemeral CI test key. The private key is never packaged, logged, or checked in. `verify_app_bundle.py --manifest <path> --signature <path> --evidence <path> --platform <tuple>` exits zero only when required roles/digests and G2/G4/G10 evidence for that tuple are present and verified. Candidate registry/image refs are recorded in signed metadata; protected publishing requires a later separate authorization/gate record.
 
-- [ ] **Step 1: Write failing tests** for absent WebUI image, mixed commits, unsupported Node patch, missing arm64 evidence, corrupted digest, and a complete local fixture. Example:
+- [x] **Step 1: Write failing tests** for absent WebUI image, mixed commits, unsupported Node patch, missing arm64 evidence, corrupted digest, and a complete local fixture. The gate also rejects tampered helper bytes, and the manifest tests cover identical shared helper paths across platforms.
 
   ```python
   assert candidate_is_promotable(complete_fixture, required={"linux/amd64", "linux/arm64"})
   assert not candidate_is_promotable(missing_webui_fixture, required={"linux/amd64"})
   ```
 
-- [ ] **Step 2: Run** the focused candidate-gate pytest; expect missing-function failure.
-- [ ] **Step 3: Implement** clean-checkout builds and artifact inventory from allowlisted source paths, ephemeral job-local registry digest capture, exact-byte Ed25519 signing, per-platform signature/hash verification, and evidence aggregation. CI pulls and runs the candidate outside its checkout using Docker/Compose only for the host flow. Keep `publish-docker.yml` and external registry publication behavior unchanged until the existing release gate is satisfied.
-- [ ] **Step 4: Run** focused tests plus the extracted-bundle smoke on amd64 and arm64 CI runners/emulation where qualified; record exact runtime patches and limitations. Run frontend lint/typecheck, focused backend tests, gateway tests, `git diff --check`, and Bandit on touched Python source. Failure in either required tuple blocks promotion.
-- [ ] **Step 5: Commit** qualification workflow and evidence tooling with `test: qualify paired Docker candidate before release (TASK-13343)`.
+- [x] **Step 2: Run** the focused candidate-gate pytest; expected missing-module failure observed before implementation, then unsupported-runtime regression failed before its guard.
+- [x] **Step 3: Implement** clean-checkout builds and artifact inventory from allowlisted bundle files, ephemeral job-local registry digest capture, exact-byte Ed25519 signing, per-platform signature/hash verification, and a required-both-platform CI status job. Each native runner builds and smokes its own local single-platform candidate; these are preview artifacts, not a published multi-platform manifest. The existing `publish-docker.yml` remains unchanged.
+- [ ] **Step 4: Run** focused tests plus the extracted-bundle smoke on amd64 and arm64 CI runners; record exact runtime patches and limitations. Run frontend lint/typecheck, focused backend tests, gateway tests, `git diff --check`, and Bandit on touched Python source. Failure in either required tuple blocks promotion. Local lean release tests: 45 pass; Black, shell syntax, YAML parse, diff check, and Bandit (0 findings) pass. Docker Desktop on this host still cannot start, so image builds, live smoke, PowerShell parsing, actual sizes/patches, and both runner results are not yet evidence. The whole-frontend typecheck baseline is still 93 untouched-file diagnostics; CI runs it and records its status without treating it as new code success.
+- [x] **Step 5: Commit** qualification workflow and evidence tooling with `test: qualify paired Docker candidate before release (TASK-13343)`; actual CI execution remains open in Step 4.
 
 ### Task 8: Review WP1 against the product contract
 

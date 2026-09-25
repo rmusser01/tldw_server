@@ -107,6 +107,38 @@ def test_valid_manifest_binds_platform_and_roles(
     )
 
 
+def test_shared_bundle_file_may_be_declared_for_both_platforms(
+    manifest_data: dict[str, object],
+    signing_key: Ed25519PrivateKey,
+    trusted_keys: dict[str, bytes],
+) -> None:
+    manifest_data["platforms"].append("linux/arm64")  # type: ignore[union-attr]
+    shared = dict(manifest_data["artifacts"][0])  # type: ignore[index]
+    shared["id"] = "backend-wheel-arm64"
+    shared["platform"] = "linux/arm64"
+    manifest_data["artifacts"].append(shared)  # type: ignore[union-attr]
+
+    result = verify_manifest(*signed(manifest_data, signing_key), trusted_keys, platform="linux/arm64")
+
+    assert result.artifacts[-1].path == "backend.whl"
+
+
+def test_shared_bundle_file_cannot_claim_different_bytes_by_platform(
+    manifest_data: dict[str, object],
+    signing_key: Ed25519PrivateKey,
+    trusted_keys: dict[str, bytes],
+) -> None:
+    manifest_data["platforms"].append("linux/arm64")  # type: ignore[union-attr]
+    conflicting = dict(manifest_data["artifacts"][0])  # type: ignore[index]
+    conflicting["id"] = "backend-wheel-arm64"
+    conflicting["platform"] = "linux/arm64"
+    conflicting["sha256"] = "0" * 64
+    manifest_data["artifacts"].append(conflicting)  # type: ignore[union-attr]
+
+    with pytest.raises(ManifestError, match="path"):
+        verify_manifest(*signed(manifest_data, signing_key), trusted_keys, platform="linux/arm64")
+
+
 def test_mutated_manifest_is_rejected_before_parsing(
     manifest_data: dict[str, object],
     signing_key: Ed25519PrivateKey,

@@ -1,6 +1,8 @@
 # One-shot verifier. Build with --build-context trust=<public-key directory>.
 # The trusted key set is part of this image's immutable digest, never a bundle mount.
 FROM python:3.12-slim-bookworm AS runtime
+ARG TLDW_SOURCE_COMMIT=unknown
+LABEL org.opencontainers.image.revision=${TLDW_SOURCE_COMMIT}
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PYTHONPATH=/opt/tldw
 RUN pip install --no-cache-dir --only-binary=:all: cryptography==45.0.6
 WORKDIR /opt/tldw

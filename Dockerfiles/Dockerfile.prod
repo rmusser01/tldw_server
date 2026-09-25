@@ -28,6 +28,8 @@ RUN pip install --upgrade pip && \
 
 
 FROM python:3.12-slim AS runtime
+ARG TLDW_SOURCE_COMMIT=unknown
+LABEL org.opencontainers.image.revision=${TLDW_SOURCE_COMMIT}
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
