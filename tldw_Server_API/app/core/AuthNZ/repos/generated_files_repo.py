@@ -259,6 +259,37 @@ class AuthnzGeneratedFilesRepo:
             logger.error(f"AuthnzGeneratedFilesRepo.get_file_by_id failed: {exc}")
             raise
 
+    async def get_file_by_source_ref(
+        self, *, user_id: int, source_feature: str, source_ref: str
+    ) -> dict[str, Any] | None:
+        """Find the newest live file for an owned, exact source reference."""
+        async with self.db_pool.acquire() as conn:
+            if self._is_postgres():
+                row = await conn.fetchrow(
+                    """
+                    SELECT * FROM generated_files
+                    WHERE user_id = $1 AND source_feature = $2 AND source_ref = $3
+                      AND is_deleted = FALSE
+                    ORDER BY id DESC LIMIT 1
+                    """,
+                    user_id, source_feature, source_ref,
+                )
+                return self._normalize_record(row) if row else None
+            cursor = await conn.execute(
+                """
+                SELECT * FROM generated_files
+                WHERE user_id = ? AND source_feature = ? AND source_ref = ?
+                  AND is_deleted = 0
+                ORDER BY id DESC LIMIT 1
+                """,
+                (user_id, source_feature, source_ref),
+            )
+            row = await cursor.fetchone()
+            if row is None:
+                return None
+            columns = [column[0] for column in cursor.description]
+            return self._normalize_record(dict(zip(columns, row)))
+
     async def get_files_by_ids(self, file_ids: list[int]) -> list[dict[str, Any]]:
         """Fetch generated file records for a bounded list of IDs."""
         if not file_ids:

@@ -282,7 +282,11 @@ class VNAssetPackService:
 
     def list_items(self, pack_id: int) -> list[VNAssetItemResponse]:
         self._require_pack(pack_id)
-        return [self._item_response(row) for row in self.repo.list_items(pack_id)]
+        return [
+            self._item_response(row)
+            for row in self.repo.list_items(pack_id)
+            if row["review_status"] != "hidden" or row["generated_file_id"] is not None
+        ]
 
     def get_item_for_pack(self, pack_id: int, item_id: int) -> VNAssetItemResponse:
         return self._item_response(self._require_item_in_pack(pack_id, item_id))
@@ -621,7 +625,7 @@ class VNAssetPackService:
 
             variant_count = request.variant_count
             total_variants = sum(int(variant_count or slot["variant_count"]) for slot in slots)
-            self._enforce_item_limit(len(self.repo.list_items(pack_id)) + total_variants)
+            self._enforce_item_limit(self.repo.count_items_for_generation(pack_id) + total_variants)
 
             options = dict(request.options)
             if selected_slot_ids:

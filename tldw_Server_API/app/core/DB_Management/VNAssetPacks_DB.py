@@ -116,6 +116,8 @@ CREATE TABLE IF NOT EXISTS vn_asset_generation_recipes (
     slot_id INTEGER NOT NULL REFERENCES vn_asset_slots(id) ON DELETE CASCADE,
     variant_index INTEGER NOT NULL,
     recipe_json TEXT NOT NULL,
+    outcome_status TEXT NOT NULL DEFAULT 'planned',
+    item_id INTEGER REFERENCES vn_asset_items(id),
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (batch_id, slot_id, variant_index)
 );
@@ -269,6 +271,7 @@ def ensure_vn_asset_tables(db: CharactersRAGDB) -> None:
         for statement in VN_ASSET_SCHEMA_STATEMENTS:
             conn.execute(statement)
         _ensure_batch_fanout_columns(conn)
+        _ensure_recipe_outcome_columns(conn)
 
 
 class VNAssetPacksRepository:
@@ -1582,10 +1585,31 @@ class VNAssetPacksRepository:
     def list_items(self, pack_id: int) -> list[dict[str, Any]]:
         self._ensure_schema_initialized()
         cursor = self.db.execute_query(
-            "SELECT * FROM vn_asset_items WHERE pack_id = ? ORDER BY id ASC",
+            """
+            SELECT * FROM vn_asset_items AS item
+            WHERE item.pack_id = ? AND NOT EXISTS (
+                SELECT 1 FROM vn_asset_generation_recipes AS recipe
+                WHERE recipe.item_id = item.id AND recipe.outcome_status != 'completed'
+            ) ORDER BY item.id ASC
+            """,
             (pack_id,),
         )
         return [dict(row) for row in cursor.fetchall()]
+
+    def count_items_for_generation(self, pack_id: int) -> int:
+        """Count visible items and active reservations, excluding failed reservations."""
+        self._ensure_schema_initialized()
+        row = self.db.execute_query(
+            """
+            SELECT COUNT(*) AS item_count FROM vn_asset_items AS item
+            WHERE item.pack_id = ? AND NOT EXISTS (
+                SELECT 1 FROM vn_asset_generation_recipes AS recipe
+                WHERE recipe.item_id = item.id AND recipe.outcome_status = 'failed'
+            )
+            """,
+            (pack_id,),
+        ).fetchone()
+        return int(row["item_count"])
 
     def count_items_referencing_generated_file(
         self,
@@ -1806,6 +1830,162 @@ class VNAssetPacksRepository:
             (batch_id, slot_id, variant_index),
         ).fetchone()
         return json.loads(row["recipe_json"]) if row is not None else None
+
+    def get_variant_outcome(
+        self, batch_id: int, slot_id: int, variant_index: int
+    ) -> dict[str, Any] | None:
+        self._ensure_schema_initialized()
+        row = self.db.execute_query(
+            """
+            SELECT outcome_status, item_id FROM vn_asset_generation_recipes
+            WHERE batch_id = ? AND slot_id = ? AND variant_index = ?
+            """,
+            (batch_id, slot_id, variant_index),
+        ).fetchone()
+        return dict(row) if row is not None else None
+
+    def reserve_variant_item(
+        self,
+        *,
+        batch_id: int,
+        slot_id: int,
+        variant_index: int,
+        item_fields: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Reserve one stable item ID for a versioned variant and its storage source ref."""
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            row = conn.execute(
+                """
+                SELECT item_id FROM vn_asset_generation_recipes
+                WHERE batch_id = ? AND slot_id = ? AND variant_index = ?
+                """,
+                (batch_id, slot_id, variant_index),
+            ).fetchone()
+            if row is None:
+                raise ValueError("vn_asset_recipe_not_found")
+            if row["item_id"] is None:
+                item = self.create_item(
+                    slot_id=slot_id,
+                    variant_index=variant_index,
+                    review_status="hidden",
+                    **dict(item_fields),
+                )
+                item_id = int(item["id"])
+                conn.execute(
+                    """
+                    UPDATE vn_asset_generation_recipes SET item_id = ?
+                    WHERE batch_id = ? AND slot_id = ? AND variant_index = ?
+                    """,
+                    (item_id, batch_id, slot_id, variant_index),
+                )
+            else:
+                item_id = int(row["item_id"])
+                item = self.get_item(item_id)
+                if item is None:
+                    raise ValueError("vn_asset_recipe_item_missing")
+        return item
+
+    def complete_variant(
+        self, *, batch_id: int, slot_id: int, variant_index: int, item_id: int
+    ) -> dict[str, Any]:
+        """Publish a stored item and derive counters from durable outcomes."""
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            row = conn.execute(
+                """
+                SELECT item_id, outcome_status FROM vn_asset_generation_recipes
+                WHERE batch_id = ? AND slot_id = ? AND variant_index = ?
+                """,
+                (batch_id, slot_id, variant_index),
+            ).fetchone()
+            if row is None or int(row["item_id"] or 0) != item_id:
+                raise ValueError("vn_asset_recipe_item_mismatch")
+            if row["outcome_status"] == "failed":
+                raise ValueError("vn_asset_variant_failed")
+            item = conn.execute(
+                "SELECT generated_file_id FROM vn_asset_items WHERE id = ?",
+                (item_id,),
+            ).fetchone()
+            if item is None or item["generated_file_id"] is None:
+                raise ValueError("vn_asset_item_storage_missing")
+            conn.execute(
+                "UPDATE vn_asset_items SET review_status = 'draft' WHERE id = ?",
+                (item_id,),
+            )
+            conn.execute(
+                """
+                UPDATE vn_asset_slots
+                SET status = 'reviewing', last_error = NULL, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (slot_id,),
+            )
+            conn.execute(
+                """
+                UPDATE vn_asset_generation_recipes SET outcome_status = 'completed'
+                WHERE batch_id = ? AND slot_id = ? AND variant_index = ?
+                """,
+                (batch_id, slot_id, variant_index),
+            )
+            _refresh_batch_outcome_counts(conn, batch_id)
+        result = self.get_item(item_id)
+        if result is None:
+            raise RuntimeError("completed_item_not_found")
+        return result
+
+    def fail_variant(
+        self, *, batch_id: int, slot_id: int, variant_index: int, error: str
+    ) -> None:
+        """Count a failed variant once, even if a Job failure is redelivered."""
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            updated = conn.execute(
+                """
+                UPDATE vn_asset_generation_recipes SET outcome_status = 'failed'
+                WHERE batch_id = ? AND slot_id = ? AND variant_index = ?
+                  AND outcome_status NOT IN ('completed', 'failed')
+                """,
+                (batch_id, slot_id, variant_index),
+            )
+            if not updated.rowcount:
+                return
+            conn.execute(
+                """
+                UPDATE vn_asset_slots
+                SET status = CASE WHEN EXISTS (
+                    SELECT 1 FROM vn_asset_generation_recipes
+                    WHERE batch_id = ? AND slot_id = ? AND outcome_status = 'completed'
+                ) THEN 'reviewing' ELSE 'failed' END,
+                    last_error = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (batch_id, slot_id, error, slot_id),
+            )
+            _refresh_batch_outcome_counts(conn, batch_id)
+
+    def mark_batch_enqueued(
+        self,
+        batch_id: int,
+        *,
+        planned_count: int,
+        enqueued_count: int,
+        total_slots: int,
+    ) -> None:
+        """Record fanout without regressing work already started by child workers."""
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            conn.execute(
+                """
+                UPDATE vn_asset_batches
+                SET status = CASE WHEN status IN ('queued', 'enqueued')
+                                  THEN 'enqueued' ELSE status END,
+                    planned_count = ?, enqueued_count = ?, enqueue_error = NULL,
+                    total_slots = ?, total_variants = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (planned_count, enqueued_count, total_slots, planned_count, batch_id),
+            )
 
     def update_batch(self, batch_id: int, fields: Mapping[str, Any]) -> dict[str, Any] | None:
         self._ensure_schema_initialized()
@@ -2120,3 +2300,56 @@ def _ensure_batch_fanout_columns(conn: Any) -> None:
             "ALTER TABLE vn_asset_idempotency_records "
             "ADD COLUMN status TEXT NOT NULL DEFAULT 'completed'"
         )
+
+
+def _ensure_recipe_outcome_columns(conn: Any) -> None:
+    columns = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(vn_asset_generation_recipes)").fetchall()
+    }
+    if "outcome_status" not in columns:
+        conn.execute(
+            "ALTER TABLE vn_asset_generation_recipes "
+            "ADD COLUMN outcome_status TEXT NOT NULL DEFAULT 'planned'"
+        )
+    if "item_id" not in columns:
+        conn.execute("ALTER TABLE vn_asset_generation_recipes ADD COLUMN item_id INTEGER")
+
+
+def _refresh_batch_outcome_counts(conn: Any, batch_id: int) -> None:
+    counts = conn.execute(
+        """
+        SELECT COUNT(*) AS total,
+               SUM(CASE WHEN outcome_status = 'completed' THEN 1 ELSE 0 END) AS completed,
+               SUM(CASE WHEN outcome_status = 'failed' THEN 1 ELSE 0 END) AS failed
+        FROM vn_asset_generation_recipes WHERE batch_id = ?
+        """,
+        (batch_id,),
+    ).fetchone()
+    completed = int(counts["completed"] or 0)
+    failed = int(counts["failed"] or 0)
+    total = int(counts["total"] or 0)
+    conn.execute(
+        """
+        UPDATE vn_asset_batches
+        SET completed_count = ?, failed_count = ?,
+            status = CASE
+                WHEN status IN ('cancelled', 'failed') THEN status
+                WHEN ? > 0 THEN 'failed'
+                WHEN ? > 0 AND ? >= ? THEN 'completed'
+                ELSE 'processing'
+            END,
+            completed_at = CASE WHEN status NOT IN ('cancelled', 'failed')
+                AND ? > 0 AND ? >= ? AND ? = 0
+                THEN CURRENT_TIMESTAMP ELSE completed_at END,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (
+            completed, failed,
+            failed,
+            total, completed, total,
+            total, completed, total, failed,
+            batch_id,
+        ),
+    )

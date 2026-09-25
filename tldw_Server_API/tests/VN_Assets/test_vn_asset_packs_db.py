@@ -50,6 +50,23 @@ def test_existing_batch_table_gains_recipe_version(chacha_db: CharactersRAGDB) -
     assert "recipe_version" in columns
 
 
+def test_existing_recipe_table_gains_outcome_columns(chacha_db: CharactersRAGDB) -> None:
+    chacha_db.execute_query(
+        "CREATE TABLE vn_asset_generation_recipes ("
+        "batch_id INTEGER, slot_id INTEGER, variant_index INTEGER, recipe_json TEXT)"
+    )
+
+    ensure_vn_asset_tables(chacha_db)
+
+    columns = {
+        row[1]
+        for row in chacha_db.execute_query(
+            "PRAGMA table_info(vn_asset_generation_recipes)"
+        ).fetchall()
+    }
+    assert {"outcome_status", "item_id"}.issubset(columns)
+
+
 def test_duplicate_recipe_rolls_back_batch(chacha_db: CharactersRAGDB) -> None:
     character_id = chacha_db.add_character_card({"name": "VN Primary"})
     repo = VNAssetPacksRepository.initialized(chacha_db)
@@ -66,6 +83,68 @@ def test_duplicate_recipe_rolls_back_batch(chacha_db: CharactersRAGDB) -> None:
         )
 
     assert repo.list_batches(pack["id"]) == []
+
+
+def test_failed_variant_cannot_publish_reserved_item(chacha_db: CharactersRAGDB) -> None:
+    character_id = chacha_db.add_character_card({"name": "VN Primary"})
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    pack = repo.create_pack(owner_user_id=1, primary_character_id=character_id, title="Pack")
+    slot = repo.create_slot(pack_id=pack["id"], asset_type="sprite", slot_key="primary")
+    batch = repo.create_batch(
+        pack_id=pack["id"], requested_by_user_id=1, total_variants=1,
+        recipes=[{"slot_id": slot["id"], "variant_index": 0, "recipe": {"prompt": "frozen"}}],
+    )
+    item = repo.reserve_variant_item(
+        batch_id=batch["id"], slot_id=slot["id"], variant_index=0,
+        item_fields={"pack_id": pack["id"], "generated_file_id": 17},
+    )
+    assert repo.list_items(pack["id"]) == []
+    assert repo.count_items_for_generation(pack["id"]) == 1
+    repo.fail_variant(
+        batch_id=batch["id"], slot_id=slot["id"], variant_index=0, error="failed"
+    )
+
+    with pytest.raises(ValueError, match="vn_asset_variant_failed"):
+        repo.complete_variant(
+            batch_id=batch["id"], slot_id=slot["id"],
+            variant_index=0, item_id=item["id"],
+        )
+
+    assert repo.get_item(item["id"])["review_status"] == "hidden"
+    assert repo.list_items(pack["id"]) == []
+    assert repo.count_items_for_generation(pack["id"]) == 0
+    assert repo.get_batch(batch["id"])["failed_count"] == 1
+
+
+def test_partial_variant_failure_keeps_completed_slot_reviewable(
+    chacha_db: CharactersRAGDB,
+) -> None:
+    character_id = chacha_db.add_character_card({"name": "VN Primary"})
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    pack = repo.create_pack(owner_user_id=1, primary_character_id=character_id, title="Pack")
+    slot = repo.create_slot(pack_id=pack["id"], asset_type="sprite", slot_key="primary")
+    batch = repo.create_batch(
+        pack_id=pack["id"], requested_by_user_id=1, total_variants=2,
+        recipes=[
+            {"slot_id": slot["id"], "variant_index": index, "recipe": {"prompt": "frozen"}}
+            for index in range(2)
+        ],
+    )
+    item = repo.reserve_variant_item(
+        batch_id=batch["id"], slot_id=slot["id"], variant_index=0,
+        item_fields={"pack_id": pack["id"], "generated_file_id": 17},
+    )
+    repo.complete_variant(
+        batch_id=batch["id"], slot_id=slot["id"], variant_index=0, item_id=item["id"]
+    )
+
+    repo.fail_variant(
+        batch_id=batch["id"], slot_id=slot["id"], variant_index=1, error="provider failed"
+    )
+
+    assert repo.get_slot(slot["id"])["status"] == "reviewing"
+    assert repo.get_batch(batch["id"])["completed_count"] == 1
+    assert repo.get_batch(batch["id"])["failed_count"] == 1
 
 
 def test_ensure_vn_asset_tables_rejects_non_sqlite_before_transaction() -> None:
