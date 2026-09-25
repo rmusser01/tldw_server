@@ -16,6 +16,37 @@ const slots = [
 ];
 
 describe('GenerationMonitor', () => {
+  it('offers a new start instead of retry for a legacy batch without a recipe', () => {
+    render(
+      <GenerationMonitor
+        generation={{ batch_id: 4, status: 'failed', recipe_available: false, selected_slot_ids: [1] }}
+        slots={[{ ...slots[0], status: 'failed', last_error: 'worker interrupted' }]}
+        onStartGeneration={vi.fn()}
+        onRetrySlot={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: 'Retry sprite.primary' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled();
+    expect(screen.getByText('Original settings unavailable. Start generation to use current settings.')).toBeVisible();
+  });
+
+  it('keeps Retry available when an older failed slot has its own recipe', () => {
+    render(
+      <GenerationMonitor
+        generation={{
+          batch_id: 4, status: 'failed', recipe_available: false,
+          selected_slot_ids: [1], failed_slot_batch_ids: { 1: 3 },
+        }}
+        slots={[{ ...slots[0], status: 'failed', last_error: 'worker interrupted' }]}
+        onStartGeneration={vi.fn()}
+        onRetrySlot={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: 'Retry sprite.primary' })).toBeEnabled();
+  });
+
   it('only allows generation start outside active lifecycle states', async () => {
     const user = userEvent.setup();
     const onStartGeneration = vi.fn();

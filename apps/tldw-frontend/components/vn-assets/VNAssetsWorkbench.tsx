@@ -303,13 +303,17 @@ export default function VNAssetsWorkbench() {
     generationCommandPending.current.add(selectedPack.id);
     ++refreshRevision.current;
     const packId = selectedPack.id;
-    const operation = `${packId}:${slotId ?? 'start'}`;
+    const sourceBatchId = slotId === undefined ? null : generation?.failed_slot_batch_ids?.[slotId];
+    const operation = `${packId}:${slotId ?? 'start'}:${sourceBatchId ?? 'latest'}`;
     const idempotencyKey = generationKeys.current.get(operation) ?? createVNAssetIdempotencyKey('vn-generation');
     generationKeys.current.set(operation, idempotencyKey);
     setPendingCommands((previous) => ({ ...previous, [packId]: { kind: slotId === undefined ? 'start' : 'retry', slotId } }));
     setError(null);
     try {
-      const request = { idempotency_key: idempotencyKey };
+      const request = {
+        idempotency_key: idempotencyKey,
+        ...(slotId !== undefined && sourceBatchId != null ? { source_batch_id: sourceBatchId } : {}),
+      };
       const nextGeneration = slotId === undefined
         ? await startVNAssetGeneration(packId, request)
         : await retryVNAssetSlot(packId, slotId, request);
@@ -325,7 +329,7 @@ export default function VNAssetsWorkbench() {
     } finally {
       finishGenerationCommand(packId);
     }
-  }, [selectedPack, loadedPackId, finishGenerationCommand]);
+  }, [selectedPack, loadedPackId, generation, finishGenerationCommand]);
 
   const handleCancelGeneration = useCallback(async () => {
     if (!selectedPack || generationCommandPending.current.has(selectedPack.id)) return;

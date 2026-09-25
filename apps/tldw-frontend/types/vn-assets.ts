@@ -110,6 +110,7 @@ export interface VNAssetItem {
 
 export interface VNAssetGenerationRequest {
   idempotency_key?: string;
+  source_batch_id?: number | null;
   slot_ids?: number[];
   variant_count?: number | null;
   options?: Record<string, unknown>;
@@ -131,6 +132,10 @@ export interface VNAssetGenerationPreflight {
 
 export interface VNAssetGenerationStatus {
   batch_id?: number | null;
+  source_batch_id?: number | null;
+  recipe_available?: boolean | null;
+  selected_slot_ids?: number[];
+  failed_slot_batch_ids?: Record<number, number>;
   job_batch_id?: string | null;
   status: string;
   total_slots?: number;

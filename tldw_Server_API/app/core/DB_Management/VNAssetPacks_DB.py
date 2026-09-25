@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS vn_asset_slots (
     depends_on_slot_id INTEGER REFERENCES vn_asset_slots(id),
     status TEXT NOT NULL DEFAULT 'planned',
     last_error TEXT,
+    last_failed_batch_id INTEGER,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(pack_id, slot_key)
@@ -106,6 +107,9 @@ CREATE TABLE IF NOT EXISTS vn_asset_batches (
     started_at DATETIME,
     completed_at DATETIME,
     options_json TEXT NOT NULL DEFAULT '{}',
+    recipe_json TEXT,
+    execution_recipe_json TEXT,
+    source_batch_id INTEGER,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -259,6 +263,7 @@ def ensure_vn_asset_tables(db: CharactersRAGDB) -> None:
         for statement in VN_ASSET_SCHEMA_STATEMENTS:
             conn.execute(statement)
         _ensure_batch_fanout_columns(conn)
+        _ensure_slot_failure_column(conn)
 
 
 class VNAssetPacksRepository:
@@ -1695,6 +1700,9 @@ class VNAssetPacksRepository:
         planned_count: int | None = None,
         job_batch_id: str | None = None,
         options: Mapping[str, Any] | None = None,
+        recipe: Mapping[str, Any] | None = None,
+        execution_recipe: Mapping[str, Any] | None = None,
+        source_batch_id: int | None = None,
     ) -> dict[str, Any]:
         self._ensure_schema_initialized()
         with self.db.transaction() as conn:
@@ -1708,9 +1716,12 @@ class VNAssetPacksRepository:
                     total_slots,
                     total_variants,
                     planned_count,
-                    options_json
+                    options_json,
+                    recipe_json,
+                    execution_recipe_json,
+                    source_batch_id
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     pack_id,
@@ -1721,12 +1732,84 @@ class VNAssetPacksRepository:
                     total_variants,
                     total_variants if planned_count is None else planned_count,
                     json.dumps(dict(options or {})),
+                    json.dumps(dict(recipe)) if recipe is not None else None,
+                    json.dumps(dict(execution_recipe)) if execution_recipe is not None else None,
+                    source_batch_id,
                 ),
             )
             batch_id = cursor.lastrowid
         batch = self.get_batch(batch_id)
         if batch is None:
             raise RuntimeError("created_batch_not_found")
+        return batch
+
+    def set_execution_recipe_if_absent(
+        self, batch_id: int, recipe: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            conn.execute(
+                """UPDATE vn_asset_batches SET execution_recipe_json = ?,
+                   updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ? AND execution_recipe_json IS NULL""",
+                (json.dumps(dict(recipe)), batch_id),
+            )
+        batch = self.get_batch(batch_id)
+        if batch is None:
+            raise ValueError("vn_asset_batch_not_found")
+        return batch
+
+    def complete_batch_fanout(
+        self,
+        batch_id: int,
+        *,
+        planned_count: int,
+        enqueued_count: int,
+        total_slots: int,
+    ) -> dict[str, Any]:
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            conn.execute(
+                """UPDATE vn_asset_batches
+                   SET status = CASE
+                       WHEN status IN ('queued', 'enqueued')
+                         OR (status = 'failed' AND enqueue_error IS NOT NULL AND failed_count = 0)
+                       THEN 'enqueued' ELSE status END,
+                       planned_count = ?, enqueued_count = ?, enqueue_error = NULL,
+                       total_slots = ?, total_variants = ?, updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ?""",
+                (planned_count, enqueued_count, total_slots, planned_count, batch_id),
+            )
+        batch = self.get_batch(batch_id)
+        if batch is None:
+            raise ValueError("vn_asset_batch_not_found")
+        return batch
+
+    def fail_batch_fanout_if_active(
+        self,
+        batch_id: int,
+        *,
+        error: str,
+        planned_count: int | None = None,
+        enqueued_count: int | None = None,
+    ) -> dict[str, Any]:
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            conn.execute(
+                """UPDATE vn_asset_batches
+                   SET status = 'failed',
+                       planned_count = COALESCE(?, planned_count),
+                       enqueued_count = COALESCE(?, enqueued_count),
+                       enqueue_error = ?, updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ? AND (
+                       status IN ('queued', 'enqueued', 'processing')
+                       OR (status = 'failed' AND enqueue_error IS NOT NULL AND failed_count = 0)
+                   )""",
+                (planned_count, enqueued_count, error, batch_id),
+            )
+        batch = self.get_batch(batch_id)
+        if batch is None:
+            raise ValueError("vn_asset_batch_not_found")
         return batch
 
     def get_batch(self, batch_id: int) -> dict[str, Any] | None:
@@ -2024,6 +2107,7 @@ def _slot_update_statement(field_name: str) -> str | None:
         ),
         "status": "UPDATE vn_asset_slots SET status = ? WHERE id = ?",
         "last_error": "UPDATE vn_asset_slots SET last_error = ? WHERE id = ?",
+        "last_failed_batch_id": "UPDATE vn_asset_slots SET last_failed_batch_id = ? WHERE id = ?",
     }
     return statements.get(field_name)
 
@@ -2041,6 +2125,9 @@ def _ensure_batch_fanout_columns(conn: Any) -> None:
         "planned_count": "ALTER TABLE vn_asset_batches ADD COLUMN planned_count INTEGER NOT NULL DEFAULT 0",
         "enqueued_count": "ALTER TABLE vn_asset_batches ADD COLUMN enqueued_count INTEGER NOT NULL DEFAULT 0",
         "enqueue_error": "ALTER TABLE vn_asset_batches ADD COLUMN enqueue_error TEXT",
+        "recipe_json": "ALTER TABLE vn_asset_batches ADD COLUMN recipe_json TEXT",
+        "execution_recipe_json": "ALTER TABLE vn_asset_batches ADD COLUMN execution_recipe_json TEXT",
+        "source_batch_id": "ALTER TABLE vn_asset_batches ADD COLUMN source_batch_id INTEGER",
     }
     for column_name, statement in additions.items():
         if column_name not in columns:
@@ -2055,3 +2142,9 @@ def _ensure_batch_fanout_columns(conn: Any) -> None:
             "ALTER TABLE vn_asset_idempotency_records "
             "ADD COLUMN status TEXT NOT NULL DEFAULT 'completed'"
         )
+
+
+def _ensure_slot_failure_column(conn: Any) -> None:
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(vn_asset_slots)").fetchall()}
+    if "last_failed_batch_id" not in columns:
+        conn.execute("ALTER TABLE vn_asset_slots ADD COLUMN last_failed_batch_id INTEGER")
