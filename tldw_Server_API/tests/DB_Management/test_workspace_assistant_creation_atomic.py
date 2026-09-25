@@ -128,7 +128,7 @@ def test_locking_getter_rejects_finished_transaction(creation_db: CharactersRAGD
             creation_db.get_persona_profile("persona-a", user_id="user-1", conn=conn, for_update=True)
 
 
-@pytest.mark.parametrize("db_factory", ["sqlite"], indirect=True)
+@pytest.mark.parametrize("db_factory", ["sqlite", pytest.param("postgres", marks=pytest.mark.postgres)], indirect=True)
 def test_factory_failure_rolls_back_trusted_origin_and_all_artifacts(
     creation_db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -149,9 +149,10 @@ def test_factory_failure_rolls_back_trusted_origin_and_all_artifacts(
             assistant_startup=AssistantStartup(source="explicit"),
             initial_messages=[{"sender": "user", "content": "Initial message"}],
         )
-    counts = tuple(db.execute_query(query).fetchone()[0] for query in (
-        "SELECT COUNT(*) FROM conversations", "SELECT COUNT(*) FROM messages",
-        "SELECT COUNT(*) FROM conversation_settings", "SELECT COUNT(*) FROM conversation_behavior_snapshots",
+    counts = tuple(db.execute_query(query).fetchone()["cnt"] for query in (
+        "SELECT COUNT(*) AS cnt FROM conversations", "SELECT COUNT(*) AS cnt FROM messages",
+        "SELECT COUNT(*) AS cnt FROM conversation_settings",
+        "SELECT COUNT(*) AS cnt FROM conversation_behavior_snapshots",
     ))
     assert counts == (0, 0, 0, 0)
 

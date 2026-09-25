@@ -72,14 +72,14 @@ def test_choice_updates_are_atomic_and_survive_restart(db_factory: Callable[[], 
     assert reopened.get_workspace(fresh["id"], include_deleted=True)[FLAG] is True
 
 
-def test_v67_upgrade_preserves_storage_and_conservatively_opts_out(
+def test_pre_optout_upgrade_preserves_storage_and_conservatively_opts_out(
     db_factory: Callable[[], CharactersRAGDB],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Build genuine v67 storage, then migrate through the registered initializer."""
+    """Build storage at each backend's preceding version, then migrate."""
     with monkeypatch.context() as historical:
-        historical.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 67)
-        historical.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 67)
+        historical.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 68)
+        historical.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 72)
         legacy = db_factory()
     values = [None, '{"assistant_kind":"persona","assistant_id":"persona-1"}', "broken-json", "null", "[]", ""]
     with legacy.transaction() as conn:
@@ -159,10 +159,10 @@ def test_cached_legacy_writer_is_not_fenced_by_the_upgrade(
     db_factory: Callable[[], CharactersRAGDB],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Demonstrate why all old writers must stop before the offline v68 upgrade."""
+    """Demonstrate why old writers must stop before the offline opt-out upgrade."""
     with monkeypatch.context() as historical:
-        historical.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 67)
-        historical.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 67)
+        historical.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 68)
+        historical.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 72)
         cached_legacy = db_factory()
     with cached_legacy.transaction() as conn:
         conn.execute(
@@ -180,8 +180,8 @@ def test_cached_legacy_writer_is_not_fenced_by_the_upgrade(
     cached_legacy.close_all_connections()
     upgraded.close_all_connections()
     with monkeypatch.context() as historical:
-        historical.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 67)
-        historical.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 67)
+        historical.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 68)
+        historical.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 72)
         with pytest.raises(CharactersRAGDBError, match="newer than supported by code"):
             db_factory()
 
@@ -190,15 +190,15 @@ def test_failed_upgrade_rolls_back_column_and_backfill(
     db_factory: Callable[[], CharactersRAGDB],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A failure after backfill must leave a valid, unchanged v67 database."""
+    """A failed backfill must leave the preceding schema unchanged."""
     with monkeypatch.context() as historical:
-        historical.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 67)
-        historical.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 67)
+        historical.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 68)
+        historical.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 72)
         legacy = db_factory()
     with legacy.transaction() as conn:
         conn.execute("INSERT INTO workspaces (id, name, client_id) VALUES (?, ?, ?)", ("legacy", "Legacy", "user-1"))
     method = (
-        "_migrate_from_v67_to_v68_postgres" if legacy.backend_type.value == "postgresql" else "_migrate_from_v67_to_v68"
+        "_migrate_from_v72_to_v73_postgres" if legacy.backend_type.value == "postgresql" else "_migrate_from_v68_to_v69"
     )
     migrate = getattr(CharactersRAGDB, method)
     legacy.close_all_connections()
@@ -213,8 +213,8 @@ def test_failed_upgrade_rolls_back_column_and_backfill(
         with pytest.raises(CharactersRAGDBError, match="injected upgrade failure"):
             db_factory()
     with monkeypatch.context() as historical:
-        historical.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 67)
-        historical.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 67)
+        historical.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 68)
+        historical.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 72)
         rolled_back = db_factory()
     row = dict(rolled_back.execute_query("SELECT * FROM workspaces WHERE id = ?", ("legacy",)).fetchone())
     assert FLAG not in row
@@ -231,7 +231,7 @@ def test_sqlite_initialization_failure_does_not_commit_optout(
     """Later legacy checks/helpers must succeed before the opt-out migration commits."""
     path = tmp_path / "late-failure.db"
     with monkeypatch.context() as historical:
-        historical.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 67)
+        historical.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 68)
         legacy = CharactersRAGDB(path, client_id="user-1")
     with legacy.transaction() as conn:
         conn.execute("INSERT INTO workspaces (id, name, client_id) VALUES (?, ?, ?)", ("legacy", "Legacy", "user-1"))
@@ -253,7 +253,7 @@ def test_sqlite_initialization_failure_does_not_commit_optout(
     with sqlite3.connect(path) as conn:
         assert conn.execute(
             "SELECT version FROM db_schema_version WHERE schema_name = ?", (CharactersRAGDB._SCHEMA_NAME,)
-        ).fetchone() == (67,)
+        ).fetchone() == (68,)
         assert FLAG not in {row[1] for row in conn.execute("PRAGMA table_info(workspaces)")}
         assert conn.execute(
             "SELECT assistant_defaults_json, version FROM workspaces WHERE id = 'legacy'"
@@ -267,7 +267,7 @@ def test_sqlite_compatible_initializer_can_finish_during_version_probe(
     """Recheck a compatible committed upgrade without rejecting or backfilling twice."""
     path = tmp_path / "initializer-race.db"
     with monkeypatch.context() as historical:
-        historical.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 67)
+        historical.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 68)
         legacy = CharactersRAGDB(path, client_id="user-1")
         legacy.close_all_connections()
     initialize = CharactersRAGDB._initialize_schema_sqlite_legacy

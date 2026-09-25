@@ -119,6 +119,8 @@ TASK-13245.3 delivered the [focused local startup provenance implementation plan
 
 **2B final ref refresh (2026-09-14):** Server dev `1e0bb6feddab5a9e4be794ea44ea21b9ea29bf30` and Chatbook dev `87a3de4493d7c78d0263c184ccaf2f590c9c277e`. Since planning refs `ebdeeac384c58559fa90fd3a5f79f5262ae190d5` / `4631b60f8dd9623fc55bf16f4a37e29fcb1240c7`, changes are server VZ drill tooling/docs and Chatbook Notes/import/sync, Library/console-access UI, first-run and release files. The compared Chat/Workspace/Persona contract paths remain unchanged. Server dev remains schema v67; this stack uses v69 after 2A v68. No rebase or Chatbook checkout modifications. Preserve the server's approved unavailable-default fail-closed behavior and the existing custom-prompt difference from Chatbook; source comparison is not Chatbook runtime or full parity certification.
 
+**2026-09-25 integration:** The complete stack is being rebased onto server dev `a2f5e1b816cfe189db7f553a1ccf8d481dc2edbe` for PR #2963. Dev now has SQLite v68 and PostgreSQL v72; the rebased opt-out and provenance migrations reserve SQLite v69/v70 and PostgreSQL v73/v74. Older validation/version lines above and below describe the original reviewed stack, not the current integration result. TASK-13245.5 tracks the new test and review gates.
+
 ### Remaining Stage 2 Scope
 
 **Files:**

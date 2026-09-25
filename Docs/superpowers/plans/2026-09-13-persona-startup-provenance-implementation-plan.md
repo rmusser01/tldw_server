@@ -38,6 +38,8 @@ Fresh planning baseline: **71 passed, six warnings** across `tests/Workspaces/te
 
 **Final execution refresh (2026-09-14):** Server dev `1e0bb6feddab5a9e4be794ea44ea21b9ea29bf30` adds only VZ drill tooling/docs since `ebdeeac384c58559fa90fd3a5f79f5262ae190d5`; Chatbook dev `87a3de4493d7c78d0263c184ccaf2f590c9c277e` changes Notes/import/sync, Library/console-access UI, first-run and release files since `4631b60f8dd9623fc55bf16f4a37e29fcb1240c7`. The compared Chat/Persona/Workspace contract paths are unchanged. Server dev still uses v67; the stack has registered v68-to-v69 migrations for 2B. No Chatbook checkout changes or rebase were made. Planning PR #2961 was rechecked open/draft at unchanged `8876d2d187`; implementation [draft PR #2963](https://github.com/rmusser01/tldw_server/pull/2963) targets that planning branch.
 
+**Dev integration refresh (2026-09-25):** The complete prerequisite stack was replayed locally onto server dev `a2f5e1b816cfe189db7f553a1ccf8d481dc2edbe`. Dev now owns SQLite v68 and PostgreSQL v72. Stage 2A opt-out uses SQLite v69 and PostgreSQL v73; Stage 2B provenance uses SQLite v70 and PostgreSQL v74. The 2026-09-14 validation numbers and version descriptions below remain historical evidence from the earlier base; the current integration gates are tracked in `IMPLEMENTATION_PLAN_pr2963_dev_rebase_20260925.md` and TASK-13245.5.
+
 Chatbook's `resolve_new_console_assistant` still bypasses defaults for supplied custom prompts and degrades unavailable defaults to an untracked assistant with a notice. Preserve the approved server difference: invalid/disabled configured defaults fail closed. No copying local IDs or prompt snapshots. Source comparison is not a Chatbook runtime test or full parity certification.
 
 ## File Responsibilities
@@ -139,7 +141,7 @@ def test_legacy_or_invalid_storage_has_unknown_origin(raw):
 
 Extend `add_conversation(conv_data, *, conn=None, assistant_startup: AssistantStartup | None = None)` in store/façade. Stage 3 adds and forwards the Character factory's trusted keyword alongside creation orchestration; that requirement is unchanged, but is not a Stage 2 deliverable. A separate typed argument is a trusted internal boundary, not public authorization. Reject `assistant_startup` and `assistant_startup_json` keys in `conv_data` or ordinary `update_data`, including null; imports must strip those fields at their explicit mapping boundary. New callers with no trusted keyword store NULL/unknown. Do not add a provenance keyword to Sync upsert.
 
-- [x] Create a two-backend fixture using the pattern in `test_workspace_persona_optout_v68.py` (`pg_database_config` via `request.getfixturevalue`, fresh handles, close all connections). Write genuine pre-migration upgrade, fresh schema, oversized direct storage, failed migration rollback, restart and unknown legacy-row tests. Observe RED before adding the migration.
+- [x] Create a two-backend fixture using the pattern in `test_workspace_persona_optout_v69.py` (`pg_database_config` via `request.getfixturevalue`, fresh handles, close all connections). Write genuine pre-migration upgrade, fresh schema, oversized direct storage, failed migration rollback, restart and unknown legacy-row tests. Observe RED before adding the migration.
 - [x] Register both migrations and update the SQLite post-v67 tail without moving legacy `executescript` helpers after the new transaction. Re-run 2A late-failure/rollback/interleaving tests. Stored history must survive Workspace deletion, hence no Workspace FK on the origin.
 - [x] Add typed insertion and ensure the encoded origin is inserted once with identity. Test outer-transaction rollback leaves no conversation or origin. Decode only through the bounded parser on reads; public/raw projection handling is Stage 4.
 
@@ -294,7 +296,7 @@ The HTTP version must seed a real conversation then assert its stored origin is 
 python -m pytest \
   tldw_Server_API/tests/Chat/test_assistant_startup.py \
   tldw_Server_API/tests/DB_Management/test_conversation_assistant_startup.py \
-  tldw_Server_API/tests/DB_Management/test_workspace_persona_optout_v68.py \
+  tldw_Server_API/tests/DB_Management/test_workspace_persona_optout_v69.py \
   tldw_Server_API/tests/Workspaces/test_workspace_assistant_creation.py \
   tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py \
   tldw_Server_API/tests/Workspaces/test_workspace_assistant_provenance.py \
