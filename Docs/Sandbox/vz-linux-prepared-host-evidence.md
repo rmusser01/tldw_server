@@ -28,6 +28,24 @@ tracker. Host reboot and launchd validation are explicit manual/operator-gated
 drills; this tracker records whether those drills were run or intentionally
 skipped for a prepared-host evidence packet.
 
+## 2026-09-25: Missing-Agent Startup Drill Preflight (Not Accepted)
+
+- TASK-13243.9 adds a test-only guest launcher and a fifth case to the manual
+  failure workflow. Focused portable checks: 167 passed, five live tests
+  deselected; Black, Ruff, shell syntax, and Bandit passed.
+- The previously accepted source bundle at
+  `~/Library/Logs/tldw/vz-launchd-recovery/20260913-1905/source-bundle-final`
+  currently lacks `rootfs.img`, although its manifest requires that file.
+  The signed helper still verifies, but this host cannot boot a VM from the
+  incomplete bundle. The earlier accepted workspace evidence remains historical
+  evidence and does not establish acceptance for this new drill.
+- No real VM run, guest proof, negative control, recovery, cleanup, or source
+  integrity result is claimed for TASK-13243.9. Restore or build and validate a
+  bootable Debian arm64 bundle, then run the opt-in workflow into a new private
+  evidence directory. Record its exact input and helper hashes, ten case results,
+  resource cleanup, and canonical source hashes here before calling the task
+  complete.
+
 ## Evidence Packet
 
 Each prepared-host evidence packet should include these fields.
