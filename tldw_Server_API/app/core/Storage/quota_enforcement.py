@@ -16,7 +16,7 @@ from tldw_Server_API.app.core.AuthNZ.repos.storage_quotas_repo import (
 )
 
 
-def _quota_fail_open_enabled() -> bool:
+def quota_fail_open_enabled() -> bool:
     """Return True when quota check errors should allow writes."""
     value = os.getenv("STORAGE_QUOTA_FAIL_OPEN", "0").strip().lower()
     return value in {"1", "true", "yes", "on"}
@@ -70,7 +70,7 @@ async def check_storage_quota(
         elif team_id is not None:
             status = await repo.check_quota_status(team_id=team_id)
     except Exception as exc:
-        fail_open = _quota_fail_open_enabled()
+        fail_open = quota_fail_open_enabled()
         logger.warning(
             "Storage quota check failed for user_id={}: {}",
             user_id,
@@ -78,6 +78,7 @@ async def check_storage_quota(
         )
         return {
             "allowed": fail_open,
+            "unavailable": True,
             "used_mb": 0.0,
             "quota_mb": None,
             "remaining_mb": None,

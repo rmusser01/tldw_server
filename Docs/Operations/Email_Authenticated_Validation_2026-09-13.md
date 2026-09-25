@@ -73,6 +73,10 @@ proxies and deployed configuration are not certified. The tests do not exercise
 password/JWT login or authenticated upload quota/billing enforcement. Upload
 parsing/persistence retains its earlier separate synthetic integration evidence.
 
+TASK-13256 subsequently added authenticated upload and organization storage-quota
+tests. See `Docs/Operations/Email_Authenticated_Upload_Validation_2026-09-25.md`
+for that narrower, newer evidence and its remaining billing/deployment limits.
+
 Multi-user SQLite is used only as an isolated test configuration. Production
 multi-user deployments require PostgreSQL; PostgreSQL RLS/migration/runtime parity
 remains unverified here. Native PST/OST and the 1M-message performance gate also

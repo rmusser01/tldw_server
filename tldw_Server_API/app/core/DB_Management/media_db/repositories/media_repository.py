@@ -121,7 +121,10 @@ class MediaRepository:
             dedupe_url_candidates = (url,)
 
         email_metadata: dict[str, Any] | None = None
-        email_tenant = str(owner_user_id if owner_user_id is not None else client_id)
+        email_owner_lookup = str(owner_user_id if owner_user_id is not None else client_id)
+        email_tenant = email_owner_lookup
+        if media_type == "email" and owner_user_id is None:
+            email_tenant = db._resolve_email_tenant_id()
         original_dedupe_candidates = dedupe_url_candidates
         if media_type == "email":
             try:
@@ -303,7 +306,7 @@ class MediaRepository:
                             f"SELECT {selected} FROM Media m WHERE m.url = ? "  # nosec B608
                             "AND m.type = 'email' AND m.deleted = 0 AND m.system_operation_id IS NULL "
                             "AND COALESCE(CAST(m.owner_user_id AS TEXT), m.client_id) = ? LIMIT 1",
-                            (url, email_tenant),
+                            (url, email_owner_lookup),
                         )
                         if row:
                             return row
@@ -326,7 +329,7 @@ class MediaRepository:
                                 "AND m.system_operation_id IS NULL "
                                 "AND COALESCE(CAST(m.owner_user_id AS TEXT), m.client_id) = ? LIMIT 1",
                                 (email_tenant, email_metadata["email_source_provider"], email_metadata["source_key"],
-                                 str(value).strip(), email_tenant),
+                                 str(value).strip(), email_owner_lookup),
                             )
                             if row:
                                 return row
@@ -342,7 +345,7 @@ class MediaRepository:
                                 "FROM Media m WHERE m.url = ? AND m.type = 'email' AND m.deleted = 0 "
                                 "AND m.system_operation_id IS NULL "
                                 "AND COALESCE(CAST(m.owner_user_id AS TEXT), m.client_id) = ?",
-                                (old_url, email_tenant),
+                                (old_url, email_owner_lookup),
                             )
                             for candidate in candidates:
                                 try:

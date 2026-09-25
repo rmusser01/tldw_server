@@ -70,6 +70,19 @@ without overriding auth or DB dependencies. See
 negative credential checks, main-app test-mode routing evidence and remaining
 startup/upload-quota/PostgreSQL limits.
 
+TASK-13256 extends the local check through the production `/media/add` router
+with real API-key scope, RBAC and organization storage-quota dependencies. Use
+`Docs/Operations/Email_Authenticated_Upload_Validation_2026-09-25.md` for the
+synthetic fixture, results and remaining deployment limits. The quota guard
+returns 503 on setup/check errors by default; `STORAGE_QUOTA_FAIL_OPEN=1` is an
+explicit override. An allowed upload near its storage limit returns
+`X-Storage-Warning`; billing limit headers also reach the final response.
+For a user in multiple organizations, pass the intended organization's
+`X-TLDW-Org-Id` on upload and email search/detail requests; membership is
+validated, and the selected organization is used for quota, billing and content.
+Without an explicit selector, a validated JWT active organization takes priority
+over the first membership. An org-scoped API key cannot select outside its scope.
+
 ## Optional Gmail Validation — Deferred
 
 Nothing below is a prerequisite for core file-upload validation. Before future

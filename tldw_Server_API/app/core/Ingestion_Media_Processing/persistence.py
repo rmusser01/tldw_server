@@ -26,26 +26,27 @@ from tldw_Server_API.app.core.Claims_Extraction.claims_utils import (
 )
 from tldw_Server_API.app.core.config import loaded_config_data, settings
 from tldw_Server_API.app.core.DB_Management.DB_Manager import mark_media_as_processed
-from tldw_Server_API.app.core.DB_Management.media_db.dedupe_urls import (
-    media_dedupe_url_candidates,
-    normalize_media_dedupe_url,
-)
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     create_media_database,
     get_media_repository,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.dedupe_urls import (
+    media_dedupe_url_candidates,
+    normalize_media_dedupe_url,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     ConflictError,
     DatabaseError,
     InputError,
 )
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.email_persisted_content import (
-    read_persisted_email_content,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.repositories.media_files_repository import MediaFilesRepository
 from tldw_Server_API.app.core.DB_Management.media_db.legacy_transcripts import (
     upsert_transcript,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.repositories.media_files_repository import MediaFilesRepository
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.email_persisted_content import (
+    read_persisted_email_content,
+)
+from tldw_Server_API.app.core.DB_Management.scope_context import ScopeContext, get_scope, scoped_context
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
     async_resolve_chunking_options_and_plan,
     prepare_chunking_options_dict,
@@ -135,13 +136,25 @@ def _with_media_db_session(
     db_path: str,
     client_id: str,
     operation: Callable[[MediaDatabase], Any],
+    scope: ScopeContext | None = None,
 ) -> Any:
     worker_db = create_media_database(
         client_id,
         db_path=db_path,
     )
     try:
-        return operation(worker_db)
+        if scope is None:
+            return operation(worker_db)
+        with scoped_context(
+            user_id=scope.user_id,
+            org_ids=scope.org_ids,
+            team_ids=scope.team_ids,
+            active_org_id=scope.active_org_id,
+            active_team_id=scope.active_team_id,
+            is_admin=scope.is_admin,
+            session_role=scope.session_role,
+        ):
+            return operation(worker_db)
     finally:
         worker_db.close_connection()
 
@@ -3182,6 +3195,9 @@ async def add_media_orchestrate(
             # --- 6. Process Media based on Type ---
             db_path_for_workers = db.db_path_str
             client_id_for_workers = db.client_id
+            email_tenant_id_for_workers = (
+                db._resolve_email_tenant_id() if form_data.media_type == "email" else None
+            )
 
             logger.info(
                 "Processing {} items of type '{}'",
@@ -3222,6 +3238,7 @@ async def add_media_orchestrate(
                             loop=loop,
                             db_path=db_path_for_workers,
                             client_id=client_id_for_workers,
+                            email_tenant_id=email_tenant_id_for_workers,
                             user_id=(current_user.id if hasattr(current_user, "id") else None),
                             max_download_bytes=max_download_bytes,
                             allowed_download_content_types=allowed_download_content_types,
@@ -4858,6 +4875,7 @@ async def process_document_like_item(
     loop: asyncio.AbstractEventLoop,
     db_path: str,
     client_id: str,
+    email_tenant_id: str | None = None,
     user_id: int | None = None,
     cancel_check: Callable[[], bool] | None = None,
     max_download_bytes: int | None = None,
@@ -5561,6 +5579,7 @@ async def process_document_like_item(
             path_kind="url" if is_url else "upload",
             db_path=db_path,
             client_id=client_id,
+            email_tenant_id=email_tenant_id,
             loop=loop,
             claims_context=claims_context,
         )
@@ -5596,11 +5615,14 @@ async def persist_doc_item_and_children(
     client_id: str,
     loop: Any,
     claims_context: dict[str, Any] | None,
+    email_tenant_id: str | None = None,
 ) -> None:
     """
     Persist a single document/email item (and any children) produced by the /add
     orchestration, mirroring the previous post-processing DB logic.
     """
+    resolved_email_tenant_id = email_tenant_id or str(client_id)
+    email_scope = get_scope() if media_type == "email" else None
     content_for_db = final_result.get("content", "")
     analysis_for_db = final_result.get("summary") or final_result.get("analysis")
     metadata_for_db = final_result.get("metadata", {}) or {}
@@ -5796,13 +5818,13 @@ async def persist_doc_item_and_children(
                         if _is_email_native_persist_enabled():
                             try:
                                 saved_metadata, saved_body = read_persisted_email_content(
-                                    worker_db, int(media_id_local), tenant_id=str(client_id),
+                                    worker_db, int(media_id_local), tenant_id=resolved_email_tenant_id,
                                 )
                                 email_graph_local = worker_db.upsert_email_message_graph(
                                     media_id=int(media_id_local),
                                     metadata=saved_metadata,
                                     body_text=saved_body,
-                                    tenant_id=str(client_id),
+                                    tenant_id=resolved_email_tenant_id,
                                     provider="upload",
                                     source_key=str(processing_filename or item_input_ref or "upload"),
                                 )
@@ -5840,6 +5862,7 @@ async def persist_doc_item_and_children(
                     db_path=db_path,
                     client_id=client_id,
                     operation=_persist_document,
+                    scope=email_scope,
                 )
 
             db_worker_result = await loop.run_in_executor(  # type: ignore[arg-type]
@@ -6009,13 +6032,13 @@ async def persist_doc_item_and_children(
                                                 if _is_email_native_persist_enabled():
                                                     try:
                                                         saved_metadata, saved_body = read_persisted_email_content(
-                                                            worker_db, int(child_id_local), tenant_id=str(client_id_local),
+                                                            worker_db, int(child_id_local), tenant_id=resolved_email_tenant_id,
                                                         )
                                                         child_email_graph_local = worker_db.upsert_email_message_graph(
                                                             media_id=int(child_id_local),
                                                             metadata=saved_metadata,
                                                             body_text=saved_body,
-                                                            tenant_id=str(client_id_local),
+                                                            tenant_id=resolved_email_tenant_id,
                                                             provider="upload",
                                                             source_key=str(child_url),
                                                         )
@@ -6048,6 +6071,7 @@ async def persist_doc_item_and_children(
                                             db_path=db_path_local,
                                             client_id=client_id_local,
                                             operation=_persist_child,
+                                            scope=email_scope,
                                         )
 
                                     (
@@ -6258,13 +6282,13 @@ async def persist_doc_item_and_children(
                                             if _is_email_native_persist_enabled():
                                                 try:
                                                     saved_metadata, saved_body = read_persisted_email_content(
-                                                        worker_db, int(child_id_local), tenant_id=str(client_id_local),
+                                                        worker_db, int(child_id_local), tenant_id=resolved_email_tenant_id,
                                                     )
                                                     child_email_graph_local = worker_db.upsert_email_message_graph(
                                                         media_id=int(child_id_local),
                                                         metadata=saved_metadata,
                                                         body_text=saved_body,
-                                                        tenant_id=str(client_id_local),
+                                                        tenant_id=resolved_email_tenant_id,
                                                         provider="upload",
                                                         source_key=str(child_url_local),
                                                     )
@@ -6297,6 +6321,7 @@ async def persist_doc_item_and_children(
                                         db_path=db_path_local,
                                         client_id=client_id_local,
                                         operation=_persist_archive_child,
+                                        scope=email_scope,
                                     )
 
                                 (

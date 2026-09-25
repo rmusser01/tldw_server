@@ -30,8 +30,11 @@ for fresh results and remaining environment gates.
 
 TASK-13255 additionally validates real API-key authentication and per-user SQLite
 isolation, including main-app test-mode request middleware and route registration. See
-`Docs/Operations/Email_Authenticated_Validation_2026-09-13.md`; startup, authenticated
-upload quotas, JWT login and PostgreSQL isolation remain separate unverified paths.
+`Docs/Operations/Email_Authenticated_Validation_2026-09-13.md`. TASK-13256 adds
+authenticated synthetic EML upload, API-key scope/role rejection, organization
+storage-quota behavior and matching search tenancy in local ASGI/SQLite; see
+`Docs/Operations/Email_Authenticated_Upload_Validation_2026-09-25.md`.
+Deployment startup, JWT login and PostgreSQL isolation remain unverified paths.
 
 Current evidence does not certify a running deployment, PostgreSQL parity, enabled
 PST/OST parsing, full-scale performance, staging sync lag or live OAuth/provider
