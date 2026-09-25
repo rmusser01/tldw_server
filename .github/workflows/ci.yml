@@ -1909,6 +1909,12 @@ jobs:
               tldw_Server_API/tests/WebScraping
               tldw_Server_API/tests/Web_Scraping
               tldw_Server_API/tests/integration
+          - name: platform-kanban
+            paths: >-
+              tldw_Server_API/tests/kanban
+          - name: platform-acp
+            paths: >-
+              tldw_Server_API/tests/Agent_Client_Protocol
     services:
       postgres:
         image: mirror.gcr.io/library/postgres:18-bookworm
