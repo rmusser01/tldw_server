@@ -14,7 +14,7 @@
 **Goal**: Recover after duplicate delivery or a worker restart.
 **Success Criteria**: A variant publishes and counts once; interrupted attempts can be reconciled.
 **Tests**: Duplicate delivery, crash boundary, lease expiry, and counter tests.
-**Status**: Not Started
+**Status**: Complete
 
 ## Stage 4: Browser reload recovery
 **Goal**: Rediscover an ambiguous or active batch after reload.

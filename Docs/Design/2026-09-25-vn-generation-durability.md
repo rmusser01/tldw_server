@@ -27,14 +27,20 @@ raw recipe text in generation status.
 
 ## Replay Boundary
 
-In the next slice, add a durable per-variant attempt ledger keyed by
-`(batch_id, slot_id, variant_index)`. Claim and terminal transitions must be
-conditional and atomic. A duplicate Job delivery should return the previously
-committed item, never generate or count it twice. A lease that expires after a
-worker crash can be reclaimed; storage registration and item publication need a
-reconciliation path for a crash between those steps. Derive batch counters from
-ledger state instead of independent increments. Keep the existing Jobs manager
-as the queue and cancellation authority.
+Use each V1 recipe row as its durable per-variant outcome ledger, keyed by
+`(batch_id, slot_id, variant_index)`. Record a reserved, hidden item ID before
+registering image bytes. Its stable `vn_asset_item:{item_id}` source reference
+lets a retry find a file registered before the worker crashed. Reveal the item
+as a draft only after storage metadata is attached. A duplicate completed Job
+returns the same item without calling the adapter again. Compute batch counters
+from recipe outcomes in one transaction instead of incrementing them in worker
+memory. Reserved items remain absent from normal item listings until committed;
+failed reservations do not consume the pack item limit. A late failure cannot
+undo a completed outcome, and one completed draft keeps its slot reviewable if
+another variant fails. Parent fanout must not overwrite a child worker's newer
+processing or terminal batch status. Keep the existing Jobs manager as the
+lease, queue, and cancellation authority; the recipe ledger does not create a
+second lease clock.
 
 ## Browser Recovery
 
