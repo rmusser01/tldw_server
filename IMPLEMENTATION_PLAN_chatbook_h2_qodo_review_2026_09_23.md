@@ -33,3 +33,6 @@ passed. The current PR head is `0f308f49b3` before this documentation update.
 H2 was subsequently restacked onto H1's workflow-only shard fix
 `aabca0478f`; `range-diff` shows all five H2 commits unchanged. Required
 GitHub checks and final H1 merge ancestry remain pending.
+After server `dev` advanced to `0db48866a5`, H2 was restacked onto H1
+`f3bbacf367`. All six existing H2 commits are unchanged by range-diff,
+and the stacked diff check passes. Required CI is pending on the new head.
