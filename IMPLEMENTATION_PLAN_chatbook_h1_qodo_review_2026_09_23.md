@@ -37,8 +37,23 @@ server capability tests, Ruff, touched-source Bandit, and diff checks pass.
 Chatbook PR #2822 consumes this decision; its focused tests cover wildcard,
 older-server fallback, and post-check 403 behavior.
 
+The first required CI verdict on H1 found a contradictory UI test expectation:
+the H1 table rejected `PUT /api/v1/chats/{id}` even though the saved-title
+scope policy intentionally permits it. The exact-base replay passed because
+the contradictory row is new in H1. The repaired table and title policy pass
+83 focused tests together. Backend CI also found that the new capability
+field needs a refreshed OpenAPI fingerprint and generated client types. An
+isolated Python 3.12 environment reproduced CI's exact schema hash
+`9ca1d044cc33…`; the regenerated fingerprint passes its drift check, and
+the generated TypeScript declaration builds. Seventeen capability tests,
+touched-source Ruff, Bandit, and diff checks pass after the latest-dev rebase.
+
 ## Stage 4: Verify and integrate
 **Goal:** Recheck latest `origin/dev`, required CI and PR review status, then merge H1 followed by H2 only when both are qualified.
 **Success Criteria:** PR heads and ancestry are verified, required checks pass, human-written Change summaries remain intact, and GitHub confirms both merge commits.
 **Tests:** Fresh focused suites on final heads, `git diff --check`, touched-source Bandit, and GitHub required-check results.
 **Status:** Not Started
+
+The branch was rebased onto server `dev` `91c32e3126baad20aba2b74399927bd63004a5f7` on 2026-09-24.
+The Chatbook compatibility PR was independently rebased onto its current
+`dev` `f1ffa17d9e22d21c875e2b744605020ee8eb8b6e`.
