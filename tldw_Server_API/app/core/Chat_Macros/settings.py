@@ -20,8 +20,8 @@ def default_settings() -> dict[str, Any]:
     }
 
 
-def normalize_settings(raw: Mapping[str, Any] | None) -> dict[str, Any]:
-    """Normalize built-in toggles, user overrides, and output profiles."""
+def normalize_settings(raw: Mapping[str, Any] | None, *, from_storage: bool = False) -> dict[str, Any]:
+    """Normalize settings, repairing legacy empty profiles only on storage reads."""
     raw = raw or {}
     settings = deepcopy(dict(raw))
     settings.update(default_settings())
@@ -48,6 +48,19 @@ def normalize_settings(raw: Mapping[str, Any] | None) -> dict[str, Any]:
     if isinstance(raw_profiles, Mapping):
         for name, profile in raw_profiles.items():
             if isinstance(profile, Mapping):
+                if from_storage:
+                    # Older versions accepted empty sections and whitespace-only
+                    # headings. Keep those records readable so users can edit them.
+                    profile = dict(profile)
+                    if profile.get("sections") == []:
+                        profile.pop("sections")
+                    titles = profile.get("section_titles")
+                    if isinstance(titles, Mapping):
+                        profile["section_titles"] = {
+                            section: title
+                            for section, title in titles.items()
+                            if not (isinstance(title, str) and title and not title.strip())
+                        }
                 settings["output_profiles"][str(name)] = profile_to_dict(
                     normalize_output_profile(str(name), profile)
                 )

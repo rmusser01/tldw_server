@@ -4,11 +4,10 @@ import { ChevronDown, ChevronUp, Plus, Save, Trash2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import {
-  updateChatMacroSettings,
+  updateChatMacroOutputProfiles,
   type ChatMacroOutputProfile,
   type ChatMacroSettings
 } from "@/services/chat-macros"
-import { outputProfilesToSettings } from "./chat-macro-editor-utils"
 
 const PROFILE_KEY = /^[a-z][a-z0-9_]{0,63}$/
 const MAX_SECTIONS = 10
@@ -72,7 +71,7 @@ const firstProfileName = (profiles: Record<string, ChatMacroOutputProfile>): str
 
 export const OutputProfileEditor = ({ settings, onSaved }: OutputProfileEditorProps) => {
   const { t } = useTranslation()
-  const [originalSettings, setOriginalSettings] = React.useState<ChatMacroSettings>(settings)
+  const dirtyRef = React.useRef(false)
   const [drafts, setDrafts] = React.useState<ProfileDrafts>(() => cloneProfiles(settings.output_profiles))
   const [selectedProfile, setSelectedProfile] = React.useState(() =>
     firstProfileName(settings.output_profiles)
@@ -93,8 +92,8 @@ export const OutputProfileEditor = ({ settings, onSaved }: OutputProfileEditorPr
   )
 
   React.useEffect(() => {
+    if (dirtyRef.current) return
     const nextDrafts = cloneProfiles(settings.output_profiles)
-    setOriginalSettings(settings)
     setDrafts(nextDrafts)
     setSelectedProfile((current) => (nextDrafts[current] ? current : firstProfileName(nextDrafts)))
     setNewProfileName("")
@@ -111,6 +110,7 @@ export const OutputProfileEditor = ({ settings, onSaved }: OutputProfileEditorPr
 
   const updateCurrentProfile = React.useCallback(
     (update: (profile: ProfileDraft) => ProfileDraft) => {
+      dirtyRef.current = true
       clearFeedback()
       setDrafts((current) => ({
         ...current,
@@ -133,6 +133,7 @@ export const OutputProfileEditor = ({ settings, onSaved }: OutputProfileEditorPr
       return
     }
 
+    dirtyRef.current = true
     setDrafts((current) => ({ ...current, [name]: createProfile() }))
     setSelectedProfile(name)
     setNewProfileName("")
@@ -141,6 +142,7 @@ export const OutputProfileEditor = ({ settings, onSaved }: OutputProfileEditorPr
 
   const deleteProfile = React.useCallback(() => {
     if (selectedProfile === "default") return
+    dirtyRef.current = true
     setDrafts((current) => {
       const { [selectedProfile]: _deleted, ...remaining } = current
       return remaining
@@ -190,6 +192,7 @@ export const OutputProfileEditor = ({ settings, onSaved }: OutputProfileEditorPr
   const removeSection = React.useCallback(
     (index: number) => {
       updateCurrentProfile((profile) => {
+        if (profile.sections.length <= 1) return profile
         return {
           ...profile,
           sections: profile.sections.filter((_, sectionIndex) => sectionIndex !== index),
@@ -211,12 +214,11 @@ export const OutputProfileEditor = ({ settings, onSaved }: OutputProfileEditorPr
   const validationErrors = React.useCallback(
     (profiles: ProfileDrafts): string[] => {
       const errors: string[] = []
-      for (const [profileName, profile] of Object.entries(profiles)) {
-        if (!PROFILE_KEY.test(profileName)) {
-          errors.push(label("validation.profileKey", "Profile names must use lowercase letters, numbers, and underscores."))
-        }
-
+      for (const profile of Object.values(profiles)) {
         const sections = profile.sections.map((section) => section.trim())
+        if (sections.length === 0) {
+          errors.push(label("validation.sectionsRequired", "A profile must contain at least one section."))
+        }
         if (sections.length > MAX_SECTIONS) {
           errors.push(label("validation.tooManySections", "A profile can contain at most 10 sections."))
         }
@@ -273,13 +275,14 @@ export const OutputProfileEditor = ({ settings, onSaved }: OutputProfileEditorPr
     }
 
     const profiles = normalizedProfiles(drafts)
-    const nextSettings = outputProfilesToSettings(originalSettings, profiles)
+    // Keep refreshes from replacing even a pristine draft while its save is pending.
+    dirtyRef.current = true
     setSaving(true)
     setError(null)
     setStatus(null)
 
     try {
-      const response = await updateChatMacroSettings(nextSettings)
+      const response = await updateChatMacroOutputProfiles(profiles)
       if (!response.ok || !response.data?.settings) {
         setError(
           response.error ||
@@ -293,7 +296,7 @@ export const OutputProfileEditor = ({ settings, onSaved }: OutputProfileEditorPr
 
       const normalizedSettings = response.data.settings
       const normalizedDrafts = cloneProfiles(normalizedSettings.output_profiles)
-      setOriginalSettings(normalizedSettings)
+      dirtyRef.current = newProfileName.length > 0
       setDrafts(normalizedDrafts)
       setSelectedProfile((current) =>
         normalizedDrafts[current] ? current : firstProfileName(normalizedDrafts)
@@ -305,7 +308,7 @@ export const OutputProfileEditor = ({ settings, onSaved }: OutputProfileEditorPr
     } finally {
       setSaving(false)
     }
-  }, [drafts, label, normalizedProfiles, onSaved, originalSettings, t, validationErrors])
+  }, [drafts, label, newProfileName, normalizedProfiles, onSaved, t, validationErrors])
 
   const profileNames = Object.keys(drafts)
 
@@ -350,6 +353,7 @@ export const OutputProfileEditor = ({ settings, onSaved }: OutputProfileEditorPr
               value={newProfileName}
               disabled={saving}
               onChange={(event) => {
+                dirtyRef.current = true
                 setNewProfileName(event.target.value)
                 clearFeedback()
               }}
@@ -497,7 +501,7 @@ export const OutputProfileEditor = ({ settings, onSaved }: OutputProfileEditorPr
                     type="button"
                     className={iconButtonClassName}
                     aria-label={indexedLabel("removeSection", `Remove section ${index + 1}`, index + 1)}
-                    disabled={saving}
+                    disabled={saving || currentProfile.sections.length <= 1}
                     onClick={() => removeSection(index)}
                   >
                     <Trash2 className="size-4" aria-hidden="true" />

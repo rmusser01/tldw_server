@@ -71,7 +71,10 @@ def normalize_output_profile(name: str, raw: Mapping[str, Any] | None = None) ->
         section_name = str(section)
         if section_name not in normalized_sections:
             raise MacroValidationError(f"output profile section_titles contains unknown section: {section_name}")
-        if not isinstance(title, str) or not title or len(title) > MAX_SECTION_TITLE_LENGTH:
+        if not isinstance(title, str):
+            raise MacroValidationError("invalid output profile section title")
+        title = title.strip()
+        if not title or len(title) > MAX_SECTION_TITLE_LENGTH:
             raise MacroValidationError("invalid output profile section title")
         normalized_titles[section_name] = title
 
@@ -139,6 +142,9 @@ def render_output_profile(
 
 
 def _validate_sections(sections: list[str]) -> None:
+    """Require a bounded nonempty selection of output sections."""
+    if not sections:
+        raise MacroValidationError("output profile requires at least one section")
     if len(sections) > MAX_PROFILE_SECTIONS:
         raise MacroValidationError("output profile has too many sections")
     for section in sections:

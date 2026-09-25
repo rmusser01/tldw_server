@@ -1,5 +1,5 @@
 import React from "react"
-import { act, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -87,6 +87,12 @@ const makeDetail = (overrides: Partial<ChatMacroDetail> = {}): ChatMacroDetail =
 
 const success = <T,>(data: T) => ({ ok: true, status: 200, data })
 
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((done) => { resolve = done })
+  return { promise, resolve }
+}
+
 const createGuidedRaw = (overrides: Partial<ReturnType<typeof createBlankMacroDraft>> = {}) => {
   const draft = createBlankMacroDraft()
   return serializeGuidedMacro({
@@ -120,7 +126,7 @@ const renderEditor = (props: Partial<React.ComponentProps<typeof ChatMacroEditor
 
 describe("ChatMacroEditor", () => {
   beforeEach(() => {
-    vi.clearAllMocks()
+    vi.resetAllMocks()
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
       value: { writeText: mocks.clipboardWriteText }
@@ -233,6 +239,79 @@ describe("ChatMacroEditor", () => {
     expect(mocks.downloadBlob).toHaveBeenCalledWith(expect.any(Blob), "research.yaml")
     const [blob] = mocks.downloadBlob.mock.calls[0] as [Blob, string]
     expect(await blob.text()).toBe(rawSource)
+  })
+
+  it.each(["guided", "source"])("exports visible dirty %s edits through copy and download", async (mode) => {
+    const raw = mode === "guided" ? `# Keep this comment\n${createGuidedRaw()}` : rawSource
+    mocks.getChatMacro.mockResolvedValueOnce(success(makeDetail({ raw })))
+    renderEditor({ selected: makeSummary() })
+    await waitFor(() => expect(screen.getByLabelText("Name")).toHaveValue("research"))
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy macro YAML" }))
+    expect(mocks.clipboardWriteText).toHaveBeenLastCalledWith(raw)
+    fireEvent.click(screen.getByRole("button", { name: "Download macro YAML" }))
+    expect(await mocks.downloadBlob.mock.calls[0][0].text()).toBe(raw)
+
+    if (mode === "guided") {
+      fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Unsaved description" } })
+    } else {
+      fireEvent.change(screen.getByLabelText("Macro YAML"), { target: { value: `${raw}\n# Unsaved source` } })
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Copy macro YAML" }))
+    fireEvent.click(screen.getByRole("button", { name: "Download macro YAML" }))
+    const copied = mocks.clipboardWriteText.mock.calls.at(-1)![0]
+    expect(copied).toContain(mode === "guided" ? "description: Unsaved description" : "# Unsaved source")
+    expect(await mocks.downloadBlob.mock.calls.at(-1)![0].text()).toBe(copied)
+  })
+
+  it.each([
+    ["validation", "external import"], ["persistence", "external import"],
+    ["validation", "selection"], ["persistence", "selection"],
+    ["validation", "local import"], ["persistence", "local import"]
+  ])("ignores late save %s after a newer %s", async (stage, change) => {
+    const user = userEvent.setup()
+    const validation = deferred<ReturnType<typeof success<{ valid: boolean; macro: { name: string } }>>>()
+    const persistence = deferred<ReturnType<typeof success<ChatMacroDetail>>>()
+    mocks.validateChatMacro.mockReturnValueOnce(validation.promise)
+    mocks.updateChatMacro.mockReturnValueOnce(persistence.promise)
+    const { rerender, props } = renderEditor({ selected: makeSummary() })
+    await screen.findByLabelText("Macro YAML")
+    await user.click(screen.getByRole("button", { name: "Save macro" }))
+    if (stage === "persistence") {
+      await act(async () => { validation.resolve(success({ valid: true, macro: { name: "research" } })) })
+      expect(mocks.updateChatMacro).toHaveBeenCalledTimes(1)
+    }
+    if (change === "external import") {
+      rerender(<ChatMacroEditor {...props} selected={null} importSource={{ requestId: 1, raw: "name: imported" }} />)
+    } else if (change === "selection") {
+      mocks.getChatMacro.mockResolvedValueOnce(success(makeDetail({ raw: "name: imported" })))
+      rerender(<ChatMacroEditor {...props} selected={makeSummary({ name: "imported" })} />)
+    } else {
+      await user.upload(document.querySelector('input[type="file"]') as HTMLInputElement, new File(["name: imported"], "imported.yaml", { type: "text/yaml" }))
+    }
+    await waitFor(() => expect(screen.getByLabelText("Macro YAML")).toHaveValue("name: imported"))
+    await act(async () => {
+      validation.resolve(success({ valid: true, macro: { name: "research" } }))
+      persistence.resolve(success(makeDetail()))
+    })
+    expect(screen.getByLabelText("Macro YAML")).toHaveValue("name: imported")
+    expect(props.onSaved).not.toHaveBeenCalled()
+    if (stage === "validation") expect(mocks.updateChatMacro).not.toHaveBeenCalled()
+  })
+
+  it("cancels a pending delete confirmation after changing selection", async () => {
+    const user = userEvent.setup()
+    const confirmation = deferred<boolean>()
+    mocks.confirmDanger.mockReturnValueOnce(confirmation.promise)
+    const { rerender, props } = renderEditor({ selected: makeSummary() })
+    await screen.findByLabelText("Macro YAML")
+    await user.click(screen.getByRole("button", { name: "Delete macro" }))
+    rerender(<ChatMacroEditor {...props} selected={null} />)
+    await user.type(screen.getByLabelText("Name"), "newer")
+    await act(async () => { confirmation.resolve(true) })
+    expect(mocks.deleteChatMacro).not.toHaveBeenCalled()
+    expect(props.onDeleted).not.toHaveBeenCalled()
+    expect(screen.getByLabelText("Name")).toHaveValue("newer")
   })
 
   it("clears a stale copy error after a later copy succeeds", async () => {

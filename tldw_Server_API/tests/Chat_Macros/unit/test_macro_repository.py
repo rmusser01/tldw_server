@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from threading import Barrier
+from typing import Any
 
 import pytest
 
@@ -55,6 +58,38 @@ def _index_sql(db: CharactersRAGDB, index_name: str) -> str:
             (index_name,),
         ).fetchone()
     return row["sql"] if row is not None else ""
+
+
+def test_concurrent_settings_mutations_preserve_all_updates(repo: ChatMacroRepository) -> None:
+    """Concurrent first-use mutations cannot overwrite another writer's fields."""
+    start = Barrier(4)
+
+    def save_field(index: int) -> None:
+        """Synchronize writers and close their thread-local connections."""
+        try:
+            start.wait(timeout=10)
+            repo.update_settings("1", lambda current: {**current, f"field_{index}": index})
+        finally:
+            repo.db.close_connection()
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        list(pool.map(save_field, range(4)))
+
+    assert repo.get_settings("1") == {f"field_{index}": index for index in range(4)}
+
+
+def test_failed_settings_mutation_rolls_back(repo: ChatMacroRepository) -> None:
+    """Invalid settings never replace a previously committed settings document."""
+    repo.save_settings("1", {"keep": True})
+
+    def fail(current: dict[str, Any]) -> dict[str, Any]:
+        """Simulate validation failing after the document is read under lock."""
+        current["keep"] = False
+        raise ValueError("invalid settings")
+
+    with pytest.raises(ValueError, match="invalid settings"):
+        repo.update_settings("1", fail)
+    assert repo.get_settings("1") == {"keep": True}
 
 
 def test_create_run_final_post_and_branch_round_trip(repo):

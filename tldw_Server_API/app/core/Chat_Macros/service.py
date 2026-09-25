@@ -119,12 +119,15 @@ class ChatMacrosService:
             return self.set_builtin_enabled(name, enabled)
 
         stored = self.storage.read(name)
-        settings = self.get_settings()
-        overrides = dict(settings.get("user_macro_enabled", {}))
-        overrides[name] = enabled
-        settings["user_macro_enabled"] = overrides
-        self.save_settings(settings)
-        item = self._user_item(stored, enabled_overrides=overrides)
+
+        def update(raw: dict[str, Any]) -> dict[str, Any]:
+            """Change only this macro's override in the current settings."""
+            settings = normalize_settings(raw, from_storage=True)
+            settings["user_macro_enabled"][name] = enabled
+            return settings
+
+        settings = self.repository.update_settings(self.user_id, update)
+        item = self._user_item(stored, enabled_overrides=settings["user_macro_enabled"])
         self._sync_registry_if_changed(item)
         return item
 
@@ -133,25 +136,33 @@ class ChatMacrosService:
         if self._builtin_item(name) is not None:
             raise MacroStorageError("built-in macros are immutable")
         self.storage.delete(name)
-        settings = self.get_settings()
-        overrides = dict(settings.get("user_macro_enabled", {}))
-        if overrides.pop(name, None) is not None:
-            settings["user_macro_enabled"] = overrides
-            self.save_settings(settings)
+
+        def update(raw: dict[str, Any]) -> dict[str, Any]:
+            """Remove only the deleted macro's override from current settings."""
+            settings = normalize_settings(raw, from_storage=True)
+            settings["user_macro_enabled"].pop(name, None)
+            return settings
+
+        self.repository.update_settings(self.user_id, update)
         self._sync_registry_catalog(self._catalog_items())
 
     def set_builtin_enabled(self, name: str, enabled: bool) -> ChatMacroCatalogItem:
         """Enable or disable an immutable built-in through user settings."""
         if self._load_builtin(name) is None:
             raise MacroNotFoundError(f"built-in macro not found: {name}")
-        settings = self.get_settings()
-        disabled = set(settings.get("disabled_builtins", []))
-        if enabled:
-            disabled.discard(name)
-        else:
-            disabled.add(name)
-        settings["disabled_builtins"] = sorted(disabled)
-        self.save_settings(settings)
+
+        def update(raw: dict[str, Any]) -> dict[str, Any]:
+            """Change one built-in toggle without replacing other current settings."""
+            settings = normalize_settings(raw, from_storage=True)
+            disabled = set(settings["disabled_builtins"])
+            if enabled:
+                disabled.discard(name)
+            else:
+                disabled.add(name)
+            settings["disabled_builtins"] = sorted(disabled)
+            return settings
+
+        self.repository.update_settings(self.user_id, update)
         item = self._builtin_item(name)
         if item is None:
             raise MacroNotFoundError(f"built-in macro not found: {name}")
@@ -171,12 +182,22 @@ class ChatMacrosService:
 
     def get_settings(self) -> dict[str, Any]:
         """Return normalized user-scoped chat macro settings."""
-        return normalize_settings(self.repository.get_settings(self.user_id))
+        return normalize_settings(self.repository.get_settings(self.user_id), from_storage=True)
 
     def save_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
         """Validate and persist user-scoped chat macro settings."""
         normalized = normalize_settings(settings)
         return self.repository.save_settings(self.user_id, normalized)
+
+    def save_output_profiles(self, profiles: dict[str, dict[str, Any]]) -> dict[str, Any]:
+        """Replace only output profiles, preserving current toggles and future settings."""
+        normalized = normalize_settings({"output_profiles": profiles})["output_profiles"]
+
+        def update(raw: dict[str, Any]) -> dict[str, Any]:
+            """Merge validated profiles into the settings read under the write lock."""
+            return normalize_settings({**raw, "output_profiles": normalized})
+
+        return self.repository.update_settings(self.user_id, update)
 
     def resolve_output_profile(
         self,
@@ -282,6 +303,7 @@ class ChatMacrosService:
 
     @staticmethod
     def _require_matching_name(resource_name: str, definition: MacroDefinition) -> None:
+        """Keep the API resource and stored YAML identities consistent."""
         if definition.name != resource_name:
             raise MacroValidationError(
                 f"macro definition name '{definition.name}' must match resource name '{resource_name}'"

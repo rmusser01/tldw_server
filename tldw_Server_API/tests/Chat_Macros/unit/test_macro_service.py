@@ -113,6 +113,7 @@ def test_create_update_delete_user_macro_and_validate_without_saving(service: Ch
 
 
 def test_create_macro_rejects_definition_name_mismatch_before_storage(service: ChatMacrosService) -> None:
+    """Reject a mismatched resource name before creating either definition."""
     with pytest.raises(
         MacroValidationError,
         match="macro definition name 'other_name' must match resource name 'daily_digest'",
@@ -124,6 +125,7 @@ def test_create_macro_rejects_definition_name_mismatch_before_storage(service: C
 
 
 def test_update_macro_rejects_definition_rename_before_storage(service: ChatMacrosService) -> None:
+    """A rejected rename leaves the original definition unchanged."""
     original_raw = _user_macro_yaml("daily_digest")
     service.create_macro("daily_digest", original_raw)
 
@@ -154,6 +156,7 @@ def test_user_enabled_override_preserves_authored_yaml(service: ChatMacrosServic
 
 
 def test_normalize_settings_preserves_unknown_keys_without_aliasing() -> None:
+    """Preserve future settings without sharing mutable values with the input."""
     raw = {
         "disabled_builtins": ["wrapup"],
         "future_authoring": {"options": ["keep"]},
@@ -250,6 +253,7 @@ def test_output_profile_local_overrides_are_bounded(service: ChatMacrosService) 
 
 
 def test_output_profile_renders_custom_section_titles() -> None:
+    """Render configured headings in place of generated section titles."""
     profile = normalize_output_profile(
         "handoff",
         {
@@ -269,11 +273,75 @@ def test_output_profile_renders_custom_section_titles() -> None:
 
 
 def test_output_profile_rejects_titles_for_unknown_sections() -> None:
+    """Reject headings that do not belong to a configured output section."""
     with pytest.raises(MacroValidationError, match="unknown section"):
         normalize_output_profile(
             "bad",
             {"sections": ["summary"], "section_titles": {"risks": "Risk register"}},
         )
+
+
+@pytest.mark.parametrize("title", ["", "   ", "\t\n", "x" * 129])
+def test_output_profile_rejects_blank_or_oversized_titles(title: str) -> None:
+    """Reject unusable headings at the backend validation boundary."""
+    with pytest.raises(MacroValidationError, match="section title"):
+        normalize_output_profile("bad", {"sections": ["summary"], "section_titles": {"summary": title}})
+
+
+def test_output_profile_trims_custom_heading() -> None:
+    """Persist a trimmed heading so rendered Markdown has useful text."""
+    profile = normalize_output_profile("brief", {"section_titles": {"summary": "  Brief  "}})
+    assert profile.section_titles == {"summary": "Brief"}
+
+
+@pytest.mark.parametrize(
+    "legacy_profile",
+    [
+        {"sections": []},
+        {"sections": ["summary"], "section_titles": {"summary": " \t "}},
+    ],
+)
+def test_legacy_empty_profiles_remain_readable_and_editable(
+    service: ChatMacrosService,
+    legacy_profile: dict,
+) -> None:
+    """Upgrade previously accepted empty values without relaxing new writes."""
+    original = {"output_profiles": {"default": legacy_profile}, "future_setting": True}
+    service.repository.save_settings("1", original)
+
+    profile = service.get_settings()["output_profiles"]["default"]
+    assert profile["sections"]
+    assert profile["section_titles"] == {}
+    assert service.repository.get_settings("1") == original
+    assert service.list_macros()
+    service.create_macro("daily_digest", _user_macro_yaml())
+    service.set_macro_enabled("daily_digest", False)
+    service.set_builtin_enabled("wrapup", False)
+    service.delete_macro("daily_digest")
+    assert service.get_settings()["future_setting"] is True
+    with pytest.raises(MacroValidationError):
+        service.save_output_profiles({"default": legacy_profile})
+
+
+@pytest.mark.parametrize("format_name", ["single_response", "structured_sections"])
+def test_output_profile_requires_at_least_one_section(format_name: str) -> None:
+    """Neither response format may silently suppress all selected output."""
+    with pytest.raises(MacroValidationError, match="at least one section"):
+        normalize_output_profile("empty", {"format": format_name, "sections": []})
+
+
+def test_save_profiles_preserves_current_settings_and_other_users(service: ChatMacrosService) -> None:
+    """Profile-only saves retain current toggles and remain user scoped."""
+    service.save_settings({"future_authoring": {"enabled": True}})
+    service.set_builtin_enabled("wrapup", False)
+    service.repository.save_settings("2", {"future_authoring": "other user"})
+
+    saved = service.save_output_profiles({"Review-Notes": {"sections": ["summary"]}})
+
+    assert saved["disabled_builtins"] == ["wrapup"]
+    assert saved["future_authoring"] == {"enabled": True}
+    assert "Review-Notes" in saved["output_profiles"]
+    assert service.repository.get_settings("2") == {"future_authoring": "other user"}
 
 
 def test_single_response_output_includes_failed_branches() -> None:

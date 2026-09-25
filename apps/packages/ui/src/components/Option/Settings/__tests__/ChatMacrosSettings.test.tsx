@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   setChatMacroEnabled: vi.fn(),
   updateChatMacro: vi.fn(),
   updateChatMacroSettings: vi.fn(),
+  updateChatMacroOutputProfiles: vi.fn(),
   validateChatMacro: vi.fn(),
   confirmDanger: vi.fn()
 }))
@@ -33,6 +34,7 @@ vi.mock("@/services/chat-macros", () => ({
   setChatMacroEnabled: mocks.setChatMacroEnabled,
   updateChatMacro: mocks.updateChatMacro,
   updateChatMacroSettings: mocks.updateChatMacroSettings,
+  updateChatMacroOutputProfiles: mocks.updateChatMacroOutputProfiles,
   validateChatMacro: mocks.validateChatMacro
 }))
 
@@ -132,7 +134,7 @@ const makeDetail = (summary: ChatMacroSummary): ChatMacroDetail => ({
 
 describe("ChatMacrosSettings", () => {
   beforeEach(() => {
-    vi.clearAllMocks()
+    vi.resetAllMocks()
     mocks.listChatMacros.mockResolvedValue(macroListResponse([builtinMacro, userMacro]))
     mocks.getChatMacroSettings.mockResolvedValue(success({ settings: makeSettings() }))
     mocks.getChatMacro.mockImplementation((name: string) => {
@@ -146,6 +148,9 @@ describe("ChatMacrosSettings", () => {
     mocks.deleteChatMacro.mockResolvedValue(success(undefined))
     mocks.updateChatMacroSettings.mockImplementation((settings: ChatMacroSettings) =>
       Promise.resolve(success({ settings }))
+    )
+    mocks.updateChatMacroOutputProfiles.mockImplementation((output_profiles: ChatMacroSettings["output_profiles"]) =>
+      Promise.resolve(success({ settings: makeSettings({ output_profiles }) }))
     )
     mocks.validateChatMacro.mockResolvedValue(success({ valid: true, macro: { name: "handoff" } }))
     mocks.confirmDanger.mockResolvedValue(true)
@@ -357,6 +362,127 @@ describe("ChatMacrosSettings", () => {
     })
 
     expect(await screen.findByLabelText("Profile")).toBeInTheDocument()
+  })
+
+  it.each(["success", "failure"])("preserves an unsaved output-profile heading during refresh and after %s", async (outcome) => {
+    const user = userEvent.setup()
+    const refresh = deferred<ReturnType<typeof success<{ settings: ChatMacroSettings }>> | { ok: false; status: number; error: string }>()
+    render(<ChatMacrosSettings />)
+    await user.click(screen.getByRole("tab", { name: "Output profiles" }))
+    const heading = await screen.findByLabelText("Section heading 1")
+    await user.type(heading, "Unsaved heading")
+    mocks.getChatMacroSettings.mockReturnValueOnce(refresh.promise)
+
+    await user.click(screen.getByRole("button", { name: "Refresh macros" }))
+
+    expect(screen.getByText("Loading output profiles")).toBeVisible()
+    expect(screen.getByLabelText("Section heading 1")).toBe(heading)
+    expect(heading).toHaveValue("Unsaved heading")
+    await act(async () => {
+      refresh.resolve(outcome === "success"
+        ? success({ settings: makeSettings() })
+        : { ok: false, status: 503, error: "Settings refresh unavailable" })
+    })
+
+    expect(screen.queryByText("Loading output profiles")).not.toBeInTheDocument()
+    expect(screen.getByLabelText("Section heading 1")).toBe(heading)
+    expect(heading).toHaveValue("Unsaved heading")
+    expect(mocks.updateChatMacroOutputProfiles).not.toHaveBeenCalled()
+    if (outcome === "failure") {
+      expect(screen.getByText("Settings refresh unavailable")).toBeVisible()
+      expect(screen.getByRole("button", { name: "Retry settings" })).toBeEnabled()
+      await user.click(screen.getByRole("button", { name: "Retry settings" }))
+      await waitFor(() => expect(screen.queryByText("Settings refresh unavailable")).not.toBeInTheDocument())
+      expect(screen.getByLabelText("Section heading 1")).toHaveValue("Unsaved heading")
+    }
+  })
+
+  it.each(["save", "delete"])("refreshes a completed %s without replacing a newer imported draft", async (operation) => {
+    const user = userEvent.setup()
+    const mutation = deferred<ReturnType<typeof success<ChatMacroDetail>>>()
+    mocks.validateChatMacro.mockResolvedValueOnce(success({ valid: true, macro: { name: "research" } }))
+    if (operation === "save") mocks.updateChatMacro.mockReturnValueOnce(mutation.promise)
+    else mocks.deleteChatMacro.mockReturnValueOnce(mutation.promise)
+    render(<ChatMacrosSettings />)
+    await user.click(await screen.findByRole("button", { name: "Select /research" }))
+    await screen.findByLabelText("Macro YAML")
+    await user.click(screen.getByRole("button", { name: operation === "save" ? "Save macro" : "Delete macro" }))
+    await waitFor(() => expect(operation === "save" ? mocks.updateChatMacro : mocks.deleteChatMacro).toHaveBeenCalled())
+    await user.upload(screen.getByLabelText("Import macro YAML file"), new File(["name: imported"], "imported.yaml", { type: "text/yaml" }))
+    await waitFor(() => expect(screen.getByLabelText("Name")).toHaveValue("imported"))
+    mocks.listChatMacros.mockResolvedValueOnce(macroListResponse(operation === "save" ? [builtinMacro, userMacro] : [builtinMacro]))
+    await act(async () => { mutation.resolve(success(makeDetail(userMacro))) })
+    await waitFor(() => expect(mocks.listChatMacros).toHaveBeenCalledTimes(2))
+    expect(screen.getByLabelText("Name")).toHaveValue("imported")
+    expect(screen.getByLabelText("Macro YAML")).toHaveValue("name: imported")
+    if (operation === "delete") expect(screen.queryByRole("button", { name: "Select /research" })).not.toBeInTheDocument()
+  })
+
+  it("does not reselect a saved macro when its catalog refresh finishes after navigation", async () => {
+    const user = userEvent.setup()
+    const catalog = deferred<ReturnType<typeof macroListResponse>>()
+    mocks.listChatMacros.mockResolvedValueOnce(macroListResponse([builtinMacro, userMacro])).mockReturnValueOnce(catalog.promise)
+    mocks.validateChatMacro.mockResolvedValueOnce(success({ valid: true, macro: { name: "research" } }))
+    render(<ChatMacrosSettings />)
+    await user.click(await screen.findByRole("button", { name: "Select /research" }))
+    await screen.findByLabelText("Macro YAML")
+    await user.click(screen.getByRole("button", { name: "Save macro" }))
+    await waitFor(() => expect(mocks.listChatMacros).toHaveBeenCalledTimes(2))
+    await user.click(screen.getByRole("button", { name: "New macro" }))
+    await user.type(screen.getByLabelText("Name"), "newer")
+    await act(async () => { catalog.resolve(macroListResponse([builtinMacro, userMacro])) })
+    expect(screen.getByLabelText("Name")).toHaveValue("newer")
+    expect(screen.getByRole("button", { name: "Select /research" })).toHaveAttribute("aria-pressed", "false")
+  })
+
+  it("refreshes a late clone without selecting it over a newer draft", async () => {
+    const user = userEvent.setup()
+    const clone = deferred<ReturnType<typeof success<ChatMacroDetail>>>()
+    mocks.cloneChatMacro.mockReturnValueOnce(clone.promise)
+    render(<ChatMacrosSettings />)
+    await user.click(await screen.findByRole("button", { name: "Clone macro" }))
+    await user.type(screen.getByLabelText("Clone macro name"), "research")
+    await user.click(screen.getByRole("button", { name: "Clone /wrapup" }))
+    await user.click(screen.getByRole("button", { name: "New macro" }))
+    await user.type(screen.getByLabelText("Name"), "newer")
+    await act(async () => { clone.resolve(success(makeDetail(userMacro))) })
+    await waitFor(() => expect(mocks.listChatMacros).toHaveBeenCalledTimes(2))
+    expect(screen.getByLabelText("Name")).toHaveValue("newer")
+  })
+
+  it("does not apply a pending file read after a newer selection", async () => {
+    const user = userEvent.setup()
+    const read = deferred<string>()
+    const file = new File(["name: imported"], "imported.yaml", { type: "text/yaml" })
+    Object.defineProperty(file, "text", { value: () => read.promise })
+    render(<ChatMacrosSettings />)
+    await screen.findByRole("button", { name: "Select /research" })
+    await user.upload(screen.getByLabelText("Import macro YAML file"), file)
+    await user.click(screen.getByRole("button", { name: "Select /research" }))
+    await act(async () => { read.resolve("name: imported") })
+    expect(screen.getByRole("button", { name: "Select /research" })).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByLabelText("Name")).toHaveValue("research")
+  })
+
+  it.each(["save", "delete"])("does not let a %s callback cancel a newer pending import", async (operation) => {
+    const user = userEvent.setup()
+    const mutation = deferred<ReturnType<typeof success<ChatMacroDetail>>>()
+    const read = deferred<string>()
+    const file = new File(["name: imported"], "imported.yaml", { type: "text/yaml" })
+    Object.defineProperty(file, "text", { value: () => read.promise })
+    mocks.validateChatMacro.mockResolvedValueOnce(success({ valid: true, macro: { name: "research" } }))
+    if (operation === "save") mocks.updateChatMacro.mockReturnValueOnce(mutation.promise)
+    else mocks.deleteChatMacro.mockReturnValueOnce(mutation.promise)
+    render(<ChatMacrosSettings />)
+    await user.click(await screen.findByRole("button", { name: "Select /research" }))
+    await screen.findByLabelText("Macro YAML")
+    await user.click(screen.getByRole("button", { name: operation === "save" ? "Save macro" : "Delete macro" }))
+    await user.upload(screen.getByLabelText("Import macro YAML file"), file)
+    await act(async () => { mutation.resolve(success(makeDetail(userMacro))) })
+    await act(async () => { read.resolve("name: imported") })
+    expect(screen.getByLabelText("Name")).toHaveValue("imported")
+    expect(screen.getByLabelText("Macro YAML")).toHaveValue("name: imported")
+    expect(mocks.listChatMacros).toHaveBeenCalledTimes(2)
   })
 
   it("keeps macro and settings failures independently retryable", async () => {

@@ -18,6 +18,7 @@ import {
   listChatMacros,
   setChatMacroEnabled,
   updateChatMacro,
+  updateChatMacroOutputProfiles,
   updateChatMacroSettings,
   validateChatMacro
 } from "@/services/chat-macros"
@@ -155,5 +156,30 @@ describe("chat macros service", () => {
         body: { raw: "name: wrapup" }
       })
     )
+  })
+
+  it("replaces only output profiles through the dedicated settings endpoint", async () => {
+    const profiles = {
+      "Review-Notes": {
+        format: "single_response" as const,
+        sections: ["summary"],
+        section_titles: { summary: "Review notes" },
+        include_branch_outputs: false
+      }
+    }
+    const response = {
+      ok: true,
+      status: 200,
+      data: { settings: { output_profiles: profiles, disabled_builtins: ["wrapup"] } }
+    }
+    mocks.apiSend.mockResolvedValueOnce(response)
+
+    await expect(updateChatMacroOutputProfiles(profiles)).resolves.toEqual(response)
+
+    expect(mocks.apiSend).toHaveBeenCalledExactlyOnceWith({
+      path: "/api/v1/chat/macros/settings/output-profiles",
+      method: "PUT",
+      body: { output_profiles: profiles }
+    })
   })
 })

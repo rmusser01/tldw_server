@@ -392,6 +392,7 @@
     "validation": {
       "profileKey": "Profile names must use lowercase letters, numbers, and underscores.",
       "profileDuplicate": "A profile with this name already exists.",
+      "sectionsRequired": "A profile must contain at least one section.",
       "tooManySections": "A profile can contain at most 10 sections.",
       "sectionDuplicate": "Section keys must be unique.",
       "sectionKey": "Section keys must use lowercase letters, numbers, and underscores.",

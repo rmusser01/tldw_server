@@ -73,8 +73,11 @@ export const ChatMacrosSettings = () => {
   const mountedRef = React.useRef(false)
   const catalogRequestRef = React.useRef(0)
   const settingsRequestRef = React.useRef(0)
+  const selectionGeneration = React.useRef(0)
 
   const refreshCatalog = React.useCallback(async (preferredName?: string) => {
+    if (!mountedRef.current) return
+    const generation = selectionGeneration.current
     const request = ++catalogRequestRef.current
     setCatalogLoading(true)
     setCatalogError(null)
@@ -91,7 +94,7 @@ export const ChatMacrosSettings = () => {
       const nextMacros = response.data.macros
       setMacros(nextMacros)
       setSelection((current) => {
-        if (preferredName && nextMacros.some((macro) => macro.name === preferredName)) {
+        if (generation === selectionGeneration.current && preferredName && nextMacros.some((macro) => macro.name === preferredName)) {
           return { kind: "macro", name: preferredName }
         }
         if (current?.kind === "new") return current
@@ -157,6 +160,7 @@ export const ChatMacrosSettings = () => {
     : ["default"]
 
   const selectMacro = React.useCallback((macro: ChatMacroSummary) => {
+    selectionGeneration.current += 1
     setCloneSource(null)
     setCloneName("")
     setCloneError(null)
@@ -164,6 +168,7 @@ export const ChatMacrosSettings = () => {
   }, [])
 
   const openNewMacro = React.useCallback(() => {
+    selectionGeneration.current += 1
     setCloneSource(null)
     setCloneName("")
     setCloneError(null)
@@ -181,13 +186,14 @@ export const ChatMacrosSettings = () => {
     event.target.value = ""
     if (!file) return
 
+    const generation = ++selectionGeneration.current
     try {
       const raw = await readMacroImport(file)
-      if (!mountedRef.current) return
+      if (!mountedRef.current || generation !== selectionGeneration.current) return
       openNewMacro()
       setImportSource({ requestId: ++importRequestRef.current, raw })
     } catch (error) {
-      if (mountedRef.current) {
+      if (mountedRef.current && generation === selectionGeneration.current) {
         setImportError(error instanceof Error ? error.message : "Unable to import macro YAML.")
       }
     }
@@ -230,9 +236,14 @@ export const ChatMacrosSettings = () => {
 
     setCloneBusy(true)
     setCloneError(null)
+    const generation = selectionGeneration.current
     try {
       const response = await cloneChatMacro(cloneSource.name, { name, command: name })
       if (!mountedRef.current) return
+      if (generation !== selectionGeneration.current) {
+        if (response.ok) await refreshCatalog()
+        return
+      }
       if (!response.ok) {
         setCloneError(responseError(response.status, response.error))
         return
@@ -241,7 +252,7 @@ export const ChatMacrosSettings = () => {
       setCloneName("")
       await refreshCatalog(name)
     } catch (error) {
-      if (mountedRef.current) {
+      if (mountedRef.current && generation === selectionGeneration.current) {
         setCloneError(error instanceof Error ? error.message : "Unable to clone macro.")
       }
     } finally {
@@ -249,19 +260,35 @@ export const ChatMacrosSettings = () => {
     }
   }, [cloneName, cloneSource, refreshCatalog])
 
+  // Mutation callbacks belong to the selection that rendered the editor.
+  const editorGeneration = selectionGeneration.current
   const handleSaved = React.useCallback((name: string) => {
     if (!mountedRef.current) return
+    if (editorGeneration !== selectionGeneration.current) {
+      void refreshCatalog()
+      return
+    }
+    selectionGeneration.current += 1
     setCloneSource(null)
     setCloneName("")
     setSelection({ kind: "macro", name })
     void refreshCatalog(name)
-  }, [refreshCatalog])
+  }, [editorGeneration, refreshCatalog])
 
   const handleDeleted = React.useCallback(() => {
     if (!mountedRef.current) return
+    if (editorGeneration !== selectionGeneration.current) {
+      void refreshCatalog()
+      return
+    }
+    selectionGeneration.current += 1
     setCloneSource(null)
     setCloneName("")
     setSelection(null)
+    void refreshCatalog()
+  }, [editorGeneration, refreshCatalog])
+
+  const handleCatalogChanged = React.useCallback(() => {
     void refreshCatalog()
   }, [refreshCatalog])
 
@@ -467,6 +494,7 @@ export const ChatMacrosSettings = () => {
               outputProfileNames={outputProfileNames}
               onSaved={handleSaved}
               onDeleted={handleDeleted}
+              onCatalogChanged={handleCatalogChanged}
               onCloneRequested={requestClone}
               onImportConsumed={handleImportConsumed}
               importSource={importSource}
@@ -494,7 +522,7 @@ export const ChatMacrosSettings = () => {
               </button>
             </div>
           ) : null}
-          {!settingsLoading && !settingsError && settings ? (
+          {settings ? (
             <OutputProfileEditor settings={settings} onSaved={handleSettingsSaved} />
           ) : null}
       </section>

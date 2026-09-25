@@ -86,6 +86,13 @@ class ChatMacroSettingsRequest(BaseModel):
     settings: dict[str, Any] = Field(default_factory=dict)
 
 
+class ChatMacroOutputProfilesRequest(BaseModel):
+    """Replace the user's output profiles without replacing unrelated settings."""
+
+    model_config = ConfigDict(extra="forbid")
+    output_profiles: dict[str, dict[str, Any]]
+
+
 class ChatMacroSettingsResponse(BaseModel):
     """Normalized user-level macro settings."""
 
