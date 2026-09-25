@@ -302,7 +302,13 @@ class _FetchDbStub:
 
 @pytest.mark.asyncio
 @pytest.mark.unit
-async def test_simulate_rate_limit_uses_fetch_and_prefers_matching_user_limit() -> None:
+async def test_simulate_rate_limit_uses_fetch_and_prefers_matching_user_limit(monkeypatch) -> None:
+    # PostgreSQL transaction connections (asyncpg) expose fetch(); the SQLite path uses
+    # execute()/fetchall(), as the other rate-limit endpoints already did.
+    async def _is_postgres() -> bool:
+        return True
+
+    monkeypatch.setattr(admin_rate_limits, "_get_is_postgres_backend_fn", lambda: _is_postgres)
     db = _FetchDbStub()
 
     response = await admin_rate_limits.simulate_rate_limit(
@@ -319,6 +325,10 @@ async def test_simulate_rate_limit_uses_fetch_and_prefers_matching_user_limit() 
     assert response.effective_burst == 1  # nosec B101
     assert response.would_allow is True  # nosec B101
     assert len(db.fetch_calls) == 2  # nosec B101
+    # asyncpg placeholders, and the real role tables (not rbac_roles/rbac_user_roles).
+    assert all("?" not in query for query, _args in db.fetch_calls)  # nosec B101
+    role_query = next(q for q, _a in db.fetch_calls if "rbac_role_rate_limits" in q)
+    assert " roles r " in role_query and " user_roles ur " in role_query  # nosec B101
 
 
 def test_matches_endpoint_requires_exact_or_path_boundary_match() -> None:

@@ -18,6 +18,24 @@ from tldw_Server_API.app.core.DB_Management.DB_Manager import (
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+from tldw_Server_API.app.core.Workflows import daily_ledger as _workflows_daily_ledger
+
+
+@pytest.fixture(autouse=True)
+def _isolate_workflows_daily_ledger(monkeypatch):
+    """Keep workflow runs out of the AuthNZ ResourceDailyLedger (TASK-13367).
+
+    Locally the ledger lives in the checkout's Databases/users.db, so every run
+    spent real daily quota and the suite started returning 429 after enough runs
+    in one day. Quota enforcement is covered in tests/Resource_Governance with a
+    per-test AuthNZ DB.
+    """
+    monkeypatch.setenv("WORKFLOWS_DISABLE_QUOTAS", "1")
+
+    async def _no_ledger():
+        return None
+
+    monkeypatch.setattr(_workflows_daily_ledger, "get_workflows_daily_ledger", _no_ledger)
 
 
 @pytest.fixture()

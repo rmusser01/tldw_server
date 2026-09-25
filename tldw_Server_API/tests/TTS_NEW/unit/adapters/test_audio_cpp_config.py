@@ -163,3 +163,23 @@ def test_rendered_config_preserves_default_voice_preset():
     config["extra_params"]["server"]["model"]["default_voice_preset"] = {"voice_id": "alba"}
     rendered = AudioCppConfig.from_provider_config(config).render_server_config()
     assert rendered["models"][0]["default_voice_preset"] == {"voice_id": "alba"}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("token", ["n", "none", "disabled", "nope", " N "])
+def test_negative_or_unknown_allow_remote_tokens_keep_the_loopback_guard(token):
+    """allow_remote_base_url = "n" means no; it must not switch the loopback guard off."""
+    extra = dict(_provider_config()["extra_params"], allow_remote_base_url=token)
+    with pytest.raises(TTSValidationError):
+        AudioCppConfig.from_provider_config(
+            _provider_config(base_url="http://example.com:8080", extra_params=extra),
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("token", ["n", "disabled", "garbage"])
+def test_negative_or_unknown_managed_and_retain_tokens_resolve_false(token):
+    extra = dict(_provider_config()["extra_params"], managed=token, retain_request_artifacts=token)
+    config = AudioCppConfig.from_provider_config(_provider_config(extra_params=extra))
+    assert config.managed is False
+    assert config.retain_request_artifacts is False

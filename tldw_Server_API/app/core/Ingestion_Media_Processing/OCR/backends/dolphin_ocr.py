@@ -5,7 +5,6 @@ import importlib.util
 import io
 import json
 import os
-import tempfile
 import threading
 from typing import Any
 from urllib.parse import urlparse
@@ -16,6 +15,8 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.types import (
     normalize_ocr_format,
 )
 from tldw_Server_API.app.core.Utils.Utils import logging
+from tldw_Server_API.app.core.Utils.coercion import env_bool
+from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.runtime_support import image_payload
 
 _TF_MODEL = None
 _TF_PROCESSOR = None
@@ -319,33 +320,24 @@ def _ocr_via_openai(image_bytes: bytes, prompt: str) -> str:
         logging.warning("DOLPHIN_USE_DATA_URL=false with non-local URL; forcing data URL for reliability.")
         use_data_url = True
 
-    if use_data_url:
-        b64 = base64.b64encode(image_bytes).decode("ascii")
-        content_image = {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}}
-    else:
-        # Path-based URLs are generally only useful for local file access
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=True) as f:
-            f.write(image_bytes)
-            f.flush()
-            content_image = {"type": "image_url", "image_url": {"url": f.name}}
+    with image_payload(image_bytes, use_data_url=use_data_url) as content_image:
+        data = {
+            "model": model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        content_image,
+                    ],
+                }
+            ],
+        }
+        _apply_generation_params(data)
 
-    data = {
-        "model": model,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    content_image,
-                ],
-            }
-        ],
-    }
-    _apply_generation_params(data)
+        from tldw_Server_API.app.core.http_client import fetch_json
 
-    from tldw_Server_API.app.core.http_client import fetch_json
-
-    j = fetch_json(method="POST", url=url, json=data, timeout=timeout)
+        j = fetch_json(method="POST", url=url, json=data, timeout=timeout)
     return (
         j.get("choices", [{}])[0]
         .get("message", {})
@@ -427,7 +419,7 @@ def _ocr_via_transformers(image_bytes: bytes, prompt: str) -> str:
         "temperature": _getf("DOLPHIN_TEMPERATURE", float, 0.0),
         "top_p": _getf("DOLPHIN_TOP_P", float, 0.9),
         "top_k": _getf("DOLPHIN_TOP_K", int, 50),
-        "do_sample": _getf("DOLPHIN_DO_SAMPLE", lambda x: str(x).lower() in ("1", "true", "yes"), False),
+        "do_sample": env_bool("DOLPHIN_DO_SAMPLE", default=False),
         "num_beams": _getf("DOLPHIN_NUM_BEAMS", int, 1),
     }
 
@@ -478,10 +470,7 @@ def _getf_optional(env: str, cast):
 
 
 def _bool_env(env: str, default: bool) -> bool:
-    val = os.getenv(env)
-    if val is None:
-        return default
-    return str(val).lower() in ("1", "true", "yes")
+    return env_bool(env, default=default)
 
 
 def _is_local_url(url: str) -> bool:

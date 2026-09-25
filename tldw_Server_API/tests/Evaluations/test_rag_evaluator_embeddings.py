@@ -97,7 +97,7 @@ class TestRAGEvaluatorEmbeddings:
 
             assert metric_name == "answer_similarity"
             assert result["method"] == "llm"
-            assert result["score"] == 0.8  # 4/5
+            assert result["score"] == 0.75  # (4-1)/4; was 0.8 under the old raw/5.0
             assert result["raw_score"] == 4.0
 
     @pytest.mark.asyncio

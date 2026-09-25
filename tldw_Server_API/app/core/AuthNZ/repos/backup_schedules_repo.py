@@ -8,6 +8,7 @@ from uuid import uuid4
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+from tldw_Server_API.app.core.AuthNZ.repos._dual_backend import row_dict
 
 
 _SQLITE_BACKUP_SCHEDULES_DDL = (
@@ -102,14 +103,7 @@ class AuthnzBackupSchedulesRepo:
     @staticmethod
     def _row_to_dict(row: Any) -> dict[str, Any]:
         """Normalize backend-specific row objects to plain JSON-friendly dicts."""
-        if isinstance(row, dict):
-            data = dict(row)
-        else:
-            try:
-                keys = row.keys()
-                data = {key: row[key] for key in keys}
-            except Exception:
-                data = dict(row)
+        data = row_dict(row)
 
         for text_id_field in ("id", "schedule_id", "last_job_id", "job_id"):
             if data.get(text_id_field) is not None:

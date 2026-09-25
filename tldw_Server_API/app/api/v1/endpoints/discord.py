@@ -4,11 +4,13 @@ import secrets
 from typing import Any
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 from loguru import logger
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, RequireRole, User
 
+from tldw_Server_API.app.api.v1.endpoints._chatops import ingress as _chatops_ingress
+from tldw_Server_API.app.api.v1.endpoints._chatops import policy as _chatops_policy
 from tldw_Server_API.app.api.v1.endpoints.discord_oauth_admin import (
     discord_admin_delete_installation_impl,
     discord_admin_get_policy_impl,
@@ -25,6 +27,7 @@ from tldw_Server_API.app.api.v1.endpoints.discord_support import (
     _decrypt_discord_payload,
     _dedupe_ttl_seconds,
     _discord_oauth_token_exchange,
+    _discord_policy_error_response,
     _discord_policy_for_guild,
     _discord_response_mode,
     _encrypt_discord_payload,
@@ -63,18 +66,9 @@ from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter
 router = APIRouter(prefix="/discord", tags=["discord"])
 
 
-def _metric_labels(**labels: Any) -> dict[str, str]:
-    normalized: dict[str, str] = {}
-    for key, value in labels.items():
-        if value is None:
-            continue
-        normalized[str(key)] = str(value)
-    return normalized
-
-
 def _emit_discord_counter(metric_name: str, **labels: Any) -> None:
     try:
-        log_counter(metric_name, labels=_metric_labels(**labels))
+        log_counter(metric_name, labels=_chatops_policy.metric_labels(**labels))
     except Exception:
         logger.debug("Failed to emit Discord metric")
 
@@ -84,76 +78,13 @@ async def _get_workspace_provider_installations_repo():
 
 
 async def _resolve_workspace_org_id(request: Request | None, user_id: int) -> int:
-    if request is not None:
-        active_org_id = _safe_int(getattr(request.state, "active_org_id", None))
-        if active_org_id is not None and active_org_id > 0:
-            return active_org_id
-        request_org_ids = getattr(request.state, "org_ids", None)
-        if isinstance(request_org_ids, (list, tuple, set)):
-            for candidate in request_org_ids:
-                org_id = _safe_int(candidate)
-                if org_id is not None and org_id > 0:
-                    return org_id
-
-    settings = get_settings()
-    if str(getattr(settings, "AUTH_MODE", "")).strip().lower() == "single_user":
-        return 1
-
-    memberships = await list_org_memberships_for_user(int(user_id))
-    for membership in memberships or []:
-        try:
-            org_id = int((membership or {}).get("org_id"))
-        except (TypeError, ValueError):
-            continue
-        if org_id <= 0:
-            continue
-        status_value = str((membership or {}).get("status") or "").strip().lower()
-        if not status_value or status_value in {"active", "member", "approved"}:
-            return org_id
-
-    for membership in memberships or []:
-        try:
-            org_id = int((membership or {}).get("org_id"))
-        except (TypeError, ValueError):
-            continue
-        if org_id > 0:
-            return org_id
-
-    raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail="Unable to resolve workspace organization for installation",
+    return await _chatops_ingress.resolve_workspace_org_id(
+        request,
+        user_id,
+        list_memberships=list_org_memberships_for_user,
+        safe_int=_safe_int,
+        auth_mode=str(getattr(get_settings(), "AUTH_MODE", "")),
     )
-
-
-def _discord_policy_error_response(
-    policy_error: dict[str, Any], *, guild_id: str | None, action: str | None
-) -> JSONResponse:
-    status_code = int(policy_error.get("status_code") or status.HTTP_403_FORBIDDEN)
-    response_payload = {k: v for k, v in policy_error.items() if k != "status_code"}
-    headers: dict[str, str] = {}
-    retry_after = _safe_int(policy_error.get("retry_after_seconds"))
-    if retry_after is not None and retry_after > 0:
-        headers["Retry-After"] = str(retry_after)
-        _emit_discord_counter(
-            "discord_policy_quota_rejections_total",
-            guild_id=guild_id or "na",
-            action=action or "na",
-            error=response_payload.get("error"),
-        )
-    else:
-        _emit_discord_counter(
-            "discord_policy_denied_total",
-            guild_id=guild_id or "na",
-            action=action or "na",
-            error=response_payload.get("error"),
-        )
-    logger.warning(
-        "Discord policy denied request: guild_id={} action={} error={}",
-        guild_id or "na",
-        action or "na",
-        response_payload.get("error"),
-    )
-    return JSONResponse(status_code=status_code, headers=headers, content={"ok": False, **response_payload})
 
 
 def _enqueue_discord_job(
@@ -163,35 +94,24 @@ def _enqueue_discord_job(
     owner_user_id: str | None = None,
     policy: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    jm = _get_job_manager()
-    request_id = _coerce_nonempty_string(payload.get("id")) or secrets.token_urlsafe(12)
     owner = _coerce_nonempty_string(owner_user_id)
     if not owner and isinstance(payload.get("member"), dict):
         owner = _coerce_nonempty_string(payload.get("member", {}).get("user", {}).get("id"))
-    response_mode = _discord_response_mode(payload, policy)
-    action = str(parsed_command.get("action") or "ask")
-    job = jm.create_job(
+    return _chatops_ingress.submit_job(
+        _get_job_manager(),
         domain="discord",
-        queue="default",
-        job_type=f"discord_{action}",
+        action=str(parsed_command.get("action") or "ask"),
+        request_id=_coerce_nonempty_string(payload.get("id")) or secrets.token_urlsafe(12),
+        owner_user_id=owner,
         payload={
-            "request_id": request_id,
             "application_id": _coerce_nonempty_string(payload.get("application_id")),
             "guild_id": _coerce_nonempty_string(payload.get("guild_id")),
             "channel_id": _coerce_nonempty_string(payload.get("channel_id")),
             "command": parsed_command,
-            "response_mode": response_mode,
         },
-        owner_user_id=owner,
-        request_id=request_id,
+        response_mode=_discord_response_mode(payload, policy),
+        safe_int=_safe_int,
     )
-    job_id = _safe_int(job.get("id"))
-    return {
-        "job_id": job_id,
-        "request_id": request_id,
-        "response_mode": response_mode,
-        "job_status": str(job.get("status") or "queued"),
-    }
 
 
 @router.post("/interactions")
@@ -225,11 +145,7 @@ async def discord_interactions(request: Request) -> JSONResponse:
     )
     if not allowed:
         _emit_discord_counter("discord_requests_total", endpoint="interactions", outcome="rate_limited")
-        return JSONResponse(
-            status_code=429,
-            headers={"Retry-After": str(retry_after)},
-            content={"ok": False, "error": "rate_limited", "retry_after_seconds": retry_after},
-        )
+        return _chatops_ingress.rate_limited_response(retry_after)
 
     interaction_type = payload.get("type")
     if interaction_type == 1:
@@ -240,7 +156,7 @@ async def discord_interactions(request: Request) -> JSONResponse:
     is_duplicate = _INTERACTION_RECEIPTS.seen_or_store(dedupe_key, _dedupe_ttl_seconds())
     if is_duplicate:
         _emit_discord_counter("discord_requests_total", endpoint="interactions", outcome="duplicate")
-        return JSONResponse(status_code=200, content={"ok": True, "status": "duplicate"})
+        return _chatops_ingress.duplicate_response()
 
     if interaction_type == 2:
         parsed_command, parse_error = _parse_discord_interaction_command(payload)
@@ -299,48 +215,18 @@ async def discord_interactions(request: Request) -> JSONResponse:
             )
 
         if action == "status":
-            jm = _get_job_manager()
-            requested_job_id = _safe_int(parsed_command.get("input"))
-            if requested_job_id is None:
-                _emit_discord_counter("discord_requests_total", endpoint="interactions", outcome="invalid_status_query")
-                return JSONResponse(
-                    status_code=400,
-                    content={
-                        "ok": False,
-                        "error": "invalid_status_query",
-                        "message": "Status command requires a numeric job id. Example: status 42",
-                    },
-                )
-            job = jm.get_job(requested_job_id)
-            job_payload = job.get("payload") if isinstance(job, dict) and isinstance(job.get("payload"), dict) else {}
-            job_guild_id = _coerce_nonempty_string(job_payload.get("guild_id"))
-            owner_user_id = _coerce_nonempty_string(job.get("owner_user_id")) if isinstance(job, dict) else None
-            status_scope = str(policy.get("status_scope") or "guild").strip().lower()
-            wrong_guild = bool(job_guild_id and guild_id and job_guild_id != guild_id)
-            wrong_user_scope = bool(
-                status_scope == "guild_and_user" and actor_user_id and owner_user_id and actor_user_id != owner_user_id
-            )
-            if not job or wrong_guild or wrong_user_scope:
-                _emit_discord_counter("discord_requests_total", endpoint="interactions", outcome="status_denied")
-                return JSONResponse(
-                    status_code=404,
-                    content={"ok": False, "error": "job_not_found", "job_id": requested_job_id},
-                )
-            _emit_discord_counter("discord_requests_total", endpoint="interactions", outcome="accepted", action=action)
-            return JSONResponse(
-                status_code=200,
-                content={
-                    "ok": True,
-                    "status": "accepted",
-                    "parsed": parsed_command,
-                    "job": {
-                        "id": requested_job_id,
-                        "status": job.get("status"),
-                        "domain": job.get("domain"),
-                        "queue": job.get("queue"),
-                        "job_type": job.get("job_type"),
-                    },
-                },
+            return _chatops_ingress.status_command_response(
+                _get_job_manager(),
+                parsed_command=parsed_command,
+                policy=policy,
+                tenant_field="guild_id",
+                tenant_id=guild_id,
+                actor_user_id=actor_user_id,
+                emit=_emit_discord_counter,
+                requests_metric="discord_requests_total",
+                endpoint="interactions",
+                coerce=_coerce_nonempty_string,
+                safe_int=_safe_int,
             )
 
         _emit_discord_counter(
@@ -352,33 +238,23 @@ async def discord_interactions(request: Request) -> JSONResponse:
     return JSONResponse(status_code=200, content={"ok": True, "status": "accepted"})
 
 
-@router.get(
-    "/jobs/{job_id}",
-    dependencies=[Depends(RequireRole("admin"))],
-)
+@router.get("/jobs/{job_id}")
 async def discord_job_status(
     job_id: int,
+    user: User = Depends(get_request_user),
 ):
-    # Ops-only lookup. Jobs in this domain are owned by platform actor ids, not
-    # tldw user ids, so there is no app-user owner to scope by -- the
-    # user-facing path is the signed in-band "status" command, which already
-    # scopes by guild/workspace and actor.
-    jm = _get_job_manager()
-    job = jm.get_job(int(job_id))
-    if not job:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job_not_found")
-    if str(job.get("domain") or "").strip().lower() != "discord":
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job_not_found")
-    return {
-        "ok": True,
-        "job": {
-            "id": int(job.get("id") or job_id),
-            "status": job.get("status"),
-            "domain": job.get("domain"),
-            "queue": job.get("queue"),
-            "job_type": job.get("job_type"),
-        },
-    }
+    return await _chatops_ingress.job_status_payload(
+        _get_job_manager(),
+        job_id,
+        domain="discord",
+        tenant_field="guild_id",
+        user_id=int(user.id),
+        list_memberships=list_org_memberships_for_user,
+        get_installations_repo=_get_workspace_provider_installations_repo,
+        policy_for=_discord_policy_for_guild,
+        coerce=_coerce_nonempty_string,
+        auth_mode=str(getattr(get_settings(), "AUTH_MODE", "")),
+    )
 
 
 @router.post("/oauth/start")

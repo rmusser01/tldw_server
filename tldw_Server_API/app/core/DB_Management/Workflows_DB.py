@@ -35,6 +35,7 @@ from .backends.query_utils import (
     prepare_backend_statement,
 )
 from .sqlite_policy import configure_sqlite_connection
+from tldw_Server_API.app.core.Utils.backoff import capped_exponential_delay
 
 _WORKFLOWS_DB_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -675,6 +676,24 @@ class WorkflowsDatabase:
             self._conn.execute("PRAGMA wal_autocheckpoint=1000;")
         except _WORKFLOWS_DB_NONCRITICAL_EXCEPTIONS as e:
             logger.warning(f"Failed to enable WAL on workflows DB: {e}")
+
+    def health_probe(self) -> dict[str, int | None]:
+        """Run a trivial query; report schema/expected versions (backend deployments only).
+
+        Raises on connectivity failure. A failure to read the version is not fatal.
+        """
+        if not self._using_backend():
+            self._conn.cursor().execute("SELECT 1").fetchone()
+            return {"schema_version": None, "expected_version": None}
+        with self.backend.transaction() as conn:  # type: ignore[union-attr]
+            self._execute_backend("SELECT 1", None, connection=conn)
+            try:
+                return {
+                    "schema_version": int(self._get_backend_schema_version(conn)),
+                    "expected_version": int(self._CURRENT_SCHEMA_VERSION),
+                }
+            except Exception:  # noqa: BLE001 - version is informational
+                return {"schema_version": None, "expected_version": None}
 
     def _get_backend_schema_version(self, conn) -> int:
         if not self.backend:
@@ -1665,21 +1684,24 @@ class WorkflowsDatabase:
                 return
             except sqlite3.OperationalError as e:
                 if "locked" in str(e).lower() and tries < max_tries - 1:
-                    _time.sleep(0.05 * (2 ** tries))
+                    # Shared schedule; jitter=False preserves existing timing.
+                    _time.sleep(capped_exponential_delay(tries, base_s=0.05, jitter=False))
                     tries += 1
                     continue
                 raise
 
-    def _sqlite_retry_commit(self) -> None:
+    def _sqlite_retry_commit(self, *, max_tries: int = 5) -> None:
         import time as _time
+
         tries = 0
         while True:
             try:
                 self._conn.commit()
                 return
             except sqlite3.OperationalError as e:
-                if "locked" in str(e).lower() and tries < 4:
-                    _time.sleep(0.05 * (2 ** tries))
+                if "locked" in str(e).lower() and tries < max_tries - 1:
+                    # Shared schedule; jitter=False preserves existing timing.
+                    _time.sleep(capped_exponential_delay(tries, base_s=0.05, jitter=False))
                     tries += 1
                     continue
                 raise
@@ -2199,7 +2221,8 @@ class WorkflowsDatabase:
                     if "locked" in str(retry_error).lower() and tries < 4:
                         with contextlib.suppress(sqlite3.Error):
                             conn.rollback()
-                        _time.sleep(0.05 * (2 ** tries))
+                        # Shared schedule; jitter=False preserves existing timing.
+                        _time.sleep(capped_exponential_delay(tries, base_s=0.05, jitter=False))
                         tries += 1
                         continue
                     with contextlib.suppress(sqlite3.Error):
@@ -2304,7 +2327,8 @@ class WorkflowsDatabase:
                     if "locked" in str(e).lower() and tries < 4:
                         import time as _time
 
-                        _time.sleep(0.05 * (2 ** tries))
+                        # Shared schedule; jitter=False preserves existing timing.
+                        _time.sleep(capped_exponential_delay(tries, base_s=0.05, jitter=False))
                         tries += 1
                         continue
                     raise
@@ -3398,7 +3422,9 @@ class WorkflowsDatabase:
             """
             SELECT id, tenant_id, run_id, url, body_json, attempts, next_attempt_at, last_error, created_at
             FROM workflow_webhook_dlq
-            WHERE next_attempt_at IS NULL OR next_attempt_at <= datetime('now')
+            -- datetime() normalises the ISO 'T' form the worker writes; compared as raw text
+            -- 'T' sorts after ' ', so a retry due later today looked not-due until tomorrow.
+            WHERE next_attempt_at IS NULL OR datetime(next_attempt_at) <= datetime('now')
             ORDER BY COALESCE(next_attempt_at, created_at) ASC, id ASC
             LIMIT ?
             """,

@@ -128,6 +128,7 @@ import {
   type PendingWebClipAgentTaskRequest
 } from "@/services/web-clipper/agent-task-handoff"
 import type { WorkspaceAgentTaskPrefill } from "./WorkspaceAgentTaskHandoffModal"
+import { isEditableTarget } from "@/utils/editable-target"
 
 const SourcesPane = React.lazy(() =>
   import("./SourcesPane").then((module) => ({ default: module.SourcesPane }))
@@ -264,18 +265,6 @@ const wasWorkspaceFreshlyInitializedInRuntime = (
       WORKSPACE_FRESH_INITIALIZATION_RUNTIME_MARKER
     ]?.has(workspaceId)
   )
-
-const isEditableKeyboardTarget = (target: EventTarget | null): boolean => {
-  if (!(target instanceof HTMLElement)) return false
-  const tag = target.tagName.toLowerCase()
-  return (
-    tag === "input" ||
-    tag === "textarea" ||
-    tag === "select" ||
-    target.isContentEditable ||
-    Boolean(target.closest("[contenteditable='true']"))
-  )
-}
 
 const jsonValueContainsOffloadPointer = (
   value: unknown,
@@ -2931,7 +2920,7 @@ const ResearchWorkspaceBody: React.FC = () => {
     const handleKeyboardShortcut = (event: KeyboardEvent) => {
       const key = event.key.toLowerCase()
       const hasPrimaryModifier = event.metaKey || event.ctrlKey
-      const editableTarget = isEditableKeyboardTarget(event.target)
+      const editableTarget = isEditableTarget(event.target)
 
       if (editableTarget) {
         return

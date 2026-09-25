@@ -3,9 +3,10 @@ id: TASK-13304
 title: >-
   Resampler fails open without librosa; audio is relabelled 16 kHz and plays 3x
   fast
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-22 04:52'
+updated_date: '2026-09-23 19:34'
 labels:
   - bug
   - audio
@@ -57,6 +58,18 @@ Found by the comprehensive core-module review; independently verified by the orc
 - [ ] #4 The other two fail-open resamplers in the module are corrected in the same pass
 - [ ] #5 A missing resampling dependency surfaces as an error to the client, not a warning in the log
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Duplicate of TASK-13308 (filed twice during the 2026-09-22 review). Work and status are tracked there.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Closed as duplicate of TASK-13308.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

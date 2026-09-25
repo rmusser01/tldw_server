@@ -1492,21 +1492,6 @@ class UnifiedEvaluationService:
             variants.add(f"user_{raw}")
         return variants
 
-    @staticmethod
-    def _extract_created_ts(record: dict[str, Any]) -> Optional[int]:
-        value = record.get("created_at")
-        if value is None:
-            value = record.get("created")
-        if isinstance(value, (int, float)):
-            return int(value)
-        if isinstance(value, str):
-            try:
-                ts = value.replace("Z", "+00:00")
-                return int(datetime.fromisoformat(ts).timestamp())
-            except _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS:
-                return None
-        return None
-
     async def _store_evaluation_result(
         self,
         evaluation_type: str,

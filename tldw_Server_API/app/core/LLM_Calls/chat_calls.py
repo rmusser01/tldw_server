@@ -54,6 +54,8 @@ from tldw_Server_API.app.core.Utils.Utils import logging
 # Session shim for non-streaming POST calls
 # - Preserves the public name `create_session_with_retries` so tests can
 #   monkeypatch it, while centralizing non-streaming requests via http_client.
+# - Returned in tests too: a pytest-only branch once handed tests the legacy
+#   facade, so no test exercised this shim's non-streaming path.
 # - For streaming (stream=True), falls back to the legacy session facade
 #   returned by http_helpers.create_session_with_retries to preserve
 #   iter_lines() semantics used in streaming paths.

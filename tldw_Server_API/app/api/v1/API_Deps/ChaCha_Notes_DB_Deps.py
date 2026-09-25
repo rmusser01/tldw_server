@@ -347,8 +347,10 @@ if not SERVER_CLIENT_ID:
 # as each user gets their DB under their own USER_DB_BASE_DIR/user_id/
 
 # +++ Default Character Configuration +++
-DEFAULT_CHARACTER_NAME = "Helpful AI Assistant"
-DEFAULT_CHARACTER_DESCRIPTION = "A default, friendly assistant created automatically by the system."
+from tldw_Server_API.app.core.Character_Chat.constants import (  # noqa: E402 - re-exported
+    DEFAULT_CHARACTER_DESCRIPTION,
+    DEFAULT_CHARACTER_NAME,
+)
 
 # --- Global Cache for ChaChaNotes DB Instances ---
 MAX_CACHED_CHACHA_DB_INSTANCES = int(settings.get("MAX_CACHED_CHACHA_DB_INSTANCES", "20"))

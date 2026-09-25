@@ -303,8 +303,9 @@ def _resample_audio_if_needed(audio, sample_rate, target_sr=16000):  # type: ign
         x_old = np.linspace(0.0, 1.0, num=arr.shape[0], endpoint=False)
         x_new = np.linspace(0.0, 1.0, num=new_len, endpoint=False)
         return np.interp(x_new, x_old, arr).astype(np.float32, copy=False)
-    except _AUDIO_UNIFIED_NONCRITICAL_EXCEPTIONS:
-        return audio
+    except _AUDIO_UNIFIED_NONCRITICAL_EXCEPTIONS as exc:
+        # Returning the input would hand back audio at sample_rate labelled as target_sr.
+        raise ValueError(f"Could not resample audio from {sample_rate} Hz to {target_sr} Hz") from exc
 
 # Optional torch/torchaudio/Nemo modules for Parakeet RNNT streaming.
 # Keep these lazy so importing this module in unit tests never forces native

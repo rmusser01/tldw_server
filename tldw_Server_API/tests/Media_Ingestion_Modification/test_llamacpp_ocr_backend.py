@@ -351,7 +351,7 @@ def test_llamacpp_remote_request_cleans_up_temp_file_when_not_using_data_url(mon
         return {"choices": [{"message": {"content": "remote text"}}]}
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.backends.llamacpp_ocr.tempfile.NamedTemporaryFile",
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.runtime_support.tempfile.NamedTemporaryFile",
         fake_tempfile,
     )
     monkeypatch.setattr(

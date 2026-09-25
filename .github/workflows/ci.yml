@@ -700,8 +700,30 @@ jobs:
               tldw_Server_API/tests/Files
               tldw_Server_API/tests/Meetings
               tldw_Server_API/tests/Notes_Tasks
-              tldw_Server_API/tests/Sync
               tldw_Server_API/tests/Translation
+          # tests/Sync outgrew one 60-minute shard: against Postgres the personal-context
+          # files run ~10-80x slower than locally (conflicts ~19 min, exchange_gate ~17 min),
+          # so gap-verified-2 was cancelled at the timeout and Sync never reported.
+          - name: sync-core
+            paths: >-
+              tldw_Server_API/tests/Sync
+              --ignore-glob=*/test_sync_v2_personal_context_*.py
+          - name: sync-pc-conflicts
+            paths: >-
+              tldw_Server_API/tests/Sync/test_sync_v2_personal_context_conflicts.py
+          - name: sync-pc-exchange-gate
+            paths: >-
+              tldw_Server_API/tests/Sync/test_sync_v2_personal_context_exchange_gate.py
+          - name: sync-pc-transport
+            paths: >-
+              tldw_Server_API/tests/Sync/test_sync_v2_personal_context_transport.py
+          # Every other personal-context file, including new ones, lands here.
+          - name: sync-pc-rest
+            paths: >-
+              tldw_Server_API/tests/Sync/test_sync_v2_personal_context_*.py
+              --deselect=tldw_Server_API/tests/Sync/test_sync_v2_personal_context_conflicts.py
+              --deselect=tldw_Server_API/tests/Sync/test_sync_v2_personal_context_exchange_gate.py
+              --deselect=tldw_Server_API/tests/Sync/test_sync_v2_personal_context_transport.py
           - name: gap-verified-3
             paths: >-
               tldw_Server_API/tests/DataTables
@@ -1275,6 +1297,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_prompt_templates_sanitizers.py
               tldw_Server_API/tests/RAG_NEW/unit/test_quick_wins_spell_check_compat.py
               tldw_Server_API/tests/RAG_NEW/unit/test_schema_corpus_alias.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_notes_include_list_relevance.py
               tldw_Server_API/tests/RAG_NEW/unit/test_standard_core_contract_threading.py
               tldw_Server_API/tests/RAG_NEW/unit/test_suggestion_generator.py
               tldw_Server_API/tests/RAG_NEW/unit/test_synonyms_registry_logging.py
@@ -1378,6 +1401,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_chat_dictionary_legacy.py
               tldw_Server_API/tests/Character_Chat/test_chat_settings_endpoints.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_e2e_mock.py
+              tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_done_spelling.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_unified_flag_monkeypatched.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_with_mock_openai.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_with_mock_openai.py
@@ -1469,14 +1493,14 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_conversation_context_primitives.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_role_normalization_and_search.py
-          - name: chat-legacy-integration
+          - name: chat-integration
             paths: >-
               tldw_Server_API/tests/Chat/test*.py
               tldw_Server_API/tests/Chat/integration
-          - name: chat-legacy-unit-a-l
+          - name: chat-unit-a-l
             paths: >-
               tldw_Server_API/tests/Chat/unit/test_[a-l]*.py
-          - name: chat-legacy-unit-m-z
+          - name: chat-unit-m-z
             paths: >-
               tldw_Server_API/tests/Chat/unit/test_[m-z]*.py
           - name: chat-new-integration-property
@@ -1631,6 +1655,8 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_persona_*.py
               tldw_Server_API/tests/Evaluations/test_recipe_*.py
           - name: product-evaluations-unit
+            # Non-UTC on purpose (TASK-13336): UTC hides host-offset timestamp bugs (delta 0).
+            tz: America/Los_Angeles
             paths: >-
               tldw_Server_API/tests/Evaluations/unit/test_*.py
           - name: product-flashcards
@@ -1680,6 +1706,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Watchlists/test_scheduler_*.py
               tldw_Server_API/tests/Watchlists/test_output_enrichment_scheduler.py
+              tldw_Server_API/tests/Watchlists/test_outputs_run_media_selection.py
               tldw_Server_API/tests/Watchlists/test_site_*.py
               tldw_Server_API/tests/Watchlists/test_subscriptions_*.py
               tldw_Server_API/tests/Watchlists/test_template_*.py
@@ -1717,6 +1744,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Workflows/test_artifact_*.py
               tldw_Server_API/tests/Workflows/test_events_*.py
+              tldw_Server_API/tests/Workflows/test_malformed_cursor_400.py
               tldw_Server_API/tests/Workflows/test_runs_*.py
               tldw_Server_API/tests/Workflows/test_webhook_*.py
               tldw_Server_API/tests/Workflows/test_workflow_approval_permissions.py
@@ -1761,6 +1789,19 @@ jobs:
             paths: >-
               tldw_Server_API/tests/MCP
               tldw_Server_API/tests/MCP_unified
+          # app/core/MCP_unified/tests (149 files, ~3.3k tests) is in pyproject
+          # testpaths but was in no CI shard, so a test stayed red for 3.5 months
+          # across 28 commits to the file it covers (TASK-13291).
+          # It runs as its OWN shard, not appended to platform-mcp-core: sharing a
+          # process with tests/MCP_unified makes test_rag_module and
+          # test_gateway_protocol_stdio fail through cross-test state pollution,
+          # though both pass in isolation.
+          # The quarantine this shard launched with (10 files, 21 red entries) is
+          # fully drained (TASK-13343); the shard runs the whole tree. Do not add
+          # --ignore entries here: fix the test, or skip it with a reason.
+          - name: platform-mcp-inapp
+            paths: >-
+              tldw_Server_API/app/core/MCP_unified/tests
           - name: platform-resource-governance
             paths: >-
               tldw_Server_API/tests/Resource_Governance
@@ -1909,6 +1950,7 @@ jobs:
       SHARD_NAME: ${{ matrix.shard.name }}
       TEST_PATHS: ${{ matrix.shard.paths }}
       RESULTS_DIR: test-results-linux-3.12-${{ matrix.shard.name }}
+      TZ: ${{ matrix.shard.tz || 'UTC' }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -2212,8 +2254,30 @@ jobs:
               tldw_Server_API/tests/Files
               tldw_Server_API/tests/Meetings
               tldw_Server_API/tests/Notes_Tasks
-              tldw_Server_API/tests/Sync
               tldw_Server_API/tests/Translation
+          # tests/Sync outgrew one 60-minute shard: against Postgres the personal-context
+          # files run ~10-80x slower than locally (conflicts ~19 min, exchange_gate ~17 min),
+          # so gap-verified-2 was cancelled at the timeout and Sync never reported.
+          - name: sync-core
+            paths: >-
+              tldw_Server_API/tests/Sync
+              --ignore-glob=*/test_sync_v2_personal_context_*.py
+          - name: sync-pc-conflicts
+            paths: >-
+              tldw_Server_API/tests/Sync/test_sync_v2_personal_context_conflicts.py
+          - name: sync-pc-exchange-gate
+            paths: >-
+              tldw_Server_API/tests/Sync/test_sync_v2_personal_context_exchange_gate.py
+          - name: sync-pc-transport
+            paths: >-
+              tldw_Server_API/tests/Sync/test_sync_v2_personal_context_transport.py
+          # Every other personal-context file, including new ones, lands here.
+          - name: sync-pc-rest
+            paths: >-
+              tldw_Server_API/tests/Sync/test_sync_v2_personal_context_*.py
+              --deselect=tldw_Server_API/tests/Sync/test_sync_v2_personal_context_conflicts.py
+              --deselect=tldw_Server_API/tests/Sync/test_sync_v2_personal_context_exchange_gate.py
+              --deselect=tldw_Server_API/tests/Sync/test_sync_v2_personal_context_transport.py
           - name: gap-verified-3
             paths: >-
               tldw_Server_API/tests/DataTables
@@ -2553,6 +2617,7 @@ jobs:
               tldw_Server_API/tests/Chunking/test_chunking_templates_endpoint_sanitization.py
               tldw_Server_API/tests/Chunking/test_chunking_templates_validate_schema.py
               tldw_Server_API/tests/Chunking/test_template_*.py
+              tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
           - name: ai-chunking-templates-api
             paths: >-
               tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestAPIEndpoints
@@ -2786,6 +2851,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_prompt_templates_sanitizers.py
               tldw_Server_API/tests/RAG_NEW/unit/test_quick_wins_spell_check_compat.py
               tldw_Server_API/tests/RAG_NEW/unit/test_schema_corpus_alias.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_notes_include_list_relevance.py
               tldw_Server_API/tests/RAG_NEW/unit/test_standard_core_contract_threading.py
               tldw_Server_API/tests/RAG_NEW/unit/test_suggestion_generator.py
               tldw_Server_API/tests/RAG_NEW/unit/test_synonyms_registry_logging.py
@@ -2889,6 +2955,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_chat_dictionary_legacy.py
               tldw_Server_API/tests/Character_Chat/test_chat_settings_endpoints.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_e2e_mock.py
+              tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_done_spelling.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_unified_flag_monkeypatched.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_with_mock_openai.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_with_mock_openai.py
@@ -2898,6 +2965,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_messages_tool_calls_exposure.py
               tldw_Server_API/tests/Character_Chat/test_message_listing_raw_content.py
               tldw_Server_API/tests/Character_Chat/test_persona_dialogue_tree_character_eval.py
+              tldw_Server_API/tests/Character_Chat/test_message_listing_raw_content.py
           - name: chat-character-legacy-files
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_file_mime_detection.py
@@ -2938,6 +3006,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_memory.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_prompt_presets.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_templates.py
+              tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_behavior_snapshot.py
           - name: chat-character-unit-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_chat_completion_precheck.py
@@ -2980,14 +3049,14 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_conversation_context_primitives.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_role_normalization_and_search.py
-          - name: chat-legacy-integration
+          - name: chat-integration
             paths: >-
               tldw_Server_API/tests/Chat/test*.py
               tldw_Server_API/tests/Chat/integration
-          - name: chat-legacy-unit-a-l
+          - name: chat-unit-a-l
             paths: >-
               tldw_Server_API/tests/Chat/unit/test_[a-l]*.py
-          - name: chat-legacy-unit-m-z
+          - name: chat-unit-m-z
             paths: >-
               tldw_Server_API/tests/Chat/unit/test_[m-z]*.py
           - name: chat-new-integration-property
@@ -3191,6 +3260,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Watchlists/test_scheduler_*.py
               tldw_Server_API/tests/Watchlists/test_output_enrichment_scheduler.py
+              tldw_Server_API/tests/Watchlists/test_outputs_run_media_selection.py
               tldw_Server_API/tests/Watchlists/test_site_*.py
               tldw_Server_API/tests/Watchlists/test_subscriptions_*.py
               tldw_Server_API/tests/Watchlists/test_template_*.py
@@ -3228,6 +3298,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Workflows/test_artifact_*.py
               tldw_Server_API/tests/Workflows/test_events_*.py
+              tldw_Server_API/tests/Workflows/test_malformed_cursor_400.py
               tldw_Server_API/tests/Workflows/test_runs_*.py
               tldw_Server_API/tests/Workflows/test_webhook_*.py
               tldw_Server_API/tests/Workflows/test_workflow_approval_permissions.py
@@ -3272,6 +3343,19 @@ jobs:
             paths: >-
               tldw_Server_API/tests/MCP
               tldw_Server_API/tests/MCP_unified
+          # app/core/MCP_unified/tests (149 files, ~3.3k tests) is in pyproject
+          # testpaths but was in no CI shard, so a test stayed red for 3.5 months
+          # across 28 commits to the file it covers (TASK-13291).
+          # It runs as its OWN shard, not appended to platform-mcp-core: sharing a
+          # process with tests/MCP_unified makes test_rag_module and
+          # test_gateway_protocol_stdio fail through cross-test state pollution,
+          # though both pass in isolation.
+          # The quarantine this shard launched with (10 files, 21 red entries) is
+          # fully drained (TASK-13343); the shard runs the whole tree. Do not add
+          # --ignore entries here: fix the test, or skip it with a reason.
+          - name: platform-mcp-inapp
+            paths: >-
+              tldw_Server_API/app/core/MCP_unified/tests
           - name: platform-resource-governance
             paths: >-
               tldw_Server_API/tests/Resource_Governance
@@ -3279,6 +3363,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_startup_*.py
+              tldw_Server_API/tests/Services/test_study_pack_startup_default.py
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_study_pack_startup_default.py
           - name: platform-services-shutdown-lifespan
@@ -3929,6 +4014,7 @@ jobs:
               tldw_Server_API/tests/Chunking/test_chunking_templates_endpoint_sanitization.py
               tldw_Server_API/tests/Chunking/test_chunking_templates_validate_schema.py
               tldw_Server_API/tests/Chunking/test_template_*.py
+              tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
           - name: ai-chunking-templates-api
             paths: >-
               tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestAPIEndpoints
@@ -4162,6 +4248,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_prompt_templates_sanitizers.py
               tldw_Server_API/tests/RAG_NEW/unit/test_quick_wins_spell_check_compat.py
               tldw_Server_API/tests/RAG_NEW/unit/test_schema_corpus_alias.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_notes_include_list_relevance.py
               tldw_Server_API/tests/RAG_NEW/unit/test_standard_core_contract_threading.py
               tldw_Server_API/tests/RAG_NEW/unit/test_suggestion_generator.py
               tldw_Server_API/tests/RAG_NEW/unit/test_synonyms_registry_logging.py
@@ -4265,6 +4352,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_chat_dictionary_legacy.py
               tldw_Server_API/tests/Character_Chat/test_chat_settings_endpoints.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_e2e_mock.py
+              tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_done_spelling.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_unified_flag_monkeypatched.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_with_mock_openai.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_with_mock_openai.py
@@ -4274,6 +4362,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_messages_tool_calls_exposure.py
               tldw_Server_API/tests/Character_Chat/test_message_listing_raw_content.py
               tldw_Server_API/tests/Character_Chat/test_persona_dialogue_tree_character_eval.py
+              tldw_Server_API/tests/Character_Chat/test_message_listing_raw_content.py
           - name: chat-character-legacy-files
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_file_mime_detection.py
@@ -4314,6 +4403,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_memory.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_prompt_presets.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_templates.py
+              tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_behavior_snapshot.py
           - name: chat-character-unit-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_chat_completion_precheck.py
@@ -4356,14 +4446,14 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_conversation_context_primitives.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_role_normalization_and_search.py
-          - name: chat-legacy-integration
+          - name: chat-integration
             paths: >-
               tldw_Server_API/tests/Chat/test*.py
               tldw_Server_API/tests/Chat/integration
-          - name: chat-legacy-unit-a-l
+          - name: chat-unit-a-l
             paths: >-
               tldw_Server_API/tests/Chat/unit/test_[a-l]*.py
-          - name: chat-legacy-unit-m-z
+          - name: chat-unit-m-z
             paths: >-
               tldw_Server_API/tests/Chat/unit/test_[m-z]*.py
           - name: chat-new-integration-property
@@ -4567,6 +4657,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Watchlists/test_scheduler_*.py
               tldw_Server_API/tests/Watchlists/test_output_enrichment_scheduler.py
+              tldw_Server_API/tests/Watchlists/test_outputs_run_media_selection.py
               tldw_Server_API/tests/Watchlists/test_site_*.py
               tldw_Server_API/tests/Watchlists/test_subscriptions_*.py
               tldw_Server_API/tests/Watchlists/test_template_*.py
@@ -4604,6 +4695,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Workflows/test_artifact_*.py
               tldw_Server_API/tests/Workflows/test_events_*.py
+              tldw_Server_API/tests/Workflows/test_malformed_cursor_400.py
               tldw_Server_API/tests/Workflows/test_runs_*.py
               tldw_Server_API/tests/Workflows/test_webhook_*.py
               tldw_Server_API/tests/Workflows/test_workflow_approval_permissions.py
@@ -4648,6 +4740,19 @@ jobs:
             paths: >-
               tldw_Server_API/tests/MCP
               tldw_Server_API/tests/MCP_unified
+          # app/core/MCP_unified/tests (149 files, ~3.3k tests) is in pyproject
+          # testpaths but was in no CI shard, so a test stayed red for 3.5 months
+          # across 28 commits to the file it covers (TASK-13291).
+          # It runs as its OWN shard, not appended to platform-mcp-core: sharing a
+          # process with tests/MCP_unified makes test_rag_module and
+          # test_gateway_protocol_stdio fail through cross-test state pollution,
+          # though both pass in isolation.
+          # The quarantine this shard launched with (10 files, 21 red entries) is
+          # fully drained (TASK-13343); the shard runs the whole tree. Do not add
+          # --ignore entries here: fix the test, or skip it with a reason.
+          - name: platform-mcp-inapp
+            paths: >-
+              tldw_Server_API/app/core/MCP_unified/tests
           - name: platform-resource-governance
             paths: >-
               tldw_Server_API/tests/Resource_Governance
@@ -4655,6 +4760,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_startup_*.py
+              tldw_Server_API/tests/Services/test_study_pack_startup_default.py
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_study_pack_startup_default.py
           - name: platform-services-shutdown-lifespan
@@ -5228,6 +5334,7 @@ jobs:
               tldw_Server_API/tests/Chunking/test_chunking_templates_endpoint_sanitization.py
               tldw_Server_API/tests/Chunking/test_chunking_templates_validate_schema.py
               tldw_Server_API/tests/Chunking/test_template_*.py
+              tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
           - name: ai-chunking-templates-api
             paths: >-
               tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestAPIEndpoints
@@ -5461,6 +5568,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_prompt_templates_sanitizers.py
               tldw_Server_API/tests/RAG_NEW/unit/test_quick_wins_spell_check_compat.py
               tldw_Server_API/tests/RAG_NEW/unit/test_schema_corpus_alias.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_notes_include_list_relevance.py
               tldw_Server_API/tests/RAG_NEW/unit/test_standard_core_contract_threading.py
               tldw_Server_API/tests/RAG_NEW/unit/test_suggestion_generator.py
               tldw_Server_API/tests/RAG_NEW/unit/test_synonyms_registry_logging.py
@@ -5564,6 +5672,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_chat_dictionary_legacy.py
               tldw_Server_API/tests/Character_Chat/test_chat_settings_endpoints.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_e2e_mock.py
+              tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_done_spelling.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_unified_flag_monkeypatched.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_with_mock_openai.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_with_mock_openai.py
@@ -5573,6 +5682,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_messages_tool_calls_exposure.py
               tldw_Server_API/tests/Character_Chat/test_message_listing_raw_content.py
               tldw_Server_API/tests/Character_Chat/test_persona_dialogue_tree_character_eval.py
+              tldw_Server_API/tests/Character_Chat/test_message_listing_raw_content.py
           - name: chat-character-legacy-files
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_file_mime_detection.py
@@ -5613,6 +5723,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_memory.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_prompt_presets.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_templates.py
+              tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_behavior_snapshot.py
           - name: chat-character-unit-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_chat_completion_precheck.py
@@ -5655,14 +5766,14 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_conversation_context_primitives.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_role_normalization_and_search.py
-          - name: chat-legacy-integration
+          - name: chat-integration
             paths: >-
               tldw_Server_API/tests/Chat/test*.py
               tldw_Server_API/tests/Chat/integration
-          - name: chat-legacy-unit-a-l
+          - name: chat-unit-a-l
             paths: >-
               tldw_Server_API/tests/Chat/unit/test_[a-l]*.py
-          - name: chat-legacy-unit-m-z
+          - name: chat-unit-m-z
             paths: >-
               tldw_Server_API/tests/Chat/unit/test_[m-z]*.py
           - name: chat-new-integration-property
@@ -5866,6 +5977,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Watchlists/test_scheduler_*.py
               tldw_Server_API/tests/Watchlists/test_output_enrichment_scheduler.py
+              tldw_Server_API/tests/Watchlists/test_outputs_run_media_selection.py
               tldw_Server_API/tests/Watchlists/test_site_*.py
               tldw_Server_API/tests/Watchlists/test_subscriptions_*.py
               tldw_Server_API/tests/Watchlists/test_template_*.py
@@ -5903,6 +6015,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Workflows/test_artifact_*.py
               tldw_Server_API/tests/Workflows/test_events_*.py
+              tldw_Server_API/tests/Workflows/test_malformed_cursor_400.py
               tldw_Server_API/tests/Workflows/test_runs_*.py
               tldw_Server_API/tests/Workflows/test_webhook_*.py
               tldw_Server_API/tests/Workflows/test_workflow_approval_permissions.py
@@ -5947,6 +6060,19 @@ jobs:
             paths: >-
               tldw_Server_API/tests/MCP
               tldw_Server_API/tests/MCP_unified
+          # app/core/MCP_unified/tests (149 files, ~3.3k tests) is in pyproject
+          # testpaths but was in no CI shard, so a test stayed red for 3.5 months
+          # across 28 commits to the file it covers (TASK-13291).
+          # It runs as its OWN shard, not appended to platform-mcp-core: sharing a
+          # process with tests/MCP_unified makes test_rag_module and
+          # test_gateway_protocol_stdio fail through cross-test state pollution,
+          # though both pass in isolation.
+          # The quarantine this shard launched with (10 files, 21 red entries) is
+          # fully drained (TASK-13343); the shard runs the whole tree. Do not add
+          # --ignore entries here: fix the test, or skip it with a reason.
+          - name: platform-mcp-inapp
+            paths: >-
+              tldw_Server_API/app/core/MCP_unified/tests
           - name: platform-resource-governance
             paths: >-
               tldw_Server_API/tests/Resource_Governance
@@ -5954,6 +6080,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_startup_*.py
+              tldw_Server_API/tests/Services/test_study_pack_startup_default.py
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_study_pack_startup_default.py
           - name: platform-services-shutdown-lifespan
@@ -6533,6 +6660,7 @@ jobs:
               tldw_Server_API/tests/Chunking/test_chunking_templates_endpoint_sanitization.py
               tldw_Server_API/tests/Chunking/test_chunking_templates_validate_schema.py
               tldw_Server_API/tests/Chunking/test_template_*.py
+              tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
           - name: ai-chunking-templates-api
             paths: >-
               tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestAPIEndpoints
@@ -6766,6 +6894,7 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_prompt_templates_sanitizers.py
               tldw_Server_API/tests/RAG_NEW/unit/test_quick_wins_spell_check_compat.py
               tldw_Server_API/tests/RAG_NEW/unit/test_schema_corpus_alias.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_notes_include_list_relevance.py
               tldw_Server_API/tests/RAG_NEW/unit/test_standard_core_contract_threading.py
               tldw_Server_API/tests/RAG_NEW/unit/test_suggestion_generator.py
               tldw_Server_API/tests/RAG_NEW/unit/test_synonyms_registry_logging.py
@@ -6869,6 +6998,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_chat_dictionary_legacy.py
               tldw_Server_API/tests/Character_Chat/test_chat_settings_endpoints.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_e2e_mock.py
+              tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_done_spelling.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_unified_flag_monkeypatched.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_streaming_with_mock_openai.py
               tldw_Server_API/tests/Character_Chat/test_complete_v2_with_mock_openai.py
@@ -6878,6 +7008,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_messages_tool_calls_exposure.py
               tldw_Server_API/tests/Character_Chat/test_message_listing_raw_content.py
               tldw_Server_API/tests/Character_Chat/test_persona_dialogue_tree_character_eval.py
+              tldw_Server_API/tests/Character_Chat/test_message_listing_raw_content.py
           - name: chat-character-legacy-files
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_file_mime_detection.py
@@ -6918,6 +7049,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_memory.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_prompt_presets.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_templates.py
+              tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_behavior_snapshot.py
           - name: chat-character-unit-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_chat_completion_precheck.py
@@ -6960,14 +7092,14 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_conversation_context_primitives.py
               tldw_Server_API/tests/Character_Chat_NEW/integration/test_role_normalization_and_search.py
-          - name: chat-legacy-integration
+          - name: chat-integration
             paths: >-
               tldw_Server_API/tests/Chat/test*.py
               tldw_Server_API/tests/Chat/integration
-          - name: chat-legacy-unit-a-l
+          - name: chat-unit-a-l
             paths: >-
               tldw_Server_API/tests/Chat/unit/test_[a-l]*.py
-          - name: chat-legacy-unit-m-z
+          - name: chat-unit-m-z
             paths: >-
               tldw_Server_API/tests/Chat/unit/test_[m-z]*.py
           - name: chat-new-integration-property
@@ -7171,6 +7303,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Watchlists/test_scheduler_*.py
               tldw_Server_API/tests/Watchlists/test_output_enrichment_scheduler.py
+              tldw_Server_API/tests/Watchlists/test_outputs_run_media_selection.py
               tldw_Server_API/tests/Watchlists/test_site_*.py
               tldw_Server_API/tests/Watchlists/test_subscriptions_*.py
               tldw_Server_API/tests/Watchlists/test_template_*.py
@@ -7208,6 +7341,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Workflows/test_artifact_*.py
               tldw_Server_API/tests/Workflows/test_events_*.py
+              tldw_Server_API/tests/Workflows/test_malformed_cursor_400.py
               tldw_Server_API/tests/Workflows/test_runs_*.py
               tldw_Server_API/tests/Workflows/test_webhook_*.py
               tldw_Server_API/tests/Workflows/test_workflow_approval_permissions.py
@@ -7252,6 +7386,19 @@ jobs:
             paths: >-
               tldw_Server_API/tests/MCP
               tldw_Server_API/tests/MCP_unified
+          # app/core/MCP_unified/tests (149 files, ~3.3k tests) is in pyproject
+          # testpaths but was in no CI shard, so a test stayed red for 3.5 months
+          # across 28 commits to the file it covers (TASK-13291).
+          # It runs as its OWN shard, not appended to platform-mcp-core: sharing a
+          # process with tests/MCP_unified makes test_rag_module and
+          # test_gateway_protocol_stdio fail through cross-test state pollution,
+          # though both pass in isolation.
+          # The quarantine this shard launched with (10 files, 21 red entries) is
+          # fully drained (TASK-13343); the shard runs the whole tree. Do not add
+          # --ignore entries here: fix the test, or skip it with a reason.
+          - name: platform-mcp-inapp
+            paths: >-
+              tldw_Server_API/app/core/MCP_unified/tests
           - name: platform-resource-governance
             paths: >-
               tldw_Server_API/tests/Resource_Governance
@@ -7259,6 +7406,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_startup_*.py
+              tldw_Server_API/tests/Services/test_study_pack_startup_default.py
               tldw_Server_API/tests/Services/test_chat_macros_jobs_worker_startup.py
               tldw_Server_API/tests/Services/test_study_pack_startup_default.py
           - name: platform-services-shutdown-lifespan

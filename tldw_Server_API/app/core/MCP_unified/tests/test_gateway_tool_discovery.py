@@ -16,10 +16,14 @@ from mcp_unified.gateway.tool_discovery import (
     resolve_profile_tool_call,
     search_profile_tools,
 )
+from mcp_unified.gateway import tool_discovery as _tool_discovery_module
 from mcp_unified.profiles.models import MCPProfile, ProfilePolicy
 
-REPO_ROOT = Path(__file__).resolve().parents[5]
-TOOL_DISCOVERY_PATH = REPO_ROOT / "mcp_unified" / "gateway" / "tool_discovery.py"
+# Derived from the imported module rather than spelled out relative to the repo root.
+# The hardcoded path was REPO_ROOT / "mcp_unified" / "gateway" / "tool_discovery.py",
+# which went stale -- and stayed silently stale -- when the package moved under
+# apps/mcp-unified/src/. Asking the module where it lives cannot drift.
+TOOL_DISCOVERY_PATH = Path(_tool_discovery_module.__file__).resolve()
 
 
 def _profile(

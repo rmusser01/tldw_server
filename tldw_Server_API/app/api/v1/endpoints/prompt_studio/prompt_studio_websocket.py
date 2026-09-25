@@ -76,6 +76,7 @@ from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
     cookie_websocket_rejection_code,
     resolve_single_user_cookie_websocket,
 )
+from tldw_Server_API.app.core.LLM_Calls.sse import sse_data
 from tldw_Server_API.app.core.Streaming.streams import WebSocketStream
 from tldw_Server_API.app.core.testing import env_flag_enabled
 from tldw_Server_API.app.services.app_lifecycle import assert_may_start_work, is_lifecycle_draining
@@ -385,7 +386,7 @@ async def sse_endpoint(
     async def event_generator():
         """Generate SSE events."""
         # Send initial connection event
-        yield f"data: {json.dumps({'type': 'connection', 'status': 'connected', 'client_id': client_id})}\n\n"
+        yield sse_data({'type': 'connection', 'status': 'connected', 'client_id': client_id})
 
         # If project specified, send current state
         if project_id:
@@ -396,14 +397,14 @@ async def sse_endpoint(
                 limit=10,
             )
 
-            yield f"data: {json.dumps({'type': 'initial_state', 'project_id': project_id, 'jobs': jobs})}\n\n"
+            yield sse_data({'type': 'initial_state', 'project_id': project_id, 'jobs': jobs})
 
         # Keep connection alive with periodic heartbeats
         try:
             while True:
                 # Send heartbeat every 30 seconds
                 await asyncio.sleep(30)
-                yield f"data: {json.dumps({'type': 'heartbeat', 'timestamp': datetime.utcnow().isoformat()})}\n\n"
+                yield sse_data({'type': 'heartbeat', 'timestamp': datetime.utcnow().isoformat()})
 
         except asyncio.CancelledError:
             logger.info(f"SSE connection closed for client {client_id}")
@@ -411,7 +412,7 @@ async def sse_endpoint(
         except _SSE_STREAM_EXCEPTIONS as e:
             logger.error("SSE error")
             safe_error_msg = sanitize_error_message(e, "SSE streaming")
-            yield f"data: {json.dumps({'type': 'error', 'message': safe_error_msg})}\n\n"
+            yield sse_data({'type': 'error', 'message': safe_error_msg})
 
     return StreamingResponse(
         event_generator(),

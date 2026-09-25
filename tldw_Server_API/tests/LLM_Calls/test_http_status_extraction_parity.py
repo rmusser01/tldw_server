@@ -1,120 +1,166 @@
-"""Regression guard for TASK-13287.
+"""All copies of get_http_status_from_exception must agree, and must recover a status
+carried only in an exception message.
 
-`get_http_status_from_exception` exists in four independent copies. Two of them match
-the status out of an exception's message with
+Two of the three copies used r"HTTP\\s+(\\d{3})" -- double-escaped inside a raw string,
+so the pattern searched for a literal backslash and could never match. Extraction then
+returned None, build_sanitized_chat_error took its status_code-is-None branch, and an
+upstream 429 reached the client as ChatProviderError's default 502: no Retry-After, and
+no rate-limit classification for any caller keyed on 429.
 
-    re.search(r"HTTP\\\\s+(\\\\d{3})", str(exc))
-
-Inside a raw string `\\\\s` is a literal backslash followed by `s`, so the pattern looks
-for `HTTP\\s 429` and can never match `HTTP 429`. The third copy,
-`Local_LLM/http_utils.py`, has the single-escape form and works.
-
-Consequence: `core/http_client.py:_AiohttpResponse.raise_for_status` raises
-`NetworkError(f"HTTP {status}")` with no `.status_code` attribute when httpx is
-unavailable, and `Embeddings/connection_pool.py` does the same. Extraction returns
-None, `build_sanitized_chat_error` produces a `ChatProviderError` with no status, and
-`core/exceptions.py` defaults that to **502**. An upstream 429 therefore reaches the
-client as 502, with no Retry-After and no rate-limit classification for any caller
-keyed on 429.
-
-The parity test at the end is the durable part: four copies of one extraction rule is
-how this drifted in the first place, and a test that asserts they agree will fail the
-next time one is edited alone.
+core/http_client.py raises NetworkError(f"HTTP {status}") with no status_code kwarg when
+httpx is unavailable, and core/Embeddings/connection_pool.py does the same, so the message
+text is the only carrier on those paths.
 """
 
 from __future__ import annotations
 
 import pytest
 
+from tldw_Server_API.app.core.Chat.chat_orchestrator import (
+    _get_http_status_from_exception as chat_extract,
+)
 from tldw_Server_API.app.core.exceptions import NetworkError
+from tldw_Server_API.app.core.LLM_Calls.error_utils import (
+    get_http_status_from_exception as llm_extract,
+)
+from tldw_Server_API.app.core.Local_LLM.http_utils import (
+    get_http_status_from_exception as local_extract,
+)
 
-pytestmark = pytest.mark.unit
-
-
-def _extractors():
-    """The live copies of this rule, by import path."""
-    from tldw_Server_API.app.core.Chat import chat_orchestrator
-    from tldw_Server_API.app.core.LLM_Calls import error_utils
-    from tldw_Server_API.app.core.Local_LLM import http_utils
-
-    return {
-        "LLM_Calls/error_utils": error_utils.get_http_status_from_exception,
-        "Chat/chat_orchestrator": chat_orchestrator._get_http_status_from_exception,
-        "Local_LLM/http_utils": http_utils.get_http_status_from_exception,
-    }
-
-
-@pytest.mark.parametrize("name", list(_extractors()))
-@pytest.mark.parametrize(
-    ("message", "expected"),
+EXTRACTORS = pytest.mark.parametrize(
+    "extract",
     [
-        ("HTTP 429", 429),
-        ("HTTP 429 rate limited", 429),
-        ("HTTP 503 from local backend", 503),
-        ("HTTP  404", 404),  # multiple spaces: \s+ must still match
+        pytest.param(llm_extract, id="LLM_Calls.error_utils"),
+        pytest.param(chat_extract, id="Chat.chat_orchestrator"),
+        pytest.param(local_extract, id="Local_LLM.http_utils"),
     ],
 )
-def test_status_is_extracted_from_a_network_error_message(
-    name: str, message: str, expected: int
-) -> None:
-    extractor = _extractors()[name]
 
-    got = extractor(NetworkError(message))
 
-    assert got == expected, (
-        f"{name} returned {got!r} for {message!r}. A double-escaped regex cannot match "
-        "a real 'HTTP <code>' message, so the status is lost and the caller defaults "
-        "to 502 -- an upstream 429 reaches the client as 502 with no Retry-After."
+@EXTRACTORS
+@pytest.mark.parametrize("status", [400, 401, 429, 500, 503])
+def test_status_recovered_from_network_error_message(extract, status: int) -> None:
+    assert extract(NetworkError(f"HTTP {status}")) == status
+
+
+@EXTRACTORS
+def test_status_recovered_from_embedded_message(extract) -> None:
+    assert extract(NetworkError("Provider returned HTTP 429 Too Many Requests")) == 429
+
+
+@EXTRACTORS
+def test_no_status_present_returns_none(extract) -> None:
+    assert extract(NetworkError("connection reset by peer")) is None
+
+
+@EXTRACTORS
+def test_attribute_branch_still_wins(extract) -> None:
+    class _Resp:
+        status_code = 503
+
+    exc = NetworkError("HTTP 429")
+    exc.response = _Resp()  # type: ignore[attr-defined]
+    assert extract(exc) == 503
+
+
+# --- after consolidation into core/Utils/http_status_extraction.py ---------------
+
+
+def test_every_entry_point_is_the_same_object() -> None:
+    """All former copies now resolve to one implementation, not four look-alikes."""
+    from tldw_Server_API.app.core.Embeddings.Embeddings_Server import Embeddings_Create
+    from tldw_Server_API.app.core.LLM_Calls import error_utils as llm_err
+    from tldw_Server_API.app.core.Local_LLM import http_utils as local_http
+    from tldw_Server_API.app.core.Utils.http_status_extraction import (
+        get_http_status_from_exception as canonical,
     )
 
-
-def test_all_copies_agree() -> None:
-    """Four copies of one rule drifted; pin that they answer identically."""
-    cases = [
-        NetworkError("HTTP 429 rate limited"),
-        NetworkError("HTTP 500 upstream exploded"),
-        NetworkError("connection reset"),  # no status present
-    ]
-    for exc in cases:
-        answers = {name: fn(exc) for name, fn in _extractors().items()}
-        assert len(set(answers.values())) == 1, (
-            f"copies disagree for {str(exc)!r}: {answers}"
-        )
+    assert llm_err.get_http_status_from_exception is canonical
+    assert local_http.get_http_status_from_exception is canonical
+    assert Embeddings_Create._get_http_status_from_exception is canonical
 
 
-def test_explicit_status_attributes_still_win() -> None:
-    """Control: message parsing is the fallback, not the primary path."""
+def test_is_http_status_error_recognises_requests_everywhere() -> None:
+    """The three TTS copies were httpx-only; the shared one also knows requests."""
+    from tldw_Server_API.app.core.TTS.adapters import (
+        elevenlabs_adapter,
+        openai_adapter,
+    )
+    from tldw_Server_API.app.core.Utils.http_status_extraction import (
+        is_http_status_error as canonical,
+    )
 
-    class _WithStatus(Exception):
-        status_code = 418
+    assert openai_adapter._is_http_status_error is canonical
+    assert elevenlabs_adapter._is_http_status_error is canonical
 
-    for name, fn in _extractors().items():
-        assert fn(_WithStatus("HTTP 429 in the text")) == 418, (
-            f"{name} preferred the message over an explicit status_code attribute"
-        )
+    class _RequestsHTTPError(Exception):
+        pass
 
-
-def test_no_status_returns_none() -> None:
-    """Control: absence must stay distinguishable from a parsed value."""
-    for name, fn in _extractors().items():
-        assert fn(NetworkError("connection reset by peer")) is None, name
+    _RequestsHTTPError.__module__ = "requests.exceptions"
+    _RequestsHTTPError.__name__ = "HTTPError"
+    assert canonical(_RequestsHTTPError()) is True
 
 
-def test_chat_orchestrator_cannot_yet_reach_this_path() -> None:
-    """Documents a separate, still-open defect rather than silently fixing it.
+def test_qwen3_method_delegates_to_the_shared_classifier() -> None:
+    from tldw_Server_API.app.core.TTS.adapters.qwen3_runtime_remote import (
+        RemoteQwenRuntime,
+    )
 
-    Correcting the regex makes the extraction work when called, but the Chat path
-    still cannot exercise it: `NetworkError` is absent from
-    `_CHAT_ORCHESTRATOR_PROVIDER_EXCEPTIONS`, so the handler that calls the extractor
-    never runs for a NetworkError, and the ChatProviderError(504) branch downstream is
-    unreachable. Widening what the chat error handler catches is a behaviour change
-    with its own blast radius and is left to its own task.
+    class _HttpxStatusError(Exception):
+        pass
 
-    If this assertion starts failing, NetworkError has been added to the tuple and
-    this note (and the task) should be retired.
+    _HttpxStatusError.__module__ = "httpx"
+    _HttpxStatusError.__name__ = "HTTPStatusError"
+
+    runtime = RemoteQwenRuntime.__new__(RemoteQwenRuntime)
+    assert runtime._is_http_status_error(_HttpxStatusError()) is True
+    assert runtime._is_http_status_error(ValueError("nope")) is False
+
+
+def test_error_text_and_network_classifier_have_one_implementation() -> None:
+    """get_http_error_text and is_network_error were also copied into Local_LLM."""
+    from tldw_Server_API.app.core.LLM_Calls import error_utils as llm_err
+    from tldw_Server_API.app.core.Local_LLM import http_utils as local_http
+    from tldw_Server_API.app.core.Utils import http_status_extraction as canonical
+
+    assert llm_err.get_http_error_text is canonical.get_http_error_text
+    assert local_http.get_http_error_text is canonical.get_http_error_text
+    assert llm_err.is_network_error is canonical.is_network_error
+    assert local_http.is_network_error is canonical.is_network_error
+
+
+def test_error_text_reads_an_unread_streaming_body() -> None:
+    """httpx raises ResponseNotRead (a RuntimeError) on .text of an unread stream.
+
+    The helper's read-then-retry branch only runs if that exception is caught;
+    dropping RuntimeError from the noncritical tuple made it dead code and let
+    ResponseNotRead escape from inside callers' error handlers.
     """
-    from tldw_Server_API.app.core.Chat import chat_orchestrator
+    import httpx
 
-    assert not issubclass(
-        NetworkError, chat_orchestrator._CHAT_ORCHESTRATOR_PROVIDER_EXCEPTIONS
-    ), "NetworkError is now caught by the chat provider tuple -- update TASK-13287"
+    from tldw_Server_API.app.core.Utils.http_status_extraction import get_http_error_text
+
+    request = httpx.Request("POST", "http://upstream.invalid/v1/chat")
+    response = httpx.Response(429, request=request, stream=httpx.ByteStream(b"slow down"))
+    exc = httpx.HTTPStatusError("429", request=request, response=response)
+    assert get_http_error_text(exc) == "slow down"
+
+
+@pytest.mark.parametrize(
+    ("module", "name", "expected"),
+    [
+        ("httpx", "ConnectTimeout", True),
+        ("httpx", "RequestError", True),
+        ("httpx", "HTTPStatusError", False),
+        ("requests.exceptions", "ConnectionError", True),
+        ("requests.exceptions", "HTTPError", False),
+        ("builtins", "ValueError", False),
+    ],
+)
+def test_is_network_error_classification(module: str, name: str, expected: bool) -> None:
+    from tldw_Server_API.app.core.Utils.http_status_extraction import is_network_error
+
+    cls = type(name, (Exception,), {})
+    cls.__module__ = module
+    assert is_network_error(cls()) is expected
+    assert is_network_error(NetworkError("down")) is True

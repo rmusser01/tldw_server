@@ -132,6 +132,7 @@ from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     provider_auth_is_resolved,
 )
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
+from tldw_Server_API.app.core.LLM_Calls.sse import is_done_line
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id, get_ps_logger
 from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry, increment_counter
 from tldw_Server_API.app.core.Metrics.stt_metrics import (
@@ -731,7 +732,7 @@ def _audio_provider_chunk_has_nonempty_content(raw_line: Any) -> bool:
         ).strip()
     except Exception:  # noqa: BLE001 - malformed provider chunks are untrusted
         return False
-    if not line or line.lower() in {"data: [done]", "[done]"}:
+    if not line or line.lower() == "[done]" or is_done_line(line):
         return False
     if line.startswith("data:"):
         line = line[len("data:") :].strip()
@@ -2792,9 +2793,7 @@ async def websocket_audio_chat_stream(
                     if not line_str:
                         continue
                     stripped = line_str.strip()
-                    if stripped.lower() in {"data: [done]", "[done]"}:
-                        break
-                    if stripped.lower().endswith("[done]"):
+                    if stripped.lower() == "[done]" or is_done_line(stripped):
                         break
                     payload_str = stripped
                     if payload_str.startswith("data:"):

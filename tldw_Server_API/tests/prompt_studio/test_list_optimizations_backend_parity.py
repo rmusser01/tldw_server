@@ -79,11 +79,13 @@ def test_list_optimizations_exists_on_the_default_backend(db_path) -> None:
     """The endpoint's failure mode: AttributeError swallowed into a 500."""
     db = PromptStudioDatabase(str(db_path), "parity-client")
     try:
-        assert hasattr(db._impl, "list_optimizations"), (
-            "list_optimizations is missing from the SQLite implementation, so the "
-            "facade's delegation raises AttributeError and the optimizations endpoint "
-            "returns 500 on every request against the default backend"
+        # ADR-051: the facade serves list_optimizations through the shared
+        # repository on both backends rather than delegating to self._impl.
+        assert callable(getattr(db, "list_optimizations", None)), (
+            "list_optimizations is not served on the default backend, so the "
+            "optimizations endpoint returns 500 on every request"
         )
+        db.list_optimizations(page=1, per_page=1)
     finally:
         db.close_connection()
 

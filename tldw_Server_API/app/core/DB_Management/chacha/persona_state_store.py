@@ -3677,6 +3677,37 @@ class PersonaStateStore:
         cursor = self.execute_query(query, tuple(params))
         return [self._persona_policy_rule_row_to_dict(row) for row in cursor.fetchall() if row]
 
+    def list_persona_policy_rules_for_personas(
+        self,
+        *,
+        persona_ids: list[str],
+        user_id: str,
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Active policy rules for many personas in one query, keyed by persona id.
+
+        Unlike list_persona_policy_rules this does not verify each profile; rows are
+        scoped by user_id, so callers pass ids from profiles they already loaded.
+        """
+        normalized_persona_ids = list(
+            dict.fromkeys(str(persona_id or "").strip() for persona_id in persona_ids if str(persona_id or "").strip())
+        )
+        rules: dict[str, list[dict[str, Any]]] = {persona_id: [] for persona_id in normalized_persona_ids}
+        if not normalized_persona_ids:
+            return rules
+        placeholders = ", ".join("?" for _ in normalized_persona_ids)
+        query = (
+            "SELECT * FROM persona_policy_rules "
+            f"WHERE user_id = ? AND persona_id IN ({placeholders}) AND deleted = 0 "  # nosec B608
+            "ORDER BY rule_kind ASC, rule_name ASC, id ASC"
+        )
+        cursor = self.execute_query(query, (user_id, *normalized_persona_ids), read_only=True)
+        for row in cursor.fetchall():
+            if not row:
+                continue
+            rule = self._persona_policy_rule_row_to_dict(row)
+            rules.setdefault(str(rule.get("persona_id") or "").strip(), []).append(rule)
+        return rules
+
     def replace_persona_policy_rules(
         self,
         *,

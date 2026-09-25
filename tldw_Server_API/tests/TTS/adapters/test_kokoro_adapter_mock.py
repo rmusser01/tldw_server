@@ -86,7 +86,7 @@ class TestKokoroAdapterMock:
         assert caps.supports_emotion_control is False
         assert caps.supports_phonemes is True
         # Validate against canonical provider limit source
-        assert caps.max_text_length == ProviderLimits.get_max_text_length("kokoro")
+        assert caps.max_text_length == ProviderLimits.get_limits("kokoro")["max_text_length"]
         assert AudioFormat.WAV in caps.supported_formats
         assert AudioFormat.MP3 in caps.supported_formats
 

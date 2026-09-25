@@ -2374,6 +2374,10 @@ class JobManager:
         return self._should_enforce_ack()
 
     # --- Queue controls (pause/drain) ---
+    def get_queue_flags(self, domain: str, queue: str) -> dict[str, bool]:
+        """The queue's control flags (paused, drain)."""
+        return self._get_queue_flags(domain, queue)
+
     def _get_queue_flags(self, domain: str, queue: str) -> dict[str, bool]:
         conn = self._connect()
         try:
@@ -2449,6 +2453,10 @@ class JobManager:
                     return flags
         finally:
             conn.close()
+
+    def update_gauges(self, *, domain: str, queue: str, job_type: str | None = None) -> None:
+        """Refresh the queue gauges for one (domain, queue[, job_type]) after an out-of-band change."""
+        self._update_gauges(domain=domain, queue=queue, job_type=job_type)
 
     def _update_gauges(self, *, domain: str, queue: str, job_type: str | None = None) -> None:
         # Optional lightweight debounce to reduce high-churn writes

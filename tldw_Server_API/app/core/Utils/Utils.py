@@ -1,14 +1,11 @@
 # Utils.py
 from __future__ import annotations
 
-import contextlib
 import hashlib
 import json
 import mimetypes
 import os
 import re
-import tempfile
-import time
 import unicodedata
 import uuid
 import zipfile
@@ -145,7 +142,6 @@ def cleanup_downloads():
 #
 
 
-
 def get_project_root() -> str:
     """Return the absolute path to the repository root directory.
 
@@ -238,9 +234,6 @@ global_search_engines = [
 ]
 
 openai_tts_voices = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"]
-
-
-
 
 
 def format_api_name(api):
@@ -379,16 +372,6 @@ def convert_to_seconds(time_str):
 
     raise ValueError(f"Invalid time format '{time_str}'")
 
-
-def truncate_content(content: str | None, max_length: int = 200) -> str | None:
-    """Truncate content to the specified maximum length with ellipsis."""
-    if not content:
-        return content
-
-    if len(content) <= max_length:
-        return content
-
-    return content[:max_length - 3] + "..."
 
 #
 # End of Misc-Functions
@@ -598,20 +581,6 @@ def generate_unique_filename(base_path, base_filename):
     return filename
 
 
-def generate_unique_identifier(file_path):
-    """Build a local identifier from file timestamp, content hash, and filename."""
-    filename = os.path.basename(file_path)
-    timestamp = int(time.time())
-
-    # Generate a hash of the file content
-    hasher = hashlib.md5(usedforsecurity=False)
-    with open(file_path, 'rb') as f:
-        for block in iter(lambda: f.read(1024 * 1024), b''):
-            hasher.update(block)
-    content_hash = hasher.hexdigest()[:8]  # Use first 8 characters of the hash
-
-    return f"local:{timestamp}:{content_hash}:{filename}"
-
 #
 # End of UUID-Functions
 #######################################################################################################################
@@ -622,19 +591,6 @@ def generate_unique_identifier(file_path):
 # Sanitization/Verification Functions
 
 # Helper function to validate URL format
-def is_valid_url(url: str) -> bool:
-    """Return whether a string matches the accepted URL pattern."""
-    regex = re.compile(
-        r'^(?:http|ftp)s?://'  # http:// or https://
-        r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+(?:[A-Z]{2,6}\.?|[A-Z0-9-]{2,}\.?)|'  # domain...
-        r'localhost|'  # localhost...
-        r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|'  # ...or ipv4
-        r'\[?[A-F0-9]*:[A-F0-9:]+\]?)'  # ...or ipv6
-        r'(?::\d+)?'  # optional port
-        r'(?:/?|[/?]\S+)$', re.IGNORECASE)
-    return re.match(regex, url) is not None
-
-
 def verify_checksum(file_path, expected_checksum):
     """Return whether a file's SHA-256 digest matches the expected checksum."""
     sha256_hash = hashlib.sha256()
@@ -820,47 +776,6 @@ def get_db_config():
 #
 # File Handling Functions
 
-# Track temp files for cleanup
-temp_files = []
-
-def save_temp_file(file):
-    """Persist an uploaded file-like object to a unique path in the system temp directory."""
-    global temp_files
-    temp_dir = tempfile.gettempdir()
-
-    original_name = getattr(file, "name", "") or ""
-    safe_name = os.path.basename(original_name)
-    stem, ext = os.path.splitext(safe_name)
-    if not stem:
-        stem = "upload"
-    unique_name = f"{stem}_{uuid.uuid4().hex}{ext}"
-
-    temp_path = os.path.join(temp_dir, unique_name)
-    if hasattr(file, "seek"):
-        with contextlib.suppress(OSError, RuntimeError, ValueError):
-            file.seek(0)
-    data = file.read()
-    if isinstance(data, str):
-        data = data.encode('utf-8')
-    with open(temp_path, 'wb') as f:
-        f.write(data)
-    if hasattr(file, "seek"):
-        with contextlib.suppress(OSError, RuntimeError, ValueError):
-            file.seek(0)
-    temp_files.append(temp_path)
-    return temp_path
-
-def cleanup_temp_files():
-    """Delete temporary files recorded by save_temp_file."""
-    global temp_files
-    for file_path in temp_files:
-        if os.path.exists(file_path):
-            try:
-                os.remove(file_path)
-                logging.info(f"Removed temporary file: {file_path}")
-            except OSError as e:
-                logging.exception(f"Failed to remove temporary file {file_path}: {e}")
-    temp_files.clear()
 
 def generate_unique_id():
     """Return a unique uploaded-file identifier."""

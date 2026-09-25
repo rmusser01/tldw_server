@@ -1116,3 +1116,187 @@ def _create_media_db(tmp_path: Path) -> MediaDatabase:
     db = MediaDatabase(db_path=str(db_path), client_id="pytest")
     db.initialize_db()
     return db
+
+
+class TestCrossSourceFusion:
+    """Sources do not share a score scale, so they may not be sorted together.
+
+    Across the retrievers in this module `score` is min-max normalised (media, chunk
+    FTS, vector), a constant 1.0 (both notes paths), a constant 0.5 (chat history,
+    character cards, SQL) or a constant 0.6/0.4 (claims). The old global sort compared
+    those numbers directly and the constants won. See ADR-049.
+    """
+
+    @staticmethod
+    def _mdr() -> MultiDatabaseRetriever:
+        return MultiDatabaseRetriever({}, user_id="test-user")
+
+    @pytest.mark.unit
+    def test_constant_scored_notes_no_longer_crowd_out_media(self) -> None:
+        """The review's scenario, which returned zero media documents.
+
+        sources=["media_db","notes"], top_k=10, an include list of 20 note ids.
+        _retrieve_allowed_notes_via_sql returns notes ordered by last_modified with no
+        text match required at all and stamps every one score=1.0, while media is
+        min-max normalised so exactly one media document reaches 1.0. The global sort
+        put all 20 notes at or above every media document and the top-10 cut returned
+        notes only -- including over the best BM25 matches -- after which generation
+        answered from documents never scored for relevance.
+        """
+        notes = [
+            Document(id=f"note{i}", content="c", source=DataSource.NOTES, metadata={}, score=1.0)
+            for i in range(20)
+        ]
+        media = [
+            Document(
+                id=f"media{i}",
+                content="c",
+                source=DataSource.MEDIA_DB,
+                metadata={},
+                score=1.0 - i * 0.1,
+            )
+            for i in range(10)
+        ]
+
+        # What the old global sort produced.
+        old_top10 = sorted(notes + media, key=lambda d: d.score, reverse=True)[:10]
+        assert all(d.id.startswith("note") for d in old_top10)
+
+        fused = self._mdr()._order_across_sources([notes, media], notes + media)[:10]
+
+        assert any(d.id.startswith("media") for d in fused), "media was shut out again"
+        # Rank-based fusion interleaves the two sources rather than picking a winner.
+        assert sum(1 for d in fused if d.id.startswith("media")) >= 4
+        assert sum(1 for d in fused if d.id.startswith("note")) >= 4
+        # Each source keeps its own internal order.
+        assert [d.id for d in fused if d.id.startswith("media")] == sorted(
+            [d.id for d in fused if d.id.startswith("media")],
+            key=lambda i: int(i.removeprefix("media")),
+        )
+
+    @pytest.mark.unit
+    def test_best_hit_of_each_source_is_not_decided_by_insertion_order(self) -> None:
+        """min-max maps every source's best hit to exactly 1.0, and list.sort is stable.
+
+        The top slot therefore used to go to whichever source happened to be inserted
+        into the dict first, not to the better match.
+        """
+        a = [Document(id="a1", content="c", source=DataSource.MEDIA_DB, metadata={}, score=1.0)]
+        b = [Document(id="b1", content="c", source=DataSource.NOTES, metadata={}, score=1.0)]
+
+        forward = self._mdr()._order_across_sources([a, b], a + b)
+        backward = self._mdr()._order_across_sources([b, a], b + a)
+
+        # Genuinely tied at rank 1 in both orderings, so both carry the same score
+        # rather than one being arbitrarily promoted above the other.
+        assert forward[0].score == forward[1].score
+        assert backward[0].score == backward[1].score
+
+    @pytest.mark.unit
+    def test_scores_stay_in_zero_to_one(self) -> None:
+        """Callers depend on the range.
+
+        unified_pipeline re-sorts by score and caps to top_k in three places and
+        applies min(1.0, score * 1.1 + 0.02); Research/providers/local.py returns the
+        value in an API response. Raw RRF scores (~0.016 at rank 1) would survive the
+        re-sorts but break both of those.
+        """
+        a = [
+            Document(id=f"a{i}", content="c", source=DataSource.MEDIA_DB, metadata={}, score=0.5)
+            for i in range(5)
+        ]
+        b = [
+            Document(id=f"b{i}", content="c", source=DataSource.NOTES, metadata={}, score=0.5)
+            for i in range(5)
+        ]
+
+        fused = self._mdr()._order_across_sources([a, b], a + b)
+
+        assert fused[0].score == pytest.approx(1.0)
+        assert all(0.0 < d.score <= 1.0 for d in fused)
+        scores = [d.score for d in fused]
+        assert scores == sorted(scores, reverse=True), "re-sorting by score must preserve fusion"
+
+    @pytest.mark.unit
+    def test_single_source_scores_are_left_alone(self) -> None:
+        """There is nothing to fuse, and rank-based scores would lose fidelity."""
+        docs = [
+            Document(id="a", content="c", source=DataSource.MEDIA_DB, metadata={}, score=0.9),
+            Document(id="b", content="c", source=DataSource.MEDIA_DB, metadata={}, score=0.3),
+        ]
+
+        out = self._mdr()._order_across_sources([docs], list(docs))
+
+        assert [(d.id, d.score) for d in out] == [("a", 0.9), ("b", 0.3)]
+
+    @pytest.mark.unit
+    def test_no_sources_is_empty(self) -> None:
+        assert self._mdr()._order_across_sources([], []) == []
+
+    @pytest.mark.unit
+    def test_document_in_two_sources_is_returned_once_and_ranked_up(self) -> None:
+        """Standard RRF: agreement between sources is evidence, not duplication."""
+        shared = Document(id="dup", content="c", source=DataSource.MEDIA_DB, metadata={}, score=0.4)
+        a = [
+            Document(id="a1", content="c", source=DataSource.MEDIA_DB, metadata={}, score=0.9),
+            shared,
+        ]
+        b = [
+            Document(id="b1", content="c", source=DataSource.NOTES, metadata={}, score=0.9),
+            Document(id="dup", content="c", source=DataSource.NOTES, metadata={}, score=0.4),
+        ]
+
+        fused = self._mdr()._order_across_sources([a, b], a + b)
+
+        assert [d.id for d in fused].count("dup") == 1
+        # Rank 2 in both beats rank 1 in only one: 2/62 > 1/61.
+        assert fused[0].id == "dup"
+
+    @pytest.mark.asyncio
+    async def test_retrieve_fuses_across_two_stubbed_sources(self) -> None:
+        """End to end through retrieve(), including the max_results cap."""
+
+        class _Stub:
+            def __init__(self, docs: list[Document]) -> None:
+                self._docs = docs
+                self.config = None
+
+            async def retrieve(self, query: str, **kwargs: object) -> list[Document]:
+                return list(self._docs)
+
+        notes = [
+            Document(id=f"n{i}", content="c", source=DataSource.NOTES, metadata={}, score=1.0)
+            for i in range(20)
+        ]
+        media = [
+            Document(
+                id=f"m{i}",
+                content="c",
+                source=DataSource.MEDIA_DB,
+                metadata={},
+                score=1.0 - i * 0.1,
+            )
+            for i in range(10)
+        ]
+
+        retriever = self._mdr()
+        retriever.retrievers = {
+            DataSource.MEDIA_DB: _Stub(media),
+            DataSource.NOTES: _Stub(notes),
+        }
+
+        docs = await retriever.retrieve(
+            "q",
+            sources=[DataSource.MEDIA_DB, DataSource.NOTES],
+            config=RetrievalConfig(max_results=10),
+        )
+
+        assert len(docs) == 10
+        # `any media at all` is too weak to guard this: the old stable global sort left
+        # exactly one media document (the single one min-max mapped to 1.0) above the
+        # twenty constant-1.0 notes, so it satisfied `any` while still shutting media
+        # out of the other nine slots. Fusion must interleave.
+        assert sum(1 for d in docs if d.id.startswith("m")) >= 4
+        assert sum(1 for d in docs if d.id.startswith("n")) >= 4
+        scores = [d.score for d in docs]
+        assert scores == sorted(scores, reverse=True)

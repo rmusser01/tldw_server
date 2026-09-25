@@ -438,9 +438,8 @@ async def test_convert_stdout_audio_trims_partial_float_frame_before_decoding(tm
 
     captured: dict[str, object] = {}
 
-    async def _fake_convert(audio_data, source_format, target_format, sample_rate):
+    async def _fake_convert(audio_data, target_format, sample_rate):
         captured["audio_data"] = audio_data
-        captured["source_format"] = source_format
         captured["target_format"] = target_format
         captured["sample_rate"] = sample_rate
         return b"converted"
@@ -451,7 +450,6 @@ async def test_convert_stdout_audio_trims_partial_float_frame_before_decoding(tm
     output = await adapter._convert_stdout_audio(stdout, AudioFormat.WAV)
 
     assert output == b"converted"
-    assert captured["source_format"] == AudioFormat.PCM
     assert captured["target_format"] == AudioFormat.WAV
     assert captured["sample_rate"] == adapter.DEFAULT_SAMPLE_RATE
     assert list(captured["audio_data"]) == [0, 16383, -16383]

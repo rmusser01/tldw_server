@@ -139,7 +139,7 @@ class SandboxModule(BaseModule):
             owner = self._svc.get_session_owner(session_id)
             if owner is None:
                 raise ValueError("session_not_found")
-            if not self._is_admin(context) and str(owner) != user_id:
+            if not self.caller_is_admin(context) and str(owner) != user_id:
                 raise PermissionError("sandbox.run session not found")
 
         files_inline = self._decode_inline_files(args.get("files") or [])
@@ -207,26 +207,6 @@ class SandboxModule(BaseModule):
             "scope_snapshot_id": status.scope_snapshot_id,
         }
 
-    def _is_admin(self, context: Any | None) -> bool:
-        try:
-            if bool(getattr(context, "is_admin", False)):
-                return True
-            metadata = getattr(context, "metadata", {}) or {}
-            roles = metadata.get("roles")
-            if isinstance(roles, str):
-                roles = [roles]
-            if isinstance(roles, list) and any(str(r).strip().lower() == "admin" for r in roles):
-                return True
-            permissions = metadata.get("permissions")
-            if isinstance(permissions, str):
-                permissions = [permissions]
-            if isinstance(permissions, list):
-                normalized = {str(permission).strip().lower() for permission in permissions if str(permission).strip()}
-                if "*" in normalized or "system.configure" in normalized:
-                    return True
-            return False
-        except Exception:
-            return False
 
     def _coerce_runtime(self, value: Any) -> SbxRuntimeType | None:
         runtime_raw = (str(value).strip().lower() if value is not None else "")
@@ -255,28 +235,6 @@ class SandboxModule(BaseModule):
                 raise ValueError(f"invalid inline file at index {index}") from exc
             decoded.append((path, data))
         return decoded
-
-    def sanitize_input(self, input_data: Any, _depth: int = 0) -> Any:
-        """
-        Relaxed sanitizer for sandbox payloads.
-
-        Allows CLI-style args and comment tokens while still stripping control chars
-        and guarding against overly deep payloads.
-        """
-        if _depth > 20:
-            raise ValueError("Input too deeply nested")
-
-        def _clean_str(s: str) -> str:
-            # Strip NULs and control chars only.
-            return "".join(ch for ch in s if ch >= " " or ch == "\n")
-
-        if isinstance(input_data, str):
-            return _clean_str(input_data)
-        if isinstance(input_data, dict):
-            return {k: self.sanitize_input(v, _depth + 1) for k, v in input_data.items()}
-        if isinstance(input_data, list):
-            return [self.sanitize_input(v, _depth + 1) for v in input_data]
-        return input_data
 
     def validate_tool_arguments(self, tool_name: str, arguments: dict[str, Any]):
         # Enforce PRD oneOf and types

@@ -12,6 +12,7 @@ from tldw_Server_API.app.api.v1.schemas.evaluation_recipe_schemas import (
     RecommendationSlot,
 )
 from tldw_Server_API.app.core.Evaluations.recipes.base import RecipeDefinition
+from tldw_Server_API.app.core.Evaluations.scoring import normalize_geval_metric, normalize_likert
 
 _RECOMMENDATION_SLOTS = ("best_overall", "best_cheap", "best_local")
 _DEFAULT_WEIGHTS = {
@@ -265,18 +266,18 @@ class SummarizationQualityRecipe(RecipeDefinition):
         if all(key in metrics for key in ("grounding", "coverage", "usefulness")):
             try:
                 return {
-                    "grounding": self._normalize_score(metrics.get("grounding"), 1.0),
-                    "coverage": self._normalize_score(metrics.get("coverage"), 1.0),
-                    "usefulness": self._normalize_score(metrics.get("usefulness"), 1.0),
+                    "grounding": self._normalize_unit_score(metrics.get("grounding")),
+                    "coverage": self._normalize_unit_score(metrics.get("coverage")),
+                    "usefulness": self._normalize_unit_score(metrics.get("usefulness")),
                 }
             except (TypeError, ValueError):
                 return None
 
         try:
-            grounding = self._normalize_score(metrics.get("consistency"), 5.0)
-            coverage = self._normalize_score(metrics.get("relevance"), 5.0)
-            coherence = self._normalize_score(metrics.get("coherence"), 5.0)
-            fluency = self._normalize_score(metrics.get("fluency"), 3.0)
+            grounding = self._normalize_geval_score("consistency", metrics.get("consistency"))
+            coverage = self._normalize_geval_score("relevance", metrics.get("relevance"))
+            coherence = self._normalize_geval_score("coherence", metrics.get("coherence"))
+            fluency = self._normalize_geval_score("fluency", metrics.get("fluency"))
         except (TypeError, ValueError):
             return None
         usefulness = (coherence + fluency) / 2.0
@@ -286,13 +287,18 @@ class SummarizationQualityRecipe(RecipeDefinition):
             "usefulness": usefulness,
         }
 
-    def _normalize_score(self, value: Any, max_score: float) -> float:
+    @staticmethod
+    def _non_negative(value: Any) -> float:
         score = float(value)
         if score < 0:
             raise ValueError("Scores must be non-negative.")
-        if score <= 1.0:
-            return score
-        return min(score / max_score, 1.0)
+        return score
+
+    def _normalize_unit_score(self, value: Any) -> float:
+        return normalize_likert(self._non_negative(value), scale_min=0.0, scale_max=1.0)
+
+    def _normalize_geval_score(self, metric: str, value: Any) -> float:
+        return normalize_geval_metric(metric, self._non_negative(value))
 
     def _pick_best_overall(self, candidate_summaries: list[dict[str, Any]]) -> dict[str, Any] | None:
         if not candidate_summaries:

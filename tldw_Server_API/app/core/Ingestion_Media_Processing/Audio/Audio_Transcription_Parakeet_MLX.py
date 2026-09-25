@@ -53,6 +53,8 @@ _mlx_model_cache_key: Optional[tuple[str, Optional[str]]] = None
 # and runs on worker threads, so the two globals must be read and published together
 # or a reader can observe one model paired with another model's key.
 _mlx_model_cache_lock = threading.Lock()
+# Serializes check-load-publish so one request loads a model and the rest reuse it.
+_mlx_model_load_lock = threading.Lock()
 _DEFAULT_MLX_MODEL_ID = "mlx-community/parakeet-tdt-0.6b-v3"
 
 
@@ -405,51 +407,55 @@ def load_parakeet_mlx_model(
         # the lock: this function is synchronous and is reached from worker threads,
         # where an interleaved publish between the two reads could otherwise pair
         # model B with key A and hand back a model the caller did not ask for.
-        cache_key = (model_id, model_cache_dir)
-        with _mlx_model_cache_lock:
-            cached_model = _mlx_model_cache
-            cached_key = _mlx_model_cache_key
-        if not force_reload and cached_model is not None and cached_key == cache_key:
-            logger.debug(f"Using cached Parakeet MLX model: {model_id}")
-            return cached_model
+        # One load at a time: without this, concurrent first requests for the same
+        # model each ran from_pretrained (1-3 GB) before either published.
+        # ponytail: global load lock, so loads of different models also serialize.
+        with _mlx_model_load_lock:
+            cache_key = (model_id, model_cache_dir)
+            with _mlx_model_cache_lock:
+                cached_model = _mlx_model_cache
+                cached_key = _mlx_model_cache_key
+            if not force_reload and cached_model is not None and cached_key == cache_key:
+                logger.debug(f"Using cached Parakeet MLX model: {model_id}")
+                return cached_model
 
-        from_pretrained_kwargs: dict[str, Any] = {}
-        if _dtype is not None and _supports_kwarg(parakeet_mlx.from_pretrained, "dtype"):
-            from_pretrained_kwargs["dtype"] = _dtype
-        if model_cache_dir and _supports_kwarg(parakeet_mlx.from_pretrained, "cache_dir"):
-            from_pretrained_kwargs["cache_dir"] = model_cache_dir
+            from_pretrained_kwargs: dict[str, Any] = {}
+            if _dtype is not None and _supports_kwarg(parakeet_mlx.from_pretrained, "dtype"):
+                from_pretrained_kwargs["dtype"] = _dtype
+            if model_cache_dir and _supports_kwarg(parakeet_mlx.from_pretrained, "cache_dir"):
+                from_pretrained_kwargs["cache_dir"] = model_cache_dir
 
-        try:
-            # Try to load the model from Hugging Face
-            logger.info(f"Loading model from: {model_id}")
-            model = parakeet_mlx.from_pretrained(model_id, **from_pretrained_kwargs)
-        except FileNotFoundError:
-            if not allow_download:
-                raise STTExecutionUnsupportedError(
-                    "Planned Parakeet MLX artifact was not available locally"
-                ) from None
-            # Model might need to be downloaded first
-            logger.info("Model not found locally, downloading from Hugging Face...")
             try:
-                # The model will be downloaded automatically
+                # Try to load the model from Hugging Face
+                logger.info(f"Loading model from: {model_id}")
                 model = parakeet_mlx.from_pretrained(model_id, **from_pretrained_kwargs)
-            except Exception as e2:
-                logger.exception(f"Failed to download/load model: {e2}")
+            except FileNotFoundError:
+                if not allow_download:
+                    raise STTExecutionUnsupportedError(
+                        "Planned Parakeet MLX artifact was not available locally"
+                    ) from None
+                # Model might need to be downloaded first
+                logger.info("Model not found locally, downloading from Hugging Face...")
+                try:
+                    # The model will be downloaded automatically
+                    model = parakeet_mlx.from_pretrained(model_id, **from_pretrained_kwargs)
+                except Exception as e2:
+                    logger.exception(f"Failed to download/load model: {e2}")
+                    return None
+            except Exception as e:
+                logger.exception(f"Failed to load model {model_id}: {e}")
                 return None
-        except Exception as e:
-            logger.exception(f"Failed to load model {model_id}: {e}")
-            return None
 
-        # Publish the pair atomically so no reader can observe a key/model mismatch.
-        # Two threads that raced to load different models each return their own local
-        # `model`, so every caller still gets what it asked for; the cache simply ends
-        # up holding whichever pair was published last, consistently.
-        with _mlx_model_cache_lock:
-            _mlx_model_cache = model
-            _mlx_model_cache_key = cache_key
-        logger.info(f"Successfully loaded Parakeet MLX model: {model_id}")
+            # Publish the pair atomically so no reader can observe a key/model mismatch.
+            # Two threads that raced to load different models each return their own local
+            # `model`, so every caller still gets what it asked for; the cache simply ends
+            # up holding whichever pair was published last, consistently.
+            with _mlx_model_cache_lock:
+                _mlx_model_cache = model
+                _mlx_model_cache_key = cache_key
+            logger.info(f"Successfully loaded Parakeet MLX model: {model_id}")
 
-        return model
+            return model
 
     except STTExecutionUnsupportedError:
         raise

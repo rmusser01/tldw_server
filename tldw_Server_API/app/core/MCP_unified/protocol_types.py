@@ -6,6 +6,14 @@ from typing import Any
 
 from loguru import logger
 
+# Source of truth for which roles are platform administrators. Imported rather than
+# restated so MCP cannot drift from AuthNZ. Now from the dependency-free module rather
+# than reaching for the private name in auth_principal_resolver, which pulled FastAPI's
+# Request in for the sake of a frozenset.
+from tldw_Server_API.app.core.AuthNZ.platform_admin import (
+    PLATFORM_ADMIN_ROLES as _PLATFORM_ADMIN_ROLES,
+)
+
 from .modules.base import BaseModule
 
 
@@ -131,19 +139,50 @@ def _trusted_compat_claims_metadata(*, auth_via: str, compat_claims_source: str)
     }
 
 
-def _metadata_has_admin_claims(metadata: dict[str, Any]) -> bool:
-    """Return True when trusted metadata carries wildcard or admin claims."""
+def metadata_has_admin_claims(metadata: Any) -> bool:
+    """Return True when metadata claims make the caller an MCP administrator.
+
+    The one admin predicate for MCP. Six had grown independently -- media, notes,
+    kanban, sandbox, mcp_discovery and this one -- with six different claim sets, and
+    they disagreed in both directions:
+
+    * Under-grant: AuthNZ treats "owner" and "super_admin" as platform admins, and
+      server.py writes those straight into metadata["roles"], but every MCP predicate
+      tested the literal "admin". A platform owner was refused permanent media delete,
+      permanent note delete and all kanban policy operations while being an
+      administrator everywhere else in the product.
+    * Over-grant: sandbox_module alone accepted the "system.configure" permission, and
+      used that to pass its CROSS-USER session gate -- so an API key with no admin role
+      could reach another user's sandbox session, while this predicate, MCP's own
+      trusted-claims gate, said the same caller was not an admin.
+
+    Roles are taken from AuthNZ's _PLATFORM_ADMIN_ROLES so the two cannot drift again.
+    Permissions deliberately do NOT follow AuthNZ's _ADMIN_CLAIM_PERMISSIONS: only the
+    "*" wildcard grants admin here, not "system.configure" or the "admin" permission.
+    A configuration permission should not authorise permanently deleting another
+    user's media and notes, which is what full parity would have granted. That
+    narrowing is the only intentional divergence from AuthNZ; see
+    Docs/ADR/048-mcp-admin-claims.md.
+    """
+    if not isinstance(metadata, dict):
+        return False
     roles = {
         str(role).strip().lower()
         for role in _metadata_claim_values(metadata.get("roles"))
         if str(role).strip()
     }
+    if roles & _PLATFORM_ADMIN_ROLES:
+        return True
     permissions = {
         str(permission).strip().lower()
         for permission in _metadata_claim_values(metadata.get("permissions"))
         if str(permission).strip()
     }
-    return "admin" in roles or "*" in permissions
+    return "*" in permissions
+
+
+# Back-compat alias: this was the private canonical predicate before it was shared.
+_metadata_has_admin_claims = metadata_has_admin_claims
 
 
 def _has_trusted_compat_claims(context: RequestContext) -> bool:

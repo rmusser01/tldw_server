@@ -25,6 +25,7 @@ import {
   getSttRecording,
   deleteSttRecording
 } from "@/db/dexie/stt-recordings"
+import { isEditableTarget } from "@/utils/editable-target"
 
 const { Text, Title } = Typography
 
@@ -410,15 +411,9 @@ export const SttPlaygroundPage: React.FC = () => {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.code !== "Space") return
+      // Space also activates a focused button, so leave buttons alone too.
       const tag = (e.target as HTMLElement)?.tagName?.toLowerCase()
-      const isEditable = (e.target as HTMLElement)?.isContentEditable
-      if (
-        tag === "input" ||
-        tag === "textarea" ||
-        tag === "select" ||
-        tag === "button" ||
-        isEditable
-      ) {
+      if (isEditableTarget(e.target) || tag === "button") {
         return
       }
       const toggleEvent = new CustomEvent("stt-toggle-record", {

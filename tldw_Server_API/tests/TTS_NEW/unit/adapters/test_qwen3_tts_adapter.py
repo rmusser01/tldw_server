@@ -205,7 +205,7 @@ async def test_streaming_transcode_fallback_buffers_output(fake_qwen_module, mon
     async def fake_generate_pcm(_request, _model_id):
         return np.zeros(480, dtype=np.int16)
 
-    async def fake_convert(_audio, source_format, target_format, sample_rate):
+    async def fake_convert(_audio, target_format, sample_rate):
         return b"converted-bytes"
 
     monkeypatch.setattr(adapter, "_can_stream_transcode", lambda _fmt: (False, "no-writer"))

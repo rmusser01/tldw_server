@@ -7758,6 +7758,89 @@ def test_versioned_pull_does_not_advance_past_unresolved_conflict(
     ]
 
 
+
+@pytest.mark.unit
+def test_legacy_pull_does_not_advance_past_unresolved_conflict(
+    sync_store: SyncV2Store,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The adapter-v1 path (a device that never negotiated versions) holds the cursor too."""
+    registry = SyncAdapterRegistry([StaticSyncAdapter(domain="notes.note")])
+    service = SyncV2Service(
+        store=sync_store,
+        adapters=registry,
+        clock=_clock,
+        settings=SyncV2Settings(
+            max_pull_page_size=10,
+            server_trusted_encryption=_ready_encryption(),
+        ),
+    )
+    service.register_device(
+        user_id="user-1",
+        display_name="Laptop",
+        client_type="chatbook",
+        device_id="device-1",
+        capabilities={"requested_domains": ["notes.note"]},
+    )
+    service.enroll_dataset(
+        user_id="user-1", dataset_id="dataset-1", domains=["notes.note"]
+    )
+    blocked = sync_store.insert_envelope(
+        _envelope(client_envelope_id="blocked-v1", status="accepted", apply_status="applied")
+    )
+    later = sync_store.insert_envelope(
+        _envelope(
+            client_envelope_id="later-v1",
+            entity_id="note-later-v1",
+            stable_key="note:later-v1",
+            payload_hash="sha256:later-v1",
+            status="accepted",
+            apply_status="applied",
+        )
+    )
+    blocked = sync_store.mark_envelope_apply_status(
+        blocked.server_sequence,
+        apply_status="conflict",
+        apply_error_code="projection_conflict",
+    )
+    sync_store.insert_conflict(
+        SyncConflictCreate(
+            conflict_id="conflict-blocked-v1",
+            dataset_id="dataset-1",
+            domain="notes.note",
+            object_id=blocked.object_id,
+            conflict_type="projection_conflict",
+            local_envelope_id=blocked.client_envelope_id,
+            server_cursor=blocked.server_sequence,
+        )
+    )
+
+    first = service.pull(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        include_own_changes=True,
+    )
+    monkeypatch.setattr(
+        sync_store,
+        "get_unresolved_materialization_conflict",
+        lambda _dataset_id: None,
+    )
+    second = service.pull(
+        user_id="user-1",
+        dataset_id="dataset-1",
+        device_id="device-1",
+        cursor=first.next_cursor,
+        include_own_changes=True,
+    )
+
+    assert first.envelopes == []
+    assert int(first.next_cursor or 0) < later.server_sequence
+    assert first.has_more is False
+    assert [item.client_envelope_id for item in second.envelopes] == [
+        later.client_envelope_id
+    ]
+
 def test_pull_token_rejects_tampering_oversize_and_negotiated_version_set_change(
     sync_store: SyncV2Store,
 ) -> None:

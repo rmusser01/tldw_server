@@ -217,6 +217,7 @@ from tldw_Server_API.app.core.Sync.v2.server_origin_batch import (
     SyncServerOriginBatchMaterializationError,
 )
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service
+from tldw_Server_API.app.core.Utils.base64url import verify_signed_token
 from tldw_Server_API.app.core.Writing.note_title import TitleGenOptions, generate_note_title
 
 #
@@ -865,39 +866,16 @@ def _decode_attachment_cursor(
 
     if raw_cursor is None:
         return None
-    if len(raw_cursor.encode("utf-8")) > 512:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="Attachment cursor exceeds its size boundary",
-        )
     try:
         validate_notes_attachment_keyset_cursor(raw_cursor)
-        payload_segment, signature_segment = raw_cursor.split(".")
-        payload = base64.urlsafe_b64decode(
-            payload_segment + "=" * (-len(payload_segment) % 4)
+        payload = verify_signed_token(
+            raw_cursor, _attachment_cursor_secret(), max_encoded_len=512
         )
-        signature = base64.urlsafe_b64decode(
-            signature_segment + "=" * (-len(signature_segment) % 4)
-        )
-        if any(
-            base64.urlsafe_b64encode(decoded_segment)
-            .decode("ascii")
-            .rstrip("=")
-            != encoded_segment
-            for decoded_segment, encoded_segment in (
-                (payload, payload_segment),
-                (signature, signature_segment),
-            )
-        ):
-            raise ValueError("noncanonical base64url")
-        expected = hmac.digest(_attachment_cursor_secret(), payload, "sha256")
-        if not hmac.compare_digest(signature, expected):
-            raise ValueError("signature mismatch")
         decoded = json.loads(payload)
     except (UnicodeError, ValueError, TypeError, json.JSONDecodeError) as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid attachment cursor",
+            detail="Invalid cursor",
         ) from exc
     if not isinstance(decoded, dict) or decoded != {
         "v": 1,
@@ -909,13 +887,13 @@ def _decode_attachment_cursor(
     }:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid attachment cursor",
+            detail="Invalid cursor",
         )
     after = decoded.get("after")
     if not isinstance(after, str):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid attachment cursor",
+            detail="Invalid cursor",
         )
     return after
 
@@ -3482,11 +3460,7 @@ async def list_collection_keyword_links_endpoint(
                 headers={"Retry-After": str(meta.get("retry_after", 60))}
             )
 
-        cursor = db.execute_query(
-            "SELECT collection_id, keyword_id FROM collection_keywords ORDER BY collection_id ASC, keyword_id ASC LIMIT ? OFFSET ?",
-            (limit, offset),
-        )
-        rows = cursor.fetchall()
+        rows = db.list_collection_keyword_links(limit, offset)
         links = [
             {
                 "collection_id": int(row["collection_id"]),
@@ -3976,11 +3950,7 @@ async def list_conversation_keyword_links_endpoint(
             total = len(links)
             links = links[offset: offset + limit]
         else:
-            cursor = db.execute_query(
-                "SELECT conversation_id, keyword_id FROM conversation_keywords ORDER BY conversation_id ASC, keyword_id ASC LIMIT ? OFFSET ?",
-                (limit, offset),
-            )
-            rows = cursor.fetchall()
+            rows = db.list_conversation_keyword_links(limit, offset)
             links = [
                 {
                     "conversation_id": str(row["conversation_id"]),
@@ -4879,6 +4849,7 @@ async def upload_note_attachment(
                 coordinator.service.settings.max_chunk_bytes,
             )
             chunk_count = (len(payload) + chunk_size - 1) // chunk_size
+            session = None
             try:
                 session = coordinator.service.create_blob_upload_session(
                     user_id=str(current_user.id),
@@ -4949,6 +4920,29 @@ async def upload_note_attachment(
                     )
                 )
             except Exception as exc:  # noqa: BLE001 - mapped to a stable public error.
+                # Release the session before surfacing the failure. Without this the
+                # sequence had no compensation at all: sessions are capped at
+                # max_active_blob_uploads, and the upload_id is minted server-side and
+                # never returned to the client, so the cancel endpoint could not reach
+                # an orphan. Eight transient failures -- a flaky network on one large
+                # attachment suffices -- permanently disabled attachment upload for
+                # that user, through this endpoint and the sync API alike, with no
+                # self-service recovery, each orphan also holding reserved_quota_bytes.
+                if session is not None:
+                    try:
+                        coordinator.service.cancel_blob_upload(
+                            user_id=str(current_user.id),
+                            dataset_id=ready.dataset.dataset_id,
+                            upload_id=session.upload_id,
+                        )
+                    except Exception:  # noqa: BLE001 - compensation must not mask exc.
+                        logger.bind(
+                            operation="notes_attachment_upload_compensation",
+                            dataset_id=ready.dataset.dataset_id,
+                            upload_id=session.upload_id,
+                        ).warning(
+                            "Failed to release blob upload session after upload error"
+                        )
                 raise _notes_attachment_http_error(exc) from exc
             return _canonical_to_legacy_attachment_response(result.attachment)
 

@@ -29,7 +29,6 @@ providers:
     base_url: "https://api.openai.com/v1/audio/speech"
     model: "tts-1"  # or "tts-1-hd" for higher quality
     timeout: 60
-    max_retries: 3
     # Optional: when true, perform a lightweight API-key verification
     # call during adapter initialization. Disabled by default so that
     # startup does not depend on external network availability.

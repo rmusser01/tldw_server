@@ -162,7 +162,6 @@ providers:
     api_key: ${OPENAI_API_KEY}
     model: tts-1-hd
     timeout: 30
-    max_retries: 3
     base_url: https://api.openai.com/v1
 
   elevenlabs:

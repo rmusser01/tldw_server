@@ -400,7 +400,12 @@ def test_message_metadata_write_failure_is_replayable_without_duplicate_rows(
     )
     assert stored_envelope.apply_status == "failed"
     assert sync_service.store.get_object_state("dataset-1", "chat.message", "msg-1") is None
-    assert chacha_db.get_message_by_id("msg-1") is not None
+    # This asserted the message row SURVIVED a failed metadata write, which is what
+    # happened when the row and its metadata were two separate writes. They are now one
+    # transaction -- the failure logs "Transaction (outermost) failed, rolling back" --
+    # so nothing is left behind at all. That is strictly stronger than what this test
+    # was defending: there is no half-written row for the retry to have to reconcile.
+    assert chacha_db.get_message_by_id("msg-1") is None
     assert chacha_db.get_message_metadata("msg-1") is None
 
     retry = _push_one(sync_service, _message_envelope())

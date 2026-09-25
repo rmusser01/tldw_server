@@ -6,6 +6,7 @@ Includes health checking, metrics, circuit breaker support, and proper error han
 
 import asyncio
 import contextlib
+import re
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
@@ -25,6 +26,14 @@ from ..execution_outcomes import (
 from ..tool_observability import ensure_tool_definition_eval_metadata
 
 T = TypeVar("T")
+
+# Control characters stripped from every sanitized string. Tab, newline and carriage
+# return are deliberately NOT in this class: they are data, not control. Dropping "\t"
+# silently corrupted every file written through fs.write (a Makefile recipe loses its
+# required tab and the call still reports success, because the integrity receipt hashes
+# the on-disk pre-image) and made fs.edit permanently unusable on tab-indented files,
+# since old_string could never match. web_tool_base re-exports this for URL validation.
+CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 
 class AdmittedModuleOperation:
@@ -767,40 +776,33 @@ class BaseModule(ABC):
         """
         Sanitize user input to prevent injection attacks (deep, recursive).
 
-        This implementation recursively validates dicts/lists and inspects strings
-        for common injection/control patterns. Override to add module-specific
-        allowlisting or transforms. A small maximum depth guard prevents abuse.
+        This implementation recursively strips control characters from strings and
+        recurses through dicts and lists. A small maximum depth guard prevents abuse.
+        Override to add module-specific allowlisting or transforms.
+
+        It deliberately does NOT carry a SQL-injection denylist. The previous one
+        rejected "--", "/*", "*/", "xp_" and "sp_" anywhere in any string, which refused
+        ordinary content with a security-flavoured error -- a Markdown "---" rule, a git
+        pathspec "-- src/app.py", the glob "src/*.py", the filename "exp_data.csv" --
+        across the 22 modules that inherit this unchanged. These values are data handed
+        to parameterised DB_Management queries, so the denylist bought no injection
+        protection; web_tool_base had already worked around it for web tools only.
+        (Its "\\x00" entry was also a literal backslash-x-0-0 rather than a NUL, so it
+        never matched; real NULs are removed by the control-character strip below.)
+
+        Four modules -- filesystem, run_command, sandbox and web_tool_base -- each
+        carried a near-identical override whose only purpose was to escape that
+        denylist, and each had drifted to a different whitespace class: filesystem and
+        sandbox kept only "\\n" (so fs.write still ate the Makefile tab even after the
+        base was fixed), run_command kept "\\n" and "\\t" but not "\\r", web_tool_base
+        kept all three. All four are gone; this is the one implementation.
         """
         # Depth guard
         if _depth > 20:
             raise ValueError("Input too deeply nested")
 
-        dangerous_patterns = [
-            "';",
-            '";',
-            "--",
-            "/*",
-            "*/",
-            "xp_",
-            "sp_",
-            "\\x00",
-        ]
-
-        def _check_str(s: str) -> str:
-            ls = s.lower()
-            for pattern in dangerous_patterns:
-                if pattern in ls:
-                    raise ValueError(f"Potentially dangerous input detected: {pattern}")
-            # Strip NULs and control chars, but preserve the whitespace that is
-            # syntactically load-bearing in file content. Dropping \t silently
-            # corrupted every tab-significant file written through fs.write (a
-            # Makefile, a TSV) while reporting success, and made fs.edit's exact
-            # string replacement permanently unable to match a tab-indented file.
-            # Same class as filesystem_module._sanitize_patch_diff, deliberately.
-            return "".join(ch for ch in s if ch >= " " or ch in {"\n", "\r", "\t"})
-
         if isinstance(input_data, str):
-            return _check_str(input_data)
+            return CONTROL_CHARS_RE.sub("", input_data)
 
         if isinstance(input_data, dict):
             return {k: self.sanitize_input(v, _depth + 1) for k, v in input_data.items()}
@@ -810,6 +812,24 @@ class BaseModule(ABC):
 
         # Pass-through for other primitives
         return input_data
+
+    def caller_is_admin(self, context: Any | None) -> bool:
+        """Return True when the request context carries MCP administrator claims.
+
+        The one admin check for every module. Five modules had grown their own, with
+        five different claim sets; see protocol_types.metadata_has_admin_claims for
+        what they disagreed about and why permissions are narrower than AuthNZ's.
+
+        Note there is no getattr(context, "is_admin") probe here. kanban and sandbox
+        both had one, but RequestContext defines no such attribute and server.py drops
+        principal.is_admin when building it, so the probe was always False and those
+        two only ever ran the claims logic they appeared stricter than.
+        """
+        # Local import: protocol_types imports BaseModule, so this cannot be
+        # module-level without a cycle.
+        from ..protocol_types import metadata_has_admin_claims
+
+        return metadata_has_admin_claims(getattr(context, "metadata", None))
 
     # Shared helpers for validators
     def is_write_tool_def(self, tool_def: dict[str, Any]) -> bool:

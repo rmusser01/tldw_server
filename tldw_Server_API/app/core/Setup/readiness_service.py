@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any
 
 from loguru import logger
@@ -16,6 +15,7 @@ from tldw_Server_API.app.core.Setup.readiness_models import (
     LANE_SPEECH,
     build_lane_summary,
 )
+from tldw_Server_API.app.core.Utils.iso_datetime import utc_now_iso as _utc_now
 
 _CHAT_MODEL_KEYS = {
     "anthropic": ("API", "anthropic_model"),
@@ -70,10 +70,6 @@ def _truthy(value: Any) -> bool:
     if isinstance(value, bool):
         return value
     return _text(value).lower() in {"1", "true", "yes", "on"}
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 def _merge_config_update(

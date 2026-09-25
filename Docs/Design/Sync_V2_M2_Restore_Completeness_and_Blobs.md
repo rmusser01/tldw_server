@@ -237,7 +237,8 @@ M2 should enforce:
 - `max_pending_upload_bytes_per_user`.
 - `max_committed_blob_bytes_per_user`.
 - Optional per-dataset quota override.
-- Upload-session expiration.
+- Upload-session expiration (implemented: `SYNC_V2_BLOB_UPLOAD_SESSION_TTL_SECONDS`,
+  read-time quota exclusion, retention-pass reaper; see ADR-052).
 - Idempotency by `(dataset_id, device_id, idempotency_key)`.
 
 Quota accounting must not rely only on blob files found on disk. The Sync v2 DB

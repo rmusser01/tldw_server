@@ -70,6 +70,7 @@ import { useConfirmDanger } from "@/components/Common/confirm-danger"
 import { useHelpModal } from "@/store/tutorials"
 import { isMac } from "@/hooks/keyboard/useKeyboardShortcuts"
 import { DemoModeProvider, useDemoMode } from "@/context/demo-mode"
+import { isEditableTarget } from "@/utils/editable-target"
 
 type OptionLayoutProps = {
   children: React.ReactNode
@@ -275,11 +276,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Don't trigger if user is typing in an input
-      const target = e.target as HTMLElement
-      const isInputField =
-        target.tagName === "INPUT" ||
-        target.tagName === "TEXTAREA" ||
-        target.isContentEditable
+      const isInputField = isEditableTarget(e.target)
 
       // ? key to open help modal (without Ctrl/Cmd to avoid double-fire)
       if (

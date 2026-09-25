@@ -562,7 +562,6 @@ class PocketTTSCppAdapter(TTSAdapter):
         audio_i16 = self._audio_normalizer.normalize(audio, target_dtype=np.int16)
         return await self.convert_audio_format(
             audio_i16,
-            source_format=AudioFormat.PCM,
             target_format=target_format,
             sample_rate=self.DEFAULT_SAMPLE_RATE,
         )

@@ -556,6 +556,32 @@ def _allocate_slides_source_projection_caps(
     return selected, caps
 
 
+def _slides_source_db_error(
+    message: str,
+    *,
+    database_name: str,
+    db: Any,
+    exc: BaseException,
+) -> RAGDatabaseError:
+    """Normalize a slides-source DB failure, naming the backend and the cause type.
+
+    Only the exception class is included: driver messages can echo SQL or params.
+
+    SQL splicing convention for the slides-source methods (media, notes, chats):
+    ``retrieve_slides_source_candidates_v1`` writes one SQL string per backend, so
+    each branch is an f-string; ``project_slides_source_documents_v1`` shares one
+    template across backends and fills the backend-specific fragments with
+    ``str.format``. Every splice is a fixed expression, never user input, and a
+    template left un-interpolated reaches PostgreSQL as a literal ``{`` (TASK-13292).
+    """
+    backend = getattr(getattr(db, "backend_type", None), "value", "unknown")
+    return RAGDatabaseError(
+        f"{message} (backend={backend}, cause={type(exc).__name__})",
+        database_name=database_name,
+        operation_type="slides_source_retrieval",
+    )
+
+
 def _slides_source_requested_values(count: int) -> str:
     """Return a fixed-placeholder derived table for at most 100 candidates."""
     if not 1 <= count <= 100:
@@ -1063,11 +1089,12 @@ class MediaDBRetriever(BaseRetriever):
                 log_errors=False,
             )
             rows = _read_slides_source_candidate_rows(cursor)
-        except Exception:  # noqa: BLE001 - closed boundary normalizes DB failures
-            raise RAGDatabaseError(
+        except Exception as exc:  # noqa: BLE001 - closed boundary normalizes DB failures
+            raise _slides_source_db_error(
                 "Media source candidate retrieval failed.",
                 database_name="media",
-                operation_type="slides_source_retrieval",
+                db=self.media_db,
+                exc=exc,
             ) from None
 
         raw_ranks: list[float] = []
@@ -1177,11 +1204,12 @@ class MediaDBRetriever(BaseRetriever):
                 cursor,
                 max_materialized_chars=sum(cap for _, cap in projections),
             )
-        except Exception:  # noqa: BLE001 - closed boundary normalizes DB failures
-            raise RAGDatabaseError(
+        except Exception as exc:  # noqa: BLE001 - closed boundary normalizes DB failures
+            raise _slides_source_db_error(
                 "Bounded media source projection failed.",
                 database_name="media",
-                operation_type="slides_source_retrieval",
+                db=self.media_db,
+                exc=exc,
             ) from None
 
         documents: list[Document] = []
@@ -2771,11 +2799,12 @@ class NotesDBRetriever(BaseRetriever):
                 log_errors=False,
             )
             rows = _read_slides_source_candidate_rows(cursor)
-        except Exception:  # noqa: BLE001 - closed boundary normalizes DB failures
-            raise RAGDatabaseError(
+        except Exception as exc:  # noqa: BLE001 - closed boundary normalizes DB failures
+            raise _slides_source_db_error(
                 "Note source candidate retrieval failed.",
                 database_name="notes",
-                operation_type="slides_source_retrieval",
+                db=self.chacha_db,
+                exc=exc,
             ) from None
 
         raw_ranks: list[float] = []
@@ -2875,11 +2904,12 @@ class NotesDBRetriever(BaseRetriever):
                 cursor,
                 max_materialized_chars=sum(cap for _, cap in projections),
             )
-        except Exception:  # noqa: BLE001 - closed boundary normalizes DB failures
-            raise RAGDatabaseError(
+        except Exception as exc:  # noqa: BLE001 - closed boundary normalizes DB failures
+            raise _slides_source_db_error(
                 "Bounded note source projection failed.",
                 database_name="notes",
-                operation_type="slides_source_retrieval",
+                db=self.chacha_db,
+                exc=exc,
             ) from None
 
         documents: list[Document] = []
@@ -2949,11 +2979,13 @@ class NotesDBRetriever(BaseRetriever):
                     self._retrieve_allowed_notes_via_chacha,
                     allowed_note_ids,
                     notebook_id,
+                    query,
                 )
             return await asyncio.to_thread(
                 self._retrieve_allowed_notes_via_sql,
                 allowed_note_ids,
                 notebook_id,
+                query,
             )
 
         if self.chacha_db is not None and not self.config.tags_filter:
@@ -2984,12 +3016,9 @@ class NotesDBRetriever(BaseRetriever):
 
         # Convert to documents
         for row in results:
-            # Calculate simple relevance score
-            title_match = query.lower() in row["title"].lower()
-            content_match = query.lower() in row["content"].lower()
-            score = (1.0 if title_match else 0.0) + (0.5 if content_match else 0.0)
-
-            documents.append(self._row_to_document(row, score=score))
+            documents.append(
+                self._row_to_document(row, score=self._text_match_score(query, row))
+            )
 
         # Sort by score
         documents.sort(key=lambda x: x.score, reverse=True)
@@ -3014,8 +3043,14 @@ class NotesDBRetriever(BaseRetriever):
         self,
         allowed_note_ids: list[str],
         notebook_id: Optional[int],
+        query: str = "",
     ) -> list[Document]:
-        """Retrieve selected notes by ID without requiring a text-search match."""
+        """Retrieve selected notes by ID without requiring a text-search match.
+
+        No text match is REQUIRED -- the include list is the filter -- but the rows are
+        still scored against the query so the caller gets relevance order rather than
+        the order the ids happened to arrive in. See _retrieve_allowed_notes_via_sql.
+        """
         documents: list[Document] = []
         for note_id in allowed_note_ids[: int(self.config.max_results)]:
             try:
@@ -3027,15 +3062,27 @@ class NotesDBRetriever(BaseRetriever):
                 continue
             if notebook_id and row.get("notebook_id") != notebook_id:
                 continue
-            documents.append(self._row_to_document(row, score=1.0))
+            documents.append(
+                self._row_to_document(row, score=self._text_match_score(query, row))
+            )
+        documents.sort(key=lambda document: document.score, reverse=True)
         return documents
 
     def _retrieve_allowed_notes_via_sql(
         self,
         allowed_note_ids: list[str],
         notebook_id: Optional[int],
+        query: str = "",
     ) -> list[Document]:
-        """Retrieve selected notes by ID through the raw SQL fallback."""
+        """Retrieve selected notes by ID through the raw SQL fallback.
+
+        The include list decides WHICH notes come back; the query decides their order
+        and their score. This used to stamp score=1.0 on every row and return them in
+        last_modified order, so a caller asking for relevance got recency wearing a
+        perfect-relevance score. Cross-source fusion (ADR-049) stopped those rows
+        crowding out other sources, but within a single-source notes query nothing
+        rescued the ordering.
+        """
         bounded_note_ids = allowed_note_ids[: int(self.config.max_results)]
         if not bounded_note_ids:
             return []
@@ -3054,9 +3101,33 @@ class NotesDBRetriever(BaseRetriever):
         if notebook_id is not None:
             sql += " AND n.notebook_id = ?"
             params.append(notebook_id)
+        # last_modified stays the TIE-BREAK, applied by the database; relevance is
+        # applied below, where the query text is available.
         sql += " ORDER BY n.last_modified DESC LIMIT ?"
         params.append(self.config.max_results)
-        return [self._row_to_document(row, score=1.0) for row in self._execute_query(sql, tuple(params))]
+        documents = [
+            self._row_to_document(row, score=self._text_match_score(query, row))
+            for row in self._execute_query(sql, tuple(params))
+        ]
+        documents.sort(key=lambda document: document.score, reverse=True)
+        return documents
+
+    @staticmethod
+    def _text_match_score(query: str, row: dict[str, Any]) -> float:
+        """Score a note row against the query: title match 1.0, content match 0.5.
+
+        The same formula the unrestricted notes path has always used, lifted here so
+        the include-list paths can share it instead of stamping 1.0 on everything.
+
+        An empty query scores every row equally at 1.0: there is no relevance to
+        measure, so claiming a difference would be worse than claiming none.
+        """
+        needle = (query or "").strip().lower()
+        if not needle:
+            return 1.0
+        title = str(row.get("title") or "").lower()
+        content = str(row.get("content") or "").lower()
+        return (1.0 if needle in title else 0.0) + (0.5 if needle in content else 0.0)
 
     def _row_to_document(self, row: dict[str, Any], *, score: float) -> Document:
         """Convert a note row into the RAG document shape."""
@@ -3718,11 +3789,12 @@ class ChatHistoryRetriever(BaseRetriever):
                 log_errors=False,
             )
             rows = _read_slides_source_candidate_rows(cursor)
-        except Exception:  # noqa: BLE001 - closed boundary normalizes DB failures
-            raise RAGDatabaseError(
+        except Exception as exc:  # noqa: BLE001 - closed boundary normalizes DB failures
+            raise _slides_source_db_error(
                 "Chat source candidate retrieval failed.",
                 database_name="chats",
-                operation_type="slides_source_retrieval",
+                db=self.chacha_db,
+                exc=exc,
             ) from None
 
         raw_ranks: list[float] = []
@@ -3829,11 +3901,12 @@ class ChatHistoryRetriever(BaseRetriever):
                 cursor,
                 max_materialized_chars=sum(cap for _, cap in projections),
             )
-        except Exception:  # noqa: BLE001 - closed boundary normalizes DB failures
-            raise RAGDatabaseError(
+        except Exception as exc:  # noqa: BLE001 - closed boundary normalizes DB failures
+            raise _slides_source_db_error(
                 "Bounded chat source projection failed.",
                 database_name="chats",
-                operation_type="slides_source_retrieval",
+                db=self.chacha_db,
+                exc=exc,
             ) from None
 
         documents: list[Document] = []
@@ -4924,7 +4997,10 @@ class MultiDatabaseRetriever:
         else:
             results = []
 
-        # Flatten and filter out failures
+        # Filter out failures, keeping each source's results in their own list. The
+        # grouping is what makes rank-based fusion possible below; flattening first
+        # throws away the only information that tells the two scales apart.
+        per_source: list[list[Document]] = []
         for source, res in zip(task_sources, results):
             if (
                 getattr(self, "credential_runtime", None) is not None
@@ -4947,7 +5023,8 @@ class MultiDatabaseRetriever:
                 if source_failures is not None:
                     source_failures.add(source)
                 continue
-            if isinstance(res, list):
+            if isinstance(res, list) and res:
+                per_source.append(res)
                 documents.extend(res)
 
         if had_source_failure and not documents:
@@ -4955,12 +5032,90 @@ class MultiDatabaseRetriever:
                 "Document retrieval failed.", operation_type="search",
             ) from None
 
-        # Sort globally by score desc and cap by max_results
-        documents.sort(key=lambda d: getattr(d, "score", 0.0), reverse=True)
+        documents = self._order_across_sources(per_source, documents)
         if config is not None and getattr(config, "max_results", None):
             documents = documents[: int(config.max_results)]
 
         return documents
+
+    def _order_across_sources(
+        self,
+        per_source: list[list[Document]],
+        documents: list[Document],
+    ) -> list[Document]:
+        """Order documents drawn from several sources without comparing raw scores.
+
+        The sources do not share a scale. Across the retrievers here, `score` is
+        min-max normalised (media, chunk FTS, vector), a constant 1.0 (both notes
+        paths), a constant 0.5 (chat history, character cards, SQL) or a constant
+        0.6/0.4 (claims). Sorting them together compared numbers that mean different
+        things, and the constants won.
+
+        Worked example, from the review that found this: sources=["media_db","notes"]
+        with top_k=10 and an include list of 20 note ids. _retrieve_allowed_notes_via_sql
+        returns notes ordered by last_modified with no text match required at all, and
+        stamps every one score=1.0. Media is min-max normalised, so exactly one media
+        document reaches 1.0. The global sort put all 20 notes at or above every media
+        document, and the top-10 cut returned notes only -- zero media documents,
+        including the best BM25 matches -- after which generation answered from
+        documents never scored for relevance at all. The same flaw decided ordinary
+        ties by dict insertion order, since min-max maps every source's best hit to
+        exactly 1.0 and list.sort is stable.
+
+        Reciprocal rank fusion uses only each document's RANK WITHIN ITS OWN SOURCE, so
+        no calibration between scales is needed. Each source keeps its own ordering,
+        which is self-consistent; only the interleaving changes.
+
+        Scores are rescaled onto (0, 1] rather than left as raw RRF values (~0.016 at
+        rank 1), because callers depend on that range: unified_pipeline re-sorts by
+        score and caps to top_k in three places, applies a [0,1]-bounded boost
+        (min(1.0, score * 1.1 + 0.02)), and Research/providers/local.py returns the
+        value in an API response. Rescaling keeps the fused order under those re-sorts
+        while leaving the range they assume intact.
+
+        Single-source results are returned untouched: their scores are meaningful
+        within one scale, there is nothing to fuse, and rank-based scores would be a
+        loss of fidelity. This is a cross-source fix only.
+
+        One further change when fusing: a document returned by two sources now appears
+        once, with its ranks summed, where the global sort listed it twice. That is
+        standard RRF and matches the existing _reciprocal_rank_fusion, but it means a
+        multi-source result set can be shorter than before for the same inputs.
+
+        See Docs/ADR/049-rag-cross-source-fusion.md.
+        """
+        if len(per_source) < 2:
+            documents.sort(key=lambda d: getattr(d, "score", 0.0), reverse=True)
+            return documents
+
+        k = 60  # standard RRF damping; rank 1 contributes 1/61, rank 2 1/62, ...
+        fused: dict[str, float] = {}
+        first_seen: dict[str, Document] = {}
+        for docs in per_source:
+            for rank, doc in enumerate(docs, start=1):
+                key = getattr(doc, "id", None)
+                if key is None:
+                    key = f"_anon:{id(doc)}"
+                fused[key] = fused.get(key, 0.0) + 1.0 / (k + rank)
+                first_seen.setdefault(key, doc)
+
+        ordered = sorted(
+            first_seen.values(),
+            key=lambda d: fused[getattr(d, "id", None) or f"_anon:{id(d)}"],
+            reverse=True,
+        )
+
+        # Rescale onto (0, 1], preserving the fused order.
+        top = max(fused.values())
+        if top > 0:
+            for doc in ordered:
+                key = getattr(doc, "id", None) or f"_anon:{id(doc)}"
+                try:
+                    doc.score = fused[key] / top
+                except (AttributeError, TypeError):
+                    # A frozen or exotic Document: order still holds, score is stale.
+                    pass
+        return ordered
 
     async def retrieve_from_plan(
         self,

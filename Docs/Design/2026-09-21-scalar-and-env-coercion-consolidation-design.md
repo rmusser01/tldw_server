@@ -136,6 +136,16 @@ Excluded from this design, deliberately:
 
 Stage 5 has no completion date by design. The ratchet is the deliverable; reaching zero is not.
 
+**Status (TASK-13322, 2026-09-23):** stages 1-3 are done. The contract shipped as
+`parse_bool(value, *, default, key=None)` and `env_bool(key, *, default)`; `parse_int`/`env_int` were
+deferred until a caller needs them. `core/testing.is_truthy` delegates on the string form of its input,
+so `is_truthy(2)` stays `False` as before; the only widened spelling is `"enabled"`.
+`MCP_unified/environment.py` keeps its own copy for the package boundary, now carrying `"enabled"`
+too, and `tests/Utils/test_coercion.py` asserts the two sets stay equal. Also migrated: all eight
+OCR backends' env flags (dots, dolphin, points, hunyuan and nemotron had the unstripped
+`("1","true","yes")` set). Unrecognised values on those keys now fall back to the key's default
+instead of `False`. Stage 4 (the ratchet) is not started.
+
 ## Verification and release gate
 
 - Stage 1 is not complete until a test proves `_as_bool("n")` resolves the loopback guard **on**, and

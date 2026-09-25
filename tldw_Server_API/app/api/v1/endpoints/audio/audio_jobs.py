@@ -30,6 +30,7 @@ from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_cursor_
 from tldw_Server_API.app.api.v1.schemas.pagination import CursorPaginationMeta
 
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_MAINTENANCE
+from tldw_Server_API.app.core.Utils.base64url import decode_opaque_cursor_segment
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
@@ -49,13 +50,14 @@ from tldw_Server_API.app.core.Usage.audio_quota import (
     get_user_tier,
     set_user_tier,
 )
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 
 router = APIRouter()
 
 MAX_CACHED_JOB_MANAGER_INSTANCES = 4
 _job_manager_cache: LRUCache = LRUCache(maxsize=MAX_CACHED_JOB_MANAGER_INSTANCES)
 _job_manager_lock = threading.Lock()
-_ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
+_ADMIN_CLAIM_PERMISSIONS = PLATFORM_ADMIN_PERMISSIONS  # see core/AuthNZ/platform_admin.py
 
 _ADMIN_DEPS = [
     Depends(RequireRole("admin")),
@@ -143,9 +145,7 @@ def _decode_audio_jobs_cursor(cursor: str) -> tuple[datetime, int]:
     if not cursor:
         raise ValueError("empty cursor")
     try:
-        padding = "=" * (-len(cursor) % 4)
-        raw = base64.urlsafe_b64decode((cursor + padding).encode("ascii")).decode("utf-8")
-        payload = json.loads(raw)
+        payload = json.loads(decode_opaque_cursor_segment(cursor))
         if int(payload.get("v", 0)) != _AUDIO_JOBS_CURSOR_VERSION:
             raise ValueError("unsupported cursor version")
         created_at = str(payload["created_at"])

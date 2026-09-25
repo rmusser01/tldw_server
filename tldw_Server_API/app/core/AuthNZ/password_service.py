@@ -473,10 +473,53 @@ class PasswordService:
             logger.error(f"Error adding to password history: {e}")
             # Don't raise - this shouldn't block password changes
 
+    async def set_password(
+        self,
+        user_id: int,
+        new_hash: str,
+        db_connection: Any,
+        *,
+        is_postgres: Optional[bool] = None,
+    ) -> None:
+        """Store a new password hash and record it in the retained history.
+
+        Runs on the caller's connection, so a transaction around it covers both writes.
+        """
+        postgres_backend = self._resolve_postgres_backend(db_connection, is_postgres=is_postgres)
+        placeholder = ("$1", "$2") if postgres_backend else ("?", "?")
+        sql = (
+            f"UPDATE users SET password_hash = {placeholder[0]}, password_changed_at = CURRENT_TIMESTAMP,"  # nosec B608
+            f" updated_at = CURRENT_TIMESTAMP WHERE id = {placeholder[1]}"
+        )
+        if postgres_backend:
+            await db_connection.execute(sql, new_hash, user_id)
+        else:
+            await db_connection.execute(sql, (new_hash, user_id))
+        await self.add_to_password_history(user_id, new_hash, db_connection, is_postgres=postgres_backend)
+
 
 #######################################################################################################################
 #
 # Module Functions for convenience
+
+
+async def fetch_password_hash(db_connection: Any, user_id: int, *, is_postgres: bool) -> Optional[str]:
+    """A user's stored password hash, or None."""
+    if is_postgres:
+        value = await db_connection.fetchval("SELECT password_hash FROM users WHERE id = $1", user_id)
+        return str(value) if value else None
+    cursor = await db_connection.execute("SELECT password_hash FROM users WHERE id = ?", (user_id,))
+    row = await cursor.fetchone()
+    if not row:
+        return None
+    if isinstance(row, dict):
+        value = row.get("password_hash")
+    else:
+        try:
+            value = row[0]
+        except (IndexError, KeyError, TypeError):
+            value = None
+    return str(value) if value else None
 
 # Global instance with thread-safe initialization
 _password_service: Optional[PasswordService] = None

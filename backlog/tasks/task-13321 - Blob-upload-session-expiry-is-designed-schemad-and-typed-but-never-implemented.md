@@ -3,9 +3,10 @@ id: TASK-13321
 title: >-
   Blob upload-session expiry is designed, schema'd and typed but never
   implemented
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-22 04:55'
+updated_date: '2026-09-23 23:14'
 labels:
   - bug
   - sync
@@ -41,21 +42,33 @@ Found by the comprehensive core-module review; the absent writer, dead state and
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A failing test abandons 8 sessions and asserts a 9th upload still succeeds after the expiry window
-- [ ] #2 expires_at is set at session creation from a configurable setting
-- [ ] #3 The two quota queries exclude expired sessions
-- [ ] #4 A sweep transitions created/uploading past expiry to expired and calls discard_upload to release staged chunks
-- [ ] #5 reserved_quota_bytes is released when a session expires
-- [ ] #6 The notes.py upload flow returns the upload_id and compensates on failure so cancel is reachable
-- [ ] #7 Design doc and ADR per CLAUDE.md, since this adds a lifecycle transition
+- [x] #1 A failing test abandons 8 sessions and asserts a 9th upload still succeeds after the expiry window
+- [x] #2 expires_at is set at session creation from a configurable setting
+- [x] #3 The two quota queries exclude expired sessions
+- [x] #4 A sweep transitions created/uploading past expiry to expired and calls discard_upload to release staged chunks
+- [x] #5 reserved_quota_bytes is released when a session expires
+- [x] #6 Design doc and ADR per CLAUDE.md, since this adds a lifecycle transition
+- [x] #7 The notes.py upload flow compensates on failure by cancelling its own session (returning the upload_id is unnecessary: the flow is a single server-driven request, so the client never needs to cancel it, and a mid-request crash is covered by expiry)
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-09-23 verification: most of this was already implemented by TASK-13335 in 22b80424f1. That commit sets expires_at at insert from SyncV2Settings.blob_upload_session_ttl_seconds, makes summarize_blob_quota's two queries (per-user and per-dataset) skip expired rows for both reserved bytes and active count, adds SyncDatabase.expire_blob_upload_sessions called from the retention_compact apply_blob_gc leg, and adds compensation in notes.py. Checked each AC against the code and found three gaps, all closed in 4c435ef69b. (a) AC4: the sweep never called discard_upload, so staged chunks stayed on disk. expire_blob_upload_sessions now returns the upload_ids it actually transitioned (rowcount==1, so a session completed after the SELECT is left alone). retention_compact discards their chunks and logs OSError/SyncBlobStoreError by class. (b) AC2: the TTL setting was not configurable at deploy time. The factory now reads SYNC_V2_BLOB_UPLOAD_SESSION_TTL_SECONDS (positive int, default 86400), like its sibling settings. (c) AC7: the notes.py compensation had no test. AC6 amended: returning the upload_id to the client adds nothing. The Notes upload is one server-driven request that cancels its own session on failure, and expiry covers a crash mid-request. Tests, each red before and green after: tests/Sync/test_sync_v2_workspace_blobs.py::test_retention_sweep_expires_abandoned_sessions_and_discards_staged_chunks uses the default cap of 8; before, it failed only on the staged-chunk assertion. tests/Sync/test_sync_v2_factory.py (env read + 2 invalid-value cases) had 3 failures before. tests/Notes/test_notes_attachment_sync_api.py::test_active_one_shot_upload_releases_its_session_when_a_chunk_fails, with the compensation disabled, left the session 'created' instead of 'cancelled'. The existing expiry tests were updated for the list return type. Sync blob/attachment/retention/store/factory suites + Notes attachment/API suites: 558 passed, 0 failed. Bandit (-ll) on Sync_DB.py, factory.py, service.py, store.py: no issues. Docs: new ADR-052 (+ index), env var and expiry semantics added to Docs/API/Sync_V2_M2.md, design doc marks upload-session expiry implemented.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Blob upload-session expiry is now complete end to end. From 22b80424f1 (TASK-13335): expires_at is set at creation, quota and the active-upload cap ignore expired sessions at read time, the retention pass reaps them, and the Notes upload cancels its own session on failure. New in 4c435ef69b: the reaper discards staged chunk files, SYNC_V2_BLOB_UPLOAD_SESSION_TTL_SECONDS configures the TTL, and new regression tests cover the default cap of 8, the TTL env var and Notes compensation. ADR-052 records the design. Known limits (by design, in ADR-052): the chunk-file sweep runs only when a retention_compact pass runs for the dataset. Slot and quota release do not depend on that pass. Pre-TTL rows with NULL expires_at are still counted until cancelled. The Postgres paths were not exercised locally.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

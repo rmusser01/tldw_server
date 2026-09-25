@@ -135,3 +135,41 @@ def test_crossing_the_pass_threshold() -> None:
     score = ev._calculate_overall_score(aliased)
     assert score == pytest.approx(0.6), "double-counting relevance lifts 0.6 to 0.7"
     assert score < 0.7, "an evaluation that should fail is being reported as passing"
+
+
+@pytest.mark.asyncio
+async def test_runner_avg_score_and_pass_gate_ignore_alias_keys(tmp_path) -> None:
+    """The eval_runner path always passes explicit metrics, so the alias keys survive
+    into the response. avg_score (which feeds mean_score) and the pass gate must
+    still count each metric once."""
+    from tldw_Server_API.app.core.Evaluations.eval_runner import EvaluationRunner
+
+    ev = _evaluator()
+
+    async def _relevance(*_args, **_kwargs):
+        return "relevance", {"score": 1.0}
+
+    async def _faithfulness(*_args, **_kwargs):
+        return "faithfulness", {"score": 0.0}
+
+    async def _context_relevance(*_args, **_kwargs):
+        return "context_relevance", {"score": 0.0}
+
+    ev._evaluate_relevance = _relevance
+    ev._evaluate_faithfulness = _faithfulness
+    ev._evaluate_context_relevance = _context_relevance
+
+    runner = EvaluationRunner(db_path=str(tmp_path / "evals.db"))
+    runner._rag_evaluator = ev
+    sample = {"input": {"query": "q", "contexts": ["c"], "response": "r"}, "expected": "a"}
+    # Canonical mean is 1/3; counting both aliases gives (1+0+0+1+0)/5 = 0.4.
+    spec = {"metrics": ["relevance", "faithfulness", "context_relevance"], "threshold": 0.35}
+
+    result = await runner._eval_rag(sample, spec, {}, "sample_0")
+
+    assert "answer_relevance" in result["scores"], "alias keys stay in the response"
+    assert result["avg_score"] == pytest.approx(1 / 3), "alias counted as its own metric"
+    assert result["passed"] is False, "double-counted 0.4 crossed the 0.35 gate"
+    aggregate = runner._calculate_aggregate_results([result], None, 0.35)
+    assert aggregate["mean_score"] == pytest.approx(1 / 3)
+    assert aggregate["pass_rate"] == 0.0

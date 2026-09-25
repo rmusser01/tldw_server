@@ -6077,6 +6077,17 @@ class CollectionsDatabase:
             raise DatabaseError("audio_studio_clip_upsert_failed")
         return AudioStudioClipRow(**row)
 
+    def get_live_audio_studio_section_text(self, project_row_id: int, section_id: str) -> dict[str, Any] | None:
+        """``{"body_text": ...}`` for a live (not deleted) section, or None if there is none."""
+        return self.backend.execute(
+            "SELECT body_text FROM audio_studio_sections WHERE project_row_id = ? AND section_id = ? AND deleted = ?",
+            (
+                project_row_id,
+                section_id,
+                self._coerce_bool_flag(False, postgres=self.backend.backend_type == BackendType.POSTGRESQL),
+            ),
+        ).first
+
     def upsert_audio_studio_section(
         self,
         *,

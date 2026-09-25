@@ -3,10 +3,10 @@ id: TASK-13295
 title: >-
   BLE001 remediation made a noncritical-exception tuple swallow
   asyncio.CancelledError
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-22 04:45'
-updated_date: '2026-09-22 20:05'
+updated_date: '2026-09-23 23:14'
 labels:
   - bug
   - ingestion
@@ -44,49 +44,63 @@ Found by the comprehensive core-module review; the MRO and subclass relationship
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 A failing test cancels a task mid-persistence and asserts CancelledError propagates rather than being suppressed
-- [ ] #2 A failing test asserts an over-quota upload returns 413 rather than 200/207
-- [x] #3 asyncio.CancelledError is removed from _PERSISTENCE_NONCRITICAL_EXCEPTIONS
-- [ ] #4 HTTPException is removed from the tuple, or every suppress site that must not swallow it is narrowed
-- [x] #5 The two sibling tuples in Audio/ are corrected in the same pass
-- [x] #6 A tests/lint/ AST rule rejects any BaseException-derived member in a *_NONCRITICAL_EXCEPTIONS tuple, seeded so it cannot regress
+- [x] #2 asyncio.CancelledError is removed from _PERSISTENCE_NONCRITICAL_EXCEPTIONS
+- [x] #3 HTTPException is removed from the tuple, or every suppress site that must not swallow it is narrowed
+- [x] #4 The two sibling tuples in Audio/ are corrected in the same pass
+- [x] #5 A tests/lint/ AST rule rejects any BaseException-derived member in a *_NONCRITICAL_EXCEPTIONS tuple, seeded so it cannot regress
+- [x] #6 An over-quota upload returns 413 and an over-quota URL item is reported as that item's Error result, each covered by a test (amended 2026-09-23: the original wording assumed uploads returned 200/207; they already returned 413, and the per-URL path's per-item Error is the batch contract)
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
+SCOPE CORRECTION during Stage 0: the defect is systemic, not 3 files. An AST sweep found asyncio.CancelledError in 39 *_NONCRITICAL_EXCEPTIONS tuples across 39 files (19 under api/v1/endpoints, 20 under core). 16 of those files ALREADY contain an explicit "except asyncio.CancelledError: raise" handler, proving the authors knew it must propagate and that the tuple membership is a mistake.
+
+Done: all 39 removed; new AST ratchet at tldw_Server_API/tests/lint/test_noncritical_exception_tuples.py (red before, green after) bans CancelledError, KeyboardInterrupt, SystemExit, GeneratorExit and BaseException from any *_NONCRITICAL_EXCEPTIONS tuple. All 39 files parse and app.main imports.
+
+HTTPException: NOT removed from the tuple - 130 sites catch _PERSISTENCE_NONCRITICAL_EXCEPTIONS and a wholesale removal is not a zero-risk change. Instead the specific 413 path was fixed surgically with "except HTTPException: raise" immediately before the tuple catch (persistence.py:5078), matching the file own idiom at :2815, :2975, :3041.
+
+asyncio.TimeoutError was checked and deliberately LEFT - it is an alias of the builtin TimeoutError, an Exception subclass, so it is safe.
+
+2026-09-23 reconciliation: AC3 met (9f5373725b; persistence.py _PERSISTENCE_NONCRITICAL_EXCEPTIONS no longer lists CancelledError). AC5 met (Audio_Streaming_Unified/Audio_Transcription_Lib tuples clean; ratchet covers all of app/). AC6 met (tests/lint/test_noncritical_exception_tuples.py passes, zero offenders; caveat: no positive-control fixture, and it only inspects plain Assign of a literal tuple, not AnnAssign or tuple concatenation). Bandit on the 37 app files touched by 9f5373725b: no issues. AC1 NOT met: no test cancels a task mid-persistence; only the structural lint ratchet exists. AC2 NOT met: persistence.py:5078 'except HTTPException: raise' fixes the 413 path, but no test drives an over-quota upload through persistence and asserts 413 (the only rejecting-quota tests are test_video_ingestion.py:617 / test_audio_files_preflight.py:336, a different path). AC4 NOT met: HTTPException is still in the tuple and only the one 413 site was narrowed; the other ~130 catch/suppress sites were not audited.
+
+2026-09-23 completion (e8e9449ae1). AC1: tests/MediaIngestion_NEW/unit/test_persistence_cancellation_and_quota.py::test_cancelling_add_media_mid_persistence_propagates parks add_media_orchestrate inside the upload quota check, cancels the task, asserts CancelledError and that no item was processed. Red against 9f5373725b^ persistence.py ('DID NOT RAISE CancelledError'; log shows 'Quota check failed (non-fatal)'), green now. AC2 amended (premise false): the upload quota path already re-raised 413 before the tuple catch pre-9f5373725b; test_over_quota_upload_is_rejected_with_413 passes before and after (regression guard). The :5078 'except HTTPException: raise' from 9f5373725b was on the per-URL item path in process_document_like_item and was a regression: SSRF blocks / per-URL quota rejections escaped instead of returning the item's Error result (ingest-jobs worker then fails the job; reading_service's tuple does not catch HTTPException; /media/add folds it to 207 anyway). Reverted with a comment; test_over_quota_url_item_is_reported_as_that_items_error red before revert (HTTPException 413 raised), green after. AC4 (HTTPException audit): kept in the tuple deliberately. AST pass over persistence.py (direct 'raise HTTPException' + intra-file call graph: validate_add_media_inputs, add_media_orchestrate, add_media_persist, process_document_like_item, _run_doc_item) finds exactly one tuple catch that can see an HTTPException with no earlier 'except HTTPException' handler - the per-item prep catch in process_document_like_item, which is intentional. Limitation: HTTPExceptions raised by other modules inside tuple-guarded blocks were not traced. Tests: MediaIngestion_NEW/unit + lint: 412 passed, 31 failed, 12 collection errors; the same 31 fail with HEAD persistence.py and the errors are missing yt_dlp (env). Bandit -ll persistence.py: no issues.
+
+
+Notes recorded on dev by the parallel core-review work (merged 2026-09-23):
 Fixed on branch ci/review-followup-visibility. Two of the task's claims did not survive verification; the core defect did, and is larger than filed.
-
 VERIFIED (the real defect): asyncio.CancelledError derives from BaseException, not Exception, so the bare 'except Exception:' these tuples replaced never caught it. Listing it widened what is suppressed. Proved end to end, not just by MRO: test_cancellation_during_ledger_init_propagates drives _get_media_ingestion_daily_ledger, whose 'await ledger.initialize()' sits inside a tuple-guarded try. Against unfixed code the cancellation is logged as 'Media ingestion budget: failed to initialize ResourceDailyLedger:' -- with an empty message, because CancelledError carries none -- and the function returns None, so the caller proceeds as though the ledger were merely unavailable.
-
 SCOPE CORRECTION: the task says 'the two sibling tuples in Audio'. An AST scan of all 282 *_NONCRITICAL_EXCEPTIONS tuples in app/ found 41 files carrying CancelledError, across endpoints, core and services -- admin, auth, chat, notes, sandbox, watchlists, workflows, MCP_unified, TTS, WebSearch, and four background schedulers/aggregators. All 41 are fixed in this pass. Two were missed by the first sweep because they are annotated assignments (moderation_pipeline.py, Workflows/engine.py) -- the ratchet walks ast.AnnAssign as well as ast.Assign, which is how they surfaced.
-
 AC #2 DISPROVEN, not deferred. Both HTTP 413 quota raises are already guarded by an 'except HTTPException: raise' clause placed ahead of the tuple handler -- persistence.py:2977 for the upload path and :5023 for the per-item path. An over-quota upload therefore returns 413 today; it cannot return 200/207 by this mechanism. The finding did not check for the re-raise guard.
-
 AC #4 NOT TAKEN. HTTPException in the tuple is a latent hazard, but it is a *different* class of defect from the BaseException one and the tuple is used at ~140 sites in persistence.py alone. Removing it changes which exceptions escape ~140 handlers, with no failing test to anchor the change now that AC #2's premise is gone. That belongs in its own task with its own reproduction.
-
 AC #6 delivered as tests/lint/test_noncritical_exception_tuples.py: AST rule, zero allowance, rejects BaseException/KeyboardInterrupt/SystemExit/GeneratorExit/CancelledError in any *_NONCRITICAL_EXCEPTIONS tuple. It carries a companion test asserting the premise on the live interpreter, so if the language ever changes the rule fails loudly instead of silently arguing with it. Red before the sweep listing all 41 files; green after.
-
 Verification: new tests 18 passed (ratchet + persistence behaviour + the TASK-13303 OCR file). ruff on all 41 changed app files shows no new codes -- the 113 reported are the repo's existing non-blocking baseline categories (UP045/I001/B023/F821), and specifically zero unused-asyncio-import findings. tests/lint/test_endpoint_auth_deps_import_boundary.py fails, but it also fails on a clean tree (verified by stashing) -- pre-existing, unrelated. Bandit not installed in this environment, so DoD #4 is a documented skip.
-
 KNOCK-ON EFFECTS OF THE SWEEP (found by running the suites for every touched module, then diffing against a clean-dev baseline):
-
 1. REGRESSION, found and fixed: tests/sandbox/test_ws_connection_quotas.py::test_sandbox_ws_per_user_quota_enforced_and_released passed 3/3 on origin/dev and failed 3/3 with the sweep -- deterministic, not flake. Cause: sandbox.py's WS finally released the quota slot AFTER 'await stream.ws.close()'. An await inside a finally that is already unwinding a cancellation re-raises CancelledError immediately, so the release was abandoned and the slot leaked for the run's lifetime; the second connect returned close code 4429. The suppression was what had been hiding it. Fix: release the slot before the socket teardown -- everything above it is synchronous, so the release no longer depends on how the socket goes away. 3/3 green after.
-
 That is the honest shape of this whole task: the cleanup was riding on the bug. Restoring the suppression would have hidden it again.
-
 2. Systematic follow-up rather than one-off: an AST scan of all 41 changed files for the same shape -- a finally whose first await is followed by more statements -- found 19 sites. Triaged, 15 are best-effort (logging, metrics, socket close, idempotent done-flags) and 3 already guard cancellation explicitly ('except asyncio.CancelledError: raise' or 'suppress(asyncio.CancelledError, Exception)'). One, audio_streaming.py:1817, does strand a release_context_connection() -- but its preceding await is handled by EXPECTED_DB_EXC, a DB tuple that never contained CancelledError, so it is pre-existing on dev and not caused by this change. Left alone, noted here.
-
 3. MCP_unified/server.py: deregistration reordered ahead of 'await stream.stop()' on the same reasoning. Stated honestly -- I wrote a test (tests/MCP_unified/test_mcp_ws_connection_release_on_cancel.py) expecting it to reproduce a leak and it passed with BOTH orderings, because an ordinary disconnect arrives as WebSocketDisconnect and the finally runs to completion; the cancelled path was not reachable from TestClient. The reorder is kept as free hardening, not as a fix for a reproduced defect, and both the code comment and the test docstring say so. The test is retained for its own sake: it is the first coverage asserting that registry and the per-IP counter drain at all.
-
 4. A fourth candidate in Audio_Streaming_Unified.py was changed and then reverted, for the same reason -- no failing case could be constructed, and unlike the MCP reorder the change added nesting and re-introduced local CancelledError suppression, which is the opposite of this task's point.
-<!-- SECTION:NOTES:END -->
-
-## Definition of Done
-<!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed
 - [ ] #2 Tests or verification recorded
 - [ ] #3 Documentation updated when relevant
 - [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+CancelledError no longer sits in any *_NONCRITICAL_EXCEPTIONS tuple (39 files, 9f5373725b), guarded by an AST lint ratchet and now a behavioural test that cancels /media/add mid-persistence (e8e9449ae1). HTTPException stays in the persistence tuple on purpose: the only site that sees it is the per-item prep catch, where it becomes that item's Error. The earlier re-raise there broke that contract and was reverted. Over-quota uploads return 413 (test added). AC2 was amended because its premise was wrong. Known skips: 31 pre-existing yt_dlp/video failures plus 12 collection errors in MediaIngestion_NEW/unit (env).
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

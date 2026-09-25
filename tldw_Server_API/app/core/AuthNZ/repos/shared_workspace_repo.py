@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+from tldw_Server_API.app.core.AuthNZ.repos._dual_backend import load_json, row_dict
 
 _VALID_SHARE_SCOPE_TYPES = {"team", "org"}
 _VALID_ACCESS_LEVELS = {"view_chat", "view_chat_add", "full_edit"}
@@ -20,20 +21,6 @@ def _to_bool(value: Any) -> bool:
         return bool(value)
     text = str(value).strip().lower()
     return text in {"1", "true", "t", "yes", "y"}
-
-
-def _load_json_dict(raw: Any) -> dict[str, Any]:
-    if isinstance(raw, dict):
-        return dict(raw)
-    if not raw:
-        return {}
-    if isinstance(raw, str):
-        try:
-            parsed = json.loads(raw)
-        except (TypeError, ValueError, json.JSONDecodeError):
-            return {}
-        return dict(parsed) if isinstance(parsed, dict) else {}
-    return {}
 
 
 def _iso_timestamp(value: Any) -> Any:
@@ -117,20 +104,7 @@ class SharedWorkspaceRepo:
                     f"Issues: {issues}"
                 )
 
-    @staticmethod
-    def _row_to_dict(row: Any) -> dict[str, Any]:
-        if row is None:
-            return {}
-        if isinstance(row, dict):
-            return dict(row)
-        try:
-            return dict(row)
-        except Exception:
-            try:
-                keys = row.keys()
-            except Exception:
-                return {}
-            return {key: row[key] for key in keys}
+    _row_to_dict = staticmethod(row_dict)
 
     @staticmethod
     def _normalize_share_row(row: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -668,7 +642,7 @@ class SharedWorkspaceRepo:
         result = []
         for r in rows:
             d = self._row_to_dict(r)
-            d["metadata"] = _load_json_dict(d.get("metadata_json"))
+            d["metadata"] = load_json(d.get("metadata_json"), dict)
             d["created_at"] = _iso_timestamp(d.get("created_at"))
             result.append(d)
         return result
@@ -720,7 +694,7 @@ class SharedWorkspaceRepo:
         result = []
         for row in rows:
             data = self._row_to_dict(row)
-            data["metadata"] = _load_json_dict(data.get("metadata_json"))
+            data["metadata"] = load_json(data.get("metadata_json"), dict)
             data["created_at"] = _iso_timestamp(data.get("created_at"))
             result.append(data)
         return result

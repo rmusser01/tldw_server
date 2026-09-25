@@ -8,7 +8,6 @@ import os
 import tempfile
 import threading
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
@@ -18,16 +17,13 @@ from pydantic import BaseModel, Field, model_validator
 from tldw_Server_API.app.core.Setup import setup_manager
 from tldw_Server_API.app.core.Setup.readiness_models import LANE_IDS, LANE_STATUSES, OVERLAY_IDS
 from tldw_Server_API.app.core.exceptions import SetupLockTimeoutError
+from tldw_Server_API.app.core.Utils.iso_datetime import utc_now_iso as _utc_now
 
 CONFIG_ROOT = setup_manager.CONFIG_RELATIVE_PATH.parent
 READINESS_FILENAME = "setup_readiness.json"
 _STORE: SetupReadinessStore | None = None
 _READINESS_LOCK_TIMEOUT_SECONDS = 10.0
 _READINESS_LOCK_STALE_SECONDS = 300.0
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 class SetupReadinessRecord(BaseModel):

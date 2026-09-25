@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from tldw_Server_API.app.api.v1.schemas.integrations_control_plane_schemas import (
@@ -10,6 +10,7 @@ from tldw_Server_API.app.api.v1.schemas.integrations_control_plane_schemas impor
     IntegrationOverviewResponse,
 )
 from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import normalize_provider_name
+from tldw_Server_API.app.core.Utils.iso_datetime import parse_iso_utc as _coerce_datetime
 
 _PERSONAL_PROVIDER_ORDER = ("slack", "discord")
 _WORKSPACE_PROVIDER_ORDER = ("slack", "discord", "telegram")
@@ -26,22 +27,6 @@ def _coerce_nonnegative_int(value: Any) -> int | None:
     except (TypeError, ValueError):
         return None
     return parsed if parsed >= 0 else None
-
-
-def _coerce_datetime(value: Any) -> datetime | None:
-    if isinstance(value, datetime):
-        if value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc)
-        return value.astimezone(timezone.utc)
-    if isinstance(value, str):
-        try:
-            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        except ValueError:
-            return None
-        if parsed.tzinfo is None:
-            return parsed.replace(tzinfo=timezone.utc)
-        return parsed.astimezone(timezone.utc)
-    return None
 
 
 def _coerce_metadata(value: Any) -> dict[str, Any]:

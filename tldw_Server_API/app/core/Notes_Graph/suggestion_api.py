@@ -19,6 +19,8 @@ from tldw_Server_API.app.core.DB_Management.chacha.note_graph_suggestion_store i
     NotesGraphSourceTooLargeError,
 )
 
+from tldw_Server_API.app.core.Utils.base64url import verify_signed_token
+
 from .suggestion_capabilities import (
     SuggestionCapabilities,
     build_unavailable_suggestion_capabilities,
@@ -80,13 +82,6 @@ class OpaqueSuggestionCursorCodec:
     def _segment(value: bytes) -> str:
         return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
 
-    @classmethod
-    def _unsegment(cls, value: str) -> bytes:
-        decoded = base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
-        if cls._segment(decoded) != value:
-            raise ValueError("notes_graph_cursor_invalid")
-        return decoded
-
     def encode(self, *, binding: dict[str, object], position: tuple[str, str]) -> str:
         payload = {"v": 1, "binding": binding, "after": list(position)}
         raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode(
@@ -98,20 +93,14 @@ class OpaqueSuggestionCursorCodec:
         return f"{self._segment(raw)}.{self._segment(signature)}"
 
     def decode(self, cursor: str, *, binding: dict[str, object]) -> tuple[str, str]:
-        if not isinstance(cursor, str) or len(cursor.encode("ascii", "ignore")) > 4096:
-            raise ValueError("notes_graph_cursor_invalid")
         try:
-            payload_segment, signature_segment = cursor.split(".")
-            raw = self._unsegment(payload_segment)
-            signature = self._unsegment(signature_segment)
-            if not hmac.compare_digest(signature, hmac.digest(self._secret, raw, "sha256")):
-                raise ValueError("notes_graph_cursor_invalid")
-            payload = json.loads(raw)
-        except (UnicodeError, ValueError, TypeError, json.JSONDecodeError) as exc:
+            payload = json.loads(verify_signed_token(cursor, self._secret, max_encoded_len=4096))
+        except (UnicodeError, ValueError, json.JSONDecodeError) as exc:
             raise ValueError("notes_graph_cursor_invalid") from exc
         after = payload.get("after") if isinstance(payload, dict) else None
         if (
-            payload.get("v") != 1
+            not isinstance(payload, dict)
+            or payload.get("v") != 1
             or payload.get("binding") != binding
             or not isinstance(after, list)
             or len(after) != 2
@@ -180,7 +169,7 @@ class NotesGraphSuggestionsAPI:
         }:
             return SuggestionAPIError(404, "notes_graph_suggestion_not_found")
         if code == "notes_graph_cursor_invalid":
-            return SuggestionAPIError(422, code)
+            return SuggestionAPIError(400, code)  # one cursor contract: Docs/API-related/Pagination_Cursors.md
         if "rate_limited" in code:
             return SuggestionAPIError(429, code)
         if "provider_model_disallowed" in code:

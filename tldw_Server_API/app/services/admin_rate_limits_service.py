@@ -4,6 +4,8 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.repos import rbac_rate_limits_repo
+
 
 _RATE_LIMITS_SERVICE_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -43,32 +45,22 @@ def _matches_endpoint(limit_row: dict[str, Any], endpoint: str) -> bool:
     return endpoint == resource or endpoint.startswith(resource + "/")
 
 
-async def fetch_user_rate_limits(*, db: Any, user_id: int) -> list[dict[str, Any]]:
-    rows = await db.fetch(
-        "SELECT resource, limit_per_min, burst FROM rbac_user_rate_limits WHERE user_id = ?",
-        int(user_id),
-    )
-    return [_row_to_dict(row) for row in rows]
+async def fetch_user_rate_limits(*, db: Any, user_id: int, is_postgres: bool = False) -> list[dict[str, Any]]:
+    return await rbac_rate_limits_repo.user_limits(db, is_postgres=is_postgres, user_id=user_id)
 
 
-async def fetch_role_rate_limits(*, db: Any, user_id: int) -> list[dict[str, Any]]:
-    rows = await db.fetch(
-        """
-        SELECT rrl.resource, rrl.limit_per_min, rrl.burst, r.name as role_name
-        FROM rbac_role_rate_limits rrl
-        JOIN rbac_roles r ON rrl.role_id = r.id
-        JOIN rbac_user_roles ur ON ur.role_id = r.id
-        WHERE ur.user_id = ?
-        """,
-        int(user_id),
-    )
-    return [_row_to_dict(row) for row in rows]
+async def fetch_role_rate_limits(*, db: Any, user_id: int, is_postgres: bool = False) -> list[dict[str, Any]]:
+    # This used to join rbac_roles/rbac_user_roles, which do not exist, so the
+    # simulator never showed role limits.
+    return await rbac_rate_limits_repo.role_limits(db, is_postgres=is_postgres, user_id=user_id)
 
 
-async def simulate_rate_limit(*, db: Any, user_id: int, endpoint: str) -> dict[str, Any]:
+async def simulate_rate_limit(
+    *, db: Any, user_id: int, endpoint: str, is_postgres: bool = False
+) -> dict[str, Any]:
     user_limits: list[dict[str, Any]] = []
     try:
-        user_limits = await fetch_user_rate_limits(db=db, user_id=user_id)
+        user_limits = await fetch_user_rate_limits(db=db, user_id=user_id, is_postgres=is_postgres)
     except _RATE_LIMITS_SERVICE_NONCRITICAL_EXCEPTIONS as exc:
         logger.warning(
             "simulate-rate-limit: failed to fetch user limits for {} exception_type={}",
@@ -78,7 +70,7 @@ async def simulate_rate_limit(*, db: Any, user_id: int, endpoint: str) -> dict[s
 
     role_limits: list[dict[str, Any]] = []
     try:
-        role_limits = await fetch_role_rate_limits(db=db, user_id=user_id)
+        role_limits = await fetch_role_rate_limits(db=db, user_id=user_id, is_postgres=is_postgres)
     except _RATE_LIMITS_SERVICE_NONCRITICAL_EXCEPTIONS as exc:
         logger.warning(
             "simulate-rate-limit: failed to fetch role limits for {} exception_type={}",

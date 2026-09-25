@@ -5,7 +5,6 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 
 #
@@ -27,9 +26,9 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
 )
 from tldw_Server_API.app.core.Audit.unified_audit_service import AuditContext, AuditEventType
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.Jobs import admin_operations
 from tldw_Server_API.app.core.Jobs.manager import (
     JobManager,
-    _reconcile_lifecycle_counter_row,
 )
 from tldw_Server_API.app.core.testing import (
     env_flag_enabled,
@@ -331,7 +330,7 @@ async def prune_jobs_endpoint(
                 and req.job_type
                 and env_flag_enabled("JOBS_UPDATE_GAUGES_ON_PRUNE")
             ):
-                jm._update_gauges(domain=req.domain, queue=req.queue, job_type=req.job_type)
+                jm.update_gauges(domain=req.domain, queue=req.queue, job_type=req.job_type)
         except _JOBS_ADMIN_NONCRITICAL_EXCEPTIONS:
             pass
         # Best-effort audit logging for admin prune action
@@ -410,7 +409,7 @@ async def queue_status_endpoint(
     if backend == "postgres":
         _set_pg_rls_for_user(admin_user, domain)
     jm = JobManager(backend=backend, db_url=db_url)
-    flags = jm._get_queue_flags(domain, queue)
+    flags = jm.get_queue_flags(domain, queue)
     return QueueFlagsResponse(**flags)
 
 
@@ -592,48 +591,10 @@ async def list_sla_policies_endpoint(
     backend = "postgres" if (db_url and db_url.startswith("postgres")) else None
     jm = JobManager(backend=backend, db_url=db_url)
     # Simple fetch via manager's internal connection
-    conn = jm._connect()
-    try:
-        if jm.backend == "postgres":
-            # Apply Postgres RLS context so listings respect the same domain policies as jobs.
-            _set_pg_rls_for_user(admin_user, domain)
-            with jm._pg_cursor(conn) as cur:
-                where = ["1=1"]
-                params: list = []
-                if domain:
-                    where.append("domain=%s")
-                    params.append(domain)
-                if queue:
-                    where.append("queue=%s")
-                    params.append(queue)
-                if job_type:
-                    where.append("job_type=%s")
-                    params.append(job_type)
-                cur.execute(
-                    f"SELECT * FROM job_sla_policies WHERE {' AND '.join(where)} ORDER BY domain,queue,job_type",  # nosec B608
-                    tuple(params),
-                )
-                rows = cur.fetchall() or []
-                return [dict(r) for r in rows]
-        else:
-            where = ["1=1"]
-            params2: list = []
-            if domain:
-                where.append("domain=?")
-                params2.append(domain)
-            if queue:
-                where.append("queue=?")
-                params2.append(queue)
-            if job_type:
-                where.append("job_type=?")
-                params2.append(job_type)
-            rows = conn.execute(
-                f"SELECT * FROM job_sla_policies WHERE {' AND '.join(where)} ORDER BY domain,queue,job_type",  # nosec B608
-                tuple(params2),
-            ).fetchall() or []
-            return [dict(r) for r in rows]
-    finally:
-        conn.close()
+    if jm.backend == "postgres":
+        # Apply Postgres RLS context so listings respect the same domain policies as jobs.
+        _set_pg_rls_for_user(admin_user, domain)
+    return admin_operations.list_sla_policies(jm, domain=domain, queue=queue, job_type=job_type)
 
 
 class SlaPolicyDeleteRequest(BaseModel):
@@ -677,126 +638,73 @@ async def list_sla_breaches_endpoint(
     db_url = os.getenv("JOBS_DB_URL")
     backend = "postgres" if (db_url and db_url.startswith("postgres")) else None
     jm = JobManager(backend=backend, db_url=db_url)
-    conn = jm._connect()
-    try:
-        # 1. Load enabled SLA policies
-        policies: list[dict] = []
-        if backend == "postgres":
-            _set_pg_rls_for_user(admin_user, domain)
-            with jm._pg_cursor(conn) as cur:
-                cur.execute(
-                    "SELECT * FROM job_sla_policies WHERE enabled=true ORDER BY domain,queue,job_type"
-                )
-                policies = [dict(r) for r in (cur.fetchall() or [])]
-        else:
-            policies = [
-                dict(r) for r in conn.execute(
-                    "SELECT * FROM job_sla_policies WHERE enabled=1 ORDER BY domain,queue,job_type"
-                ).fetchall()
-            ]
+    if backend == "postgres":
+        _set_pg_rls_for_user(admin_user, domain)
+    # 1. Load enabled SLA policies
+    policies = admin_operations.list_enabled_sla_policies(jm)
+    if not policies:
+        return []
 
-        if not policies:
-            return []
+    # Build lookup: (domain, queue, job_type) -> policy
+    policy_lookup: dict[tuple[str, str, str], dict] = {}
+    for pol in policies:
+        key = (str(pol.get("domain", "")), str(pol.get("queue", "")), str(pol.get("job_type", "")))
+        policy_lookup[key] = pol
 
-        # Build lookup: (domain, queue, job_type) -> policy
-        policy_lookup: dict[tuple[str, str, str], dict] = {}
-        for pol in policies:
-            key = (str(pol.get("domain", "")), str(pol.get("queue", "")), str(pol.get("job_type", "")))
-            policy_lookup[key] = pol
+    # 2. Load active jobs (queued + processing)
+    active_jobs = admin_operations.list_active_jobs(jm, domain=domain, queue=queue, job_type=job_type)
 
-        # 2. Load active jobs (queued + processing)
-        active_jobs: list[dict] = []
-        if backend == "postgres":
-            with jm._pg_cursor(conn) as cur:
-                where = ["status IN ('queued', 'processing')"]
-                params: list = []
-                if domain:
-                    where.append("domain=%s")
-                    params.append(domain)
-                if queue:
-                    where.append("queue=%s")
-                    params.append(queue)
-                if job_type:
-                    where.append("job_type=%s")
-                    params.append(job_type)
-                cur.execute(
-                    f"SELECT id, domain, queue, job_type, status, created_at, acquired_at, started_at FROM jobs WHERE {' AND '.join(where)} ORDER BY created_at",  # nosec B608
-                    tuple(params),
-                )
-                active_jobs = [dict(r) for r in (cur.fetchall() or [])]
-        else:
-            where2 = ["status IN ('queued', 'processing')"]
-            params2: list = []
-            if domain:
-                where2.append("domain=?")
-                params2.append(domain)
-            if queue:
-                where2.append("queue=?")
-                params2.append(queue)
-            if job_type:
-                where2.append("job_type=?")
-                params2.append(job_type)
-            active_jobs = [
-                dict(r) for r in conn.execute(
-                    f"SELECT id, domain, queue, job_type, status, created_at, acquired_at, started_at FROM jobs WHERE {' AND '.join(where2)} ORDER BY created_at",  # nosec B608
-                    tuple(params2),
-                ).fetchall()
-            ]
+    now = datetime.utcnow()
+    breaches: list[dict] = []
+    for job in active_jobs:
+        jd = str(job.get("domain", ""))
+        jq = str(job.get("queue", ""))
+        jjt = str(job.get("job_type", ""))
+        pol = policy_lookup.get((jd, jq, jjt))
+        if not pol:
+            continue
 
-        # 3. Check each active job against its policy
-        now = datetime.utcnow()
-        breaches: list[dict] = []
-        for job in active_jobs:
-            jd = str(job.get("domain", ""))
-            jq = str(job.get("queue", ""))
-            jjt = str(job.get("job_type", ""))
-            pol = policy_lookup.get((jd, jq, jjt))
-            if not pol:
-                continue
+        breach_kinds: list[str] = []
+        breach_details: dict[str, Any] = {}
 
-            breach_kinds: list[str] = []
-            breach_details: dict[str, Any] = {}
+        # Check wait time (time in queue before being acquired)
+        max_qlat = pol.get("max_queue_latency_seconds")
+        if max_qlat is not None:
+            created_at = _parse_dt_safe(job.get("created_at"))
+            if created_at:
+                if job.get("status") == "queued":
+                    wait_seconds = max(0.0, (now - created_at).total_seconds())
+                else:
+                    acquired_at = _parse_dt_safe(job.get("acquired_at"))
+                    wait_seconds = max(0.0, (acquired_at - created_at).total_seconds()) if acquired_at else 0.0
+                if wait_seconds > float(max_qlat):
+                    breach_kinds.append("queue_latency")
+                    breach_details["wait_seconds"] = round(wait_seconds, 1)
+                    breach_details["max_wait_seconds"] = int(max_qlat)
 
-            # Check wait time (time in queue before being acquired)
-            max_qlat = pol.get("max_queue_latency_seconds")
-            if max_qlat is not None:
-                created_at = _parse_dt_safe(job.get("created_at"))
-                if created_at:
-                    if job.get("status") == "queued":
-                        wait_seconds = max(0.0, (now - created_at).total_seconds())
-                    else:
-                        acquired_at = _parse_dt_safe(job.get("acquired_at"))
-                        wait_seconds = max(0.0, (acquired_at - created_at).total_seconds()) if acquired_at else 0.0
-                    if wait_seconds > float(max_qlat):
-                        breach_kinds.append("queue_latency")
-                        breach_details["wait_seconds"] = round(wait_seconds, 1)
-                        breach_details["max_wait_seconds"] = int(max_qlat)
+        # Check processing duration
+        max_dur = pol.get("max_duration_seconds")
+        if max_dur is not None and job.get("status") == "processing":
+            started_at = _parse_dt_safe(job.get("started_at")) or _parse_dt_safe(job.get("acquired_at"))
+            if started_at:
+                processing_seconds = max(0.0, (now - started_at).total_seconds())
+                if processing_seconds > float(max_dur):
+                    breach_kinds.append("duration")
+                    breach_details["processing_seconds"] = round(processing_seconds, 1)
+                    breach_details["max_processing_seconds"] = int(max_dur)
 
-            # Check processing duration
-            max_dur = pol.get("max_duration_seconds")
-            if max_dur is not None and job.get("status") == "processing":
-                started_at = _parse_dt_safe(job.get("started_at")) or _parse_dt_safe(job.get("acquired_at"))
-                if started_at:
-                    processing_seconds = max(0.0, (now - started_at).total_seconds())
-                    if processing_seconds > float(max_dur):
-                        breach_kinds.append("duration")
-                        breach_details["processing_seconds"] = round(processing_seconds, 1)
-                        breach_details["max_processing_seconds"] = int(max_dur)
+        if breach_kinds:
+            breaches.append({
+                "job_id": job.get("id"),
+                "domain": jd,
+                "queue": jq,
+                "job_type": jjt,
+                "status": job.get("status"),
+                "breach_kinds": breach_kinds,
+                **breach_details,
+            })
 
-            if breach_kinds:
-                breaches.append({
-                    "job_id": job.get("id"),
-                    "domain": jd,
-                    "queue": jq,
-                    "job_type": jjt,
-                    "status": job.get("status"),
-                    "breach_kinds": breach_kinds,
-                    **breach_details,
-                })
-
-        return breaches
-    finally:
-        conn.close()
+    return breaches
 
 
 def _parse_dt_safe(value: Any) -> datetime | None:
@@ -1213,7 +1121,7 @@ async def ttl_sweep_endpoint(
         # Refresh gauges when fully scoped to avoid stale metrics
         try:
             if req.domain and req.queue and req.job_type:
-                jm._update_gauges(domain=req.domain, queue=req.queue, job_type=req.job_type)
+                jm.update_gauges(domain=req.domain, queue=req.queue, job_type=req.job_type)
         except _JOBS_ADMIN_NONCRITICAL_EXCEPTIONS:
             pass
         # Diagnostics after executing
@@ -1380,42 +1288,12 @@ async def get_archive_meta(
     db_url = os.getenv("JOBS_DB_URL")
     backend = "postgres" if (db_url and db_url.startswith("postgres")) else None
     jm = JobManager(backend=backend, db_url=db_url)
-    conn = jm._connect()
-    try:
-        if jm.backend == "postgres":
-            _set_pg_rls_for_user(admin_user, domain)
-            with jm._pg_cursor(conn) as cur:
-                cur.execute(
-                    "SELECT payload, result, payload_compressed, result_compressed FROM jobs_archive WHERE id = %s",
-                    (int(job_id),),
-                )
-                row = cur.fetchone()
-        else:
-            row = conn.execute(
-                "SELECT payload, result, payload_compressed, result_compressed FROM jobs_archive WHERE id = ?",
-                (int(job_id),),
-            ).fetchone()
-        if not row:
-            raise HTTPException(status_code=404, detail="Archive row not found for job_id")
-        # row can be dict or tuple
-        def _get(ix_or_key):
-            if isinstance(row, dict):
-                return row.get(ix_or_key)
-            return row[ix_or_key]
-        payload_present = _get(0) is not None
-        result_present = _get(1) is not None
-        payload_compressed_present = _get(2) is not None
-        result_compressed_present = _get(3) is not None
-        return ArchiveMetaResponse(
-            job_id=int(job_id),
-            payload_present=bool(payload_present),
-            result_present=bool(result_present),
-            payload_compressed_present=bool(payload_compressed_present),
-            result_compressed_present=bool(result_compressed_present),
-        )
-    finally:
-        with contextlib.suppress(_JOBS_ADMIN_NONCRITICAL_EXCEPTIONS):
-            conn.close()
+    if jm.backend == "postgres":
+        _set_pg_rls_for_user(admin_user, domain)
+    presence = admin_operations.archived_payload_presence(jm, int(job_id))
+    if presence is None:
+        raise HTTPException(status_code=404, detail="Archive row not found for job_id")
+    return ArchiveMetaResponse(job_id=int(job_id), **presence)
 
 
 class JobItem(BaseModel):
@@ -1528,42 +1406,10 @@ async def stale_processing_endpoint(
         if backend == "postgres":
             _set_pg_rls_for_user(admin_user, domain)
         jm = JobManager(backend=backend, db_url=db_url)
-        conn = jm._connect()
-        out: list[StaleGroup] = []
-        try:
-            if jm.backend == "postgres":
-                with jm._pg_cursor(conn) as cur:
-                    where = ["status='processing'", "(leased_until IS NULL OR leased_until <= NOW())"]
-                    params: list = []
-                    if domain:
-                        where.append("domain = %s")
-                        params.append(domain)
-                    if queue:
-                        where.append("queue = %s")
-                        params.append(queue)
-                    cur.execute(
-                        f"SELECT domain, queue, COUNT(*) FROM jobs WHERE {' AND '.join(where)} GROUP BY domain, queue",  # nosec B608
-                        tuple(params),
-                    )
-                    for (d, q, c) in cur.fetchall():
-                        out.append(StaleGroup(domain=str(d), queue=str(q), count=int(c)))
-            else:
-                where = ["status='processing'", "(leased_until IS NULL OR leased_until <= DATETIME('now'))"]
-                params2: list = []
-                if domain:
-                    where.append("domain = ?")
-                    params2.append(domain)
-                if queue:
-                    where.append("queue = ?")
-                    params2.append(queue)
-                sql = f"SELECT domain, queue, COUNT(*) FROM jobs WHERE {' AND '.join(where)} GROUP BY domain, queue"  # nosec B608
-                for (d, q, c) in conn.execute(sql, tuple(params2)).fetchall():
-                    out.append(StaleGroup(domain=str(d), queue=str(q), count=int(c)))
-        finally:
-            try:
-                conn.close()
-            except _JOBS_ADMIN_NONCRITICAL_EXCEPTIONS:
-                logger.opt(exception=True).debug("Failed to close connection in list_stale_groups")
+        out = [
+            StaleGroup(domain=d, queue=q, count=c)
+            for d, q, c in admin_operations.stale_processing_groups(jm, domain=domain, queue=queue)
+        ]
         return out
     except HTTPException:
         raise
@@ -1619,169 +1465,7 @@ async def batch_cancel_endpoint(
         if backend == "postgres":
             _set_pg_rls_for_user(admin_user, req.domain)
         jm = JobManager(backend=backend, db_url=db_url)
-        conn = jm._connect()
-        try:
-            where = ["domain = %s"] if jm.backend == "postgres" else ["domain = ?"]
-            params: list = [req.domain]
-            if req.queue:
-                where.append("queue = %s" if jm.backend == "postgres" else "queue = ?")
-                params.append(req.queue)
-            if req.job_type:
-                where.append("job_type = %s" if jm.backend == "postgres" else "job_type = ?")
-                params.append(req.job_type)
-            if req.job_id is not None:
-                where.append("id = %s" if jm.backend == "postgres" else "id = ?")
-                params.append(int(req.job_id))
-            if jm.backend == "postgres":
-                if req.dry_run:
-                    with jm._pg_cursor(conn) as cur:
-                        cur.execute(
-                            f"SELECT COUNT(*) FROM jobs WHERE ({' AND '.join(where)}) AND status IN ('queued','processing')",  # nosec B608
-                            tuple(params),
-                        )
-                        c = cur.fetchone()
-                        count = int(c.get("count") or 0) if isinstance(c, dict) else int(c[0] if c else 0)
-                        return BatchCancelResponse(affected=count)
-
-                counters_enabled = env_flag_enabled("JOBS_COUNTERS_ENABLED")
-                affected = 0
-                with conn:  # noqa: SIM117
-                    with jm._pg_cursor(conn) as cur:
-                        cur.execute(
-                            (
-                                "WITH candidates AS (SELECT id,domain,queue,job_type,status,available_at "
-                                f"FROM jobs WHERE ({' AND '.join(where)}) "  # nosec B608
-                                "AND status IN ('queued','processing') FOR UPDATE), changed AS ("
-                                "UPDATE jobs AS target SET status='cancelled', cancelled_at=NOW(), "
-                                "cancellation_reason='batch_cancel', leased_until=NULL, worker_id=NULL, "
-                                "lease_id=NULL FROM candidates WHERE target.id=candidates.id "
-                                "AND target.status IN ('queued','processing') "
-                                "RETURNING candidates.domain,candidates.queue,candidates.job_type,"
-                                "candidates.status AS prior_status,"
-                                "candidates.available_at AS prior_available_at) "
-                                "SELECT domain,queue,job_type,COUNT(*) AS total_count,"
-                                "COUNT(*) FILTER (WHERE prior_status='queued' "
-                                "AND prior_available_at IS NULL) AS ready_count,"
-                                "COUNT(*) FILTER (WHERE prior_status='queued' "
-                                "AND prior_available_at IS NOT NULL) AS scheduled_count,"
-                                "COUNT(*) FILTER (WHERE prior_status='processing') AS processing_count "
-                                "FROM changed GROUP BY domain,queue,job_type"
-                            ),
-                            tuple(params),
-                        )
-                        groups = list(cur.fetchall() or [])
-                        affected = sum(int(row.get("total_count") or 0) for row in groups)
-                        if counters_enabled:
-                            for row in groups:
-                                cur.execute(
-                                    (
-                                        "UPDATE job_counters SET "
-                                        "ready_count=GREATEST(ready_count - %s, 0), "
-                                        "scheduled_count=GREATEST(scheduled_count - %s, 0), "
-                                        "processing_count=GREATEST(processing_count - %s, 0), "
-                                        "updated_at=NOW() WHERE domain=%s AND queue=%s AND job_type=%s"
-                                    ),
-                                    (
-                                        int(row["ready_count"] or 0),
-                                        int(row["scheduled_count"] or 0),
-                                        int(row["processing_count"] or 0),
-                                        row["domain"],
-                                        row["queue"],
-                                        row["job_type"],
-                                    ),
-                                )
-                                if cur.rowcount == 0:
-                                    _reconcile_lifecycle_counter_row(
-                                        cur,
-                                        backend=jm.backend,
-                                        domain=row["domain"],
-                                        queue=row["queue"],
-                                        job_type=row["job_type"],
-                                    )
-            else:
-                if req.dry_run:
-                    cur = conn.execute(
-                        f"SELECT COUNT(*) FROM jobs WHERE ({' AND '.join(where)}) AND status IN ('queued','processing')",  # nosec B608
-                        tuple(params),
-                    )
-                    r = cur.fetchone()
-                    return BatchCancelResponse(affected=int(r[0] if r else 0))
-
-                counters_enabled = env_flag_enabled("JOBS_COUNTERS_ENABLED")
-                affected = 0
-                with conn:
-                    conn.execute("BEGIN IMMEDIATE")
-                    groups = []
-                    if counters_enabled:
-                        groups = list(
-                            conn.execute(
-                                (
-                                    "SELECT domain,queue,job_type,COUNT(*) AS total_count,"
-                                    "SUM(CASE WHEN status='queued' AND available_at IS NULL "
-                                    "THEN 1 ELSE 0 END) AS ready_count,"
-                                    "SUM(CASE WHEN status='queued' AND available_at IS NOT NULL "
-                                    "THEN 1 ELSE 0 END) AS scheduled_count,"
-                                    "SUM(CASE WHEN status='processing' THEN 1 ELSE 0 END) "
-                                    f"AS processing_count FROM jobs WHERE ({' AND '.join(where)}) "  # nosec B608
-                                    "AND status IN ('queued','processing') "
-                                    "GROUP BY domain,queue,job_type"
-                                ),
-                                tuple(params),
-                            ).fetchall()
-                            or []
-                        )
-                    changed = conn.execute(
-                        (
-                            "UPDATE jobs SET status='cancelled', cancelled_at=DATETIME('now'), "
-                            "cancellation_reason='batch_cancel', leased_until=NULL, worker_id=NULL, "
-                            f"lease_id=NULL WHERE ({' AND '.join(where)}) "  # nosec B608
-                            "AND status IN ('queued','processing')"
-                        ),
-                        tuple(params),
-                    )
-                    affected = int(changed.rowcount or 0)
-                    if counters_enabled:
-                        for row in groups:
-                            counter_cursor = conn.execute(
-                                (
-                                    "UPDATE job_counters SET "
-                                    "ready_count=MAX(ready_count - ?, 0), "
-                                    "scheduled_count=MAX(scheduled_count - ?, 0), "
-                                    "processing_count=MAX(processing_count - ?, 0), "
-                                    "updated_at=DATETIME('now') "
-                                    "WHERE domain=? AND queue=? AND job_type=?"
-                                ),
-                                (
-                                    int(row[4] or 0),
-                                    int(row[5] or 0),
-                                    int(row[6] or 0),
-                                    row[0],
-                                    row[1],
-                                    row[2],
-                                ),
-                            )
-                            if (counter_cursor.rowcount or 0) == 0:
-                                _reconcile_lifecycle_counter_row(
-                                    conn,
-                                    backend=jm.backend,
-                                    domain=row[0],
-                                    queue=row[1],
-                                    job_type=row[2],
-                                )
-
-            try:
-                if req.domain and req.queue and req.job_type:
-                    jm._update_gauges(
-                        domain=req.domain,
-                        queue=req.queue,
-                        job_type=req.job_type,
-                    )
-            except _JOBS_ADMIN_NONCRITICAL_EXCEPTIONS:
-                pass
-            return BatchCancelResponse(affected=int(affected))
-        finally:
-            with contextlib.suppress(_JOBS_ADMIN_NONCRITICAL_EXCEPTIONS):
-                conn.close()
+        return BatchCancelResponse(affected=admin_operations.batch_cancel(jm, domain=req.domain, queue=req.queue, job_type=req.job_type, job_id=req.job_id, dry_run=req.dry_run))
     except HTTPException:
         raise
     except _JOBS_ADMIN_NONCRITICAL_EXCEPTIONS as e:
@@ -1817,189 +1501,7 @@ async def batch_reschedule_endpoint(
         if backend == "postgres":
             _set_pg_rls_for_user(admin_user, req.domain)
         jm = JobManager(backend=backend, db_url=db_url)
-        conn = jm._connect()
-        try:
-            where = ["domain = %s", "status = 'queued'"] if jm.backend == "postgres" else ["domain = ?", "status = 'queued'"]
-            params: list = [req.domain]
-            if req.queue:
-                where.append("queue = %s" if jm.backend == "postgres" else "queue = ?")
-                params.append(req.queue)
-            if req.job_type:
-                where.append("job_type = %s" if jm.backend == "postgres" else "job_type = ?")
-                params.append(req.job_type)
-            if jm.backend == "postgres":
-                if req.dry_run:
-                    with jm._pg_cursor(conn) as cur:
-                        cur.execute(
-                            f"SELECT COUNT(*) FROM jobs WHERE {' AND '.join(where)}",  # nosec B608
-                            tuple(params),
-                        )
-                        r = cur.fetchone()
-                        count = int(r.get("count") or 0) if isinstance(r, dict) else int(r[0] if r else 0)
-                        return BatchRescheduleResponse(affected=count)
-
-                counters_enabled = env_flag_enabled("JOBS_COUNTERS_ENABLED")
-                affected = 0
-                with conn:  # noqa: SIM117
-                    with jm._pg_cursor(conn) as cur:
-                        target_available_at = (
-                            "NULL"
-                            if req.delay_seconds == 0
-                            else "NOW() + (%s || ' seconds')::interval"
-                        )
-                        update_params = (
-                            tuple(params)
-                            if req.delay_seconds == 0
-                            else (*params, int(req.delay_seconds))
-                        )
-                        cur.execute(
-                            (
-                                "WITH candidates AS (SELECT id,domain,queue,job_type,available_at "
-                                f"FROM jobs WHERE {' AND '.join(where)} FOR UPDATE), "  # nosec B608
-                                "changed AS (UPDATE jobs AS target SET available_at="
-                                f"{target_available_at} FROM candidates "  # nosec B608
-                                "WHERE target.id=candidates.id AND target.status='queued' "
-                                "RETURNING candidates.domain,candidates.queue,candidates.job_type,"
-                                "candidates.available_at AS prior_available_at) "
-                                "SELECT domain,queue,job_type,COUNT(*) AS total_count,"
-                                "COUNT(*) FILTER (WHERE prior_available_at IS NULL) AS ready_count,"
-                                "COUNT(*) FILTER (WHERE prior_available_at IS NOT NULL) AS scheduled_count "
-                                "FROM changed GROUP BY domain,queue,job_type"
-                            ),
-                            update_params,
-                        )
-                        groups = list(cur.fetchall() or [])
-                        affected = sum(int(row.get("total_count") or 0) for row in groups)
-                        if counters_enabled:
-                            for row in groups:
-                                moved = int(
-                                    row["scheduled_count"]
-                                    if req.delay_seconds == 0
-                                    else row["ready_count"]
-                                )
-                                if moved == 0:
-                                    continue
-                                if req.delay_seconds == 0:
-                                    counter_sql = (
-                                        "UPDATE job_counters SET "
-                                        "scheduled_count=GREATEST(scheduled_count - %s, 0), "
-                                        "ready_count=ready_count + %s, updated_at=NOW() "
-                                        "WHERE domain=%s AND queue=%s AND job_type=%s"
-                                    )
-                                else:
-                                    counter_sql = (
-                                        "UPDATE job_counters SET "
-                                        "ready_count=GREATEST(ready_count - %s, 0), "
-                                        "scheduled_count=scheduled_count + %s, updated_at=NOW() "
-                                        "WHERE domain=%s AND queue=%s AND job_type=%s"
-                                    )
-                                cur.execute(
-                                    counter_sql,
-                                    (
-                                        moved,
-                                        moved,
-                                        row["domain"],
-                                        row["queue"],
-                                        row["job_type"],
-                                    ),
-                                )
-                                if cur.rowcount == 0:
-                                    _reconcile_lifecycle_counter_row(
-                                        cur,
-                                        backend=jm.backend,
-                                        domain=row["domain"],
-                                        queue=row["queue"],
-                                        job_type=row["job_type"],
-                                    )
-            else:
-                if req.dry_run:
-                    cur = conn.execute(
-                        f"SELECT COUNT(*) FROM jobs WHERE {' AND '.join(where)}",  # nosec B608
-                        tuple(params),
-                    )
-                    r = cur.fetchone()
-                    return BatchRescheduleResponse(affected=int(r[0] if r else 0))
-
-                counters_enabled = env_flag_enabled("JOBS_COUNTERS_ENABLED")
-                affected = 0
-                with conn:
-                    conn.execute("BEGIN IMMEDIATE")
-                    groups = []
-                    if counters_enabled:
-                        groups = list(
-                            conn.execute(
-                                (
-                                    "SELECT domain,queue,job_type,COUNT(*) AS total_count,"
-                                    "SUM(CASE WHEN available_at IS NULL THEN 1 ELSE 0 END) "
-                                    "AS ready_count,"
-                                    "SUM(CASE WHEN available_at IS NOT NULL THEN 1 ELSE 0 END) "
-                                    f"AS scheduled_count FROM jobs WHERE {' AND '.join(where)} "  # nosec B608
-                                    "GROUP BY domain,queue,job_type"
-                                ),
-                                tuple(params),
-                            ).fetchall()
-                            or []
-                        )
-                    if req.delay_seconds == 0:
-                        changed = conn.execute(
-                            f"UPDATE jobs SET available_at=NULL WHERE {' AND '.join(where)}",  # nosec B608
-                            tuple(params),
-                        )
-                    else:
-                        changed = conn.execute(
-                            f"UPDATE jobs SET available_at=DATETIME('now', ?) WHERE {' AND '.join(where)}",  # nosec B608
-                            (f"+{int(req.delay_seconds)} seconds", *params),
-                        )
-                    affected = int(changed.rowcount or 0)
-                    if counters_enabled:
-                        for row in groups:
-                            moved = int(
-                                row[5]
-                                if req.delay_seconds == 0
-                                else row[4]
-                            )
-                            if moved == 0:
-                                continue
-                            if req.delay_seconds == 0:
-                                counter_sql = (
-                                    "UPDATE job_counters SET "
-                                    "scheduled_count=MAX(scheduled_count - ?, 0), "
-                                    "ready_count=ready_count + ?, updated_at=DATETIME('now') "
-                                    "WHERE domain=? AND queue=? AND job_type=?"
-                                )
-                            else:
-                                counter_sql = (
-                                    "UPDATE job_counters SET "
-                                    "ready_count=MAX(ready_count - ?, 0), "
-                                    "scheduled_count=scheduled_count + ?, updated_at=DATETIME('now') "
-                                    "WHERE domain=? AND queue=? AND job_type=?"
-                                )
-                            counter_cursor = conn.execute(
-                                counter_sql,
-                                (moved, moved, row[0], row[1], row[2]),
-                            )
-                            if (counter_cursor.rowcount or 0) == 0:
-                                _reconcile_lifecycle_counter_row(
-                                    conn,
-                                    backend=jm.backend,
-                                    domain=row[0],
-                                    queue=row[1],
-                                    job_type=row[2],
-                                )
-
-            try:
-                if req.domain and req.queue and req.job_type:
-                    jm._update_gauges(
-                        domain=req.domain,
-                        queue=req.queue,
-                        job_type=req.job_type,
-                    )
-            except _JOBS_ADMIN_NONCRITICAL_EXCEPTIONS:
-                pass
-            return BatchRescheduleResponse(affected=int(affected))
-        finally:
-            with contextlib.suppress(_JOBS_ADMIN_NONCRITICAL_EXCEPTIONS):
-                conn.close()
+        return BatchRescheduleResponse(affected=admin_operations.batch_reschedule(jm, domain=req.domain, queue=req.queue, job_type=req.job_type, delay_seconds=req.delay_seconds, dry_run=req.dry_run))
     except HTTPException:
         raise
     except _JOBS_ADMIN_NONCRITICAL_EXCEPTIONS as e:
@@ -2099,150 +1601,7 @@ async def batch_requeue_quarantined_endpoint(
         if backend == "postgres":
             _set_pg_rls_for_user(admin_user, req.domain)
         jm = JobManager(backend=backend, db_url=db_url)
-        conn = jm._connect()
-        try:
-            if jm.backend == "postgres":
-                where = ["domain = %s", "status = 'quarantined'"]
-                params: list = [req.domain]
-                if req.queue:
-                    where.append("queue = %s")
-                    params.append(req.queue)
-                if req.job_type:
-                    where.append("job_type = %s")
-                    params.append(req.job_type)
-                if req.job_id is not None:
-                    where.append("id = %s")
-                    params.append(int(req.job_id))
-                if req.dry_run:
-                    with jm._pg_cursor(conn) as cur:
-                        cur.execute(
-                            f"SELECT COUNT(*) AS c FROM jobs WHERE {' AND '.join(where)}",  # nosec B608
-                            tuple(params),
-                        )
-                        row = cur.fetchone()
-                        count = int(row.get("c") or 0) if isinstance(row, dict) else int(row[0] if row else 0)
-                        return BatchRequeueQuarantinedResponse(affected=count)
-
-                counters_enabled = env_flag_enabled("JOBS_COUNTERS_ENABLED")
-                affected = 0
-                with conn:  # noqa: SIM117
-                    with jm._pg_cursor(conn) as cur:
-                        cur.execute(
-                            (
-                                "WITH changed AS (UPDATE jobs SET status='queued', "
-                                "failure_streak_count=0, failure_streak_code=NULL, "
-                                "quarantined_at=NULL, available_at=NULL, leased_until=NULL, "
-                                "worker_id=NULL, lease_id=NULL, completion_token=NULL "
-                                f"WHERE {' AND '.join(where)} "  # nosec B608
-                                "RETURNING domain,queue,job_type) "
-                                "SELECT domain,queue,job_type,COUNT(*) AS c FROM changed "
-                                "GROUP BY domain,queue,job_type"
-                            ),
-                            tuple(params),
-                        )
-                        groups = list(cur.fetchall() or [])
-                        affected = sum(int(row.get("c") or 0) for row in groups)
-                        if counters_enabled:
-                            for row in groups:
-                                moved = int(row["c"] or 0)
-                                cur.execute(
-                                    (
-                                        "UPDATE job_counters SET "
-                                        "ready_count=ready_count + %s, "
-                                        "quarantined_count=GREATEST(quarantined_count - %s, 0), "
-                                        "updated_at=NOW() "
-                                        "WHERE domain=%s AND queue=%s AND job_type=%s"
-                                    ),
-                                    (
-                                        moved,
-                                        moved,
-                                        row["domain"],
-                                        row["queue"],
-                                        row["job_type"],
-                                    ),
-                                )
-                                if cur.rowcount == 0:
-                                    _reconcile_lifecycle_counter_row(
-                                        cur,
-                                        backend=jm.backend,
-                                        domain=row["domain"],
-                                        queue=row["queue"],
-                                        job_type=row["job_type"],
-                                    )
-            else:
-                where = ["domain = ?", "status = 'quarantined'"]
-                params2: list = [req.domain]
-                if req.queue:
-                    where.append("queue = ?")
-                    params2.append(req.queue)
-                if req.job_type:
-                    where.append("job_type = ?")
-                    params2.append(req.job_type)
-                if req.job_id is not None:
-                    where.append("id = ?")
-                    params2.append(int(req.job_id))
-                if req.dry_run:
-                    cur = conn.execute(f"SELECT COUNT(*) FROM jobs WHERE {' AND '.join(where)}", tuple(params2))  # nosec B608
-                    r = cur.fetchone()
-                    return BatchRequeueQuarantinedResponse(affected=int(r[0] if r else 0))
-
-                counters_enabled = env_flag_enabled("JOBS_COUNTERS_ENABLED")
-                affected = 0
-                with conn:
-                    conn.execute("BEGIN IMMEDIATE")
-                    groups = []
-                    if counters_enabled:
-                        groups = list(
-                            conn.execute(
-                                f"SELECT domain,queue,job_type,COUNT(*) FROM jobs WHERE {' AND '.join(where)} GROUP BY domain,queue,job_type",  # nosec B608
-                                tuple(params2),
-                            ).fetchall()
-                            or []
-                        )
-                    changed = conn.execute(
-                        (
-                            "UPDATE jobs SET status='queued', failure_streak_count=0, "
-                            "failure_streak_code=NULL, quarantined_at=NULL, available_at=NULL, "
-                            "leased_until=NULL, worker_id=NULL, lease_id=NULL, "
-                            f"completion_token=NULL WHERE {' AND '.join(where)}"  # nosec B608
-                        ),
-                        tuple(params2),
-                    )
-                    affected = int(changed.rowcount or 0)
-                    if counters_enabled:
-                        for row in groups:
-                            moved = int(row[3] or 0)
-                            counter_cursor = conn.execute(
-                                (
-                                    "UPDATE job_counters SET ready_count=ready_count + ?, "
-                                    "quarantined_count=MAX(quarantined_count - ?, 0), "
-                                    "updated_at=DATETIME('now') "
-                                    "WHERE domain=? AND queue=? AND job_type=?"
-                                ),
-                                (moved, moved, row[0], row[1], row[2]),
-                            )
-                            if (counter_cursor.rowcount or 0) == 0:
-                                _reconcile_lifecycle_counter_row(
-                                    conn,
-                                    backend=jm.backend,
-                                    domain=row[0],
-                                    queue=row[1],
-                                    job_type=row[2],
-                                )
-
-            try:
-                if req.domain and req.queue and req.job_type:
-                    jm._update_gauges(
-                        domain=req.domain,
-                        queue=req.queue,
-                        job_type=req.job_type,
-                    )
-            except _JOBS_ADMIN_NONCRITICAL_EXCEPTIONS:
-                pass
-            return BatchRequeueQuarantinedResponse(affected=affected)
-        finally:
-            with contextlib.suppress(_JOBS_ADMIN_NONCRITICAL_EXCEPTIONS):
-                conn.close()
+        return BatchRequeueQuarantinedResponse(affected=admin_operations.batch_requeue_quarantined(jm, domain=req.domain, queue=req.queue, job_type=req.job_type, job_id=req.job_id, dry_run=req.dry_run))
     except HTTPException:
         raise
     except _JOBS_ADMIN_NONCRITICAL_EXCEPTIONS as e:

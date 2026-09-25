@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import sqlite3
 from contextlib import asynccontextmanager
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -453,7 +452,8 @@ async def test_ensure_tables_uses_information_schema_for_postgres() -> None:
     assert "sqlite_master" not in table_query
 
 
-def test_row_to_dict_logs_conversion_failures(monkeypatch) -> None:
+def test_row_to_dict_raises_on_unconvertible_row() -> None:
+    """A row that cannot be materialized surfaces instead of becoming an empty record."""
     from tldw_Server_API.app.core.AuthNZ.repos import prototype_workspaces_repo as repo_module
 
     class BrokenRow:
@@ -463,19 +463,8 @@ def test_row_to_dict_logs_conversion_failures(monkeypatch) -> None:
         def __getitem__(self, _key: str) -> str:
             raise TypeError("broken row access")
 
-    warnings: list[tuple[Any, ...]] = []
-    monkeypatch.setattr(
-        repo_module,
-        "logger",
-        SimpleNamespace(debug=lambda *args: warnings.append(args)),
-        raising=False,
-    )
-
-    result = repo_module.PrototypeWorkspacesRepo._row_to_dict(BrokenRow())
-
-    assert result == {}
-    assert warnings
-    assert "Failed to convert prototype workspace row" in warnings[0][0]
+    with pytest.raises(TypeError):
+        repo_module.PrototypeWorkspacesRepo._row_to_dict(BrokenRow())
 
 
 @pytest.mark.asyncio

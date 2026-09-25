@@ -4,7 +4,7 @@ title: RAG alias metric keys inflate the overall score and move the pass thresho
 status: Done
 assignee: []
 created_date: '2026-09-22 04:54'
-updated_date: '2026-09-23 00:12'
+updated_date: '2026-09-23 23:20'
 labels:
   - bug
   - evaluations
@@ -53,10 +53,20 @@ Found by the comprehensive core-module review; independently reproduced by the o
 - [x] #5 Alias keys remain present in the response for OpenAI-style compatibility
 <!-- AC:END -->
 
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Premise partly already fixed: 9061081c0c (earlier on this branch) deduped aliases inside RAGEvaluator._calculate_overall_score and added tests/Evaluations/unit/test_rag_evaluator_alias_scoring.py (1.0/0.0 -> 0.5, 0.9/0.3 -> 0.6 < 0.7). That covers overall_score, which unified_evaluation_service and the eval_runner pipeline path (overall_score at eval_runner.py ~810) consume.
+
+Remaining bug found while verifying AC3/AC4: EvaluationRunner._eval_rag never reads overall_score; it averages every key in result['metrics'] itself, and on the runner path (explicit metrics) the alias keys are always present, so avg_score, the aggregate mean_score built from it, and the pass decision still double-counted relevance/faithfulness. Fixed in 0123ee97d6: avg_score skips an alias whose canonical twin is present (reuses rag_evaluator._CANONICAL_METRIC_FOR_ALIAS); the per-sample scores dict keeps the alias keys.
+
+Test test_runner_avg_score_and_pass_gate_ignore_alias_keys drives the real RAGEvaluator.evaluate (stubbed metric calls) through runner._eval_rag with explicit metrics relevance=1.0, faithfulness=0.0, context_relevance=0.0 and threshold 0.35. RED before 0123ee97d6: avg_score 0.4 != 1/3 (and would pass the 0.35 gate). GREEN: avg_score 1/3, passed False, aggregate mean_score 1/3, pass_rate 0.0, alias keys still in scores. (A symmetric 1.0/0.0 pair hides the bug because both aliases are added, so the test uses three metrics.) Evaluations/unit with RUN_EVALUATIONS=1: 268 passed after. Bandit -ll on eval_runner.py: no findings. Ruff: 2 pre-existing findings, same count on ea1cbc6941.
+<!-- SECTION:NOTES:END -->
+
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Fixed test-first and merged to dev in PR #2980 (merge commit 8045fa2956). A failing test reproduced the defect before any code changed, with controls pinning the behaviour that had to stay unchanged. Qodo review then found follow-on defects in three of this batch's fixes; those were corrected in the same PR before merge.
+Alias keys (answer_relevance, answer_faithfulness) no longer inflate RAG scores: overall_score was fixed in 9061081c0c, and the eval_runner's own avg_score/mean_score/pass decision is fixed in 0123ee97d6. Alias keys remain in the response. No known skips.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

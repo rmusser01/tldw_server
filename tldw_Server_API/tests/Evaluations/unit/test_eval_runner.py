@@ -37,7 +37,7 @@ async def test_eval_summarization_parses_geval_dict(monkeypatch, tmp_path):
     }
 
     result = await runner._eval_summarization(sample, eval_spec, {}, "sample_000001")
-    assert result["scores"]["coherence"] == pytest.approx(0.8)
+    assert result["scores"]["coherence"] == pytest.approx(0.75)  # (4 - 1) / 4 on 1-5; was 4 / 5
     assert result["scores"]["fluency"] == pytest.approx(1.0)
     assert result["passed"] is True
 
@@ -68,7 +68,7 @@ async def test_eval_summarization_respects_thresholds_dict(monkeypatch, tmp_path
     }
 
     result = await runner._eval_summarization(sample, eval_spec, {}, "sample_000001")
-    assert result["scores"]["coherence"] == pytest.approx(0.8)
+    assert result["scores"]["coherence"] == pytest.approx(0.75)  # (4 - 1) / 4 on 1-5; was 4 / 5
     assert result["scores"]["fluency"] == pytest.approx(1.0)
     assert result["passed"] is False
 

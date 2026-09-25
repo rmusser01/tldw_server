@@ -1582,17 +1582,9 @@ class KanbanModule(BaseModule):
         deleted = db.delete_checklist_item(item_id)
         return {"deleted": bool(deleted), "item_id": item_id}
 
-    def _is_admin(self, context: Any | None) -> bool:
-        try:
-            if bool(getattr(context, "is_admin", False)):
-                return True
-            roles = (getattr(context, "metadata", {}) or {}).get("roles")
-            return isinstance(roles, list) and any(str(r).lower() == "admin" for r in roles)
-        except (AttributeError, TypeError, ValueError):
-            return False
 
     def _require_admin(self, context: Any | None) -> None:
-        if not self._is_admin(context):
+        if not self.caller_is_admin(context):
             raise ValueError("forbidden: admin privileges required")
 
     async def _workflow_policy_get(self, args: dict[str, Any], context: Any | None) -> dict[str, Any]:

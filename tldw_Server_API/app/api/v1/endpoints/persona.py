@@ -7563,27 +7563,27 @@ async def persona_catalog(
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
-        profiles = db.list_persona_profiles(user_id=user_id, active_only=True, limit=200)
-        if not profiles:
-            profiles = [_ensure_default_persona_profile(db, user_id=user_id)]
-        buddy_rows = _load_persona_buddy_rows_for_projection(db, profiles=profiles)
-        catalog: list[PersonaInfo] = []
-        for profile in profiles:
-            policy_rules = db.list_persona_policy_rules(
-                persona_id=str(profile.get("id") or ""),
-                user_id=user_id,
-                include_deleted=False,
-            )
-            catalog.append(
-                _persona_info_from_profile(
-                    profile,
-                    policy_rules=policy_rules,
-                    buddy_row=buddy_rows.get(str(profile.get("id") or "").strip()),
-                )
-            )
-        return catalog
+        return await _run_persona_db_call(_build_persona_catalog, db, user_id=user_id)
     except (InputError, ConflictError, CharactersRAGDBError) as exc:
         raise _to_http_exception(exc, action="list persona catalog") from exc
+
+
+def _build_persona_catalog(db: CharactersRAGDB, *, user_id: str) -> list[PersonaInfo]:
+    """Load profiles, buddies and policy rules in a fixed number of queries."""
+    profiles = db.list_persona_profiles(user_id=user_id, active_only=True, limit=200)
+    if not profiles:
+        profiles = [_ensure_default_persona_profile(db, user_id=user_id)]
+    buddy_rows = _load_persona_buddy_rows_for_projection(db, profiles=profiles)
+    persona_ids = [str(profile.get("id") or "").strip() for profile in profiles]
+    rules_by_persona = db.list_persona_policy_rules_for_personas(persona_ids=persona_ids, user_id=user_id)
+    return [
+        _persona_info_from_profile(
+            profile,
+            policy_rules=rules_by_persona.get(persona_id, []),
+            buddy_row=buddy_rows.get(persona_id),
+        )
+        for profile, persona_id in zip(profiles, persona_ids)
+    ]
 
 
 @router.post("/session", response_model=PersonaSessionResponse, tags=["persona"], status_code=status.HTTP_200_OK)

@@ -188,8 +188,7 @@ async def test_sandbox_run_inherits_owned_session_defaults() -> None:
     assert spec.trust_level == TrustLevel.untrusted
 
 
-@pytest.mark.asyncio
-async def test_sandbox_run_allows_permission_based_admin_override() -> None:
+def _admin_override_module() -> SandboxModule:
     module = SandboxModule(ModuleConfig(name="sandbox"))
     module._svc = _FakeSandboxService()
     module._svc.sessions["sess-admin"] = Session(
@@ -199,12 +198,56 @@ async def test_sandbox_run_allows_permission_based_admin_override() -> None:
         expires_at=None,
     )
     module._svc.session_owners["sess-admin"] = "88"
+    return module
+
+
+@pytest.mark.asyncio
+async def test_sandbox_run_denies_system_configure_cross_user_override() -> None:
+    """system.configure no longer reaches another user's session. See ADR-048.
+
+    This test previously asserted the opposite. sandbox_module was the only one of six
+    MCP admin predicates that accepted the system.configure permission, and it used it
+    to pass this CROSS-USER gate -- while protocol_types, the predicate MCP used for
+    its own trusted-claims gate, said the same caller was not an admin. The unified
+    predicate keeps the "*" wildcard but not system.configure: a configuration
+    permission should not authorise reaching another user's sandbox session, nor the
+    two irreversible deletes the same predicate gates in media and notes.
+    """
+    module = _admin_override_module()
     ctx = RequestContext(
         request_id="req-admin-1",
         user_id="77",
         client_id="test-client",
         session_id=None,
         metadata={"permissions": ["system.configure"]},
+    )
+
+    with pytest.raises(PermissionError):
+        await module.execute_tool(
+            "sandbox.run",
+            {
+                "session_id": "sess-admin",
+                "command": ["python", "-c", "print('ok')"],
+            },
+            context=ctx,
+        )
+
+
+@pytest.mark.parametrize("claims", [{"roles": ["admin"]}, {"roles": ["owner"]}, {"roles": ["super_admin"]}, {"permissions": ["*"]}])
+@pytest.mark.asyncio
+async def test_sandbox_run_allows_platform_admin_override(claims: dict) -> None:
+    """The under-grant half: owner and super_admin are platform admins in AuthNZ.
+
+    server.py writes those roles straight into metadata, but every MCP predicate used
+    to test the literal "admin", so a platform owner was refused here.
+    """
+    module = _admin_override_module()
+    ctx = RequestContext(
+        request_id="req-admin-1",
+        user_id="77",
+        client_id="test-client",
+        session_id=None,
+        metadata=claims,
     )
 
     result = await module.execute_tool(

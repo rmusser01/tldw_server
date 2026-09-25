@@ -44,9 +44,10 @@ from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
 from tldw_Server_API.app.core.exceptions import raise_detached_error
 from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 
 router = APIRouter(prefix="", tags=["org-team-keys"])
-_ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
+_ADMIN_CLAIM_PERMISSIONS = PLATFORM_ADMIN_PERMISSIONS  # see core/AuthNZ/platform_admin.py
 
 
 def _raise_provider_validation_http_error(exc: ChatAPIError) -> NoReturn:

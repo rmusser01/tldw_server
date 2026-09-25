@@ -12010,6 +12010,83 @@ class SyncDatabase:
                 connection=conn,
             )
 
+    def expire_blob_upload_sessions(
+        self,
+        *,
+        dataset_id: str | None = None,
+        limit: int = 500,
+    ) -> list[str]:
+        """Mark timed-out upload sessions expired, releasing slot and reserved quota.
+
+        Nothing reaped these before. Sessions are capped at max_active_blob_uploads and
+        the upload_id is minted server-side and never returned to the client, so the
+        cancel endpoint could not reach an orphan: eight transient failures permanently
+        disabled attachment upload for that user with no self-service recovery.
+
+        Expiry is compared in Python because expires_at is TEXT on SQLite and TIMESTAMPTZ
+        on PostgreSQL. Rows with no expires_at are left alone -- they predate the TTL and
+        releasing them here would be a silent change of meaning, not a repair.
+
+        Returns the expired upload_ids so the caller can discard their staged chunks.
+        """
+
+        now = _parse_iso_datetime(utcnow_iso())
+        now_iso = utcnow_iso()
+        if dataset_id is None:
+            rows = self.execute(
+                """
+                SELECT upload_id, expires_at
+                  FROM sync_blob_upload_sessions
+                 WHERE status IN ('created', 'uploading')
+                """,
+            )
+        else:
+            rows = self.execute(
+                """
+                SELECT upload_id, expires_at
+                  FROM sync_blob_upload_sessions
+                 WHERE status IN ('created', 'uploading')
+                   AND dataset_id = ?
+                """,
+                (dataset_id,),
+            )
+
+        stale: list[str] = []
+        for row in rows or ():
+            raw = _timestamp_to_string(row.get("expires_at"))
+            if not raw:
+                continue
+            try:
+                if _parse_iso_datetime(raw) > now:
+                    continue
+            except (TypeError, ValueError):
+                continue
+            stale.append(str(row["upload_id"]))
+            if len(stale) >= limit:
+                break
+
+        if not stale:
+            return []
+
+        expired: list[str] = []
+        with self.backend.transaction() as conn:
+            for upload_id in stale:
+                updated = self.execute(
+                    """
+                    UPDATE sync_blob_upload_sessions
+                       SET status = ?, updated_at = ?
+                     WHERE upload_id = ?
+                       AND status IN ('created', 'uploading')
+                    """,
+                    ("expired", now_iso, upload_id),
+                    connection=conn,
+                )
+                # A session completed or cancelled since the SELECT is not ours to
+                # discard.
+                if updated.rowcount == 1:
+                    expired.append(upload_id)
+        return expired
+
     def get_blob_chunk(
         self,
         upload_id: str,
@@ -12636,14 +12713,43 @@ class SyncDatabase:
         *,
         dataset_id: str | None = None,
     ) -> SyncBlobQuotaUsage:
-        """Return committed and pending blob quota usage for one user."""
+        """Return committed and pending blob quota usage for one user.
+
+        Expired sessions are excluded from both the reserved bytes and the active
+        count. Without that predicate a failed upload held one of
+        max_active_blob_uploads slots and its reserved quota for ever: expires_at was
+        never set at insert and appeared in no WHERE clause, and no reaper existed, so
+        eight transient failures permanently disabled attachment upload for that user.
+        Rows whose expires_at is NULL are still counted -- those predate the TTL and
+        must not be silently released.
+        """
+
+        # Expiry is evaluated in Python, not SQL: expires_at is TEXT on SQLite and
+        # TIMESTAMPTZ on PostgreSQL, so a bound string compares differently (or not at
+        # all) across the two. The lease code at _acquire_background_lease does the same
+        # for the same reason. The row count here is bounded by the active-upload cap.
+        now = _parse_iso_datetime(utcnow_iso())
+
+        def _live(rows: Any) -> tuple[int, int]:
+            total = 0
+            count = 0
+            for row in rows or ():
+                raw = _timestamp_to_string(row.get("expires_at"))
+                if raw:
+                    try:
+                        if _parse_iso_datetime(raw) <= now:
+                            continue  # expired: releases its slot and reserved quota
+                    except (TypeError, ValueError):
+                        pass  # unparseable expiry is treated as no expiry
+                total += int(row.get("reserved_quota_bytes") or 0)
+                count += 1
+            return total, count
 
         if dataset_id is None:
-            reserved_row = _first(
+            reserved_bytes, active_uploads = _live(
                 self.execute(
                     """
-                    SELECT COALESCE(SUM(reserved_quota_bytes), 0) AS bytes,
-                           COUNT(*) AS active_upload_count
+                    SELECT reserved_quota_bytes, expires_at
                       FROM sync_blob_upload_sessions
                      WHERE owner_user_id = ?
                        AND status IN ('created', 'uploading')
@@ -12663,11 +12769,10 @@ class SyncDatabase:
                 )
             )
         else:
-            reserved_row = _first(
+            reserved_bytes, active_uploads = _live(
                 self.execute(
                     """
-                    SELECT COALESCE(SUM(reserved_quota_bytes), 0) AS bytes,
-                           COUNT(*) AS active_upload_count
+                    SELECT reserved_quota_bytes, expires_at
                       FROM sync_blob_upload_sessions
                      WHERE owner_user_id = ?
                        AND dataset_id = ?
@@ -12691,9 +12796,9 @@ class SyncDatabase:
         return SyncBlobQuotaUsage(
             owner_user_id=owner_user_id,
             dataset_id=dataset_id,
-            reserved_blob_bytes=int(reserved_row["bytes"] if reserved_row else 0),
+            reserved_blob_bytes=reserved_bytes,
             used_blob_bytes=int(used_row["bytes"] if used_row else 0),
-            active_upload_count=int(reserved_row["active_upload_count"] if reserved_row else 0),
+            active_upload_count=active_uploads,
         )
 
     def _require_blob_upload_session(

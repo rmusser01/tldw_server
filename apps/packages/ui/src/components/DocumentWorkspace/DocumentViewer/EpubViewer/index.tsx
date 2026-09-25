@@ -9,6 +9,7 @@ import { EpubSearch } from "./EpubSearch"
 import { EPUB_THEMES, FONT_FAMILY_CSS } from "@/hooks/document-workspace/useEpubSettings"
 import type { EpubLocation } from "@/hooks/document-workspace/useEpubReader"
 import type { TocItem, Annotation, AnnotationColor, EpubTheme, EpubScrollMode, EpubSpreadMode, EpubFontFamily } from "../../types"
+import { isEditableTarget } from "@/utils/editable-target"
 
 // Color mapping for EPUB highlights
 const HIGHLIGHT_COLORS: Record<AnnotationColor, string> = {
@@ -453,10 +454,7 @@ export const EpubViewer: React.FC<EpubViewerProps> = ({
 
     const handleKeyDown = (e: KeyboardEvent) => {
       // Don't handle if in input
-      if (
-        document.activeElement?.tagName === "INPUT" ||
-        document.activeElement?.tagName === "TEXTAREA"
-      ) {
+      if (isEditableTarget(document.activeElement)) {
         return
       }
 

@@ -237,6 +237,15 @@ async def test_external_federation_module_integration_exposes_and_executes_virtu
                 settings={
                     "external_servers_config_path": str(external_config),
                     "external_server_loader": lambda: list(cfg.servers),
+                    # The module wires a credential broker alongside the loader, and
+                    # in production both read the same registry. This test injected
+                    # only the loader, so the call fell through to the DB-backed
+                    # broker service, which raised "Unknown external server: docs" for
+                    # a server that exists solely in the injected registry. Injecting
+                    # the matching half restores the symmetry; None means this server
+                    # carries no managed credentials, which is what auth_mode "none"
+                    # resolves to.
+                    "external_credential_broker": lambda **_kwargs: None,
                 },
             )
         )

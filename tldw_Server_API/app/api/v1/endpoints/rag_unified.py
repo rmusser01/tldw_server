@@ -497,8 +497,8 @@ def _checkpoint_admin_authorized(principal: AuthPrincipal) -> bool:
     }
     return bool(
         principal.is_admin
-        or "admin" in roles
-        or permissions & {"*", "system.configure"}
+        or roles & PLATFORM_ADMIN_ROLES
+        or permissions & PLATFORM_ADMIN_PERMISSIONS
     )
 
 
@@ -756,6 +756,7 @@ def _build_source_health_source_sets(
 
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
 from tldw_Server_API.app.core.RAG.rag_service.analytics_system import UnifiedFeedbackSystem
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS, PLATFORM_ADMIN_ROLES
 
 router = APIRouter(prefix="/api/v1/rag", tags=["rag-unified"])
 

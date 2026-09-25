@@ -25,6 +25,7 @@ import {
   type SourceReviewFlashcardsIntent,
   type SourceReviewHandoffPayload
 } from "@/services/tldw/source-review-handoff"
+import { isEditableTarget } from "@/utils/editable-target"
 
 const { Text } = Typography
 
@@ -165,12 +166,7 @@ export const FlashcardsManager: React.FC = () => {
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Don't trigger when typing in inputs
-      const target = e.target as HTMLElement
-      if (
-        target.tagName === "INPUT" ||
-        target.tagName === "TEXTAREA" ||
-        target.isContentEditable
-      ) {
+      if (isEditableTarget(e.target)) {
         return
       }
 
