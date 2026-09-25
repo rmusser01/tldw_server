@@ -187,7 +187,11 @@ class MediaModule(BaseModule):
                 # Use a short-lived transaction to avoid leaving artifacts
                 with self.db.transaction():
                     self.db.execute_query("CREATE TABLE IF NOT EXISTS _mcp_healthcheck (k TEXT PRIMARY KEY, v TEXT)")
-                    self.db.execute_query("INSERT OR REPLACE INTO _mcp_healthcheck(k, v) VALUES (?, ?)", ("ping", datetime.utcnow().isoformat()))
+                    self.db.execute_query(
+                        "INSERT INTO _mcp_healthcheck(k, v) VALUES (?, ?) "
+                        "ON CONFLICT(k) DO UPDATE SET v = excluded.v",
+                        ("ping", datetime.utcnow().isoformat()),
+                    )
                     # Best-effort cleanup to keep DB tidy (ignore errors for non-SQLite backends)
                     with contextlib.suppress(_MEDIA_MODULE_NONCRITICAL_EXCEPTIONS):
                         self.db.execute_query("DELETE FROM _mcp_healthcheck WHERE k = ?", ("ping",))
