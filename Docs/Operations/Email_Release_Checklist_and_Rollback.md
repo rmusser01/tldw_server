@@ -9,6 +9,7 @@ Related:
 - `Docs/Operations/Email_Core_Validation_2026-09-13.md`
 - `Docs/Operations/Email_Local_Startup_and_Search_Performance_2026-09-25.md`
 - `Docs/Operations/Email_Live_SQLite_Validation_2026-09-25.md`
+- `Docs/Operations/Email_Live_PostgreSQL_Validation_2026-09-25.md`
 - `Docs/Operations/Env_Vars.md`
 
 ## Single-Owner Workflow
@@ -29,7 +30,8 @@ The owner's personal Gmail and personal email are excluded.
 - [x] Exercise the main FastAPI lifespan and scoped email search/detail plus media search with synthetic users, temporary SQLite and an outbound/model-call guard (TASK-13361; `Docs/Operations/Email_Local_Startup_and_Search_Performance_2026-09-25.md`).
 - [x] Validate full-app Uvicorn startup/shutdown and scoped synthetic email upload/search/detail/media search over loopback HTTP with isolated SQLite (TASK-13362; `Docs/Operations/Email_Live_SQLite_Validation_2026-09-25.md`).
 - [x] Register and verify the native email persistence counter in the live synthetic SQLite upload path (TASK-13363; same validation report).
-- [ ] Validate the PostgreSQL deployment path and target scale. The live SQLite probe does not establish PostgreSQL isolation.
+- [x] Validate full-app Uvicorn startup/shutdown and scoped synthetic email upload/search/detail/media search with PostgreSQL AuthNZ and content, including direct forced-RLS isolation checks (TASK-13364; `Docs/Operations/Email_Live_PostgreSQL_Validation_2026-09-25.md`).
+- [ ] Validate the intended deployment topology and target scale; both live probes used one loopback worker and one synthetic message.
 - [ ] Record actual performance/parity evidence for the intended cutover scope. The local 10,000-message synthetic SQLite benchmark does not certify the 1M-message target or production parity.
 - [ ] Configure and verify core rollout flags in the chosen environment:
   - `EMAIL_NATIVE_PERSIST_ENABLED=true`
@@ -63,6 +65,7 @@ Current validation: `Docs/Operations/Email_Core_Validation_2026-09-13.md`.
 Authenticated-access follow-up: `Docs/Operations/Email_Authenticated_Validation_2026-09-13.md`.
 Local startup and bounded performance: `Docs/Operations/Email_Local_Startup_and_Search_Performance_2026-09-25.md`.
 Live SQLite HTTP validation: `Docs/Operations/Email_Live_SQLite_Validation_2026-09-25.md`.
+Live PostgreSQL HTTP/RLS validation: `Docs/Operations/Email_Live_PostgreSQL_Validation_2026-09-25.md`.
 
 For an actual rollout record:
 - Scope: core / optional Gmail
