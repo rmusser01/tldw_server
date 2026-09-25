@@ -10,6 +10,8 @@ from tldw_Server_API.app.core.DB_Management.VNAssetPacks_DB import (
     ensure_vn_asset_tables,
 )
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.fixture
 def chacha_db() -> Generator[CharactersRAGDB, None, None]:
@@ -80,9 +82,9 @@ def test_existing_slot_table_receives_failure_batch_column(chacha_db: Characters
     ensure_vn_asset_tables(chacha_db)
 
     row = chacha_db.execute_query(
-        "SELECT last_failed_batch_id FROM vn_asset_slots WHERE id = 1"
+        "SELECT last_failed_batch_id, latest_generation_batch_id FROM vn_asset_slots WHERE id = 1"
     ).fetchone()
-    assert row[0] is None
+    assert tuple(row) == (None, None)
 
 
 def test_ensure_vn_asset_tables_rejects_non_sqlite_before_transaction() -> None:

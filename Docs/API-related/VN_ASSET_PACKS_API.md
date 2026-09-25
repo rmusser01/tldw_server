@@ -234,6 +234,7 @@ Status response:
   "recipe_available": true,
   "selected_slot_ids": [10, 11],
   "failed_slot_batch_ids": {},
+  "failed_slot_recipe_available": {},
   "job_batch_id": "vn_assets:user:1:pack:1:batch:7",
   "status": "queued",
   "total_slots": 2,
@@ -254,10 +255,11 @@ batch's accepted recipe for that slot. Send its `batch_id` as `source_batch_id`
 along with a fresh idempotency key. If omitted, the server selects the newest
 recorded failed batch for that slot for older clients. The returned status has
 a new `batch_id` and the original `source_batch_id`. The WebUI uses
-`failed_slot_batch_ids` from generation status, so a later batch that merely
-selected the slot cannot replace its failure source. A different variant count, slot
+`failed_slot_batch_ids` and `failed_slot_recipe_available` from generation
+status, so a later batch that merely selected the slot cannot replace its
+failure source or hide an older source without a recipe. A different variant count, slot
 selection, or recipe-affecting option is rejected. An old failed batch
-with `recipe_available: false` cannot be faithfully retried: the API returns
+without a recipe cannot be faithfully retried: the API returns
 `409 vn_asset_recipe_unavailable`; Start generation uses current settings
 instead. `POST /packs/{pack_id}/items/{item_id}/regenerate` also uses current
 pack and slot settings. Neither action guarantees byte-identical output from a

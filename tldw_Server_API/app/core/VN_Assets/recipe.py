@@ -13,6 +13,19 @@ RECIPE_VERSION = 1
 
 
 def load_recipe(value: Any, *, pack_id: int, owner_user_id: int) -> dict[str, Any]:
+    """Parse a stored recipe for the expected pack and owner.
+
+    Args:
+        value: Serialized recipe JSON, or a missing legacy value.
+        pack_id: Pack that owns the batch.
+        owner_user_id: User that requested the batch.
+
+    Returns:
+        The validated versioned recipe.
+
+    Raises:
+        ValueError: The recipe is absent, malformed, or belongs elsewhere.
+    """
     try:
         recipe = json.loads(value)
     except (TypeError, ValueError) as exc:
@@ -29,6 +42,7 @@ def load_recipe(value: Any, *, pack_id: int, owner_user_id: int) -> dict[str, An
 
 
 def slot_recipe(recipe: Mapping[str, Any], slot_id: int) -> dict[str, Any]:
+    """Return the recorded slot recipe or reject a slot absent from the batch."""
     for slot in recipe["slots"]:
         if isinstance(slot, dict) and slot.get("slot_id") == slot_id:
             return slot
@@ -43,6 +57,21 @@ def build_authored_recipe(
     owner_user_id: int,
     variant_count: int | None,
 ) -> dict[str, Any]:
+    """Freeze generation inputs and rendered prompts before accepting a batch.
+
+    Args:
+        repo: Repository used to read the character and configured world books.
+        pack: Current pack record.
+        slots: Selected slot records.
+        owner_user_id: User requesting the generation.
+        variant_count: Optional per-slot variant override.
+
+    Returns:
+        A versioned recipe containing one entry per selected slot.
+
+    Raises:
+        ValueError: The character or a configured world book is unavailable.
+    """
     character = repo.get_character(int(pack["primary_character_id"]))
     if character is None:
         raise ValueError("primary_character_not_found")
@@ -101,6 +130,7 @@ def build_authored_recipe(
 
 
 def _world_book_entries(repo: VNAssetPacksRepository, pack: Mapping[str, Any]) -> list[Any]:
+    """Read configured world-book entries, rejecting incomplete prompt context."""
     raw_ids = pack.get("source_world_book_ids_json")
     ids = json.loads(raw_ids) if isinstance(raw_ids, str) else (raw_ids or [])
     if not ids:
@@ -121,6 +151,7 @@ def _world_book_entries(repo: VNAssetPacksRepository, pack: Mapping[str, Any]) -
 
 
 def _json_object(value: Any) -> dict[str, Any]:
+    """Decode an optional JSON object without retaining non-object values."""
     if not value:
         return {}
     loaded = json.loads(value) if isinstance(value, str) else value
@@ -128,6 +159,7 @@ def _json_object(value: Any) -> dict[str, Any]:
 
 
 def _positive_int(value: Any) -> int | None:
+    """Return a positive integer or None for absent and invalid values."""
     try:
         parsed = int(value)
     except (TypeError, ValueError):
@@ -136,6 +168,7 @@ def _positive_int(value: Any) -> int | None:
 
 
 def _first_text(*values: Any) -> str | None:
+    """Return the first nonblank textual value in priority order."""
     for value in values:
         if value is not None and str(value).strip():
             return str(value).strip()
@@ -143,5 +176,6 @@ def _first_text(*values: Any) -> str | None:
 
 
 def _join(*values: Any) -> str | None:
+    """Join nonblank prompt fragments with line breaks."""
     parts = [_first_text(value) for value in values]
     return "\n".join(part for part in parts if part) or None

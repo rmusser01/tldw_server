@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS vn_asset_slots (
     status TEXT NOT NULL DEFAULT 'planned',
     last_error TEXT,
     last_failed_batch_id INTEGER,
+    latest_generation_batch_id INTEGER,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(pack_id, slot_key)
@@ -1406,6 +1407,46 @@ class VNAssetPacksRepository:
             )
         return self.get_slot(slot_id)
 
+    def mark_slot_generation_started(self, slot_id: int, batch_id: int) -> None:
+        """Show progress only for the latest batch without hiding a sibling failure."""
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            conn.execute(
+                """UPDATE vn_asset_slots
+                   SET status = CASE WHEN last_failed_batch_id = ? THEN status ELSE 'generating' END,
+                       last_error = CASE WHEN last_failed_batch_id = ? THEN last_error ELSE NULL END,
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ? AND (latest_generation_batch_id = ? OR latest_generation_batch_id IS NULL)""",
+                (batch_id, batch_id, slot_id, batch_id),
+            )
+
+    def mark_slot_generation_succeeded(self, slot_id: int, batch_id: int) -> None:
+        """Clear older failures, but retain any failure from this same batch."""
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            conn.execute(
+                """UPDATE vn_asset_slots
+                   SET status = CASE WHEN last_failed_batch_id = ? THEN status ELSE 'reviewing' END,
+                       last_error = CASE WHEN last_failed_batch_id = ? THEN last_error ELSE NULL END,
+                       last_failed_batch_id = CASE
+                           WHEN last_failed_batch_id = ? THEN last_failed_batch_id ELSE NULL END,
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ? AND (latest_generation_batch_id = ? OR latest_generation_batch_id IS NULL)""",
+                (batch_id, batch_id, batch_id, slot_id, batch_id),
+            )
+
+    def mark_slot_generation_failed(self, slot_id: int, batch_id: int, error: str) -> None:
+        """Record failure only when this batch still owns the slot's latest outcome."""
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            conn.execute(
+                """UPDATE vn_asset_slots
+                   SET status = 'failed', last_error = ?, last_failed_batch_id = ?,
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ? AND (latest_generation_batch_id = ? OR latest_generation_batch_id IS NULL)""",
+                (error, batch_id, slot_id, batch_id),
+            )
+
     def delete_slot(self, slot_id: int) -> None:
         self._ensure_schema_initialized()
         with self.db.transaction() as conn:
@@ -1738,6 +1779,15 @@ class VNAssetPacksRepository:
                 ),
             )
             batch_id = cursor.lastrowid
+            if recipe is not None and status == "queued":
+                conn.executemany(
+                    """UPDATE vn_asset_slots SET latest_generation_batch_id = ?, updated_at = CURRENT_TIMESTAMP
+                       WHERE id = ? AND pack_id = ?""",
+                    (
+                        (batch_id, int(slot["slot_id"]), pack_id)
+                        for slot in recipe.get("slots", [])
+                    ),
+                )
         batch = self.get_batch(batch_id)
         if batch is None:
             raise RuntimeError("created_batch_not_found")
@@ -1780,6 +1830,14 @@ class VNAssetPacksRepository:
                    WHERE id = ?""",
                 (planned_count, enqueued_count, total_slots, planned_count, batch_id),
             )
+            conn.execute(
+                """UPDATE vn_asset_batches
+                   SET status = 'completed', completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP),
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ? AND status = 'enqueued' AND failed_count = 0
+                     AND planned_count > 0 AND completed_count >= planned_count""",
+                (batch_id,),
+            )
         batch = self.get_batch(batch_id)
         if batch is None:
             raise ValueError("vn_asset_batch_not_found")
@@ -1811,6 +1869,44 @@ class VNAssetPacksRepository:
         if batch is None:
             raise ValueError("vn_asset_batch_not_found")
         return batch
+
+    def record_batch_variant_success(self, batch_id: int) -> None:
+        """Increment completion and transition status in one transaction."""
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            conn.execute(
+                """UPDATE vn_asset_batches
+                   SET completed_count = completed_count + 1,
+                       status = CASE
+                           WHEN status IN ('failed', 'completed', 'cancelled') THEN status
+                           WHEN COALESCE(NULLIF(planned_count, 0), total_variants, 0) > 0
+                             AND completed_count + 1 >= COALESCE(NULLIF(planned_count, 0), total_variants, 0)
+                           THEN 'completed'
+                           ELSE 'processing'
+                       END,
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ?""",
+                (batch_id,),
+            )
+            conn.execute(
+                """UPDATE vn_asset_batches
+                   SET completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP)
+                   WHERE id = ? AND status = 'completed'""",
+                (batch_id,),
+            )
+
+    def record_batch_variant_failure(self, batch_id: int) -> None:
+        """Increment failure without reopening a completed or cancelled batch."""
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            conn.execute(
+                """UPDATE vn_asset_batches
+                   SET failed_count = failed_count + 1,
+                       status = CASE WHEN status IN ('completed', 'cancelled') THEN status ELSE 'failed' END,
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ?""",
+                (batch_id,),
+            )
 
     def get_batch(self, batch_id: int) -> dict[str, Any] | None:
         self._ensure_schema_initialized()
@@ -2148,3 +2244,5 @@ def _ensure_slot_failure_column(conn: Any) -> None:
     columns = {row[1] for row in conn.execute("PRAGMA table_info(vn_asset_slots)").fetchall()}
     if "last_failed_batch_id" not in columns:
         conn.execute("ALTER TABLE vn_asset_slots ADD COLUMN last_failed_batch_id INTEGER")
+    if "latest_generation_batch_id" not in columns:
+        conn.execute("ALTER TABLE vn_asset_slots ADD COLUMN latest_generation_batch_id INTEGER")

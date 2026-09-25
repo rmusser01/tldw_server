@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import threading
 from collections.abc import Generator
 from dataclasses import replace
 from types import SimpleNamespace
@@ -9,6 +11,7 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.endpoints import vn_assets as vn_assets_endpoint
@@ -31,6 +34,8 @@ from tldw_Server_API.app.core.VN_Assets.jobs import (
     vn_asset_generation_jobs_queue,
 )
 from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
+
+pytestmark = pytest.mark.integration
 
 
 class FakeJobs:
@@ -283,11 +288,11 @@ async def test_worker_uses_accepted_recipe_after_pack_and_slot_edits(
     status = service.start_generation(pack.id, VNAssetGenerationRequest(slot_ids=[slot.id]))
     service.repo.update_pack(pack.id, {"style_prompt": "edited oil", "default_backend": "changed"})
     service.repo.update_slot(slot.id, {"variant_count": 4, "prompt_template": "edited template"})
-    with service.repo.db.transaction() as conn:
-        conn.execute(
-            "UPDATE character_cards SET description = ? WHERE id = ?",
-            ("An edited cartographer.", character_id),
-        )
+    character = service.repo.get_character(character_id)
+    service.repo.db.update_character_card(
+        character_id, {"description": "An edited cartographer."},
+        expected_version=int(character["version"]),
+    )
     adapter = FakeImageAdapter()
     registry = FakeImageRegistry(adapter)
     gate = FakeGenerationGate()
@@ -312,7 +317,10 @@ async def test_worker_uses_accepted_recipe_after_pack_and_slot_edits(
     assert adapter.requests[0].width == 640
     assert adapter.requests[0].seed == 101
     assert gate.requests[0][0] == "stable_diffusion_cpp"
-    assert json.loads(service.repo.get_batch(status.batch_id)["execution_recipe_json"])["slots"][0]["backend"] == "stable_diffusion_cpp"
+    assert (
+        json.loads(service.repo.get_batch(status.batch_id)["execution_recipe_json"])["slots"][0]["backend"]
+        == "stable_diffusion_cpp"
+    )
 
 
 def test_backend_resolution_failure_marks_batch_failed(
@@ -383,6 +391,45 @@ def test_parent_retry_resumes_partial_fanout_after_transient_enqueue_failure(
     assert resumed["enqueued_count"] == status.planned_count
     assert service.repo.get_batch(status.batch_id)["enqueue_error"] is None
     assert len(child_jobs.created) == status.planned_count
+
+
+@pytest.mark.asyncio
+async def test_fanout_retry_completes_batch_when_all_children_already_finished(
+    service: VNAssetPackService,
+    character_id: int,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    class PersistThenFailJobs(FakeJobs):
+        failed = False
+
+        def create_job(self, **kwargs: Any) -> dict[str, Any]:
+            job = super().create_job(**kwargs)
+            if kwargs.get("job_type") == "vn_asset_generate_variant" and not self.failed:
+                self.failed = True
+                raise RuntimeError("response lost after child insert")
+            return job
+
+    pack = service.create_pack(VNAssetPackCreate(title="Fanout Recovery", primary_character_id=character_id))
+    slot = service.create_slot(pack.id, VNAssetSlotCreate(asset_type="sprite", slot_key="sprite.primary"))
+    jobs = PersistThenFailJobs()
+    status = service.start_generation(pack.id, VNAssetGenerationRequest(slot_ids=[slot.id]), jobs_manager=jobs)
+    worker = VNAssetGenerationWorker(
+        repo=service.repo, jobs_manager=jobs,
+        image_registry=FakeImageRegistry(FakeImageAdapter()), backend_gate=FakeGenerationGate(),
+        save_vn_asset_image=RecordingVNSaver(),
+    )
+    payload = {"pack_id": pack.id, "batch_id": status.batch_id, "user_id": 1}
+
+    with pytest.raises(RuntimeError, match="response lost"):
+        worker.handle_enqueue_batch(payload)
+    child = next(job for job in jobs.created if job["job_type"] == "vn_asset_generate_variant")
+    await worker.handle_generate_variant(child["payload"])
+    resumed = worker.handle_enqueue_batch(payload)
+
+    assert resumed["status"] == "completed"
+    assert service.repo.get_batch(status.batch_id)["completed_count"] == 1
+    assert len([job for job in jobs.created if job["job_type"] == "vn_asset_generate_variant"]) == 1
 
 
 @pytest.mark.asyncio
@@ -497,7 +544,10 @@ async def test_worker_pins_implicit_hosted_model_before_child_execution(
     await worker.handle_generate_variant({**payload, "slot_id": slot.id, "variant_index": 0})
 
     assert adapter.requests[0].model == "provider/model-a"
-    assert json.loads(service.repo.get_batch(batch.batch_id)["execution_recipe_json"])["slots"][0]["model"] == "provider/model-a"
+    assert (
+        json.loads(service.repo.get_batch(batch.batch_id)["execution_recipe_json"])["slots"][0]["model"]
+        == "provider/model-a"
+    )
     assert "private-test-credential" not in json.dumps(service.repo.get_batch(batch.batch_id))
 
 
@@ -626,6 +676,30 @@ def test_retry_rejects_legacy_source_instead_of_using_current_settings(
         )
 
 
+def test_generation_status_reports_recipe_availability_for_each_failed_slot_source(
+    service: VNAssetPackService,
+    pack_with_slots: SimpleNamespace,
+) -> None:
+    slot_id = pack_with_slots.slots[0].id
+    legacy = service.repo.create_batch(
+        pack_id=pack_with_slots.id, requested_by_user_id=1, status="failed",
+        options={"slot_ids": [slot_id]},
+    )
+    service.repo.update_slot(slot_id, {
+        "status": "failed", "last_error": "legacy failure", "last_failed_batch_id": legacy["id"],
+    })
+    newer = service.start_generation(
+        pack_with_slots.id, VNAssetGenerationRequest(slot_ids=[slot_id]),
+    )
+    service.repo.update_batch(newer.batch_id, {"status": "failed", "enqueue_error": "queue unavailable"})
+
+    status = service.get_generation_status(pack_with_slots.id)
+
+    assert status.recipe_available is True
+    assert status.failed_slot_batch_ids[slot_id] == legacy["id"]
+    assert status.failed_slot_recipe_available[slot_id] is False
+
+
 def test_retry_without_source_uses_latest_failed_batch_for_that_slot(
     service: VNAssetPackService,
     pack_with_slots: SimpleNamespace,
@@ -678,6 +752,136 @@ def test_retry_uses_recorded_slot_failure_not_later_batch_that_only_selected_it(
 
     assert status.failed_slot_batch_ids[slot.id] == first.batch_id
     assert retry.source_batch_id == first.batch_id
+
+
+@pytest.mark.asyncio
+async def test_late_variant_success_preserves_sibling_failure_for_retry(
+    service: VNAssetPackService,
+    fake_jobs: FakeJobs,
+    character_id: int,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    pack = service.create_pack(VNAssetPackCreate(title="Mixed Outcomes", primary_character_id=character_id))
+    slot = service.create_slot(pack.id, VNAssetSlotCreate(
+        asset_type="sprite", slot_key="sprite.primary", variant_count=2,
+    ))
+    status = service.start_generation(pack.id, VNAssetGenerationRequest(slot_ids=[slot.id]))
+    worker = VNAssetGenerationWorker(
+        repo=service.repo, jobs_manager=fake_jobs,
+        image_registry=FakeImageRegistry(FakeImageAdapter()), backend_gate=FakeGenerationGate(),
+        save_vn_asset_image=RecordingVNSaver(),
+    )
+    payload = {"pack_id": pack.id, "batch_id": status.batch_id, "user_id": 1}
+    worker.handle_enqueue_batch(payload)
+
+    worker._record_generation_failure(batch_id=status.batch_id, slot_id=slot.id, error="provider failed")
+    await worker._generate_variant(
+        pack=service.repo.get_pack(pack.id), slot=service.repo.get_slot(slot.id),
+        batch=service.repo.get_batch(status.batch_id), character=None,
+        variant_index=1, user_id=1, job=None,
+    )
+
+    failed_slot = service.repo.get_slot(slot.id)
+    assert failed_slot["status"] == "failed"
+    assert failed_slot["last_error"] == "provider failed"
+    assert failed_slot["last_failed_batch_id"] == status.batch_id
+    assert service.retry_slot(pack.id, slot.id).source_batch_id == status.batch_id
+
+
+@pytest.mark.parametrize("newer_failed", [False, True])
+def test_older_batch_failure_cannot_replace_newer_slot_result(
+    service: VNAssetPackService,
+    fake_jobs: FakeJobs,
+    character_id: int,
+    newer_failed: bool,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    pack = service.create_pack(VNAssetPackCreate(title="Ordered Outcomes", primary_character_id=character_id))
+    slot = service.create_slot(pack.id, VNAssetSlotCreate(asset_type="sprite", slot_key="sprite.primary"))
+    older = service.start_generation(pack.id, VNAssetGenerationRequest(slot_ids=[slot.id]))
+    newer = service.start_generation(pack.id, VNAssetGenerationRequest(slot_ids=[slot.id]))
+    worker = VNAssetGenerationWorker(repo=service.repo, jobs_manager=fake_jobs)
+
+    if newer_failed:
+        worker._record_generation_failure(batch_id=newer.batch_id, slot_id=slot.id, error="newer failure")
+    else:
+        service.repo.mark_slot_generation_succeeded(slot.id, newer.batch_id)
+    worker._record_generation_failure(batch_id=older.batch_id, slot_id=slot.id, error="older failure")
+
+    failed_slot = service.repo.get_slot(slot.id)
+    assert failed_slot["status"] == ("failed" if newer_failed else "reviewing")
+    assert failed_slot["last_error"] == ("newer failure" if newer_failed else None)
+    assert failed_slot["last_failed_batch_id"] == (newer.batch_id if newer_failed else None)
+
+
+@pytest.mark.asyncio
+async def test_older_batch_success_cannot_clear_newer_failure(
+    service: VNAssetPackService,
+    fake_jobs: FakeJobs,
+    character_id: int,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    pack = service.create_pack(VNAssetPackCreate(title="Late Success", primary_character_id=character_id))
+    slot = service.create_slot(pack.id, VNAssetSlotCreate(asset_type="sprite", slot_key="sprite.primary"))
+    older = service.start_generation(pack.id, VNAssetGenerationRequest(slot_ids=[slot.id]))
+    worker = VNAssetGenerationWorker(
+        repo=service.repo, jobs_manager=fake_jobs,
+        image_registry=FakeImageRegistry(FakeImageAdapter()), backend_gate=FakeGenerationGate(),
+        save_vn_asset_image=RecordingVNSaver(),
+    )
+    worker.handle_enqueue_batch({"pack_id": pack.id, "batch_id": older.batch_id, "user_id": 1})
+    newer = service.start_generation(pack.id, VNAssetGenerationRequest(slot_ids=[slot.id]))
+    worker._record_generation_failure(batch_id=newer.batch_id, slot_id=slot.id, error="newer failure")
+
+    await worker._generate_variant(
+        pack=service.repo.get_pack(pack.id), slot=service.repo.get_slot(slot.id),
+        batch=service.repo.get_batch(older.batch_id), character=None,
+        variant_index=0, user_id=1, job=None,
+    )
+
+    failed_slot = service.repo.get_slot(slot.id)
+    assert failed_slot["status"] == "failed"
+    assert failed_slot["last_error"] == "newer failure"
+    assert failed_slot["last_failed_batch_id"] == newer.batch_id
+
+
+def test_stale_success_read_cannot_reopen_failed_batch(
+    service: VNAssetPackService,
+    fake_jobs: FakeJobs,
+    character_id: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    pack = service.create_pack(VNAssetPackCreate(title="Sibling Race", primary_character_id=character_id))
+    slot = service.create_slot(pack.id, VNAssetSlotCreate(
+        asset_type="sprite", slot_key="sprite.primary", variant_count=2,
+    ))
+    batch = service.start_generation(pack.id, VNAssetGenerationRequest(slot_ids=[slot.id]))
+    worker = VNAssetGenerationWorker(repo=service.repo, jobs_manager=fake_jobs)
+    original_get_batch = service.repo.get_batch
+    failure_recorded = False
+
+    def read_before_sibling_failure(batch_id: int) -> dict[str, Any] | None:
+        nonlocal failure_recorded
+        snapshot = original_get_batch(batch_id)
+        if not failure_recorded:
+            failure_recorded = True
+            worker._record_generation_failure(batch_id=batch_id, slot_id=slot.id, error="sibling failure")
+        return snapshot
+
+    monkeypatch.setattr(service.repo, "get_batch", read_before_sibling_failure)
+    worker._record_generation_success(batch_id=batch.batch_id)
+    if not failure_recorded:
+        worker._record_generation_failure(batch_id=batch.batch_id, slot_id=slot.id, error="sibling failure")
+
+    stored = original_get_batch(batch.batch_id)
+    assert stored["status"] == "failed"
+    assert stored["failed_count"] == 1
+    assert stored["completed_count"] == 1
 
 
 def test_retry_rejects_source_from_another_pack(
@@ -1386,6 +1590,50 @@ async def test_worker_entrypoint_rejects_payload_owner_mismatch_before_opening_u
                 "payload": {"pack_id": 1, "batch_id": 1, "user_id": 2},
             }
         )
+
+
+@pytest.mark.asyncio
+async def test_generation_api_keeps_event_loop_responsive_during_recipe_capture(
+    chacha_db: CharactersRAGDB,
+    character_id: int,
+    fake_jobs: FakeJobs,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets import service as service_module
+
+    service = VNAssetPackService(chacha_db, owner_user_id=1, jobs_manager=fake_jobs)
+    pack = service.create_pack(VNAssetPackCreate(title="Async Capture", primary_character_id=character_id))
+    service.create_slot(pack.id, VNAssetSlotCreate(asset_type="sprite", slot_key="sprite.primary"))
+    entered = threading.Event()
+    release = threading.Event()
+    original = service_module.build_authored_recipe
+
+    def slow_recipe(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        entered.set()
+        release.wait(timeout=2)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(service_module, "build_authored_recipe", slow_recipe)
+    app = FastAPI()
+    app.include_router(vn_assets_router, prefix="/api/v1/vn")
+    app.dependency_overrides[get_request_user] = lambda: User(id=1, username="vn-generator")
+    app.dependency_overrides[get_chacha_db_for_user] = lambda: chacha_db
+    app.dependency_overrides[vn_assets_endpoint._job_manager] = lambda: fake_jobs
+    url = f"/api/v1/vn/vn-assets/packs/{pack.id}/generate"
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        loop = asyncio.get_running_loop()
+        started_at = loop.time()
+        request_task = asyncio.create_task(client.post(url, json={"idempotency_key": "capture-offload"}))
+        try:
+            await asyncio.to_thread(entered.wait, 2)
+            assert entered.is_set()
+            assert loop.time() - started_at < 1.0
+        finally:
+            release.set()
+        response = await request_task
+
+    assert response.status_code == 202
 
 
 def test_generation_api_enqueues_parent_job(
