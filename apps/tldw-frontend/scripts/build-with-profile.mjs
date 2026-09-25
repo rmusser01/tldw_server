@@ -44,10 +44,17 @@ export function shapeWebuiBuildEnv(profile, env = process.env) {
   const internalApiOrigin = String(nextEnv.TLDW_INTERNAL_API_ORIGIN || "").trim()
 
   if (resolvedProfile === "production") {
-    nextEnv.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    const managed = nextEnv.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE === "managed"
+    nextEnv.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = managed ? "managed" : "quickstart"
     delete nextEnv.NEXT_PUBLIC_API_URL
-    nextEnv.TLDW_INTERNAL_API_ORIGIN =
-      internalApiOrigin || DEFAULT_INTERNAL_API_ORIGIN
+    if (managed) {
+      delete nextEnv.NEXT_PUBLIC_X_API_KEY
+      delete nextEnv.NEXT_PUBLIC_API_BEARER
+      delete nextEnv.TLDW_INTERNAL_API_ORIGIN
+    } else {
+      nextEnv.TLDW_INTERNAL_API_ORIGIN =
+        internalApiOrigin || DEFAULT_INTERNAL_API_ORIGIN
+    }
   } else {
     nextEnv.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "advanced"
   }

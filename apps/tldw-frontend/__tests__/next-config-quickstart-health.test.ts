@@ -6,7 +6,7 @@ let loadId = 0;
 const loadConfig = async (mode: string, internalOrigin: string) => {
   vi.stubEnv('NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE', mode);
   vi.stubEnv('TLDW_INTERNAL_API_ORIGIN', internalOrigin);
-  vi.stubEnv('NEXT_PUBLIC_API_URL', mode === 'quickstart' ? '' : 'https://public.example.test');
+  vi.stubEnv('NEXT_PUBLIC_API_URL', mode === 'quickstart' || mode === 'managed' ? '' : 'https://public.example.test');
   const url = pathToFileURL(path.resolve(__dirname, '../next.config.mjs'));
   url.searchParams.set('health-routing-test', String(++loadId));
   return (await import(/* @vite-ignore */ url.href)).default;
@@ -46,5 +46,11 @@ describe('quickstart public health routing', () => {
     await expect(loadConfig('quickstart', '')).rejects.toThrow(
       'quickstart mode requires TLDW_INTERNAL_API_ORIGIN'
     );
+  });
+
+  it('builds managed WebUI without a private API rewrite or origin', async () => {
+    const config = await loadConfig('managed', '');
+
+    expect(await config.rewrites()).toEqual([]);
   });
 });

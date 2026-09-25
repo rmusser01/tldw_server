@@ -25,7 +25,7 @@ const getQuickstartWebUiCookie = async (
       ? process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE || ""
       : ""
   ).trim()
-  if (deploymentMode !== "quickstart") return undefined
+  if (deploymentMode !== "quickstart" && deploymentMode !== "managed") return undefined
   const expectedCookieOrigin = String(window.location?.origin || "").trim()
   if (!expectedCookieOrigin) return undefined
   const cookieSession = await storage

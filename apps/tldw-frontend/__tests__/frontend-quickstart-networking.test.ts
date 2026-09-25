@@ -136,6 +136,25 @@ describe("frontend quickstart networking", () => {
     ).toThrow(/TLDW_INTERNAL_API_ORIGIN/i)
   })
 
+  it("accepts managed build without baking a private backend origin", async () => {
+    const validateNetworkingConfig = await loadValidateNetworkingConfig()
+
+    expect(validateNetworkingConfig({
+      NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE: "managed",
+      TLDW_INTERNAL_API_ORIGIN: "",
+      NEXT_PUBLIC_API_URL: ""
+    })).toMatchObject({deploymentMode: "managed", publicApiUrl: ""})
+  })
+
+  it("rejects an absolute public API URL in managed mode", async () => {
+    const validateNetworkingConfig = await loadValidateNetworkingConfig()
+
+    expect(() => validateNetworkingConfig({
+      NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE: "managed",
+      NEXT_PUBLIC_API_URL: "http://127.0.0.1:8000"
+    })).toThrow(/NEXT_PUBLIC_API_URL/i)
+  })
+
   it.each([
     ["relative URL", "/api"],
     ["non-HTTP URL", "ftp://app:8000"],

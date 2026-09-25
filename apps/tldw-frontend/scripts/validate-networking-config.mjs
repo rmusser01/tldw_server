@@ -1,4 +1,5 @@
 const QUICKSTART_MODE = "quickstart"
+const MANAGED_MODE = "managed"
 
 function isAbsoluteUrl(value) {
   try {
@@ -36,6 +37,7 @@ export function validateNetworkingConfig(env = process.env) {
   const internalApiOrigin = String(env.TLDW_INTERNAL_API_ORIGIN || "")
   const canonicalInternalApiOrigin = canonicalBareHttpOrigin(internalApiOrigin)
   const publicApiUrl = String(env.NEXT_PUBLIC_API_URL || "").trim()
+  const sameOriginMode = deploymentMode === QUICKSTART_MODE || deploymentMode === MANAGED_MODE
 
   if (deploymentMode === QUICKSTART_MODE && !canonicalInternalApiOrigin) {
     throw new Error(
@@ -44,16 +46,22 @@ export function validateNetworkingConfig(env = process.env) {
   }
 
   if (
-    deploymentMode === QUICKSTART_MODE &&
+    sameOriginMode &&
     publicApiUrl.length > 0 &&
     isAbsoluteUrl(publicApiUrl)
   ) {
     throw new Error(
-      "Invalid WebUI networking config: quickstart mode must not set NEXT_PUBLIC_API_URL to an absolute browser API URL."
+      "Invalid WebUI networking config: same-origin mode must not set NEXT_PUBLIC_API_URL to an absolute browser API URL."
     )
   }
 
-  if (deploymentMode !== QUICKSTART_MODE && !isAbsoluteUrl(publicApiUrl)) {
+  if (deploymentMode === MANAGED_MODE && internalApiOrigin && !canonicalInternalApiOrigin) {
+    throw new Error(
+      "Invalid WebUI networking config: managed mode requires TLDW_INTERNAL_API_ORIGIN to be a canonical HTTP(S) origin when supplied."
+    )
+  }
+
+  if (!sameOriginMode && !isAbsoluteUrl(publicApiUrl)) {
     throw new Error(
       "Invalid WebUI networking config: advanced mode requires NEXT_PUBLIC_API_URL to be an absolute browser API URL."
     )

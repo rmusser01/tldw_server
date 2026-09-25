@@ -34,6 +34,22 @@ describe("shapeWebuiBuildEnv", () => {
     expect(env.TLDW_INTERNAL_API_ORIGIN).toBe("http://127.0.0.1:8000")
   })
 
+  it("preserves managed production mode without baking a private origin", () => {
+    const env = shapeWebuiBuildEnv("production", {
+      NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE: "managed",
+      NEXT_PUBLIC_API_URL: "http://browser-api.example.test",
+      NEXT_PUBLIC_X_API_KEY: "public-key-sentinel",
+      NEXT_PUBLIC_API_BEARER: "public-bearer-sentinel",
+      TLDW_INTERNAL_API_ORIGIN: "http://private-build-sentinel.invalid:9876",
+    })
+
+    expect(env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE).toBe("managed")
+    expect(env.NEXT_PUBLIC_API_URL).toBeUndefined()
+    expect(env.NEXT_PUBLIC_X_API_KEY).toBeUndefined()
+    expect(env.NEXT_PUBLIC_API_BEARER).toBeUndefined()
+    expect(env.TLDW_INTERNAL_API_ORIGIN).toBeUndefined()
+  })
+
   it("requires advanced-mode browser api settings for development", () => {
     const env = shapeWebuiBuildEnv("development", {
       NEXT_PUBLIC_API_URL: "http://127.0.0.1:8000",

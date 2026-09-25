@@ -40,7 +40,7 @@ The code paths above are the planned ownership boundaries. If an existing helper
 **Goal:** Define verified pairing and build a standalone WebUI whose browser API URLs do not depend on private build-time ports.
 **Success Criteria:** A signed test manifest rejects tampering and wrong platform; the managed Next build contains no private backend rewrite or public key; one build works against two private backend origins.
 **Tests:** Manifest pytest; networking and Next config tests; runtime-config/session Vitest; standalone asset inspection.
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 1: Define and verify the paired release manifest
 
@@ -74,29 +74,29 @@ The code paths above are the planned ownership boundaries. If an existing helper
 
 **Interfaces:** Build marker `NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=managed`; runtime-only `TLDW_INTERNAL_API_ORIGIN`; browser transport remains the existing `BrowserTransport` shape with `mode: "quickstart"` for same-origin semantics. The explicit managed build marker distinguishes packaging and Next rewrites from developer quickstart. `validateNetworkingConfig(env)` returns `deploymentMode`, `internalApiOrigin`, `publicApiUrl` unchanged in shape.
 
-- [ ] **Step 1: Write failing tests** that managed mode accepts an empty `NEXT_PUBLIC_API_URL` without a build-time backend URL, `next.config.mjs` returns `rewrites() === []`, and browser HTTP/WebSocket requests resolve to the page origin. Preserve quickstart rewrite and advanced absolute-origin tests. Example:
+- [x] **Step 1: Write failing tests** that managed mode accepts an empty `NEXT_PUBLIC_API_URL` without a build-time backend URL, `next.config.mjs` returns `rewrites() === []`, and browser HTTP/WebSocket requests resolve to the page origin. Preserve quickstart rewrite and advanced absolute-origin tests. Example:
 
   ```ts
   expect(resolveBrowserTransport({surface: "webui-page", deploymentMode: "managed", pageOrigin: "http://127.0.0.1:8080"})).toMatchObject({mode: "quickstart", apiOrigin: ""})
   ```
 
-- [ ] **Step 2: Run** `bun run --cwd apps/tldw-frontend test:run -- __tests__/next-config-quickstart-health.test.ts` and the shared browser-networking test through the workspace Vitest command; expect the new managed assertions to fail.
-- [ ] **Step 3: Implement** managed build validation and no rewrites, map managed browser transport to same origin, and keep the private origin out of `NEXT_PUBLIC_*`. Audit `connection.tsx`, `TldwApiClient.ts`, `browser-websocket.ts`, and `direct-browser-config.ts` for literal `quickstart` comparisons; cover each behavior in a focused regression test. Do not change extension or hosted mode behavior.
+- [x] **Step 2: Run** `bun run --cwd apps/tldw-frontend test:run -- __tests__/next-config-quickstart-health.test.ts` and the shared browser-networking test through the workspace Vitest command; expect the new managed assertions to fail.
+- [x] **Step 3: Implement** managed build validation and no rewrites, map managed browser transport to same origin, and keep the private origin out of `NEXT_PUBLIC_*`. Audit `connection.tsx`, `TldwApiClient.ts`, `browser-websocket.ts`, and `direct-browser-config.ts` for literal `quickstart` comparisons; cover each behavior in a focused regression test. Do not change extension or hosted mode behavior.
 
   ```js
   if (deploymentMode === 'managed') return [];
   // Runtime-only TLDW_INTERNAL_API_ORIGIN remains read by Next API routes.
   ```
 
-- [ ] **Step 4: Run** both targeted suites, existing quickstart runtime-config/session suites, and `bun run --cwd apps/tldw-frontend typecheck`. Build once with `NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=managed` and inspect generated client files for a fixture private origin/master key; expect neither to appear.
-- [ ] **Step 5: Commit** the targeted WebUI/shared-code changes with `feat: add managed same-origin WebUI mode (TASK-13343)`.
+- [x] **Step 4: Run** both targeted suites, existing quickstart runtime-config/session suites, and `bun run --cwd apps/tldw-frontend typecheck`. Build once with `NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=managed` and inspect generated client files for a fixture private origin/master key; expect neither to appear. The managed build and 64 focused tests passed; full typecheck reports 93 existing diagnostics in untouched files, recorded as a WP1 qualification issue.
+- [x] **Step 5: Commit** the targeted WebUI/shared-code changes with `feat: add managed same-origin WebUI mode (TASK-13343)`.
 
 ## Stage 2: Browser/session boundary and gateway
 
 **Goal:** Make the single public origin secure across multiple local installations and functional for HTTP and WebSockets.
 **Success Criteria:** Runtime session exchange works through the gateway, instance cookies do not collide on one host, and the route/auth matrix passes against fake and real upstreams.
 **Tests:** Backend CSRF tests; Next API Vitest; gateway Node tests; Playwright cookie lifecycle, uploads, streaming, WebSockets.
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 3: Scope session and CSRF cookies to one managed instance
 

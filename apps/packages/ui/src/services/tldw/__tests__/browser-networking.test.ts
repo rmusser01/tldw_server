@@ -25,6 +25,24 @@ describe("browser-networking", () => {
     )
   })
 
+  it("uses the page origin for managed WebUI HTTP and WebSocket traffic", () => {
+    const resolved = resolveBrowserTransport({
+      surface: "webui-page",
+      deploymentMode: "managed",
+      pageOrigin: "http://127.0.0.1:8080",
+      apiOrigin: ""
+    })
+
+    expect(buildBrowserHttpBase(resolved)).toBe("")
+    expect(buildBrowserWebSocketBase(resolved)).toBe("ws://127.0.0.1:8080")
+    expect(resolveWebUiQuickstartServerUrl({
+      surface: "webui-page",
+      deploymentMode: "managed",
+      pageOrigin: "http://127.0.0.1:8080",
+      apiOrigin: ""
+    })).toBe("http://127.0.0.1:8080")
+  })
+
   it("requires an explicit absolute api origin in advanced mode", () => {
     expect(() =>
       resolveBrowserTransport({

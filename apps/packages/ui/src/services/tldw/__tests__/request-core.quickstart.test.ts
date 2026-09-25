@@ -73,6 +73,31 @@ describe("tldwRequest quickstart and advanced transport", () => {
     expect(requestHeaders.get("Authorization")).toBeNull()
   })
 
+  it("uses the managed WebUI origin for cookie-session requests", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "managed"
+    document.cookie = "csrf_token=csrf-123; Path=/"
+    const fetchMock = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }))
+
+    const { tldwRequest } = await import("@/services/tldw/request-core")
+    await tldwRequest(
+      { path: "/api/v1/notes", method: "POST", body: { title: "Managed note" } },
+      {
+        getConfig: async () => ({
+          serverUrl: window.location.origin,
+          authMode: "single-user",
+          authSource: "cookie-session"
+        }),
+        fetchFn: fetchMock
+      }
+    )
+
+    const call = fetchMock.mock.calls[0]
+    expect(call?.[0]).toBe("/api/v1/notes")
+    const init = call[1]
+    expect(init.credentials).toBe("same-origin")
+    expect(new Headers(init.headers).get("X-CSRF-Token")).toBe("csrf-123")
+  })
+
   it("uses cookie auth on safe methods without attaching csrf", async () => {
     process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
     document.cookie = "csrf_token=csrf-123; Path=/"

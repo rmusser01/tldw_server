@@ -131,7 +131,9 @@ export const resolveAdvancedRequestTransportGuard = ({
 export const resolveBrowserTransportMode = (
   deploymentMode?: string | null
 ): BrowserTransportMode =>
-  normalizeString(deploymentMode) === "quickstart" ? "quickstart" : "advanced"
+  ["quickstart", "managed"].includes(normalizeString(deploymentMode))
+    ? "quickstart"
+    : "advanced"
 
 export const isLoopbackHost = (hostname: string): boolean => {
   const normalized = normalizeString(hostname).toLowerCase()
