@@ -4,7 +4,7 @@ title: Harden VN variant terminal and item visibility invariants
 status: Done
 assignee: []
 created_date: '2026-09-25 17:24'
-updated_date: '2026-09-25 17:41'
+updated_date: '2026-09-25 17:42'
 labels:
   - vn-assets
   - backend
@@ -13,6 +13,7 @@ dependencies:
   - TASK-13358
 references:
   - 'https://github.com/rmusser01/tldw_server/issues/2021'
+  - 'https://github.com/rmusser01/tldw_server/pull/3016'
 priority: high
 ---
 
