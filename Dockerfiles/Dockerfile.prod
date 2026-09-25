@@ -58,8 +58,8 @@ COPY --chown=appuser:appuser THIRD_PARTY_NOTICES.txt /app/THIRD_PARTY_NOTICES.tx
 COPY Dockerfiles/entrypoints/tldw-app-first-run.sh /usr/local/bin/tldw-app-first-run
 
 # Create writable runtime DB directory without copying host runtime data.
-RUN mkdir -p /app/Databases && \
-    chown appuser:appuser /app/Databases && \
+RUN mkdir -p /app/Databases /app/managed-config && \
+    chown appuser:appuser /app/Databases /app/managed-config && \
     chmod +x /usr/local/bin/tldw-app-first-run
 USER appuser
 

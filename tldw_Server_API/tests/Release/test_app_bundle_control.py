@@ -238,6 +238,41 @@ def test_verify_command_does_not_create_or_change_state(
     assert config.gateway_hop_secret not in output.out + output.err
 
 
+def test_helper_pinned_signer_must_match_manifest(
+    tmp_path: Path,
+    release: tuple[Path, Path, Path, dict[str, bytes]],
+) -> None:
+    bundle, manifest, signature, keys = release
+    trusted = tmp_path / "trusted"
+    trusted.mkdir()
+    (trusted / "test-key.pub").write_bytes(keys["test-key"])
+    state = tmp_path / "instance"
+
+    assert (
+        main(
+            [
+                "init",
+                "--state",
+                str(state),
+                "--manifest",
+                str(manifest),
+                "--signature",
+                str(signature),
+                "--platform",
+                "linux/amd64",
+                "--bundle-root",
+                str(bundle),
+                "--trusted-keys",
+                str(trusted),
+                "--expected-signer",
+                "different-key",
+            ]
+        )
+        == 1
+    )
+    assert not state.exists()
+
+
 def test_missing_required_platform_image_fails(
     release: tuple[Path, Path, Path, dict[str, bytes]],
 ) -> None:

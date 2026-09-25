@@ -176,7 +176,7 @@ The code paths above are the planned ownership boundaries. If an existing helper
 - [x] **Step 2: Run** `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Release/test_app_bundle_control.py -q`; expected collection failure observed before implementation, and env-injection regression was red before its guard.
 - [x] **Step 3: Implement** transactional initialization through a temporary directory + atomic replace, strict ownership/permissions, secret-safe messages, and refusal to overwrite valid credentials. WebUI/gateway/control Dockerfiles and a frozen gateway-only dependency lock are present; the managed WebUI stage omits build-time private origins/keys and copies traced plus public/static assets. Actual image builds remain in Step 4.
 - [ ] **Step 4: Run** control tests, Docker builds for both Linux architectures in CI, image-content guards, `docker image inspect`, and scoped Bandit. Verify no development database, `.env`, `node_modules` source tree, or build cache leaks into runtime images. Local verifier tests: 25 pass across manifest/control; gateway frozen lock and Node syntax pass; Bandit 0 findings. Docker Desktop's socket reports “Docker Desktop is unable to start” on this host, so image builds/inspection and live asset smoke remain open for Task 7 CI or a repaired daemon.
-- [ ] **Step 5: Commit** image/control changes with `feat: build paired managed application images (TASK-13343)`.
+- [x] **Step 5: Commit** image/control changes at `80ba4ec172` with `feat: build paired managed application images (TASK-13343)`; image execution remains an explicit open acceptance check in Step 4.
 
 ### Task 6: Add Docker-only host helpers and Compose bundle
 
@@ -184,22 +184,22 @@ The code paths above are the planned ownership boundaries. If an existing helper
 
 **Interfaces:** Host helpers call only Docker/Compose. The official bundle embeds a fixed control-image digest and trusted key ID; a local CI test bundle uses its own explicitly trusted test key/registry. `start` verifies the signed manifest through a one-shot pinned control image before `compose up`; configuration and project identity live in an OS user data directory outside the extracted bundle. `stop` uses the persisted project ID and retains data. No script accepts an arbitrary image URL or shell fragment from the WebUI.
 
-- [ ] **Step 1: Write failing helper tests** with a fake `docker` executable recording arguments. Check first-start order (`control verify/init` before `compose up`), repeat start reuse, stop from a different working directory, unavailable Docker/Compose, occupied public port, bad signature, and private-only backend/Next ports. Example:
+- [x] **Step 1: Write failing helper tests** with a fake `docker` executable recording arguments. Check first-start order (`control verify/init` before `compose up`), repeat start reuse, stop from a different working directory, unavailable Docker/Compose, occupied public port, bad signature, and private-only backend/Next ports. The extracted-directory fixture runs away from the checkout and records every Docker argument.
 
   ```python
   assert calls.index("control:verify") < calls.index("compose:up")
   assert "ports" not in compose["services"]["app"]
   ```
 
-- [ ] **Step 2: Run** the helper pytest file; expect missing-helper failures.
-- [ ] **Step 3: Implement** the digest-pinned Compose services for gateway, WebUI, backend, and one-shot control without Postgres/Redis defaults. `start` finds its bundle directory independent of the shell CWD, selects a documented state root, calls control verification/initialization, then uses `docker compose --project-name <persisted-id> --env-file <state>/config.env -f <bundle>/compose.yaml up -d`. Bind only `127.0.0.1:8080` (or the persisted first-install alternative) on the host. `stop` does not remove volumes. PowerShell follows the same contract without requiring bash.
+- [x] **Step 2: Run** the helper pytest file; expected missing-helper failures observed before implementation.
+- [x] **Step 3: Implement** the digest-pinned Compose services for gateway, WebUI, backend, and one-shot control without Postgres/Redis defaults. Source helper templates require candidate packaging to embed a fixed control-image digest and trusted key ID; `start` runs the pinned one-shot control image to verify/init, pulls signed image refs, then starts Compose with a saved project ID. Only the gateway binds host loopback. Shell and PowerShell stop/status keep volumes. The backend image now exposes a writable managed-config mount point for persistent generated keys.
 
   ```sh
   docker compose --project-name "$project_id" --env-file "$state_dir/config.env" -f "$bundle_dir/compose.yaml" up -d
   ```
 
-- [ ] **Step 4: Run** helper tests; run `docker compose config` for both target architectures and actual first/repeat/stop/restart flows from an extracted directory outside the checkout. Assert server data and credentials persist, browser setup works, and the backend/Next are unreachable directly from the host. Add a negative test for an unrelated process already bound to 8080.
-- [ ] **Step 5: Commit** bundle/helpers/docs with `feat: start paired Docker bundle from release archive (TASK-13343)`.
+- [ ] **Step 4: Run** helper tests; run `docker compose config` for both target architectures and actual first/repeat/stop/restart flows from an extracted directory outside the checkout. Assert server data and credentials persist, browser setup works, and the backend/Next are unreachable directly from the host. Add a negative test for an unrelated process already bound to 8080. Shell/fake-Docker control-helper suite and Compose config pass locally; live container and PowerShell runtime checks remain pending Docker/Windows CI.
+- [x] **Step 5: Commit** bundle/helpers/docs with `feat: start paired Docker bundle from release archive (TASK-13343)`; live Docker and Windows execution remain open in Step 4 until qualification CI runs.
 
 ## Stage 4: Qualification and release boundary
 

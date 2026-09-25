@@ -1,0 +1,65 @@
+services:
+  app:
+    image: ${TLDW_BACKEND_IMAGE:?Signed backend image is required}
+    restart: unless-stopped
+    environment:
+      AUTH_MODE: single_user
+      SINGLE_USER_API_KEY: ${SINGLE_USER_API_KEY:?Instance API key is required}
+      CSRF_COOKIE_NAME: ${CSRF_COOKIE_NAME:?Instance CSRF name is required}
+      TLDW_ENV_FILE: /app/managed-config/.env
+      TLDW_RUN_AUTH_INIT_ON_START: "1"
+      HOST: 0.0.0.0
+      PORT: "8000"
+      UVICORN_WORKERS: "1"
+    volumes:
+      - backend_data:/app/Databases
+      - backend_config:/app/managed-config
+    expose:
+      - "8000"
+    networks:
+      - private
+
+  webui:
+    image: ${TLDW_WEBUI_IMAGE:?Signed WebUI image is required}
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE: managed
+      TLDW_WEBUI_EXPOSE_RUNTIME_AUTH: "1"
+      TLDW_INTERNAL_API_ORIGIN: http://app:8000
+      TLDW_GATEWAY_HOP_SECRET: ${TLDW_GATEWAY_HOP_SECRET:?Gateway hop secret is required}
+      SINGLE_USER_API_KEY: ${SINGLE_USER_API_KEY:?Instance API key is required}
+      SINGLE_USER_SESSION_COOKIE_NAME: ${SINGLE_USER_SESSION_COOKIE_NAME:?Instance session cookie is required}
+      CSRF_COOKIE_NAME: ${CSRF_COOKIE_NAME:?Instance CSRF name is required}
+    expose:
+      - "3000"
+    networks:
+      - private
+
+  gateway:
+    image: ${TLDW_GATEWAY_IMAGE:?Signed gateway image is required}
+    restart: unless-stopped
+    depends_on:
+      webui:
+        condition: service_healthy
+    environment:
+      TLDW_PUBLIC_HOST: 127.0.0.1
+      TLDW_PUBLIC_PORT: ${TLDW_PUBLIC_PORT:?Public port is required}
+      TLDW_GATEWAY_LISTEN_HOST: 0.0.0.0
+      TLDW_GATEWAY_LISTEN_PORT: "8080"
+      TLDW_INTERNAL_API_ORIGIN: http://app:8000
+      TLDW_INTERNAL_WEBUI_ORIGIN: http://webui:3000
+      TLDW_GATEWAY_HOP_SECRET: ${TLDW_GATEWAY_HOP_SECRET:?Gateway hop secret is required}
+    ports:
+      - "127.0.0.1:${TLDW_PUBLIC_PORT}:8080"
+    networks:
+      - private
+
+networks:
+  private:
+
+volumes:
+  backend_data:
+  backend_config:

@@ -312,6 +312,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--platform", choices=("linux/amd64", "linux/arm64"), required=True)
     parser.add_argument("--bundle-root", type=Path, default=Path("/bundle"))
     parser.add_argument("--trusted-keys", type=Path, default=Path("/opt/tldw/trusted-keys"))
+    parser.add_argument("--expected-signer")
     parser.add_argument("--public-port", type=int)
     args = parser.parse_args(argv)
     try:
@@ -322,6 +323,8 @@ def main(argv: list[str] | None = None) -> int:
             platform=args.platform,
             bundle_root=args.bundle_root,
         )
+        if args.expected_signer is not None and verified.manifest.signer_id != args.expected_signer:
+            raise BundleControlError("manifest signer differs from pinned helper key identity")
         if args.command == "init":
             initialize_bundle(args.state, verified, public_port=args.public_port)
         elif args.state.exists() or args.state.is_symlink():

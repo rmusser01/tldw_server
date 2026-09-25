@@ -4,7 +4,7 @@ title: Plan and implement paired Docker distribution and runtime gateway
 status: In Progress
 assignee: []
 created_date: '2026-09-23 06:15'
-updated_date: '2026-09-25 17:08'
+updated_date: '2026-09-25 17:17'
 labels:
   - distribution
   - docker
@@ -53,6 +53,8 @@ WP1 Task 3 cookie isolation complete: backend CSRF cookie setting and logout cle
 WP1 Task 4 gateway code ready: route table, Host/Origin checks, stripping forwarded/Next control/hop headers, private Next hop, streaming proxy including cancellation and WebSocket upgrade, read-only maintenance status. http-proxy-middleware 4.2.0 is pinned. Twelve real-socket Node checks and 145 Next runtime/session tests pass; rebuilt standalone Next through gateway proves direct runtime auth unavailable and gateway cookie exchange successful without forwarding the master key on normal backend routes. Bun frozen lock, lint, syntax, token sync, and bundle budget pass. Full frontend typecheck still has the same 93 unrelated diagnostics. Real FastAPI extracted-bundle and two-instance browser smoke remain WP1 qualification gates.
 
 WP1 Task 5 code/control slice: control tests red then 10 passed; full manifest+control 25 passed. Managed WebUI target now Node 24 with no build-time private API origin/key; gateway has dedicated frozen 14-package lock and Node 24 image; one-shot control image embeds a build-context trusted public key set. Docker image builds, inspect, and live asset smoke remain open: Docker Desktop socket on this host responds "Docker Desktop is unable to start" despite supported CLI/direct launch attempts. CI qualification in Task 7 must run those checks before acceptance. Scoped Bandit: 0 findings.
+
+WP1 Task 6 bundle/helper source ready: signed-control verify/init precedes Compose pull/up; fixed digest/key placeholders are filled only during candidate packaging; shell and PowerShell start/stop/status use persisted state and project ID. Compose publishes only loopback gateway, persists backend DB/config volumes, and has no default Postgres/Redis. 35 manifest/control/helper tests pass, shell syntax passes, Compose config validates for amd64 and arm64, Bandit 0 new findings. Local live Docker and Windows PowerShell execution remain unverified because Docker Desktop cannot start here and pwsh is unavailable; Task 7 CI must exercise those gates.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
