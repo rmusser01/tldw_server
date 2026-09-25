@@ -752,8 +752,8 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 72  # Native fork storage after Persona and history projections
-    _POSTGRES_SCHEMA_VERSION = 76
+    _CURRENT_SCHEMA_VERSION = 73  # Companion storage after Persona, history, and native fork migrations
+    _POSTGRES_SCHEMA_VERSION = 77
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
     _NOTE_TASK_V60_TABLES = (
@@ -7413,6 +7413,64 @@ UPDATE db_schema_version
    AND version = 66;
 """
 
+    _MIGRATION_SQL_V72_TO_V73_PERSONA_COMPANION = """
+ALTER TABLE persona_visual_packs ADD COLUMN companion_behavior_json TEXT;
+
+CREATE TABLE IF NOT EXISTS persona_buddy_preferences (
+  user_id      TEXT PRIMARY KEY,
+  ambient_mode TEXT NOT NULL CHECK(ambient_mode IN ('off', 'expressive', 'roaming')),
+  version      INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+  created_at   TEXT NOT NULL,
+  updated_at   TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS persona_visual_pack_reviews (
+  id               TEXT PRIMARY KEY,
+  pack_id          TEXT NOT NULL REFERENCES persona_visual_packs(id) ON DELETE CASCADE,
+  user_id          TEXT NOT NULL,
+  reviewer_user_id TEXT NOT NULL,
+  fingerprint      TEXT NOT NULL CHECK(length(fingerprint) = 64),
+  pack_version     INTEGER NOT NULL CHECK(pack_version >= 1),
+  reviewed_at      TEXT NOT NULL,
+  created_at       TEXT NOT NULL,
+  UNIQUE(pack_id, fingerprint)
+);
+CREATE INDEX IF NOT EXISTS idx_persona_visual_pack_reviews_pack
+  ON persona_visual_pack_reviews(pack_id, user_id, reviewed_at);
+
+UPDATE db_schema_version SET version = 73
+ WHERE schema_name = 'rag_char_chat_schema' AND version = 72;
+"""
+
+    _MIGRATION_SQL_V76_TO_V77_PERSONA_COMPANION_POSTGRES = """
+ALTER TABLE persona_visual_packs ADD COLUMN IF NOT EXISTS companion_behavior_json TEXT;
+
+CREATE TABLE IF NOT EXISTS persona_buddy_preferences (
+  user_id      TEXT PRIMARY KEY,
+  ambient_mode TEXT NOT NULL CHECK(ambient_mode IN ('off', 'expressive', 'roaming')),
+  version      INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+  created_at   TIMESTAMP NOT NULL,
+  updated_at   TIMESTAMP NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS persona_visual_pack_reviews (
+  id               TEXT PRIMARY KEY,
+  pack_id          TEXT NOT NULL REFERENCES persona_visual_packs(id) ON DELETE CASCADE,
+  user_id          TEXT NOT NULL,
+  reviewer_user_id TEXT NOT NULL,
+  fingerprint      TEXT NOT NULL CHECK(length(fingerprint) = 64),
+  pack_version     INTEGER NOT NULL CHECK(pack_version >= 1),
+  reviewed_at      TIMESTAMP NOT NULL,
+  created_at       TIMESTAMP NOT NULL,
+  UNIQUE(pack_id, fingerprint)
+);
+CREATE INDEX IF NOT EXISTS idx_persona_visual_pack_reviews_pack
+  ON persona_visual_pack_reviews(pack_id, user_id, reviewed_at);
+
+UPDATE db_schema_version SET version = 77
+ WHERE schema_name = 'rag_char_chat_schema' AND version = 76;
+"""
+
     _MIGRATION_SQL_V66_TO_V67_POSTGRES = """
 ALTER TABLE quizzes
   ADD COLUMN IF NOT EXISTS activity_type TEXT NOT NULL DEFAULT 'questions';
@@ -8645,6 +8703,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (69, "_migrate_from_v69_to_v70"),
             (70, "_migrate_from_v70_to_v71"),
             (71, "_migrate_from_v71_to_v72"),
+            (72, "_migrate_from_v72_to_v73_persona_companion"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
@@ -17880,6 +17939,35 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if self._get_db_version(conn) != 68:
             raise SchemaError("Keyword survivor SQLite migration failed version verification.")  # noqa: TRY003
 
+    def _migrate_from_v72_to_v73_persona_companion(self, conn: sqlite3.Connection) -> None:
+        """Add Persona companion preferences and immutable visual-pack reviews."""
+        if self._get_db_version(conn) != 72:
+            raise SchemaError("Persona companion migration requires SQLite schema V72.")  # noqa: TRY003
+        migration_sql = self._MIGRATION_SQL_V72_TO_V73_PERSONA_COMPANION
+        existing_columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info('persona_visual_packs')")
+        }
+        if "companion_behavior_json" in existing_columns:
+            migration_sql = migration_sql.replace(
+                "ALTER TABLE persona_visual_packs ADD COLUMN companion_behavior_json TEXT;", ""
+            )
+        for statement in split_sql_statements(migration_sql):
+            conn.execute(statement)
+        if self._get_db_version(conn) != 73:
+            raise SchemaError("Persona companion SQLite migration failed version verification.")  # noqa: TRY003
+
+    def _migrate_from_v76_to_v77_persona_companion_postgres(self, conn: Any) -> None:
+        """Add Persona companion storage in the PostgreSQL migration transaction."""
+        if self._get_schema_version_postgres(conn) != 76:
+            raise SchemaError("Persona companion migration requires PostgreSQL schema V76.")  # noqa: TRY003
+        self._apply_postgres_migration_script(
+            self._MIGRATION_SQL_V76_TO_V77_PERSONA_COMPANION_POSTGRES,
+            conn,
+            expected_version=77,
+        )
+        if self._get_schema_version_postgres(conn) != 77:
+            raise SchemaError("Persona companion PostgreSQL migration failed version verification.")  # noqa: TRY003
+
     def _migrate_from_v69_to_v70_postgres(self, conn: Any) -> None:
         """Add local tombstone metadata in the existing PostgreSQL migration transaction."""
         if self._get_schema_version_postgres(conn) != 69:
@@ -20958,6 +21046,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     if target_version >= 72 and current_db_version == 71:
                         self._migrate_from_v71_to_v72(conn)
                         current_db_version = self._get_db_version(conn)
+                    if target_version >= 73 and current_db_version == 72:
+                        self._migrate_from_v72_to_v73_persona_companion(conn)
+                        current_db_version = self._get_db_version(conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
                     conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_created_at ON flashcards(created_at)")
@@ -21422,6 +21513,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     current_db_version = self._get_db_version(conn)
                 if target_version >= 72 and current_db_version == 71:
                     self._migrate_from_v71_to_v72(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 73 and current_db_version == 72:
+                    self._migrate_from_v72_to_v73_persona_companion(conn)
                     current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
@@ -25728,6 +25822,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._migrate_from_v75_to_v76_postgres(conn)
                 self._runtime_schema_version = 76
                 current_version = 76
+
+            if target_version >= 77 and current_version < 77:
+                self._migrate_from_v76_to_v77_persona_companion_postgres(conn)
+                self._runtime_schema_version = 77
+                current_version = 77
 
             if current_version < target_version:
                 logger.warning(
@@ -45779,10 +45878,18 @@ for _persona_state_store_method in (
     "get_persona_buddy",
     "list_persona_buddies",
     "upsert_persona_buddy",
+    "get_persona_buddy_preferences",
+    "upsert_persona_buddy_preferences",
+    "patch_persona_buddy_overlay_preferences",
     "create_persona_visual_pack",
+    "get_persona_visual_pack_for_user",
     "get_persona_visual_pack",
     "list_persona_visual_packs",
     "get_active_persona_visual_pack",
+    "create_persona_visual_pack_review",
+    "get_persona_visual_pack_current_review",
+    "list_persona_visual_pack_current_reviews",
+    "update_persona_visual_pack_payload",
     "activate_persona_visual_pack",
     "deactivate_persona_visual_pack",
     "update_persona_visual_pack_manifest",
