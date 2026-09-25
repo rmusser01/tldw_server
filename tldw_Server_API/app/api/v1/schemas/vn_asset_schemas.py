@@ -239,6 +239,7 @@ class VNAssetGenerationRequest(BaseModel):
         le=DEFAULT_VN_ASSET_SLOT_VARIANT_LIMIT,
     )
     options: dict[str, Any] = Field(default_factory=dict)
+    source_batch_id: int | None = Field(default=None, strict=True, ge=1)
     idempotency_key: str | None = Field(default=None, min_length=1, max_length=160)
 
 
@@ -266,6 +267,10 @@ class VNAssetGenerationStatusResponse(BaseModel):
     """Serialized VN asset generation batch status."""
 
     batch_id: int | None = None
+    source_batch_id: int | None = None
+    recipe_available: bool | None = None
+    selected_slot_ids: list[int] = Field(default_factory=list)
+    failed_slot_batch_ids: dict[int, int] = Field(default_factory=dict)
     job_batch_id: str | None = None
     status: str
     total_slots: int = 0
