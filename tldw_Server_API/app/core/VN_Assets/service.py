@@ -739,8 +739,15 @@ class VNAssetPackService:
             )
         ):
             raise ValueError("vn_asset_retry_source_unavailable")
-        recipe = load_recipe(source["recipe_json"], pack_id=pack_id, owner_user_id=owner_user_id)
-        authored_slot = slot_recipe(recipe, slot_id)
+        try:
+            recipe = load_recipe(source["recipe_json"], pack_id=pack_id, owner_user_id=owner_user_id)
+            authored_slot = slot_recipe(recipe, slot_id)
+        except ValueError as exc:
+            logger.warning(
+                "VN asset Retry recipe rejected: batch_id={} pack_id={} slot_id={} owner_user_id={} code={}",
+                source["id"], pack_id, slot_id, owner_user_id, str(exc),
+            )
+            raise
         count = int(authored_slot["variant_count"])
         if request.variant_count is not None and request.variant_count != count:
             raise ValueError("vn_asset_retry_override_conflict")
@@ -979,16 +986,29 @@ class VNAssetPackService:
         )
 
     def _generation_status_response(self, row: Mapping[str, Any]) -> VNAssetGenerationStatusResponse:
+        failed_slot_batch_ids = {
+            int(slot["id"]): int(slot["last_failed_batch_id"])
+            for slot in self.repo.list_slots(int(row["pack_id"]))
+            if slot.get("last_failed_batch_id") is not None
+            and (slot.get("last_error") or slot.get("status") == SLOT_STATUS_FAILED)
+        }
+        source_batches = {
+            batch_id: self.repo.get_batch(batch_id)
+            for batch_id in set(failed_slot_batch_ids.values())
+        }
         return VNAssetGenerationStatusResponse(
             batch_id=int(row["id"]),
             source_batch_id=row.get("source_batch_id"),
             recipe_available=row.get("recipe_json") is not None,
             selected_slot_ids=_batch_selected_slot_ids(row),
-            failed_slot_batch_ids={
-                int(slot["id"]): int(slot["last_failed_batch_id"])
-                for slot in self.repo.list_slots(int(row["pack_id"]))
-                if slot.get("last_failed_batch_id") is not None
-                and (slot.get("last_error") or slot.get("status") == SLOT_STATUS_FAILED)
+            failed_slot_batch_ids=failed_slot_batch_ids,
+            failed_slot_recipe_available={
+                slot_id: bool(
+                    (source := source_batches[batch_id])
+                    and int(source["pack_id"]) == int(row["pack_id"])
+                    and source["recipe_json"] is not None
+                )
+                for slot_id, batch_id in failed_slot_batch_ids.items()
             },
             job_batch_id=row["job_batch_id"],
             status=str(row["status"]),

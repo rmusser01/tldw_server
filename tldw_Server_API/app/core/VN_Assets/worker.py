@@ -19,11 +19,6 @@ from tldw_Server_API.app.core.Image_Generation.adapters.base import ImageGenRequ
 from tldw_Server_API.app.core.Image_Generation.config import get_image_generation_config, resolve_image_generation_model
 from tldw_Server_API.app.core.Storage.generated_file_helpers import save_and_register_vn_asset_image
 from tldw_Server_API.app.core.VN_Assets.concurrency import get_default_backend_generation_gate
-from tldw_Server_API.app.core.VN_Assets.constants import (
-    SLOT_STATUS_FAILED,
-    SLOT_STATUS_GENERATING,
-    SLOT_STATUS_REVIEWING,
-)
 from tldw_Server_API.app.core.VN_Assets.jobs import (
     VN_ASSET_ENQUEUE_BATCH_JOB_TYPE,
     VN_ASSET_GENERATE_VARIANT_JOB_TYPE,
@@ -120,7 +115,11 @@ class VNAssetGenerationWorker:
         enqueued_count = 0
         try:
             for slot in slots:
-                slot_variant_count = int(slot["variant_count"]) if batch.get("recipe_json") is not None else int(variant_count_override or slot["variant_count"])
+                slot_variant_count = (
+                    int(slot["variant_count"])
+                    if batch.get("recipe_json") is not None
+                    else int(variant_count_override or slot["variant_count"])
+                )
                 for variant_index in range(slot_variant_count):
                     create_generate_variant_job(
                         self.jobs_manager,
@@ -585,8 +584,15 @@ class VNAssetGenerationWorker:
         slot_id = int(slot["id"])
         batch_id = int(batch["id"])
         if batch.get("recipe_json") is not None:
-            recipe = load_recipe(batch["recipe_json"], pack_id=pack_id, owner_user_id=user_id)
-            authored = slot_recipe(recipe, slot_id)
+            try:
+                recipe = load_recipe(batch["recipe_json"], pack_id=pack_id, owner_user_id=user_id)
+                authored = slot_recipe(recipe, slot_id)
+            except ValueError as exc:
+                logger.warning(
+                    "VN asset worker recipe rejected: batch_id={} pack_id={} slot_id={} owner_user_id={} code={}",
+                    batch_id, pack_id, slot_id, user_id, str(exc),
+                )
+                raise
             if variant_index < 0 or variant_index >= int(authored["variant_count"]):
                 raise ValueError("vn_asset_recipe_variant_mismatch")
             execution = slot_recipe(self._execution_recipe(batch), slot_id)
@@ -655,7 +661,7 @@ class VNAssetGenerationWorker:
             request_id=f"vn_asset:{pack_id}:{slot_id}:{batch_id}:{variant_index}",
         )
 
-        self.repo.update_slot(slot_id, {"status": SLOT_STATUS_GENERATING, "last_error": None})
+        self.repo.mark_slot_generation_started(slot_id, batch_id)
         with self.backend_gate.try_acquire(backend, model=model) as lease:
             if not lease.acquired:
                 raise ValueError("vn_asset_backend_busy")
@@ -720,7 +726,7 @@ class VNAssetGenerationWorker:
         except Exception:
             self.repo.delete_item(item_id)
             raise
-        self.repo.update_slot(slot_id, {"status": SLOT_STATUS_REVIEWING, "last_error": None, "last_failed_batch_id": None})
+        self.repo.mark_slot_generation_succeeded(slot_id, batch_id)
         self._record_generation_success(batch_id=batch_id)
         logger.info(
             "VN asset variant generated: pack_id={} slot_id={} item_id={} backend={}",
@@ -747,6 +753,7 @@ class VNAssetGenerationWorker:
         return str(backend)
 
     def _resolve_slot_execution(self, slot: Mapping[str, Any], config: Any) -> dict[str, Any]:
+        """Pin the public backend/model selection without persisting local paths."""
         backend = self._resolve_backend({"default_backend": slot.get("requested_backend")}, {})
         resolved = {
             "slot_id": slot["slot_id"],
@@ -762,40 +769,27 @@ class VNAssetGenerationWorker:
 
     @staticmethod
     def _execution_recipe(batch: Mapping[str, Any]) -> dict[str, Any]:
+        """Read the batch's pinned execution recipe or reject an invalid snapshot."""
         try:
             recipe = json.loads(batch["execution_recipe_json"])
         except (TypeError, ValueError) as exc:
             raise ValueError("vn_asset_execution_recipe_unavailable") from exc
-        if not isinstance(recipe, dict) or recipe.get("version") != RECIPE_VERSION or not isinstance(recipe.get("slots"), list):
+        if (
+            not isinstance(recipe, dict)
+            or recipe.get("version") != RECIPE_VERSION
+            or not isinstance(recipe.get("slots"), list)
+        ):
             raise ValueError("vn_asset_execution_recipe_invalid")
         return recipe
 
     def _record_generation_success(self, *, batch_id: int) -> None:
-        batch = self.repo.get_batch(batch_id)
-        if batch is None:
-            return
-        completed_count = int(batch["completed_count"] or 0) + 1
-        planned_count = int(batch["planned_count"] or batch["total_variants"] or 0)
-        fields: dict[str, Any] = {"completed_count": completed_count}
-        if not _is_terminal_batch_status(batch["status"]):
-            if planned_count and completed_count >= planned_count:
-                fields["status"] = "completed"
-                fields["completed_at"] = _utc_now()
-            else:
-                fields["status"] = "processing"
-        self.repo.update_batch(batch_id, fields)
+        """Advance batch completion without reopening a terminal batch."""
+        self.repo.record_batch_variant_success(batch_id)
 
     def _record_generation_failure(self, *, batch_id: int, slot_id: int, error: str) -> None:
-        self.repo.update_slot(slot_id, {
-            "status": SLOT_STATUS_FAILED,
-            "last_error": error,
-            "last_failed_batch_id": batch_id,
-        })
-        batch = self.repo.get_batch(batch_id)
-        if batch is None:
-            return
-        failed_count = int(batch["failed_count"] or 0) + 1
-        self.repo.update_batch(batch_id, {"status": "failed", "failed_count": failed_count})
+        """Record an applicable slot failure and mark the batch failed."""
+        self.repo.mark_slot_generation_failed(slot_id, batch_id, error)
+        self.repo.record_batch_variant_failure(batch_id)
 
     def _cancel_terminal_batch_jobs(
         self,
@@ -1037,7 +1031,3 @@ def _job_id(job: Mapping[str, Any] | None) -> str | None:
     if not job:
         return None
     return _first_text(job.get("id"), job.get("uuid"))
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()

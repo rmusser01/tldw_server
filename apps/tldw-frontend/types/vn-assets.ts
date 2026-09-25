@@ -136,6 +136,7 @@ export interface VNAssetGenerationStatus {
   recipe_available?: boolean | null;
   selected_slot_ids?: number[];
   failed_slot_batch_ids?: Record<number, number>;
+  failed_slot_recipe_available?: Record<number, boolean>;
   job_batch_id?: string | null;
   status: string;
   total_slots?: number;

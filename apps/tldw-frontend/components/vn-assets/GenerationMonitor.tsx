@@ -49,6 +49,8 @@ export default function GenerationMonitor({
   const canCancelGeneration = generationActive && !busy;
   const failedSlots = slots.filter((slot) => slot.status === 'failed' || slot.last_error);
   const legacyRetryUnavailable = (slotId: number): boolean => {
+    const sourceAvailable = generation?.failed_slot_recipe_available?.[slotId];
+    if (sourceAvailable !== undefined) return !sourceAvailable;
     if (generation?.recipe_available !== false) return false;
     const sourceBatchId = generation.failed_slot_batch_ids?.[slotId];
     return sourceBatchId === generation.batch_id ||

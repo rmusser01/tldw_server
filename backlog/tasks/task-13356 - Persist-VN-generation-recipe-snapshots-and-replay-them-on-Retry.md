@@ -4,7 +4,7 @@ title: Persist VN generation recipe snapshots and replay them on Retry
 status: In Progress
 assignee: []
 created_date: '2026-09-25 16:11'
-updated_date: '2026-09-25 17:30'
+updated_date: '2026-09-25 19:58'
 labels:
   - vn-assets
 dependencies: []
@@ -34,7 +34,7 @@ Issue #2021 follow-up after PR #2954. Freeze the authored generation recipe when
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Draft PR #3015 against dev: https://github.com/rmusser01/tldw_server/pull/3015. Two independent read-only reviews addressed fanout replay, parent/child race safety, per-slot failure provenance, local model drift, and local path redaction. Final checks: VN backend 297 passed; frontend VN monitor/workbench 20 passed; typecheck and OpenAPI drift passed; Bandit 0 findings; scoped Ruff passed excluding three verified pre-existing BLE001/UP035 warnings; git diff --check passed. Authenticated browser QA was unavailable in this isolated checkout. Remaining #2021 work: crash-after-file-registration exactly-once recovery and mutable local model contents. Awaiting requester-authored Change summary and review feedback before merge.
+PR #3015 against dev is ready for review with the requester-authored Change summary. Recipe snapshots, Retry provenance, local-model drift protection, and replay-safe fanout are implemented. Qodo three correctness bugs and CodeRabbit fanout completion bug were reproduced and fixed: latest-batch slot guards preserve sibling failures; batch counters/status update atomically; generation status reports per-slot failed-source recipe availability; synchronous generation endpoints run in FastAPI threadpool. Review follow-up also added docstrings, reflowed added long lines, classified VN tests, used the CharacterStore update API in a generation test, and added contextual recipe diagnostics without changing stable API error codes. Verification after final changes: full VN suite 305 passed; frontend VN 37 passed; typecheck, OpenAPI drift, scoped Ruff, Bandit (0 findings), and diff check passed. Black --check reports pre-existing whole-file formatting drift; no broad reformat. Authenticated browser QA unavailable in isolated checkout. GitHub Actions remain queued. Remaining #2021 work: crash-after-file-registration exactly-once recovery and mutable local model file contents.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

@@ -1854,7 +1854,7 @@ async def prompt_preview(
     status_code=status.HTTP_202_ACCEPTED,
     dependencies=[Depends(rbac_rate_limit("vn_assets.generate"))],
 )
-async def start_generation(
+def start_generation(
     pack_id: int,
     request: VNAssetGenerationRequest | None = None,
     service: VNAssetPackService = Depends(_service),
@@ -1946,7 +1946,7 @@ async def cancel_generation(
     status_code=status.HTTP_202_ACCEPTED,
     dependencies=[Depends(rbac_rate_limit("vn_assets.generate"))],
 )
-async def retry_slot_generation(
+def retry_slot_generation(
     pack_id: int,
     slot_id: int,
     request: VNAssetGenerationRequest | None = None,
@@ -2018,7 +2018,7 @@ async def retry_slot_generation(
     response_model=VNAssetGenerationStatusResponse,
     status_code=status.HTTP_202_ACCEPTED,
 )
-async def regenerate_item(
+def regenerate_item(
     pack_id: int,
     item_id: int,
     request: VNAssetGenerationRequest | None = None,

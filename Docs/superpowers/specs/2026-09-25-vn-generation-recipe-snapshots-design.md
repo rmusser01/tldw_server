@@ -111,9 +111,10 @@ idempotency makes output writes exactly once.
 
 The Retry request accepts optional `source_batch_id` and retains its required
 idempotency key. The returned generation status includes the new batch ID and
-retry provenance where available. A snapshot-unavailable conflict names the
-recovery action in user terms. The existing monitor keeps one Retry per failed
-slot and binds it to the displayed failed batch. No new setup screen is needed.
+retry provenance and per-failed-slot recipe availability where available. A
+snapshot-unavailable conflict names the recovery action in user terms. The
+existing monitor keeps one Retry per failed slot and binds it to that slot's
+recorded failed batch. No new setup screen is needed.
 
 ## Verification
 

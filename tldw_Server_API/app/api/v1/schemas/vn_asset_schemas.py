@@ -271,6 +271,7 @@ class VNAssetGenerationStatusResponse(BaseModel):
     recipe_available: bool | None = None
     selected_slot_ids: list[int] = Field(default_factory=list)
     failed_slot_batch_ids: dict[int, int] = Field(default_factory=dict)
+    failed_slot_recipe_available: dict[int, bool] = Field(default_factory=dict)
     job_batch_id: str | None = None
     status: str
     total_slots: int = 0

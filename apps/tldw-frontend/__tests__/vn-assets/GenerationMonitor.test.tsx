@@ -47,6 +47,25 @@ describe('GenerationMonitor', () => {
     expect(screen.getByRole('button', { name: 'Retry sprite.primary' })).toBeEnabled();
   });
 
+  it('disables Retry when an older failed slot lacks a recipe even if the latest batch has one', () => {
+    render(
+      <GenerationMonitor
+        generation={{
+          batch_id: 4, status: 'failed', recipe_available: true,
+          selected_slot_ids: [1], failed_slot_batch_ids: { 1: 3 },
+          failed_slot_recipe_available: { 1: false },
+        }}
+        slots={[{ ...slots[0], status: 'failed', last_error: 'worker interrupted' }]}
+        onStartGeneration={vi.fn()}
+        onRetrySlot={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: 'Retry sprite.primary' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled();
+    expect(screen.getByText('Original settings unavailable. Start generation to use current settings.')).toBeVisible();
+  });
+
   it('only allows generation start outside active lifecycle states', async () => {
     const user = userEvent.setup();
     const onStartGeneration = vi.fn();
