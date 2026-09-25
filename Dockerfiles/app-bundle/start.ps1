@@ -79,6 +79,13 @@ if ($occupied) {
 }
 & docker @composeArgs 'pull'
 if ($LASTEXITCODE -ne 0) { throw 'Failed to pull the signed image references.' }
-& docker @composeArgs 'up' '-d' '--no-build'
-if ($LASTEXITCODE -ne 0) { throw 'Failed to start the paired application.' }
-Write-Output "Open http://127.0.0.1:$publicPort/"
+& docker @composeArgs 'up' '-d' '--no-build' '--wait' '--wait-timeout' '600'
+if ($LASTEXITCODE -ne 0) {
+    & docker @composeArgs 'down' *> $null
+    throw 'Application failed readiness; partial services were stopped and data was retained.'
+}
+$browserUrl = "http://127.0.0.1:$publicPort/"
+Write-Output "Open $browserUrl"
+if ($env:TLDW_APP_NO_BROWSER -ne '1') {
+    try { Start-Process $browserUrl } catch { Write-Warning 'Open the printed browser URL manually.' }
+}

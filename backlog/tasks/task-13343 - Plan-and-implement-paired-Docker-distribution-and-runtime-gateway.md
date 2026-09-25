@@ -4,7 +4,7 @@ title: Plan and implement paired Docker distribution and runtime gateway
 status: In Progress
 assignee: []
 created_date: '2026-09-23 06:15'
-updated_date: '2026-09-25 17:32'
+updated_date: '2026-09-25 17:41'
 labels:
   - distribution
   - docker
@@ -26,7 +26,7 @@ WP1 of TASK-13265: establish the shared manifest/artifact contract, runtime gate
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 Write an executable WP1 plan with exact file responsibilities, test cycles, and G2/G4/G10/G12 coverage.
-- [ ] #2 Create a runtime-configured gateway and managed WebUI build with authenticated routing and same-origin behavior.
+- [x] #2 Create a runtime-configured gateway and managed WebUI build with authenticated routing and same-origin behavior.
 - [ ] #3 Build a paired Docker bundle with pinned artifacts, idempotent initialization, and Docker-only host helpers.
 - [ ] #4 Verify a fresh Docker setup and networking/security paths outside a repository checkout before publication.
 <!-- AC:END -->
@@ -57,6 +57,10 @@ WP1 Task 5 code/control slice: control tests red then 10 passed; full manifest+c
 WP1 Task 6 bundle/helper source ready: signed-control verify/init precedes Compose pull/up; fixed digest/key placeholders are filled only during candidate packaging; shell and PowerShell start/stop/status use persisted state and project ID. Compose publishes only loopback gateway, persists backend DB/config volumes, and has no default Postgres/Redis. 35 manifest/control/helper tests pass, shell syntax passes, Compose config validates for amd64 and arm64, Bandit 0 new findings. Local live Docker and Windows PowerShell execution remain unverified because Docker Desktop cannot start here and pwsh is unavailable; Task 7 CI must exercise those gates.
 
 WP1 Task 7 candidate tooling and manual CI lane implemented: 45 lean Release tests pass; signed exact-byte manifest, per-platform artifact roles/hashes, source-revision image labels, pinned local-registry refs, and G2/G4/G10/G12 evidence are checked. Manual GitHub Actions lane builds native amd64/arm64 candidates in separate job-local registries, runs shell/PowerShell syntax checks and an extracted-bundle smoke, and requires both jobs. No protected image or install catalog is published. Local Docker daemon remains unable to start, so neither image builds nor live smoke/actual runtime patch/size evidence has run here; both-platform CI must pass before TASK-13343 acceptance. Whole-frontend typecheck baseline remains 93 diagnostics in untouched files.
+
+WP1 final self-review recorded in Docs/superpowers/reviews/2026-09-25-complete-app-wp1-acceptance.md. AC2 gateway/managed WebUI implementation is complete and locally tested. AC3/AC4 and G2/G4/G10/G12 acceptance remain open: Docker Desktop cannot start on this host; native amd64/arm64 manual CI candidate runs have not executed; no measured image sizes/runtime patches/startup times or two-instance browser setup proof exists. Manual CI now keeps G2/G4/G12 false and verifies the promotion gate refuses provisional candidates. No protected publication occurred. Shell start now waits for Compose health before printing/opening the browser; PowerShell source matches but runtime is untested.
+
+WP1 review follow-up: 46 lean Release tests pass, Black/shell syntax/Compose config for amd64 and arm64/diff check pass, and scoped Bandit reports zero findings. Start helpers wait for service health and tear down partial services after failed readiness while retaining state. Candidate lane deliberately leaves G2/G4/G12 false and its promotion check must refuse it; live CI and full browser/two-instance/runtime evidence remain open.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

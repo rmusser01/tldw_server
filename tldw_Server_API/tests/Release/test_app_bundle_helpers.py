@@ -40,6 +40,7 @@ def installed_bundle(tmp_path: Path) -> tuple[Path, Path, Path]:
         "with open(os.environ['FAKE_DOCKER_LOG'], 'a') as log: log.write(json.dumps(args) + '\\n')\n"
         "if args and args[0] == 'info' and os.environ.get('FAKE_DOCKER_FAIL_INFO') == '1': sys.exit(1)\n"
         "if args[:2] == ['compose', 'version'] and os.environ.get('FAKE_DOCKER_FAIL_COMPOSE') == '1': sys.exit(1)\n"
+        "if args and args[0] == 'compose' and 'up' in args and os.environ.get('FAKE_DOCKER_FAIL_UP') == '1': sys.exit(1)\n"
         "if args[:2] == ['info', '--format']: print('x86_64')\n"
         "if args[:2] == ['compose', 'version']: print('Docker Compose version v2')\n"
         "if args and args[0] == 'run':\n"
@@ -73,6 +74,7 @@ def run_helper(
         "PATH": f"{binary}:{os.environ['PATH']}",
         "TLDW_APP_STATE_DIR": str(state),
         "TLDW_APP_PUBLIC_PORT": "18080",
+        "TLDW_APP_NO_BROWSER": "1",
         "FAKE_DOCKER_LOG": str(log),
         "FAKE_STATE_DIR": str(state),
         **(extra_env or {}),
@@ -102,6 +104,7 @@ def test_first_start_verifies_before_init_and_compose(
     assert verify < initialize < pull < up
     assert "--network" in calls[verify] and "none" in calls[verify]
     assert "--no-build" in calls[up]
+    assert "--wait" in calls[up] and "600" in calls[up]
     assert "tldw_test" in calls[up]
     assert "registry.invalid/tldw/control@sha256:" + "a" * 64 in calls[verify]
 
@@ -137,6 +140,17 @@ def test_occupied_port_stops_before_compose_up(
 
     assert result.returncode != 0
     assert not any("up" in call for call in calls)
+
+
+def test_failed_start_stops_partial_services_but_keeps_instance(
+    installed_bundle: tuple[Path, Path, Path],
+) -> None:
+    result, calls = run_helper("start.sh", installed_bundle, extra_env={"FAKE_DOCKER_FAIL_UP": "1"})
+
+    assert result.returncode != 0
+    assert any("up" in call for call in calls)
+    assert any("down" in call for call in calls)
+    assert (installed_bundle[2] / "instance" / "config.env").exists()
 
 
 def test_stop_uses_persisted_identity_from_other_directory(

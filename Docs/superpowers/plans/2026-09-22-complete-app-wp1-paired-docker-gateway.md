@@ -206,7 +206,7 @@ The code paths above are the planned ownership boundaries. If an existing helper
 **Goal:** Make WP1 evidence reproducible without treating an incomplete or frozen publication as available to users.
 **Success Criteria:** CI tests the exact extractable candidate using an ephemeral job-local registry; manifest qualification refuses missing artifacts/gates; documentation states current availability accurately.
 **Tests:** Fresh extracted-bundle G2; routing/auth G4; tampered/missing artifact G10; supported runtime and policy G12 checks.
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 7: Build candidate qualification and promotion gate
 
@@ -222,8 +222,8 @@ The code paths above are the planned ownership boundaries. If an existing helper
   ```
 
 - [x] **Step 2: Run** the focused candidate-gate pytest; expected missing-module failure observed before implementation, then unsupported-runtime regression failed before its guard.
-- [x] **Step 3: Implement** clean-checkout builds and artifact inventory from allowlisted bundle files, ephemeral job-local registry digest capture, exact-byte Ed25519 signing, per-platform signature/hash verification, and a required-both-platform CI status job. Each native runner builds and smokes its own local single-platform candidate; these are preview artifacts, not a published multi-platform manifest. The existing `publish-docker.yml` remains unchanged.
-- [ ] **Step 4: Run** focused tests plus the extracted-bundle smoke on amd64 and arm64 CI runners; record exact runtime patches and limitations. Run frontend lint/typecheck, focused backend tests, gateway tests, `git diff --check`, and Bandit on touched Python source. Failure in either required tuple blocks promotion. Local lean release tests: 45 pass; Black, shell syntax, YAML parse, diff check, and Bandit (0 findings) pass. Docker Desktop on this host still cannot start, so image builds, live smoke, PowerShell parsing, actual sizes/patches, and both runner results are not yet evidence. The whole-frontend typecheck baseline is still 93 untouched-file diagnostics; CI runs it and records its status without treating it as new code success.
+- [x] **Step 3: Implement** clean-checkout builds and artifact inventory from allowlisted bundle files, ephemeral job-local registry digest capture, exact-byte Ed25519 signing, per-platform signature/hash verification, and a required-both-platform CI status job. Each native runner builds and smokes its own local single-platform candidate; these are provisional artifacts, not a published multi-platform manifest. The evidence keeps G2/G4/G12 false until browser setup, two-instance networking, and runtime-support checks exist; the promotion verifier must refuse that candidate. The existing `publish-docker.yml` remains unchanged.
+- [ ] **Step 4: Run** focused tests plus the extracted-bundle smoke on amd64 and arm64 CI runners; record exact runtime patches and limitations. Run frontend lint/typecheck, focused backend tests, gateway tests, `git diff --check`, and Bandit on touched Python source. Failure in either required tuple blocks promotion. Local lean release tests: 46 pass; Black, shell syntax, YAML parse, Compose config for both platform settings, diff check, and Bandit (0 findings) pass. Docker Desktop on this host still cannot start, so image builds, live smoke, PowerShell parsing, actual sizes/patches, and both runner results are not yet evidence. The whole-frontend typecheck baseline is still 93 untouched-file diagnostics; CI runs it and records its status without treating it as new code success. The manual lane emits only provisional evidence until the remaining G2/G4/G12 scenarios are implemented and passed.
 - [x] **Step 5: Commit** qualification workflow and evidence tooling with `test: qualify paired Docker candidate before release (TASK-13343)`; actual CI execution remains open in Step 4.
 
 ### Task 8: Review WP1 against the product contract
@@ -232,10 +232,10 @@ The code paths above are the planned ownership boundaries. If an existing helper
 
 **Interfaces:** Acceptance record links the exact candidate manifest and G2/G4/G10/G12 results. WP2-WP5 consume the signed manifest schema and the gateway/managed WebUI artifact without copying implementations.
 
-- [ ] **Step 1: Check** every WP1 requirement in spec sections 5, 10, 11, and the applicable section 12 gates against a test or a clearly recorded deferred WP4/WP5 boundary. Treat missing G4 networking scenarios as failing acceptance, not a documentation caveat.
+- [x] **Step 1: Check** every WP1 requirement in spec sections 5, 10, 11, and the applicable section 12 gates against a test or a clearly recorded deferred WP4/WP5 boundary. The review record at `Docs/superpowers/reviews/2026-09-25-complete-app-wp1-acceptance.md` identifies live G2/G4/G10/G12 gaps and keeps TASK-13343 In Progress rather than treating them as documentation-only caveats.
 - [ ] **Step 2: Run** full targeted frontend/backend/gateway suites and the candidate smoke once more only if Task 7 changed artifacts; otherwise cite its immutable evidence. Run `git diff --check`, scoped lint, and Bandit, and inspect the exact staged diff for secrets or unrelated files.
 - [ ] **Step 3: Record** measured download/installed sizes, startup times, tested platforms, and any unsupported behavior in the candidate evidence. Mark TASK-13343 complete only when its criteria and local/CI gates pass; note that public publication remains separately gated.
-- [ ] **Step 4: Commit** final task/doc/evidence updates with `docs: record paired Docker candidate qualification (TASK-13343)`.
+- [x] **Step 4: Commit** final task/doc/evidence updates with `docs: record provisional Docker candidate review (TASK-13343)`; the record explicitly states that qualification remains open.
 
 ## Plan self-review checklist
 

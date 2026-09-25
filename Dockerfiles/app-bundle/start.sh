@@ -97,5 +97,17 @@ if command -v lsof >/dev/null 2>&1 && \
 fi
 
 compose pull
-compose up -d --no-build
-echo "Open http://127.0.0.1:$public_port/"
+if ! compose up -d --no-build --wait --wait-timeout 600; then
+  compose down >/dev/null 2>&1 || true
+  echo 'Application failed readiness; partial services were stopped and data was retained.' >&2
+  exit 1
+fi
+browser_url="http://127.0.0.1:$public_port/"
+echo "Open $browser_url"
+if [ "${TLDW_APP_NO_BROWSER:-0}" != 1 ]; then
+  if [ "$(uname -s)" = Darwin ] && command -v open >/dev/null 2>&1; then
+    open "$browser_url" >/dev/null 2>&1 || true
+  elif [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$browser_url" >/dev/null 2>&1 || true
+  fi
+fi

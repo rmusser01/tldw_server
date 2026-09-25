@@ -174,18 +174,22 @@ from pathlib import Path
 
 path = Path(sys.argv[1])
 evidence = json.loads(path.read_text())
-for gate in ("G2", "G4", "G10", "G12"):
-    evidence["platforms"][sys.argv[2]][gate] = True
+# This smoke verifies artifact trust. Browser setup, two-instance routing,
+# and upstream runtime-support review still need their own live evidence.
+evidence["platforms"][sys.argv[2]]["G10"] = True
 path.write_text(json.dumps(evidence, sort_keys=True))
 PY
 python -m Helper_Scripts.build_app_bundle \
   --artifacts "$output_dir/inventory.json" --evidence "$output_dir/evidence.json" \
   --signing-key "$output_dir/signing.key" --output "$output_dir/bundle"
-python -m Helper_Scripts.verify_app_bundle \
+if python -m Helper_Scripts.verify_app_bundle \
   --manifest "$output_dir/bundle/manifest.json" \
   --signature "$output_dir/bundle/manifest.sig" \
   --evidence "$output_dir/evidence.json" \
   --trusted-key-id ci-test --trusted-key-file "$output_dir/trust/ci-test.pub" \
-  --platform "$platform"
+  --platform "$platform"; then
+  echo 'Incomplete candidate unexpectedly passed the promotion gate.' >&2
+  exit 1
+fi
 rm "$output_dir/signing.key"
-echo "Qualified local $platform candidate in $output_dir/bundle (job-local registry only)."
+echo "Built provisional local $platform candidate in $output_dir/bundle; G2/G4/G12 remain open."
