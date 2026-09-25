@@ -2683,6 +2683,7 @@ jobs:
               tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestTemplateProcessing
               tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
               tldw_Server_API/tests/Chunking/test_chunking_templates_endpoint_sanitization.py
+              tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
               tldw_Server_API/tests/Chunking/test_chunking_templates_validate_schema.py
               tldw_Server_API/tests/Chunking/test_template_*.py
               tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
@@ -4088,6 +4089,7 @@ jobs:
               tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestTemplateInitialization
               tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestTemplateProcessing
               tldw_Server_API/tests/Chunking/test_chunking_templates_endpoint_sanitization.py
+              tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
               tldw_Server_API/tests/Chunking/test_chunking_templates_validate_schema.py
               tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
               tldw_Server_API/tests/Chunking/test_template_*.py
@@ -5417,6 +5419,7 @@ jobs:
               tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestTemplateInitialization
               tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestTemplateProcessing
               tldw_Server_API/tests/Chunking/test_chunking_templates_endpoint_sanitization.py
+              tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
               tldw_Server_API/tests/Chunking/test_chunking_templates_validate_schema.py
               tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
               tldw_Server_API/tests/Chunking/test_template_*.py
@@ -6752,6 +6755,7 @@ jobs:
               tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestTemplateInitialization
               tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestTemplateProcessing
               tldw_Server_API/tests/Chunking/test_chunking_templates_endpoint_sanitization.py
+              tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
               tldw_Server_API/tests/Chunking/test_chunking_templates_validate_schema.py
               tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
               tldw_Server_API/tests/Chunking/test_template_*.py

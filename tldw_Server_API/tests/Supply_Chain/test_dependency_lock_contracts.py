@@ -22,10 +22,7 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
 pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[3]
-UV_IMAGE = (
-    "ghcr.io/astral-sh/uv:0.12.7@"
-    "sha256:95f2aa1fe59274951cfe9b0cbc7972e879ff1004bc8945d130a32eb0dbd85945"
-)
+UV_IMAGE = "ghcr.io/astral-sh/uv:0.12.7@" "sha256:95f2aa1fe59274951cfe9b0cbc7972e879ff1004bc8945d130a32eb0dbd85945"
 PYTHON_PRODUCTION_PROFILES = {
     "app": ("Dockerfiles/Dockerfile.prod", None),
     "worker": ("Dockerfiles/Dockerfile.worker", "multiplayer"),
@@ -97,11 +94,7 @@ def _resolved_bun_releases(lock: dict[str, Any]) -> set[str]:
 
 def _updates_by_ecosystem(dependabot: dict[str, Any], ecosystem: str) -> list[dict[str, Any]]:
     """Return Dependabot update policies for one package ecosystem."""
-    return [
-        update
-        for update in dependabot["updates"]
-        if update["package-ecosystem"] == ecosystem
-    ]
+    return [update for update in dependabot["updates"] if update["package-ecosystem"] == ecosystem]
 
 
 def _load_next_config(path: Path) -> dict[str, Any]:
@@ -132,9 +125,7 @@ def _load_next_config(path: Path) -> dict[str, Any]:
     return json.loads(result.stdout)
 
 
-def _assert_bun_release_baseline(
-    web_lock: dict[str, Any], admin_lock: dict[str, Any]
-) -> None:
+def _assert_bun_release_baseline(web_lock: dict[str, Any], admin_lock: dict[str, Any]) -> None:
     """Assert resolved packages and the direct Bun workspace ownership contract."""
     web_workspaces = web_lock["workspaces"]
     assert set(web_workspaces) == {
@@ -166,10 +157,7 @@ def _assert_bun_release_baseline(
     assert web_lock["packages"]["@playwright/test"][0] == "@playwright/test@1.58.0"
     assert web_lock["packages"]["playwright"][0] == "playwright@1.58.0"
     assert web_lock["packages"]["wxt"][0] == "wxt@0.20.27"
-    assert (
-        admin_lock["packages"]["eslint-plugin-react-hooks"][0]
-        == "eslint-plugin-react-hooks@7.0.1"
-    )
+    assert admin_lock["packages"]["eslint-plugin-react-hooks"][0] == "eslint-plugin-react-hooks@7.0.1"
     assert web_lock["packages"]["next"][0] == "next@16.3.3"
     assert admin_lock["packages"]["next"][0] == "next@16.3.3"
     assert not web_lock["packages"]["@sentry/nextjs"][0].startswith("@sentry/nextjs@9.")
@@ -257,9 +245,7 @@ def test_python_release_tools_and_build_backend_are_exactly_pinned() -> None:
         "setuptools==84.0.0",
         "wheel==0.48.0",
     ]
-    assert pyproject["tool"]["uv"]["conflicts"] == [
-        [{"group": "release"}, {"extra": "backend-vllm"}]
-    ]
+    assert pyproject["tool"]["uv"]["conflicts"] == [[{"group": "release"}, {"extra": "backend-vllm"}]]
     assert pyproject["tool"]["setuptools"]["packages"]["find"]["namespaces"] is True
     assert pyproject["project"]["optional-dependencies"]["ingestion_email"] == [
         "pypff>=0.6.3; python_version >= '3.11'"
@@ -291,11 +277,7 @@ def test_universal_uv_lock_contains_root_and_release_tool_profiles() -> None:
 def test_all_platform_transformers_resolutions_exclude_cve_2026_9856() -> None:
     """Reject vulnerable branches even when Linux resolves a patched release."""
     lock = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))
-    versions = [
-        Version(package["version"])
-        for package in lock["package"]
-        if package["name"] == "transformers"
-    ]
+    versions = [Version(package["version"]) for package in lock["package"] if package["name"] == "transformers"]
     assert versions, "the source inventory must retain the required dependency"
     assert all(version >= Version("5.10.0") for version in versions), versions
 
@@ -339,9 +321,7 @@ def test_python_production_images_use_locked_noneditable_uv_profiles(
 
 def test_container_build_matrix_includes_all_python_production_profiles() -> None:
     """Catches a locked worker image that is omitted from pull-request builds."""
-    workflow = yaml.safe_load(
-        (ROOT / ".github/workflows/container-build-check.yml").read_text(encoding="utf-8")
-    )
+    workflow = yaml.safe_load((ROOT / ".github/workflows/container-build-check.yml").read_text(encoding="utf-8"))
     build = workflow["jobs"]["build-and-scan"]
     matrix = {entry["name"]: entry for entry in build["strategy"]["matrix"]["include"]}
 
@@ -354,14 +334,10 @@ def test_container_build_matrix_includes_all_python_production_profiles() -> Non
 
 def test_embedding_worker_entrypoint_is_in_the_built_package() -> None:
     """Catches namespace-only worker modules omitted by setuptools discovery."""
-    assert (
-        ROOT / "tldw_Server_API/app/core/Embeddings/services/__init__.py"
-    ).is_file()
+    assert (ROOT / "tldw_Server_API/app/core/Embeddings/services/__init__.py").is_file()
     worker = (ROOT / "Dockerfiles/Dockerfile.worker").read_text(encoding="utf-8")
     assert (
-        'CMD ["python", "-m", '
-        '"tldw_Server_API.app.core.Embeddings.services.redis_worker", '
-        '"--stage", "all"]'
+        'CMD ["python", "-m", ' '"tldw_Server_API.app.core.Embeddings.services.redis_worker", ' '"--stage", "all"]'
     ) in worker
 
 
@@ -374,8 +350,18 @@ def test_dependabot_owns_bun_uv_docker_and_actions_update_roots() -> None:
     assert [update["directory"] for update in bun_updates].count("/admin-ui") == 1
     assert len(_updates_by_ecosystem(dependabot, "uv")) == 1
     assert _updates_by_ecosystem(dependabot, "uv")[0]["directory"] == "/"
-    assert any(
-        update["directory"] == "/Dockerfiles"
-        for update in _updates_by_ecosystem(dependabot, "docker")
-    )
+    assert any(update["directory"] == "/Dockerfiles" for update in _updates_by_ecosystem(dependabot, "docker"))
     assert len(_updates_by_ecosystem(dependabot, "github-actions")) == 1
+
+
+@pytest.mark.parametrize("dockerfile", [profile[0] for profile in PYTHON_PRODUCTION_PROFILES.values()])
+def test_local_package_checks_use_the_installed_environment(dockerfile: str) -> None:
+    """Build checks must inspect installed packages rather than system Python or source."""
+    text = (ROOT / dockerfile).read_text(encoding="utf-8")
+    checks = [
+        line
+        for line in text.splitlines()
+        if line.startswith("RUN ") and ("import mcp_unified" in line or "import json, sys;" in line)
+    ]
+    assert checks
+    assert all(line.startswith("RUN /opt/tldw-venv/bin/python -I -c ") for line in checks)
