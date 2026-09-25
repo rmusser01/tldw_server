@@ -268,9 +268,7 @@ self_monitoring_rules
 semantic_memories
 sessions
 share_audit_log
-share_tokens
 share_tokens_new
-shared_workspaces
 slides_generation_receipts
 sources
 study_assistant_messages
