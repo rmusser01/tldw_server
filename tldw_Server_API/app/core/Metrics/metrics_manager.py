@@ -1414,6 +1414,14 @@ class MetricsRegistry:
                 labels=["path_kind", "outcome"],
             )
         )
+        self.register_metric(
+            MetricDefinition(
+                name="email_native_persist_total",
+                type=MetricType.COUNTER,
+                description="Native email persistence outcomes by path",
+                labels=["path_kind", "outcome"],
+            )
+        )
 
         self.register_metric(
             MetricDefinition(

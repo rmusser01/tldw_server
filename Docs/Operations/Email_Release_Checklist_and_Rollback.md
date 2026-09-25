@@ -28,6 +28,7 @@ The owner's personal Gmail and personal email are excluded.
 - [x] Validate authenticated synthetic EML uploads, key/role rejection, expected-user check, org storage quota and owner-scoped search in local ASGI/SQLite (TASK-13256; `Docs/Operations/Email_Authenticated_Upload_Validation_2026-09-25.md`).
 - [x] Exercise the main FastAPI lifespan and scoped email search/detail plus media search with synthetic users, temporary SQLite and an outbound/model-call guard (TASK-13361; `Docs/Operations/Email_Local_Startup_and_Search_Performance_2026-09-25.md`).
 - [x] Validate full-app Uvicorn startup/shutdown and scoped synthetic email upload/search/detail/media search over loopback HTTP with isolated SQLite (TASK-13362; `Docs/Operations/Email_Live_SQLite_Validation_2026-09-25.md`).
+- [x] Register and verify the native email persistence counter in the live synthetic SQLite upload path (TASK-13363; same validation report).
 - [ ] Validate the PostgreSQL deployment path and target scale. The live SQLite probe does not establish PostgreSQL isolation.
 - [ ] Record actual performance/parity evidence for the intended cutover scope. The local 10,000-message synthetic SQLite benchmark does not certify the 1M-message target or production parity.
 - [ ] Configure and verify core rollout flags in the chosen environment:

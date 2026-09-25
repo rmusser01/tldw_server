@@ -35,8 +35,11 @@ run exited successfully.
 
 One email observability defect surfaced: successful persistence logged
 `Metric email_native_persist_total not registered`. Its counter therefore
-cannot be relied on in this run. Follow-up is TASK-13363, to be fixed before
-the PostgreSQL validation.
+cannot be relied on in the first run. TASK-13363 registered that counter with
+`path_kind` and `outcome` labels. The focused metric test recorded a
+`path_kind=primary, outcome=success` sample, and a second full-server synthetic
+SQLite run passed with no unregistered-metric warning. Its raw log is
+`/tmp/email_live_sqlite_probe_13363_metric.log`.
 
 This is a loopback smoke test with one synthetic message. It does not establish
 TLS/reverse-proxy behavior, multi-worker behavior, PostgreSQL tenant isolation,
