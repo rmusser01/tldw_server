@@ -16,12 +16,15 @@ from pathlib import Path
 
 import pytest
 from Helper_Scripts.ci.rls_coverage_ratchet import (
+    DEFAULT_BASELINE,
+    DEFAULT_EXEMPTIONS,
     OWNERSHIP_COLUMNS,
     CoverageReport,
     RatchetError,
     compare,
     enforce,
     load_baseline,
+    load_exemptions,
     scan_source,
 )
 
@@ -50,8 +53,9 @@ def report() -> CoverageReport:
 def test_no_new_tenant_owned_table_lacks_an_rls_policy(report):
     """The gate. A new uncovered table fails here instead of leaking in prod."""
     baseline = load_baseline(BASELINE)
+    exemptions = load_exemptions(DEFAULT_EXEMPTIONS)
 
-    newly_covered = enforce(report, baseline)
+    newly_covered = enforce(report, baseline, exemptions)
 
     if newly_covered:
         listed = ", ".join(sorted(newly_covered))
@@ -159,3 +163,48 @@ def test_an_unreadable_source_file_fails_instead_of_being_skipped(tmp_path):
             scan_source([root])
     finally:
         bad.chmod(0o644)
+
+
+class TestExemptions:
+    """Exemptions are decisions, and a decision without a reason is a guess."""
+
+    def test_every_exemption_carries_a_reason(self) -> None:
+        exemptions = load_exemptions(DEFAULT_EXEMPTIONS)
+        assert exemptions, "the exemptions file should not be empty"
+        for table, reason in exemptions.items():
+            assert len(reason) > 40, f"{table} needs a real reason, got {reason!r}"
+
+    def test_a_reasonless_exemption_is_refused(self, tmp_path) -> None:
+        path = tmp_path / "exemptions.txt"
+        path.write_text("# comment\nsome_table\n", encoding="utf-8")
+        with pytest.raises(RatchetError) as exc_info:
+            load_exemptions(path)
+        assert "no reason" in str(exc_info.value)
+
+    def test_an_unreadable_exemptions_file_fails_loudly(self, tmp_path) -> None:
+        """Otherwise a missing file would silently exempt nothing, or everything."""
+        with pytest.raises(RatchetError):
+            load_exemptions(tmp_path / "does-not-exist.txt")
+
+    def test_exemptions_and_baseline_do_not_overlap(self) -> None:
+        """A table listed in both would look like work in progress and a decision."""
+        exemptions = set(load_exemptions(DEFAULT_EXEMPTIONS))
+        baseline = set(load_baseline(DEFAULT_BASELINE))
+        assert not (exemptions & baseline), sorted(exemptions & baseline)
+
+    def test_exempted_table_is_not_reported_as_a_regression(self) -> None:
+        """The whole point: an exempted table never fails the guard."""
+        report = CoverageReport(
+            owned_tables=frozenset({"share_tokens"}), policy_tables=frozenset()
+        )
+        regressions, _ = compare(
+            report, frozenset(), {"share_tokens": "anonymous redemption"}
+        )
+        assert regressions == frozenset()
+
+    def test_a_table_with_no_exemption_still_fails(self) -> None:
+        report = CoverageReport(
+            owned_tables=frozenset({"some_new_table"}), policy_tables=frozenset()
+        )
+        regressions, _ = compare(report, frozenset(), {"share_tokens": "x"})
+        assert regressions == frozenset({"some_new_table"})
