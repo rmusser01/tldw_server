@@ -157,7 +157,7 @@ The code paths above are the planned ownership boundaries. If an existing helper
 **Goal:** Boot paired, digest-pinned images and persistent credentials/data from an extracted bundle with Docker as the only host runtime.
 **Success Criteria:** First start initializes once; repeat start reuses credentials/data/project identity; stop/status work from another directory; no backend/Next port is published.
 **Tests:** Control pytest, Compose config validation, shell/PowerShell helper checks, fresh Docker account smoke.
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 5: Build managed Docker images and an idempotent control entry point
 
@@ -165,7 +165,7 @@ The code paths above are the planned ownership boundaries. If an existing helper
 
 **Interfaces:** `app_bundle_control init --state /state --manifest /bundle/manifest.json --signature /bundle/manifest.sig --platform linux/amd64|linux/arm64` verifies first, then creates private config if absent; `verify` checks exact image/artifact digests and compatibility without changing state. Config records stable Compose project ID, unique session/CSRF names, API key, gateway hop secret, and pinned image references. Control exits nonzero if existing state conflicts with the signed release.
 
-- [ ] **Step 1: Write failing pytest** using a temporary state directory: first init creates mode-0600 files, second init leaves keys byte-identical, malformed signature leaves state untouched, existing data with mismatched identity is rejected, and no secret appears in stdout. The later image smoke must execute Node 24 and request a copied `public`/`static` asset from the running WebUI; inspecting Dockerfile text is insufficient.
+- [x] **Step 1: Write failing pytest** using a temporary state directory: first init creates mode-0600 files, second init leaves keys byte-identical, malformed signature leaves state untouched, existing data with mismatched identity is rejected, and no secret appears in stdout. The later image smoke must execute Node 24 and request a copied `public`/`static` asset from the running WebUI; inspecting Dockerfile text is insufficient. Ten control tests now cover these paths plus read-only verify, required images, symlink traversal, and signed env-injection input.
 
   ```python
   first = initialize_bundle(state_dir, verified_release)
@@ -173,9 +173,9 @@ The code paths above are the planned ownership boundaries. If an existing helper
   assert first.api_key == second.api_key
   ```
 
-- [ ] **Step 2: Run** `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Release/test_app_bundle_control.py -q`; expect failure.
-- [ ] **Step 3: Implement** transactional initialization through a temporary directory + atomic replace, strict ownership/permissions, secret-safe messages, and refusal to overwrite valid credentials. Build WebUI/gateway/control images from the same clean source commit; include declared proxy dependency closure and Next traced assets. Use a private backend origin at runtime in Next, never a build-time Docker service URL. Do not put the control secret or API key in image layers.
-- [ ] **Step 4: Run** control tests, Docker builds for both Linux architectures in CI, image-content guards, `docker image inspect`, and scoped Bandit. Verify no development database, `.env`, `node_modules` source tree, or build cache leaks into runtime images.
+- [x] **Step 2: Run** `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Release/test_app_bundle_control.py -q`; expected collection failure observed before implementation, and env-injection regression was red before its guard.
+- [x] **Step 3: Implement** transactional initialization through a temporary directory + atomic replace, strict ownership/permissions, secret-safe messages, and refusal to overwrite valid credentials. WebUI/gateway/control Dockerfiles and a frozen gateway-only dependency lock are present; the managed WebUI stage omits build-time private origins/keys and copies traced plus public/static assets. Actual image builds remain in Step 4.
+- [ ] **Step 4: Run** control tests, Docker builds for both Linux architectures in CI, image-content guards, `docker image inspect`, and scoped Bandit. Verify no development database, `.env`, `node_modules` source tree, or build cache leaks into runtime images. Local verifier tests: 25 pass across manifest/control; gateway frozen lock and Node syntax pass; Bandit 0 findings. Docker Desktop's socket reports “Docker Desktop is unable to start” on this host, so image builds/inspection and live asset smoke remain open for Task 7 CI or a repaired daemon.
 - [ ] **Step 5: Commit** image/control changes with `feat: build paired managed application images (TASK-13343)`.
 
 ### Task 6: Add Docker-only host helpers and Compose bundle

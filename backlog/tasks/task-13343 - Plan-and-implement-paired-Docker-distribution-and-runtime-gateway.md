@@ -4,7 +4,7 @@ title: Plan and implement paired Docker distribution and runtime gateway
 status: In Progress
 assignee: []
 created_date: '2026-09-23 06:15'
-updated_date: '2026-09-25 16:52'
+updated_date: '2026-09-25 17:08'
 labels:
   - distribution
   - docker
@@ -51,6 +51,8 @@ WP1 Task 2 complete: managed same-origin WebUI mode and production build wrapper
 WP1 Task 3 cookie isolation complete: backend CSRF cookie setting and logout clearing, Next runtime config/session cookie pair, browser runtime accessor and all affected readers. Verification: 32 AuthNZ unit tests; 6 focused HTTP/logout integration tests; 179 Next/runtime browser tests; 219 affected service tests. Two same-host ports filter to their own cookie pair. Frontend lint has one pre-existing any warning, typecheck remains 93 unrelated diagnostics. Bandit: 11 existing B106 findings in auth.py identical to HEAD; zero new findings. Gateway-level two-instance browser exercise is deferred to Task 4.
 
 WP1 Task 4 gateway code ready: route table, Host/Origin checks, stripping forwarded/Next control/hop headers, private Next hop, streaming proxy including cancellation and WebSocket upgrade, read-only maintenance status. http-proxy-middleware 4.2.0 is pinned. Twelve real-socket Node checks and 145 Next runtime/session tests pass; rebuilt standalone Next through gateway proves direct runtime auth unavailable and gateway cookie exchange successful without forwarding the master key on normal backend routes. Bun frozen lock, lint, syntax, token sync, and bundle budget pass. Full frontend typecheck still has the same 93 unrelated diagnostics. Real FastAPI extracted-bundle and two-instance browser smoke remain WP1 qualification gates.
+
+WP1 Task 5 code/control slice: control tests red then 10 passed; full manifest+control 25 passed. Managed WebUI target now Node 24 with no build-time private API origin/key; gateway has dedicated frozen 14-package lock and Node 24 image; one-shot control image embeds a build-context trusted public key set. Docker image builds, inspect, and live asset smoke remain open: Docker Desktop socket on this host responds "Docker Desktop is unable to start" despite supported CLI/direct launch attempts. CI qualification in Task 7 must run those checks before acceptance. Scoped Bandit: 0 findings.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

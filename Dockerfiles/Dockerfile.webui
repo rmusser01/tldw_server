@@ -1,73 +1,61 @@
-# Production Dockerfile for tldw Next.js WebUI
-# - Builds the WebUI in monorepo workspace mode
-# - Ships a standalone Next.js runtime artifact
+# Paired WebUI build. `managed-runtime` has no build-time API origin or secret.
+# The default `runtime` target preserves the existing quickstart image contract.
 
-FROM oven/bun:1.3.2-debian AS builder
+FROM oven/bun:1.3.2-debian AS dependencies
 
-ENV NEXT_TELEMETRY_DISABLED=1
-
+ENV NEXT_TELEMETRY_DISABLED=1 SKIP_WXT_PREPARE=1
 WORKDIR /app/apps
-
-# Copy the root manifest plus workspace manifests Bun needs for the frozen lockfile.
-# Only copy non-WebUI workspace manifests/shims so unrelated source changes do not
-# invalidate this layer.
-COPY apps/package.json /app/apps/package.json
-COPY apps/bun.lock /app/apps/bun.lock
+COPY apps/package.json apps/bun.lock /app/apps/
 COPY apps/scripts /app/apps/scripts
 COPY apps/extension/package.json /app/apps/extension/package.json
 COPY apps/extension/scripts/wxt-prepare.mjs /app/apps/extension/scripts/wxt-prepare.mjs
 COPY apps/packages/voice-assistant-sdk/package.json /app/apps/packages/voice-assistant-sdk/package.json
 COPY apps/tldw-frontend /app/apps/tldw-frontend
 COPY apps/packages/ui /app/apps/packages/ui
-
-# Keep the root workspace graph aligned with bun.lock while skipping extension prepare.
-ENV SKIP_WXT_PREPARE=1
 RUN bun install --frozen-lockfile --cwd /app/apps
 
-# Build-time API config baked into client bundle
+FROM dependencies AS quickstart-builder
 ARG NEXT_PUBLIC_API_URL=
 ARG NEXT_PUBLIC_API_BASE_URL=
 ARG NEXT_PUBLIC_API_VERSION=v1
 ARG NEXT_PUBLIC_X_API_KEY=
-ARG NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=quickstart
 ARG TLDW_INTERNAL_API_ORIGIN=http://app:8000
-
-ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
-ENV NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
-ENV NEXT_PUBLIC_API_VERSION=${NEXT_PUBLIC_API_VERSION}
-ENV NEXT_PUBLIC_X_API_KEY=${NEXT_PUBLIC_X_API_KEY}
-ENV NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=${NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE}
-ENV TLDW_INTERNAL_API_ORIGIN=${TLDW_INTERNAL_API_ORIGIN}
-
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL} \
+    NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL} \
+    NEXT_PUBLIC_API_VERSION=${NEXT_PUBLIC_API_VERSION} \
+    NEXT_PUBLIC_X_API_KEY=${NEXT_PUBLIC_X_API_KEY} \
+    NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=quickstart \
+    TLDW_INTERNAL_API_ORIGIN=${TLDW_INTERNAL_API_ORIGIN}
 WORKDIR /app/apps/tldw-frontend
+RUN bun scripts/validate-networking-config.mjs && bun run build:prod
 
-RUN bun /app/apps/tldw-frontend/scripts/validate-networking-config.mjs \
- && bun run build:prod
+FROM dependencies AS managed-builder
+ENV NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=managed
+WORKDIR /app/apps/tldw-frontend
+RUN bun scripts/validate-networking-config.mjs && bun run build:prod
 
-
-FROM node:20-bookworm-slim AS runtime
-
+FROM node:24-bookworm-slim AS webui-runtime-base
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     HOSTNAME=0.0.0.0 \
-    PORT=3000 \
-    NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=quickstart \
-    TLDW_INTERNAL_API_ORIGIN=http://app:8000
-
+    PORT=3000
 WORKDIR /app
-
 RUN useradd -m -u 10002 webui
-
-# Standalone output contains server.js plus traced runtime deps
-COPY --from=builder --chown=webui:webui /app/apps/tldw-frontend/.next/standalone /app
-COPY --from=builder --chown=webui:webui /app/apps/tldw-frontend/.next/static /app/apps/tldw-frontend/.next/static
-COPY --from=builder --chown=webui:webui /app/apps/tldw-frontend/public /app/apps/tldw-frontend/public
 USER webui
-
 WORKDIR /app/apps/tldw-frontend
-
 EXPOSE 3000
-
 HEALTHCHECK --interval=30s --timeout=5s --retries=5 CMD node -e "fetch('http://localhost:3000').then((r)=>process.exit(r.ok ? 0 : 1)).catch(()=>process.exit(1))"
-
 CMD ["node", "server.js"]
+
+FROM webui-runtime-base AS managed-runtime
+ENV NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=managed
+COPY --from=managed-builder --chown=webui:webui /app/apps/tldw-frontend/.next/standalone /app
+COPY --from=managed-builder --chown=webui:webui /app/apps/tldw-frontend/.next/static /app/apps/tldw-frontend/.next/static
+COPY --from=managed-builder --chown=webui:webui /app/apps/tldw-frontend/public /app/apps/tldw-frontend/public
+
+FROM webui-runtime-base AS runtime
+ENV NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=quickstart \
+    TLDW_INTERNAL_API_ORIGIN=http://app:8000
+COPY --from=quickstart-builder --chown=webui:webui /app/apps/tldw-frontend/.next/standalone /app
+COPY --from=quickstart-builder --chown=webui:webui /app/apps/tldw-frontend/.next/static /app/apps/tldw-frontend/.next/static
+COPY --from=quickstart-builder --chown=webui:webui /app/apps/tldw-frontend/public /app/apps/tldw-frontend/public

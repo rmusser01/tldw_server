@@ -1,0 +1,9 @@
+{
+  "name": "tldw-managed-gateway",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "dependencies": {
+    "http-proxy-middleware": "4.2.0"
+  }
+}
