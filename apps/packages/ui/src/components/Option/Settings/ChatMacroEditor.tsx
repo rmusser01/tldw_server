@@ -48,6 +48,7 @@ export interface ChatMacroEditorProps {
   outputProfileNames: string[]
   onSaved: (name: string) => void
   onDeleted: (name: string) => void
+  onCatalogChanged?: () => void
   onCloneRequested: (macro: ChatMacroSummary) => void
   onImportConsumed?: (requestId: number) => void
   importSource?: ChatMacroEditorImportSource | null
@@ -93,6 +94,7 @@ export const ChatMacroEditor = ({
   outputProfileNames,
   onSaved,
   onDeleted,
+  onCatalogChanged,
   onCloneRequested,
   onImportConsumed,
   importSource = null
@@ -104,6 +106,7 @@ export const ChatMacroEditor = ({
   const [draft, setDraft] = React.useState<GuidedMacroDraft>(createBlankMacroDraft)
   const [sourceRaw, setSourceRaw] = React.useState("")
   const [serverRaw, setServerRaw] = React.useState("")
+  const [serverDraft, setServerDraft] = React.useState<GuidedMacroDraft | null>(null)
   const [mode, setMode] = React.useState<EditorMode>("guided")
   const [loading, setLoading] = React.useState(false)
   const [loadedDetailName, setLoadedDetailName] = React.useState<string | null>(null)
@@ -128,8 +131,12 @@ export const ChatMacroEditor = ({
   const importRequestId = importSource?.requestId
   const importedRaw = importSource?.raw
 
+  React.useEffect(() => () => { requestGeneration.current += 1 }, [])
+
   React.useEffect(() => {
     const generation = ++requestGeneration.current
+    setBusyAction(null)
+    setServerDraft(null)
     setValidationError(null)
     setValidationMessage(null)
 
@@ -164,6 +171,7 @@ export const ChatMacroEditor = ({
         setSourceRaw(response.data.raw)
         if (parsed.mode === "guided") {
           setDraft(parsed.draft)
+          setServerDraft(parsed.draft)
           setMode("guided")
         } else {
           setDraft((current) => ({
@@ -189,6 +197,8 @@ export const ChatMacroEditor = ({
     const parsed = parseMacroSource(raw)
     setSourceRaw(raw)
     setServerRaw("")
+    setServerDraft(null)
+    setBusyAction(null)
     setValidationError(null)
     setValidationMessage(null)
     if (parsed.mode === "guided") {
@@ -274,7 +284,7 @@ export const ChatMacroEditor = ({
   const switchToSource = () => {
     if (mode === "source") return
     try {
-      setSourceRaw(serializeGuidedMacro(draft))
+      setSourceRaw(unchangedGuidedDraft ? serverRaw : serializeGuidedMacro(draft))
       setValidationError(null)
       setValidationMessage(null)
       setMode("source")
@@ -303,11 +313,16 @@ export const ChatMacroEditor = ({
     event.target.value = ""
     if (!file) return
 
+    const generation = ++requestGeneration.current
+    setBusyAction(null)
     try {
       const raw = await readMacroImport(file)
+      if (generation !== requestGeneration.current) return
       applyImportedSource(raw, selected?.name || null)
     } catch (error) {
-      setValidationError(error instanceof Error ? error.message : label("importError", "Unable to import YAML."))
+      if (generation === requestGeneration.current) {
+        setValidationError(error instanceof Error ? error.message : label("importError", "Unable to import YAML."))
+      }
     }
   }
 
@@ -321,6 +336,12 @@ export const ChatMacroEditor = ({
     }
   }
 
+  const unchangedGuidedDraft = Boolean(serverRaw) && serverDraft !== null
+    && JSON.stringify(draft) === JSON.stringify(serverDraft)
+
+  const rawForExport = (): string | null =>
+    mode === "guided" && unchangedGuidedDraft ? serverRaw : rawForSave()
+
   const saveMacro = async (event: React.FormEvent) => {
     event.preventDefault()
     if (isBuiltin || isBusy || loading || !hasCurrentDetail) return
@@ -328,11 +349,13 @@ export const ChatMacroEditor = ({
     const raw = rawForSave()
     if (raw === null) return
 
+    const generation = requestGeneration.current
     setBusyAction("save")
     setValidationError(null)
     setValidationMessage(null)
     try {
       const validation = await validateChatMacro(raw)
+      if (generation !== requestGeneration.current) return
       if (!validation.ok || !validation.data?.valid) {
         setValidationError(validation.data?.error || responseError(validation.status, validation.error))
         return
@@ -350,25 +373,33 @@ export const ChatMacroEditor = ({
       const response = isCreate
         ? await createChatMacro({ name: draft.name, raw })
         : await updateChatMacro(selected.name, { raw })
+      if (generation !== requestGeneration.current) {
+        if (response.ok && response.data) onCatalogChanged?.()
+        return
+      }
       if (!response.ok || !response.data) {
         setValidationError(responseError(response.status, response.error))
         return
       }
 
       setServerRaw(response.data.raw)
+      const parsed = parseMacroSource(response.data.raw)
+      setServerDraft(parsed.mode === "guided" ? parsed.draft : null)
       setSourceRaw(response.data.raw)
       setValidationMessage(label("validationPassed", "Server validation passed."))
       onSaved(response.data.summary.name)
     } catch (error) {
-      setValidationError(error instanceof Error ? error.message : label("saveError", "Unable to save macro."))
+      if (generation === requestGeneration.current) {
+        setValidationError(error instanceof Error ? error.message : label("saveError", "Unable to save macro."))
+      }
     } finally {
-      setBusyAction(null)
+      if (generation === requestGeneration.current) setBusyAction(null)
     }
   }
 
   const copyYaml = async () => {
     if (loading || !hasCurrentDetail) return
-    const raw = serverRaw || rawForSave()
+    const raw = rawForExport()
     if (raw === null) return
     try {
       await navigator.clipboard.writeText(raw)
@@ -381,7 +412,7 @@ export const ChatMacroEditor = ({
 
   const downloadYaml = () => {
     if (loading || !hasCurrentDetail) return
-    const raw = serverRaw || rawForSave()
+    const raw = rawForExport()
     if (raw === null) return
     const name = selected?.name || draft.name || "macro"
     downloadBlob(new Blob([raw], { type: "text/yaml" }), `${name}.yaml`)
@@ -389,6 +420,7 @@ export const ChatMacroEditor = ({
 
   const removeMacro = async () => {
     if (!selected || isBuiltin || isBusy || loading || !hasCurrentDetail) return
+    const generation = requestGeneration.current
     setBusyAction("delete")
     try {
       const confirmed = await confirmDanger({
@@ -398,18 +430,24 @@ export const ChatMacroEditor = ({
         cancelText: label("cancel", "Cancel"),
         autoFocusButton: "cancel"
       })
-      if (!confirmed) return
+      if (!confirmed || generation !== requestGeneration.current) return
 
       const response = await deleteChatMacro(selected.name)
+      if (generation !== requestGeneration.current) {
+        if (response.ok) onCatalogChanged?.()
+        return
+      }
       if (!response.ok) {
         setValidationError(responseError(response.status, response.error))
         return
       }
       onDeleted(selected.name)
     } catch (error) {
-      setValidationError(error instanceof Error ? error.message : label("deleteError", "Unable to delete macro."))
+      if (generation === requestGeneration.current) {
+        setValidationError(error instanceof Error ? error.message : label("deleteError", "Unable to delete macro."))
+      }
     } finally {
-      setBusyAction(null)
+      if (generation === requestGeneration.current) setBusyAction(null)
     }
   }
 

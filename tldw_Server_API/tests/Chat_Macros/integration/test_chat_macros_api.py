@@ -182,7 +182,8 @@ def test_macro_crud_validate_and_clone(api_client: MacroApiClient):
     assert cloned.json()["definition"]["command"] == "my_wrapup"
 
 
-def test_macro_api_rejects_mismatched_definition_names_without_storage_changes(api_client: MacroApiClient) -> None:
+def test_macro_api_rejects_mismatched_create_name(api_client: MacroApiClient) -> None:
+    """A rejected create exposes neither conflicting name through the API."""
     rejected_create = api_client.client.post(
         PREFIX,
         json={"name": "daily_digest", "raw": _macro_yaml("other_name")},
@@ -190,9 +191,12 @@ def test_macro_api_rejects_mismatched_definition_names_without_storage_changes(a
 
     assert rejected_create.status_code == 400, rejected_create.text
     assert "must match" in rejected_create.json()["detail"]
-    assert not (api_client.user_base / "macros" / "daily_digest").exists()
-    assert not (api_client.user_base / "macros" / "other_name").exists()
+    assert api_client.client.get(f"{PREFIX}/daily_digest").status_code == 404
+    assert api_client.client.get(f"{PREFIX}/other_name").status_code == 404
 
+
+def test_macro_api_rejects_definition_rename(api_client: MacroApiClient) -> None:
+    """A rejected update preserves the original source and public identity."""
     original_raw = _macro_yaml("daily_digest")
     created = api_client.client.post(PREFIX, json={"name": "daily_digest", "raw": original_raw})
     assert created.status_code == 201, created.text
@@ -204,8 +208,46 @@ def test_macro_api_rejects_mismatched_definition_names_without_storage_changes(a
 
     assert rejected_update.status_code == 400, rejected_update.text
     assert "must match" in rejected_update.json()["detail"]
-    assert (api_client.user_base / "macros" / "daily_digest" / "MACRO.yaml").read_text(encoding="utf-8") == original_raw
-    assert not (api_client.user_base / "macros" / "renamed").exists()
+    original = api_client.client.get(f"{PREFIX}/daily_digest")
+    assert original.status_code == 200, original.text
+    assert original.json()["raw"] == original_raw
+    assert api_client.client.get(f"{PREFIX}/renamed").status_code == 404
+
+
+def test_profile_only_update_preserves_recent_toggle(api_client: MacroApiClient) -> None:
+    """Saving a profile draft cannot revert toggles changed since it opened."""
+    original = api_client.client.get(f"{PREFIX}/settings").json()["settings"]
+    disabled = api_client.client.put(f"{PREFIX}/wrapup", json={"enabled": False})
+    assert disabled.status_code == 200, disabled.text
+    profiles = original["output_profiles"]
+    profiles["default"]["section_titles"] = {"summary": "  Brief  "}
+    saved = api_client.client.put(f"{PREFIX}/settings/output-profiles", json={"output_profiles": profiles})
+    assert saved.status_code == 200, saved.text
+    persisted = api_client.client.get(f"{PREFIX}/settings").json()["settings"]
+    assert persisted["disabled_builtins"] == ["wrapup"]
+    assert persisted["output_profiles"]["default"]["section_titles"] == {"summary": "Brief"}
+
+
+@pytest.mark.parametrize(
+    "profile",
+    [
+        {"sections": []},
+        {"sections": ["summary"], "section_titles": {"summary": " \t "}},
+    ],
+)
+@pytest.mark.parametrize("profile_only", [False, True])
+def test_settings_api_rejects_unrenderable_profiles(
+    api_client: MacroApiClient,
+    profile: dict,
+    profile_only: bool,
+) -> None:
+    """Both settings operations reject invalid profiles without persisting them."""
+    original = api_client.client.get(f"{PREFIX}/settings").json()
+    body = {"output_profiles": {"default": profile}}
+    url = f"{PREFIX}/settings/output-profiles" if profile_only else f"{PREFIX}/settings"
+    response = api_client.client.put(url, json=body if profile_only else {"settings": body})
+    assert response.status_code == 400, response.text
+    assert api_client.client.get(f"{PREFIX}/settings").json() == original
 
 
 def test_update_macro_enabled_state_without_replacing_definition(api_client: MacroApiClient):

@@ -244,6 +244,15 @@ export const updateChatMacroSettings = (
     body: { settings }
   })
 
+export const updateChatMacroOutputProfiles = (
+  profiles: Record<string, ChatMacroOutputProfile>
+): Promise<ApiSendResponse<ChatMacroSettingsResponse>> =>
+  apiSend<ChatMacroSettingsResponse>({
+    path: `${CHAT_MACROS_BASE}/settings/output-profiles`,
+    method: "PUT",
+    body: { output_profiles: profiles }
+  })
+
 export const cloneChatMacro = (
   name: string,
   request: ChatMacroCloneRequest

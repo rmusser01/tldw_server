@@ -53,7 +53,8 @@ The manager supports:
 
 Import and export are YAML-only. An import opens a blank editor draft and does
 not persist until the user saves after validation. Imports accept `.yaml` or
-`.yml` source files only and are limited to 500,000 bytes. Exports use the
+`.yml` source files only and are limited to 500,000 bytes. Exports include the
+visible draft, including unsaved edits. Untouched definitions retain the exact
 canonical YAML returned by the server.
 
 Guided mode intentionally supports a narrow, inspectable topology: one through
@@ -65,9 +66,9 @@ fields or topology.
 
 ## Output Profiles
 
-Macro settings contain named output profiles. The output-profile editor preserves
-unrelated settings keys and replaces its local values with the normalized server
-response after a successful save.
+Macro settings contain named output profiles. The output-profile editor saves
+only profiles through an atomic backend update, preserving current macro toggles
+and unrelated settings. Unsaved profile edits survive settings refreshes.
 
 Each profile selects one result format:
 
@@ -75,10 +76,11 @@ Each profile selects one result format:
 - `single_response`: return one consolidated response.
 
 Profiles can include branch outputs and define custom `section_titles` for
-individual section keys. Section order is significant. A profile has at most ten
+individual section keys. Section order is significant. A profile has one to ten
 sections; section keys use the same lowercase identifier rules as profile names,
-and custom titles are bounded to 128 characters. The default profile is always
-retained.
+and custom titles are trimmed, nonblank, and bounded to 128 characters. Existing
+profile names accepted by the backend remain editable. The default profile is
+always retained.
 
 ## Built-In `/wrapup`
 
@@ -114,9 +116,15 @@ The REST API is exposed under `/api/v1/chat/macros`:
 - `POST /api/v1/chat/macros/validate`: validate macro YAML without saving it.
 - `GET|PUT /api/v1/chat/macros/settings`: read or replace macro settings,
   including global output profiles and disabled built-ins.
+- `PUT /api/v1/chat/macros/settings/output-profiles`: atomically replace only
+  output profiles, preserving other current settings.
 - `POST /api/v1/chat/macros/run`: create and enqueue a macro run.
 - `GET /api/v1/chat/macros/runs/{run_id}`: read run and branch detail.
 - `POST /api/v1/chat/macros/runs/{run_id}/cancel`: request cancellation.
+
+Previously stored empty section lists fall back to default sections on read,
+and whitespace-only headings fall back to generated headings. This keeps legacy
+settings editable; new writes still reject these empty values.
 
 ## Execution And Jobs
 

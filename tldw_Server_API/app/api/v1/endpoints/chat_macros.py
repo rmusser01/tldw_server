@@ -20,6 +20,7 @@ from tldw_Server_API.app.api.v1.schemas.chat_macros import (
     ChatMacroCreateRequest,
     ChatMacroDetail,
     ChatMacroListResponse,
+    ChatMacroOutputProfilesRequest,
     ChatMacroRunDetailResponse,
     ChatMacroRunRecordResponse,
     ChatMacroRunRequest,
@@ -263,6 +264,19 @@ async def update_chat_macro_settings(
     """Validate and persist the current user's chat macro settings."""
     try:
         settings_payload = await asyncio.to_thread(service.save_settings, request.settings)
+        return ChatMacroSettingsResponse(settings=settings_payload)
+    except (MacroValidationError, MacroStorageError) as exc:
+        _raise_macro_http(exc)
+
+
+@router.put("/settings/output-profiles", response_model=ChatMacroSettingsResponse)
+async def update_chat_macro_output_profiles(
+    request: ChatMacroOutputProfilesRequest,
+    service: ChatMacrosService = Depends(get_chat_macros_service),
+) -> ChatMacroSettingsResponse:
+    """Atomically replace profiles while retaining other current user settings."""
+    try:
+        settings_payload = await asyncio.to_thread(service.save_output_profiles, request.output_profiles)
         return ChatMacroSettingsResponse(settings=settings_payload)
     except (MacroValidationError, MacroStorageError) as exc:
         _raise_macro_http(exc)

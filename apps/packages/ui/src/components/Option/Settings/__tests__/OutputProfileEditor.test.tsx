@@ -7,11 +7,13 @@ import type { ChatMacroSettings } from "@/services/chat-macros"
 import { OutputProfileEditor } from "../OutputProfileEditor"
 
 const mocks = vi.hoisted(() => ({
-  updateChatMacroSettings: vi.fn()
+  updateChatMacroSettings: vi.fn(),
+  updateChatMacroOutputProfiles: vi.fn()
 }))
 
 vi.mock("@/services/chat-macros", () => ({
-  updateChatMacroSettings: mocks.updateChatMacroSettings
+  updateChatMacroSettings: mocks.updateChatMacroSettings,
+  updateChatMacroOutputProfiles: mocks.updateChatMacroOutputProfiles
 }))
 
 vi.mock("react-i18next", () => ({
@@ -69,6 +71,9 @@ describe("OutputProfileEditor", () => {
     mocks.updateChatMacroSettings.mockImplementation((settings: ChatMacroSettings) =>
       Promise.resolve(success(settings))
     )
+    mocks.updateChatMacroOutputProfiles.mockImplementation((output_profiles: ChatMacroSettings["output_profiles"]) =>
+      Promise.resolve(success(makeSettings({ output_profiles })))
+    )
   })
 
   it("uses the themed surface token for profile fields", () => {
@@ -77,9 +82,9 @@ describe("OutputProfileEditor", () => {
     expect(screen.getByLabelText("Profile")).toHaveClass("bg-surface")
   })
 
-  it("saves ordered sections and custom headings without dropping other settings", async () => {
+  it("saves ordered sections and custom headings without sending unrelated settings", async () => {
     const user = userEvent.setup()
-    renderProfileEditor()
+    const { props } = renderProfileEditor()
 
     await user.click(screen.getByRole("button", { name: "Add section" }))
     await user.type(screen.getByLabelText("Section key 3"), "risks")
@@ -87,19 +92,15 @@ describe("OutputProfileEditor", () => {
     await user.click(screen.getByRole("button", { name: "Save profiles" }))
 
     await waitFor(() =>
-      expect(mocks.updateChatMacroSettings).toHaveBeenCalledWith(
-        expect.objectContaining({
-          disabled_builtins: ["example"],
-          unrelated_setting: { preserve: true },
-          output_profiles: expect.objectContaining({
-            default: expect.objectContaining({
-              sections: ["summary", "action_items", "risks"],
-              section_titles: { risks: "Risk register" }
-            })
-          })
+      expect(mocks.updateChatMacroOutputProfiles).toHaveBeenCalledWith({
+        concise: props.settings.output_profiles.concise,
+        default: expect.objectContaining({
+          sections: ["summary", "action_items", "risks"],
+          section_titles: { risks: "Risk register" }
         })
-      )
+      })
     )
+    expect(mocks.updateChatMacroSettings).not.toHaveBeenCalled()
   })
 
   it("moves a custom heading with its renamed section key", async () => {
@@ -112,10 +113,10 @@ describe("OutputProfileEditor", () => {
     await user.type(screen.getByLabelText("Section key 1"), "overview")
     await user.click(screen.getByRole("button", { name: "Save profiles" }))
 
-    await waitFor(() => expect(mocks.updateChatMacroSettings).toHaveBeenCalled())
-    const [savedSettings] = mocks.updateChatMacroSettings.mock.calls[0] as [ChatMacroSettings]
-    expect(savedSettings.output_profiles.default.sections).toEqual(["overview", "action_items"])
-    expect(savedSettings.output_profiles.default.section_titles).toEqual({
+    await waitFor(() => expect(mocks.updateChatMacroOutputProfiles).toHaveBeenCalled())
+    const [profiles] = mocks.updateChatMacroOutputProfiles.mock.calls[0] as [ChatMacroSettings["output_profiles"]]
+    expect(profiles.default.sections).toEqual(["overview", "action_items"])
+    expect(profiles.default.section_titles).toEqual({
       overview: "Executive summary"
     })
   })
@@ -134,7 +135,7 @@ describe("OutputProfileEditor", () => {
     await user.click(screen.getByRole("button", { name: "Save profiles" }))
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Section keys must be unique.")
-    expect(mocks.updateChatMacroSettings).not.toHaveBeenCalled()
+    expect(mocks.updateChatMacroOutputProfiles).not.toHaveBeenCalled()
     expect(screen.getByLabelText("Section heading 1")).toHaveValue("Executive summary")
     expect(screen.getByLabelText("Section heading 2")).toHaveValue("Action plan")
 
@@ -142,9 +143,9 @@ describe("OutputProfileEditor", () => {
     await user.type(screen.getByLabelText("Section key 1"), "overview")
     await user.click(screen.getByRole("button", { name: "Save profiles" }))
 
-    await waitFor(() => expect(mocks.updateChatMacroSettings).toHaveBeenCalled())
-    const [savedSettings] = mocks.updateChatMacroSettings.mock.calls[0] as [ChatMacroSettings]
-    expect(savedSettings.output_profiles.default.section_titles).toEqual({
+    await waitFor(() => expect(mocks.updateChatMacroOutputProfiles).toHaveBeenCalled())
+    const [profiles] = mocks.updateChatMacroOutputProfiles.mock.calls[0] as [ChatMacroSettings["output_profiles"]]
+    expect(profiles.default.section_titles).toEqual({
       overview: "Executive summary",
       action_items: "Action plan"
     })
@@ -159,13 +160,11 @@ describe("OutputProfileEditor", () => {
     await user.click(screen.getByRole("button", { name: "Save profiles" }))
 
     await waitFor(() =>
-      expect(mocks.updateChatMacroSettings).toHaveBeenCalledWith(
+      expect(mocks.updateChatMacroOutputProfiles).toHaveBeenCalledWith(
         expect.objectContaining({
-          output_profiles: expect.objectContaining({
-            default: expect.objectContaining({
-              format: "single_response",
-              include_branch_outputs: true
-            })
+          default: expect.objectContaining({
+            format: "single_response",
+            include_branch_outputs: true
           })
         })
       )
@@ -212,14 +211,14 @@ describe("OutputProfileEditor", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Section keys must use lowercase letters, numbers, and underscores."
     )
-    expect(mocks.updateChatMacroSettings).not.toHaveBeenCalled()
+    expect(mocks.updateChatMacroOutputProfiles).not.toHaveBeenCalled()
 
     await user.clear(screen.getByLabelText("Section key 3"))
     await user.type(screen.getByLabelText("Section key 3"), "summary")
     await user.click(screen.getByRole("button", { name: "Save profiles" }))
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Section keys must be unique.")
-    expect(mocks.updateChatMacroSettings).not.toHaveBeenCalled()
+    expect(mocks.updateChatMacroOutputProfiles).not.toHaveBeenCalled()
   })
 
   it("blocks profiles with more than ten sections and headings over 128 characters", async () => {
@@ -235,7 +234,7 @@ describe("OutputProfileEditor", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "A profile can contain at most 10 sections."
     )
-    expect(mocks.updateChatMacroSettings).not.toHaveBeenCalled()
+    expect(mocks.updateChatMacroOutputProfiles).not.toHaveBeenCalled()
 
     await user.click(screen.getByRole("button", { name: "Remove section 11" }))
     await user.type(screen.getByLabelText("Section heading 1"), "x".repeat(129))
@@ -244,7 +243,7 @@ describe("OutputProfileEditor", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Section headings must be 128 characters or fewer."
     )
-    expect(mocks.updateChatMacroSettings).not.toHaveBeenCalled()
+    expect(mocks.updateChatMacroOutputProfiles).not.toHaveBeenCalled()
   })
 
   it("validates new profile names before creating drafts", async () => {
@@ -267,7 +266,7 @@ describe("OutputProfileEditor", () => {
 
   it("retains draft edits after a failed save", async () => {
     const user = userEvent.setup()
-    mocks.updateChatMacroSettings.mockResolvedValueOnce({
+    mocks.updateChatMacroOutputProfiles.mockResolvedValueOnce({
       ok: false,
       status: 503,
       error: "Settings unavailable"
@@ -280,6 +279,102 @@ describe("OutputProfileEditor", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Settings unavailable")
     expect(screen.getByLabelText("Section heading 1")).toHaveValue("Executive summary")
     expect(screen.getByRole("button", { name: "Save profiles" })).toBeEnabled()
+  })
+
+  it("preserves dirty profiles and selection when settings refresh", async () => {
+    const user = userEvent.setup()
+    const { props, rerender } = renderProfileEditor()
+    await user.selectOptions(screen.getByLabelText("Profile"), "concise")
+    await user.type(screen.getByLabelText("Section heading 1"), "Local heading")
+
+    rerender(<OutputProfileEditor {...props} settings={makeSettings({ disabled_builtins: [] })} />)
+
+    expect(screen.getByLabelText("Profile")).toHaveValue("concise")
+    expect(screen.getByLabelText("Section heading 1")).toHaveValue("Local heading")
+    await user.click(screen.getByRole("button", { name: "Save profiles" }))
+    await waitFor(() => expect(mocks.updateChatMacroOutputProfiles).toHaveBeenCalledWith(
+      expect.objectContaining({ concise: expect.objectContaining({ section_titles: { summary: "Local heading" } }) })
+    ))
+  })
+
+  it("preserves an unfinished new profile name when settings refresh", async () => {
+    const user = userEvent.setup()
+    const { props, rerender } = renderProfileEditor()
+    await user.type(screen.getByLabelText("New profile name"), "review")
+
+    rerender(<OutputProfileEditor {...props} settings={makeSettings()} />)
+
+    expect(screen.getByLabelText("New profile name")).toHaveValue("review")
+  })
+
+  it("preserves profile additions and deletions when settings refresh", async () => {
+    const user = userEvent.setup()
+    const { props, rerender } = renderProfileEditor()
+    await user.selectOptions(screen.getByLabelText("Profile"), "concise")
+    await user.click(screen.getByRole("button", { name: "Delete profile" }))
+    await user.type(screen.getByLabelText("New profile name"), "review")
+    await user.click(screen.getByRole("button", { name: "Add profile" }))
+
+    rerender(<OutputProfileEditor {...props} settings={makeSettings()} />)
+
+    expect(screen.getByLabelText("Profile")).toHaveValue("review")
+    expect(screen.queryByRole("option", { name: "concise" })).not.toBeInTheDocument()
+  })
+
+  it("refreshes pristine profiles and resumes refreshing after a successful save", async () => {
+    const user = userEvent.setup()
+    const { props, rerender } = renderProfileEditor()
+    const refreshed = makeSettings()
+    refreshed.output_profiles.default.section_titles = { summary: "Server heading" }
+    rerender(<OutputProfileEditor {...props} settings={refreshed} />)
+    expect(screen.getByLabelText("Section heading 1")).toHaveValue("Server heading")
+
+    await user.type(screen.getByLabelText("Section heading 1"), " edited")
+    await user.click(screen.getByRole("button", { name: "Save profiles" }))
+    await screen.findByRole("status")
+    expect(screen.getByLabelText("Section heading 1")).toHaveValue("Server heading edited")
+
+    rerender(<OutputProfileEditor {...props} settings={makeSettings()} />)
+    expect(screen.getByLabelText("Section heading 1")).toHaveValue("")
+  })
+
+  it("prevents removing the last section", async () => {
+    const user = userEvent.setup()
+    renderProfileEditor()
+    await user.click(screen.getByRole("button", { name: "Remove section 2" }))
+
+    expect(screen.getByRole("button", { name: "Remove section 1" })).toBeDisabled()
+    await user.click(screen.getByRole("button", { name: "Remove section 1" }))
+    expect(screen.getByLabelText("Section key 1")).toHaveValue("summary")
+  })
+
+  it.each(["structured_sections", "single_response"] as const)("rejects an empty %s profile before saving", async (format) => {
+    const user = userEvent.setup()
+    const settings = makeSettings()
+    settings.output_profiles.default = { ...settings.output_profiles.default, format, sections: [] }
+    renderProfileEditor({ settings })
+    await user.click(screen.getByRole("button", { name: "Save profiles" }))
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("A profile must contain at least one section.")
+    expect(mocks.updateChatMacroOutputProfiles).not.toHaveBeenCalled()
+    expect(mocks.updateChatMacroSettings).not.toHaveBeenCalled()
+  })
+
+  it("round-trips existing backend-supported profile names without new-name validation", async () => {
+    const user = userEvent.setup()
+    const settings = makeSettings()
+    settings.output_profiles["Review-Notes"] = settings.output_profiles.concise
+    const { props } = renderProfileEditor({ settings })
+    await user.selectOptions(screen.getByLabelText("Profile"), "Review-Notes")
+    await user.type(screen.getByLabelText("Section heading 1"), "Review notes")
+    await user.click(screen.getByRole("button", { name: "Save profiles" }))
+
+    await waitFor(() => expect(props.onSaved).toHaveBeenCalledWith(expect.objectContaining({
+      output_profiles: expect.objectContaining({
+        "Review-Notes": expect.objectContaining({ section_titles: { summary: "Review notes" } })
+      })
+    })))
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
   })
 
   it("prevents draft mutations while a save is pending and applies the normalized response", async () => {
@@ -299,19 +394,19 @@ describe("OutputProfileEditor", () => {
       include_branch_outputs: true
     }
     let resolveSave: ((response: ReturnType<typeof success>) => void) | undefined
-    mocks.updateChatMacroSettings.mockImplementationOnce(
+    mocks.updateChatMacroOutputProfiles.mockImplementationOnce(
       () => new Promise((resolve) => {
         resolveSave = resolve
       })
     )
-    renderProfileEditor({ settings })
+    const { props, rerender } = renderProfileEditor({ settings })
 
     await user.selectOptions(screen.getByLabelText("Profile"), "concise")
     expect(screen.getByRole("button", { name: "Delete profile" })).toBeEnabled()
     expect(screen.getByRole("button", { name: "Move section 1 down" })).toBeEnabled()
     await user.click(screen.getByRole("button", { name: "Save profiles" }))
 
-    await waitFor(() => expect(mocks.updateChatMacroSettings).toHaveBeenCalled())
+    await waitFor(() => expect(mocks.updateChatMacroOutputProfiles).toHaveBeenCalled())
     expect(screen.getByLabelText("Profile")).toBeDisabled()
     expect(screen.getByLabelText("New profile name")).toBeDisabled()
     expect(screen.getByRole("button", { name: "Add profile" })).toBeDisabled()
@@ -326,6 +421,9 @@ describe("OutputProfileEditor", () => {
     expect(screen.getByRole("button", { name: "Remove section 1" })).toBeDisabled()
 
     await user.type(screen.getByLabelText("Section key 1"), "mutated")
+    expect(screen.getByLabelText("Section key 1")).toHaveValue("summary")
+
+    rerender(<OutputProfileEditor {...props} settings={normalizedSettings} />)
     expect(screen.getByLabelText("Section key 1")).toHaveValue("summary")
 
     await act(async () => {
