@@ -370,7 +370,11 @@ class TestKanbanVectorSearchHelpers:
             def __init__(self, *_args, **_kwargs):
                 raise PanicException("panic from rust backend")
 
-        monkeypatch.setattr(kvs, "_CHROMADB_AVAILABLE", True)
+        # The module gates on is_vector_search_available() now; the old
+        # _CHROMADB_AVAILABLE flag is gone, so patching it raised AttributeError
+        # and this test failed. It went unnoticed because tests/kanban is in no
+        # CI shard and has never run.
+        monkeypatch.setattr(kvs, "is_vector_search_available", lambda: True)
         monkeypatch.setattr(kvs, "KanbanVectorSearch", _RaisingVectorSearch)
 
         result = kvs.create_kanban_vector_search(
