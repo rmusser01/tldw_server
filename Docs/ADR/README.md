@@ -71,10 +71,13 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-037](037-canonical-notes-link-sync-and-derived-graph-projections.md) | Accepted | Synchronize explicit manual note links while keeping wikilinks, backlinks, orphan state, and graph summaries deterministic local projections. |
 | [ADR-038](038-canonical-notes-attachment-registry-and-blob-lifecycle.md) | Accepted | Give Notes attachments stable product identity while reusing the shared Sync blob lifecycle. |
 | [ADR-039](039-canonical-notes-task-sync-and-derived-checklist-projections.md) | Accepted | Synchronize mutable Notes tasks and immutable activity while keeping Markdown checklists and read state derived. |
-| [ADR-040](040-synchronized-moodboards-and-studio-authority.md) | Proposed | Synchronize moodboards, explicit placements, and accepted Studio sidecars while retaining existing product authority and derived smart matches. |
+| [ADR-040](040-synchronized-moodboards-and-studio-authority.md) | Accepted | Synchronize moodboards, explicit placements, and accepted Studio sidecars while retaining existing product authority and derived smart matches. |
 | [ADR-041](041-scheduled-agent-execution-feasibility.md) | Accepted | Keep Scheduled Agent execution fail-closed until exact deployment certification and the separate execution stack are both ready. |
 | [ADR-042](042-browser-transport-admission-and-attestation.md) | Accepted | Admit browser retrieval only through URL-guarded single-user compatibility or a complete governed-transport attestation. |
-
-| [ADR-045](045-persona-live-pending-plan-handoff.md) | Accepted | Project the latest active owned pending Persona plan through authenticated session detail for explicit full Live review. |
+| [ADR-043](043-managed-llamacpp-manual-slot-snapshots.md) | Accepted | Keep managed llama.cpp slot snapshots admin-only, opt-in, and owned by the active supervisor with durable operation receipts. |
 | [ADR-044](044-cookie-session-governance-owner-preflight.md) | Accepted | Resolve canonical cookie-session owners before ingress quotas only when policy scopes cannot admit anonymous requests. |
+| [ADR-045](045-persona-live-pending-plan-handoff.md) | Accepted | Project the latest active owned pending Persona plan through authenticated session detail for explicit full Live review. |
 | [ADR-046](046-persona-live-conversation-and-voice-runtime.md) | Accepted | Reuse authenticated Chat admission for Live conversation and require owned runtime preparation before voice capture. |
+| [ADR-047](047-per-user-audio-preset-ownership.md) | Accepted | Store reusable TTS/STT presets as authenticated per-user Audio API state in Media DB, separate from speech outputs and history. |
+
+The original backfill inventory is [the 2026-06-03 decision inventory](inventory/2026-06-03-decision-inventory.md). See the [2026-09-25 reconciliation](inventory/2026-09-25-decision-inventory-reconciliation.md) for current dispositions of its unresolved rows.
