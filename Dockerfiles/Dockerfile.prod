@@ -63,8 +63,8 @@ WORKDIR /app
 COPY --from=builder /opt/tldw-venv /opt/tldw-venv
 
 # Verify local packages are installed, without relying on repository PYTHONPATH.
-RUN python -c "import mcp_unified; import tldw_profile_core"
-RUN python -c "import json, sys; from pathlib import Path; \
+RUN /opt/tldw-venv/bin/python -I -c "import mcp_unified; import tldw_profile_core"
+RUN /opt/tldw-venv/bin/python -I -c "import json, sys; from pathlib import Path; \
     root = Path(sys.prefix) / 'share/tldw_profile_core'; \
     json.loads((root / 'schemas/personal-context-v1.json').read_text()); \
     json.loads((root / 'fixtures/v1/01-manifest.json').read_text())"

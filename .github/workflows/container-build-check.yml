@@ -117,19 +117,6 @@ jobs:
           cache-from: type=gha,scope=check-${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=check-${{ matrix.name }}
 
-      - name: Verify backend local package imports
-        if: ${{ matrix.python_runtime == true }}
-        env:
-          IMAGE_REF: ${{ steps.build.outputs.digest }}
-        run: |
-          set -euo pipefail
-          docker load --input "$RUNNER_TEMP/${{ matrix.name }}.oci.tar"
-          image_id="$(docker image inspect --format '{{.Id}}' "$IMAGE_REF")"
-          docker run --rm --network none --read-only \
-            --cap-drop ALL --security-opt no-new-privileges \
-            --entrypoint python "$image_id" -I -c \
-            "import mcp_unified; import tldw_profile_core"
-
       - name: Extract exact OCI candidate
         shell: bash
         run: |
@@ -194,6 +181,12 @@ jobs:
           if image["Id"] != os.environ["SUBJECT_DIGEST"] or (image["Os"], image["Architecture"]) != ("linux", "amd64"):
               raise SystemExit("loaded OCI image identity/platform mismatch")
           PY
+          docker run --rm --pull never --platform linux/amd64 \
+            --user "$(id -u):$(id -g)" \
+            --network none --cap-drop ALL --security-opt no-new-privileges:true \
+            --read-only --workdir /tmp \
+            --entrypoint python "$SUBJECT_DIGEST" -I -c \
+            "import mcp_unified; import tldw_profile_core"
           docker run --rm --pull never --platform linux/amd64 \
             --user "$(id -u):$(id -g)" \
             --network none --cap-drop ALL --security-opt no-new-privileges:true \

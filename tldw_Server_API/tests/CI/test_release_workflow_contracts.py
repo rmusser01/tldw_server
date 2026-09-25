@@ -620,28 +620,36 @@ def test_container_build_check_covers_workers_without_publishing_images() -> Non
     ]
     assert build["with"]["push"] is False
     assert workflow["permissions"] == {"contents": "read"}
-    assert [entry["backend"] for entry in matrix] == [True, True, True, False, False]
+    assert [entry.get("python_runtime", False) for entry in matrix] == [True, True, True, False, False]
     assert "type=oci" in build["with"]["outputs"]
 
 
 def test_container_backend_smoke_uses_the_built_image_and_isolated_imports() -> None:
-    """Backend packaging omissions must fail before the matrix result is green."""
-    workflow = _load(Path(".github/workflows/container-build-check.yml"))
+    """Local package imports use the admitted OCI subject and fail its runtime gate."""
+    workflow = _load(CONTAINER_WORKFLOW)
     steps = workflow["jobs"]["build-and-scan"]["steps"]
     build = _get_step(steps, "Build local OCI candidate")
-    smoke = _get_step(steps, "Verify backend local package imports")
+    runtime = _get_step(steps, "Verify embedded Python runtime")
+    script = _run(runtime)
 
-    assert steps.index(smoke) > steps.index(build)
-    assert smoke["if"] == "matrix.backend"
-    assert smoke["env"]["IMAGE_REF"] == "${{ steps.build.outputs.digest }}"
-    assert "docker load --input" in smoke["run"]
-    assert "docker image inspect --format" in smoke["run"]
-    assert '"$image_id" -I -c' in smoke["run"]
-    assert "--entrypoint python" in smoke["run"]
-    assert "import mcp_unified; import tldw_profile_core" in smoke["run"]
-    assert "--network none" in smoke["run"]
-    assert "--read-only" in smoke["run"]
-    assert not smoke.get("continue-on-error", False)
+    assert steps.index(runtime) > steps.index(build)
+    assert runtime["if"] == "${{ matrix.python_runtime == true }}"
+    assert runtime["env"]["SUBJECT_DIGEST"] == "${{ steps.build.outputs.digest }}"
+    assert "| docker load" in script
+    assert 'docker image inspect "$SUBJECT_DIGEST"' in script
+    assert '--entrypoint python "$SUBJECT_DIGEST" -I -c' in script
+    assert "import mcp_unified; import tldw_profile_core" in script
+    assert "--network none" in script
+    assert "--read-only" in script
+    assert script.index("loaded OCI image identity/platform mismatch") < script.index(
+        "import mcp_unified; import tldw_profile_core"
+    )
+    assert script.index("import mcp_unified; import tldw_profile_core") < script.index(
+        "runtime_probe.py probe --lock /probe/uv.lock"
+    )
+    gate = _run(_get_step(steps, "Require candidate admission"))
+    assert 'test "${{ steps.runtime.outcome }}" = "success"' in gate
+    assert sum("docker load" in step.get("run", "") for step in steps) == 1
 
 
 def test_frontend_required_enforces_shared_hooks_and_preserves_full_lint() -> None:

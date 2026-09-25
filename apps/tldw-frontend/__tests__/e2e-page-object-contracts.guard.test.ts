@@ -24,7 +24,6 @@ const audiobookStudioPagePath = path.resolve(
   testDir,
   '../e2e/utils/page-objects/AudiobookStudioPage.ts'
 );
-const audioStudioPagePath = path.resolve(testDir, '../e2e/utils/page-objects/AudioStudioPage.ts');
 const knowledgeQaPagePath = path.resolve(testDir, '../e2e/utils/page-objects/KnowledgeQAPage.ts');
 const agentRegistryPagePath = path.resolve(
   testDir,

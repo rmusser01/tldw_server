@@ -982,7 +982,7 @@ describe("CharactersManager first-use onboarding", () => {
     expect(createScope.getByText("Prompt preset")).toBeInTheDocument()
     expect(createScope.queryByText("Generation temperature")).not.toBeInTheDocument()
 
-    await user.click(createScope.getByRole("button", { name: "Show advanced fields" }))
+    fireEvent.click(createScope.getByRole("button", { name: "Show advanced fields" }))
 
     expect(await createScope.findByRole("button", { name: "Prompt control" })).toBeInTheDocument()
     expect(createScope.getByRole("button", { name: "Generation settings" })).toBeInTheDocument()
@@ -1434,7 +1434,7 @@ describe("CharactersManager first-use onboarding", () => {
       { target: { value: "You are a grounded assistant." } }
     )
 
-    await user.click(createScope.getByRole("button", { name: "Show advanced fields" }))
+    fireEvent.click(createScope.getByRole("button", { name: "Show advanced fields" }))
     await user.click(await createScope.findByRole("button", { name: "Metadata" }))
     await selectCharacterWorldBook(user, createScope, "Lore Atlas")
 
@@ -1529,7 +1529,7 @@ describe("CharactersManager first-use onboarding", () => {
       { target: { value: "You are a grounded assistant." } }
     )
 
-    await user.click(createScope.getByRole("button", { name: "Show advanced fields" }))
+    fireEvent.click(createScope.getByRole("button", { name: "Show advanced fields" }))
     await user.click(await createScope.findByRole("button", { name: "Metadata" }))
     await selectCharacterWorldBook(user, createScope, "Lore Atlas")
 
