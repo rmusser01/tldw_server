@@ -3460,6 +3460,29 @@ async def ensure_mcp_prompt_read_permission_pg(pool: DatabasePool | None = None)
         return False
 
 
+async def ensure_calendar_permissions_pg(pool: DatabasePool | None = None) -> bool:
+    """Backfill Calendar grants on existing PostgreSQL installations."""
+    db_pool = pool or await get_db_pool()
+    if getattr(db_pool, "pool", None) is None:
+        return False
+
+    async with db_pool.transaction() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT table_name FROM information_schema.tables
+            WHERE table_schema = current_schema()
+              AND table_name = ANY($1::text[])
+            """,
+            ["roles", "permissions", "role_permissions"],
+        )
+        if {"roles", "permissions", "role_permissions"} - {str(row["table_name"]) for row in rows}:
+            return False
+        from tldw_Server_API.app.core.AuthNZ.rbac_seed import ensure_baseline_rbac_seed
+
+        await ensure_baseline_rbac_seed(conn, include_mcp_permissions=True, is_postgres=True)
+    return True
+
+
 async def ensure_notification_permissions_pg(pool: DatabasePool | None = None) -> bool:
     """Ensure notification grants and matching legacy role memberships on PostgreSQL."""
     try:

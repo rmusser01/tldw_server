@@ -333,6 +333,12 @@ EMBEDDINGS_ADMIN = "embeddings.admin"
 CLAIMS_REVIEW = "claims.review"
 CLAIMS_ADMIN = "claims.admin"
 
+# Calendar permissions
+CALENDAR_READ = "calendar.read"
+CALENDAR_WRITE = "calendar.write"
+CALENDAR_SYNC = "calendar.sync"
+CALENDAR_ADMIN = "calendar.admin"
+
 # Moderation review permissions
 MODERATION_REVIEW_READ = "moderation.review.read"
 MODERATION_REVIEW_DECIDE = "moderation.review.decide"
