@@ -9,7 +9,8 @@ const ORIGINAL_ENV = {
   NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE: process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE,
   TLDW_INTERNAL_API_ORIGIN: process.env.TLDW_INTERNAL_API_ORIGIN,
   SINGLE_USER_SESSION_COOKIE_NAME: process.env.SINGLE_USER_SESSION_COOKIE_NAME,
-  CSRF_COOKIE_NAME: process.env.CSRF_COOKIE_NAME
+  CSRF_COOKIE_NAME: process.env.CSRF_COOKIE_NAME,
+  TLDW_GATEWAY_HOP_SECRET: process.env.TLDW_GATEWAY_HOP_SECRET
 }
 
 const restoreEnv = () => {
@@ -30,6 +31,7 @@ const configureRuntimeAuth = () => {
   process.env.TLDW_INTERNAL_API_ORIGIN = "http://app:8000"
   delete process.env.SINGLE_USER_SESSION_COOKIE_NAME
   delete process.env.CSRF_COOKIE_NAME
+  delete process.env.TLDW_GATEWAY_HOP_SECRET
 }
 
 const callRuntimeConfig = async (
@@ -99,6 +101,27 @@ describe("WebUI runtime config API", () => {
       csrfCookieName: "tldw_csrf_a1"
     })
     expect(JSON.stringify(res.body)).not.toContain("runtime-single-user-key")
+  })
+
+  it("accepts managed runtime auth only with the private gateway hop", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "managed"
+    process.env.TLDW_GATEWAY_HOP_SECRET = "managed-hop-secret-at-least-32-characters"
+
+    const accepted = await callRuntimeConfig(
+      { "x-tldw-gateway-hop": process.env.TLDW_GATEWAY_HOP_SECRET },
+      "172.18.0.4"
+    )
+    const missing = await callRuntimeConfig({}, "172.18.0.4")
+    const wrong = await callRuntimeConfig({ "x-tldw-gateway-hop": "wrong-hop" }, "172.18.0.4")
+    const publicPeer = await callRuntimeConfig(
+      { "x-tldw-gateway-hop": process.env.TLDW_GATEWAY_HOP_SECRET },
+      "203.0.113.10"
+    )
+
+    expect(accepted.body.runtimeAuth).toMatchObject({ available: true, csrfCookieName: "csrf_token" })
+    expect(missing.body.runtimeAuth).toEqual({ available: false })
+    expect(wrong.body.runtimeAuth).toEqual({ available: false })
+    expect(publicPeer.body.runtimeAuth).toEqual({ available: false })
   })
 
   it.each(["custom_session", "CSRF_TOKEN"])(

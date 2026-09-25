@@ -4,7 +4,7 @@ title: Plan and implement paired Docker distribution and runtime gateway
 status: In Progress
 assignee: []
 created_date: '2026-09-23 06:15'
-updated_date: '2026-09-25 16:38'
+updated_date: '2026-09-25 16:52'
 labels:
   - distribution
   - docker
@@ -49,6 +49,8 @@ In isolated worktree codex/complete-app-wp1, Task 1 signed-manifest verifier imp
 WP1 Task 2 complete: managed same-origin WebUI mode and production build wrapper. Six focused Vitest files (64 tests) pass; managed Turbopack standalone build, token sync, and bundle budget pass; four URL/credential sentinels absent from generated static/server/standalone files. Full frontend typecheck remains red with 93 diagnostics in untouched files (baseline qualification issue). Task 3 cookie isolation in progress.
 
 WP1 Task 3 cookie isolation complete: backend CSRF cookie setting and logout clearing, Next runtime config/session cookie pair, browser runtime accessor and all affected readers. Verification: 32 AuthNZ unit tests; 6 focused HTTP/logout integration tests; 179 Next/runtime browser tests; 219 affected service tests. Two same-host ports filter to their own cookie pair. Frontend lint has one pre-existing any warning, typecheck remains 93 unrelated diagnostics. Bandit: 11 existing B106 findings in auth.py identical to HEAD; zero new findings. Gateway-level two-instance browser exercise is deferred to Task 4.
+
+WP1 Task 4 gateway code ready: route table, Host/Origin checks, stripping forwarded/Next control/hop headers, private Next hop, streaming proxy including cancellation and WebSocket upgrade, read-only maintenance status. http-proxy-middleware 4.2.0 is pinned. Twelve real-socket Node checks and 145 Next runtime/session tests pass; rebuilt standalone Next through gateway proves direct runtime auth unavailable and gateway cookie exchange successful without forwarding the master key on normal backend routes. Bun frozen lock, lint, syntax, token sync, and bundle budget pass. Full frontend typecheck still has the same 93 unrelated diagnostics. Real FastAPI extracted-bundle and two-instance browser smoke remain WP1 qualification gates.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

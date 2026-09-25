@@ -130,7 +130,7 @@ The code paths above are the planned ownership boundaries. If an existing helper
 
 **Interfaces:** `routeForPath(pathname: string): "managed" | "next" | "backend"`; `authorizeRequest(req: http.IncomingMessage): boolean`; `createGateway({backendOrigin, nextOrigin, publicHost, publicPort, gatewayHopSecret, phase}): http.Server`. Only the gateway supplies `X-Tldw-Gateway-Hop` to private Next; the browser cannot set it through. `/_tldw/*` serves read-only status/maintenance and the exact Docker host-helper instruction. Mutating control requests remain unavailable until WP3/WP4.
 
-- [ ] **Step 1: Write failing Node tests** for the complete spec section 5 route table, path/query preservation, forbidden unknown Host/Origin/forwarded headers, stripped browser-supplied hop headers, stable Set-Cookie/redirect handling, multipart streaming, request cancellation, and WebSocket upgrade. Example:
+- [x] **Step 1: Write failing Node tests** for the complete spec section 5 route table, path/query preservation, forbidden unknown Host/Origin/forwarded headers, stripped browser-supplied hop headers, stable Set-Cookie/redirect handling, multipart streaming, request cancellation, and WebSocket upgrade. Example:
 
   ```js
   assert.equal(routeForPath('/api/_tldw-webui/session'), 'next');
@@ -138,8 +138,8 @@ The code paths above are the planned ownership boundaries. If an existing helper
   assert.equal(routeForPath('/_next/static/app.js'), 'next');
   ```
 
-- [ ] **Step 2: Run** `node --test apps/tldw-frontend/gateway/__tests__/*.test.mjs`; expect missing-module failures.
-- [ ] **Step 3: Implement** explicit routing and an `http-proxy-middleware` proxy for each private upstream. Reject host/Origin mismatches before HTTP proxying or WebSocket upgrade, remove client `Forwarded`, `X-Forwarded-*`, and hop headers, and synthesize only the canonical headers Next/backend need. Use the library's documented `upgrade` path for WebSockets and do not buffer request bodies. The Next managed auth policy checks the hop secret in constant time and a non-public listener/network; no browser request may carry master credentials into arbitrary backend routes.
+- [x] **Step 2: Run** `node --test apps/tldw-frontend/gateway/__tests__/*.test.mjs`; expect missing-module failures.
+- [x] **Step 3: Implement** explicit routing and an `http-proxy-middleware` proxy for each private upstream. Reject host/Origin mismatches before HTTP proxying or WebSocket upgrade, remove client `Forwarded`, `X-Forwarded-*`, and hop headers, and synthesize only the canonical headers Next/backend need. Use the library's documented `upgrade` path for WebSockets and do not buffer request bodies. The Next managed auth policy checks the hop secret in constant time and a non-public listener/network; no browser request may carry master credentials into arbitrary backend routes.
 
   ```js
   server.on('upgrade', (req, socket, head) => {
@@ -149,8 +149,8 @@ The code paths above are the planned ownership boundaries. If an existing helper
   });
   ```
 
-- [ ] **Step 4: Run** Node tests and Next runtime-auth tests. Start dummy upstreams twice on different private ports with one built WebUI/gateway; verify each public request reaches the currently configured port. Run Playwright/HTTP probes for auth, docs API, uploads, streaming cancellation, WebSockets, redirects, and maintenance status. Capture failures as tests before changing routing.
-- [ ] **Step 5: Commit** gateway/lockfile/Next-policy changes with `feat: route managed WebUI through runtime gateway (TASK-13343)`.
+- [x] **Step 4: Run** Node tests and Next runtime-auth tests. Start dummy upstreams twice on different private ports with one built WebUI/gateway; verify each public request reaches the currently configured port. Run Playwright/HTTP probes for auth, docs API, uploads, streaming cancellation, WebSockets, redirects, and maintenance status. Capture failures as tests before changing routing. Twelve real-socket Node checks, 145 Next runtime-auth/session tests, and a rebuilt standalone Next through-gateway cookie exchange pass. Exact extracted-bundle plus real FastAPI and two-instance browser smoke remain Task 6/7 qualification gates. Frontend typecheck retains 93 existing unrelated diagnostics.
+- [x] **Step 5: Commit** gateway/lockfile/Next-policy changes with `feat: route managed WebUI through runtime gateway (TASK-13343)`.
 
 ## Stage 3: Extractable Docker release bundle
 

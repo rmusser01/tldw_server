@@ -15,6 +15,7 @@ const ORIGINAL_ENV = {
   TLDW_INTERNAL_API_ORIGIN: process.env.TLDW_INTERNAL_API_ORIGIN,
   SINGLE_USER_SESSION_COOKIE_NAME: process.env.SINGLE_USER_SESSION_COOKIE_NAME,
   CSRF_COOKIE_NAME: process.env.CSRF_COOKIE_NAME,
+  TLDW_GATEWAY_HOP_SECRET: process.env.TLDW_GATEWAY_HOP_SECRET,
 };
 
 const restoreEnv = () => {
@@ -35,6 +36,7 @@ const configureRuntimeAuth = () => {
   process.env.TLDW_INTERNAL_API_ORIGIN = BACKEND_ORIGIN;
   delete process.env.SINGLE_USER_SESSION_COOKIE_NAME;
   delete process.env.CSRF_COOKIE_NAME;
+  delete process.env.TLDW_GATEWAY_HOP_SECRET;
 };
 
 const backendResponse = ({
@@ -179,6 +181,22 @@ describe('WebUI runtime session bootstrap API', () => {
       'tldw_session_a1=rotated; Path=/api; HttpOnly',
       'tldw_csrf_a1=new-token; Path=/',
     ]);
+  });
+
+  it('boots a managed session only across the private gateway hop', async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = 'managed';
+    process.env.TLDW_GATEWAY_HOP_SECRET = 'managed-hop-secret-at-least-32-characters';
+    const hop = process.env.TLDW_GATEWAY_HOP_SECRET;
+
+    const denied = await callRoute();
+    const accepted = await callRoute({
+      headers: { 'x-tldw-gateway-hop': hop },
+      remoteAddress: '172.18.0.4',
+    });
+
+    expect(denied.statusCode).toBe(503);
+    expect(accepted.statusCode).toBe(200);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
   it('keeps same-host installations on different ports to their own cookie pair', async () => {

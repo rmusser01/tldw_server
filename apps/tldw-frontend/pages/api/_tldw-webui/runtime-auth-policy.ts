@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto';
 import type { NextApiRequest } from 'next';
 
 export type RuntimeAuthPolicy =
@@ -89,6 +90,29 @@ const isTrustedLocalPeer = (remoteAddress?: string): boolean => {
     (first === 172 && second >= 16 && second <= 31 && third === 0 && fourth === 1) ||
     (first === 192 && second === 168 && third === 65 && fourth === 1)
   );
+};
+
+const isPrivateGatewayPeer = (remoteAddress?: string): boolean => {
+  const normalized = normalizedPeerAddress(remoteAddress);
+  if (normalized === '::1' || /^f[cd][0-9a-f:]+$/i.test(normalized)) return true;
+  const parts = extractIPv4Address(remoteAddress);
+  if (!parts) return false;
+  const [first, second] = parts;
+  return (
+    first === 127 || first === 10 ||
+    (first === 172 && second >= 16 && second <= 31) ||
+    (first === 192 && second === 168)
+  );
+};
+
+const hasGatewayHop = (req: NextApiRequest): boolean => {
+  const expected = process.env.TLDW_GATEWAY_HOP_SECRET;
+  const received = singleHeaderValue(req.headers['x-tldw-gateway-hop']);
+  if (!expected || expected.length < 32 || /\s/.test(expected) || !received) return false;
+  const expectedBytes = Buffer.from(expected);
+  const receivedBytes = Buffer.from(received);
+  return expectedBytes.length === receivedBytes.length &&
+    timingSafeEqual(expectedBytes, receivedBytes);
 };
 
 const singleHeaderValue = (value?: string | string[]): string | null => {
@@ -196,14 +220,22 @@ export const resolveRuntimeAuthPolicy = (req: NextApiRequest): RuntimeAuthPolicy
   if (process.env.TLDW_WEBUI_EXPOSE_RUNTIME_AUTH !== '1') {
     return { available: false, reason: 'disabled' };
   }
-  if (getDeploymentMode() !== 'quickstart') {
+  const deploymentMode = getDeploymentMode();
+  if (deploymentMode !== 'quickstart' && deploymentMode !== 'managed') {
     return { available: false, reason: 'deployment-mode' };
   }
   if (!isLoopbackHost(req.headers.host)) return { available: false, reason: 'host' };
-  if (!isTrustedLocalPeer(req.socket?.remoteAddress)) {
-    return { available: false, reason: 'peer' };
+  if (deploymentMode === 'managed') {
+    if (!isPrivateGatewayPeer(req.socket?.remoteAddress)) {
+      return { available: false, reason: 'peer' };
+    }
+    if (!hasGatewayHop(req)) return { available: false, reason: 'gateway-hop' };
+  } else {
+    if (!isTrustedLocalPeer(req.socket?.remoteAddress)) {
+      return { available: false, reason: 'peer' };
+    }
+    if (hasUntrustedForwardingHeaders(req)) return { available: false, reason: 'forwarded' };
   }
-  if (hasUntrustedForwardingHeaders(req)) return { available: false, reason: 'forwarded' };
 
   const apiKey = process.env.SINGLE_USER_API_KEY;
   if (!isUsableApiKey(apiKey)) return { available: false, reason: 'api-key' };
