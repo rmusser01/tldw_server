@@ -4,12 +4,13 @@ title: Persist VN generation recipe snapshots and replay them on Retry
 status: In Progress
 assignee: []
 created_date: '2026-09-25 16:11'
-updated_date: '2026-09-25 17:28'
+updated_date: '2026-09-25 17:30'
 labels:
   - vn-assets
 dependencies: []
 references:
   - 'https://github.com/rmusser01/tldw_server/issues/2021'
+  - 'https://github.com/rmusser01/tldw_server/pull/3015'
 documentation:
   - Docs/superpowers/specs/2026-09-25-vn-generation-recipe-snapshots-design.md
   - Docs/API-related/VN_ASSET_PACKS_API.md
@@ -33,11 +34,7 @@ Issue #2021 follow-up after PR #2954. Freeze the authored generation recipe when
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Implemented in codex/vn-recipe-snapshots. Verification: VN backend 289 passed; frontend VN monitor/workbench 18 passed; frontend typecheck passed; OpenAPI fingerprint check passed; scoped Ruff has no new findings (three existing BLE001/UP035 warnings); Bandit touched production files 0 findings; git diff --check passed. Browser QA not run: isolated checkout has no authenticated VN pack and worker-backed data. Crash-after-file-registration exactly-once recovery and mutable local model bytes remain separate #2021 work.
-
-Independent review found and fixed three gaps: replay of transient fanout-failed parent jobs, slot-aware WebUI source binding, and implicit local model path/mode drift detection without persisting the configured path. Added a parent/child completion-race guard. Latest checks: VN backend 292 passed; frontend VN components 19 passed; typecheck, OpenAPI drift, scoped Ruff excluding three established baseline warnings, git diff --check, and Bandit (0 findings) passed. Authenticated browser QA remains unverified.
-
-Final pre-PR verification: 297 VN backend tests passed; 20 focused frontend tests passed; frontend typecheck, OpenAPI drift check, scoped Ruff excluding three verified pre-existing warnings, git diff --check passed; Bandit 0 findings. Authenticated browser QA not available in isolated checkout. Two read-only independent reviews were addressed, including path redaction, per-slot failure provenance, transient parent/child race handling.
+Draft PR #3015 against dev: https://github.com/rmusser01/tldw_server/pull/3015. Two independent read-only reviews addressed fanout replay, parent/child race safety, per-slot failure provenance, local model drift, and local path redaction. Final checks: VN backend 297 passed; frontend VN monitor/workbench 20 passed; typecheck and OpenAPI drift passed; Bandit 0 findings; scoped Ruff passed excluding three verified pre-existing BLE001/UP035 warnings; git diff --check passed. Authenticated browser QA was unavailable in this isolated checkout. Remaining #2021 work: crash-after-file-registration exactly-once recovery and mutable local model contents. Awaiting requester-authored Change summary and review feedback before merge.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
