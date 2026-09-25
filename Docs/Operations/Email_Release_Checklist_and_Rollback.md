@@ -1,12 +1,13 @@
 # Email Release Checklist and Rollback
 
 Audience: Owner / maintainer
-Status (2026-09-13): Core validation recorded; core release gate open. Optional live Gmail validation deferred.
+Status (2026-09-25): Local core validation recorded; chosen-deployment release gate open. Optional live Gmail validation deferred.
 
 Related:
 - `Docs/Product/Email_Ingestion_Search_PRD.md`
 - `Docs/Operations/Email_Sync_Operations_Runbook.md`
 - `Docs/Operations/Email_Core_Validation_2026-09-13.md`
+- `Docs/Operations/Email_Local_Startup_and_Search_Performance_2026-09-25.md`
 - `Docs/Operations/Env_Vars.md`
 
 ## Single-Owner Workflow
@@ -24,8 +25,9 @@ The owner's personal Gmail and personal email are excluded.
 - [x] Implement FR-SEARCH-004 cursor pagination (TASK-13253); omitted cursor preserves offset behavior. See `Docs/Design/email-search-cursor-pagination.md` for traversal semantics.
 - [x] Validate real API-key authentication and per-user SQLite isolation, including main-app route registration/test-mode request middleware (TASK-13255; `Docs/Operations/Email_Authenticated_Validation_2026-09-13.md`).
 - [x] Validate authenticated synthetic EML uploads, key/role rejection, expected-user check, org storage quota and owner-scoped search in local ASGI/SQLite (TASK-13256; `Docs/Operations/Email_Authenticated_Upload_Validation_2026-09-25.md`).
+- [x] Exercise the main FastAPI lifespan and scoped email search/detail plus media search with synthetic users, temporary SQLite and an outbound/model-call guard (TASK-13361; `Docs/Operations/Email_Local_Startup_and_Search_Performance_2026-09-25.md`).
 - [ ] Validate chosen deployment/startup, production database backend and target scale. Local ASGI tests do not establish live server readiness or PostgreSQL isolation.
-- [ ] Record actual performance/parity evidence for the intended cutover scope. Small fixtures and checker unit tests do not certify the 1M-message benchmark or production parity.
+- [ ] Record actual performance/parity evidence for the intended cutover scope. The local 10,000-message synthetic SQLite benchmark does not certify the 1M-message target or production parity.
 - [ ] Configure and verify core rollout flags in the chosen environment:
   - `EMAIL_NATIVE_PERSIST_ENABLED=true`
   - `EMAIL_OPERATOR_SEARCH_ENABLED=true`
@@ -56,6 +58,7 @@ prevent downstream model processing. No live Gmail work was performed for TASK-1
 
 Current validation: `Docs/Operations/Email_Core_Validation_2026-09-13.md`.
 Authenticated-access follow-up: `Docs/Operations/Email_Authenticated_Validation_2026-09-13.md`.
+Local startup and bounded performance: `Docs/Operations/Email_Local_Startup_and_Search_Performance_2026-09-25.md`.
 
 For an actual rollout record:
 - Scope: core / optional Gmail

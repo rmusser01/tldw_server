@@ -1,8 +1,8 @@
-"""Real API-key authentication and per-user SQLite email routing, without lifespan.
+"""Real API-key authentication and per-user SQLite email routing.
 
 Users/keys are created through AuthNZ services. Authentication and Media database
-dependencies are not overridden. This does not certify deployed middleware,
-password/JWT login, upload quotas, application startup, or PostgreSQL RLS.
+dependencies are not overridden. This does not certify deployed infrastructure,
+password/JWT login, upload quotas, or PostgreSQL RLS.
 """
 
 import asyncio
@@ -126,7 +126,7 @@ async def authenticated_email(tmp_path, monkeypatch, request):
 
         from tldw_Server_API.tests.helpers.app_main_state import app_main_isolated, reload_app_main
 
-        use_main = getattr(request, "param", None) == "main"
+        use_main = getattr(request, "param", None) in {"main", "main_lifespan"}
         with app_main_isolated() if use_main else nullcontext():
             if use_main:
                 app = reload_app_main().app
@@ -137,7 +137,7 @@ async def authenticated_email(tmp_path, monkeypatch, request):
                 app.include_router(add.router, prefix="/api/v1/media")
             assert app.dependency_overrides == {}
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-                yield SimpleNamespace(client=client, users=users, manager=manager, pool=pool)
+                yield SimpleNamespace(app=app, client=client, users=users, manager=manager, pool=pool)
     finally:
         await reset()
         assert attempts == [], f"Forbidden attempts, including caught errors: {attempts}"
@@ -260,3 +260,27 @@ async def test_main_app_middleware_auth_and_email_route_registration(authenticat
     )
     assert response.status_code == 200, response.text
     assert [item["title"] for item in response.json()["items"]] == ["Synthetic bob"]
+
+
+@pytest.mark.parametrize("authenticated_email", ["main_lifespan"], indirect=True)
+async def test_main_app_lifespan_serves_scoped_email_and_media_routes(authenticated_email):
+    """Exercise the actual startup/shutdown sequence with synthetic mail and no outbound calls."""
+    env = authenticated_email
+    bob = env.users[1]
+    headers = {"X-API-KEY": bob.key["key"]}
+    async with env.app.router.lifespan_context(env.app):
+        search = await env.client.get("/api/v1/email/search", headers=headers)
+        assert search.status_code == 200, search.text
+        assert [row["subject"] for row in search.json()["items"]] == ["Synthetic bob"]
+
+        detail = await env.client.get(f"/api/v1/email/messages/{bob.message_ids[0]}", headers=headers)
+        assert detail.status_code == 200, detail.text
+        assert detail.json()["subject"] == "Synthetic bob"
+
+        media = await env.client.post(
+            "/api/v1/media/search",
+            headers=headers,
+            json={"query": "subject:Synthetic", "media_types": ["email"], "email_query_mode": "operators"},
+        )
+        assert media.status_code == 200, media.text
+        assert [item["title"] for item in media.json()["items"]] == ["Synthetic bob"]
