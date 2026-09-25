@@ -197,6 +197,7 @@ CREATE TABLE IF NOT EXISTS vn_asset_idempotency_records (
     idempotency_key TEXT NOT NULL,
     payload_hash TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'completed',
+    batch_id INTEGER REFERENCES vn_asset_batches(id),
     response_json TEXT NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -456,6 +457,24 @@ class VNAssetPacksRepository:
             record = dict(row)
             if str(record["payload_hash"]) != payload_hash:
                 raise ValueError("idempotency_key_conflict")
+            if (
+                not claimed
+                and scope in {
+                    "vn_asset_generate", "vn_asset_slot_retry", "vn_asset_item_regenerate"
+                }
+                and record["status"] == "in_progress"
+                and record["batch_id"] is None
+            ):
+                reclaimed = conn.execute(
+                    """
+                    UPDATE vn_asset_idempotency_records
+                    SET updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ? AND status = 'in_progress' AND batch_id IS NULL
+                      AND updated_at <= datetime('now', '-2 minutes')
+                    """,
+                    (record["id"],),
+                )
+                claimed = reclaimed.rowcount == 1
             return record, claimed
 
     def complete_idempotency_record(
@@ -544,6 +563,7 @@ class VNAssetPacksRepository:
                   AND resource_id = ?
                   AND idempotency_key = ?
                   AND status = 'in_progress'
+                  AND batch_id IS NULL
                 """,
                 (owner_user_id, scope, resource_id, idempotency_key),
             )
@@ -1417,6 +1437,18 @@ class VNAssetPacksRepository:
     def delete_slot(self, slot_id: int) -> None:
         self._ensure_schema_initialized()
         with self.db.transaction() as conn:
+            active_recipe = conn.execute(
+                """
+                SELECT 1 FROM vn_asset_generation_recipes AS recipe
+                JOIN vn_asset_batches AS batch ON batch.id = recipe.batch_id
+                WHERE recipe.slot_id = ?
+                  AND batch.status IN ('planned', 'queued', 'enqueued', 'processing')
+                LIMIT 1
+                """,
+                (slot_id,),
+            ).fetchone()
+            if active_recipe is not None:
+                raise ValueError("slot_has_active_generation")
             conn.execute("DELETE FROM vn_asset_slots WHERE id = ?", (slot_id,))
 
     def create_item(
@@ -1535,6 +1567,17 @@ class VNAssetPacksRepository:
         cursor = self.db.execute_query("SELECT * FROM vn_asset_items WHERE id = ?", (item_id,))
         row = cursor.fetchone()
         return dict(row) if row is not None else None
+
+    def item_is_unpublished(self, item_id: int) -> bool:
+        self._ensure_schema_initialized()
+        row = self.db.execute_query(
+            """
+            SELECT 1 FROM vn_asset_generation_recipes
+            WHERE item_id = ? AND outcome_status != 'completed' LIMIT 1
+            """,
+            (item_id,),
+        ).fetchone()
+        return row is not None
 
     def delete_item(self, item_id: int) -> bool:
         self._ensure_schema_initialized()
@@ -1730,6 +1773,7 @@ class VNAssetPacksRepository:
         job_batch_id: str | None = None,
         options: Mapping[str, Any] | None = None,
         recipes: list[Mapping[str, Any]] | None = None,
+        idempotency_receipt: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
         self._ensure_schema_initialized()
         if recipes is not None:
@@ -1765,6 +1809,26 @@ class VNAssetPacksRepository:
                 ),
             )
             batch_id = cursor.lastrowid
+            if idempotency_receipt is not None:
+                linked = conn.execute(
+                    """
+                    UPDATE vn_asset_idempotency_records
+                    SET batch_id = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE owner_user_id = ? AND scope = ? AND resource_id = ?
+                      AND idempotency_key = ? AND payload_hash = ?
+                      AND status = 'in_progress' AND batch_id IS NULL
+                    """,
+                    (
+                        batch_id,
+                        requested_by_user_id,
+                        idempotency_receipt["scope"],
+                        idempotency_receipt["resource_id"],
+                        idempotency_receipt["idempotency_key"],
+                        idempotency_receipt["payload_hash"],
+                    ),
+                )
+                if linked.rowcount != 1:
+                    raise ValueError("vn_asset_generation_receipt_not_claimed")
             if recipes is not None:
                 for entry in recipes:
                     conn.execute(
@@ -1903,6 +1967,16 @@ class VNAssetPacksRepository:
                 raise ValueError("vn_asset_recipe_item_mismatch")
             if row["outcome_status"] == "failed":
                 raise ValueError("vn_asset_variant_failed")
+            if row["outcome_status"] == "completed":
+                result = self.get_item(item_id)
+                if result is None:
+                    raise ValueError("vn_asset_recipe_item_missing")
+                return result
+            batch = conn.execute(
+                "SELECT status FROM vn_asset_batches WHERE id = ?", (batch_id,)
+            ).fetchone()
+            if batch is None or batch["status"] in {"cancelled", "failed"}:
+                raise ValueError("vn_asset_batch_terminal")
             item = conn.execute(
                 "SELECT generated_file_id FROM vn_asset_items WHERE id = ?",
                 (item_id,),
@@ -2300,6 +2374,15 @@ def _ensure_batch_fanout_columns(conn: Any) -> None:
             "ALTER TABLE vn_asset_idempotency_records "
             "ADD COLUMN status TEXT NOT NULL DEFAULT 'completed'"
         )
+    if "batch_id" not in idempotency_columns:
+        conn.execute(
+            "ALTER TABLE vn_asset_idempotency_records "
+            "ADD COLUMN batch_id INTEGER REFERENCES vn_asset_batches(id)"
+        )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_vn_asset_idempotency_batch_id "
+        "ON vn_asset_idempotency_records(batch_id) WHERE batch_id IS NOT NULL"
+    )
 
 
 def _ensure_recipe_outcome_columns(conn: Any) -> None:
@@ -2335,7 +2418,7 @@ def _refresh_batch_outcome_counts(conn: Any, batch_id: int) -> None:
         SET completed_count = ?, failed_count = ?,
             status = CASE
                 WHEN status IN ('cancelled', 'failed') THEN status
-                WHEN ? > 0 THEN 'failed'
+                WHEN ? > 0 AND ? + ? >= ? THEN 'failed'
                 WHEN ? > 0 AND ? >= ? THEN 'completed'
                 ELSE 'processing'
             END,
@@ -2347,7 +2430,7 @@ def _refresh_batch_outcome_counts(conn: Any, batch_id: int) -> None:
         """,
         (
             completed, failed,
-            failed,
+            failed, completed, failed, total,
             total, completed, total,
             total, completed, total, failed,
             batch_id,

@@ -609,6 +609,7 @@ class VNAssetPackService:
         *,
         user_id: int | None = None,
         jobs_manager: Any | None = None,
+        idempotency_receipt: Mapping[str, str] | None = None,
     ) -> VNAssetGenerationStatusResponse:
         request = request or VNAssetGenerationRequest()
         requested_by_user_id = self.owner_user_id if user_id is None else int(user_id)
@@ -655,6 +656,7 @@ class VNAssetPackService:
                 planned_count=total_variants,
                 options=options,
                 recipes=recipes,
+                idempotency_receipt=idempotency_receipt,
             )
         try:
             job = create_enqueue_batch_job(
@@ -676,6 +678,37 @@ class VNAssetPackService:
         if job_batch_id:
             batch = self.repo.update_batch(int(batch["id"]), {"job_batch_id": job_batch_id}) or batch
 
+        return self._generation_status_response(batch)
+
+    def recover_generation_receipt(
+        self,
+        record: Mapping[str, Any],
+        *,
+        pack_id: int,
+        jobs_manager: Any | None = None,
+    ) -> VNAssetGenerationStatusResponse:
+        """Recover the exact batch linked to an unfinished generation receipt."""
+        self._require_pack(pack_id)
+        if int(record.get("owner_user_id") or 0) != self.owner_user_id:
+            raise ValueError("vn_asset_generation_receipt_not_found")
+        batch_id = int(record.get("batch_id") or 0)
+        batch = self.repo.get_batch(batch_id) if batch_id else None
+        if (
+            batch is None
+            or int(batch["pack_id"]) != pack_id
+            or int(batch["requested_by_user_id"]) != self.owner_user_id
+        ):
+            raise ValueError("vn_asset_generation_receipt_not_found")
+        if not batch["job_batch_id"] and batch["status"] in {"queued", "enqueued", "processing"}:
+            job = create_enqueue_batch_job(
+                jobs_manager or self._require_jobs_manager(),
+                pack_id=pack_id,
+                batch_id=batch_id,
+                user_id=self.owner_user_id,
+            )
+            job_batch_id = str(job.get("id") or job.get("uuid") or "")
+            if job_batch_id:
+                batch = self.repo.update_batch(batch_id, {"job_batch_id": job_batch_id}) or batch
         return self._generation_status_response(batch)
 
     def get_generation_status(self, pack_id: int) -> VNAssetGenerationStatusResponse:
@@ -701,11 +734,15 @@ class VNAssetPackService:
         *,
         user_id: int | None = None,
         jobs_manager: Any | None = None,
+        idempotency_receipt: Mapping[str, str] | None = None,
     ) -> VNAssetGenerationStatusResponse:
         self._require_slot_in_pack(pack_id, slot_id)
         request = request or VNAssetGenerationRequest()
         request = request.model_copy(update={"slot_ids": [slot_id]})
-        return self.start_generation(pack_id, request, user_id=user_id, jobs_manager=jobs_manager)
+        return self.start_generation(
+            pack_id, request, user_id=user_id, jobs_manager=jobs_manager,
+            idempotency_receipt=idempotency_receipt,
+        )
 
     def regenerate_item(
         self,
@@ -715,11 +752,15 @@ class VNAssetPackService:
         *,
         user_id: int | None = None,
         jobs_manager: Any | None = None,
+        idempotency_receipt: Mapping[str, str] | None = None,
     ) -> VNAssetGenerationStatusResponse:
         item = self._require_item_in_pack(pack_id, item_id)
         request = request or VNAssetGenerationRequest()
         request = request.model_copy(update={"slot_ids": [int(item["slot_id"])]})
-        return self.start_generation(pack_id, request, user_id=user_id, jobs_manager=jobs_manager)
+        return self.start_generation(
+            pack_id, request, user_id=user_id, jobs_manager=jobs_manager,
+            idempotency_receipt=idempotency_receipt,
+        )
 
     def _maybe_enqueue_lazy_depth_companion(self, item: Mapping[str, Any]) -> None:
         if self.jobs_manager is None:
@@ -849,7 +890,7 @@ class VNAssetPackService:
 
     def _require_owned_item(self, item_id: int) -> dict[str, Any]:
         item = self.repo.get_item(item_id)
-        if item is None:
+        if item is None or self.repo.item_is_unpublished(item_id):
             raise ValueError("item_not_found")
         try:
             self._require_pack(int(item["pack_id"]))

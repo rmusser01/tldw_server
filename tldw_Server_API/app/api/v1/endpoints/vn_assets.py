@@ -7,6 +7,7 @@ import inspect
 import json
 import os
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -85,6 +86,7 @@ router = APIRouter(prefix="/vn-assets", tags=["vn-assets"])
 CONFLICT_ERROR_CODES = {
     "slot_already_exists",
     "slot_has_dependents",
+    "slot_has_active_generation",
 }
 TERMINAL_JOB_STATUSES = {"completed", "failed", "cancelled", "quarantined"}
 UPLOAD_CHUNK_SIZE_BYTES = 1024 * 1024
@@ -182,6 +184,7 @@ def _claim_or_replay_idempotency(
     idempotency_key: str | None,
     payload_hash: str,
     response_model: type[BaseModel],
+    recover_in_progress: Callable[[dict[str, Any]], BaseModel] | None = None,
 ) -> BaseModel | None:
     if not idempotency_key:
         return None
@@ -200,6 +203,21 @@ def _claim_or_replay_idempotency(
     if claimed:
         return None
     if str(record.get("status") or "completed") != "completed":
+        if recover_in_progress is not None and record.get("batch_id") is not None:
+            try:
+                recovered = recover_in_progress(record)
+            except ValueError as exc:
+                raise _handle_value_error(exc) from exc
+            _record_idempotency_response(
+                service,
+                owner_user_id=owner_user_id,
+                scope=scope,
+                resource_id=resource_id,
+                idempotency_key=idempotency_key,
+                payload_hash=payload_hash,
+                response=recovered,
+            )
+            return recovered
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=vn_error_detail(
@@ -1857,14 +1875,20 @@ async def start_generation(
             "request": generation_request.model_dump(mode="json", exclude={"idempotency_key"}),
         }
     )
+    receipt = {
+        "scope": "vn_asset_generate",
+        "resource_id": f"pack:{pack_id}",
+        "idempotency_key": idempotency_key,
+        "payload_hash": payload_hash,
+    }
     replay = _claim_or_replay_idempotency(
         service,
         owner_user_id=owner_user_id,
-        scope="vn_asset_generate",
-        resource_id=f"pack:{pack_id}",
-        idempotency_key=idempotency_key,
-        payload_hash=payload_hash,
+        **receipt,
         response_model=VNAssetGenerationStatusResponse,
+        recover_in_progress=lambda record: service.recover_generation_receipt(
+            record, pack_id=pack_id, jobs_manager=jobs_manager
+        ),
     )
     if replay is not None:
         return replay
@@ -1874,6 +1898,7 @@ async def start_generation(
             generation_request,
             user_id=owner_user_id,
             jobs_manager=jobs_manager,
+            idempotency_receipt=receipt,
         )
     except ValueError as exc:
         _release_idempotency_claim(
@@ -1951,14 +1976,20 @@ async def retry_slot_generation(
             "request": generation_request.model_dump(mode="json", exclude={"idempotency_key"}),
         }
     )
+    receipt = {
+        "scope": "vn_asset_slot_retry",
+        "resource_id": f"pack:{pack_id}:slot:{slot_id}",
+        "idempotency_key": idempotency_key,
+        "payload_hash": payload_hash,
+    }
     replay = _claim_or_replay_idempotency(
         service,
         owner_user_id=owner_user_id,
-        scope="vn_asset_slot_retry",
-        resource_id=f"pack:{pack_id}:slot:{slot_id}",
-        idempotency_key=idempotency_key,
-        payload_hash=payload_hash,
+        **receipt,
         response_model=VNAssetGenerationStatusResponse,
+        recover_in_progress=lambda record: service.recover_generation_receipt(
+            record, pack_id=pack_id, jobs_manager=jobs_manager
+        ),
     )
     if replay is not None:
         return replay
@@ -1969,6 +2000,7 @@ async def retry_slot_generation(
             generation_request,
             user_id=owner_user_id,
             jobs_manager=jobs_manager,
+            idempotency_receipt=receipt,
         )
     except ValueError as exc:
         _release_idempotency_claim(
@@ -2023,14 +2055,20 @@ async def regenerate_item(
             "request": generation_request.model_dump(mode="json", exclude={"idempotency_key"}),
         }
     )
+    receipt = {
+        "scope": "vn_asset_item_regenerate",
+        "resource_id": f"pack:{pack_id}:item:{item_id}",
+        "idempotency_key": idempotency_key,
+        "payload_hash": payload_hash,
+    }
     replay = _claim_or_replay_idempotency(
         service,
         owner_user_id=owner_user_id,
-        scope="vn_asset_item_regenerate",
-        resource_id=f"pack:{pack_id}:item:{item_id}",
-        idempotency_key=idempotency_key,
-        payload_hash=payload_hash,
+        **receipt,
         response_model=VNAssetGenerationStatusResponse,
+        recover_in_progress=lambda record: service.recover_generation_receipt(
+            record, pack_id=pack_id, jobs_manager=jobs_manager
+        ),
     )
     if replay is not None:
         return replay
@@ -2041,6 +2079,7 @@ async def regenerate_item(
             generation_request,
             user_id=owner_user_id,
             jobs_manager=jobs_manager,
+            idempotency_receipt=receipt,
         )
     except ValueError as exc:
         _release_idempotency_claim(

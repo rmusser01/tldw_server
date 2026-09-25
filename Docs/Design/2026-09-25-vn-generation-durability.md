@@ -35,20 +35,40 @@ as a draft only after storage metadata is attached. A duplicate completed Job
 returns the same item without calling the adapter again. Compute batch counters
 from recipe outcomes in one transaction instead of incrementing them in worker
 memory. Reserved items remain absent from normal item listings until committed;
-failed reservations do not consume the pack item limit. A late failure cannot
-undo a completed outcome, and one completed draft keeps its slot reviewable if
-another variant fails. Parent fanout must not overwrite a child worker's newer
+direct item, review, preferred, and file reads also reject unpublished
+reservations. Failed reservations do not consume the pack item limit. A late
+failure cannot undo a completed outcome or demote an approved item during
+redelivery. A failed variant leaves queued siblings runnable; the batch becomes
+failed only when all planned variants have completed or failed. One completed
+draft keeps its slot reviewable if another variant fails. A cancelled batch
+cannot publish a reserved variant, including when cancellation races the
+worker's final transaction. Active recipe slots cannot be deleted until their
+batch is terminal. Parent fanout must not overwrite a child worker's newer
 processing or terminal batch status. Keep the existing Jobs manager as the
 lease, queue, and cancellation authority; the recipe ledger does not create a
 second lease clock.
 
 ## Browser Recovery
 
-After server replay is durable, use the existing latest generation status API
-on mount and pack selection. A submitted operation's idempotency key must
-survive reload until the server acknowledges it. Reconcile a pending key with
-the returned batch status before allowing another Start or Retry. Keep polling
-bounded and non-overlapping while that batch is active.
+Bind each Start/Retry idempotency receipt to the newly created batch in the
+same ChaChaNotes transaction as the batch and recipe rows. A same-key retry
+with an unfinished receipt finds that exact owned batch and, if its parent
+Job ID was not recorded, calls the Jobs create operation again using the
+batch's deterministic Jobs key. It returns the batch status and completes the
+receipt rather than creating another batch. A receipt with no committed batch
+returns an in-progress conflict for two minutes, then permits the same key and
+payload to reclaim it. The receipt-to-batch conditional update fences old and
+new contenders so at most one batch commits. Never guess a batch from the
+pack's latest batch.
+
+Use the existing latest generation status API on mount and pack selection.
+Store only unresolved Start/Retry idempotency keys in tab-scoped storage,
+namespaced by owner and pack. Also remember the selected pack ID per owner so
+reload can reconcile a pending request on a non-first pack. On reload, replay
+the exact pending operation once with its original key; on acknowledgement
+remove it and refresh pack details. A still-in-progress conflict keeps the key
+for a later retry. Do not infer that the latest batch belongs to that key.
+Keep polling bounded and non-overlapping while a batch is active.
 
 ## Verification
 
