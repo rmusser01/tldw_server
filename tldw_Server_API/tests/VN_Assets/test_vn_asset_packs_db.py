@@ -1,5 +1,6 @@
 import json
-from typing import Generator
+import sqlite3
+from collections.abc import Generator
 
 import pytest
 
@@ -30,7 +31,41 @@ def test_vn_asset_tables_are_created(chacha_db: CharactersRAGDB) -> None:
         "vn_asset_slots",
         "vn_asset_items",
         "vn_asset_batches",
+        "vn_asset_generation_recipes",
     }.issubset(table_names)
+
+
+def test_existing_batch_table_gains_recipe_version(chacha_db: CharactersRAGDB) -> None:
+    chacha_db.execute_query(
+        "CREATE TABLE vn_asset_batches ("
+        "id INTEGER PRIMARY KEY, pack_id INTEGER NOT NULL, job_batch_id TEXT)"
+    )
+
+    ensure_vn_asset_tables(chacha_db)
+
+    columns = {
+        row[1]
+        for row in chacha_db.execute_query("PRAGMA table_info(vn_asset_batches)").fetchall()
+    }
+    assert "recipe_version" in columns
+
+
+def test_duplicate_recipe_rolls_back_batch(chacha_db: CharactersRAGDB) -> None:
+    character_id = chacha_db.add_character_card({"name": "VN Primary"})
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    pack = repo.create_pack(owner_user_id=1, primary_character_id=character_id, title="Pack")
+    slot = repo.create_slot(pack_id=pack["id"], asset_type="sprite", slot_key="primary")
+    recipe = {"slot_id": slot["id"], "variant_index": 0, "recipe": {"prompt": "frozen"}}
+
+    with pytest.raises(sqlite3.IntegrityError):
+        repo.create_batch(
+            pack_id=pack["id"],
+            requested_by_user_id=1,
+            total_variants=2,
+            recipes=[recipe, recipe],
+        )
+
+    assert repo.list_batches(pack["id"]) == []
 
 
 def test_ensure_vn_asset_tables_rejects_non_sqlite_before_transaction() -> None:

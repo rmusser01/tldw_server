@@ -103,11 +103,21 @@ CREATE TABLE IF NOT EXISTS vn_asset_batches (
     completed_count INTEGER NOT NULL DEFAULT 0,
     failed_count INTEGER NOT NULL DEFAULT 0,
     cancelled_count INTEGER NOT NULL DEFAULT 0,
+    recipe_version INTEGER NOT NULL DEFAULT 0,
     started_at DATETIME,
     completed_at DATETIME,
     options_json TEXT NOT NULL DEFAULT '{}',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS vn_asset_generation_recipes (
+    batch_id INTEGER NOT NULL REFERENCES vn_asset_batches(id) ON DELETE CASCADE,
+    slot_id INTEGER NOT NULL REFERENCES vn_asset_slots(id) ON DELETE CASCADE,
+    variant_index INTEGER NOT NULL,
+    recipe_json TEXT NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (batch_id, slot_id, variant_index)
 );
 
 CREATE TABLE IF NOT EXISTS vn_pack_portability_jobs (
@@ -1695,8 +1705,13 @@ class VNAssetPacksRepository:
         planned_count: int | None = None,
         job_batch_id: str | None = None,
         options: Mapping[str, Any] | None = None,
+        recipes: list[Mapping[str, Any]] | None = None,
     ) -> dict[str, Any]:
         self._ensure_schema_initialized()
+        if recipes is not None:
+            expected_count = total_variants if planned_count is None else planned_count
+            if not recipes or len(recipes) != expected_count:
+                raise ValueError("vn_asset_recipe_count_mismatch")
         with self.db.transaction() as conn:
             cursor = conn.execute(
                 """
@@ -1708,9 +1723,10 @@ class VNAssetPacksRepository:
                     total_slots,
                     total_variants,
                     planned_count,
-                    options_json
+                    options_json,
+                    recipe_version
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     pack_id,
@@ -1721,9 +1737,25 @@ class VNAssetPacksRepository:
                     total_variants,
                     total_variants if planned_count is None else planned_count,
                     json.dumps(dict(options or {})),
+                    1 if recipes is not None else 0,
                 ),
             )
             batch_id = cursor.lastrowid
+            if recipes is not None:
+                for entry in recipes:
+                    conn.execute(
+                        """
+                        INSERT INTO vn_asset_generation_recipes (
+                            batch_id, slot_id, variant_index, recipe_json
+                        ) VALUES (?, ?, ?, ?)
+                        """,
+                        (
+                            batch_id,
+                            int(entry["slot_id"]),
+                            int(entry["variant_index"]),
+                            json.dumps(dict(entry["recipe"])),
+                        ),
+                    )
         batch = self.get_batch(batch_id)
         if batch is None:
             raise RuntimeError("created_batch_not_found")
@@ -1742,6 +1774,38 @@ class VNAssetPacksRepository:
             (pack_id,),
         )
         return [dict(row) for row in cursor.fetchall()]
+
+    def list_batch_recipes(self, batch_id: int) -> list[dict[str, Any]]:
+        self._ensure_schema_initialized()
+        rows = self.db.execute_query(
+            """
+            SELECT slot_id, variant_index, recipe_json
+            FROM vn_asset_generation_recipes
+            WHERE batch_id = ? ORDER BY slot_id, variant_index
+            """,
+            (batch_id,),
+        ).fetchall()
+        return [
+            {
+                "slot_id": int(row["slot_id"]),
+                "variant_index": int(row["variant_index"]),
+                "recipe": json.loads(row["recipe_json"]),
+            }
+            for row in rows
+        ]
+
+    def get_batch_recipe(
+        self, batch_id: int, slot_id: int, variant_index: int
+    ) -> dict[str, Any] | None:
+        self._ensure_schema_initialized()
+        row = self.db.execute_query(
+            """
+            SELECT recipe_json FROM vn_asset_generation_recipes
+            WHERE batch_id = ? AND slot_id = ? AND variant_index = ?
+            """,
+            (batch_id, slot_id, variant_index),
+        ).fetchone()
+        return json.loads(row["recipe_json"]) if row is not None else None
 
     def update_batch(self, batch_id: int, fields: Mapping[str, Any]) -> dict[str, Any] | None:
         self._ensure_schema_initialized()
@@ -2041,6 +2105,7 @@ def _ensure_batch_fanout_columns(conn: Any) -> None:
         "planned_count": "ALTER TABLE vn_asset_batches ADD COLUMN planned_count INTEGER NOT NULL DEFAULT 0",
         "enqueued_count": "ALTER TABLE vn_asset_batches ADD COLUMN enqueued_count INTEGER NOT NULL DEFAULT 0",
         "enqueue_error": "ALTER TABLE vn_asset_batches ADD COLUMN enqueue_error TEXT",
+        "recipe_version": "ALTER TABLE vn_asset_batches ADD COLUMN recipe_version INTEGER NOT NULL DEFAULT 0",
     }
     for column_name, statement in additions.items():
         if column_name not in columns:
