@@ -202,3 +202,66 @@ def test_generated_files_repo_exposes_stt_audio_constants() -> None:
     assert SOURCE_FEATURE_STT == "stt"
     assert FILE_CATEGORY_STT_AUDIO in VALID_FILE_CATEGORIES
     assert SOURCE_FEATURE_STT in VALID_SOURCE_FEATURES
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("postgres", [False, True])
+async def test_vn_source_registration_reuses_live_record_in_transaction(postgres: bool) -> None:
+    conn = _PostgresConnWithSqliteTrap() if postgres else _SqliteConnWithFetchrowTrap()
+    repo = AuthnzGeneratedFilesRepo(db_pool=_PoolStub(conn, postgres=postgres))
+
+    record = await repo.create_file(
+        user_id=5, filename="loser.png", storage_path="vn_assets/loser.png",
+        file_category="image", source_feature="vn_assets", source_ref="vn_asset_item:4",
+    )
+
+    assert record["_idempotent_replay"] is True
+    calls = conn.fetchrow_calls if postgres else conn.execute_calls
+    assert all("insert into generated_files" not in query.lower() for query, _params in calls)
+    if postgres:
+        assert "pg_advisory_xact_lock" in calls[0][0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("postgres", [False, True])
+@pytest.mark.parametrize("source_feature,source_ref", [
+    ("vn_assets", "vn_asset_item:"),
+    ("vn_assets", "vn_asset_item:abc"),
+    ("vn_assets", "vn_asset_item:42:variant"),
+    ("vn_assets", "vn_asset_item:0"),
+    ("vn_assets", "vn_asset_item:-1"),
+    ("vn_assets", "vn_asset_item:0042"),
+    ("vn_assets", "vn_asset_item:42\n"),
+    ("image_gen", "vn_asset_item:42"),
+])
+async def test_only_canonical_vn_item_refs_are_idempotent(
+    postgres: bool, source_feature: str, source_ref: str,
+) -> None:
+    conn = _PostgresConnWithSqliteTrap() if postgres else _SqliteConnWithFetchrowTrap()
+    repo = AuthnzGeneratedFilesRepo(db_pool=_PoolStub(conn, postgres=postgres))
+
+    record = await repo.create_file(
+        user_id=5, filename="new.png", storage_path="images/new.png",
+        file_category="image", source_feature=source_feature, source_ref=source_ref,
+    )
+
+    assert not record.get("_idempotent_replay", False)
+    calls = conn.fetchrow_calls if postgres else conn.execute_calls
+    assert any("insert into generated_files" in query.lower() for query, _params in calls)
+
+
+@pytest.mark.asyncio
+async def test_postgres_vn_admission_locks_all_quota_scopes_on_the_bound_connection() -> None:
+    conn = _PostgresConnWithSqliteTrap()
+    repo = AuthnzGeneratedFilesRepo(db_pool=_PoolStub(conn, postgres=True))
+
+    async with repo.vn_item_transaction(user_id=5, source_ref="vn_asset_item:42") as bound_repo:
+        await bound_repo.lock_quota_scopes(user_id=5, org_id=51, team_id=52)
+
+    calls = conn.fetchrow_calls
+    assert "pg_advisory_xact_lock" in calls[0][0]
+    assert [(" ".join(query.split()), params) for query, params in calls[1:]] == [
+        ("SELECT id FROM users WHERE id = $1 FOR UPDATE", (5,)),
+        ("SELECT id FROM storage_quotas WHERE org_id = $1 FOR UPDATE", (51,)),
+        ("SELECT id FROM storage_quotas WHERE team_id = $1 FOR UPDATE", (52,)),
+    ]

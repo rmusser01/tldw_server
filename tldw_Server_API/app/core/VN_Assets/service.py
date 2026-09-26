@@ -33,6 +33,7 @@ from tldw_Server_API.app.api.v1.schemas.vn_asset_schemas import (
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.VNAssetPacks_DB import VNAssetPacksRepository
+from tldw_Server_API.app.core.exceptions import VNAssetGenerationError
 from tldw_Server_API.app.core.Storage import generated_file_helpers
 from tldw_Server_API.app.core.VN_Assets.constants import (
     ASSET_TYPE_BACKGROUND,
@@ -622,7 +623,7 @@ class VNAssetPackService:
                 if len(slots) != len(selected_slot_ids):
                     raise ValueError("slot_not_found")
             if not slots:
-                raise ValueError("vn_asset_generation_no_slots")
+                raise VNAssetGenerationError("vn_asset_generation_no_slots", pack_id=pack_id)
 
             variant_count = request.variant_count
             total_variants = sum(int(variant_count or slot["variant_count"]) for slot in slots)
@@ -669,7 +670,6 @@ class VNAssetPackService:
             self.repo.update_batch(
                 int(batch["id"]),
                 {
-                    "status": "failed",
                     "enqueue_error": str(exc),
                 },
             )
@@ -687,10 +687,15 @@ class VNAssetPackService:
         pack_id: int,
         jobs_manager: Any | None = None,
     ) -> VNAssetGenerationStatusResponse:
-        """Recover the exact batch linked to an unfinished generation receipt."""
+        """Return generation status for record's batch belonging to pack_id.
+
+        jobs_manager optionally overrides the queue backend. A missing parent
+        Job is re-enqueued only for an active batch. Raises VNAssetGenerationError
+        for receipt ownership/link errors; Jobs/database failures propagate.
+        """
         self._require_pack(pack_id)
         if int(record.get("owner_user_id") or 0) != self.owner_user_id:
-            raise ValueError("vn_asset_generation_receipt_not_found")
+            raise VNAssetGenerationError("vn_asset_generation_receipt_not_found", pack_id=pack_id)
         batch_id = int(record.get("batch_id") or 0)
         batch = self.repo.get_batch(batch_id) if batch_id else None
         if (
@@ -698,7 +703,7 @@ class VNAssetPackService:
             or int(batch["pack_id"]) != pack_id
             or int(batch["requested_by_user_id"]) != self.owner_user_id
         ):
-            raise ValueError("vn_asset_generation_receipt_not_found")
+            raise VNAssetGenerationError("vn_asset_generation_receipt_not_found", pack_id=pack_id, batch_id=batch_id)
         if not batch["job_batch_id"] and batch["status"] in {"queued", "enqueued", "processing"}:
             job = create_enqueue_batch_job(
                 jobs_manager or self._require_jobs_manager(),
@@ -708,7 +713,9 @@ class VNAssetPackService:
             )
             job_batch_id = str(job.get("id") or job.get("uuid") or "")
             if job_batch_id:
-                batch = self.repo.update_batch(batch_id, {"job_batch_id": job_batch_id}) or batch
+                batch = self.repo.update_batch(
+                    batch_id, {"job_batch_id": job_batch_id, "enqueue_error": None}
+                ) or batch
         return self._generation_status_response(batch)
 
     def get_generation_status(self, pack_id: int) -> VNAssetGenerationStatusResponse:
@@ -723,7 +730,7 @@ class VNAssetPackService:
         batches = self.repo.list_batches(pack_id)
         if not batches:
             return VNAssetGenerationStatusResponse(status="idle")
-        batch = self.repo.update_batch(int(batches[0]["id"]), {"status": "cancelled"}) or batches[0]
+        batch = self.repo.cancel_batch(int(batches[0]["id"])) or batches[0]
         return self._generation_status_response(batch)
 
     def retry_slot(

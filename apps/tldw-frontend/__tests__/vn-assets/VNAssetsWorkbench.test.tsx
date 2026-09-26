@@ -2,6 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
+vi.hoisted(() => {
+  vi.stubEnv('NEXT_PUBLIC_API_URL', 'http://127.0.0.1:8000');
+});
+
 const mocks = vi.hoisted(() => ({
   bulkReviewVNAssetItems: vi.fn(),
   getVNAssetGenerationPreflight: vi.fn(),
@@ -43,7 +47,8 @@ vi.mock('@web/lib/api/vnAssets', () => ({
 }));
 
 import VNAssetsWorkbench from '@web/components/vn-assets/VNAssetsWorkbench';
-import { readPendingVNAssetGeneration } from '@web/lib/vnAssetIdempotency';
+import { ApiError } from '@web/lib/api';
+import { readPendingVNAssetGeneration, writePendingVNAssetGeneration } from '@web/lib/vnAssetIdempotency';
 
 describe('VNAssetsWorkbench', () => {
   beforeEach(() => {
@@ -95,6 +100,67 @@ describe('VNAssetsWorkbench', () => {
     ]);
     mocks.getVNAssetGeneration.mockResolvedValue({ status: 'failed', failed_count: 1 });
   }
+
+  it.each(['Start', 'other Retry'])('abandons a missing-slot retry so %s works and reload does not replay it', async (nextAction) => {
+    existingFailedPack();
+    mocks.listVNAssetPacks.mockResolvedValue([
+      { id: 7, owner_user_id: 1, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
+    ]);
+    mocks.listVNAssetSlots.mockResolvedValue([
+      { id: 12, pack_id: 7, asset_type: 'sprite', slot_key: 'sprite_neutral', variant_count: 1, status: 'failed' },
+      { id: 13, pack_id: 7, asset_type: 'sprite', slot_key: 'sprite_happy', variant_count: 1, status: 'failed' },
+    ]);
+    mocks.retryVNAssetSlot.mockRejectedValueOnce(new ApiError('slot_not_found', { status: 404, detail: 'slot_not_found' }));
+    const user = userEvent.setup();
+    const first = render(<VNAssetsWorkbench />);
+    await user.click(await screen.findByRole('button', { name: 'Retry sprite_neutral' }));
+    await screen.findByText('slot_not_found');
+    expect(readPendingVNAssetGeneration(1, 7)).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Refresh generation status' }));
+    expect(mocks.retryVNAssetSlot).toHaveBeenCalledTimes(1);
+    first.unmount();
+
+    render(<VNAssetsWorkbench />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
+    expect(mocks.retryVNAssetSlot).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole('button', { name: nextAction === 'Start' ? 'Start generation' : 'Retry sprite_happy' }));
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('queued'));
+    if (nextAction === 'Start') expect(mocks.startVNAssetGeneration).toHaveBeenCalledTimes(1);
+    else expect(mocks.retryVNAssetSlot).toHaveBeenLastCalledWith(7, 13, expect.objectContaining({ idempotency_key: expect.any(String) }));
+  });
+
+  it('abandons a restored missing-slot receipt after one reload reconciliation', async () => {
+    existingFailedPack();
+    mocks.listVNAssetPacks.mockResolvedValue([
+      { id: 7, owner_user_id: 1, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
+    ]);
+    writePendingVNAssetGeneration(1, 7, { kind: 'retry', slotId: 12, key: 'missing-slot-receipt' });
+    mocks.retryVNAssetSlot.mockRejectedValue(new ApiError('slot_not_found', { status: 404, detail: 'slot_not_found' }));
+    const first = render(<VNAssetsWorkbench />);
+    await screen.findByText('slot_not_found');
+    await waitFor(() => expect(readPendingVNAssetGeneration(1, 7)).toBeNull());
+    first.unmount();
+    render(<VNAssetsWorkbench />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
+    expect(mocks.retryVNAssetSlot).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([408, 429, 500, 503])('preserves a retry receipt after ambiguous HTTP %s', async (status) => {
+    existingFailedPack();
+    mocks.listVNAssetPacks.mockResolvedValue([
+      { id: 7, owner_user_id: 1, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
+    ]);
+    mocks.retryVNAssetSlot.mockRejectedValueOnce(new ApiError('Try again', { status }));
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    await user.click(await screen.findByRole('button', { name: 'Retry sprite_neutral' }));
+    await screen.findByText('Try again');
+    const pending = readPendingVNAssetGeneration(1, 7);
+    expect(pending).not.toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Refresh generation status' }));
+    await waitFor(() => expect(readPendingVNAssetGeneration(1, 7)).toBeNull());
+    expect(mocks.retryVNAssetSlot).toHaveBeenLastCalledWith(7, 12, { idempotency_key: pending!.key });
+  });
 
   it('reuses the required start key after an ambiguous transport failure', async () => {
     existingFailedPack();

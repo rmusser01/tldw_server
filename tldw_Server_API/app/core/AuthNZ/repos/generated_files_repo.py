@@ -7,15 +7,22 @@ mindmaps, spreadsheets).
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
+import re
 import uuid as uuid_module
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+from tldw_Server_API.app.core.AuthNZ.database import (
+    DatabasePool,
+    _convert_question_mark_to_dollar,
+    _flatten_params,
+)
 
 # File categories (used for file_category field)
 FILE_CATEGORY_TTS_AUDIO = "tts_audio"
@@ -64,6 +71,42 @@ RETENTION_POLICY_TRANSIENT = "transient"
 RETENTION_POLICY_CUSTOM = "custom"
 
 
+def is_vn_item_source_ref(source_feature: str, source_ref: str | None) -> bool:
+    """Apply VN idempotency only to canonical positive item-ID references."""
+    return (
+        source_feature == SOURCE_FEATURE_VN_ASSETS and isinstance(source_ref, str)
+        and re.fullmatch(r"vn_asset_item:[1-9][0-9]*", source_ref) is not None
+    )
+
+
+class _TransactionBoundPool:
+    """Compose file and quota repositories on one guarded transaction connection."""
+
+    def __init__(self, conn: Any, *, postgres: bool) -> None:
+        self._conn = conn
+        self.pool = object() if postgres else None
+
+    @contextlib.asynccontextmanager
+    async def acquire(self) -> AsyncIterator[Any]:
+        """Borrow the connection without releasing or committing it."""
+        yield self._conn
+
+    @contextlib.asynccontextmanager
+    async def transaction(self) -> AsyncIterator[Any]:
+        """Join the owning transaction; only its outer context commits."""
+        yield self._conn
+
+    async def fetchone(self, query: str, *args: Any) -> dict[str, Any] | None:
+        """Read quota information without opening an independent connection."""
+        params = _flatten_params(args)
+        if self.pool is not None:
+            row = await self._conn.fetchrow(_convert_question_mark_to_dollar(query, params), *params)
+            return dict(row) if row else None
+        cursor = await self._conn.execute(query, params)
+        row = await cursor.fetchone()
+        return dict(zip((col[0] for col in cursor.description), row)) if row else None
+
+
 @dataclass
 class AuthnzGeneratedFilesRepo:
     """
@@ -78,6 +121,40 @@ class AuthnzGeneratedFilesRepo:
     def _is_postgres(self) -> bool:
         """Detect whether the current AuthNZ backend is PostgreSQL."""
         return getattr(self.db_pool, "pool", None) is not None
+
+    @staticmethod
+    async def _lock_vn_item(conn: Any, user_id: int, source_ref: str) -> None:
+        """Hold an owner/item advisory lock until the PostgreSQL commit."""
+        lock_key = int.from_bytes(
+            hashlib.sha256(f"vn_asset_file:{user_id}:{source_ref}".encode()).digest()[:8],
+            byteorder="big", signed=True,
+        )
+        await conn.fetchrow("SELECT pg_advisory_xact_lock($1)", lock_key)
+
+    @contextlib.asynccontextmanager
+    async def vn_item_transaction(
+        self, *, user_id: int, source_ref: str,
+    ) -> AsyncIterator[AuthnzGeneratedFilesRepo]:
+        """Serialize a VN item and bind registration/accounting to one transaction."""
+        async with self.db_pool.transaction() as conn:
+            postgres = self._is_postgres()
+            if postgres:
+                await self._lock_vn_item(conn, user_id, source_ref)
+            yield AuthnzGeneratedFilesRepo(_TransactionBoundPool(conn, postgres=postgres))
+
+    async def lock_quota_scopes(
+        self, *, user_id: int, org_id: int | None, team_id: int | None,
+    ) -> None:
+        """Lock admission counters in user/org/team order until registration commits."""
+        if not self._is_postgres():
+            # BEGIN IMMEDIATE already serializes SQLite admissions and usage writes.
+            return
+        async with self.db_pool.acquire() as conn:
+            await conn.fetchrow("SELECT id FROM users WHERE id = $1 FOR UPDATE", user_id)
+            if org_id:
+                await conn.fetchrow("SELECT id FROM storage_quotas WHERE org_id = $1 FOR UPDATE", org_id)
+            if team_id:
+                await conn.fetchrow("SELECT id FROM storage_quotas WHERE team_id = $1 FOR UPDATE", team_id)
 
     @staticmethod
     def _normalize_record(row: Any) -> dict[str, Any]:
@@ -173,6 +250,32 @@ class AuthnzGeneratedFilesRepo:
 
         try:
             async with self.db_pool.transaction() as conn:
+                if is_vn_item_source_ref(source_feature, source_ref):
+                    # SQLite transactions already use BEGIN IMMEDIATE. PostgreSQL
+                    # serializes the same owner/item key until this transaction ends.
+                    if self._is_postgres():
+                        await self._lock_vn_item(conn, user_id, source_ref)
+                        existing = await conn.fetchrow(
+                            """
+                            SELECT * FROM generated_files
+                            WHERE user_id = $1 AND source_feature = $2 AND source_ref = $3
+                              AND is_deleted = FALSE ORDER BY id DESC LIMIT 1
+                            """,
+                            user_id, source_feature, source_ref,
+                        )
+                    else:
+                        cursor = await conn.execute(
+                            """
+                            SELECT * FROM generated_files
+                            WHERE user_id = ? AND source_feature = ? AND source_ref = ?
+                              AND is_deleted = 0 ORDER BY id DESC LIMIT 1
+                            """,
+                            (user_id, source_feature, source_ref),
+                        )
+                        row = await cursor.fetchone()
+                        existing = dict(zip((col[0] for col in cursor.description), row)) if row else None
+                    if existing is not None:
+                        return {**self._normalize_record(existing), "_idempotent_replay": True}
                 if self._is_postgres():
                     # PostgreSQL path
                     row = await conn.fetchrow(
@@ -289,6 +392,20 @@ class AuthnzGeneratedFilesRepo:
                 return None
             columns = [column[0] for column in cursor.description]
             return self._normalize_record(dict(zip(columns, row)))
+
+    async def get_live_file_by_storage_path(
+        self, *, user_id: int, storage_path: str,
+    ) -> dict[str, Any] | None:
+        """Find a committed live reference before considering byte cleanup."""
+        row = await self.db_pool.fetchone(
+            """
+            SELECT * FROM generated_files
+            WHERE user_id = ? AND storage_path = ? AND is_deleted = ?
+            ORDER BY id DESC LIMIT 1
+            """,
+            user_id, storage_path, False,
+        )
+        return self._normalize_record(row) if row else None
 
     async def get_files_by_ids(self, file_ids: list[int]) -> list[dict[str, Any]]:
         """Fetch generated file records for a bounded list of IDs."""

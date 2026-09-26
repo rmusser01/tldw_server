@@ -1,7 +1,83 @@
+from pathlib import Path
+
 import pytest
 
 from tldw_Server_API.app.core.AuthNZ.exceptions import StorageError as AuthNZStorageError
 from tldw_Server_API.app.core.Storage import generated_file_helpers
+
+
+@pytest.mark.asyncio
+async def test_vn_helper_resolves_replay_before_quota_preflight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    outputs_dir = tmp_path / "outputs"
+    winning = outputs_dir / "vn_assets" / "winner.png"
+    winning.parent.mkdir(parents=True)
+    winning.write_bytes(b"winner")
+
+    class FullStorageService:
+        async def get_vn_generated_file(self, *, user_id, source_ref):
+            assert (user_id, source_ref) == (5, "vn_asset_item:4")
+            return {"id": 17, "storage_path": "vn_assets/winner.png"}
+
+        async def check_combined_quota(self, *_args, **_kwargs):
+            raise RuntimeError("quota denied")
+
+    async def get_service():
+        return FullStorageService()
+
+    monkeypatch.setattr(generated_file_helpers, "get_storage_service", get_service)
+    monkeypatch.setattr(
+        generated_file_helpers.DatabasePaths, "get_user_outputs_dir",
+        staticmethod(lambda _user_id: outputs_dir),
+    )
+    record = await generated_file_helpers.save_and_register_vn_asset_image(
+        user_id=5, pack_id=1, item_id=4, asset_type="sprite", image_bytes=b"replacement",
+    )
+
+    assert record["id"] == 17
+    assert list(outputs_dir.rglob("*.png")) == [winning]
+
+
+@pytest.mark.asyncio
+async def test_vn_registration_collision_removes_losing_file_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    outputs_dir = tmp_path / "outputs"
+    winning = outputs_dir / "vn_assets" / "winner.png"
+    winning.parent.mkdir(parents=True)
+    winning.write_bytes(b"winner")
+
+    class ExistingStorageService:
+        async def get_vn_generated_file(self, **_kwargs):
+            return None
+
+        async def get_generated_files_repo(self):
+            return self
+
+        async def get_live_file_by_storage_path(self, **_kwargs):
+            return None
+
+        async def check_combined_quota(self, *_args, **_kwargs):
+            return True, {}
+
+        async def register_generated_file(self, **_kwargs):
+            return {"id": 17, "storage_path": "vn_assets/winner.png"}
+
+    async def get_service():
+        return ExistingStorageService()
+
+    monkeypatch.setattr(generated_file_helpers, "get_storage_service", get_service)
+    monkeypatch.setattr(
+        generated_file_helpers.DatabasePaths, "get_user_outputs_dir",
+        staticmethod(lambda _user_id: outputs_dir),
+    )
+    record = await generated_file_helpers.save_and_register_vn_asset_image(
+        user_id=5, pack_id=1, item_id=4, asset_type="sprite", image_bytes=b"loser",
+    )
+
+    assert record["id"] == 17
+    assert list(outputs_dir.rglob("*.png")) == [winning]
 
 
 def test_generate_filename_sanitizes_prefix_and_extension():
