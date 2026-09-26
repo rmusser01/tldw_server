@@ -26,6 +26,10 @@
 **Tests**: Verify PR merge commit and target branch through GitHub.
 **Status**: In Progress. All 53 checks passed on `f80a81d2e23bfbaacd22907d54107778bbc6c33c`, but GitHub refused merge because newer `dev` commits require an up-to-date branch. The stack was rebased without conflicts onto `a2826f103f02a67f57adb40ed048dbfa2ecfc6e5`; all 26 commits are identical in `git range-diff`. Fresh integration verification and CI are required before merge; no administrator bypass is permitted.
 
+**Subsequent integration (2026-09-26)**: While CI on `ecf26b6ebe5ae2975540644d8585f8ae2d6cc734` was queued, `dev` advanced with Sync blob-upload expiry to `f5fa1f3a41855aa02871d8b76d0ec0cebbaf9e07`. The 27-commit stack was rebased without conflicts, and every patch remains identical in `git range-diff`. The new integration gate includes the 18-file Persona core matrix and 21 upstream Sync expiry cases. Native GitHub auto-merge is disabled; normal merge still requires the strict required-status-check and up-to-date-branch gates. The superseded license audit was cancelled by a PR-body edit and has a replacement run; it is not an implementation failure.
+
+**Verification**: The combined 19-file gate passed 734 tests with 26 warnings, no skips and no failures in 174.36 seconds using the official live PostgreSQL fixture. Production Bandit found zero findings/errors across 14 files; changed Python compiles, the OpenAPI fingerprint is unchanged, shard coverage reports zero new uncovered files, and whitespace checks pass. Logs are `/private/tmp/persona-pr2963-sync-rebase-{core,openapi,bandit}-20260926.*`. Fresh CI on the published rebased head remains the merge gate.
+
 ## ADR Check
 
 **ADR required**: No for TASK-13245.5. The rebase, review and CI repairs preserve the approved startup contract and do not establish a new durable architecture rule. The existing choice/provenance design is `Docs/Design/2026-09-13-persona-workspace-choice-provenance-design.md`; the ADR index was searched. A historical decision backfill or later strict-startup design remains a separate assessment, not an automatic promotion of an inventory candidate.
