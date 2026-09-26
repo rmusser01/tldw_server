@@ -7,9 +7,6 @@ on:
       - 'apps/packages/ui/src/**'
       - 'apps/tldw-frontend/**'
       - 'tldw_Server_API/**'
-  workflow_run:
-    workflows: [Frontend License Gate Audit]
-    types: [completed]
   workflow_dispatch:
     inputs:
       tier:

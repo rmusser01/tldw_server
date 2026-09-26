@@ -7,9 +7,6 @@ on:
   # Run on PRs targeting main/master/dev, not every branch
   pull_request:
     branches: [ main, master, dev ]
-  workflow_run:
-    workflows: [Frontend License Gate Audit]
-    types: [completed]
   schedule:
     - cron: '0 6 * * 1'
   # Allow manual runs

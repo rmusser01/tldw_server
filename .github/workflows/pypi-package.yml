@@ -13,9 +13,6 @@ on:
       - Helper_Scripts/Packaging/**
       - .github/workflows/pypi-package.yml
       - .github/workflows/publish-pypi.yml
-  workflow_run:
-    workflows: [Frontend License Gate Audit]
-    types: [completed]
   push:
     branches:
       - main

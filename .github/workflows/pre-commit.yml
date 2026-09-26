@@ -2,9 +2,6 @@ name: pre-commit
 
 on:
   pull_request:
-  workflow_run:
-    workflows: [Frontend License Gate Audit]
-    types: [completed]
   push:
     branches: [ main, master, dev ]
 

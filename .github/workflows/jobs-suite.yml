@@ -8,9 +8,6 @@ on:
       - 'tldw_Server_API/app/api/v1/endpoints/jobs_admin.py'
       - 'tldw_Server_API/tests/Jobs/**'
       - '.github/workflows/jobs-suite.yml'
-  workflow_run:
-    workflows: [Frontend License Gate Audit]
-    types: [completed]
   schedule:
     - cron: '0 7 * * 1'  # Weekly (Mon 07:00 UTC)
 

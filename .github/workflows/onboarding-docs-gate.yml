@@ -14,9 +14,6 @@ on:
       - .github/workflows/mkdocs.yml
       - .github/workflows/onboarding-docs-gate.yml
       - .github/workflows/onboarding-docs-smoke-nightly.yml
-  workflow_run:
-    workflows: [Frontend License Gate Audit]
-    types: [completed]
   push:
     branches:
       - main
