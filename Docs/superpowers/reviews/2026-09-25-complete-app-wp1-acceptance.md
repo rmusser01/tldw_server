@@ -4,12 +4,75 @@ This records development qualification for TASK-13343 on `codex/complete-app-wp1
 Protected frontend publication remains frozen. No public image, installer,
 catalog entry, PR or merge is approved by this record.
 
+## Corrected exact-source qualification (2026-09-26)
+
+TASK-13343 is complete for provisional WP1 Linux Docker qualification after
+restoring and meeting Task8. Exact built source is
+`84d54884346f548379f44fea53c09320b4a5fb6c`; the later audit/documentation commit
+is not the built artifact. [CI 36258800617](https://github.com/rmusser01/tldw_server/actions/runs/36258800617)
+passed native amd64, native arm64, Windows parser and daemon-selection regressions,
+and the required-both job. Fresh local arm64 and both native candidates each pass
+all 13 lifecycle and 38 browser checks plus owned cleanup. Raw Ed25519 signatures,
+production verification, source/platform identity, eight helper hashes, raw/merged
+measurement equality and compressed archive contents independently verify for all
+three. The local measured archive also passes its extracted signed-control helper
+verification without initializing state.
+
+The original measurement requirement is fulfilled with actual SHA256-verified
+registry response bytes, merged-image filesystem allocation, fresh owned persistent
+state and host monotonic time through signed-helper authenticated readiness and
+probe revocation. Registry payload totals deduplicate shared blobs and include the
+measured compressed helper archive. Images are prefetched; first application state
+is empty and repeat state is retained. Allocation totals below sum four per-image
+filesystems; shared layers, Docker cache and VM overhead mean these are not an
+incremental host-disk usage or minimum-free-space claim. Persistent state covers
+data/config volumes and private helper state. Per-role bytes, image digests, archive
+hashes, raw timing/storage records and provenance are preserved in
+[the measurement report](2026-09-26-complete-app-wp1-measurements.json).
+
+| Run | Download bytes (GiB) | Merged image allocation bytes (GiB) | Fresh persistent allocation bytes | First start seconds | Repeat start seconds |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Local Docker Desktop arm64 | 4,496,873,970 (4.188 GiB) | 9,894,424,576 (9.215 GiB) | 15,736,832 | 95.482 | 95.026 |
+| Native CI amd64 | 4,387,572,544 (4.086 GiB) | 10,053,050,368 (9.363 GiB) | 15,749,120 | 124.841 | 124.626 |
+| Native CI arm64 | 4,476,516,523 (4.169 GiB) | 9,828,134,912 (9.153 GiB) | 15,781,888 | 123.913 | 93.493 |
+
+Immutable manifest SHA256:
+
+- Local Docker Desktop arm64: `39e09e851d90d25e0e3c213bb359bcf25494622ddac85d5930d37160841774a5`
+- Native CI amd64: `4092b245ee34e795bf2ca8c93d26575902d31ed554e4748dc49f4d04a9e6614a`
+- Native CI arm64: `5aa3e7ff56fa0a8c1e4a3c03be4a10723167a44e5f264875136c4b6fe32858b5`
+
+The reviewed correction and OCI-index amendment have no remaining code findings.
+Local Release verification passed 237 tests and the maintained browser probe file
+passed 59; scoped Black/Ruff/ESLint/shell syntax/diff checks and measurement Bandit
+(zero findings) pass. Both native Release suites pass 237 tests with the existing
+`/dev/.pytest_cache` permission warning from `-c /dev/null`; no application test
+failed. The whole-frontend type-check baseline remains 93 diagnostics, and the
+Task20 persistence baseline remains 10 failures. Docker builds retain existing
+pip-root, Browserslist and Turbopack warnings; these are not a warning-free build
+claim. Actual runtimes are Python 3.12.14 and Node 24.21.0 for all three candidates.
+
+G2/G4/G10 pass their mapped WP1 checks. Every browser report still declares
+`managed_connection_and_initial_wizard_only` and `planned_setup_complete=false`.
+Full provider/document onboarding remains open TASK-13376. Windows Docker runtime,
+native packages, full core-format/platform qualification, recovery/update policy
+and the remaining WP2–WP5 work remain product requirements in the completed
+TASK-13265 design. G12 stays false and production promotion is refused. No PR,
+merge, image/installer release or install-catalog publication occurred.
+
+The local run used an isolated anonymous Docker configuration after its default
+credential helper stalled. Public metadata lookup and builds succeeded under
+that configuration; the underlying credential-helper cause remains unresolved.
+Unrelated PostgreSQL containers were preserved. Successful output contains no
+private signing key; failed local signatures were invalidated and failed evidence
+remains in private directories.
+
 ## Correction at the user’s instruction (2026-09-26)
 
-TASK-13343 is reopened. The original Task8 requirement to measure download and
+TASK-13343 was reopened. The original Task8 requirement to measure download and
 installed sizes and startup times is restored. The prior closure was premature.
-The reviewed readiness, CI trigger and probe deadline defects require corrections
-and fresh qualification. The provider-and-document walkthrough remains an
+The reviewed readiness, CI trigger and probe deadline defects required corrections
+and fresh qualification, now recorded above. The provider-and-document walkthrough remains an
 explicit product acceptance checkpoint; initial wizard progression does not prove
 it. Existing signed candidates below are historical evidence for their exact
 source, not evidence that these corrections are complete.
@@ -22,7 +85,7 @@ five-case addition; browser verification passed 59 tests, including the 10-secon
 slow-response deadline. Black, Ruff, ESLint, shell syntax and diff checks pass;
 production measurement Bandit reports zero findings. The reviewer independently
 passed 15 measurement cases and all five real-browser transport variants.
-Windows execution and exact corrected local/native artifacts remain unqualified.
+At that review, Windows execution and corrected local/native artifacts were still unqualified.
 Measurements distinguish actual registry payload bytes from filesystem allocation;
 first/repeat startup uses fresh/retained application state with images prefetched.
 
@@ -32,8 +95,8 @@ The corrected reader verifies/counts the root index and the unique selected
 platform manifest before its config/layers; unselected attestation payload is
 excluded. Six red regressions cover OCI/Docker indexes and invalid selections or
 schema; complete Release verification now passes 237 tests. Scoped Black/Ruff
-and Bandit (zero findings) pass. This amendment still needs bounded review and
-fresh exact-source qualification. Windows job in CI 36257592285 executed both
+and Bandit (zero findings) pass. This amendment then required bounded review and
+fresh exact-source qualification; both are complete above. Windows job in CI 36257592285 executed both
 parser and daemon-selection checks successfully for `d88309a2b3`.
 The first local attempt stalled in Docker credential retrieval; an isolated,
 anonymous task configuration accesses public metadata/builds successfully without
@@ -395,9 +458,9 @@ authorized release action.
 
 ## Open task and known limits
 
-TASK-13343 is In Progress. Its original measured download/installed footprints
-and startup times are required before closure, together with reviewed technical
-corrections and fresh exact-source qualification. TASK-13265 is the completed
+TASK-13343 is complete for the provisional WP1 scope qualified above. Its original
+measured download/installed footprints and startup times were restored and met,
+together with reviewed corrections and fresh exact-source qualification. TASK-13265 is the completed
 design record. Open TASK-13376 tracks complete provider/document onboarding;
 Windows runtime qualification, the remaining WP2–WP5 product work, full release
 policy and authorized publication remain separate requirements in that design.
@@ -409,7 +472,7 @@ explicitly failing; affected passing checks do not make those suites green.
 Task22 final 20 gateway/route tests and Task23 final 58 maintained probe tests/lint
 are warning-free. Earlier project test warnings and Git gc/unreachable-object
 housekeeping warnings are disclosed in their scoped evidence; no manual GC/prune.
-The current corrections include production Python measurement code and require
-fresh scoped Bandit checks as well as native workflow qualification. Historical
-passing checks do not qualify the corrected source.
+The current corrections include production Python measurement code; fresh scoped
+Bandit and exact-source native qualification pass as recorded above. Historical
+passing checks were not substituted for corrected-source evidence.
 Branch/worktree preserved; no PR, merge or protected publication performed.

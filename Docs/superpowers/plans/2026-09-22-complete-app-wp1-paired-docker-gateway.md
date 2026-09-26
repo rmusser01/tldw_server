@@ -206,7 +206,7 @@ The code paths above are the planned ownership boundaries. If an existing helper
 **Goal:** Make WP1 evidence reproducible without treating an incomplete or frozen publication as available to users.
 **Success Criteria:** CI tests the exact extractable candidate using an ephemeral job-local registry; manifest qualification refuses missing artifacts/gates; documentation states current availability accurately.
 **Tests:** Fresh extracted-bundle G2; routing/auth G4; tampered/missing artifact G10; supported runtime and policy G12 checks.
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 7: Build candidate qualification and promotion gate
 
@@ -234,8 +234,8 @@ The code paths above are the planned ownership boundaries. If an existing helper
 
 - [x] **Step 1: Check** every WP1 requirement in spec sections 5, 10, 11, and the applicable section 12 gates against a test or a clearly recorded deferred WP4/WP5 boundary. The review record at `Docs/superpowers/reviews/2026-09-25-complete-app-wp1-acceptance.md` records the initial live gaps and final exact local/nativeG2/G4/G10 proof; G12 remains false and unsupported release behavior is explicitly deferred.
 - [x] **Step 2: Run** full targeted frontend/backend/gateway suites and the candidate smoke once more only if Task 7 changed artifacts; otherwise cite its immutable evidence. Run `git diff --check`, scoped lint, and Bandit, and inspect the exact staged diff for secrets or unrelated files.
-- [ ] **Step 3: Record** measured download/installed sizes, startup times, tested platforms, and any unsupported behavior in the candidate evidence. Mark TASK-13343 complete only when its criteria and local/CI gates pass; note that public publication remains separately gated. The September 26 deferral and task closure were withdrawn at the user's instruction; Docker image metadata and CI build duration are not substitutes for these measurements.
-- [x] **Step 4: Commit** final task/doc/evidence updates with `docs: record provisional Docker candidate review (TASK-13343)`; the record explicitly states that qualification remains open.
+- [x] **Step 3: Record** measured download/installed sizes, startup times, tested platforms, and unsupported behavior. Exact `84d54884346f548379f44fea53c09320b4a5fb6c` passes fresh local arm64 and both native candidates in CI 36258800617, including actual payload/filesystem/persistent-state/startup measurements and independent signed-artifact verification. The acceptance record and `2026-09-26-complete-app-wp1-measurements.json` preserve all values and method limits. The premature deferral/closure was withdrawn; actual measurements now fulfill the requirement. G12 remains false and public publication separately gated.
+- [x] **Step 4: Commit** final task/doc/evidence updates. The record distinguishes qualified provisional Linux Docker artifacts from open full product/provider/document and publication requirements.
 
 ### Task 9: Qualify live browser setup and two isolated instances
 
@@ -951,7 +951,7 @@ targets, with raw measurement provenance and owned cleanup.
 and browser checks; measurements are not inferred from build duration or .Size.
 **Tests:** Measurement calculation/refusal tests; local arm64 and native amd64/arm64
 qualification; independent signed-artifact verification.
-**Status:** In Progress
+**Status:** Complete
 
 ### Stage C: Review and record the corrected outcome
 **Goal:** Review amended scope, run targeted tests/lint/Bandit, and update task/docs
@@ -959,11 +959,20 @@ from actual evidence without waiving missing provider/document acceptance.
 **Success Criteria:** Reviewed fixes and measurements are recorded; remaining
 product checkpoints are explicit; task closure meets the original criteria.
 **Tests:** Scoped review and fresh verification evidence.
-**Status:** In Progress
+**Status:** Complete
 
 The bounded independent review of `bff2bb5..091145b` and its trigger follow-up
 found one omitted-input defect (backend documentation, readme, licenses and
 notices). Five red regressions reproduced it; all 29 trigger cases pass after
 the reviewed correction. No code findings remain. The reviewer independently
 passed 15 measurement tests and all five real-browser transport variants,
-including absolute slow-response rejection. Fresh candidate proof remains open.
+including absolute slow-response rejection. Fresh candidate proof was still open
+at that review.
+
+Final correction and OCI-index amendment reviews have no remaining findings.
+Source `84d54884346f548379f44fea53c09320b4a5fb6c` now passes local arm64 and both
+native candidates in CI 36258800617: all 13 lifecycle/38 browser checks and owned
+cleanup, independent raw/production signatures, eight helper hashes, measured
+records and archive verification. Release237/browser59 and scoped lint/Bandit0
+pass; existing pytest cache and build warnings are disclosed. Task8 is restored
+and fulfilled. TASK-13376 remains open, full setup false and G12 false; no release.

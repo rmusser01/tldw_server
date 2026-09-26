@@ -1,0 +1,268 @@
+{
+  "schema_version": 1,
+  "task": "TASK-13343",
+  "source_commit": "84d54884346f548379f44fea53c09320b4a5fb6c",
+  "ci_url": "https://github.com/rmusser01/tldw_server/actions/runs/36258800617",
+  "scope": "Provisional WP1 Linux Docker qualification; full provider/document onboarding and G12 remain open.",
+  "measurement_limits": "Actual SHA256-verified registry payload and compressed helper archive bytes. Installed figures are per-image merged filesystem allocations, not incremental engine/VM disk usage. Persistent state covers owned data/config volumes and helper state. Startup uses prefetched images with empty/retained application state.",
+  "runs": {
+    "local_docker_desktop_arm64": {
+      "browser_check_count": 38,
+      "browser_checks_passed": true,
+      "compatibility": {
+        "allowed_upgrade_sources": [
+          "0.1.0"
+        ],
+        "backend_generation": 1,
+        "browser_generation": 1,
+        "components": [
+          "core"
+        ],
+        "min_launcher": "0.1.0",
+        "node_version": "24.21.0",
+        "python_version": "3.12.14"
+      },
+      "gates": {
+        "G10": true,
+        "G12": false,
+        "G2": true,
+        "G4": true
+      },
+      "lifecycle_checks_passed": true,
+      "manifest_sha256": "39e09e851d90d25e0e3c213bb359bcf25494622ddac85d5930d37160841774a5",
+      "measurements": {
+        "download_unique_image_payload_bytes": 4496864032,
+        "fresh_persistent_storage": {
+          "backend_config_allocated_bytes": 8192,
+          "backend_data_allocated_bytes": 15720448,
+          "helper_state_allocated_bytes": 8192,
+          "helper_state_logical_file_bytes": 911,
+          "method": "read-only du of owned named volumes; lstat allocation of private helper state",
+          "platform": "linux/arm64",
+          "schema_version": 1,
+          "source_commit": "84d54884346f548379f44fea53c09320b4a5fb6c"
+        },
+        "helper_bundle_download_bytes": 9938,
+        "helper_bundle_sha256": "ec81f9b6bd94c46f740a407265e596dd34b50710cc806191c688cd86cc397c0d",
+        "method": "SHA256-verified index (when present), selected platform manifest, config and layer response bytes; filesystem du -sx -B1 in read-only images",
+        "platform": "linux/arm64",
+        "roles": {
+          "backend": {
+            "compressed_download_payload_bytes": 4302928321,
+            "image": "localhost:15000/tldw/backend@sha256:6a217d2a945e440b8100a612ab996855829bb6cef53b4c2cd9f5b7c5cc662717",
+            "rootfs_allocated_bytes": 8845529088
+          },
+          "control": {
+            "compressed_download_payload_bytes": 50158685,
+            "image": "localhost:15000/tldw/control@sha256:009b3b777fc939fe6e2dd4f9cd83136be71b053028395bc7244e04d1afc34525",
+            "rootfs_allocated_bytes": 177836032
+          },
+          "gateway": {
+            "compressed_download_payload_bytes": 80834198,
+            "image": "localhost:15000/tldw/gateway@sha256:e11cc206987c73e12445d718fb62ff875470c78514c49b02a17501d6153b5beb",
+            "rootfs_allocated_bytes": 264953856
+          },
+          "webui": {
+            "compressed_download_payload_bytes": 171751593,
+            "image": "localhost:15000/tldw/webui@sha256:930397cf9fb3eb20b83af92c5e3a161984007d6cd8d0d97d57dae0adc99a46c4",
+            "rootfs_allocated_bytes": 606105600
+          }
+        },
+        "schema_version": 1,
+        "source_commit": "84d54884346f548379f44fea53c09320b4a5fb6c",
+        "startup": {
+          "first_start_ms": 95481.833041,
+          "first_state": "empty",
+          "image_cache": "prefetched",
+          "method": "host monotonic time around signed helper, through authenticated readiness and probe revocation",
+          "platform": "linux/arm64",
+          "repeat_start_ms": 95025.726084,
+          "repeat_state": "retained",
+          "schema_version": 1,
+          "source_commit": "84d54884346f548379f44fea53c09320b4a5fb6c"
+        },
+        "storage_note": "Per-image merged-filesystem allocation; shared layers may reduce total engine storage. Build cache and Docker VM overhead are excluded.",
+        "total_unique_download_payload_bytes": 4496873970
+      },
+      "owned_cleanup_verified": true,
+      "planned_setup_complete": false,
+      "platform": "linux/arm64",
+      "promotion_rejected": true,
+      "signature_verified": true,
+      "source_commit": "84d54884346f548379f44fea53c09320b4a5fb6c",
+      "verified_helper_files": 8
+    },
+    "native_ci_amd64": {
+      "browser_check_count": 38,
+      "browser_checks_passed": true,
+      "compatibility": {
+        "allowed_upgrade_sources": [
+          "0.1.0"
+        ],
+        "backend_generation": 1,
+        "browser_generation": 1,
+        "components": [
+          "core"
+        ],
+        "min_launcher": "0.1.0",
+        "node_version": "24.21.0",
+        "python_version": "3.12.14"
+      },
+      "gates": {
+        "G10": true,
+        "G12": false,
+        "G2": true,
+        "G4": true
+      },
+      "lifecycle_checks_passed": true,
+      "manifest_sha256": "4092b245ee34e795bf2ca8c93d26575902d31ed554e4748dc49f4d04a9e6614a",
+      "measurements": {
+        "download_unique_image_payload_bytes": 4387562625,
+        "fresh_persistent_storage": {
+          "backend_config_allocated_bytes": 8192,
+          "backend_data_allocated_bytes": 15724544,
+          "helper_state_allocated_bytes": 16384,
+          "helper_state_logical_file_bytes": 908,
+          "method": "read-only du of owned named volumes; lstat allocation of private helper state",
+          "platform": "linux/amd64",
+          "schema_version": 1,
+          "source_commit": "84d54884346f548379f44fea53c09320b4a5fb6c"
+        },
+        "helper_bundle_download_bytes": 9919,
+        "helper_bundle_sha256": "92d19e1da47e29642292ad0598035ea0843c8bd07c84210551a2a7863380320e",
+        "method": "SHA256-verified index (when present), selected platform manifest, config and layer response bytes; filesystem du -sx -B1 in read-only images",
+        "platform": "linux/amd64",
+        "roles": {
+          "backend": {
+            "compressed_download_payload_bytes": 4192778247,
+            "image": "localhost:5000/tldw/backend@sha256:72be43ed4501772c54ed84bd3c6943682265efb7825f7931a090b3a818533048",
+            "rootfs_allocated_bytes": 9067106304
+          },
+          "control": {
+            "compressed_download_payload_bytes": 51621678,
+            "image": "localhost:5000/tldw/control@sha256:0eed473bc313d0665ed8785d8d1e66fb87a437f6a5db5243a5af61c88ac65f97",
+            "rootfs_allocated_bytes": 153034752
+          },
+          "gateway": {
+            "compressed_download_payload_bytes": 81879604,
+            "image": "localhost:5000/tldw/gateway@sha256:038378c6d217370204220aca1c09607fcc1e2b84d5e8438ebe7483afb3269294",
+            "rootfs_allocated_bytes": 246198272
+          },
+          "webui": {
+            "compressed_download_payload_bytes": 172168014,
+            "image": "localhost:5000/tldw/webui@sha256:60c2c4965fe1063e0e4e0b361545513ef149c14410a393d2347ecb024c595307",
+            "rootfs_allocated_bytes": 586711040
+          }
+        },
+        "schema_version": 1,
+        "source_commit": "84d54884346f548379f44fea53c09320b4a5fb6c",
+        "startup": {
+          "first_start_ms": 124840.886758,
+          "first_state": "empty",
+          "image_cache": "prefetched",
+          "method": "host monotonic time around signed helper, through authenticated readiness and probe revocation",
+          "platform": "linux/amd64",
+          "repeat_start_ms": 124626.4968,
+          "repeat_state": "retained",
+          "schema_version": 1,
+          "source_commit": "84d54884346f548379f44fea53c09320b4a5fb6c"
+        },
+        "storage_note": "Per-image merged-filesystem allocation; shared layers may reduce total engine storage. Build cache and Docker VM overhead are excluded.",
+        "total_unique_download_payload_bytes": 4387572544
+      },
+      "owned_cleanup_verified": true,
+      "planned_setup_complete": false,
+      "platform": "linux/amd64",
+      "promotion_rejected": true,
+      "signature_verified": true,
+      "source_commit": "84d54884346f548379f44fea53c09320b4a5fb6c",
+      "verified_helper_files": 8
+    },
+    "native_ci_arm64": {
+      "browser_check_count": 38,
+      "browser_checks_passed": true,
+      "compatibility": {
+        "allowed_upgrade_sources": [
+          "0.1.0"
+        ],
+        "backend_generation": 1,
+        "browser_generation": 1,
+        "components": [
+          "core"
+        ],
+        "min_launcher": "0.1.0",
+        "node_version": "24.21.0",
+        "python_version": "3.12.14"
+      },
+      "gates": {
+        "G10": true,
+        "G12": false,
+        "G2": true,
+        "G4": true
+      },
+      "lifecycle_checks_passed": true,
+      "manifest_sha256": "5aa3e7ff56fa0a8c1e4a3c03be4a10723167a44e5f264875136c4b6fe32858b5",
+      "measurements": {
+        "download_unique_image_payload_bytes": 4476506608,
+        "fresh_persistent_storage": {
+          "backend_config_allocated_bytes": 8192,
+          "backend_data_allocated_bytes": 15757312,
+          "helper_state_allocated_bytes": 16384,
+          "helper_state_logical_file_bytes": 908,
+          "method": "read-only du of owned named volumes; lstat allocation of private helper state",
+          "platform": "linux/arm64",
+          "schema_version": 1,
+          "source_commit": "84d54884346f548379f44fea53c09320b4a5fb6c"
+        },
+        "helper_bundle_download_bytes": 9915,
+        "helper_bundle_sha256": "5b8b895c0579b46587766f234e077fec8dbb320386f1878b39f97cb3037c68e5",
+        "method": "SHA256-verified index (when present), selected platform manifest, config and layer response bytes; filesystem du -sx -B1 in read-only images",
+        "platform": "linux/arm64",
+        "roles": {
+          "backend": {
+            "compressed_download_payload_bytes": 4281572225,
+            "image": "localhost:5000/tldw/backend@sha256:4fd9dfe3fd91c29bbe03b9dd09d4be6dd92804d1923ad50a17ed42199e7f3a3d",
+            "rootfs_allocated_bytes": 8779407360
+          },
+          "control": {
+            "compressed_download_payload_bytes": 51263813,
+            "image": "localhost:5000/tldw/control@sha256:c19240c6446940fdff73cc1380d70fe6fed2ffa73ac3d0cf367122e24c91e9b2",
+            "rootfs_allocated_bytes": 177893376
+          },
+          "gateway": {
+            "compressed_download_payload_bytes": 81940203,
+            "image": "localhost:5000/tldw/gateway@sha256:cee9125a0e1b231906a7d23b62fe593e9da151ddcc1aa0e039e1701c310f5a54",
+            "rootfs_allocated_bytes": 264982528
+          },
+          "webui": {
+            "compressed_download_payload_bytes": 172752366,
+            "image": "localhost:5000/tldw/webui@sha256:b509e19a6a9f1793e405b59122e784e38e524e08bf6878d726d10a9d74bc2a1f",
+            "rootfs_allocated_bytes": 605851648
+          }
+        },
+        "schema_version": 1,
+        "source_commit": "84d54884346f548379f44fea53c09320b4a5fb6c",
+        "startup": {
+          "first_start_ms": 123913.081666,
+          "first_state": "empty",
+          "image_cache": "prefetched",
+          "method": "host monotonic time around signed helper, through authenticated readiness and probe revocation",
+          "platform": "linux/arm64",
+          "repeat_start_ms": 93493.466245,
+          "repeat_state": "retained",
+          "schema_version": 1,
+          "source_commit": "84d54884346f548379f44fea53c09320b4a5fb6c"
+        },
+        "storage_note": "Per-image merged-filesystem allocation; shared layers may reduce total engine storage. Build cache and Docker VM overhead are excluded.",
+        "total_unique_download_payload_bytes": 4476516523
+      },
+      "owned_cleanup_verified": true,
+      "planned_setup_complete": false,
+      "platform": "linux/arm64",
+      "promotion_rejected": true,
+      "signature_verified": true,
+      "source_commit": "84d54884346f548379f44fea53c09320b4a5fb6c",
+      "verified_helper_files": 8
+    }
+  }
+}

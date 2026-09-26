@@ -1,10 +1,10 @@
 ---
 id: TASK-13343
 title: Plan and implement paired Docker distribution and runtime gateway
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-23 06:15'
-updated_date: '2026-09-26 17:20'
+updated_date: '2026-09-26 18:09'
 labels:
   - distribution
   - docker
@@ -14,7 +14,7 @@ dependencies:
 references:
   - Docs/Design/2026-09-20-complete-app-distribution-design.md
 documentation:
-  - Docs/superpowers/plans/2026-09-22-complete-app-wp1-paired-docker-gateway.md
+  - Docs/superpowers/reviews/2026-09-26-complete-app-wp1-measurements.json
 ---
 
 ## Description
@@ -28,9 +28,9 @@ WP1 of TASK-13265: establish the shared manifest/artifact contract, runtime gate
 - [x] #1 Write an executable WP1 plan with exact file responsibilities, test cycles, and G2/G4/G10/G12 coverage.
 - [x] #2 Create a runtime-configured gateway and managed WebUI build with authenticated routing and same-origin behavior.
 - [x] #3 Build a paired Docker bundle with pinned artifacts, idempotent initialization, and Docker-only host helpers.
-- [ ] #4 Verify a fresh Docker setup and networking/security paths outside a repository checkout before publication.
-- [ ] #5 Record measured compressed download bytes, unpacked image sizes, fresh writable-state footprint, and cold/repeat startup-to-authenticated-readiness times for each Linux Docker target; do not substitute Docker image metadata or build duration.
-- [ ] #6 Verify public-browser readiness or reject unsupported remote Docker daemons before initialization, trigger paired CI for runtime and dependency changes, and enforce absolute adversarial-request deadlines.
+- [x] #4 Verify a fresh Docker setup and networking/security paths outside a repository checkout before publication.
+- [x] #5 Record measured compressed download bytes, unpacked image sizes, fresh writable-state footprint, and cold/repeat startup-to-authenticated-readiness times for each Linux Docker target; do not substitute Docker image metadata or build duration.
+- [x] #6 Verify public-browser readiness or reject unsupported remote Docker daemons before initialization, trigger paired CI for runtime and dependency changes, and enforce absolute adversarial-request deadlines.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -159,14 +159,28 @@ Bounded independent review of bff2bb5..091145b plus the trigger follow-up now ha
 Exact d88309a2b3 local arm64 qualification built all4 images and passed built-backend MCP/setup tests, then failed closed in measurement before emitting a report. Docker Desktop descriptor inspection confirms all4 pinned image digests identify OCI image indexes (each856bytes), while the measurement helper expects a direct manifest/config. Add bounded OCI index platform selection and count index plus selected manifest/config/layers; preserve hash/source/platform checks and ambiguous/missing-platform refusal. Existing native run36257592285 stays historical/in progress; no cancellation or acceptance waiver. Local original attempt stalled in Docker credential helper; task-private anonymous configuration resolves public metadata/build access without changing saved credentials or unrelated databases.
 
 OCI-index correction TDD: five actual-registry fixtures reproduced KeyError(config) for OCI/Docker indexes, missing/ambiguous platform and corrupt selected manifest; all pass after bounded platform selection. A separate schema regression showed invalid index schema1 was accepted; schema validation restores refusal. Count SHA256-verified root index plus exactly one supported platform manifest/config/layers, exclude unselected attestation payload, retain architecture/source checks and owned filesystem du. Black/Ruff/diff and measurement Bandit0 pass; complete Release rerun underway. Fresh exact-source rebuild and bounded independent follow-up review remain required.
+
+Restored Task8 is fulfilled by exact source 84d54884346f548379f44fea53c09320b4a5fb6c. Fresh local arm64 and CI 36258800617 native amd64/arm64 pass all 13 lifecycle and 38 browser checks plus owned cleanup. Windows parser/daemon-selection regressions and the required-both job pass. All three raw Ed25519/production signatures, eight helper hashes, source/platform identities, actual measurement records and compressed archive hashes/contents independently verify.
+
+Native download payload plus archive: amd64 4,387,572,544 bytes; arm64 4,476,516,523 bytes. Per-image merged allocation sums: amd64 10,053,050,368 bytes; arm64 9,828,134,912 bytes. First/repeat authenticated startup with prefetched images: amd64 124.841/124.626 seconds; arm64 123.913/93.493 seconds. Local arm64: 95.482/95.026 seconds. The measurement JSON and acceptance record preserve all per-role/state/timing values and method limits.
+
+Final bounded reviews have no remaining findings. The Release suite passes 237 tests; the maintained browser probe passes 59. Scoped lint and measurement Bandit (zero findings) pass. Native tests retain one pre-existing /dev pytest-cache warning; the frontend baseline remains 93 diagnostics and the persistence harness baseline 10 failures. Existing build warnings remain disclosed. Local credential-helper cause remains unresolved; an isolated anonymous configuration was used successfully.
+
+Full provider/document checkpoint TASK-13376 remains To Do, planned_setup_complete false, G12 false and promotion refused. No PR, merge, release or catalog publication occurred. Final audit records follow the built 84d5488 source; they do not claim the later documentation commit was built.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Completed the user-approved review corrections and restored the original measurements before closure. Remote/TCP Docker daemons are refused before initialization, paired CI covers copied runtime/dependency inputs, adversarial requests use an absolute deadline, and real transfer/filesystem/fresh-persistent-state/startup records are mandatory and hash/source/platform checked, including OCI indexes. Exact source 84d54884346f548379f44fea53c09320b4a5fb6c passed fresh local arm64 and native amd64/arm64 CI 36258800617 with independent signed-artifact and measurement verification. WP1 provisional Linux Docker acceptance is complete. Full provider/document workflow remains open TASK-13376, Windows Docker runtime is unqualified, G12 is false and publication remains gated. Actual values and method limits are preserved in the linked acceptance and measurement reports.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
