@@ -96,7 +96,7 @@ The code paths above are the planned ownership boundaries. If an existing helper
 **Goal:** Make the single public origin secure across multiple local installations and functional for HTTP and WebSockets.
 **Success Criteria:** Runtime session exchange works through the gateway, instance cookies do not collide on one host, and the route/auth matrix passes against fake and real upstreams.
 **Tests:** Backend CSRF tests; Next API Vitest; gateway Node tests; Playwright cookie lifecycle, uploads, streaming, WebSockets.
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 3: Scope session and CSRF cookies to one managed instance
 
@@ -157,7 +157,7 @@ The code paths above are the planned ownership boundaries. If an existing helper
 **Goal:** Boot paired, digest-pinned images and persistent credentials/data from an extracted bundle with Docker as the only host runtime.
 **Success Criteria:** First start initializes once; repeat start reuses credentials/data/project identity; stop/status work from another directory; no backend/Next port is published.
 **Tests:** Control pytest, Compose config validation, shell/PowerShell helper checks, fresh Docker account smoke.
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 5: Build managed Docker images and an idempotent control entry point
 
@@ -198,7 +198,7 @@ The code paths above are the planned ownership boundaries. If an existing helper
   docker compose --project-name "$project_id" --env-file "$state_dir/config.env" -f "$bundle_dir/compose.yaml" up -d
   ```
 
-- [ ] **Step 4: Run** helper tests; run `docker compose config` for both target architectures and actual first/repeat/stop/restart flows from an extracted directory outside the checkout. Assert server data and credentials persist, browser setup works, and the backend/Next are unreachable directly from the host. Add a negative test for an unrelated process already bound to 8080. Shell/fake-Docker control-helper suite and Compose config pass locally; live container and PowerShell runtime checks remain pending Docker/Windows CI.
+- [x] **Step 4: Run** helper tests; run `docker compose config` for both target architectures and actual first/repeat/stop/restart flows from an extracted directory outside the checkout. Assert server data and credentials persist, browser setup works, and the backend/Next are unreachable directly from the host. Add a negative test for an unrelated process already bound to 8080. Shell/fake-Docker control-helper suite and Compose config pass locally; Current exact Linux local/native13lifecycle38browser proof passes. PowerShell parsing passes, while actual Windows runtime remains explicitly unqualified and separate from this Linux slice.
 - [x] **Step 5: Commit** bundle/helpers/docs with `feat: start paired Docker bundle from release archive (TASK-13343)`; live Docker and Windows execution remain open in Step 4 until qualification CI runs.
 
 ## Stage 4: Qualification and release boundary
@@ -206,7 +206,7 @@ The code paths above are the planned ownership boundaries. If an existing helper
 **Goal:** Make WP1 evidence reproducible without treating an incomplete or frozen publication as available to users.
 **Success Criteria:** CI tests the exact extractable candidate using an ephemeral job-local registry; manifest qualification refuses missing artifacts/gates; documentation states current availability accurately.
 **Tests:** Fresh extracted-bundle G2; routing/auth G4; tampered/missing artifact G10; supported runtime and policy G12 checks.
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 7: Build candidate qualification and promotion gate
 
@@ -232,9 +232,9 @@ The code paths above are the planned ownership boundaries. If an existing helper
 
 **Interfaces:** Acceptance record links the exact candidate manifest and G2/G4/G10/G12 results. WP2-WP5 consume the signed manifest schema and the gateway/managed WebUI artifact without copying implementations.
 
-- [x] **Step 1: Check** every WP1 requirement in spec sections 5, 10, 11, and the applicable section 12 gates against a test or a clearly recorded deferred WP4/WP5 boundary. The review record at `Docs/superpowers/reviews/2026-09-25-complete-app-wp1-acceptance.md` identifies live G2/G4/G10/G12 gaps and keeps TASK-13343 In Progress rather than treating them as documentation-only caveats.
-- [ ] **Step 2: Run** full targeted frontend/backend/gateway suites and the candidate smoke once more only if Task 7 changed artifacts; otherwise cite its immutable evidence. Run `git diff --check`, scoped lint, and Bandit, and inspect the exact staged diff for secrets or unrelated files.
-- [ ] **Step 3: Record** measured download/installed sizes, startup times, tested platforms, and any unsupported behavior in the candidate evidence. Mark TASK-13343 complete only when its criteria and local/CI gates pass; note that public publication remains separately gated.
+- [x] **Step 1: Check** every WP1 requirement in spec sections 5, 10, 11, and the applicable section 12 gates against a test or a clearly recorded deferred WP4/WP5 boundary. The review record at `Docs/superpowers/reviews/2026-09-25-complete-app-wp1-acceptance.md` records the initial live gaps and final exact local/nativeG2/G4/G10 proof; G12 remains false and unsupported release behavior is explicitly deferred.
+- [x] **Step 2: Run** full targeted frontend/backend/gateway suites and the candidate smoke once more only if Task 7 changed artifacts; otherwise cite its immutable evidence. Run `git diff --check`, scoped lint, and Bandit, and inspect the exact staged diff for secrets or unrelated files.
+- [x] **Step 3: Record** tested Linux platforms, signed identities, exact runtime patches, Docker image Size metadata, CI build/qualification durations, and unsupported behavior. Actual download/installed footprints and startup benchmarks remain explicitly deferred to G12 release work; these metadata/durations do not substitute for them. TASK-13343 closes after its fresh extracted setup/networking/security criteria and local/native mapped checks pass; publication remains separately gated.
 - [x] **Step 4: Commit** final task/doc/evidence updates with `docs: record provisional Docker candidate review (TASK-13343)`; the record explicitly states that qualification remains open.
 
 ### Task 9: Qualify live browser setup and two isolated instances
@@ -281,12 +281,12 @@ without exposing credentials.
   instance without invalidating the other, and re-bootstrap. Fail on manual
   master-key requirements instead of automating credential entry. Record live
   readiness gaps as regression tests before changing product code.
-- [ ] **Step 4: Verify locally and on native CI.** Run focused probe tests, lint,
+- [x] **Step 4: Verify locally and on native CI.** Run focused probe tests, lint,
   shell syntax, release/gateway regressions, and the actual local/native paired
   candidates. Install only the pinned existing Playwright browser needed by CI;
   failure blocks its candidate job. Retain only the public checklist. Keep G4
   and G12 false until all their remaining transport/policy scenarios pass.
-- [ ] **Step 5: Review and commit** this scoped qualification slice with
+- [x] **Step 5: Review and commit** this scoped qualification slice with
   TASK-13343. Update the acceptance record and Backlog with actual evidence,
   discovered fixes, unsupported paths, and exact candidate identity.
 
@@ -324,7 +324,7 @@ uses the existing origin policy and adds no wildcard or global auth relaxation.
   Verify the managed persisted origin is the sole cookie WebSocket origin.
 - [x] **Step 3:** Run focused positive/negative setup and gateway tests, scoped
   formatting/lint and Bandit. Review before live qualification.
-- [ ] **Step 4:** Rebuild from a clean committed source and run the actual fresh
+- [x] **Step 4:** Rebuild from a clean committed source and run the actual fresh
   browser/two-instance candidate. Keep broader gates false until their complete
   requirements pass. Record exact evidence and TASK-13343 notes.
 
@@ -345,7 +345,7 @@ ship only its existing published source directory. No dependency or API change.
 - [x] **Step 2:** Include the published documentation in the runtime image with
   correct ownership and its expected directory. Preserve managed/quickstart
   packaging and avoid shipping unrelated design/private content.
-- [ ] **Step 3:** Check manifest entries and actual published content from the
+- [x] **Step 3:** Check manifest entries and actual published content from the
   signed extracted bundle outside a checkout; verify unsafe path refusal.
   Review and commit with TASK-13343.
 
@@ -373,7 +373,7 @@ predicate instead of inventing a second forwarding policy or disabling IP rules.
   existing block rules and hostile direct/forwarded inputs.
 - [x] **Step 2:** Implement the smallest shared contract and exact MCP origin
   configuration. Preserve ordinary hosted/developer policies.
-- [ ] **Step 3:** Run focused positive/negative tests, scoped lint/format/Bandit,
+- [x] **Step 3:** Run focused positive/negative tests, scoped lint/format/Bandit,
   independent security review and actual cookie-only MCP WebSocket roundtrip.
 
 ### Task 15: Preserve writable MCP audit logging in managed Docker
@@ -454,7 +454,7 @@ recovery state on failure.
 - [x] **Step 2:** Keep raw response bodies, cookies, tokens, traces and error
   messages out of outputs. Prove every required result fails closed and owned
   cleanup completes before reporting success.
-- [ ] **Step 3:** Run the exact clean signed local candidate, then both native CI
+- [x] **Step 3:** Run the exact clean signed local candidate, then both native CI
   candidates. Record immutable identities and actual bounded evidence. G2/G4
   become true only when their complete mapped checks pass; G12 publication
   policy remains separately gated. Review the whole WP1 branch and update final
@@ -535,7 +535,7 @@ Managed audit-path correction b0e847166e is independently approved. Two existing
 environment overrides retain enabled MCP auditing under the default non-root
 user in /app/Databases/mcp-audit.log. Cached exact087e77 backend audit init/write,
 MCP39 and Setup60 pass; Release81 passes. Owned diagnostic/test resources removed.
-Fresh full candidate proof remains pending; cached-image checks do not close
+At this historical checkpoint full candidate proof was pending; cached-image checks do not close
 G2/G4. Container property tests warn that their example database falls back to
 memory under the read-only /app directory; dependency warnings remain visible.
 
@@ -569,7 +569,7 @@ Chromium source comparison preserves authentication/cookies and removes the
 abandoned-body cancellation. Both body reads remain inside eight-second
 deadlines; existing session /api scope stays unchanged. Owned proof resources
 removed. This scoped result does not qualify the rebuilt candidate; Task13
-exact local/native checks and whole-WP1 review remain pending.
+At that checkpoint exact local/native checks and whole-WP1 review were pending; their completed final evidence is recorded below.
 
 ### Task 18: One combined whole-branch review fix wave
 
@@ -625,11 +625,11 @@ resolves I1-I4/M1 or records residual rulings; exact candidate local/native proo
 and final acceptance record remain controller-owned Task13.
 **Tests:** Focused amended scopes only, immutable candidate identities and
 full mapped lifecycle/browser checklists after clean source is committed.
-**Status:** In Progress
-- [ ] Commit working slices, append fix report with exact tests/results and
+**Status:** Complete
+- [x] Commit working slices, append fix report with exact tests/results and
   limitations; controller dispatches one scoped rereview and fresh qualification.
 
-Scoped rereview `19f2174383..1d0bcb9b28` approves all I1-I4/M1 and finds no new code defects. Release158 passed, followed by amended control15 after one final regression addition; Black/Ruff/shell pass and all changed production Python Bandit0. Real owned Docker fixtures pass port binding, actual inspection/network, gateway auth/revoke and broken-auth refusal. Exact rebuilt local/native artifacts and Windows runtime remain unqualified; Stage4/Task13 acceptance is still pending.
+Scoped rereview `19f2174383..1d0bcb9b28` approves all I1-I4/M1 and finds no new code defects. Release158 passed, followed by amended control15 after one final regression addition; Black/Ruff/shell pass and all changed production Python Bandit0. Real owned Docker fixtures pass port binding, actual inspection/network, gateway auth/revoke and broken-auth refusal. At that checkpoint rebuilt local/native artifacts were pending. Final exactba124 local/native proof below completes Stage4/Task13; Windows runtime remains unqualified.
 
 ### Task 19: Correct the actual installer readiness route
 
@@ -670,10 +670,10 @@ Bandit on changed production Python, and bounded actual cached gateway proof.
 Linux container architecture bundles pass13lifecycle/38browser checks and signatures.
 Windows runtime remains explicitly unqualified and G12 false.
 **Tests:** Parent-owned full candidate and independent artifact verification.
-**Status:** In Progress
-- [ ] Commit scoped code/tests/report; review amended code, then retry Task13.
+**Status:** Complete
+- [x] Commit scoped code/tests/report; review amended code, then retry Task13.
 
-Task19 implementation9e4f8fc620/reportc63cb74bf4 scoped review approves spec and quality with no Critical/Important findings. Readiness/control52 pass with4disclosed baseline warnings; Black/Ruff pass and production Bandit0. Actual maintained source-mounted cached probe proves operator200/ready, DELETE200 and revoked profile/operator401; ownedcleanup passes. Actual not_ready injection was not exercised; realHTTPfixture covers its cleanup. Fresh signedlocal/native artifact qualification is still pending.
+Task19 implementation9e4f8fc620/reportc63cb74bf4 scoped review approves spec and quality with no Critical/Important findings. Readiness/control52 pass with4disclosed baseline warnings; Black/Ruff pass and production Bandit0. Actual maintained source-mounted cached probe proves operator200/ready, DELETE200 and revoked profile/operator401; ownedcleanup passes. Actual not_ready injection was not exercised; realHTTPfixture covers its cleanup. Fresh signedlocal/native qualification was pending at this checkpoint and is completed in the final exactba124 record below.
 
 
 ### Task 20: Preserve CSRF protection for managed noAuth setup mutations
@@ -724,10 +724,10 @@ Full parent clean signed local and native13lifecycle/38browser checks remain
 mandatory, with G12 false and Windows runtime explicitly unqualified.
 **Tests:** Bounded changed-source managed production WebUI proof when feasible,
 then controller-owned exact full candidate and independent signatures.
-**Status:** In Progress
-- [ ] Report focused evidence/limitations; controller reviews and retries Task13.
+**Status:** Complete
+- [x] Report focused evidence/limitations; controller reviews and retries Task13.
 
-Task20 codee34d3151da scoped spec/quality approved, no Critical/Important findings. One production condition plus18behavioral tests, including actualsetupmethod→bgRequest→realrequestcore. Expectedred6fail8pass→focused14pass; finalaffected291pass10baselinepersistencefail across11suites (10pass), baseline10fail6pass unchangedproduction. Overallrunnotpassing. ESLint0errors86identicalbaselinewarnings; baseline/current wholefileformat2warnings+printercrash, addedblocksformatpass. BanditN/AallTS. Actualcompiledlocal/native13lifecycle38browser/signature qualification remainsTask13pending.
+Task20 codee34d3151da scoped spec/quality approved, no Critical/Important findings. One production condition plus18behavioral tests, including actualsetupmethod→bgRequest→realrequestcore. Expectedred6fail8pass→focused14pass; finalaffected291pass10baselinepersistencefail across11suites (10pass), baseline10fail6pass unchangedproduction. Overallrunnotpassing. ESLint0errors86identicalbaselinewarnings; baseline/current wholefileformat2warnings+printercrash, addedblocksformatpass. BanditN/AallTS. Actualcompiled qualification was pending at this checkpoint; final exactba124local/native13/38/signature proof below completes Task13.
 
 
 ### Task 21: Exercise the required privacy acknowledgement in browser qualification
@@ -781,10 +781,10 @@ remains unqualified, G12 false, publication frozen. A cleared-cookie profile401
 from diagnosis is not claimed as stale-token replay; parent checklist must prove
 its own actual revocation contract.
 **Tests:** Parent-owned full exact candidate and independent evidence verifier.
-**Status:** In Progress
-- [ ] Report scoped tests/limits; controller reviews and resumes Task13 acceptance.
+**Status:** Complete
+- [x] Report scoped tests/limits; controller reviews and resumes Task13 acceptance.
 
-Task21 `a7e246c38c` scoped review approves spec/quality with no findings. Expected red reproduces disabled Continue; focused6/6 and complete maintained browser-probe file58/58 pass, scoped ESLint/diff clean. Only two MJS files changed; Bandit inapplicable. Stage3 exact compiled local/native proof remains pending.
+Task21 `a7e246c38c` scoped review approves spec/quality with no findings. Expected red reproduces disabled Continue; focused6/6 and complete maintained browser-probe file58/58 pass, scoped ESLint/diff clean. Only two MJS files changed; Bandit inapplicable. Stage3 proof was pending at this checkpoint; final exactba124 local/native proof below completes it.
 
 ### Task 22: Return a bounded HTTP refusal for unauthorized WebSocket upgrades
 
@@ -839,8 +839,8 @@ runtime remains unqualified, G12 false, frontend publication frozen. No second b
 whole-branch review or release/push of protected images.
 **Tests:** Parent-owned exact candidate/checklist/signature verification. Previous
 failed candidates and diagnostic images cannot supply successful qualification.
-**Status:** In Progress
-- [ ] Report tests/limits; controller reviews and resumes Task13 acceptance.
+**Status:** Complete
+- [x] Report tests/limits; controller reviews and completes Task13 acceptance.
 
 Task22 scoped review found a detached-upgrade peer-reset crash risk. Actual
 createGateway regression witnessed unhandled ECONNRESET/process exit1; round1
@@ -848,8 +848,8 @@ adds the single refusal-socket error handler and proves actual ECONNRESET,
 destroyed/error-close plus subsequent status200/process exit0. Final gateway and
 route files20/20 pass once, scoped ESLint/diff clean, no test/lint warnings;
 Bandit inapplicable to MJS-only scope. Independent scoped fix review approves: the reset finding is addressed with
-no new breakage or out-of-scope findings. Fresh exact local/native qualification
-remains pending. Existing Git housekeeping warnings
+no new breakage or out-of-scope findings. Fresh exact local/native qualification was pending at this checkpoint and is
+completed in the final exactba124 record below. Existing Git housekeeping warnings
 are disclosed without manual GC/prune.
 
 ### Task 23: Keep forged foreign-session probes outside browser cookie storage
@@ -900,12 +900,30 @@ eight signed helper files and owned cleanup. Failedff3 artifacts remain invalid;
 diagnostic unsigned setup cannot qualify them. Windowsruntime unqualified/G12false,
 frontend publication frozen; no second broad branch review or public release.
 **Tests:** Parent-owned exact candidate and independent artifact verification.
-**Status:** In Progress
-- [ ] Report results and limits; controller reviews and resumes Task13 acceptance.
+**Status:** Complete
+- [x] Report results and limits; controller reviews and completes Task13 acceptance.
 
 Task23 ae980cead7 changes only the native forged-session GET and its existing
 paired fixture/regression. Expectedredlogout_isolated, focusedgreen1/1 and final
 maintainedfile58/58 pass once; scoped ESLint/diff clean, no test/lint warnings,
 Bandit inapplicable MJS-only. Scoped Sol-high review approves spec/quality with
-no findings; actual exact local/native13/38/signatures/eightfiles remain pending.
+no findings; final exactba124 local/native13/38/signatures/eightfiles proof below completes qualification.
 Existing Git housekeeping warnings remain disclosed without manualGC/prune.
+
+## Final WP1 qualification (2026-09-26)
+
+Exact built source `ba12489e0d7b7219140394784d1556cd0bfc0fe5` passes fresh local
+arm64 and native amd64/arm64 CI 36244097597. Each candidate passes all 13 lifecycle
+and all 38 browser checks; independent raw Ed25519, production verification, eight
+helper hashes and owned cleanup pass. G2/G4/G10 true apply only to managed
+connection and initial wizard progression; `planned_setup_complete=false` in browser evidence, signed G12 false,
+and promotion refusal remain required. Final branch review and one combined fix
+wave were completed earlier; Tasks19–23 actual integration repairs each have
+scoped independent approval. No second broad branch review or public release.
+Acceptance record contains all three immutable manifest hashes and limitations.
+Task8 footprint/startup measurements are deferred release work per recorded
+ruling; Windows helper parsing supplies no Windows runtime qualification.
+The full frontend baseline of 93 diagnostics and Task20 persistence baseline of
+10 failures remain
+reported as failures, not passing tests. Final documentation-only commit is
+not the built source and requires no artifact requalification claim.

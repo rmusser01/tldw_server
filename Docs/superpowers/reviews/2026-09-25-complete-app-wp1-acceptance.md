@@ -6,20 +6,50 @@ catalog entry, PR or merge is approved by this record.
 
 ## Current evidence (2026-09-26)
 
-The final code review fix wave and Tasks19/20/21/22/23 pass scoped spec/quality review. Exact clean source `ff3becc70a387768a129dd66b8dd297aa396eee9` local arm64 builds all four images and passes builtMCPSetup/all13 lifecycle checks. It passes35 browser checks, including both hostile upgrades, then fails onlylogout_isolated. Actual exact-image two-instance diagnosis proves the forged foreign-session probe installs a replacement CSRF cookie through Playwright's shared request context; captured-token logout403 versus current-token logout200 and profiles401/200 establish probe contamination. Task23 ae980cead7 is implemented and independently approved; fresh exact proof is pending. Cleanup passed, signatures are invalidated and all gates remain false. Same-source native CI [36242386644](https://github.com/rmusser01/tldw_server/actions/runs/36242386644) was superseded after the reproduced local failure and its cancellation was requested. It supplies no native acceptance. The earlier failed13d9 native run is historical. Local dependency installation completed this time; prior intermittent waiting still has no established cause/fix. Fresh corrected local/native qualification remains pending.
+WP1 Linux Docker development qualification is complete for exact built source `ba12489e0d7b7219140394784d1556cd0bfc0fe5`. Fresh local arm64 and native amd64/arm64 [CI 36244097597](https://github.com/rmusser01/tldw_server/actions/runs/36244097597) each built four roles and passed the built-backend MCP and setup tests, all 13 lifecycle checks, all 38 browser checks, and owned cleanup. All three candidate raw Ed25519 signatures, production verification, source/platform identities and eight helper hashes independently verify. Both native jobs, required-both job, and Windows helper parser pass. The final review fix wave and Tasks19–23 have scoped independent approval. G2/G4/G10 are true for managed connection and initial wizard progression only; planned_setup_complete remains false, G12 false and promotion refused. Superseded failed/cancelled candidates supply no current acceptance. The two corrected local installs complete without a stall; prior intermittent dependency waiting has no established cause/fix. A later documentation-only branch commit is not the built revision; artifact evidence always names `ba12489e0d`.
 
 | Contract | Current evidence | Status |
 | --- | --- | --- |
-| Sections5/10: Docker-only startup, stable identity, gateway readiness and private ports | Reviewed fixes and scoped Docker fixtures cover signed identities, gateway cookie auth/revoke, first-port conflict/retry, authoritative persisted inputs and owned cleanup. | Exactff3 local signed lifecycle13 passes; browser logout probe fails. Windows runtime unqualified. |
-| Section11 / G10: required signed artifacts | Both consumers now require all eight signed paths for the selected platform; omitted/missing/wrong-platform/tampered cases pass. | Failedff3 signatures invalidated; corrected exact signed bytes pending. |
-| G2: credential-free managed connection and initial wizard | Implementation/probe tests exist; authenticated installer readiness is now required before browser success. | Exactff3 local both managed setup/privacy progression passes; full browser gate remains failed. |
-| G4: two-instance networking/auth | Full browser checklist remains strict and uses the same managed WebUI artifact against two private target configurations. | Exactff3 local both hostile inputs pass; logout_isolated fails from probe cookie contamination; corrected full evidence pending. |
-| G12: release policy | Python3.12 and Node24 upstream eligibility rechecked September26; exact patches will be recorded from built images. | False/open: full matrix, Windows runtime, dependency/security/footprints and protected publication remain separate. |
+| Sections5/10: Docker-only startup, stable identity, gateway readiness and private ports | Reviewed fixes and scoped Docker fixtures cover signed identities, gateway cookie auth/revoke, first-port conflict/retry, authoritative persisted inputs and owned cleanup. | `ba12489e0d`: local and both native runs pass 13 lifecycle and 38 browser checks. Windows runtime unqualified. |
+| Section11 / G10: required signed artifacts | Both consumers now require all eight signed paths for the selected platform; omitted/missing/wrong-platform/tampered cases pass. | `ba12489e0d`: all three signatures and all eight helper hashes independently verify. |
+| G2: credential-free managed connection and initial wizard | Implementation/probe tests exist; authenticated installer readiness is now required before browser success. | `ba12489e0d`: local and both native runs pass all 38 mapped checks for managed connection and initial wizard; full provider setup remains outside this scope. |
+| G4: two-instance networking/auth | Full browser checklist remains strict and uses the same managed WebUI artifact against two private target configurations. | `ba12489e0d`: local and both native runs pass the complete two-instance transport, auth, CSRF, logout and rebootstrap matrix. |
+| G12: release policy | Actual Python 3.12.14 and Node 24.21.0 patches are recorded from built images; upstream eligibility was rechecked September 26. | False/open: full matrix, Windows runtime, dependency/security/footprints and protected publication remain separate. |
+
+### Immutable final candidates
+
+All rows name exact source `ba12489e0d7b7219140394784d1556cd0bfc0fe5` and pass
+13/13 lifecycle checks, 38/38 browser checks, signature and eight helper checks,
+and owned cleanup.
+
+| Candidate | Manifest SHA256 |
+| --- | --- |
+| Local linux/arm64 | `07895ec93e2b199e5ebf428b119ff725a328f1e33f00a57f5ef3ae9464db97a8` |
+| Native linux/amd64 | `fd3d2aa98440c40b7fcb50133e463d2190b77554f1ffba2af7908f92d221fe2e` |
+| Native linux/arm64 | `78434549ee544e1b2e4955850e3c4747b625c22e16fe60c05baa896f36834f63` |
+
+Actual candidate runtimes: Python 3.12.14 and Node 24.21.0. Native build plus
+qualification durations are 1769 seconds (amd64) and 1563 seconds (arm64); these are
+not startup benchmarks. Docker image Size metadata bytes are:
+
+| Platform/source | Backend | WebUI | Gateway | Control |
+| --- | ---: | ---: | ---: | ---: |
+| Native amd64 | 8803417706 | 536153597 | 230428856 | 139468643 |
+| Native arm64 | 8515256961 | 555185619 | 249105654 | 164213815 |
+| Local arm64 | 4302910050 | 171753414 | 80834209 | 50158712 |
+
+These values are Docker image metadata from their respective stores. They are
+not measured download or installed footprints and must not be used to claim
+cross-platform compression savings. Footprints and startup benchmarks remain
+separate G12 release work. No registry/release/catalog publication is eligible.
 
 PowerShell helpers are provisional. Windows parsing does not prove real Docker startup, ACL/private-state handling, port recovery, readiness, or stop/status. Docker image Size metadata does not measure download or installed footprint. The 93 untouched whole-frontend typecheck diagnostics remain a disclosed failing baseline.
 
 
 ## Review fixes and scoped verification
+
+The following checkpoints describe evidence available before final qualification.
+The current evidence above supersedes their pending qualification statements.
 
 Final whole-WP1 review covered `3c871df717..19f2174383`. Its four Important
 findings and one Minor finding were handled in a single combined fix wave,
@@ -151,6 +181,8 @@ lint/diff clean and MJS-only Bandit inapplicable. Fresh exact proof is pending.
 - Ruling: Send forged foreign-session probes through the existing bounded native request helper, preserving captured-token logout assertions and browser state — actual shared Playwright requests install401 CSRF cookies and contaminate the legitimate session test. Cost if wrong: probe isolation/fixture response behavior must be reworked and fresh exact local/native13lifecycle38browser signatures repeated; no backend CSRF/logout policy, token refresh workaround or failure-latch weakening is authorized.
 
 - Ruling: Cancel the superseded own-branchff3 native CI after actual local failure diagnosis and reviewed Task23 correction, then qualify a fresh exact source — the old probe contaminates its browser cookie jar and cannot supply eligible acceptance, while duplicate jobs consume the same qualification resources. Cost if wrong: old-source native failure telemetry is lost and cross-platform confirmation must come from the corrected exact run; cancellation supplies no pass, no borrowed artifacts or release permission.
+
+- Ruling: Close the WP1 Linux Docker implementation/qualification slice with G12 false and defer full download/installed footprints and startup benchmarks to the separate release gate — TASK-13343 acceptance requires fresh extracted setup and networking/security proof, now passed locally and on both native architectures; Docker image Size metadata and CI build duration cannot stand in for those measurements. Cost if wrong: reopen WP1 and measure the missing footprints/benchmarks before closure; no publication, Windows runtime, full provider setup or release readiness is implied.
 
 ## Historical evidence through September25 and superseded follow-ups
 
@@ -325,3 +357,21 @@ full runtime/security-policy evidence, produce a single qualified
 multi-platform signed candidate, and record its immutable manifest plus
 measured sizes and startup times. Public promotion remains a separate
 authorized release action.
+
+## Task closure and known limits
+
+TASK-13343 closes as the Linux Docker implementation/qualification slice.
+The full product/release work in TASK-13265 remains separate: full provider
+setup, Windows runtime/private ACL/port/recovery/stop-status tests, download and
+installed footprints, startup benchmarks, full release policy and publication.
+Every candidate browser evidence file records G2 scope
+`managed_connection_and_initial_wizard_only` and `planned_setup_complete=false`.
+The signed manifests keep G12 false. The whole-frontend baseline of 93 diagnostics
+and Task20 persistence harness baseline of 10 failures stay
+explicitly failing; affected passing checks do not make those suites green.
+Task22 final 20 gateway/route tests and Task23 final 58 maintained probe tests/lint
+are warning-free. Earlier project test warnings and Git gc/unreachable-object
+housekeeping warnings are disclosed in their scoped evidence; no manual GC/prune.
+New MJS-only corrections require no Bandit run; amended production Python had
+zero new findings in the recorded scoped checks and native workflow checks pass.
+Branch/worktree preserved; no PR, merge or protected publication performed.

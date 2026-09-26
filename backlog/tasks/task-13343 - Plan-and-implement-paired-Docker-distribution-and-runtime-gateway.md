@@ -1,10 +1,10 @@
 ---
 id: TASK-13343
 title: Plan and implement paired Docker distribution and runtime gateway
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-23 06:15'
-updated_date: '2026-09-26 13:06'
+updated_date: '2026-09-26 13:49'
 labels:
   - distribution
   - docker
@@ -28,7 +28,7 @@ WP1 of TASK-13265: establish the shared manifest/artifact contract, runtime gate
 - [x] #1 Write an executable WP1 plan with exact file responsibilities, test cycles, and G2/G4/G10/G12 coverage.
 - [x] #2 Create a runtime-configured gateway and managed WebUI build with authenticated routing and same-origin behavior.
 - [x] #3 Build a paired Docker bundle with pinned artifacts, idempotent initialization, and Docker-only host helpers.
-- [ ] #4 Verify a fresh Docker setup and networking/security paths outside a repository checkout before publication.
+- [x] #4 Verify a fresh Docker setup and networking/security paths outside a repository checkout before publication.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -141,14 +141,24 @@ Task22 scoped Astra fixround1 rereview972..d0af approves: peer-reset finding add
 Exactff3 local builtall4/MCPSetup/all13lifecyclepass and35browserchecks; ONLYlogout_isolatedfalse, bothhostileinputsnowpass. Actualexactff diagnostic proves sharedcontext foreignsessionGET401 installsreplacementCSRFcookie -> capturedlogout403, samecurrenttokenlogout200/profile401200; sessionsunchanged/explicitbothstaleCookie401/cleanup/PGpreserved. Unsigneddiagnosticinitializer suppliesno qualification. PlanTask23 beforeedits: existingnativehostileRequest forforgedGET, sameforeigncookie/strict401403/capturedlogout/latches unchanged, fixturemiddlewareSetCookie regression TDD/scopedreview/freshexactlocalnative13/38/signatures/eightfiles. Native36242386644 stillinprogress; failedcandidategatesfalse/signaturesinvalidated. Windows/G12/publicationremainopen.
 
 Task23 ae980cead7 scoped Sol-high review approves spec/quality with no findings. IsolatednativeforgedGET keeps strictrefusal/capturedlogout/rebootstrap/latches andbrowserstate; fixture catchesactualCSRFSetCookie. Expectedredlogout_isolated→focusedgreen/full58pass once, lint/diff clean/no warnings/BanditN/A. Fresh exact local/native13/38/signature/eightfile/cleanup proof pending. Supersededff3 ownbranchnative36242386644 cancellationrequested tofreequalificationresources after provenfailedlocalprobe; supplies no nativeacceptance. All26rulingspersisted; Windows/G12/publicationremainopen.
+
+Exactclean ba12489e0d7b7219140394784d1556cd0bfc0fe5 localarmcandidate EXIT0: all4built/MCPSetup/all13lifecycle/all38browser/ownedcleanup pass. IndependentrawEd25519+productionverification+8helperSHA pass; manifest07895ec93e2b199e5ebf428b119ff725a328f1e33f00a57f5ef3ae9464db97a8. G2G4G10true/G12false/promotionrefused/managedconnection_initialwizard_only/plannedsetupfalse. Python3.12.14Node24.21.0, no recoverymarkers/only2unrelatedPG. Native36244097597 sameSHA stillinprogress, bothfocusednativechecks/Windowssyntaxpass, closurependingnativeartifacts. Priorff3nativeconfirmedcancelled/noacceptance. Docs/task-only statusupdate afterlocalcomplete leavesexecutables/remoteimmutableSHA unchanged.
+
+Finalexact builtba12489e0d7b7219140394784d1556cd0bfc0fe5 qualifies localarm and BOTHnativeamd/arm CI36244097597 success. Eachpassesall13lifecycle/all38browser/cleanup; independentrawEd25519+productionverify+8helperSHA/sourceplatform/gatematch pass. Manifests local07895ec93e2b199e5ebf428b119ff725a328f1e33f00a57f5ef3ae9464db97a8 AMDfd3d2aa98440c40b7fcb50133e463d2190b77554f1ffba2af7908f92d221fe2e ARM78434549ee544e1b2e4955850e3c4747b625c22e16fe60c05baa896f36834f63. G2G4G10true scopedmanagedconnection_initialwizard_only/plannedsetupfalse, G12false/promotionrefused. RuntimePython3.12.14Node24.21.0. Native build+qualification1769s/1563s notstartupbenchmarks; Docker.Size metadata recorded notdownload/installfootprints. Allreviewfixesapproved andnewMJSchecks warningfree20gateway/58probe; BanditN/A newMJS, previousamendedPython0newfindings/nativeworkflowrequiredchecks pass. Knownfullfrontend93diagnostic andTask20persist10failurebaselines remainfailing. Footprints/startupbenchmarks/fullprovider/Windowsruntime/fullrelease/publication deferredG12/TASK13265. NoPRmergepub; branch/worktreepreserved, finaldoconlyHEADnotbuiltba. All27rulingspersistedacceptance.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Completed the WP1 paired Linux Docker foundation: a managed browser origin, private API and Next services, runtime cookie bootstrap, signed manifests and Docker-only host helpers. Exact built source ba12489e0d7b7219140394784d1556cd0bfc0fe5 passes all 13 extracted-bundle lifecycle checks and all 38 two-instance browser checks locally and on native amd64/arm64 CI 36244097597. Signatures, all eight helper hashes and cleanup independently verify. Actual integration defects were repaired through scoped TDD and reviews while retaining authentication, CSRF, private-hop policy and strict failure checks. G2/G4/G10 are true for managed connection and initial wizard progression only; G12 remains false and promotion is refused. Full provider setup, Windows runtime, footprints, startup benchmarks and public release remain separate work in TASK-13265. Existing failing typecheck and persistence-test baselines are documented. Branch and worktree are preserved; no PR, merge or publication occurred. The final documentation commit is not the built revision.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
