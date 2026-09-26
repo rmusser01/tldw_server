@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer, request as httpRequest } from 'node:http';
 import { connect } from 'node:net';
@@ -259,6 +260,66 @@ for (const peerCloses of [false, true]) {
     }
   });
 }
+
+test('survives a peer reset after a forbidden upgrade and closes that socket', { timeout: 6_000 }, async (t) => {
+  const script = `
+    import assert from 'node:assert/strict';
+    import { once } from 'node:events';
+    import { connect } from 'node:net';
+    import { createGateway } from ${JSON.stringify(new URL('../server.mjs', import.meta.url).href)};
+    const gateway = createGateway({
+      backendOrigin: 'http://127.0.0.1:8000', nextOrigin: 'http://127.0.0.1:3000',
+      publicHost: '127.0.0.1', publicPort: 0,
+      gatewayHopSecret: 'gateway-hop-test-secret-at-least-32-characters',
+    });
+    gateway.listen(0, '127.0.0.1');
+    await once(gateway, 'listening');
+    const port = gateway.address().port;
+    const peer = connect({ port, host: '127.0.0.1', allowHalfOpen: true });
+    await once(peer, 'connect');
+    const upgraded = once(gateway, 'upgrade');
+    const ended = once(peer, 'end');
+    let refusal = '';
+    peer.on('data', (chunk) => { refusal += chunk.toString(); });
+    peer.write('GET /api/v1/mcp/ws HTTP/1.1\\r\\nHost: 127.0.0.1:' + port +
+      '\\r\\nOrigin: http://attacker.test\\r\\nCookie: session=legitimate-session' +
+      '\\r\\nUpgrade: websocket\\r\\nConnection: Upgrade\\r\\n\\r\\n');
+    const [, deniedSocket] = await upgraded;
+    // Do not add an error listener here: the gateway must handle the real reset.
+    const emit = deniedSocket.emit;
+    let resetCode;
+    deniedSocket.emit = function (event, ...args) {
+      if (event === 'error') resetCode = args[0].code;
+      return emit.call(this, event, ...args);
+    };
+    const closed = new Promise((resolve) => deniedSocket.once('close', resolve));
+    await ended;
+    assert.equal(refusal.startsWith('HTTP/1.1 403 Forbidden'), true);
+    peer.resetAndDestroy();
+    const hadError = await closed;
+    assert.equal(resetCode, 'ECONNRESET');
+    assert.equal(hadError, true);
+    assert.equal(deniedSocket.destroyed, true);
+    const status = await fetch('http://127.0.0.1:' + port + '/_tldw/status');
+    assert.equal(status.status, 200);
+    assert.deepEqual(await status.json(), { phase: 'ready', ready: true });
+    gateway.closeAllConnections();
+    await new Promise((resolve) => gateway.close(resolve));
+    console.log('gateway survived reset and closed refused socket');
+  `;
+  const child = spawn(process.execPath, ['--input-type=module', '-e', script]);
+  t.after(() => child.kill());
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
+  child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+  const timeout = setTimeout(() => child.kill(), 4_000);
+  t.after(() => clearTimeout(timeout));
+  const [code] = await once(child, 'close');
+
+  assert.equal(code, 0, stderr);
+  assert.equal(stdout.trim(), 'gateway survived reset and closed refused socket');
+});
 
 test('serves bounded read-only maintenance status without contacting either upstream', async (t) => {
   const { publicOrigin, seen } = await fixture(t, { phase: 'maintenance' });
