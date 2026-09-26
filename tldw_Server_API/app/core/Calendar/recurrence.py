@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+from calendar import monthrange
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone, tzinfo
 from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dateutil import parser as date_parser
 from dateutil import rrule
+from icalendar import Timezone, vDDDLists, vDDDTypes, vRecur
+from icalendar.parser import Contentlines
 
 from tldw_Server_API.app.core.Calendar.constants import (
     MAX_EXPANDED_OCCURRENCES,
@@ -41,6 +44,147 @@ _WEEKDAYS = {
     "SU": rrule.SU,
 }
 _SUPPORTED_RRULE_KEYS = {"FREQ", "INTERVAL", "BYDAY", "COUNT", "UNTIL"}
+_TIMEZONE_RRULE_KEYS = _SUPPORTED_RRULE_KEYS | {"BYMONTH", "BYMONTHDAY", "WKST"}
+MAX_VTIMEZONE_BYTES = 64 * 1024
+MAX_VTIMEZONE_OBSERVANCES = 32
+MAX_VTIMEZONE_TRANSITIONS = 20_000
+
+
+def validate_provider_timezones(payload: str) -> None:
+    """Bound custom timezone work before icalendar/dateutil can resolve any offsets.
+
+    Only annual patterns guaranteed to yield in every selected year are accepted;
+    never use UNTIL or a yielded-candidate counter to bound a non-yielding rule.
+    Unsafe imported definitions are rejected; invalid persisted metadata becomes
+    the view service's existing partial-result warning, never a fixed offset.
+    """
+    stack: list[str] = []
+    size = 0
+    observances = 0
+    timezone_count = 0
+    transitions = 0
+    properties: dict[str, str] = {}
+    for line in Contentlines.from_ical(payload):
+        if not line:
+            continue
+        name, _params, value = line.parts()
+        name = name.upper()
+        if name == "BEGIN":
+            stack.append(value.upper())
+            if value.upper() == "VTIMEZONE":
+                size = 0
+                timezone_count += 1
+            elif value.upper() in {"STANDARD", "DAYLIGHT"} and "VTIMEZONE" in stack:
+                observances += 1
+                transitions += 1
+                properties = {}
+        if "VTIMEZONE" in stack:
+            size += len(line.encode("utf-8")) + 2
+            if (
+                size > MAX_VTIMEZONE_BYTES or observances > MAX_VTIMEZONE_OBSERVANCES
+                or timezone_count > MAX_VTIMEZONE_OBSERVANCES
+            ):
+                raise CalendarValidationError("VTIMEZONE exceeds parsing limits")
+            if name in {"EXRULE", "EXDATE"}:
+                raise CalendarValidationError("VTIMEZONE observance exclusions are not supported")
+            if name in {"DTSTART", "RRULE"} and stack[-1] in {"STANDARD", "DAYLIGHT"}:
+                if name in properties:
+                    raise CalendarValidationError("VTIMEZONE observance has duplicate start/rule")
+                properties[name] = value
+            if name == "RDATE" and stack[-1] in {"STANDARD", "DAYLIGHT"}:
+                try:
+                    transitions += len(vDDDLists.from_ical(value))
+                except (TypeError, ValueError) as exc:
+                    raise CalendarValidationError("Invalid provider VTIMEZONE dates") from exc
+            if transitions > MAX_VTIMEZONE_TRANSITIONS:
+                raise CalendarValidationError("VTIMEZONE exceeds transition budget")
+        if name == "END":
+            if not stack or stack[-1] != value.upper():
+                raise CalendarValidationError("Invalid iCalendar component stack")
+            if "VTIMEZONE" in stack and stack[-1] in {"STANDARD", "DAYLIGHT"} and "RRULE" in properties:
+                transitions += _validate_timezone_rule(properties)
+                if transitions > MAX_VTIMEZONE_TRANSITIONS:
+                    raise CalendarValidationError("VTIMEZONE exceeds transition budget")
+            stack.pop()
+    if stack:
+        raise CalendarValidationError("Invalid iCalendar component stack")
+
+
+def _validate_timezone_rule(properties: dict[str, str]) -> int:
+    """Validate productive annual patterns and bound their lifetime transition count.
+
+    Month days must exist even in non-leap years; weekday ordinals are limited
+    to the first/last four, with no intersecting BYMONTHDAY filter. Full provider
+    rules remain unchanged when supported, never replaced by approximations.
+    The conservative estimate covers every supported query year through 9999.
+    """
+    try:
+        value = properties["RRULE"]
+        fields = vRecur.from_ical(value)
+        if set(fields) - _TIMEZONE_RRULE_KEYS or fields.get("FREQ") != ["YEARLY"]:
+            raise CalendarValidationError("VTIMEZONE requires bounded annual date-level rules")
+        for key in ("INTERVAL", "COUNT"):
+            values = fields.get(key, [1])
+            if len(values) != 1 or int(values[0]) < 1:
+                raise CalendarValidationError("VTIMEZONE interval/count must be positive")
+        start = vDDDTypes.from_ical(properties["DTSTART"])
+        if isinstance(start, date) and not isinstance(start, datetime):
+            start = datetime.combine(start, time.min)
+        if not isinstance(start, datetime):
+            raise CalendarValidationError("VTIMEZONE requires a valid observance start")
+        default_months = list(range(1, 13)) if "BYMONTHDAY" in fields else [start.month]
+        months = [int(month) for month in fields.get("BYMONTH", default_months)]
+        if not months or len(months) > 12 or any(not 1 <= month <= 12 for month in months):
+            raise CalendarValidationError("VTIMEZONE has unsupported months")
+        if "BYDAY" in fields:
+            days = fields["BYDAY"]
+            if (
+                "BYMONTHDAY" in fields or not days or len(days) > 7
+                or (any(day.relative is None for day in days) and any(day.relative is not None for day in days))
+                or any(day.weekday not in _WEEKDAYS or (
+                    day.relative is not None and not 1 <= abs(day.relative) <= 4
+                ) for day in days)
+            ):
+                raise CalendarValidationError("VTIMEZONE requires productive weekday rules")
+            per_year = sum(
+                len(months) * (5 if day.relative is None else 1)
+                if "BYMONTH" in fields else (53 if day.relative is None else 1)
+                for day in days
+            )
+        else:
+            days = [int(day) for day in fields.get("BYMONTHDAY", [start.day])]
+            shortest_month = min(monthrange(2001, month)[1] for month in months)
+            if not days or len(days) > 31 or any(not 1 <= abs(day) <= shortest_month for day in days):
+                raise CalendarValidationError("VTIMEZONE requires productive month-day rules")
+            per_year = len(months) * len(days)
+        last_year = 9999
+        if "UNTIL" in fields:
+            until_values = fields["UNTIL"]
+            if len(until_values) != 1 or not isinstance(until_values[0], date):
+                raise CalendarValidationError("VTIMEZONE requires a valid rule end")
+            last_year = min(last_year, until_values[0].year)
+        interval = int(fields.get("INTERVAL", [1])[0])
+        annual_steps = 0 if last_year < start.year else 1 + (last_year - start.year) // interval
+        candidates = annual_steps * per_year
+        if "COUNT" in fields:
+            candidates = min(candidates, int(fields["COUNT"][0]))
+        return candidates
+    except (TypeError, ValueError, KeyError, OverflowError) as exc:
+        raise CalendarValidationError("Invalid provider VTIMEZONE rule") from exc
+
+
+def resolve_provider_timezone(timezone_name: str, vtimezone_text: str) -> tzinfo:
+    """Rebuild an embedded provider zone without consulting the process-global TZID cache."""
+    if not isinstance(vtimezone_text, str) or len(vtimezone_text.encode("utf-8")) > MAX_VTIMEZONE_BYTES:
+        raise CalendarValidationError("VTIMEZONE exceeds parsing limits")
+    try:
+        validate_provider_timezones(vtimezone_text)
+        component = Timezone.from_ical(vtimezone_text)
+        if component.name != "VTIMEZONE" or str(component.get("TZID")) != timezone_name:
+            raise CalendarValidationError("VTIMEZONE does not match the recurrence timezone")
+        return component.to_tz(lookup_tzid=False)
+    except (TypeError, ValueError, KeyError, IndexError, OverflowError) as exc:
+        raise CalendarValidationError("Invalid provider VTIMEZONE") from exc
 
 
 @dataclass(frozen=True)
@@ -215,10 +359,14 @@ def expand_recurrence_set(
     provider_rule: bool = False,
     warnings: list[str] | None = None,
     duration_text: str | None = None,
+    vtimezone_text: str | None = None,
 ) -> list[RecurrenceOccurrence]:
     """Expand DTSTART/RRULE/RDATE minus EXDATE with bounded iteration and exclusive dates."""
     validate_query_window(window_start, window_end)
-    zone = _zoneinfo(timezone_name)
+    zone = (
+        resolve_provider_timezone(timezone_name or "", vtimezone_text)
+        if provider_rule and vtimezone_text is not None else _zoneinfo(timezone_name)
+    )
     start = _coerce_datetime(master_start, zone)
     end = _coerce_datetime(master_end, zone) if master_end else None
     duration = (
@@ -458,7 +606,7 @@ def _coerce_until(value: TemporalValue, dtstart: datetime) -> datetime:
     return coerced.astimezone(dtstart.tzinfo)
 
 
-def _coerce_datetime(value: TemporalValue | None, tz: ZoneInfo | timezone | None = None) -> datetime:
+def _coerce_datetime(value: TemporalValue | None, tz: tzinfo | None = None) -> datetime:
     if value is None:
         raise CalendarValidationError("Calendar query window boundaries are required")
     default_tz = tz or timezone.utc

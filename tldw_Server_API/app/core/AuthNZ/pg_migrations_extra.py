@@ -21,6 +21,9 @@ from tldw_Server_API.app.core.DB_Management.backends.pg_sharing_schema import (
     apply_postgres_sharing_schema,
     postgres_sharing_schema_issues,
 )
+from tldw_Server_API.app.core.DB_Management.calendar_permission_schema import (
+    postgres_calendar_rbac_tables_exist,
+)
 
 from .database import DatabasePool, get_db_pool
 from .exceptions import DatabaseError as AuthNZDatabaseError
@@ -3461,21 +3464,17 @@ async def ensure_mcp_prompt_read_permission_pg(pool: DatabasePool | None = None)
 
 
 async def ensure_calendar_permissions_pg(pool: DatabasePool | None = None) -> bool:
-    """Backfill Calendar grants on existing PostgreSQL installations."""
+    """Backfill Calendar grants in one PostgreSQL transaction.
+
+    Return False for non-PostgreSQL pools or incomplete RBAC schemas, and True
+    after the baseline seed succeeds. Lookup and seed failures propagate.
+    """
     db_pool = pool or await get_db_pool()
     if getattr(db_pool, "pool", None) is None:
         return False
 
     async with db_pool.transaction() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT table_name FROM information_schema.tables
-            WHERE table_schema = current_schema()
-              AND table_name = ANY($1::text[])
-            """,
-            ["roles", "permissions", "role_permissions"],
-        )
-        if {"roles", "permissions", "role_permissions"} - {str(row["table_name"]) for row in rows}:
+        if not await postgres_calendar_rbac_tables_exist(conn):
             return False
         from tldw_Server_API.app.core.AuthNZ.rbac_seed import ensure_baseline_rbac_seed
 

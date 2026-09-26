@@ -115,9 +115,189 @@ END:VCALENDAR""")
     assert events[1].recurrence_id == "2026-06-07T09:00:00+00:00"
 
 
+@pytest.mark.parametrize("start_property", ["DTSTART", "RECURRENCE-ID"])
+def test_embedded_timezone_rules_are_scoped_to_each_payload(start_property: str) -> None:
+    """A library TZID cache must not substitute another account's custom definition."""
+    events = []
+    for offset in ("+0100", "+0200"):
+        events.extend(CalDavProvider().parse_vevents(
+            "BEGIN:VCALENDAR\nBEGIN:VTIMEZONE\nTZID:Custom/PayloadScoped\nBEGIN:STANDARD\n"
+            f"DTSTART:19700101T000000\nTZOFFSETFROM:{offset}\nTZOFFSETTO:{offset}\n"
+            "END:STANDARD\nEND:VTIMEZONE\nBEGIN:VEVENT\nUID:scoped\n"
+            f"{start_property};TZID=Custom/PayloadScoped:20260605T090000\nDURATION:PT1H\n"
+            "RDATE;TZID=Custom/PayloadScoped:20260606T090000\nEND:VEVENT\nEND:VCALENDAR"
+        ))
+    expected_starts = (
+        ["2026-06-05T09:00:00+01:00", "2026-06-05T09:00:00+02:00"] if start_property == "DTSTART"
+        else ["2026-06-05T08:00:00+00:00", "2026-06-05T07:00:00+00:00"]
+    )
+    assert [event.start_at for event in events] == expected_starts
+    assert [event.end_at for event in events] == ["2026-06-05T10:00:00+01:00", "2026-06-05T10:00:00+02:00"]
+    assert [event.rdate for event in events] == [["2026-06-06T09:00:00+01:00"], ["2026-06-06T09:00:00+02:00"]]
+
+
 def test_provider_rejects_oversized_ics_before_parsing() -> None:
     with pytest.raises(CalendarValidationError, match="byte limit"):
         CalDavProvider(max_ics_bytes=32).parse_vevents("x" * 33)
+
+
+@pytest.mark.parametrize("payload", [
+    "END:VEVENT",
+    "BEGIN:VCALENDAR\nBEGIN:VTIMEZONE\nTZID:Custom/MissingOffset\nBEGIN:STANDARD\n"
+    "DTSTART:19700101T000000\nTZOFFSETFROM:+0100\nEND:STANDARD\nEND:VTIMEZONE\nEND:VCALENDAR",
+])
+def test_invalid_timezone_structure_is_a_domain_validation_error(payload: str) -> None:
+    """Malformed structures remain controlled import failures rather than parser exceptions."""
+    with pytest.raises(CalendarValidationError):
+        CalDavProvider().parse_vevents(payload)
+
+
+@pytest.mark.parametrize("rule", [
+    "FREQ=SECONDLY", "FREQ=YEARLY;BYSECOND=0,1,2", "FREQ=YEARLY;INTERVAL=0", "FREQ=YEARLY;COUNT=0",
+    "FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=30", "FREQ=YEARLY;INTERVAL=4;BYMONTH=2;BYMONTHDAY=29",
+    "FREQ=YEARLY\nEXRULE:FREQ=SECONDLY", "FREQ=YEARLY\nEXDATE:19700101T000000",
+])
+def test_provider_rejects_unsafe_timezone_rules_before_parsing(
+    monkeypatch: pytest.MonkeyPatch, rule: str,
+) -> None:
+    """Custom timezone offset lookups must never enter unbounded or invalid rule scans."""
+    def must_not_parse(*_args: Any, **_kwargs: Any) -> Any:
+        pytest.fail("Unsafe VTIMEZONE reached the calendar parser")
+
+    monkeypatch.setattr(caldav_module.ICalendar, "from_ical", must_not_parse)
+    with pytest.raises(CalendarValidationError, match="VTIMEZONE"):
+        CalDavProvider().parse_vevents(
+            "BEGIN:VCALENDAR\nBEGIN:VTIMEZONE\nTZID:Custom/Unsafe\nBEGIN:STANDARD\n"
+            "DTSTART:19700101T000000\nTZOFFSETFROM:+0100\nTZOFFSETTO:+0200\n"
+            f"RRULE:{rule}\nEND:STANDARD\nEND:VTIMEZONE\nEND:VCALENDAR"
+        )
+
+
+@pytest.mark.parametrize("start", ["19700101T000000", "20260101T020000"])
+def test_timezone_productivity_guard_does_not_scan_to_year_9999(
+    monkeypatch: pytest.MonkeyPatch, start: str,
+) -> None:
+    """Instrument actual dateutil years: UNTIL must not masquerade as a non-yielding work bound."""
+    from dateutil import rrule
+
+    years: list[int] = []
+    original = rrule._iterinfo.rebuild
+
+    def counted_rebuild(self: Any, year: int, month: int) -> None:
+        years.append(year)
+        original(self, year, month)
+
+    monkeypatch.setattr(rrule._iterinfo, "rebuild", counted_rebuild)
+    with pytest.raises(CalendarValidationError):
+        caldav_module.validate_provider_timezones(
+            f"BEGIN:VTIMEZONE\nTZID:Custom/Never\nBEGIN:STANDARD\nDTSTART:{start}\n"
+            "TZOFFSETFROM:+0100\nTZOFFSETTO:+0100\nRRULE:FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=30\n"
+            "END:STANDARD\nEND:VTIMEZONE"
+        )
+    assert years == [], f"{len(years)} year scans ending at {years[-1]}"
+
+
+@pytest.mark.parametrize(("rule", "copies"), [
+    ("FREQ=YEARLY;BYDAY=MO,TU,WE,TH,FR,SA,SU", 1),
+    ("FREQ=YEARLY;BYMONTH=3;BYDAY=2SU", 32),
+    ("FREQ=YEARLY;BYMONTHDAY=1", 1),
+])
+def test_provider_timezone_transition_history_budget_rejects_before_parsing(
+    monkeypatch: pytest.MonkeyPatch, rule: str, copies: int,
+) -> None:
+    """Small definitions cannot trigger excessive dense or cumulative historical transitions."""
+    def must_not_parse(*_args: Any, **_kwargs: Any) -> Any:
+        pytest.fail("Excessive timezone history reached the calendar parser")
+
+    monkeypatch.setattr(caldav_module.ICalendar, "from_ical", must_not_parse)
+    observance = (
+        "BEGIN:STANDARD\nDTSTART:16010101T000000\nTZOFFSETFROM:+0100\nTZOFFSETTO:+0100\n"
+        f"RRULE:{rule}\nEND:STANDARD\n"
+    )
+    with pytest.raises(CalendarValidationError, match="transition budget"):
+        CalDavProvider().parse_vevents(
+            f"BEGIN:VCALENDAR\nBEGIN:VTIMEZONE\nTZID:Custom/Dense\n{observance * copies}"
+            "END:VTIMEZONE\nEND:VCALENDAR"
+        )
+
+
+@pytest.mark.parametrize("lifespan", ["COUNT=2", "UNTIL=16020101T000000Z"])
+def test_provider_timezone_transition_budget_respects_bounded_rule_lifespan(lifespan: str) -> None:
+    """Explicit finite lifespan bounds allow old definitions without changing their semantics."""
+    caldav_module.validate_provider_timezones(
+        "BEGIN:VTIMEZONE\nTZID:Custom/Finite\nBEGIN:STANDARD\nDTSTART:16010101T000000\n"
+        "TZOFFSETFROM:+0100\nTZOFFSETTO:+0100\n"
+        f"RRULE:FREQ=YEARLY;BYDAY=MO,TU,WE,TH,FR,SA,SU;{lifespan}\nEND:STANDARD\nEND:VTIMEZONE"
+    )
+
+
+def test_timezone_rejects_mixed_ordinal_weekdays_before_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Intersecting ordinal/plain weekdays may never yield, regardless of a small COUNT."""
+    def must_not_parse(*_args: Any, **_kwargs: Any) -> Any:
+        pytest.fail("Nonproductive mixed weekdays reached the calendar parser")
+
+    monkeypatch.setattr(caldav_module.ICalendar, "from_ical", must_not_parse)
+    with pytest.raises(CalendarValidationError, match="VTIMEZONE"):
+        CalDavProvider().parse_vevents(
+            "BEGIN:VCALENDAR\nBEGIN:VTIMEZONE\nTZID:Custom/Mixed\nBEGIN:STANDARD\n"
+            "DTSTART:19700101T000000\nTZOFFSETFROM:+0100\nTZOFFSETTO:+0100\n"
+            "RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=1MO,TU;COUNT=1\n"
+            "END:STANDARD\nEND:VTIMEZONE\nEND:VCALENDAR"
+        )
+
+
+def test_timezone_implicit_month_density_bounds_actual_finite_candidates() -> None:
+    """A month-day filter without BYMONTH visits every month, not just DTSTART's month."""
+    from datetime import datetime
+
+    from dateutil import rrule
+
+    from tldw_Server_API.app.core.Calendar.recurrence import _validate_timezone_rule
+
+    rule = "FREQ=YEARLY;BYMONTHDAY=1;UNTIL=20261231T235959Z"
+    estimate = _validate_timezone_rule({"DTSTART": "20260101T000000", "RRULE": rule})
+    actual = list(rrule.rrulestr(rule, dtstart=datetime(2026, 1, 1), ignoretz=True))
+    assert estimate >= len(actual) == 12
+
+
+@pytest.mark.parametrize(("copies", "rejected"), [(10, False), (11, True)])
+def test_timezone_explicit_dates_consume_cumulative_transition_budget(copies: int, rejected: bool) -> None:
+    """RDATE parsing and initial starts share the same budget as generated transitions."""
+    dates = ",".join(["20000101T000000"] * 1999)
+    payload = "BEGIN:VCALENDAR\n" + "".join(
+        f"BEGIN:VTIMEZONE\nTZID:Custom/Explicit{index}\nBEGIN:STANDARD\nDTSTART:19700101T000000\n"
+        f"TZOFFSETFROM:+0100\nTZOFFSETTO:+0100\nRDATE:{dates}\nEND:STANDARD\nEND:VTIMEZONE\n"
+        for index in range(copies)
+    ) + "END:VCALENDAR"
+    if rejected:
+        with pytest.raises(CalendarValidationError, match="transition budget"):
+            caldav_module.validate_provider_timezones(payload)
+    else:
+        caldav_module.validate_provider_timezones(payload)
+
+
+@pytest.mark.parametrize(("zone_count", "observance_count", "rejected"), [(2, 16, False), (3, 11, True)])
+def test_provider_timezone_observance_limit_is_cumulative(
+    monkeypatch: pytest.MonkeyPatch, zone_count: int, observance_count: int, rejected: bool,
+) -> None:
+    """Several individually small timezone definitions cannot bypass the total observance cap."""
+    def must_not_parse(*_args: Any, **_kwargs: Any) -> Any:
+        pytest.fail("Oversized timezone set reached the calendar parser")
+
+    if rejected:
+        monkeypatch.setattr(caldav_module.ICalendar, "from_ical", must_not_parse)
+    observance = (
+        "BEGIN:STANDARD\nDTSTART:19700101T000000\nTZOFFSETFROM:+0100\nTZOFFSETTO:+0100\nEND:STANDARD\n"
+    )
+    payload = "BEGIN:VCALENDAR\n" + "".join(
+        f"BEGIN:VTIMEZONE\nTZID:Custom/Many{index}\n{observance * observance_count}END:VTIMEZONE\n"
+        for index in range(zone_count)
+    ) + "END:VCALENDAR"
+    if rejected:
+        with pytest.raises(CalendarValidationError, match="VTIMEZONE"):
+            CalDavProvider().parse_vevents(payload)
+    else:
+        assert CalDavProvider().parse_vevents(payload) == []
 
 
 def test_provider_rejects_oversized_buffered_response() -> None:

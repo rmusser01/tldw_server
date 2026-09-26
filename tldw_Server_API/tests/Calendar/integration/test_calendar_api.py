@@ -595,7 +595,9 @@ def _create_provider_item(db: CalendarDatabase, *, owner_user_id: int = 1, org_i
     return calendar, item
 
 
-def test_create_calendar(calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub]) -> None:
+def test_create_named_calendar_assigns_authenticated_owner_and_default_utc_timezone(
+    calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
+) -> None:
     client, _db, _reminder_service = calendar_api_client
 
     calendar = _create_calendar(client, name="Deep Work", description="Focus blocks")
@@ -1056,6 +1058,43 @@ def test_create_caldav_account_encrypts_credentials_and_redacts_response(
     }
 
 
+@pytest.mark.parametrize("failure", ["validation", "after_insert"])
+def test_account_creation_failure_rolls_back_secret_and_account(
+    calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
+    monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
+    """Failed creation leaves neither an encrypted credential nor a partially created account."""
+    client, db, _reminders = calendar_api_client
+    monkeypatch.setenv("CALENDAR_SECRET_ENCRYPTION_KEY", _calendar_secret_key())
+    created_refs: list[str] = []
+    original_secret = db.create_secret_ref
+    original_account = db.create_external_account
+
+    def capture_secret(**kwargs: Any) -> str:
+        ref = original_secret(**kwargs)
+        created_refs.append(ref)
+        return ref
+
+    def fail_account(**kwargs: Any) -> None:
+        if failure == "after_insert":
+            original_account(**kwargs)
+            raise RuntimeError("Injected account persistence failure")
+        raise CalendarValidationError("Injected account validation failure")
+
+    monkeypatch.setattr(db, "create_secret_ref", capture_secret)
+    monkeypatch.setattr(db, "create_external_account", fail_account)
+    response = client.post("/api/v1/calendar/external/accounts", json={
+        "provider": "caldav", "display_name": "Atomic account",
+        "server_url": "https://caldav.example.test/dav/", "username": "reader@example.test",
+        "password": "app-secret",
+    })
+    assert response.status_code == (400 if failure == "validation" else 500)
+    assert len(created_refs) == 1
+    assert db.list_external_accounts_for_user(user_id=1, tenant_id="default") == []
+    with pytest.raises(CalendarValidationError):
+        db.resolve_secret_ref(created_refs[0])
+
+
 def test_create_caldav_account_requires_encryption_key_for_credentials(
     calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
     monkeypatch: pytest.MonkeyPatch,
@@ -1153,6 +1192,104 @@ def test_caldav_account_verify_and_discover_use_stored_secret(
     assert provider.discovery_requests[0]["password"] == "app-secret"
     assert "app-secret" not in verify_response.text
     assert "app-secret" not in discover_response.text
+
+
+@pytest.mark.parametrize("operation", ["verify", "discover"])
+@pytest.mark.parametrize("destination", [
+    "https://other.example.test/dav/", "https://caldav.example.test:444/dav/", "http://caldav.example.test/dav/",
+])
+@pytest.mark.parametrize("replacement", [{}, {"username": "replacement"}, {"password": "replacement"}])
+def test_provider_request_rejects_other_origin_when_reusing_any_stored_credential(
+    calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
+    monkeypatch: pytest.MonkeyPatch, operation: str, destination: str, replacement: dict[str, str],
+) -> None:
+    """A request URL cannot redirect either stored Basic credential to another origin."""
+    client, _db, _reminders = calendar_api_client
+    monkeypatch.setenv("CALENDAR_SECRET_ENCRYPTION_KEY", _calendar_secret_key())
+    account = client.post("/api/v1/calendar/external/accounts", json={
+        "provider": "caldav", "display_name": "Pinned account",
+        "server_url": "https://caldav.example.test/dav/", "username": "reader@example.test",
+        "password": "app-secret",
+    }).json()
+    response = client.post(f"/api/v1/calendar/external/accounts/{account['id']}/{operation}",
+                           json={"server_url": destination, **replacement})
+    assert response.status_code == 400, response.text
+    provider = client.caldav_provider  # type: ignore[attr-defined]
+    assert provider.verify_requests == provider.discovery_requests == []
+    assert "app-secret" not in response.text
+
+
+@pytest.mark.parametrize("override_url", [False, True])
+def test_shared_credentials_reject_unpinned_fallback_without_saved_account_origin(
+    calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
+    monkeypatch: pytest.MonkeyPatch, override_url: bool,
+) -> None:
+    """A worker fallback is not a trusted origin for an account with unpinned stored credentials."""
+    from tldw_Server_API.app.core.Calendar.provider_operations import resolve_caldav_credentials
+    from tldw_Server_API.app.core.Calendar.secret_store import CalendarSecretStore
+
+    _client, db, _reminders = calendar_api_client
+    monkeypatch.setenv("CALENDAR_SECRET_ENCRYPTION_KEY", _calendar_secret_key())
+    ref = CalendarSecretStore(db=db).create_secret(
+        owner_user_id=1, provider="caldav", payload={"username": "reader", "password": "app-secret"},
+    )
+    account = db.create_external_account(tenant_id="default", user_id=1, provider="caldav",
+                                        display_name="Unpinned account", secret_ref=ref)
+    target = "https://other.example.test/dav/"
+    with pytest.raises(CalendarValidationError, match="account server origin"):
+        resolve_caldav_credentials(db, account_id=account.id, actor_user_id=1, tenant_id="default",
+                                  overrides={"server_url": target} if override_url else None,
+                                  fallback_server_url=target)
+
+
+@pytest.mark.parametrize("operation", ["verify", "discover"])
+@pytest.mark.parametrize("replacement", [
+    {"server_url": "https://CALDAV.example.test:443/other/"},
+    {"server_url": "https://other.example.test/dav/", "username": "explicit-user", "password": "explicit-secret"},
+    {"server_url": "https://other.example.test/dav/", "username": "explicit-user", "token": "explicit-secret"},
+])
+def test_provider_request_allows_same_origin_or_complete_explicit_credentials(
+    calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
+    monkeypatch: pytest.MonkeyPatch, operation: str, replacement: dict[str, str],
+) -> None:
+    """Paths/default ports are origin-equivalent; complete replacements reuse no stored credentials."""
+    client, _db, _reminders = calendar_api_client
+    monkeypatch.setenv("CALENDAR_SECRET_ENCRYPTION_KEY", _calendar_secret_key())
+    account = client.post("/api/v1/calendar/external/accounts", json={
+        "provider": "caldav", "display_name": "Pinned account",
+        "server_url": "https://caldav.example.test/dav/", "username": "reader@example.test",
+        "password": "app-secret",
+    }).json()
+    response = client.post(f"/api/v1/calendar/external/accounts/{account['id']}/{operation}", json=replacement)
+    assert response.status_code == 200, response.text
+    provider = client.caldav_provider  # type: ignore[attr-defined]
+    requests = provider.verify_requests if operation == "verify" else provider.discovery_requests
+    assert requests == [{"server_url": replacement["server_url"],
+                         "username": replacement.get("username", "reader@example.test"),
+                         "password": replacement.get("password", replacement.get("token", "app-secret"))}]
+
+
+@pytest.mark.parametrize("kind", ["event", "todo"])
+def test_created_wall_clock_item_inherits_calendar_zone_in_agenda_and_week(
+    calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub], kind: str,
+) -> None:
+    """Omitted item zones interpret local event/todo times in the selected calendar's zone."""
+    client, _db, _reminders = calendar_api_client
+    calendar = _create_calendar(client, timezone="America/Los_Angeles")
+    fields = {"start_at": "2026-06-05T09:00:00", "end_at": "2026-06-05T10:00:00"} if kind == "event" else {
+        "start_at": None, "end_at": None, "due_at": "2026-06-05T09:00:00",
+    }
+    item = _create_event(client, calendar["id"], kind=kind, **fields)
+    assert item["timezone"] == "America/Los_Angeles"
+    for view, window in [
+        ("agenda", {"start_at": "2026-06-05T15:00:00Z", "end_at": "2026-06-05T18:00:00Z"}),
+        ("week", {"week_start": "2026-06-01", "timezone": "America/Los_Angeles"}),
+    ]:
+        response = client.get(f"/api/v1/calendar/views/{view}", params={**window, "include_scheduled_tasks": False})
+        assert response.status_code == 200, response.text
+        rows = response.json()["items"]
+        assert [row["calendar_item_id"] for row in rows] == [item["id"]]
+        assert rows[0]["start_at"] == "2026-06-05T09:00:00-07:00"
 
 
 def test_binding_rejects_remote_calendar_on_other_origin(

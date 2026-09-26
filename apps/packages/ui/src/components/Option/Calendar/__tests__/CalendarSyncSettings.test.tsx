@@ -1,6 +1,6 @@
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -144,6 +144,33 @@ describe("CalendarSyncSettings", () => {
       expect.anything(),
       expect.objectContaining({ password: expect.any(String) })
     )
+  })
+
+  it.each([true, false])("submits integer sync days after decimal input (blur=%s)", async (blur) => {
+    const user = userEvent.setup()
+    renderSettings()
+    await user.click(await screen.findByRole("button", { name: "Discover calendars" }))
+    const discovery = await screen.findByRole("region", { name: "Discovered calendars" })
+    const lookback = within(discovery).getByRole("spinbutton", { name: "Lookback days" })
+    const lookahead = within(discovery).getByRole("spinbutton", { name: "Lookahead days" })
+    await user.clear(lookback)
+    await user.type(lookback, "30.7")
+    await user.clear(lookahead)
+    await user.type(lookahead, "120.2")
+    const bind = within(discovery).getByRole("button", { name: "Bind Work" })
+    if (blur) {
+      await user.tab()
+      expect(lookback).toHaveValue("31")
+      expect(lookahead).toHaveValue("120")
+      await user.click(bind)
+    } else {
+      // Submit while a decimal is still being edited, without relying on blur rounding.
+      fireEvent.click(bind)
+    }
+
+    await waitFor(() => expect(mocks.createExternalCalendarBinding).toHaveBeenCalledWith(
+      expect.objectContaining({ lookback_days: 31, lookahead_days: 120 })
+    ))
   })
 
   it("discovers remote calendars, binds one with sync windows, queues sync, and confirms delete", async () => {

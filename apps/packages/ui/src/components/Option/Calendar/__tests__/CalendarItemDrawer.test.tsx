@@ -162,6 +162,44 @@ describe("CalendarItemDrawer", () => {
   })
 
   it.each([
+    { kind: "event", timezone: "America/Los_Angeles", changeSelection: false },
+    { kind: "todo", timezone: "Asia/Kolkata", changeSelection: false },
+    { kind: "event", timezone: "America/Los_Angeles", changeSelection: true },
+    { kind: "todo", timezone: "Asia/Kolkata", changeSelection: true }
+  ])("creates $kind in the selected calendar timezone $timezone (changeSelection=$changeSelection)", async ({ kind, timezone, changeSelection }) => {
+    const user = userEvent.setup()
+    const selectedCalendar = { ...calendars[0], id: 2, name: "Local research", timezone }
+    renderDrawer(null, {
+      calendars: changeSelection ? [...calendars, selectedCalendar] : [selectedCalendar]
+    })
+    if (changeSelection) {
+      await user.click(screen.getByRole("combobox", { name: "Calendar" }))
+      await user.click(await screen.findByText("Local research"))
+    }
+    await user.type(screen.getByRole("textbox", { name: "Title" }), "Local appointment")
+    if (kind === "todo") {
+      await user.click(screen.getByRole("radio", { name: "Todo" }))
+      await user.type(screen.getByRole("textbox", { name: "Due" }), "2026-11-02T17:00")
+    } else {
+      await user.type(screen.getByRole("textbox", { name: "Start" }), "2026-11-02T09:00")
+      await user.type(screen.getByRole("textbox", { name: "End" }), "2026-11-02T10:00")
+    }
+    await user.click(screen.getByRole("button", { name: "Save item" }))
+
+    await waitFor(() => expect(mocks.createCalendarItem).toHaveBeenCalledWith(
+      expect.objectContaining({
+        calendar_id: 2,
+        kind,
+        timezone,
+        start_at: kind === "event" ? "2026-11-02T09:00" : null,
+        end_at: kind === "event" ? "2026-11-02T10:00" : null,
+        due_at: kind === "todo" ? "2026-11-02T17:00" : null
+      })
+    ))
+    expect(mocks.updateCalendarItem).not.toHaveBeenCalled()
+  })
+
+  it.each([
     { kind: "event", start_at: "2026-06-05T09:00:35.123-07:00", end_at: "2026-06-05T10:00:45-07:00", due_at: null },
     { kind: "todo", start_at: "2026-06-05T17:00:35+05:30", end_at: null, due_at: "2026-06-05T17:00:35+05:30" },
     { kind: "event", start_at: "2026-06-05", end_at: "2026-06-08", due_at: null, all_day: true }
