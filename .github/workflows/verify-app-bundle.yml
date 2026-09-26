@@ -4,6 +4,10 @@ name: Exercise paired Docker app candidate
 # to GHCR, a release, or the install catalog.
 on:
   workflow_dispatch:
+  # Bootstrap the new workflow from this branch before it exists on default.
+  push:
+    branches: [codex/complete-app-wp1]
+    paths: [.github/workflows/verify-app-bundle.yml]
 
 permissions:
   contents: read
@@ -86,6 +90,11 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
+
+      - name: Record runner disk headroom
+        run: |
+          df -h / /var/lib/docker
+          docker system df
 
       - name: Build and smoke one native platform without promoting it
         env:
