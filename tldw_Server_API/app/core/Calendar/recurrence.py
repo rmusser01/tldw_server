@@ -82,7 +82,7 @@ class LocalRecurrenceRule:
         return ";".join(parts)
 
     @classmethod
-    def from_rrule(cls, value: str) -> "LocalRecurrenceRule":
+    def from_rrule(cls, value: str) -> LocalRecurrenceRule:
         """Parse the local recurrence subset from an RRULE value."""
 
         text = value.strip()
@@ -230,7 +230,12 @@ def expand_recurrence_set(
                 fields = dict(part.split("=", 1) for part in rrule_text.removeprefix("RRULE:").split(";"))
                 if int(fields.get("INTERVAL", "1")) < 1 or int(fields.get("COUNT", "1")) < 1:
                     raise ValueError("Recurrence interval/count must be positive")
-                rules.rrule(rrule.rrulestr(rrule_text, dtstart=start))
+                until = fields.get("UNTIL")
+                if all_day and until and len(until) == 8 and until.isdigit():
+                    cutoff = _coerce_until(datetime.strptime(until, "%Y%m%d").date(), start)
+                    fields["UNTIL"] = cutoff.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+                normalized_rule = ";".join(f"{key}={value}" for key, value in fields.items())
+                rules.rrule(rrule.rrulestr(normalized_rule, dtstart=start))
             else:
                 rules.rrule(_dateutil_rule(LocalRecurrenceRule.from_rrule(rrule_text), dtstart=start))
         for value in rdates:

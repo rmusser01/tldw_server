@@ -3,23 +3,23 @@
 from __future__ import annotations
 
 import base64
-from html import escape as html_escape
 import ipaddress
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
+from html import escape as html_escape
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
-from defusedxml import ElementTree
+import httpx
 from dateutil import parser as date_parser
 from dateutil import tz
+from defusedxml import ElementTree
 from icalendar import Calendar as ICalendar
-import httpx
 
 from tldw_Server_API.app.core.Calendar.errors import CalendarValidationError
 from tldw_Server_API.app.core.Calendar.provider_operations import log_calendar_failure
-from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
 from tldw_Server_API.app.core.http_client import _prepare_pinned_transport_target, create_client
+from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
 
 _DAV_NS = "DAV:"
 _CALDAV_NS = "urn:ietf:params:xml:ns:caldav"
@@ -296,7 +296,7 @@ class CalDavProvider:
             headers["Depth"] = depth
         if body is not None:
             headers["Content-Type"] = "application/xml; charset=utf-8"
-        auth_value = base64.b64encode(f"{username}:{password}".encode("utf-8")).decode("ascii")
+        auth_value = base64.b64encode(f"{username}:{password}".encode()).decode("ascii")
         headers["Authorization"] = f"Basic {auth_value}"
         safe_url = self._validate_http_url(url)
         content = body.encode("utf-8") if body is not None else None

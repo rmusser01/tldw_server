@@ -1,8 +1,11 @@
 import React from "react"
-import { Button, Divider, Drawer, Input, Popconfirm, Select, Space, Typography, message } from "antd"
+import { Button, Divider, Drawer, Input, Popconfirm, Select, Space, Tooltip, Typography, message } from "antd"
+import { Trash2 } from "lucide-react"
+import { safeExternalUrl } from "@/utils/safe-external-url"
 import type {
   CalendarItemKind,
   CalendarItemUpdateRequest,
+  CalendarLinkResponse,
   CalendarResponse,
   CalendarSourceOwner,
   CalendarViewItemResponse
@@ -12,6 +15,8 @@ import {
   createCalendarAnnotation,
   createCalendarItem,
   createCalendarLink,
+  listCalendarLinks,
+  deleteCalendarLink,
   deleteCalendarItem,
   updateCalendarItem,
   updateCalendarLocalTags
@@ -75,6 +80,9 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
   const [annotation, setAnnotation] = React.useState("")
   const [linkLabel, setLinkLabel] = React.useState("")
   const [linkUrl, setLinkUrl] = React.useState("")
+  const [links, setLinks] = React.useState<CalendarLinkResponse[]>([])
+  const [linksLoading, setLinksLoading] = React.useState(false)
+  const [linksError, setLinksError] = React.useState(false)
   const [initialTags, setInitialTags] = React.useState<string[] | null>([])
   const [tagsDirty, setTagsDirty] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
@@ -106,6 +114,36 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
     setLinkLabel("")
     setLinkUrl("")
   }, [calendars, item, open])
+
+  React.useEffect(() => {
+    let active = true
+    setLinks(item?.links ?? [])
+    setLinksError(false)
+    if (!open || !item?.calendar_item_id || isLinkedProjection) {
+      setLinksLoading(false)
+      return () => { active = false }
+    }
+    setLinksLoading(true)
+    listCalendarLinks(item.calendar_item_id)
+      .then((result) => { if (active) setLinks(result.items) })
+      .catch(() => { if (active) setLinksError(true) })
+      .finally(() => { if (active) setLinksLoading(false) })
+    return () => { active = false }
+  }, [open, item, isLinkedProjection])
+
+  const handleRemoveLink = async (linkId: number) => {
+    if (!item?.calendar_item_id) return
+    setSaving(true)
+    try {
+      await deleteCalendarLink(item.calendar_item_id, linkId)
+      setLinks((current) => current.filter((link) => link.id !== linkId))
+      await onSaved()
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "Unable to remove link")
+    } finally {
+      setSaving(false)
+    }
+  }
 
   const refreshAndClose = async () => {
     await onSaved()
@@ -269,7 +307,7 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
             <Select
               aria-label="Calendar"
               value={calendarId ?? undefined}
-              disabled={!canEditItemFields}
+              disabled={!isCreate || !canEditItemFields}
               onChange={(value) => setCalendarId(Number(value))}
               options={calendars.map((calendar) => ({
                 value: calendar.id,
@@ -394,8 +432,27 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
                   onChange={(event) => setAnnotation(event.target.value)}
                 />
               </label>
-              {item.link?.url ? (
-                <Button href={item.link.url}>{item.link.label || "Open link"}</Button>
+              {linksLoading ? <Typography.Text type="secondary" role="status">Loading links</Typography.Text> : null}
+              {linksError ? <Typography.Text type="danger" role="alert">Links unavailable</Typography.Text> : null}
+              {links.map((link) => {
+                const label = link.label || link.target_id
+                const href = safeExternalUrl(link.url)
+                return (
+                  <div key={link.id} className="flex min-w-0 items-center justify-between gap-2">
+                    {href ? <Typography.Link href={href} className="min-w-0 break-words">{label}</Typography.Link>
+                      : <Typography.Text className="min-w-0 break-words">{label}</Typography.Text>}
+                    <Popconfirm title="Remove this link?" okText="Remove link" cancelText="Cancel"
+                      onConfirm={() => handleRemoveLink(link.id)}>
+                      <Tooltip title={`Remove ${label}`}>
+                        <Button type="text" aria-label={`Remove ${label}`} disabled={saving}
+                          icon={<Trash2 size={16} />} />
+                      </Tooltip>
+                    </Popconfirm>
+                  </div>
+                )
+              })}
+              {!links.length && item.link?.url && safeExternalUrl(item.link.url) ? (
+                <Button href={safeExternalUrl(item.link.url) ?? undefined}>{item.link.label || "Open link"}</Button>
               ) : null}
               <div className="flex flex-col gap-2">
                 <label className="flex flex-col gap-1">

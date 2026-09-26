@@ -38,14 +38,14 @@
 **Tests:** API role member/nonmember/wrong-org and revoked membership tests; authorized link list/delete and refresh tests; drawer calendar-selector and persisted-link tests; exception export identity and endpoint docstring checks.
 **Files:** Calendar API/schemas, permission tests, shared exception modules, `apps/packages/ui/src/services/calendar.ts`, Calendar drawer/types/tests, and backend integration tests.
 **Steps:** Write failing tests; wire existing AuthNZ membership APIs; add link GET/DELETE and UI retrieval; disable only the unsupported move control; centralize exception definitions using existing lightweight export pattern; document API functions; run backend/frontend tests and typecheck; run security/format checks; commit with TASK-13356.
-**Status:** In Progress
+**Status:** Complete
 
 ## Stage 4: Re-review and Integration
 **Goal:** Publish verified fixes, address follow-up review, and satisfy merge gates.
 **Success Criteria:** Each Qodo finding has a verified disposition in its thread; fresh Qodo review and required CI checks pass; branch is current with dev; PR is merged, or an exact remaining external/policy gate is recorded without claiming completion.
 **Tests:** Full Calendar pytest suite; focused frontend Vitest tests from frontend and shared-UI working directories; frontend TypeScript; touched-scope Bandit; pre-commit; shard coverage guard; git diff checks. Inspect baseline failures separately rather than masking them.
 **Steps:** Self-review complete diff; verify and push; reply to Qodo threads; request fresh review; inspect CI and latest dev; rebase/reverify if required; merge only when allowed; update Backlog with PR/verification/final state.
-**Status:** Not Started
+**Status:** In Progress
 
 ## Decisions and Evidence
 
@@ -53,3 +53,6 @@
 - Baseline on rebased head: Calendar backend 112 passing, frontend 30 passing, shared-UI route tests 3 passing, TypeScript clean, Bandit zero findings, shard guard zero new uncovered files.
 - Qodo review posted 21 findings. Finding 21 was omitted from the initial summary and was supplied in issue comment 5843301983: endpoint docstrings.
 - External provider smoke remains unrun without credentials. Preserve the requester-authored Change summary verbatim; do not manufacture human rationale.
+- Remediation verification: 152 Calendar backend tests; 34 frontend tests; 3 route tests from the shared-UI cwd; TypeScript and full Calendar-source Ruff pass; touched-scope Bandit has zero findings/errors; pre-commit and shard coverage guard pass.
+- Additional regression: provider all-day RRULE UNTIL dates are normalized for aware recurrence expansion while raw provider metadata remains unchanged.
+- Refetched dev remains `59bd5845038342013a2d84d0130f6164f14b54fd`. Desktop/mobile Calendar drawer screenshots use isolated, nonsecret API fixtures, not a live provider connection.

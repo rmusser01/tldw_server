@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Protocol
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -31,6 +31,7 @@ from tldw_Server_API.app.core.Calendar.recurrence import (
 )
 from tldw_Server_API.app.core.DB_Management.Calendar_DB import (
     CalendarItemRow,
+    CalendarLinkRow,
     CalendarRecurrenceRow,
 )
 from tldw_Server_API.app.services.scheduled_tasks_control_plane_service import (
@@ -89,6 +90,7 @@ class CalendarViewItem:
     recurrence_id: int | None = None
     occurrence_index: int | None = None
     link: CalendarViewLink | None = None
+    links: list[CalendarLinkRow] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -238,7 +240,8 @@ class CalendarViewService:
                 continue
             if _item_overlaps_window(item, window_start, window_end):
                 view_items.append(_view_item_from_row(item, local_tags=local_tags))
-        return view_items
+        links = self.calendar_service.db.list_links_for_items(row.id for row in readable_rows)
+        return [replace(item, links=links.get(item.calendar_item_id, [])) for item in view_items]
 
     async def load_scheduled_task_projections(
         self,

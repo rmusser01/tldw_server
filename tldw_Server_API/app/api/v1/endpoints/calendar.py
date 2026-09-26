@@ -1,3 +1,5 @@
+"""Permission-scoped Calendar CRUD, views, local context, and read-only CalDAV sync APIs."""
+
 from __future__ import annotations
 
 import json
@@ -14,6 +16,9 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     rbac_rate_limit,
 )
 from tldw_Server_API.app.api.v1.schemas.calendar_schemas import (
+    CalDavAccountMutationResponse,
+    CalDavAccountVerifyRequest,
+    CalDavAccountVerifyResponse,
     CalendarAnnotationCreateRequest,
     CalendarAnnotationResponse,
     CalendarCreateRequest,
@@ -22,9 +27,11 @@ from tldw_Server_API.app.api.v1.schemas.calendar_schemas import (
     CalendarItemResponse,
     CalendarItemUpdateRequest,
     CalendarLinkCreateRequest,
+    CalendarLinkDeleteResponse,
+    CalendarLinkListResponse,
     CalendarLinkResponse,
-    CalendarLocalTagsUpdateRequest,
     CalendarListResponse,
+    CalendarLocalTagsUpdateRequest,
     CalendarMembershipCreateRequest,
     CalendarMembershipDeleteResponse,
     CalendarMembershipListResponse,
@@ -32,17 +39,14 @@ from tldw_Server_API.app.api.v1.schemas.calendar_schemas import (
     CalendarReminderCreateRequest,
     CalendarReminderProjectionResponse,
     CalendarReminderResponse,
+    CalendarResponse,
     CalendarSyncEventListResponse,
     CalendarSyncEventResponse,
-    CalendarResponse,
     CalendarSyncTriggerRequest,
     CalendarSyncTriggerResponse,
     CalendarViewItemResponse,
     CalendarViewLinkResponse,
     CalendarViewResponse,
-    CalDavAccountMutationResponse,
-    CalDavAccountVerifyRequest,
-    CalDavAccountVerifyResponse,
     ExternalCalendarAccountCreateRequest,
     ExternalCalendarAccountListResponse,
     ExternalCalendarAccountResponse,
@@ -54,6 +58,7 @@ from tldw_Server_API.app.api.v1.schemas.calendar_schemas import (
     ExternalCalendarDiscoveryResponse,
 )
 from tldw_Server_API.app.api.v1.schemas.reminders_schemas import ReminderTaskCreateRequest
+from tldw_Server_API.app.core.AuthNZ.orgs_teams import list_org_memberships_for_user
 from tldw_Server_API.app.core.AuthNZ.permissions import (
     CALENDAR_READ,
     CALENDAR_SYNC,
@@ -67,9 +72,9 @@ from tldw_Server_API.app.core.Calendar.errors import (
     CalendarReadOnlyError,
     CalendarValidationError,
 )
+from tldw_Server_API.app.core.Calendar.provider_operations import call_provider, resolve_caldav_credentials
 from tldw_Server_API.app.core.Calendar.providers.caldav import CalDavProvider, sanitize_provider_metadata
 from tldw_Server_API.app.core.Calendar.secret_store import CalendarSecretStore
-from tldw_Server_API.app.core.Calendar.provider_operations import call_provider, resolve_caldav_credentials
 from tldw_Server_API.app.core.Calendar.view_service import (
     CalendarViewFilters,
     CalendarViewResult,
@@ -90,32 +95,49 @@ router = APIRouter(prefix="/calendar", tags=["calendar"])
 
 
 def get_calendar_database() -> CalendarDatabase:
+    """Provide the Calendar repository dependency for a request."""
     return CalendarDatabase()
 
 
 def get_scheduled_tasks_service() -> ScheduledTasksControlPlaneService:
+    """Provide the existing scheduled-task control plane for projections and reminders."""
     return ScheduledTasksControlPlaneService()
 
 
 def get_calendar_job_manager() -> JobManager:
+    """Provide the configured Jobs manager for user-visible Calendar sync."""
     return jobs_manager_from_env()
 
 
 def get_caldav_provider() -> CalDavProvider:
+    """Provide the guarded, read-only CalDAV adapter."""
     return CalDavProvider()
 
 
-def get_calendar_service(
+async def get_calendar_service(
     current_user: User = Depends(get_request_user),
     db: CalendarDatabase = Depends(get_calendar_database),
 ) -> CalendarService:
-    return CalendarService(db=db, tenant_id=_tenant_id(current_user))
+    """Build request-local permissions from current active AuthNZ organization roles."""
+    user_id = _user_id(current_user)
+    memberships = await list_org_memberships_for_user(user_id) if current_user.org_ids else []
+    roles = frozenset(
+        (int(row["org_id"]), str(row["role"]).lower())
+        for row in memberships
+        if row.get("status") == "active" and row.get("org_id") in current_user.org_ids and row.get("role")
+    )
+    return CalendarService(
+        db=db,
+        tenant_id=_tenant_id(current_user),
+        org_role_resolver=lambda actor, org, role: actor == user_id and (org, role.lower()) in roles,
+    )
 
 
 def get_calendar_view_service(
     calendar_service: CalendarService = Depends(get_calendar_service),
     scheduled_tasks_service: ScheduledTasksControlPlaneService = Depends(get_scheduled_tasks_service),
 ) -> CalendarViewService:
+    """Compose permission-aware Calendar views with scheduled-task projections."""
     return CalendarViewService(
         calendar_service=calendar_service,
         scheduled_tasks_service=scheduled_tasks_service,
@@ -123,6 +145,7 @@ def get_calendar_view_service(
 
 
 def _user_id(current_user: User) -> int:
+    """Require a numeric authenticated owner ID for Calendar persistence."""
     try:
         return int(current_user.id)
     except (TypeError, ValueError) as exc:
@@ -133,10 +156,12 @@ def _user_id(current_user: User) -> int:
 
 
 def _tenant_id(current_user: User) -> str:
+    """Resolve the authenticated tenant, using the local default when absent."""
     return current_user.tenant_id or "default"
 
 
 def _http_error(status_code: int, code: str, message: str) -> HTTPException:
+    """Build a consistent Calendar API error envelope."""
     return HTTPException(
         status_code=status_code,
         detail={"code": code, "message": message},
@@ -144,6 +169,7 @@ def _http_error(status_code: int, code: str, message: str) -> HTTPException:
 
 
 def _map_calendar_error(exc: Exception) -> HTTPException:
+    """Translate domain errors without exposing unexpected internal failures."""
     if isinstance(exc, CalendarReadOnlyError):
         return _http_error(status.HTTP_409_CONFLICT, "item_read_only", str(exc))
     if isinstance(exc, (CalendarNotFound, CalendarItemNotFound)):
@@ -156,10 +182,12 @@ def _map_calendar_error(exc: Exception) -> HTTPException:
 
 
 def _recurrences_for_item(db: CalendarDatabase, item: CalendarItemRow) -> CalendarRecurrenceRow | None:
+    """Load the persisted recurrence associated with an authorized item."""
     return db.list_recurrences_for_items([item.id]).get(item.id)
 
 
 def _item_response(db: CalendarDatabase, item: CalendarItemRow) -> CalendarItemResponse:
+    """Serialize an item together with its persisted recurrence."""
     return CalendarItemResponse.from_row(item, recurrence=_recurrences_for_item(db, item))
 
 
@@ -169,6 +197,7 @@ def _assert_external_account_owner(
     account_id: int,
     current_user: User,
 ) -> None:
+    """Reject access to another user or tenant's external Calendar credentials."""
     account = db.get_external_account(account_id)
     if account.user_id != _user_id(current_user) or account.tenant_id != _tenant_id(current_user):
         raise CalendarPermissionDenied("External calendar account is outside the current user scope")
@@ -180,11 +209,13 @@ def _assert_external_binding_owner(
     binding_id: int,
     current_user: User,
 ) -> None:
+    """Authorize a binding through its external-account owner."""
     binding = db.get_external_binding(binding_id)
     _assert_external_account_owner(db, account_id=binding.account_id, current_user=current_user)
 
 
 def _provider_result_dict(result: Any) -> dict[str, Any]:
+    """Normalize provider results to a serializable mapping."""
     if isinstance(result, dict):
         return result
     if is_dataclass(result):
@@ -198,6 +229,7 @@ def _sync_window_for_binding(
     binding: Any,
     payload: CalendarSyncTriggerRequest | None,
 ) -> tuple[str, str, str]:
+    """Resolve explicit or configured bounded scan windows and their trigger reason."""
     now = datetime.now(timezone.utc)
     default_start = (now - timedelta(days=int(binding.lookback_days))).isoformat()
     default_end = (now + timedelta(days=int(binding.lookahead_days))).isoformat()
@@ -211,6 +243,7 @@ def _sync_window_for_binding(
 
 
 def _external_account_metadata(payload: ExternalCalendarAccountCreateRequest) -> dict[str, Any] | None:
+    """Retain nonsecret account discovery metadata."""
     metadata: dict[str, Any] = {}
     if payload.account_metadata:
         metadata.update(sanitize_provider_metadata(payload.account_metadata))
@@ -222,6 +255,7 @@ def _external_account_metadata(payload: ExternalCalendarAccountCreateRequest) ->
 
 
 def _external_account_secret_payload(payload: ExternalCalendarAccountCreateRequest) -> dict[str, Any] | None:
+    """Separate credentials for encrypted storage and reject incomplete CalDAV setup."""
     secret_payload = {
         key: value
         for key, value in {
@@ -244,6 +278,7 @@ def _upsert_recurrence_if_present(
     item_id: int,
     payload: CalendarItemCreateRequest | CalendarItemUpdateRequest,
 ) -> None:
+    """Preserve omitted recurrence, clear explicit null, or persist the supplied rule."""
     if "recurrence" not in payload.model_fields_set:
         return
     if payload.recurrence is None:
@@ -260,6 +295,7 @@ def _upsert_recurrence_if_present(
 
 
 def _view_response(result: CalendarViewResult) -> CalendarViewResponse:
+    """Serialize expanded items, persisted links, and partial-result warnings."""
     items: list[CalendarViewItemResponse] = []
     for item in result.items:
         link = None
@@ -291,6 +327,7 @@ def _view_response(result: CalendarViewResult) -> CalendarViewResponse:
                 recurrence_id=item.recurrence_id,
                 occurrence_index=item.occurrence_index,
                 link=link,
+                links=[CalendarLinkResponse.from_row(row) for row in item.links],
                 metadata=item.metadata,
             )
         )
@@ -315,6 +352,7 @@ async def create_calendar(
     _principal=Depends(RequirePermission(CALENDAR_WRITE)),  # noqa: B008
     service: CalendarService = Depends(get_calendar_service),
 ) -> CalendarResponse:
+    """Create a local calendar owned by the current authenticated principal."""
     try:
         row = service.create_calendar(
             actor_user_id=_user_id(current_user),
@@ -349,6 +387,7 @@ async def list_calendars(
     _principal=Depends(RequirePermission(CALENDAR_READ)),  # noqa: B008
     service: CalendarService = Depends(get_calendar_service),
 ) -> CalendarListResponse:
+    """List only calendars readable within the current user and tenant scope."""
     try:
         rows = service.list_calendars(
             actor_user_id=_user_id(current_user),
@@ -379,6 +418,7 @@ async def add_calendar_membership(
     _principal=Depends(RequirePermission(CALENDAR_WRITE)),  # noqa: B008
     service: CalendarService = Depends(get_calendar_service),
 ) -> CalendarMembershipResponse:
+    """Grant a user or organization role access after checking calendar management rights."""
     try:
         row = service.add_membership(
             actor_user_id=_user_id(current_user),
@@ -409,6 +449,7 @@ async def list_calendar_memberships(
     _principal=Depends(RequirePermission(CALENDAR_READ)),  # noqa: B008
     service: CalendarService = Depends(get_calendar_service),
 ) -> CalendarMembershipListResponse:
+    """Return the membership grants visible to an authorized calendar reader."""
     try:
         rows = service.list_memberships(actor_user_id=_user_id(current_user), calendar_id=calendar_id)
     except (
@@ -436,6 +477,7 @@ async def remove_calendar_membership(
     _principal=Depends(RequirePermission(CALENDAR_WRITE)),  # noqa: B008
     service: CalendarService = Depends(get_calendar_service),
 ) -> CalendarMembershipDeleteResponse:
+    """Remove a grant after checking calendar management rights."""
     try:
         removed = service.remove_membership(
             actor_user_id=_user_id(current_user),
@@ -467,6 +509,7 @@ async def create_calendar_item(
     service: CalendarService = Depends(get_calendar_service),
     db: CalendarDatabase = Depends(get_calendar_database),
 ) -> CalendarItemResponse:
+    """Create a native event or todo and its recurrence atomically."""
     try:
         with db.transaction():
             item = service.create_item(
@@ -511,6 +554,7 @@ async def update_calendar_item(
     service: CalendarService = Depends(get_calendar_service),
     db: CalendarDatabase = Depends(get_calendar_database),
 ) -> CalendarItemResponse:
+    """Apply native item and recurrence changes atomically; reject provider-owned edits."""
     try:
         with db.transaction():
             item = service.update_item(
@@ -545,6 +589,7 @@ async def get_calendar_agenda(
     _principal=Depends(RequirePermission(CALENDAR_READ)),  # noqa: B008
     view_service: CalendarViewService = Depends(get_calendar_view_service),
 ) -> CalendarViewResponse:
+    """Return a bounded permission-filtered agenda with optional scheduled-task projections."""
     try:
         result = await view_service.agenda(
             actor_user_id=_user_id(current_user),
@@ -583,6 +628,7 @@ async def get_calendar_week(
     _principal=Depends(RequirePermission(CALENDAR_READ)),  # noqa: B008
     view_service: CalendarViewService = Depends(get_calendar_view_service),
 ) -> CalendarViewResponse:
+    """Return a timezone-aware week view using the same agenda permissions and expansion."""
     try:
         result = await view_service.week(
             actor_user_id=_user_id(current_user),
@@ -620,6 +666,7 @@ async def create_calendar_annotation(
     _principal=Depends(RequirePermission(CALENDAR_WRITE)),  # noqa: B008
     service: CalendarService = Depends(get_calendar_service),
 ) -> CalendarAnnotationResponse:
+    """Attach local commentary without mutating provider-managed event fields."""
     try:
         row = service.create_annotation(
             actor_user_id=_user_id(current_user),
@@ -650,6 +697,7 @@ async def update_calendar_local_tags(
     _principal=Depends(RequirePermission(CALENDAR_WRITE)),  # noqa: B008
     service: CalendarService = Depends(get_calendar_service),
 ) -> CalendarAnnotationResponse:
+    """Update user-local tags independently of imported provider content."""
     try:
         row = service.update_local_tags(
             actor_user_id=_user_id(current_user),
@@ -680,6 +728,7 @@ async def create_calendar_link(
     _principal=Depends(RequirePermission(CALENDAR_WRITE)),  # noqa: B008
     service: CalendarService = Depends(get_calendar_service),
 ) -> CalendarLinkResponse:
+    """Attach an item-local reference after checking calendar write access."""
     try:
         row = service.create_link(
             actor_user_id=_user_id(current_user),
@@ -701,6 +750,45 @@ async def create_calendar_link(
     return CalendarLinkResponse.from_row(row)
 
 
+@router.get(
+    "/items/{item_id}/links",
+    response_model=CalendarLinkListResponse,
+    dependencies=[Depends(rbac_rate_limit("calendar.read"))],
+)
+async def list_calendar_links(
+    item_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    _principal=Depends(RequirePermission(CALENDAR_READ)),  # noqa: B008
+    service: CalendarService = Depends(get_calendar_service),
+) -> CalendarLinkListResponse:
+    """Return persisted links only after checking access to their Calendar item."""
+    try:
+        rows = service.list_links(actor_user_id=_user_id(current_user), item_id=item_id)
+    except (CalendarNotFound, CalendarItemNotFound, CalendarPermissionDenied, CalendarValidationError) as exc:
+        raise _map_calendar_error(exc) from exc
+    return CalendarLinkListResponse(items=[CalendarLinkResponse.from_row(row) for row in rows], total=len(rows))
+
+
+@router.delete(
+    "/items/{item_id}/links/{link_id}",
+    response_model=CalendarLinkDeleteResponse,
+    dependencies=[Depends(rbac_rate_limit("calendar.write"))],
+)
+async def delete_calendar_link(
+    item_id: int = Path(..., ge=1),
+    link_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    _principal=Depends(RequirePermission(CALENDAR_WRITE)),  # noqa: B008
+    service: CalendarService = Depends(get_calendar_service),
+) -> CalendarLinkDeleteResponse:
+    """Remove an item-local link without changing the linked resource or provider event."""
+    try:
+        removed = service.delete_link(actor_user_id=_user_id(current_user), item_id=item_id, link_id=link_id)
+    except (CalendarNotFound, CalendarItemNotFound, CalendarPermissionDenied, CalendarValidationError) as exc:
+        raise _map_calendar_error(exc) from exc
+    return CalendarLinkDeleteResponse(removed=removed)
+
+
 @router.post(
     "/items/{item_id}/copy",
     response_model=CalendarItemResponse,
@@ -715,6 +803,7 @@ async def copy_calendar_item(
     service: CalendarService = Depends(get_calendar_service),
     db: CalendarDatabase = Depends(get_calendar_database),
 ) -> CalendarItemResponse:
+    """Create a native editable copy of an authorized provider-managed item."""
     try:
         item = service.copy_provider_item(
             actor_user_id=_user_id(current_user),
@@ -746,6 +835,7 @@ async def create_calendar_reminder(
     service: CalendarService = Depends(get_calendar_service),
     scheduled_tasks_service: ScheduledTasksControlPlaneService = Depends(get_scheduled_tasks_service),
 ) -> CalendarReminderResponse:
+    """Create a scheduled reminder linked to an authorized Calendar item."""
     user_id = _user_id(current_user)
     try:
         service.get_item(actor_user_id=user_id, item_id=payload.calendar_item_id)
@@ -785,6 +875,7 @@ async def list_external_calendar_accounts(
     _principal=Depends(RequirePermission(CALENDAR_SYNC)),  # noqa: B008
     db: CalendarDatabase = Depends(get_calendar_database),
 ) -> ExternalCalendarAccountListResponse:
+    """List only external accounts owned by the current principal and tenant."""
     rows = db.list_external_accounts_for_user(user_id=_user_id(current_user), tenant_id=_tenant_id(current_user))
     items = [ExternalCalendarAccountResponse.from_row(row) for row in rows]
     return ExternalCalendarAccountListResponse(items=items, total=len(items))
@@ -802,6 +893,7 @@ async def create_external_calendar_account(
     _principal=Depends(RequirePermission(CALENDAR_SYNC)),  # noqa: B008
     db: CalendarDatabase = Depends(get_calendar_database),
 ) -> ExternalCalendarAccountResponse:
+    """Create owner-scoped external account metadata and encrypt optional credentials."""
     try:
         secret_ref = payload.secret_ref
         secret_payload = _external_account_secret_payload(payload)
@@ -837,6 +929,7 @@ async def verify_external_calendar_account(
     db: CalendarDatabase = Depends(get_calendar_database),
     provider: CalDavProvider = Depends(get_caldav_provider),
 ) -> CalDavAccountVerifyResponse:
+    """Check owner-scoped CalDAV credentials without blocking the API event loop."""
     try:
         _assert_external_account_owner(db, account_id=account_id, current_user=current_user)
         credentials = resolve_caldav_credentials(
@@ -870,6 +963,7 @@ async def discover_external_calendars(
     db: CalendarDatabase = Depends(get_calendar_database),
     provider: CalDavProvider = Depends(get_caldav_provider),
 ) -> ExternalCalendarDiscoveryResponse:
+    """Discover same-origin CalDAV collections using active owner-scoped credentials."""
     try:
         _assert_external_account_owner(db, account_id=account_id, current_user=current_user)
         credentials = resolve_caldav_credentials(
@@ -906,6 +1000,7 @@ async def revoke_external_calendar_account(
     _principal=Depends(RequirePermission(CALENDAR_SYNC)),  # noqa: B008
     db: CalendarDatabase = Depends(get_calendar_database),
 ) -> CalDavAccountMutationResponse:
+    """Revoke an owned external account and clear its stored credentials."""
     try:
         _assert_external_account_owner(db, account_id=account_id, current_user=current_user)
         db.revoke_external_account(account_id)
@@ -925,6 +1020,7 @@ async def delete_external_calendar_account(
     _principal=Depends(RequirePermission(CALENDAR_SYNC)),  # noqa: B008
     db: CalendarDatabase = Depends(get_calendar_database),
 ) -> CalDavAccountMutationResponse:
+    """Soft-delete an owned external account and remove secret material."""
     try:
         _assert_external_account_owner(db, account_id=account_id, current_user=current_user)
         db.delete_external_account(account_id)
@@ -945,6 +1041,7 @@ async def create_external_calendar_binding(
     _principal=Depends(RequirePermission(CALENDAR_SYNC)),  # noqa: B008
     db: CalendarDatabase = Depends(get_calendar_database),
 ) -> ExternalCalendarBindingResponse:
+    """Bind an owned external collection to a compatible local calendar."""
     try:
         _assert_external_account_owner(db, account_id=payload.account_id, current_user=current_user)
         account = db.get_external_account(payload.account_id)
@@ -979,6 +1076,7 @@ async def list_external_calendar_bindings(
     _principal=Depends(RequirePermission(CALENDAR_SYNC)),  # noqa: B008
     db: CalendarDatabase = Depends(get_calendar_database),
 ) -> ExternalCalendarBindingListResponse:
+    """List collection bindings after authorizing the external-account owner."""
     try:
         _assert_external_account_owner(db, account_id=account_id, current_user=current_user)
         rows = db.list_external_bindings_for_account(account_id)
@@ -1000,6 +1098,7 @@ async def update_external_calendar_binding(
     _principal=Depends(RequirePermission(CALENDAR_SYNC)),  # noqa: B008
     db: CalendarDatabase = Depends(get_calendar_database),
 ) -> ExternalCalendarBindingResponse:
+    """Update polling configuration for an owner-authorized binding."""
     try:
         _assert_external_binding_owner(db, binding_id=binding_id, current_user=current_user)
         row = db.update_external_binding(binding_id, payload.service_updates())
@@ -1019,6 +1118,7 @@ async def enable_external_calendar_binding(
     _principal=Depends(RequirePermission(CALENDAR_SYNC)),  # noqa: B008
     db: CalendarDatabase = Depends(get_calendar_database),
 ) -> ExternalCalendarBindingResponse:
+    """Opt an owned binding into read-only polling."""
     try:
         _assert_external_binding_owner(db, binding_id=binding_id, current_user=current_user)
         row = db.update_external_binding(binding_id, {"sync_enabled": True, "disabled_at": None})
@@ -1038,6 +1138,7 @@ async def disable_external_calendar_binding(
     _principal=Depends(RequirePermission(CALENDAR_SYNC)),  # noqa: B008
     db: CalendarDatabase = Depends(get_calendar_database),
 ) -> ExternalCalendarBindingResponse:
+    """Stop polling for an owned binding without deleting imported content."""
     try:
         _assert_external_binding_owner(db, binding_id=binding_id, current_user=current_user)
         row = db.disable_external_binding(binding_id)
@@ -1057,6 +1158,7 @@ async def delete_external_calendar_binding(
     _principal=Depends(RequirePermission(CALENDAR_SYNC)),  # noqa: B008
     db: CalendarDatabase = Depends(get_calendar_database),
 ) -> ExternalCalendarBindingResponse:
+    """Soft-delete an owned external binding."""
     try:
         _assert_external_binding_owner(db, binding_id=binding_id, current_user=current_user)
         row = db.delete_external_binding(binding_id)
@@ -1076,6 +1178,7 @@ async def get_external_calendar_binding_sync_status(
     _principal=Depends(RequirePermission(CALENDAR_SYNC)),  # noqa: B008
     db: CalendarDatabase = Depends(get_calendar_database),
 ) -> ExternalCalendarBindingResponse:
+    """Return polling status only to the external-account owner."""
     try:
         _assert_external_binding_owner(db, binding_id=binding_id, current_user=current_user)
         row = db.get_external_binding(binding_id)
@@ -1096,6 +1199,7 @@ async def list_external_calendar_binding_sync_events(
     _principal=Depends(RequirePermission(CALENDAR_SYNC)),  # noqa: B008
     db: CalendarDatabase = Depends(get_calendar_database),
 ) -> CalendarSyncEventListResponse:
+    """Return bounded diagnostic history for an owner-authorized binding."""
     try:
         _assert_external_binding_owner(db, binding_id=binding_id, current_user=current_user)
         rows = db.list_sync_events(binding_id=binding_id, limit=limit)
@@ -1118,6 +1222,7 @@ async def trigger_external_calendar_sync(
     db: CalendarDatabase = Depends(get_calendar_database),
     job_manager: JobManager = Depends(get_calendar_job_manager),
 ) -> CalendarSyncTriggerResponse:
+    """Enqueue or reuse bounded read-only sync work without placing credentials in Jobs."""
     try:
         _assert_external_binding_owner(db, binding_id=binding_id, current_user=current_user)
         binding = db.get_external_binding(binding_id)
