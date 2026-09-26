@@ -29,8 +29,7 @@ import {
   listCalDavAccounts,
   listExternalCalendarBindings,
   revokeCalDavAccount,
-  triggerCalendarSync,
-  verifyCalDavAccount
+  triggerCalendarSync
 } from "@/services/calendar"
 
 interface CalendarSyncSettingsProps {
@@ -148,16 +147,21 @@ export const CalendarSyncSettings: React.FC<CalendarSyncSettingsProps> = ({
 
   const addAccountMutation = useMutation({
     mutationFn: async (draft: AccountDraft) => {
-      const account = await createCalDavAccount({
+      if (
+        !draft.display_name.trim() ||
+        !draft.server_url.trim() ||
+        !draft.username.trim() ||
+        !draft.password.trim()
+      ) {
+        throw new Error("Account name, server URL, username, and password are required")
+      }
+      return await createCalDavAccount({
         display_name: draft.display_name.trim(),
         server_url: draft.server_url.trim(),
         username: draft.username.trim(),
-        password: draft.password
+        password: draft.password,
+        verify_before_create: true
       })
-      if (draft.password) {
-        await verifyCalDavAccount(account.id, { password: draft.password })
-      }
-      return account
     },
     onSuccess: async () => {
       setDrawerOpen(false)
@@ -214,6 +218,7 @@ export const CalendarSyncSettings: React.FC<CalendarSyncSettingsProps> = ({
         calendar_id: draft.calendar_id,
         remote_calendar_id: remoteCalendar.remote_calendar_id,
         remote_display_name: remoteCalendar.remote_display_name ?? null,
+        sync_interval_minutes: 60,
         lookback_days: normalizeNumber(draft.lookback_days, DEFAULT_LOOKBACK_DAYS),
         lookahead_days: normalizeNumber(draft.lookahead_days, DEFAULT_LOOKAHEAD_DAYS),
         provider_capabilities: remoteCalendar.provider_capabilities ?? null
