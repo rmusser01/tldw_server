@@ -702,3 +702,84 @@ elif args[0] not in ('start','rm'): sys.exit(1)
     mounts = json.loads(capture.read_text())
     assert len(mounts) == 2
     assert (image / "app" / production).read_bytes() == (root / production).read_bytes()
+
+
+def test_control_public_key_copy_overrides_restrictive_source_mode(tmp_path: Path) -> None:
+    """The public-key COPY contract must not inherit a signing job's umask."""
+    import shlex
+    import shutil
+    import stat
+
+    root = Path(__file__).resolve().parents[3]
+    source = tmp_path / "ci-test.pub"
+    source.write_bytes(bytes(range(32)))
+    source.chmod(0o600)
+    instruction = next(
+        shlex.split(line)
+        for line in (root / "Dockerfiles/Dockerfile.control").read_text().splitlines()
+        if line.startswith("COPY ") and "--from=trust" in line.split()
+    )
+    # Model this COPY's documented mode behavior; the scoped image proof also
+    # exercises BuildKit itself with a real 0600 public source key.
+    destination = tmp_path / "embedded.pub"
+    shutil.copy2(source, destination)
+    for option in instruction[1:-2]:
+        if option.startswith("--chmod="):
+            destination.chmod(int(option.split("=", 1)[1], 8))
+    assert stat.S_IMODE(destination.stat().st_mode) == 0o444
+    assert stat.S_IMODE(source.stat().st_mode) == 0o600
+
+
+@pytest.mark.parametrize("key_mode, key_size, private_present, expected", [
+    (0o444, 32, False, 0),
+    (0o000, 32, False, 1),
+    (0o444, 0, False, 1),
+    (0o444, 32, True, 1),
+])
+def test_control_content_guard_executes_as_isolated_host_caller(
+    tmp_path: Path, key_mode: int, key_size: int, private_present: bool, expected: int,
+) -> None:
+    """Root's size check must not accept trust unreadable by the helper caller."""
+    import os
+    import subprocess
+
+    root = Path(__file__).resolve().parents[3]
+    shell = (root / "Helper_Scripts/qualify_app_bundle_candidate.sh").read_text()
+    block = shell[
+        shell.index('docker run --rm --platform "$platform" --entrypoint', shell.index("grep -q")):
+        shell.index("# Exercise focused security tests")
+    ]
+    image = tmp_path / "control"
+    trust = image / "trusted-keys"
+    trust.mkdir(parents=True)
+    public = trust / "ci-test.pub"
+    public.write_bytes(b"x" * key_size)
+    public.chmod(key_mode)
+    if private_present:
+        (image / "signing.key").write_bytes(b"private-fixture")
+    docker = tmp_path / "docker"
+    docker.write_text(f'''#!{os.sys.executable}
+import os, subprocess, sys
+args = sys.argv[1:]
+if '--user' not in args or args[args.index('--user') + 1] != f'{{os.getuid()}}:{{os.getgid()}}':
+    sys.exit(79)
+if os.getuid() == 0 or '--read-only' not in args or '--network' not in args or args[args.index('--network') + 1] != 'none':
+    sys.exit(79)
+if '--cap-drop' not in args or args[args.index('--cap-drop') + 1] != 'ALL' or '--security-opt' not in args or args[args.index('--security-opt') + 1] != 'no-new-privileges':
+    sys.exit(79)
+entrypoint = args[args.index('--entrypoint') + 1]
+command = args[args.index('-c') + 1].replace('/opt/tldw', {str(image)!r})
+sys.exit(subprocess.run([entrypoint, '-c', command], capture_output=True).returncode)
+''')
+    docker.chmod(0o700)
+    harness = tmp_path / "guard.sh"
+    harness.write_text('set -eu\nplatform=linux/arm64\ncontrol_tag=scoped-control\n' + block)
+    try:
+        result = subprocess.run(
+            ["bash", str(harness)],
+            env={**os.environ, "PATH": str(tmp_path) + ":" + os.environ["PATH"]},
+            capture_output=True, check=False,
+        )
+        assert result.returncode == expected
+    finally:
+        public.chmod(0o600)

@@ -186,8 +186,10 @@ docker run --rm --platform "$platform" --entrypoint sh "$webui_tag" -c \
   'test ! -e /app/apps/tldw-frontend/.next/cache && test -s /app/apps/tldw-frontend/public/favicon.ico &&
    test -r /app/Docs/Published/API-related/AuthNZ-API-Guide.md &&
    grep -q "^# AuthNZ API Guide$" /app/Docs/Published/API-related/AuthNZ-API-Guide.md'
-docker run --rm --platform "$platform" --entrypoint sh "$control_tag" -c \
-  'test ! -e /opt/tldw/signing.key && test -s /opt/tldw/trusted-keys/ci-test.pub'
+docker run --rm --platform "$platform" --entrypoint python \
+  --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
+  --user "$(id -u):$(id -g)" "$control_tag" -c \
+  'from pathlib import Path; assert not Path("/opt/tldw/signing.key").exists(); assert len(Path("/opt/tldw/trusted-keys/ci-test.pub").read_bytes()) == 32'
 
 # Exercise focused security tests on the actual built backend dependencies.
 # Narrow read-only mounts supply the Compose contract and the excluded setup
