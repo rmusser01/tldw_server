@@ -36,7 +36,24 @@ presented for review before implementation.
 **Tests**: Existing candidate signature/lifecycle/browser checks, then ordinary
 provider validation/save/first chat, document upload/search/application chat with
 the configured repository mock. Only disposable owned test resources are used.
-**Status**: Not Started
+**Status**: In Progress
+
+Fresh candidate source `cb581a1e16032df27e4026afd784c9a682b584c1` passed
+built-backend qualification, 13 lifecycle and 38 initial-browser checks.
+Final signature and local artifact hashes verified; pipeline exited 0 and
+removed its owned fixtures and signing key. Manifest SHA256:
+`4e5c4173e5437196412de3211a83534f7adb7f4b44b94995d127386a79214de7`.
+The final archive is extracted outside the checkout at
+`/private/tmp/task13376-workflow-cb581a1e16/bundle` for the separate ordinary
+provider/document workflow. Initial-wizard scope stays unchanged; full
+qualification remains false. Native CI run `36265212062` is still in progress.
+
+Ordinary WebUI provider validation/save and first test chat passed. Home now
+accepts the live cookie session. Markdown ingestion and lexical content search
+passed, and ordinary chat returned the mock response. Model discovery still
+falsely reports no providers/models because its separate precheck omits the
+cookie session. Additional behavior changes await review/approval; see
+`Docs/superpowers/reviews/2026-09-26-complete-app-provider-document-qualification.md`.
 
 ## Stage 3: Verify persistence and record the actual result
 **Goal**: Stop/start retains provider configuration and document data, with an
@@ -48,4 +65,11 @@ requirements and G12 remain separate required product gates.
 **Tests**: Signed stop/start helpers plus browser search/chat with retained data;
 verify scoped cleanup and unchanged unrelated services. Preserve evidence and
 plans; commit task and acceptance updates with the related work.
-**Status**: Not Started
+**Status**: In Progress
+
+Signed stop/start passed and the document remained searchable. New chat failed
+after restart: the provider settings were written to packaged `config.txt`,
+outside the persistent config volume, and were absent after container
+recreation. Full qualification stays false. amd64 native initial-browser
+qualification also failed `manual_master_key_absent_2`; its cause is unverified.
+Preserve the private evidence/state and record these blockers before any fix.
