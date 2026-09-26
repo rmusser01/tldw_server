@@ -6,7 +6,7 @@ catalog entry, PR or merge is approved by this record.
 
 ## Current evidence (2026-09-26)
 
-The final code review fix wave and Tasks19/20/21 pass scoped spec/quality review. Exact clean candidate `13d9a0d29cffffc282647ac9b72585af1c15eb8a` native CI [36239373229](https://github.com/rmusser01/tldw_server/actions/runs/36239373229) built all four images on both Linux architectures, passed built-backend MCP/setup and all13 signed lifecycle checks. Both candidates pass25 browser checks including normal wizard/privacy progression on both instances, then fail only hostile_inputs_1. Actual same-product cached diagnosis isolates a foreign-Origin cookie WebSocket upgrade reset instead of the required HTTP refusal; Task22 is planned. Owned cleanup passed; signatures are invalidated and all candidate gates remain false. Local dependency installation stalled twice; bounded diagnostics establish intermittent waiting but no cause/fix, and native builds completed. Full corrected local/native qualification remains pending.
+The final code review fix wave and Tasks19/20/21/22 pass scoped spec/quality review. Exact clean candidate `13d9a0d29cffffc282647ac9b72585af1c15eb8a` native CI [36239373229](https://github.com/rmusser01/tldw_server/actions/runs/36239373229) built all four images on both Linux architectures, passed built-backend MCP/setup and all13 signed lifecycle checks. Both candidates pass25 browser checks including normal wizard/privacy progression on both instances, then fail only hostile_inputs_1. Actual same-product cached diagnosis isolates a foreign-Origin cookie WebSocket upgrade reset instead of the required HTTP refusal; Task22 correction9722148d6f and peer-reset safety fixd0afab1daf are implemented; scoped fix review approves with no remaining findings. Owned cleanup passed; signatures are invalidated and all candidate gates remain false. Local dependency installation stalled twice; bounded diagnostics establish intermittent waiting but no cause/fix, and native builds completed. Full corrected local/native qualification remains pending.
 
 | Contract | Current evidence | Status |
 | --- | --- | --- |
@@ -95,7 +95,15 @@ the missing unused cached69 control image required local initializer source for
 diagnostic state, so this is not Docker-only/signed-helper qualification.
 DELETE200 and explicit captured stale-cookie replay401 pass, all owned volumes/
 network/containers removed, unrelated PostgreSQL identities/states preserved.
-Task22 will correct the actual gateway refusal response, retaining strict probe.
+Task22 now supplies a constant403 with absolute1000ms unreferenced cleanup,
+retaining the strict probe and authorization rules. Scoped review found a
+peer-reset process-crash risk; actual gateway red reproduced ECONNRESET/exit1,
+and the minimal pre-end error handler now proves socket destruction and
+subsequent status200/process exit0. Final gateway/routes20/20 and scoped lint
+pass without warnings. Scoped fix review approves with no new breakage; exact corrected qualification
+remains pending;
+Bandit is inapplicable to MJS-only edits. Git housekeeping warnings remain
+baseline and no manual GC/prune occurred.
 
 ## Rulings I made
 

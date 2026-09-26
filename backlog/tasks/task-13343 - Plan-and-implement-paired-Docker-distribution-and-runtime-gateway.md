@@ -4,7 +4,7 @@ title: Plan and implement paired Docker distribution and runtime gateway
 status: In Progress
 assignee: []
 created_date: '2026-09-23 06:15'
-updated_date: '2026-09-26 12:18'
+updated_date: '2026-09-26 12:34'
 labels:
   - distribution
   - docker
@@ -133,6 +133,10 @@ Task21 probe correction a7e246c38c changes only two MJS files: normal required p
 Task21 independent Sol-high review approves spec compliance and quality; no Critical/Important/Minor findings. Sourcea7e246c38c scoped two-file correction; parent will freeze clean tracking HEAD and run full exact arm64 candidate, then same tested revision native CI. Reviewer cannot verify cross-task actual contracts; parent retains13lifecycle/38browser/signature/8files/ownedcleanup and stale-token checks. No publication or Windowsruntime claim.
 
 Exact13d9native run36239373229 completedfailure BOTH linuxamd64/arm64: all4roles built/MCPSetup/all13signedlifecycle/25browserchecks pass thenonlyhostile_inputs_1false; cleanuptrue/allgatesfalse/manisiginvalidated. BothwizardAPI/privacyprogress pass, provingTask21actualfix. Localordinary13d9 andretryquiet afterresolved256 interruptedonlyverifiedownbuild after972s/924s, cleanup/no sig; boundedproc diagnostic timedout302s, identityprobe completed90s, sameasBun/unclassifiedscripts/norootcause/no versionfix. Nativebothbuildspass. Actualcached69runtime productunchanged13 diagnosis isolates fifth hostileOrigin+validcookieMCPupgrade ECONNRESET/noHTTP duegateway socket.destroy; firstfourcasespass, exactDELETE200/capturedstaleCookie401/allowncleanup. Plan narrowTask22 constant bounded403 forbiddenupgrade response +realgateway regression, preservestrictprobe/guards/source/dep policies. Missingunused69control image limitsdiagnostic signed-helper claims; noqualifiedcandidate yet.
+
+Task22 source9722148d6f and fixd0afab1daf implement constant403 absolute1000ms unref/close-canceled cleanup for authorization-denied upgrades. Scoped review found rawsocket peer-reset processcrash; actual createGateway redECONNRESET/exit1 reproduced, one pre-end destroy-onerror listener green proves actualreset/errorclose/destroyed/status200/process0. Finalgateway/routes20pass once, scopedESLint/diff warningfree; BanditN/A MJS. Independent scoped fix review pending, exact local/native13lifecycle38browser/eightfiles/signatures/cleanup mandatory before acceptance. No policy/probe/dependencychanges, Windows runtime unqualified/G12false/publicationfrozen; git housekeeping warnings disclosed/no manualGC.
+
+Task22 scoped Astra fixround1 rereview972..d0af approves: peer-reset finding addressed, actual gateway regression addressed, no new breakage/out-of-scope findings. Root read fullreport; implementation complete, exact qualification pending. Freeze clean trackingHEAD and build fresh corrected localarm candidate plus same exact ownbranch native CI under existing authorization/Ruling19; no publication/PR/merge or Windows/G12 qualification.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
