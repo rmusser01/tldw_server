@@ -2026,6 +2026,102 @@ def test_retry_slot_api_reports_legacy_recipe_recovery(
     assert "Start generation" in response.json()["detail"]["message"]
 
 
+@pytest.mark.parametrize(
+    ("field", "corruption"),
+    [
+        ("recipe_json", "invalid_json"),
+        ("recipe_json", "missing_variant_count"),
+        ("recipe_json", "string_variant_count"),
+        ("recipe_json", "bool_variant_count"),
+        ("recipe_json", "zero_variant_count"),
+        ("recipe_json", "missing_prompt"),
+        ("recipe_json", "missing_width"),
+        ("recipe_json", "invalid_labels"),
+        ("recipe_json", "short_seeds"),
+        ("recipe_json", "null_slot"),
+        ("execution_recipe_json", "invalid_json"),
+        ("execution_recipe_json", "missing_slots"),
+        ("execution_recipe_json", "null_slots"),
+        ("execution_recipe_json", "null_slot"),
+        ("execution_recipe_json", "missing_backend"),
+        ("execution_recipe_json", "invalid_backend"),
+        ("execution_recipe_json", "invalid_model"),
+        ("execution_recipe_json", "missing_target"),
+    ],
+)
+def test_retry_slot_api_rejects_malformed_stored_snapshots_without_enqueue(
+    service: VNAssetPackService,
+    pack_with_slots: SimpleNamespace,
+    fake_jobs: FakeJobs,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    corruption: str,
+) -> None:
+    """Reject corrupted recorded inputs before accepting any Retry work."""
+    slot_id = pack_with_slots.slots[0].id
+    source = service.start_generation(pack_with_slots.id, VNAssetGenerationRequest(slot_ids=[slot_id]))
+    service.repo.update_batch(source.batch_id, {"status": "failed"})
+    service.repo.update_slot(slot_id, {
+        "status": "failed", "last_error": "provider failed", "last_failed_batch_id": source.batch_id,
+    })
+    snapshot = json.loads(service.repo.get_batch(source.batch_id)["recipe_json"])
+    if field == "execution_recipe_json":
+        snapshot = {"version": 1, "slots": [{"slot_id": slot_id, "backend": "test", "model": None}]}
+    entry = snapshot["slots"][0]
+    if corruption.startswith("missing_") and corruption not in {"missing_prompt", "missing_target"}:
+        target = snapshot if corruption == "missing_slots" else entry
+        target.pop(corruption.removeprefix("missing_"))
+    elif corruption == "missing_prompt":
+        entry["prompt_snapshot"].pop("prompt")
+    elif corruption == "string_variant_count":
+        entry["variant_count"] = "1"
+    elif corruption == "bool_variant_count":
+        entry["variant_count"] = True
+    elif corruption == "zero_variant_count":
+        entry["variant_count"] = 0
+    elif corruption == "invalid_labels":
+        entry["labels"] = []
+    elif corruption == "short_seeds":
+        entry["seeds"] = []
+    elif corruption == "null_slot":
+        snapshot["slots"] = [None]
+    elif corruption == "null_slots":
+        snapshot["slots"] = None
+    elif corruption == "invalid_backend":
+        entry["backend"] = []
+    elif corruption == "invalid_model":
+        entry["model"] = {}
+    elif corruption == "missing_target":
+        snapshot["slots"] = []
+    raw_snapshot = "{" if corruption == "invalid_json" else json.dumps(snapshot)
+    get_batch = service.repo.get_batch
+
+    def read_corrupt_batch(batch_id: int) -> dict[str, Any] | None:
+        """Simulate a malformed persisted snapshot at the repository boundary."""
+        batch = get_batch(batch_id)
+        return {**batch, field: raw_snapshot} if batch and batch_id == source.batch_id else batch
+
+    monkeypatch.setattr(service.repo, "get_batch", read_corrupt_batch)
+    batches_before = len(service.repo.list_batches(pack_with_slots.id))
+    jobs_before = len(fake_jobs.created)
+    app = FastAPI()
+    app.include_router(vn_assets_router, prefix="/api/v1/vn")
+    app.dependency_overrides[get_request_user] = lambda: User(id=1, username="vn-generator")
+    app.dependency_overrides[vn_assets_endpoint._service] = lambda: service
+    app.dependency_overrides[vn_assets_endpoint._job_manager] = lambda: fake_jobs
+
+    response = TestClient(app, raise_server_exceptions=False).post(
+        f"/api/v1/vn/vn-assets/packs/{pack_with_slots.id}/slots/{slot_id}/retry",
+        json={"idempotency_key": "corrupt-retry", "source_batch_id": source.batch_id},
+    )
+
+    assert response.status_code == 409
+    expected_code = "vn_asset_recipe_invalid" if field == "recipe_json" else "vn_asset_execution_recipe_invalid"
+    assert response.json()["detail"]["code"] == expected_code
+    assert len(service.repo.list_batches(pack_with_slots.id)) == batches_before
+    assert len(fake_jobs.created) == jobs_before
+
+
 def test_regenerate_item_api_replays_same_idempotency_key_and_conflicts_on_different_payload(
     chacha_db: CharactersRAGDB,
     character_id: int,

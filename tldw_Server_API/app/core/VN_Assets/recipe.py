@@ -6,10 +6,57 @@ import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+
 from tldw_Server_API.app.core.DB_Management.VNAssetPacks_DB import VNAssetPacksRepository
 from tldw_Server_API.app.core.VN_Assets.prompts import build_prompt_preview
 
 RECIPE_VERSION = 1
+
+
+class _PromptSnapshot(BaseModel):
+    """Validate the prompt fields consumed by generation without coercion."""
+
+    model_config = ConfigDict(strict=True)
+    prompt: str
+    negative_prompt: str | None
+
+
+class _AuthoredSlot(BaseModel):
+    """Validate stored slot inputs before Retry or worker replay."""
+
+    model_config = ConfigDict(strict=True)
+    slot_id: int = Field(gt=0)
+    slot_key: str = Field(min_length=1)
+    asset_type: str = Field(min_length=1)
+    labels: dict[str, Any]
+    variant_count: int = Field(ge=0)
+    prompt_snapshot: _PromptSnapshot
+    requested_backend: str | None
+    requested_model: str | None
+    width: int | None = Field(gt=0)
+    height: int | None = Field(gt=0)
+    format: str = Field(min_length=1)
+    extra_params: dict[str, Any]
+    seeds: list[int | None]
+
+    @model_validator(mode="after")
+    def _validate_seed_count(self) -> _AuthoredSlot:
+        """Require one recorded seed for each variant the worker will replay."""
+        if len(self.seeds) != self.variant_count:
+            raise ValueError("variant seed count mismatch")
+        return self
+
+
+class _ExecutionSlot(BaseModel):
+    """Validate the pinned public backend/model selection."""
+
+    model_config = ConfigDict(strict=True)
+    slot_id: int = Field(gt=0)
+    backend: str = Field(min_length=1)
+    model: str | None
+    local_model_mode: str | None = None
+    local_model_path_sha256: str | None = None
 
 
 def load_recipe(value: Any, *, pack_id: int, owner_user_id: int) -> dict[str, Any]:
@@ -26,18 +73,59 @@ def load_recipe(value: Any, *, pack_id: int, owner_user_id: int) -> dict[str, An
     Raises:
         ValueError: The recipe is absent, malformed, or belongs elsewhere.
     """
+    if value is None:
+        raise ValueError("vn_asset_recipe_unavailable")
     try:
         recipe = json.loads(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError("vn_asset_recipe_unavailable") from exc
+        raise ValueError("vn_asset_recipe_invalid") from exc
     if (
         not isinstance(recipe, dict)
         or recipe.get("version") != RECIPE_VERSION
         or recipe.get("pack_id") != pack_id
         or recipe.get("owner_user_id") != owner_user_id
+        or type(recipe.get("primary_character_id")) is not int
+        or recipe["primary_character_id"] <= 0
         or not isinstance(recipe.get("slots"), list)
     ):
         raise ValueError("vn_asset_recipe_invalid")
+    try:
+        for slot in recipe["slots"]:
+            _AuthoredSlot.model_validate(slot)
+    except ValidationError as exc:
+        raise ValueError("vn_asset_recipe_invalid") from exc
+    return recipe
+
+
+def load_execution_recipe(value: Any) -> dict[str, Any]:
+    """Validate a stored execution snapshot without rewriting recorded values.
+
+    Args:
+        value: Serialized execution JSON, or an absent snapshot.
+
+    Returns:
+        The validated snapshot with all recorded metadata preserved.
+
+    Raises:
+        ValueError: The snapshot is absent or cannot be faithfully replayed.
+    """
+    if value is None:
+        raise ValueError("vn_asset_execution_recipe_unavailable")
+    try:
+        recipe = json.loads(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("vn_asset_execution_recipe_invalid") from exc
+    if (
+        not isinstance(recipe, dict)
+        or recipe.get("version") != RECIPE_VERSION
+        or not isinstance(recipe.get("slots"), list)
+    ):
+        raise ValueError("vn_asset_execution_recipe_invalid")
+    try:
+        for slot in recipe["slots"]:
+            _ExecutionSlot.model_validate(slot)
+    except ValidationError as exc:
+        raise ValueError("vn_asset_execution_recipe_invalid") from exc
     return recipe
 
 
