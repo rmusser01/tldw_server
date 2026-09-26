@@ -158,6 +158,108 @@ test('rejects unknown Host and Origin before either upstream', async (t) => {
   assert.equal(seen.length, 0);
 });
 
+for (const hostileHeader of ['origin', 'host']) {
+  test(`returns HTTP 403 for a cookie upgrade with hostile ${hostileHeader} before either upstream`, async (t) => {
+    const { publicOrigin, backend, next, seen } = await fixture(t);
+    const upgrades = [];
+    for (const upstream of [backend, next]) {
+      upstream.on('upgrade', (_req, socket) => {
+        upgrades.push(upstream);
+        socket.destroy();
+      });
+    }
+    const hostileValue = hostileHeader === 'origin' ? 'http://attacker.test' : 'attacker.test';
+    const response = await new Promise((resolve, reject) => {
+      const req = httpRequest(`${publicOrigin}/api/v1/mcp/ws`, {
+        headers: {
+          host: new URL(publicOrigin).host,
+          origin: publicOrigin,
+          cookie: 'session=legitimate-session',
+          upgrade: 'websocket',
+          connection: 'Upgrade',
+          authorization: 'Bearer browser-credential',
+          'x-tldw-gateway-hop': 'forged-hop',
+          'x-forwarded-for': '203.0.113.5',
+          [hostileHeader]: hostileValue,
+        },
+      }, (res) => {
+        const chunks = [];
+        res.on('data', (chunk) => chunks.push(chunk));
+        res.on('end', () => resolve({ status: res.statusCode, headers: res.headers,
+          body: Buffer.concat(chunks).toString() }));
+      });
+      const timeout = setTimeout(() => req.destroy(new Error('upgrade refusal timed out')), 2_000);
+      req.once('close', () => clearTimeout(timeout));
+      req.on('upgrade', (_res, socket) => {
+        socket.destroy();
+        reject(new Error('unauthorized upgrade received HTTP 101'));
+      });
+      req.on('error', reject);
+      req.end();
+    });
+
+    assert.equal(response.status, 403);
+    assert.equal(response.body, 'Forbidden');
+    assert.equal(response.headers['set-cookie'], undefined);
+    for (const name of Object.keys(response.headers)) {
+      assert.equal(/^(?:authorization|cookie|proxy-authenticate|www-authenticate|forwarded|x-forwarded-.*|x-tldw-gateway-.*)$/i.test(name), false);
+    }
+    const serialized = JSON.stringify(response);
+    for (const value of [hostileValue, 'legitimate-session', 'browser-credential', 'forged-hop', '203.0.113.5', HOP_SECRET]) {
+      assert.equal(serialized.includes(value), false);
+    }
+    assert.equal(upgrades.length, 0);
+    assert.equal(seen.length, 0);
+  });
+}
+
+for (const peerCloses of [false, true]) {
+  test(`bounds forbidden upgrade cleanup when the peer ${peerCloses ? 'closes' : 'stays open'}`, { timeout: 4_000 }, async (t) => {
+    const { publicOrigin, gateway } = await fixture(t);
+    const originalSetTimeout = globalThis.setTimeout;
+    let backstop;
+    let backstopFired = false;
+    t.mock.method(globalThis, 'setTimeout', (callback, delay, ...args) => {
+      if (delay !== 1_000) return originalSetTimeout(callback, delay, ...args);
+      backstop = originalSetTimeout(() => {
+        backstopFired = true;
+        callback(...args);
+      }, delay);
+      return backstop;
+    });
+    const parsed = new URL(publicOrigin);
+    const socket = connect({ port: Number(parsed.port), host: parsed.hostname,
+      allowHalfOpen: !peerCloses });
+    let traffic;
+    t.after(() => { clearInterval(traffic); socket.destroy(); });
+    await once(socket, 'connect');
+    const upgraded = once(gateway, 'upgrade');
+    const ended = once(socket, 'end');
+    let response = '';
+    socket.on('data', (chunk) => { response += chunk.toString(); });
+    const started = performance.now();
+    socket.write(`GET /api/v1/mcp/ws HTTP/1.1\r\nHost: ${parsed.host}\r\nOrigin: http://attacker.test\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n`);
+    const [, gatewaySocket] = await upgraded;
+    t.after(() => gatewaySocket.destroy());
+    const closed = once(gatewaySocket, 'close');
+    assert.equal(backstop.hasRef(), false);
+    await ended;
+    assert.equal(response, 'HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 9\r\n\r\nForbidden');
+    if (!peerCloses) {
+      traffic = setInterval(() => socket.write('peer traffic cannot extend the deadline'), 100);
+    }
+    await closed;
+    const elapsed = performance.now() - started;
+    if (peerCloses) {
+      await new Promise((resolve) => originalSetTimeout(resolve, 1_100));
+      assert.equal(backstopFired, false);
+    } else {
+      assert.equal(backstopFired, true);
+      assert.equal(elapsed >= 900 && elapsed < 2_000, true);
+    }
+  });
+}
+
 test('serves bounded read-only maintenance status without contacting either upstream', async (t) => {
   const { publicOrigin, seen } = await fixture(t, { phase: 'maintenance' });
   const status = await fetch(`${publicOrigin}/_tldw/status`);
@@ -282,10 +384,11 @@ test('injects the managed hop only for canonical MCP HTTP and WebSocket paths', 
   const socket = connect(Number(parsed.port), parsed.hostname);
   t.after(() => socket.destroy());
   await once(socket, 'connect');
-  socket.write(`GET /api/v1/mcp/ws HTTP/1.1\r\nHost: ${parsed.host}\r\nOrigin: ${publicOrigin}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nX-Tldw-Gateway-Hop: forged\r\nX-Forwarded-For: 8.8.8.8\r\n\r\n`);
+  socket.write(`GET /api/v1/mcp/ws HTTP/1.1\r\nHost: ${parsed.host}\r\nOrigin: ${publicOrigin}\r\nCookie: session=legitimate-session\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nX-Tldw-Gateway-Hop: forged\r\nX-Forwarded-For: 8.8.8.8\r\n\r\n`);
   const [chunk] = await once(socket, 'data');
   assert.match(chunk.toString(), /^HTTP\/1\.1 101 Switching Protocols/);
   assert.equal(upstreamHeaders['x-tldw-gateway-hop'], HOP_SECRET);
   assert.equal(upstreamHeaders['x-forwarded-for'], '127.0.0.1');
+  assert.equal(upstreamHeaders.cookie, 'session=legitimate-session');
   assert.equal(chunk.toString().includes(HOP_SECRET), false);
 });

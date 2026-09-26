@@ -169,7 +169,14 @@ export function createGateway({ backendOrigin, nextOrigin, publicHost, publicPor
     const port = publicPort || server.address()?.port;
     const host = new URL(`http://${publicHost}:${port}`).host;
     const pathname = requestPath(req);
-    if (!authorizeRequest(req, { publicHost, publicPort: port }) || !pathname || readPhase() !== 'ready') {
+    if (!authorizeRequest(req, { publicHost, publicPort: port })) {
+      const backstop = setTimeout(() => socket.destroy(), 1_000);
+      backstop.unref();
+      socket.once('close', () => clearTimeout(backstop));
+      socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 9\r\n\r\nForbidden');
+      return;
+    }
+    if (!pathname || readPhase() !== 'ready') {
       socket.destroy();
       return;
     }
