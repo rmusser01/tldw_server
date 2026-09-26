@@ -28,6 +28,12 @@ const configuredSingleUser = {
   apiKey: "test-key"
 }
 
+const configuredCookieSession = {
+  serverUrl: "http://127.0.0.1:19080",
+  authMode: "single-user" as const,
+  authSource: "cookie-session" as const
+}
+
 const deferred = <T,>() => {
   let resolve!: (value: T) => void
   let reject!: (error: unknown) => void
@@ -40,8 +46,99 @@ const deferred = <T,>() => {
 
 describe("usePostOnboardingMediaReadiness", () => {
   beforeEach(() => {
-    vi.clearAllMocks()
+    vi.resetAllMocks()
     mocks.getRuntimeSingleUserApiKeyOverride.mockReturnValue(null)
+  })
+
+  it("verifies media access with the managed cookie session without a master key", async () => {
+    mocks.getConfig.mockResolvedValue(configuredCookieSession)
+    mocks.listMedia.mockResolvedValue([])
+
+    const { result } = renderHook(() => usePostOnboardingMediaReadiness(true))
+
+    await waitFor(() => expect(result.current.status).toBe("ready"))
+  })
+
+  it("keeps cookie-session media access checking until the live probe succeeds", async () => {
+    const mediaRequest = deferred<unknown[]>()
+    mocks.getConfig.mockResolvedValue(configuredCookieSession)
+    mocks.listMedia.mockReturnValue(mediaRequest.promise)
+    const { result } = renderHook(() => usePostOnboardingMediaReadiness(false))
+
+    let check!: Promise<void>
+    await act(async () => {
+      check = result.current.retry()
+    })
+    expect(result.current.status).toBe("checking")
+
+    await act(async () => {
+      mediaRequest.resolve([])
+      await check
+    })
+    expect(result.current.status).toBe("ready")
+  })
+
+  it.each(["401 Unauthorized", "403 Forbidden"])(
+    "requires recovery when the cookie-session media probe returns %s",
+    async (message) => {
+      mocks.getConfig.mockResolvedValue(configuredCookieSession)
+      mocks.listMedia.mockRejectedValue(new Error(message))
+
+      const { result } = renderHook(() => usePostOnboardingMediaReadiness(true))
+
+      await waitFor(() =>
+        expect(result.current).toMatchObject({
+          status: "needs_config",
+          errorMessage: message
+        })
+      )
+    }
+  )
+
+  it("reports a failed media probe instead of trusting the cookie-session marker", async () => {
+    mocks.getConfig.mockResolvedValue(configuredCookieSession)
+    mocks.listMedia.mockRejectedValue(new Error("503 Service Unavailable"))
+
+    const { result } = renderHook(() => usePostOnboardingMediaReadiness(true))
+
+    await waitFor(() =>
+      expect(result.current).toMatchObject({
+        status: "error",
+        errorMessage: "503 Service Unavailable"
+      })
+    )
+  })
+
+  it.each([
+    { ...configuredCookieSession, serverUrl: "" },
+    { ...configuredCookieSession, authMode: "multi-user" },
+    { serverUrl: "http://127.0.0.1:19080", authMode: "single-user" }
+  ])(
+    "requires configuration when authentication is incomplete: %j",
+    async (config) => {
+      mocks.getConfig.mockResolvedValue(config)
+      mocks.listMedia.mockResolvedValue([])
+
+      const { result } = renderHook(() => usePostOnboardingMediaReadiness(true))
+
+      await waitFor(() => expect(result.current.status).toBe("needs_config"))
+    }
+  )
+
+  it.each([
+    configuredSingleUser,
+    {
+      serverUrl: "http://127.0.0.1:19080",
+      authMode: "multi-user",
+      accessToken: "test-token"
+    }
+  ])("keeps credential-based media access working: %j", async (config) => {
+    mocks.getConfig.mockResolvedValue(config)
+    mocks.listMedia.mockResolvedValue([])
+
+    const { result } = renderHook(() => usePostOnboardingMediaReadiness(true))
+
+    await waitFor(() => expect(result.current.status).toBe("ready"))
   })
 
   it("treats quickstart runtime auth as configured for media readiness", async () => {

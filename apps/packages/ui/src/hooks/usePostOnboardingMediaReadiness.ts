@@ -40,8 +40,10 @@ const hasRequiredAuth = (config: TldwConfig | null): boolean => {
     return Boolean(String(config.accessToken || "").trim())
   }
   return Boolean(
+    (config.authMode === "single-user" &&
+      config.authSource === "cookie-session") ||
     String(config.apiKey || "").trim() ||
-      String(getRuntimeSingleUserApiKeyOverride() || "").trim()
+    String(getRuntimeSingleUserApiKeyOverride() || "").trim()
   )
 }
 
