@@ -237,6 +237,59 @@ The code paths above are the planned ownership boundaries. If an existing helper
 - [ ] **Step 3: Record** measured download/installed sizes, startup times, tested platforms, and any unsupported behavior in the candidate evidence. Mark TASK-13343 complete only when its criteria and local/CI gates pass; note that public publication remains separately gated.
 - [x] **Step 4: Commit** final task/doc/evidence updates with `docs: record provisional Docker candidate review (TASK-13343)`; the record explicitly states that qualification remains open.
 
+### Task 9: Qualify live browser setup and two isolated instances
+
+**Goal:** Close the current live-browser gap in Tasks 6/7 using the exact signed
+extracted candidate. Keep the existing transport/unit evidence and broader G4
+transport qualification distinct from these browser results.
+
+**Files:** Create `apps/tldw-frontend/scripts/qualify-app-bundle-browser.mjs`
+and focused behavioral tests under `apps/tldw-frontend/scripts/__tests__/`;
+create `Helper_Scripts/test_app_bundle_browser.sh`; wire the probe into
+`Helper_Scripts/qualify_app_bundle_candidate.sh` and
+`.github/workflows/verify-app-bundle.yml`. Reuse existing Playwright dependencies.
+
+**Interfaces:** The shell probe takes the extracted bundle path, resolves its
+own repository tooling before changing directories, creates two disposable
+instance state directories, and starts both with the signed host helper. It
+passes a whitelist-only JSON file of public URLs and instance cookie names to
+the browser probe. No API key, session token, cookie value, signing private key,
+browser storage state, or trace is printed or uploaded. Output is a bounded
+public JSON checklist with timings and booleans. Cleanup stops only these two
+owned Compose projects and removes only disposable test state.
+
+Reuse the same WebUI image digest for both instances. After the second signed
+first start, a qualification-only Compose override changes its private backend
+and Next hostnames/ports, including matching healthchecks. This fixture proves
+runtime routing without editing the signed bundle or advertising a new user
+configuration interface. Check actual container environment/image identity
+without exposing credentials.
+
+- [ ] **Step 1: Write the behavioral checks first.** Require two distinct public
+  loopback origins and cookie-name pairs; fail invalid/remote/duplicate inputs
+  before browser launch. In a fresh real Chromium context, render managed setup
+  without manually entering the master API key or seeding browser storage;
+  inspect the actual visible setup flow and interact through accessible controls.
+  Do not mock application API responses in live qualification.
+- [ ] **Step 2: Verify red evidence** before implementing the new probe. Preserve
+  meaningful failure output in the task report. Existing Playwright tooling may
+  be used for inspection; new qualification uses the repository's script style.
+- [ ] **Step 3: Implement the smallest probe.** Check anonymous profile refusal,
+  browser-managed session bootstrap, HttpOnly session/readable CSRF attributes,
+  cookie-only profile access, both instances in the same browser context,
+  missing and foreign CSRF rejection, foreign-session rejection, logout of one
+  instance without invalidating the other, and re-bootstrap. Fail on manual
+  master-key requirements instead of automating credential entry. Record live
+  readiness gaps as regression tests before changing product code.
+- [ ] **Step 4: Verify locally and on native CI.** Run focused probe tests, lint,
+  shell syntax, release/gateway regressions, and the actual local/native paired
+  candidates. Install only the pinned existing Playwright browser needed by CI;
+  failure blocks its candidate job. Retain only the public checklist. Keep G4
+  and G12 false until all their remaining transport/policy scenarios pass.
+- [ ] **Step 5: Review and commit** this scoped qualification slice with
+  TASK-13343. Update the acceptance record and Backlog with actual evidence,
+  discovered fixes, unsupported paths, and exact candidate identity.
+
 ## Plan self-review checklist
 
 CI follow-up (September 25): user-authorized branch push bootstrapped the new

@@ -90,8 +90,8 @@ Gateway routing order is explicit:
 | Path | Destination |
 | --- | --- |
 | `/_tldw/*` | Minimal managed status/maintenance UI and authenticated control operations. |
-| `/api/_tldw-webui/*`, `/api/documentation/*`, `/api/hello` | Existing Next API routes. Runtime session bootstrap uses the same private backend origin as the gateway. |
-| `/api/v1`, `/api/v1/*`, `/health`, `/internal/ready`, `/openapi.json`, `/docs`, `/docs/*`, `/redoc`, `/setup`, `/setup/*` | Managed backend, subject to its existing authorization and setup gates. |
+| `/api/_tldw-webui/*`, `/api/documentation/*`, `/api/hello`, `/setup`, `/setup/*` | Next API routes and application setup wizard. Runtime session bootstrap uses the same private backend origin as the gateway. |
+| `/api/v1`, `/api/v1/*`, `/health`, `/internal/ready`, `/openapi.json`, `/docs`, `/docs/*`, `/docs-static`, `/docs-static/*`, `/static/favicon.ico`, `/redoc` | Managed backend, subject to its existing authorization and setup gates. Backend setup APIs remain under `/api/v1`; its legacy HTML `/setup` does not replace the application wizard. |
 | Other paths | Next standalone WebUI and static assets. |
 
 The managed WebUI build uses a dedicated managed mode with relative browser API URLs and no build-time private API rewrites. Configure session bootstrap from runtime-only private configuration. This requires adapting the current mode validator/runtime policy and shared browser-networking code, not merely changing environment variables. The existing quickstart/developer modes retain their supported behavior. Never embed master API keys in public configuration or client bundles.
