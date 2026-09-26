@@ -7,6 +7,28 @@ import pytest
 from hypothesis import given, settings, strategies as st
 
 
+@given(
+    additions=st.lists(st.integers(min_value=0, max_value=20), max_size=30),
+    exclusions=st.lists(st.integers(min_value=0, max_value=20), max_size=30),
+)
+@settings(max_examples=40, deadline=None)
+def test_recurrence_set_is_unique_sorted_and_respects_exclusions(additions, exclusions) -> None:
+    recurrence = _recurrence_module()
+    start = datetime(2026, 6, 1, 9, tzinfo=timezone.utc)
+    occurrence_dates = lambda days: [(start + timedelta(days=day)).isoformat() for day in days]
+    occurrences = recurrence.expand_recurrence_set(
+        master_start=start,
+        master_end=None,
+        rrule_text="FREQ=DAILY;COUNT=10",
+        rdates=occurrence_dates(additions),
+        exdates=occurrence_dates(exclusions),
+        window_start=start,
+        window_end=start + timedelta(days=25),
+    )
+    expected = sorted(({0, *range(10), *additions} - set(exclusions)))
+    assert [entry.start_at for entry in occurrences] == [start + timedelta(days=day) for day in expected]
+
+
 def _recurrence_module():
     try:
         return importlib.import_module("tldw_Server_API.app.core.Calendar.recurrence")

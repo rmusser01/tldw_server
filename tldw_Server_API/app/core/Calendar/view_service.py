@@ -17,7 +17,6 @@ from tldw_Server_API.app.core.Calendar.calendar_service import CalendarService
 from tldw_Server_API.app.core.Calendar.constants import (
     CALENDAR_SOURCE_OWNER_LINKED_PROJECTION,
     CALENDAR_SOURCE_OWNER_PROVIDER,
-    CALENDAR_SOURCE_OWNER_TLDW,
 )
 from tldw_Server_API.app.core.Calendar.errors import (
     CalendarItemNotFound,
@@ -27,7 +26,7 @@ from tldw_Server_API.app.core.Calendar.errors import (
 from tldw_Server_API.app.core.Calendar.recurrence import (
     LocalRecurrenceRule,
     RecurrenceOccurrence,
-    expand_rrule,
+    expand_recurrence_set,
     validate_query_window,
 )
 from tldw_Server_API.app.core.DB_Management.Calendar_DB import (
@@ -130,11 +129,13 @@ class CalendarViewService:
         validate_query_window(start_at, end_at)
         window_start = _coerce_datetime(start_at)
         window_end = _coerce_datetime(end_at)
+        warnings: list[str] = []
         items = self.expand_items_window(
             actor_user_id=actor_user_id,
             start_at=window_start,
             end_at=window_end,
             filters=filters,
+            warnings=warnings,
         )
         if filters.include_scheduled_tasks:
             items.extend(
@@ -149,6 +150,8 @@ class CalendarViewService:
             start_at=window_start.isoformat(),
             end_at=window_end.isoformat(),
             items=items,
+            partial=bool(warnings),
+            warnings=warnings,
         )
 
     async def week(
@@ -185,6 +188,7 @@ class CalendarViewService:
         start_at: TemporalValue,
         end_at: TemporalValue,
         filters: CalendarViewFilters | None = None,
+        warnings: list[str] | None = None,
     ) -> list[CalendarViewItem]:
         """Expand local Calendar rows and local recurrence rows inside a window."""
 
@@ -201,20 +205,36 @@ class CalendarViewService:
         )
         readable_rows = self._filter_readable_items(actor_user_id=actor_user_id, rows=rows)
         recurrences = self.calendar_service.db.list_recurrences_for_items(row.id for row in readable_rows)
+        exceptions: dict[tuple[int | None, str], list[str]] = {}
+        for item in readable_rows:
+            metadata = json.loads(item.source_payload_json or "{}")
+            if item.source_owner == CALENDAR_SOURCE_OWNER_PROVIDER and metadata.get("recurrence_id"):
+                exceptions.setdefault((item.external_binding_id, str(metadata.get("uid"))), []).append(
+                    metadata["recurrence_id"]
+                )
         view_items: list[CalendarViewItem] = []
         for item in readable_rows:
+            if item.source_owner == CALENDAR_SOURCE_OWNER_PROVIDER and item.status.lower() == "cancelled":
+                continue
             local_tags = self._local_tags_for_actor(actor_user_id=actor_user_id, item=item)
             recurrence = recurrences.get(item.id)
-            if recurrence and recurrence.rrule and item.source_owner == CALENDAR_SOURCE_OWNER_TLDW:
-                view_items.extend(
-                    self._expand_recurring_item(
-                        item=item,
-                        recurrence=recurrence,
-                        window_start=window_start,
-                        window_end=window_end,
-                        local_tags=local_tags,
+            if recurrence:
+                try:
+                    view_items.extend(
+                        self._expand_recurring_item(
+                            item=item,
+                            recurrence=recurrence,
+                            window_start=window_start,
+                            window_end=window_end,
+                            local_tags=local_tags,
+                            exception_dates=exceptions.get((item.external_binding_id, item.source_uid or ""), []),
+                        )
                     )
-                )
+                except CalendarValidationError:
+                    if warnings is not None:
+                        warnings.append(f"Item {item.id} recurrence could not be expanded within Calendar limits")
+                    if _item_overlaps_window(item, window_start, window_end):
+                        view_items.append(_view_item_from_row(item, local_tags=local_tags))
                 continue
             if _item_overlaps_window(item, window_start, window_end):
                 view_items.append(_view_item_from_row(item, local_tags=local_tags))
@@ -279,10 +299,7 @@ class CalendarViewService:
         actor_user_id: int,
         filters: CalendarViewFilters,
     ) -> list[int]:
-        visible_ids = {
-            calendar.id
-            for calendar in self.calendar_service.list_calendars(actor_user_id=actor_user_id)
-        }
+        visible_ids = {calendar.id for calendar in self.calendar_service.list_calendars(actor_user_id=actor_user_id)}
         if filters.calendar_ids is None:
             return sorted(visible_ids)
         return [calendar_id for calendar_id in filters.calendar_ids if calendar_id in visible_ids]
@@ -314,18 +331,22 @@ class CalendarViewService:
         window_start: datetime,
         window_end: datetime,
         local_tags: list[str],
+        exception_dates: list[str],
     ) -> list[CalendarViewItem]:
         master_start = item.start_at or item.due_at
         if master_start is None:
             return []
-        occurrences = expand_rrule(
+        occurrences = expand_recurrence_set(
             master_start=master_start,
             master_end=item.end_at,
-            rrule_text=recurrence.rrule or "",
+            rrule_text=recurrence.rrule,
+            rdates=json.loads(recurrence.rdate_json or "[]"),
+            exdates=[*json.loads(recurrence.exdate_json or "[]"), *exception_dates],
             window_start=window_start,
             window_end=window_end,
             timezone_name=recurrence.timezone or item.timezone,
             all_day=item.all_day,
+            provider_rule=item.source_owner == CALENDAR_SOURCE_OWNER_PROVIDER,
         )
         return [
             _view_item_from_occurrence(
@@ -373,7 +394,9 @@ def _view_item_from_row(
         all_day=item.all_day,
         status=item.status,
         local_tags=local_tags if local_tags is not None else _json_list(item.local_tags_json),
-        read_only_reason="provider" if item.provider_owned or item.source_owner == CALENDAR_SOURCE_OWNER_PROVIDER else None,
+        read_only_reason="provider"
+        if item.provider_owned or item.source_owner == CALENDAR_SOURCE_OWNER_PROVIDER
+        else None,
     )
 
 
@@ -403,6 +426,7 @@ def _view_item_from_occurrence(
         local_tags=local_tags,
         recurrence_id=recurrence.id,
         occurrence_index=occurrence.occurrence_index,
+        read_only_reason="provider" if item.provider_owned else None,
     )
 
 
@@ -434,9 +458,14 @@ def _item_overlaps_window(item: CalendarItemRow, window_start: datetime, window_
     start_value = item.start_at or item.due_at
     if start_value is None:
         return False
+    if item.all_day:
+        zone = _zoneinfo(item.timezone or "UTC")
+        start_at = _coerce_datetime(start_value).replace(tzinfo=zone)
+        end_at = _coerce_datetime(item.end_at).replace(tzinfo=zone) if item.end_at else start_at + timedelta(days=1)
+        return end_at > window_start and start_at < window_end
     start_at = _coerce_datetime(start_value)
     end_at = _coerce_datetime(item.end_at) if item.end_at else start_at
-    return end_at >= window_start and start_at <= window_end
+    return (end_at > window_start if end_at > start_at else start_at >= window_start) and start_at < window_end
 
 
 def _coerce_datetime(value: TemporalValue | None) -> datetime:

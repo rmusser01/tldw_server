@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+from contextvars import ContextVar
 import json
 import sqlite3
 from collections.abc import Generator, Iterable
@@ -284,7 +285,7 @@ class CalendarSecretStore:
                 tenant_id=tenant_id,
                 user_id=user_id,
                 provider=provider,
-        )
+            )
         return str(row["encrypted_payload"])
 
     def resolve_secret_ref_for_user(
@@ -359,7 +360,7 @@ class CalendarSecretStore:
             UPDATE calendar_external_account_secrets
             SET encrypted_payload = '',
                 deleted_at = ?
-            WHERE {' AND '.join(clauses)}
+            WHERE {" AND ".join(clauses)}
             """,  # nosec B608
             tuple(params),
         )
@@ -420,7 +421,7 @@ class CalendarSecretStore:
             f"""
             SELECT encrypted_payload
             FROM calendar_external_account_secrets
-            WHERE {' AND '.join(clauses)}
+            WHERE {" AND ".join(clauses)}
             """,  # nosec B608
             tuple(params),
         ).fetchone()
@@ -434,11 +435,18 @@ class CalendarDatabase:
 
     def __init__(self, db_path: str | Path | None = None):
         self.db_path = Path(db_path) if db_path is not None else _default_calendar_db_path()
+        self._transaction_connection: ContextVar[sqlite3.Connection | None] = ContextVar(
+            f"calendar_transaction_{id(self)}", default=None
+        )
         self.secret_store = CalendarSecretStore(self)
         self.ensure_schema()
 
     @contextlib.contextmanager
     def connection(self) -> Generator[sqlite3.Connection, None, None]:
+        active = self._transaction_connection.get()
+        if active is not None:
+            yield active
+            return
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
@@ -450,13 +458,29 @@ class CalendarDatabase:
 
     @contextlib.contextmanager
     def transaction(self) -> Generator[sqlite3.Connection, None, None]:
+        active = self._transaction_connection.get()
+        if active is not None:
+            savepoint = f"calendar_{uuid4().hex}"
+            active.execute(f"SAVEPOINT {savepoint}")  # nosec B608 - generated hexadecimal identifier
+            try:
+                yield active
+                active.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608
+            except Exception:
+                active.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")  # nosec B608
+                active.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608
+                raise
+            return
         with self.connection() as conn:
+            conn.execute("BEGIN")
+            token = self._transaction_connection.set(conn)
             try:
                 yield conn
                 conn.commit()
             except Exception:
                 conn.rollback()
                 raise
+            finally:
+                self._transaction_connection.reset(token)
 
     def ensure_schema(self) -> None:
         with self.transaction() as conn:
@@ -999,7 +1023,7 @@ class CalendarDatabase:
             clauses.append("remote_deleted_at IS NULL")
         sql = f"""
             SELECT * FROM calendar_items
-            WHERE {' AND '.join(clauses)}
+            WHERE {" AND ".join(clauses)}
             ORDER BY COALESCE(start_at, due_at) ASC, id ASC
             """  # nosec B608
         with self.connection() as conn:
@@ -1041,19 +1065,22 @@ class CalendarDatabase:
                         SELECT 1 FROM calendar_recurrences r
                         WHERE r.calendar_item_id = calendar_items.id
                     )
-                    AND substr(COALESCE(start_at, due_at), 1, 10) <= ?
+                )
+                OR (
+                    source_owner = 'provider'
+                    AND json_extract(source_payload_json, '$.recurrence_id') IS NOT NULL
                 )
             )
             """,
         ]
-        params: list[Any] = [*ids, widened_start, widened_end, widened_end]
+        params: list[Any] = [*ids, widened_start, widened_end]
         if not include_deleted:
             clauses.append("deleted_at IS NULL")
         if not include_remote_deleted:
             clauses.append("remote_deleted_at IS NULL")
         sql = f"""
             SELECT * FROM calendar_items
-            WHERE {' AND '.join(clauses)}
+            WHERE {" AND ".join(clauses)}
             ORDER BY COALESCE(start_at, due_at) ASC, id ASC
             """  # nosec B608
         with self.connection() as conn:
@@ -1115,6 +1142,11 @@ class CalendarDatabase:
                 {"rrule", "rdate_json", "exdate_json", "timezone"},
             )
             return self._get_recurrence_row(conn, int(existing["id"]))
+
+    def delete_recurrence(self, calendar_item_id: int) -> None:
+        """Clear recurrence within the caller's item mutation transaction."""
+        with self.transaction() as conn:
+            conn.execute("DELETE FROM calendar_recurrences WHERE calendar_item_id = ?", (calendar_item_id,))
 
     def list_recurrences_for_items(
         self,
@@ -1278,7 +1310,7 @@ class CalendarDatabase:
             clauses.append("remote_deleted_at IS NULL")
         sql = f"""
             SELECT * FROM calendar_items
-            WHERE {' AND '.join(clauses)}
+            WHERE {" AND ".join(clauses)}
             ORDER BY COALESCE(start_at, due_at, created_at) ASC, id ASC
             """  # nosec B608
         with self.connection() as conn:
@@ -1397,7 +1429,7 @@ class CalendarDatabase:
             clauses.append("deleted_at IS NULL")
         sql = f"""
             SELECT * FROM calendar_annotations
-            WHERE {' AND '.join(clauses)}
+            WHERE {" AND ".join(clauses)}
             ORDER BY created_at ASC, id ASC
             """  # nosec B608
         with self.connection() as conn:
@@ -1603,7 +1635,7 @@ class CalendarDatabase:
             clauses.append("deleted_at IS NULL")
         sql = f"""
             SELECT * FROM external_calendar_accounts
-            WHERE {' AND '.join(clauses)}
+            WHERE {" AND ".join(clauses)}
             ORDER BY provider ASC, display_name ASC, id ASC
             """  # nosec B608
         with self.connection() as conn:
@@ -2231,7 +2263,7 @@ class CalendarDatabase:
             clauses.append("deleted_at IS NULL")
         sql = f"""
             SELECT * FROM external_calendar_bindings
-            WHERE {' AND '.join(clauses)}
+            WHERE {" AND ".join(clauses)}
             ORDER BY remote_display_name ASC, id ASC
             """  # nosec B608
         rows = conn.execute(sql, (account_id,)).fetchall()

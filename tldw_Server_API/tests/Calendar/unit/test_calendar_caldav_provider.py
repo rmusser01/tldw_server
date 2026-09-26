@@ -16,6 +16,41 @@ from tldw_Server_API.app.core.Calendar.providers import caldav as caldav_module
 pytestmark = pytest.mark.unit
 
 
+def test_parse_preserves_date_only_events_and_exclusive_end() -> None:
+    event = CalDavProvider().parse_vevents("""BEGIN:VCALENDAR
+BEGIN:VEVENT
+UID:holiday
+DTSTART;VALUE=DATE:20260605
+DTEND;VALUE=DATE:20260607
+END:VEVENT
+END:VCALENDAR""")[0]
+    assert event.start_at == "2026-06-05"
+    assert event.end_at == "2026-06-07"
+    assert event.all_day is True
+
+
+def test_parse_preserves_master_recurrence_and_detached_identity() -> None:
+    events = CalDavProvider().parse_vevents("""BEGIN:VCALENDAR
+BEGIN:VEVENT
+UID:series
+DTSTART:20260605T090000Z
+RRULE:FREQ=DAILY;COUNT=3
+RDATE:20260610T090000Z
+EXDATE:20260606T090000Z
+END:VEVENT
+BEGIN:VEVENT
+UID:series
+RECURRENCE-ID:20260607T090000Z
+DTSTART:20260607T110000Z
+SUMMARY:Moved
+END:VEVENT
+END:VCALENDAR""")
+    assert events[0].rrule == "FREQ=DAILY;COUNT=3"
+    assert events[0].rdate == ["2026-06-10T09:00:00+00:00"]
+    assert events[0].exdate == ["2026-06-06T09:00:00+00:00"]
+    assert events[1].recurrence_id == "2026-06-07T09:00:00+00:00"
+
+
 def test_provider_rejects_oversized_ics_before_parsing() -> None:
     with pytest.raises(CalendarValidationError, match="byte limit"):
         CalDavProvider(max_ics_bytes=32).parse_vevents("x" * 33)
@@ -60,9 +95,11 @@ def test_default_transport_bounds_stream_before_buffering(
                 closed.append(True)
 
     monkeypatch.setattr(caldav_module, "create_client", lambda **kwargs: Client())
-    monkeypatch.setattr(caldav_module, "evaluate_url_policy", lambda *args, **kwargs: SimpleNamespace(
-        allowed=True, resolved_ips=("93.184.216.34",)
-    ))
+    monkeypatch.setattr(
+        caldav_module,
+        "evaluate_url_policy",
+        lambda *args, **kwargs: SimpleNamespace(allowed=True, resolved_ips=("93.184.216.34",)),
+    )
     with pytest.raises(CalendarValidationError, match="byte limit"):
         CalDavProvider(max_response_bytes=32)._request(
             "REPORT", "https://calendar.example.test/", username="user", password="secret"

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 from typing import Any, Literal
+from dateutil import parser as date_parser
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -139,6 +141,15 @@ class CalendarRecurrenceRequest(BaseModel):
                 LocalRecurrenceRule.from_rrule(self.rrule)
             except CalendarValidationError as exc:
                 raise ValueError(str(exc)) from exc
+        try:
+            if self.timezone:
+                ZoneInfo(self.timezone)
+            for value in [*(self.rdate or []), *(self.exdate or [])]:
+                date_parser.isoparse(value)
+        except (ValueError, ZoneInfoNotFoundError) as exc:
+            raise ValueError(
+                "Recurrence dates and timezone must be valid ISO dates/timestamps and IANA timezone"
+            ) from exc
         return self
 
 
