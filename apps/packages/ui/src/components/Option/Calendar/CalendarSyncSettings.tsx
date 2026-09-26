@@ -89,7 +89,7 @@ const bindingKey = (accountId: number, remoteCalendarId: string): string =>
   `${accountId}:${remoteCalendarId}`
 
 const normalizeNumber = (value: number | null, fallback: number): number =>
-  typeof value === "number" && Number.isFinite(value) ? value : fallback
+  typeof value === "number" && Number.isFinite(value) ? Math.round(value) : fallback
 
 export const CalendarSyncSettings: React.FC<CalendarSyncSettingsProps> = ({
   calendars,
@@ -451,6 +451,8 @@ export const CalendarSyncSettings: React.FC<CalendarSyncSettingsProps> = ({
                               aria-label="Lookback days"
                               min={0}
                               max={3650}
+                              precision={0}
+                              step={1}
                               value={draft.lookback_days}
                               onChange={(value) =>
                                 updateBindingDraft(account.id, remoteCalendar.remote_calendar_id, {
@@ -465,6 +467,8 @@ export const CalendarSyncSettings: React.FC<CalendarSyncSettingsProps> = ({
                               aria-label="Lookahead days"
                               min={0}
                               max={3650}
+                              precision={0}
+                              step={1}
                               value={draft.lookahead_days}
                               onChange={(value) =>
                                 updateBindingDraft(account.id, remoteCalendar.remote_calendar_id, {

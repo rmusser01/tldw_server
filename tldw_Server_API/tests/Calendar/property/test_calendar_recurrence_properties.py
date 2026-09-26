@@ -4,7 +4,8 @@ import importlib
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from hypothesis import given, settings, strategies as st
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 pytestmark = pytest.mark.unit
 
@@ -30,7 +31,7 @@ def test_recurrence_set_is_unique_sorted_and_respects_exclusions(additions: list
         window_start=start,
         window_end=start + timedelta(days=25),
     )
-    expected = sorted(({0, *range(10), *additions} - set(exclusions)))
+    expected = sorted({0, *range(10), *additions} - set(exclusions))
     assert [entry.start_at for entry in occurrences] == [start + timedelta(days=day) for day in expected]
 
 

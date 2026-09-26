@@ -47,7 +47,9 @@ Provider refreshes must preserve local annotations, links, and local tags. The c
 
 Native recurrence supports daily, weekly, and monthly rules plus explicit added/excluded dates. Provider recurrence retains raw RRULE/RDATE/EXDATE and detached recurrence identities. Expansion supports frequency, interval, count, until, week start, and plain weekly weekday selection; complex BYxxx rules are preserved but return a partial-result warning rather than entering potentially non-yielding expansion. High-frequency rules seek to the requested window without scanning their entire history. Reaching the 2,000-occurrence cap retains bounded results and marks the view partial.
 
-Editing a local occurrence's title or context updates series text without rewriting master timestamps. Occurrence-specific time/kind edits remain disabled pending an exception editor. Unchanged times retain their stored offsets; naive timed records use their item timezone. All-day values remain civil dates with exclusive end dates, including imported DURATION values.
+Embedded provider VTIMEZONE definitions are retained and reconstructed per payload, preserving changing DST offsets without trusting a global custom-TZID cache. Definitions are limited to 64 KiB and 32 total observances per payload, with a conservative productive annual-rule subset. A cumulative 20,000-transition budget counts explicit dates and bounds generated history through year 9999, honoring interval/count/end limits; unsafe definitions are rejected before timezone evaluation. Invalid persisted definitions return partial-result warnings. Older imported records without the embedded definition need a resync to restore custom-zone recurrence.
+
+Editing a local occurrence's title or context updates series text without rewriting master timestamps. Occurrence-specific time/kind edits remain disabled pending an exception editor. Unchanged times retain their stored offsets; naive timed records use their item timezone. Newly created local items inherit the selected calendar's timezone when no item timezone is supplied; explicit item zones and timestamp offsets remain authoritative. All-day values remain civil dates with exclusive end dates, including imported DURATION values.
 
 Native item deletion uses the authorized `DELETE /items/{item_id}` soft-delete path; provider-owned items cannot be deleted through it. Persisted links can be retrieved with `GET /items/{item_id}/links` and removed with `DELETE /items/{item_id}/links/{link_id}` under the item's scope.
 
@@ -81,6 +83,8 @@ Core tables include:
 - `calendar_external_account_secrets`
 
 External account rows store provider metadata and a secret reference. Raw app passwords, tokens, auth headers, and provider credential payloads must not be stored in account rows, Jobs payloads, logs, or API responses.
+
+Account and encrypted-secret creation commit together; an account-creation failure rolls both back. Verify/discovery URL overrides must keep the account's origin whenever either stored credential is reused. A different public HTTPS origin requires a complete, explicitly supplied username and password/token, so no stored Basic credential is forwarded to it.
 
 ## Permissions
 

@@ -55,6 +55,15 @@ def resolve_caldav_credentials(
     }
     if not all(isinstance(value, str) and value.strip() for value in values.values()):
         raise CalendarValidationError("CalDAV account requires server_url, username, and password/token")
+    from tldw_Server_API.app.core.Calendar.providers.caldav import CalDavProvider
+
+    CalDavProvider._validate_http_url(values["server_url"])
+    complete_replacement = bool(request.get("username") and (request.get("password") or request.get("token")))
+    if not complete_replacement:
+        account_url = stored.get("server_url") or metadata.get("server_url")
+        if not isinstance(account_url, str) or not account_url.strip():
+            raise CalendarValidationError("Stored CalDAV credentials require an account server origin")
+        CalDavProvider.same_origin_url(account_url, values["server_url"])
     return values
 
 

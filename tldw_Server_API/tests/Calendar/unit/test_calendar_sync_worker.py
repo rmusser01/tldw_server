@@ -26,6 +26,182 @@ from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
 pytestmark = pytest.mark.unit
 
 
+_CUSTOM_VTIMEZONE = """BEGIN:VTIMEZONE
+TZID:Custom/Research
+BEGIN:STANDARD
+DTSTART:19701101T020000
+TZOFFSETFROM:-0700
+TZOFFSETTO:-0800
+RRULE:FREQ=YEARLY;BYMONTH=11;BYDAY=1SU
+END:STANDARD
+BEGIN:DAYLIGHT
+DTSTART:19700308T020000
+TZOFFSETFROM:-0800
+TZOFFSETTO:-0700
+RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=2SU
+END:DAYLIGHT
+END:VTIMEZONE"""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("view_name", ["agenda", "week"])
+@pytest.mark.parametrize(("master", "window_start", "window_end", "expected"), [
+    ("20260306T120000", "2026-03-07", "2026-03-10", [
+        "2026-03-07T12:00:00-08:00", "2026-03-08T12:00:00-07:00", "2026-03-09T12:00:00-07:00",
+    ]),
+    ("20261030T120000", "2026-10-31", "2026-11-03", [
+        "2026-10-31T12:00:00-07:00", "2026-11-01T12:00:00-08:00", "2026-11-02T12:00:00-08:00",
+    ]),
+])
+async def test_custom_vtimezone_recurrence_survives_import_in_later_views(
+    calendar_db: CalendarDatabase, view_name: str, master: str,
+    window_start: str, window_end: str, expected: list[str],
+) -> None:
+    """Persisted custom rules retain wall time and both DST offsets beyond the master window."""
+    from tldw_Server_API.app.core.Calendar.calendar_sync_worker import _upsert_events
+    from tldw_Server_API.app.core.Calendar.providers.caldav import CalDavProvider
+    from tldw_Server_API.app.core.Calendar.view_service import CalendarViewFilters, CalendarViewService
+
+    fixture = _create_sync_fixture(calendar_db)
+    events = CalDavProvider().parse_vevents(
+        f"BEGIN:VCALENDAR\n{_CUSTOM_VTIMEZONE}\nBEGIN:VEVENT\nUID:custom-series\n"
+        f"DTSTART;TZID=Custom/Research:{master}\nDURATION:PT1H\n"
+        "RRULE:FREQ=DAILY;COUNT=4\nEND:VEVENT\nEND:VCALENDAR"
+    )
+    binding = calendar_db.get_external_binding(fixture.binding_id)
+    _upsert_events(calendar_db, binding=binding, events=events)
+    rows = calendar_db.list_items_for_expansion(
+        calendar_ids=[fixture.calendar_id], window_start=window_start, window_end=window_end,
+    )
+    item_id = rows[0].id
+    _upsert_events(calendar_db, binding=binding, events=events)
+    # Re-open the repository: no in-memory tzinfo can satisfy the round trip.
+    view = CalendarViewService(calendar_service=CalendarService(db=CalendarDatabase(db_path=calendar_db.db_path)))
+    filters = CalendarViewFilters(include_scheduled_tasks=False)
+    if view_name == "agenda":
+        result = await view.agenda(
+            actor_user_id=1, start_at=window_start, end_at=window_end, filters=filters,
+        )
+    else:
+        result = await view.week(actor_user_id=1, week_start=window_start, timezone="UTC", filters=filters)
+    assert [item.start_at for item in result.items] == expected
+    assert result.partial is False
+    assert result.warnings == []
+    assert all(item.calendar_item_id == item_id and item.read_only_reason == "provider" for item in result.items)
+    assert json.loads(rows[0].source_payload_json)["rrule"] == "FREQ=DAILY;COUNT=4"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("master", "window_start", "window_end", "duration", "expected_ends"), [
+    ("20260306T120000", "2026-03-07T12:00:00-08:00", "2026-03-09", "P1D", [
+        "2026-03-08T12:00:00-07:00", "2026-03-09T12:00:00-07:00",
+    ]),
+    ("20260306T120000", "2026-03-07T12:00:00-08:00", "2026-03-09", "PT24H", [
+        "2026-03-08T13:00:00-07:00", "2026-03-09T12:00:00-07:00",
+    ]),
+    ("20261030T120000", "2026-10-31T12:00:00-07:00", "2026-11-02", "P1D", [
+        "2026-11-01T12:00:00-08:00", "2026-11-02T12:00:00-08:00",
+    ]),
+    ("20261030T120000", "2026-10-31T12:00:00-07:00", "2026-11-02", "PT24H", [
+        "2026-11-01T11:00:00-08:00", "2026-11-02T12:00:00-08:00",
+    ]),
+])
+async def test_custom_vtimezone_keeps_nominal_days_distinct_from_elapsed_hours(
+    calendar_db: CalendarDatabase, master: str, window_start: str,
+    window_end: str, duration: str, expected_ends: list[str],
+) -> None:
+    """Each later occurrence reapplies the lexical duration using the embedded DST rules."""
+    from tldw_Server_API.app.core.Calendar.calendar_sync_worker import _upsert_events
+    from tldw_Server_API.app.core.Calendar.providers.caldav import CalDavProvider
+    from tldw_Server_API.app.core.Calendar.view_service import CalendarViewFilters, CalendarViewService
+
+    fixture = _create_sync_fixture(calendar_db)
+    events = CalDavProvider().parse_vevents(
+        f"BEGIN:VCALENDAR\n{_CUSTOM_VTIMEZONE}\nBEGIN:VEVENT\nUID:custom-duration\n"
+        f"DTSTART;TZID=Custom/Research:{master}\nDURATION:{duration}\n"
+        "RRULE:FREQ=DAILY;COUNT=4\nEND:VEVENT\nEND:VCALENDAR"
+    )
+    _upsert_events(calendar_db, binding=calendar_db.get_external_binding(fixture.binding_id), events=events)
+    result = await CalendarViewService(calendar_service=CalendarService(db=calendar_db)).agenda(
+        actor_user_id=1, start_at=window_start, end_at=window_end,
+        filters=CalendarViewFilters(include_scheduled_tasks=False),
+    )
+    assert [item.end_at for item in result.items] == expected_ends
+    assert result.partial is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("exclude_second_fold", [False, True])
+async def test_custom_vtimezone_preserves_dates_detached_identity_and_fold_order(
+    calendar_db: CalendarDatabase, exclude_second_fold: bool,
+) -> None:
+    """UTC set identity distinguishes folds and suppresses only the detached original instant."""
+    from tldw_Server_API.app.core.Calendar.calendar_sync_worker import _upsert_events
+    from tldw_Server_API.app.core.Calendar.providers.caldav import CalDavProvider
+    from tldw_Server_API.app.core.Calendar.view_service import CalendarViewFilters, CalendarViewService
+
+    fixture = _create_sync_fixture(calendar_db)
+    fold_exdate = "EXDATE:20261101T093000Z\n" if exclude_second_fold else ""
+    events = CalDavProvider().parse_vevents(
+        f"BEGIN:VCALENDAR\n{_CUSTOM_VTIMEZONE}\nBEGIN:VEVENT\nUID:custom-fold\nSUMMARY:Master\n"
+        "DTSTART;TZID=Custom/Research:20261030T013000\nDURATION:PT30M\nRRULE:FREQ=DAILY;COUNT=5\n"
+        "RDATE:20261101T093000Z\nEXDATE;TZID=Custom/Research:20261031T013000\n"
+        f"{fold_exdate}END:VEVENT\nBEGIN:VEVENT\nUID:custom-fold\nSUMMARY:Moved\n"
+        "RECURRENCE-ID;TZID=Custom/Research:20261102T013000\n"
+        "DTSTART;TZID=Custom/Research:20261102T050000\nDURATION:PT30M\nEND:VEVENT\nEND:VCALENDAR"
+    )
+    binding = calendar_db.get_external_binding(fixture.binding_id)
+    _upsert_events(calendar_db, binding=binding, events=events)
+    _upsert_events(calendar_db, binding=binding, events=list(reversed(events)))
+    result = await CalendarViewService(calendar_service=CalendarService(db=calendar_db)).agenda(
+        actor_user_id=1, start_at="2026-10-31", end_at="2026-11-04",
+        filters=CalendarViewFilters(include_scheduled_tasks=False),
+    )
+    expected = [
+        ("Master", "2026-11-01T01:30:00-07:00", "2026-11-01T01:00:00-08:00"),
+        ("Moved", "2026-11-02T05:00:00-08:00", "2026-11-02T05:30:00-08:00"),
+        ("Master", "2026-11-03T01:30:00-08:00", "2026-11-03T02:00:00-08:00"),
+    ]
+    if not exclude_second_fold:
+        expected.insert(1, ("Master", "2026-11-01T01:30:00-08:00", "2026-11-01T02:00:00-08:00"))
+    assert [(item.title, item.start_at, item.end_at) for item in result.items] == expected
+    assert len({item.id for item in result.items}) == len(expected)
+    assert result.partial is False
+    assert events[1].recurrence_id == "2026-11-02T09:30:00+00:00"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("metadata_problem", ["nonproductive", "oversized"])
+async def test_unsafe_persisted_custom_timezone_reports_partial_later_view(
+    calendar_db: CalendarDatabase, metadata_problem: str,
+) -> None:
+    """Unusable metadata is rejected safely and cannot silently manufacture fixed-offset instances."""
+    from tldw_Server_API.app.core.Calendar.calendar_sync_worker import _upsert_events
+    from tldw_Server_API.app.core.Calendar.providers.caldav import CalDavProvider
+    from tldw_Server_API.app.core.Calendar.view_service import CalendarViewFilters, CalendarViewService
+
+    fixture = _create_sync_fixture(calendar_db)
+    events = CalDavProvider().parse_vevents(
+        f"BEGIN:VCALENDAR\n{_CUSTOM_VTIMEZONE}\nBEGIN:VEVENT\nUID:unsafe-stored-zone\n"
+        "DTSTART;TZID=Custom/Research:20260306T120000\nDURATION:PT1H\n"
+        "RRULE:FREQ=DAILY;COUNT=4\nEND:VEVENT\nEND:VCALENDAR"
+    )
+    metadata = events[0].provider_payload
+    assert metadata is not None
+    metadata["vtimezone"] = (
+        _CUSTOM_VTIMEZONE.replace("BYMONTH=3;BYDAY=2SU", "BYMONTH=2;BYMONTHDAY=30")
+        if metadata_problem == "nonproductive" else "x" * (64 * 1024 + 1)
+    )
+    _upsert_events(calendar_db, binding=calendar_db.get_external_binding(fixture.binding_id), events=events)
+    result = await CalendarViewService(calendar_service=CalendarService(db=calendar_db)).agenda(
+        actor_user_id=1, start_at="2026-03-07", end_at="2026-03-10",
+        filters=CalendarViewFilters(include_scheduled_tasks=False),
+    )
+    assert result.items == []
+    assert result.partial is True
+    assert result.warnings
+
+
 @pytest.mark.asyncio
 async def test_import_preserves_master_and_detached_occurrences_across_refresh(calendar_db: CalendarDatabase) -> None:
     from tldw_Server_API.app.core.Calendar.calendar_sync_worker import _upsert_events

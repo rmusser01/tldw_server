@@ -220,7 +220,11 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
         }
         await updateCalendarItem(itemId(item), updates)
       } else {
-        await createCalendarItem({ ...payload, local_tags: currentTags })
+        await createCalendarItem({
+          ...payload,
+          timezone: selectedCalendar?.timezone ?? null,
+          local_tags: currentTags
+        })
       }
 
       await saveLocalContext(currentTags, false)

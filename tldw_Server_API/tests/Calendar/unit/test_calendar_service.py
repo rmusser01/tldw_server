@@ -5,6 +5,8 @@ import json
 import sqlite3
 from collections.abc import Generator
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -18,7 +20,7 @@ from tldw_Server_API.app.core.Calendar.errors import (
     CalendarReadOnlyError,
     CalendarValidationError,
 )
-from tldw_Server_API.app.core.DB_Management.Calendar_DB import CalendarDatabase
+from tldw_Server_API.app.core.DB_Management.Calendar_DB import CalendarDatabase, CalendarItemRow, CalendarRow
 
 pytestmark = pytest.mark.unit
 
@@ -135,7 +137,10 @@ def test_agenda_authorization_query_count_is_bounded(
         {"timezone": "No/SuchZone"},
     ],
 )
-def test_service_rejects_invalid_temporal_values_on_create_and_update(calendar_db, values):
+def test_service_rejects_invalid_temporal_values_on_create_and_update(
+    calendar_db: CalendarDatabase, values: dict[str, str],
+) -> None:
+    """Invalid timestamps, intervals and zones fail before changing persisted item times."""
     service = CalendarService(db=calendar_db)
     calendar = service.create_calendar(actor_user_id=1, name="Times", timezone="UTC")
     base = {"kind": "event", "title": "Event", "start_at": "2026-06-05T09:00:00Z"}
@@ -149,7 +154,9 @@ def test_service_rejects_invalid_temporal_values_on_create_and_update(calendar_d
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("rrule", [None, "FREQ=DAILY;COUNT=3"])
-async def test_agenda_applies_recurrence_additions_and_exclusions(calendar_db, rrule):
+async def test_agenda_applies_recurrence_additions_and_exclusions(
+    calendar_db: CalendarDatabase, rrule: str | None,
+) -> None:
     from tldw_Server_API.app.core.Calendar.view_service import CalendarViewService
 
     service = CalendarService(db=calendar_db)
@@ -169,7 +176,7 @@ async def test_agenda_applies_recurrence_additions_and_exclusions(calendar_db, r
 
 
 @pytest.mark.asyncio
-async def test_all_day_without_end_overlaps_afternoon_but_not_next_day(calendar_db):
+async def test_all_day_without_end_overlaps_afternoon_but_not_next_day(calendar_db: CalendarDatabase) -> None:
     from tldw_Server_API.app.core.Calendar.view_service import CalendarViewService
 
     service = CalendarService(db=calendar_db)
@@ -185,7 +192,7 @@ async def test_all_day_without_end_overlaps_afternoon_but_not_next_day(calendar_
 
 
 @pytest.mark.asyncio
-async def test_rdate_before_master_is_not_lost_by_database_prefilter(calendar_db):
+async def test_rdate_before_master_is_not_lost_by_database_prefilter(calendar_db: CalendarDatabase) -> None:
     from tldw_Server_API.app.core.Calendar.view_service import CalendarViewService
 
     service = CalendarService(db=calendar_db)
@@ -205,13 +212,15 @@ async def test_rdate_before_master_is_not_lost_by_database_prefilter(calendar_db
 
 
 @pytest.fixture
-def calendar_db(tmp_path):
+def calendar_db(tmp_path: Path) -> CalendarDatabase:
     db = CalendarDatabase(db_path=tmp_path / "calendar.db")
     db.ensure_schema()
     return db
 
 
-def _create_provider_item(calendar_db: CalendarDatabase, *, owner_user_id: int = 1):
+def _create_provider_item(
+    calendar_db: CalendarDatabase, *, owner_user_id: int = 1,
+) -> tuple[CalendarRow, CalendarItemRow]:
     calendar = calendar_db.create_calendar(
         tenant_id="default",
         owner_user_id=owner_user_id,
@@ -246,7 +255,7 @@ def _create_provider_item(calendar_db: CalendarDatabase, *, owner_user_id: int =
     return calendar, item
 
 
-def _view_service_module():
+def _view_service_module() -> ModuleType:
     try:
         return importlib.import_module("tldw_Server_API.app.core.Calendar.view_service")
     except ModuleNotFoundError as exc:
@@ -263,7 +272,7 @@ class _ScheduledTasksStub:
         return ScheduledTaskListResponse(items=self.tasks, total=len(self.tasks))
 
 
-def test_viewer_cannot_edit_local_item(calendar_db):
+def test_viewer_cannot_edit_local_item(calendar_db: CalendarDatabase) -> None:
     service = CalendarService(db=calendar_db)
     calendar = service.create_calendar(actor_user_id=1, name="Shared", timezone="UTC")
     local_item = service.create_item(
@@ -294,7 +303,7 @@ def test_viewer_cannot_edit_local_item(calendar_db):
         service.update_item(actor_user_id=2, item_id=local_item.id, title="Nope")
 
 
-def test_owner_can_manage_membership(calendar_db):
+def test_owner_can_manage_membership(calendar_db: CalendarDatabase) -> None:
     service = CalendarService(db=calendar_db)
     calendar = service.create_calendar(actor_user_id=1, name="Shared", timezone="UTC")
 
@@ -311,7 +320,7 @@ def test_owner_can_manage_membership(calendar_db):
     assert any(row.principal_type == "user" and row.principal_id == "2" for row in memberships)
 
 
-def test_non_owner_cannot_manage_membership(calendar_db):
+def test_non_owner_cannot_manage_membership(calendar_db: CalendarDatabase) -> None:
     service = CalendarService(db=calendar_db)
     calendar = service.create_calendar(actor_user_id=1, name="Shared", timezone="UTC")
     service.add_membership(
@@ -332,7 +341,7 @@ def test_non_owner_cannot_manage_membership(calendar_db):
         )
 
 
-def test_org_role_membership_grants_access_only_through_resolver(calendar_db):
+def test_org_role_membership_grants_access_only_through_resolver(calendar_db: CalendarDatabase) -> None:
     resolver_calls: list[tuple[int, int | None, str]] = []
 
     def resolver(user_id: int, org_id: int | None, role: str) -> bool:
@@ -377,7 +386,7 @@ def test_org_role_membership_grants_access_only_through_resolver(calendar_db):
     assert resolver_calls
 
 
-def test_editor_can_create_and_edit_local_items(calendar_db):
+def test_editor_can_create_and_edit_local_items(calendar_db: CalendarDatabase) -> None:
     service = CalendarService(db=calendar_db)
     calendar = service.create_calendar(actor_user_id=1, name="Shared", timezone="UTC")
     service.add_membership(
@@ -400,7 +409,7 @@ def test_editor_can_create_and_edit_local_items(calendar_db):
     assert updated.title == "Final title"
 
 
-def test_update_item_validates_effective_event_and_todo_times(calendar_db):
+def test_update_item_validates_effective_event_and_todo_times(calendar_db: CalendarDatabase) -> None:
     service = CalendarService(db=calendar_db)
     calendar = service.create_calendar(actor_user_id=1, name="Personal", timezone="UTC")
     event = service.create_item(
@@ -440,7 +449,7 @@ def test_update_item_validates_effective_event_and_todo_times(calendar_db):
     assert updated_todo.start_at == "2026-06-05T14:00:00Z"
 
 
-def test_commenter_can_annotate_local_item_but_cannot_edit_it(calendar_db):
+def test_commenter_can_annotate_local_item_but_cannot_edit_it(calendar_db: CalendarDatabase) -> None:
     service = CalendarService(db=calendar_db)
     calendar = service.create_calendar(actor_user_id=1, name="Shared", timezone="UTC")
     local_item = service.create_item(
@@ -497,7 +506,7 @@ def test_commenter_can_annotate_local_item_but_cannot_edit_it(calendar_db):
     assert calendar_db.get_item(local_item.id).local_tags_json is None
 
 
-def test_provider_owned_item_edits_raise_read_only_error(calendar_db):
+def test_provider_owned_item_edits_raise_read_only_error(calendar_db: CalendarDatabase) -> None:
     _, provider_item = _create_provider_item(calendar_db)
     service = CalendarService(db=calendar_db)
 
@@ -508,7 +517,7 @@ def test_provider_owned_item_edits_raise_read_only_error(calendar_db):
         service.delete_item(actor_user_id=1, item_id=provider_item.id)
 
 
-def test_copied_provider_item_becomes_local_and_independent(calendar_db):
+def test_copied_provider_item_becomes_local_and_independent(calendar_db: CalendarDatabase) -> None:
     calendar, provider_item = _create_provider_item(calendar_db)
     service = CalendarService(db=calendar_db)
 
@@ -530,7 +539,7 @@ def test_copied_provider_item_becomes_local_and_independent(calendar_db):
     assert provider_after.title == "Imported meeting"
 
 
-def test_shared_viewer_can_read_local_item_but_not_personal_provider_import(calendar_db):
+def test_shared_viewer_can_read_local_item_but_not_personal_provider_import(calendar_db: CalendarDatabase) -> None:
     calendar, provider_item = _create_provider_item(calendar_db)
     service = CalendarService(db=calendar_db)
     local_item = service.create_item(
@@ -563,7 +572,7 @@ def test_shared_viewer_can_read_local_item_but_not_personal_provider_import(cale
     assert {item.id for item in visible_items} == {local_item.id}
 
 
-def test_calendar_owner_can_read_and_list_personal_provider_import(calendar_db):
+def test_calendar_owner_can_read_and_list_personal_provider_import(calendar_db: CalendarDatabase) -> None:
     calendar, provider_item = _create_provider_item(calendar_db)
     service = CalendarService(db=calendar_db)
 
@@ -579,7 +588,7 @@ def test_calendar_owner_can_read_and_list_personal_provider_import(calendar_db):
     assert provider_item.id in {item.id for item in visible_items}
 
 
-def test_copied_provider_item_is_shared_by_normal_membership(calendar_db):
+def test_copied_provider_item_is_shared_by_normal_membership(calendar_db: CalendarDatabase) -> None:
     calendar, provider_item = _create_provider_item(calendar_db)
     service = CalendarService(db=calendar_db)
     copied = service.copy_provider_item(
@@ -610,7 +619,7 @@ def test_copied_provider_item_is_shared_by_normal_membership(calendar_db):
     assert provider_item.id not in {item.id for item in visible_items}
 
 
-def test_service_rejects_cross_tenant_calendar_item_list_and_annotation_paths(calendar_db):
+def test_service_rejects_cross_tenant_calendar_item_list_and_annotation_paths(calendar_db: CalendarDatabase) -> None:
     tenant_a_service = CalendarService(db=calendar_db, tenant_id="tenant-a")
     tenant_b_service = CalendarService(db=calendar_db, tenant_id="tenant-b")
     tenant_b_calendar = tenant_b_service.create_calendar(
@@ -662,7 +671,7 @@ def test_service_rejects_cross_tenant_calendar_item_list_and_annotation_paths(ca
     assert tenant_b_service.get_item(actor_user_id=1, item_id=tenant_b_item.id).title == "Tenant B item"
 
 
-def test_calendar_links_follow_calendar_permissions(calendar_db):
+def test_calendar_links_follow_calendar_permissions(calendar_db: CalendarDatabase) -> None:
     service = CalendarService(db=calendar_db)
     calendar = service.create_calendar(actor_user_id=1, name="Shared", timezone="UTC")
     service.add_membership(
@@ -695,7 +704,7 @@ def test_calendar_links_follow_calendar_permissions(calendar_db):
 
 
 @pytest.mark.asyncio
-async def test_agenda_expands_recurring_local_items_from_persisted_recurrence(calendar_db):
+async def test_agenda_expands_recurring_local_items_from_persisted_recurrence(calendar_db: CalendarDatabase) -> None:
     view_service = _view_service_module()
     service = CalendarService(db=calendar_db)
     calendar = service.create_calendar(actor_user_id=1, name="Research", timezone="UTC")
@@ -733,7 +742,7 @@ async def test_agenda_expands_recurring_local_items_from_persisted_recurrence(ca
 
 
 @pytest.mark.asyncio
-async def test_agenda_includes_offset_aware_items_after_authoritative_datetime_overlap(calendar_db):
+async def test_agenda_includes_offset_aware_items_after_authoritative_datetime_overlap(calendar_db: CalendarDatabase) -> None:
     view_service = _view_service_module()
     service = CalendarService(db=calendar_db)
     calendar = service.create_calendar(actor_user_id=1, name="Research", timezone="America/Los_Angeles")
@@ -761,7 +770,7 @@ async def test_agenda_includes_offset_aware_items_after_authoritative_datetime_o
 
 
 @pytest.mark.asyncio
-async def test_week_includes_offset_aware_items_crossing_raw_iso_boundary(calendar_db):
+async def test_week_includes_offset_aware_items_crossing_raw_iso_boundary(calendar_db: CalendarDatabase) -> None:
     view_service = _view_service_module()
     service = CalendarService(db=calendar_db)
     calendar = service.create_calendar(actor_user_id=1, name="Research", timezone="UTC")
@@ -788,7 +797,7 @@ async def test_week_includes_offset_aware_items_crossing_raw_iso_boundary(calend
 
 
 @pytest.mark.asyncio
-async def test_agenda_includes_all_day_date_only_items_for_overlapping_day_windows(calendar_db):
+async def test_agenda_includes_all_day_date_only_items_for_overlapping_day_windows(calendar_db: CalendarDatabase) -> None:
     view_service = _view_service_module()
     service = CalendarService(db=calendar_db)
     calendar = service.create_calendar(actor_user_id=1, name="Research", timezone="UTC")
@@ -818,7 +827,7 @@ async def test_agenda_includes_all_day_date_only_items_for_overlapping_day_windo
 
 
 @pytest.mark.asyncio
-async def test_agenda_returns_read_only_scheduled_task_linked_projections(calendar_db):
+async def test_agenda_returns_read_only_scheduled_task_linked_projections(calendar_db: CalendarDatabase) -> None:
     view_service = _view_service_module()
     service = CalendarService(db=calendar_db)
     calendar = service.create_calendar(actor_user_id=1, name="Research", timezone="UTC")
