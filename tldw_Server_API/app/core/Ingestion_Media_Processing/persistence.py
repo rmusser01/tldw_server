@@ -10,9 +10,12 @@ import logging
 import os
 import sqlite3
 import time
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from datetime import datetime, timezone
 from pathlib import Path as FilePath
-from typing import Any, Callable, Mapping
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 from uuid import uuid4
 
@@ -69,6 +72,9 @@ from tldw_Server_API.app.core.testing import (
     is_explicit_pytest_runtime,
     is_test_mode,
 )
+
+if TYPE_CHECKING:
+    from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 
 try:
     from tldw_Server_API.app.core.Resource_Governance import RGRequest
@@ -157,6 +163,54 @@ def _with_media_db_session(
             return operation(worker_db)
     finally:
         worker_db.close_connection()
+
+
+@contextlib.asynccontextmanager
+async def _archive_media_db_worker(
+    *,
+    db_path: str,
+    client_id: str,
+) -> AsyncIterator[Callable[[Callable[[MediaDatabase], Any]], Awaitable[Any]]]:
+    """Own one lazy database handle on one thread for an archive's lifetime.
+
+    Copy the request context for each operation so worker-local scope changes
+    cannot leak into the next child. Operations retain their own transactions.
+    """
+    loop = asyncio.get_running_loop()
+    context = copy_context()
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="email-archive-db")
+    worker_db: MediaDatabase | None = None
+
+    def invoke(operation: Callable[[MediaDatabase], Any]) -> Any:
+        nonlocal worker_db
+        if worker_db is None:
+            worker_db = create_media_database(client_id, db_path=db_path)
+        return operation(worker_db)
+
+    async def run_operation(operation: Callable[[MediaDatabase], Any]) -> Any:
+        return await loop.run_in_executor(executor, context.copy().run, invoke, operation)
+
+    def close() -> None:
+        if worker_db is not None:
+            worker_db.close_connection()
+
+    try:
+        yield run_operation
+    finally:
+        # The close is queued behind any cancelled/in-flight operation.
+        close_future = loop.run_in_executor(executor, context.copy().run, close)
+        cancelled_during_close = False
+        try:
+            while not close_future.done():
+                try:
+                    await asyncio.shield(close_future)
+                except asyncio.CancelledError:
+                    cancelled_during_close = True
+            close_future.result()
+        finally:
+            executor.shutdown(wait=False)
+        if cancelled_during_close:
+            raise asyncio.CancelledError
 
 
 def _build_ingestion_budget_headers(
@@ -6169,205 +6223,199 @@ async def persist_doc_item_and_children(
                         persisted_any_children = False
                     else:
                         child_db_results = []
-                        for child in children:
-                            try:
-                                child_content = child.get("content")
-                                child_meta = child.get("metadata") or {}
-                                if not child_content:
-                                    continue
-                                safe_child_meta = build_safe_metadata_subset(child_meta)
-                                safe_child_meta_json: str | None = None
+                        async with _archive_media_db_worker(
+                            db_path=db_path, client_id=client_id,
+                        ) as run_archive_operation:
+                            for child in children:
                                 try:
-                                    from tldw_Server_API.app.core.Utils.metadata_utils import (  # type: ignore
-                                        normalize_safe_metadata,
+                                    child_content = child.get("content")
+                                    child_meta = child.get("metadata") or {}
+                                    if not child_content:
+                                        continue
+                                    safe_child_meta = build_safe_metadata_subset(child_meta)
+                                    safe_child_meta_json: str | None = None
+                                    try:
+                                        from tldw_Server_API.app.core.Utils.metadata_utils import (  # type: ignore
+                                            normalize_safe_metadata,
+                                        )
+
+                                        safe_child_meta = normalize_safe_metadata(safe_child_meta)
+                                        safe_child_meta_json = json.dumps(safe_child_meta, ensure_ascii=False)
+                                    except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
+                                        pass
+
+                                    child_chunks_for_sql: list[dict[str, Any]] | None = None
+                                    try:
+                                        opts_child = resolved_chunk_options or {}
+                                        if opts_child:
+                                            from tldw_Server_API.app.core.Chunking.chunker import (  # type: ignore
+                                                Chunker as _Chunker,
+                                            )
+
+                                            chunker_child = _Chunker()
+                                            flat_child = chunker_child.chunk_text_hierarchical_flat(
+                                                child_content,
+                                                method=opts_child.get("method") or "sentences",
+                                                max_size=opts_child.get("max_size") or 500,
+                                                overlap=opts_child.get("overlap") or 50,
+                                            )
+                                            child_chunks_for_sql = []
+                                            for item in flat_child:
+                                                meta = item.get("metadata") or {}
+                                                chunk_type = (
+                                                    chunker_child.normalize_chunk_type(
+                                                        meta.get("chunk_type") or meta.get("paragraph_kind")
+                                                    )
+                                                    or "text"
+                                                )
+                                                small_meta: dict[str, Any] = {}
+                                                if meta.get("ancestry_titles"):
+                                                    small_meta["ancestry_titles"] = meta.get("ancestry_titles")
+                                                if meta.get("section_path"):
+                                                    small_meta["section_path"] = meta.get("section_path")
+                                                child_chunks_for_sql.append(
+                                                    {
+                                                        "text": item.get("text", ""),
+                                                        "start_char": meta.get("start_offset"),
+                                                        "end_char": meta.get("end_offset"),
+                                                        "chunk_type": chunk_type,
+                                                        "metadata": small_meta,
+                                                    }
+                                                )
+                                    except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
+                                        child_chunks_for_sql = None
+
+                                    child_title = (
+                                        getattr(form_data, "title", None)
+                                        or child_meta.get("title")
+                                        or f"{FilePath(item_input_ref).stem} (archive child)"
+                                    )
+                                    child_author = child_meta.get(
+                                        "author",
+                                        getattr(form_data, "author", None) or "Unknown",
+                                    )
+                                    child_url = (
+                                        f"{item_input_ref}::archive::" f"{child_meta.get('filename') or child_title}"
                                     )
 
-                                    safe_child_meta = normalize_safe_metadata(safe_child_meta)
-                                    safe_child_meta_json = json.dumps(safe_child_meta, ensure_ascii=False)
-                                except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
-                                    pass
-
-                                child_chunks_for_sql: list[dict[str, Any]] | None = None
-                                try:
-                                    opts_child = resolved_chunk_options or {}
-                                    if opts_child:
-                                        from tldw_Server_API.app.core.Chunking.chunker import (  # type: ignore
-                                            Chunker as _Chunker,
-                                        )
-
-                                        chunker_child = _Chunker()
-                                        flat_child = chunker_child.chunk_text_hierarchical_flat(
-                                            child_content,
-                                            method=opts_child.get("method") or "sentences",
-                                            max_size=opts_child.get("max_size") or 500,
-                                            overlap=opts_child.get("overlap") or 50,
-                                        )
-                                        child_chunks_for_sql = []
-                                        for item in flat_child:
-                                            meta = item.get("metadata") or {}
-                                            chunk_type = (
-                                                chunker_child.normalize_chunk_type(
-                                                    meta.get("chunk_type") or meta.get("paragraph_kind")
+                                    def _db_child_arch_worker(
+                                        worker_db: MediaDatabase,
+                                        child_url_local: str = child_url,
+                                        child_title_local: str = child_title,
+                                        child_content_local: str = child_content,
+                                        child_metadata_local: dict[str, Any] = (
+                                            child_meta if isinstance(child_meta, dict) else {}
+                                        ),
+                                        final_keywords_local: list[str] = final_keywords_list,
+                                        safe_child_meta_json_local: str | None = safe_child_meta_json,
+                                        model_used_local: str | None = model_used,
+                                        child_author_local: str = child_author,
+                                        child_chunks_for_sql_local: list[dict[str, Any]] | None = child_chunks_for_sql,
+                                        media_type_local: str = media_type,
+                                        form_data_local: Any = form_data,
+                                        chunk_options_local: dict[str, Any] | None = resolved_chunk_options,
+                                    ) -> Any:
+                                        def _persist_archive_child(worker_db: MediaDatabase) -> Any:
+                                            media_writer = _resolve_media_writer(worker_db)
+                                            child_id_local, child_uuid_local, child_msg_local = (
+                                                media_writer.add_media_with_keywords(
+                                                    url=_normalize_dedupe_url_for_db(child_url_local),
+                                                    title=child_title_local,
+                                                    media_type=media_type_local,
+                                                    content=child_content_local,
+                                                    keywords=final_keywords_local,
+                                                    prompt=getattr(form_data_local, "custom_prompt", None),
+                                                    analysis_content=None,
+                                                    safe_metadata=safe_child_meta_json_local,
+                                                    transcription_model=model_used_local,
+                                                    author=child_author_local,
+                                                    overwrite=getattr(form_data_local, "overwrite_existing", False),
+                                                    chunk_options=chunk_options_local,
+                                                    chunks=child_chunks_for_sql_local,
                                                 )
-                                                or "text"
                                             )
-                                            small_meta: dict[str, Any] = {}
-                                            if meta.get("ancestry_titles"):
-                                                small_meta["ancestry_titles"] = meta.get("ancestry_titles")
-                                            if meta.get("section_path"):
-                                                small_meta["section_path"] = meta.get("section_path")
-                                            child_chunks_for_sql.append(
-                                                {
-                                                    "text": item.get("text", ""),
-                                                    "start_char": meta.get("start_offset"),
-                                                    "end_char": meta.get("end_offset"),
-                                                    "chunk_type": chunk_type,
-                                                    "metadata": small_meta,
-                                                }
-                                            )
-                                except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
-                                    child_chunks_for_sql = None
-
-                                child_title = (
-                                    getattr(form_data, "title", None)
-                                    or child_meta.get("title")
-                                    or f"{FilePath(item_input_ref).stem} (archive child)"
-                                )
-                                child_author = child_meta.get(
-                                    "author",
-                                    getattr(form_data, "author", None) or "Unknown",
-                                )
-                                child_url = (
-                                    f"{item_input_ref}::archive::" f"{child_meta.get('filename') or child_title}"
-                                )
-
-                                def _db_child_arch_worker(
-                                    child_url_local: str = child_url,
-                                    child_title_local: str = child_title,
-                                    child_content_local: str = child_content,
-                                    child_metadata_local: dict[str, Any] = (
-                                        child_meta if isinstance(child_meta, dict) else {}
-                                    ),
-                                    final_keywords_local: list[str] = final_keywords_list,
-                                    safe_child_meta_json_local: str | None = safe_child_meta_json,
-                                    model_used_local: str | None = model_used,
-                                    child_author_local: str = child_author,
-                                    child_chunks_for_sql_local: list[dict[str, Any]] | None = child_chunks_for_sql,
-                                    media_type_local: str = media_type,
-                                    form_data_local: Any = form_data,
-                                    chunk_options_local: dict[str, Any] | None = resolved_chunk_options,
-                                    db_path_local: str = db_path,
-                                    client_id_local: str = client_id,
-                                ) -> Any:
-                                    def _persist_archive_child(worker_db: MediaDatabase) -> Any:
-                                        media_writer = _resolve_media_writer(worker_db)
-                                        child_id_local, child_uuid_local, child_msg_local = (
-                                            media_writer.add_media_with_keywords(
-                                                url=_normalize_dedupe_url_for_db(child_url_local),
-                                                title=child_title_local,
-                                                media_type=media_type_local,
-                                                content=child_content_local,
-                                                keywords=final_keywords_local,
-                                                prompt=getattr(form_data_local, "custom_prompt", None),
-                                                analysis_content=None,
-                                                safe_metadata=safe_child_meta_json_local,
-                                                transcription_model=model_used_local,
-                                                author=child_author_local,
-                                                overwrite=getattr(form_data_local, "overwrite_existing", False),
-                                                chunk_options=chunk_options_local,
-                                                chunks=child_chunks_for_sql_local,
-                                            )
-                                        )
-                                        if media_type_local == "email" and child_id_local:
-                                            if _is_email_native_persist_enabled():
-                                                try:
-                                                    saved_metadata, saved_body = read_persisted_email_content(
-                                                        worker_db, int(child_id_local), tenant_id=resolved_email_tenant_id,
-                                                    )
-                                                    child_email_graph_local = worker_db.upsert_email_message_graph(
-                                                        media_id=int(child_id_local),
-                                                        metadata=saved_metadata,
-                                                        body_text=saved_body,
-                                                        tenant_id=resolved_email_tenant_id,
-                                                        provider="upload",
-                                                        source_key=str(child_url_local),
-                                                    )
+                                            if media_type_local == "email" and child_id_local:
+                                                if _is_email_native_persist_enabled():
+                                                    try:
+                                                        saved_metadata, saved_body = read_persisted_email_content(
+                                                            worker_db, int(child_id_local), tenant_id=resolved_email_tenant_id,
+                                                        )
+                                                        child_email_graph_local = worker_db.upsert_email_message_graph(
+                                                            media_id=int(child_id_local),
+                                                            metadata=saved_metadata,
+                                                            body_text=saved_body,
+                                                            tenant_id=resolved_email_tenant_id,
+                                                            provider="upload",
+                                                            source_key=str(child_url_local),
+                                                        )
+                                                        _emit_email_native_persist_metric(
+                                                            path_kind="archive_child",
+                                                            outcome=(
+                                                                "success"
+                                                                if isinstance(child_email_graph_local, dict)
+                                                                and child_email_graph_local.get("email_message_id")
+                                                                else "noop"
+                                                            ),
+                                                        )
+                                                    except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as exc:
+                                                        logger.debug(
+                                                            "Email native upsert skipped due to non-fatal error (archive_child): {}",
+                                                            exc,
+                                                        )
+                                                        _emit_email_native_persist_metric(
+                                                            path_kind="archive_child",
+                                                            outcome="error",
+                                                        )
+                                                else:
                                                     _emit_email_native_persist_metric(
                                                         path_kind="archive_child",
-                                                        outcome=(
-                                                            "success"
-                                                            if isinstance(child_email_graph_local, dict)
-                                                            and child_email_graph_local.get("email_message_id")
-                                                            else "noop"
-                                                        ),
+                                                        outcome="skipped_flag",
                                                     )
-                                                except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as exc:
-                                                    logger.debug(
-                                                        "Email native upsert skipped due to non-fatal error (archive_child): {}",
-                                                        exc,
-                                                    )
-                                                    _emit_email_native_persist_metric(
-                                                        path_kind="archive_child",
-                                                        outcome="error",
-                                                    )
-                                            else:
-                                                _emit_email_native_persist_metric(
-                                                    path_kind="archive_child",
-                                                    outcome="skipped_flag",
-                                                )
-                                        return child_id_local, child_uuid_local, child_msg_local
+                                            return child_id_local, child_uuid_local, child_msg_local
 
-                                    return _with_media_db_session(
-                                        db_path=db_path_local,
-                                        client_id=client_id_local,
-                                        operation=_persist_archive_child,
-                                        scope=email_scope,
+                                        return _persist_archive_child(worker_db)
+
+                                    (
+                                        child_id,
+                                        child_uuid,
+                                        child_msg,
+                                    ) = await run_archive_operation(_db_child_arch_worker)
+                                    await _enforce_chunk_consistency_after_persist(
+                                        result=final_result,
+                                        form_data=form_data,
+                                        media_type=media_type,
+                                        path_kind=path_kind,
+                                        processor="email_child_archive_persist",
+                                        expected_chunk_count=(
+                                            len(child_chunks_for_sql) if isinstance(child_chunks_for_sql, list) else None
+                                        ),
+                                        db_message=child_msg,
+                                        media_id=child_id,
+                                        db_path=db_path,
+                                        client_id=client_id,
+                                        loop=loop,
                                     )
-
-                                (
-                                    child_id,
-                                    child_uuid,
-                                    child_msg,
-                                ) = await loop.run_in_executor(  # type: ignore[arg-type]
-                                    None,
-                                    _db_child_arch_worker,
-                                )
-                                await _enforce_chunk_consistency_after_persist(
-                                    result=final_result,
-                                    form_data=form_data,
-                                    media_type=media_type,
-                                    path_kind=path_kind,
-                                    processor="email_child_archive_persist",
-                                    expected_chunk_count=(
-                                        len(child_chunks_for_sql) if isinstance(child_chunks_for_sql, list) else None
-                                    ),
-                                    db_message=child_msg,
-                                    media_id=child_id,
-                                    db_path=db_path,
-                                    client_id=client_id,
-                                    loop=loop,
-                                )
-                                _emit_ingestion_chunks_metric(
-                                    media_type=media_type,
-                                    chunk_method=(resolved_chunk_options or {}).get("method"),
-                                    chunk_count=(
-                                        len(child_chunks_for_sql) if isinstance(child_chunks_for_sql, list) else 0
-                                    ),
-                                )
-                                child_db_results.append(
-                                    {
-                                        "db_id": child_id,
-                                        "media_uuid": child_uuid,
-                                        "message": child_msg,
-                                        "title": child_title,
-                                    }
-                                )
-                                persisted_any_children = True
-                            except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as child_db_err:
-                                logger.warning(
-                                    "Archive child email persistence failed: {}",
-                                    child_db_err,
-                                )
+                                    _emit_ingestion_chunks_metric(
+                                        media_type=media_type,
+                                        chunk_method=(resolved_chunk_options or {}).get("method"),
+                                        chunk_count=(
+                                            len(child_chunks_for_sql) if isinstance(child_chunks_for_sql, list) else 0
+                                        ),
+                                    )
+                                    child_db_results.append(
+                                        {
+                                            "db_id": child_id,
+                                            "media_uuid": child_uuid,
+                                            "message": child_msg,
+                                            "title": child_title,
+                                        }
+                                    )
+                                    persisted_any_children = True
+                                except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as child_db_err:
+                                    logger.warning(
+                                        "Archive child email persistence failed: {}",
+                                        child_db_err,
+                                    )
                         try:
                             if child_db_results:
                                 final_result["child_db_results"] = child_db_results
