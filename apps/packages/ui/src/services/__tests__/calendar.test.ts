@@ -15,6 +15,8 @@ import {
   updateCalendarLocalTags,
   createExternalCalendarBinding,
   deleteCalendarItem,
+  listCalendarLinks,
+  deleteCalendarLink,
   deleteCalDavAccount,
   discoverExternalCalendars,
   getCalendarAgenda,
@@ -30,6 +32,22 @@ import {
 describe("calendar service contract", () => {
   beforeEach(() => {
     mocks.bgRequest.mockReset()
+  })
+
+  it("lists persisted links with an encoded item ID", async () => {
+    mocks.bgRequest.mockResolvedValue({ items: [], total: 0 })
+    await listCalendarLinks("item/7")
+    expect(mocks.bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/calendar/items/item%2F7/links", method: "GET"
+    })
+  })
+
+  it("removes only the selected item link", async () => {
+    mocks.bgRequest.mockResolvedValue({ removed: 1 })
+    await deleteCalendarLink(7, 11)
+    expect(mocks.bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/calendar/items/7/links/11", method: "DELETE"
+    })
   })
 
   it("lists calendars through the calendar collection endpoint", async () => {

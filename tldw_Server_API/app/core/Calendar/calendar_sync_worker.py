@@ -12,8 +12,8 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.Calendar.errors import CalendarPermissionDenied, CalendarValidationError
-from tldw_Server_API.app.core.Calendar.providers.caldav import CalDavProvider, sanitize_provider_metadata
 from tldw_Server_API.app.core.Calendar.provider_operations import call_provider, resolve_caldav_credentials
+from tldw_Server_API.app.core.Calendar.providers.caldav import CalDavProvider, sanitize_provider_metadata
 from tldw_Server_API.app.core.DB_Management.Calendar_DB import (
     CalendarDatabase,
     ExternalCalendarAccountRow,

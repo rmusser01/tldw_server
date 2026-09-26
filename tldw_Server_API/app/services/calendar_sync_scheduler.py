@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sqlite3
 from datetime import datetime, timedelta, timezone
 
 from tldw_Server_API.app.core.Calendar.calendar_sync_worker import (
@@ -27,6 +28,7 @@ _SCHEDULER_GUARD_EXCEPTIONS = (
     TimeoutError,
     TypeError,
     ValueError,
+    sqlite3.Error,
 )
 
 
@@ -79,7 +81,7 @@ async def run_calendar_sync_scheduler(
             return
         try:
             await queue_due_calendar_sync_jobs(db=db, job_manager=job_manager)
-        except Exception as exc:
+        except (CalendarError, *_SCHEDULER_GUARD_EXCEPTIONS) as exc:
             log_calendar_failure("scan_due_bindings", exc)
         if stop_event is None:
             await asyncio.sleep(interval)

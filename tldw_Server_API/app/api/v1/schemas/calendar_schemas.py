@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 from typing import Any, Literal
-from dateutil import parser as date_parser
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from dateutil import parser as date_parser
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from tldw_Server_API.app.api.v1.schemas.reminders_schemas import ReminderTaskCreateRequest
@@ -71,7 +71,7 @@ class CalendarResponse(BaseModel):
     updated_at: str
 
     @classmethod
-    def from_row(cls, row: CalendarRow) -> "CalendarResponse":
+    def from_row(cls, row: CalendarRow) -> CalendarResponse:
         return cls(
             id=row.id,
             tenant_id=row.tenant_id,
@@ -113,7 +113,7 @@ class CalendarMembershipResponse(BaseModel):
     updated_at: str
 
     @classmethod
-    def from_row(cls, row: CalendarMembershipRow) -> "CalendarMembershipResponse":
+    def from_row(cls, row: CalendarMembershipRow) -> CalendarMembershipResponse:
         return cls(**row.__dict__)
 
 
@@ -135,7 +135,7 @@ class CalendarRecurrenceRequest(BaseModel):
     timezone: str | None = None
 
     @model_validator(mode="after")
-    def _validate_rrule(self) -> "CalendarRecurrenceRequest":
+    def _validate_rrule(self) -> CalendarRecurrenceRequest:
         if self.rrule:
             try:
                 LocalRecurrenceRule.from_rrule(self.rrule)
@@ -164,7 +164,7 @@ class CalendarRecurrenceResponse(BaseModel):
     updated_at: str
 
     @classmethod
-    def from_row(cls, row: CalendarRecurrenceRow) -> "CalendarRecurrenceResponse":
+    def from_row(cls, row: CalendarRecurrenceRow) -> CalendarRecurrenceResponse:
         return cls(
             id=row.id,
             calendar_item_id=row.calendar_item_id,
@@ -196,7 +196,7 @@ class CalendarItemCreateRequest(BaseModel):
     recurrence: CalendarRecurrenceRequest | None = None
 
     @model_validator(mode="after")
-    def _validate_item_time(self) -> "CalendarItemCreateRequest":
+    def _validate_item_time(self) -> CalendarItemCreateRequest:
         if self.kind == "event" and not self.start_at:
             raise ValueError("Calendar events require start_at")
         if self.kind == "todo" and not (self.start_at or self.due_at):
@@ -266,7 +266,7 @@ class CalendarItemResponse(BaseModel):
         cls,
         row: CalendarItemRow,
         recurrence: CalendarRecurrenceRow | None = None,
-    ) -> "CalendarItemResponse":
+    ) -> CalendarItemResponse:
         return cls(
             id=row.id,
             calendar_id=row.calendar_id,
@@ -324,7 +324,7 @@ class CalendarAnnotationResponse(BaseModel):
     updated_at: str
 
     @classmethod
-    def from_row(cls, row: CalendarAnnotationRow) -> "CalendarAnnotationResponse":
+    def from_row(cls, row: CalendarAnnotationRow) -> CalendarAnnotationResponse:
         return cls(
             id=row.id,
             calendar_item_id=row.calendar_item_id,
@@ -359,7 +359,7 @@ class CalendarLinkResponse(BaseModel):
     updated_at: str
 
     @classmethod
-    def from_row(cls, row: CalendarLinkRow) -> "CalendarLinkResponse":
+    def from_row(cls, row: CalendarLinkRow) -> CalendarLinkResponse:
         return cls(
             id=row.id,
             calendar_item_id=row.calendar_item_id,
@@ -371,6 +371,15 @@ class CalendarLinkResponse(BaseModel):
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
+
+
+class CalendarLinkListResponse(BaseModel):
+    items: list[CalendarLinkResponse] = Field(default_factory=list)
+    total: int = Field(..., ge=0)
+
+
+class CalendarLinkDeleteResponse(BaseModel):
+    removed: int = Field(..., ge=0)
 
 
 class CalendarItemCopyRequest(BaseModel):
@@ -407,6 +416,7 @@ class CalendarViewItemResponse(BaseModel):
     recurrence_id: int | None = None
     occurrence_index: int | None = None
     link: CalendarViewLinkResponse | None = None
+    links: list[CalendarLinkResponse] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -483,7 +493,7 @@ class ExternalCalendarAccountResponse(BaseModel):
     updated_at: str
 
     @classmethod
-    def from_row(cls, row: ExternalCalendarAccountRow) -> "ExternalCalendarAccountResponse":
+    def from_row(cls, row: ExternalCalendarAccountRow) -> ExternalCalendarAccountResponse:
         return cls(
             id=row.id,
             tenant_id=row.tenant_id,
@@ -565,7 +575,7 @@ class ExternalCalendarBindingResponse(BaseModel):
     updated_at: str
 
     @classmethod
-    def from_row(cls, row: ExternalCalendarBindingRow) -> "ExternalCalendarBindingResponse":
+    def from_row(cls, row: ExternalCalendarBindingRow) -> ExternalCalendarBindingResponse:
         return cls(
             id=row.id,
             account_id=row.account_id,
@@ -609,7 +619,7 @@ class CalendarSyncEventResponse(BaseModel):
     created_at: str
 
     @classmethod
-    def from_row(cls, row: CalendarSyncEventRow) -> "CalendarSyncEventResponse":
+    def from_row(cls, row: CalendarSyncEventRow) -> CalendarSyncEventResponse:
         return cls(
             id=row.id,
             binding_id=row.binding_id,

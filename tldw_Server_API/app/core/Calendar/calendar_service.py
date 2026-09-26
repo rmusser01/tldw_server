@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Any, get_args
-from dateutil import parser as date_parser
 from datetime import timezone as utc_timezone
+from typing import Any, get_args
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from dateutil import parser as date_parser
 
 from tldw_Server_API.app.core.Calendar.constants import CALENDAR_SOURCE_OWNER_PROVIDER
 from tldw_Server_API.app.core.Calendar.errors import (
+    CalendarItemNotFound,
     CalendarPermissionDenied,
     CalendarReadOnlyError,
     CalendarValidationError,
@@ -337,8 +339,10 @@ class CalendarService:
         self._item_and_context(actor_user_id, item_id)
         return self.db.list_links(item_id)
 
-    def delete_link(self, *, actor_user_id: int, link_id: int) -> int:
+    def delete_link(self, *, actor_user_id: int, link_id: int, item_id: int | None = None) -> int:
         link = self.db.get_link(link_id)
+        if item_id is not None and link.calendar_item_id != item_id:
+            raise CalendarItemNotFound("Calendar link does not belong to this item")
         item, _ = self._item_and_context(actor_user_id, link.calendar_item_id)
         self._assert_calendar_access(actor_user_id, item.calendar_id, "write")
         return self.db.delete_link(link_id)
