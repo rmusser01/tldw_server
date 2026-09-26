@@ -11,6 +11,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     InputError,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.validation import MediaDbLike
+from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import exception_type_for_log
 
 
 class DocumentVersionsRepository:
@@ -183,32 +184,19 @@ class DocumentVersionsRepository:
                             except DatabaseError:
                                 pass
                 except Exception as exc:
-                    logger.warning(
-                        "Could not populate identifiers for version_id={}: {}",
-                        version_id,
-                        exc,
-                    )
+                    logger.warning("Document version identifiers skipped (error_type={})", exception_type_for_log(exc))
 
                 db._log_sync_event(conn, "DocumentVersions", new_uuid, "create", new_version, insert_data)
         except (InputError, DatabaseError, sqlite3.Error) as exc:
             if "foreign key constraint failed" in str(exc).lower():
-                logger.exception(
-                    "Failed create document version: Media ID {} not found.",
-                    media_id,
-                    exc_info=False,
-                )
+                logger.error("Document version creation failed (error_type={})", exception_type_for_log(exc))
                 raise InputError(f"Cannot create document version: Media ID {media_id} not found.") from exc  # noqa: TRY003
-            logger.error("DB error creating document version for media {}: {}", media_id, exc, exc_info=True)
+            logger.error("Document version creation failed (error_type={})", exception_type_for_log(exc))
             if isinstance(exc, (InputError, DatabaseError)):
                 raise
             raise DatabaseError(f"Failed create document version: {exc}") from exc  # noqa: TRY003
         except Exception as exc:
-            logger.error(
-                "Unexpected error creating document version for media {}: {}",
-                media_id,
-                exc,
-                exc_info=True,
-            )
+            logger.error("Document version creation failed (error_type={})", exception_type_for_log(exc))
             raise DatabaseError(f"Unexpected error creating document version: {exc}") from exc  # noqa: TRY003
         else:
             return {

@@ -26,8 +26,8 @@ from tldw_Server_API.app.core.DB_Management.sql_utils import split_sql_statement
 from tldw_Server_API.app.core.testing import is_truthy
 
 from .base import (
-    BackendFeatures,
     AuthorizationDeniedError,
+    BackendFeatures,
     BackendType,
     ConnectionPool,
     DatabaseBackend,
@@ -621,11 +621,14 @@ class PostgreSQLBackend(DatabaseBackend):
 
         statements = [
             # Maintain both keys for compatibility across modules/tests
-            ("SELECT set_config('app.current_user_id', %s, false)", (user_id,)),
-            ("SELECT set_config('app.user_id', %s, false)", (user_id,)),
-            ("SELECT set_config('app.org_ids', %s, false)", (org_ids,)),
-            ("SELECT set_config('app.team_ids', %s, false)", (team_ids,)),
-            ("SELECT set_config('app.is_admin', %s, false)", (is_admin,)),
+            (
+                "SELECT set_config('app.current_user_id', %s, false), "
+                "set_config('app.user_id', %s, false), "
+                "set_config('app.org_ids', %s, false), "
+                "set_config('app.team_ids', %s, false), "
+                "set_config('app.is_admin', %s, false)",
+                (user_id, user_id, org_ids, team_ids, is_admin),
+            ),
         ]
 
         def _run_with_cursor(cur) -> None:
@@ -1359,6 +1362,8 @@ class PostgreSQLBackend(DatabaseBackend):
             refresh_tsv_sql = f"""
                 UPDATE {source_table_ident}
                 SET {fts_column_ident} =
+                    to_tsvector('english', {columns_concat_set})
+                WHERE {fts_column_ident} IS DISTINCT FROM
                     to_tsvector('english', {columns_concat_set})
             """  # nosec B608
             cursor.execute(refresh_tsv_sql)

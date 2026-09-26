@@ -1,4 +1,4 @@
-"""Helpers for logging user-controlled URLs without sensitive components."""
+"""Helpers for diagnostic logs without user-controlled sensitive components."""
 
 from __future__ import annotations
 
@@ -46,3 +46,13 @@ def redact_url_for_log(value: object) -> str:
 def redact_urls_for_log(values: Iterable[object]) -> list[str]:
     """Return a list of URL-like values safe to include in logs."""
     return [redact_url_for_log(value) for value in values]
+
+
+def exception_type_for_log(exc: BaseException) -> str:
+    """Return a bounded exception class name without rendering exception data.
+
+    Exception text and tracebacks can include email bodies, headers, credentials
+    or uploaded filenames. Callers should log this summary without attaching
+    the original exception or traceback to the log record.
+    """
+    return type(exc).__name__[:80]

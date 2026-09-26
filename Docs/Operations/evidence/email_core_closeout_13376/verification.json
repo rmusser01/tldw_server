@@ -1,0 +1,116 @@
+{
+  "measured_source_revision": "880d690a932629c49dd5fd2ebc94fea97e9f6324",
+  "quality": {
+    "ruff_exit": 0,
+    "bandit_exit": 0,
+    "bandit_findings": 0,
+    "bandit_errors": 0,
+    "whitespace_exit": 0,
+    "compiled_python_files": 62,
+    "production_and_probe_files": 38
+  },
+  "pytest_scopes": {
+    "combined_core": {
+      "log": "/tmp/email_core_regression_13376.log",
+      "sha256": "0487a3410cb5c2ad4e51cf6700981f4ab4d611a6e526e61979f24850830e3529",
+      "observed_summary": "328 passed, 2 skipped, 10 warnings in 726.30s (0:12:06)"
+    },
+    "logging_real_schema": {
+      "log": "/tmp/email_sqlite_schema_green_13376.log",
+      "sha256": "8b915ed373cf6637afe77b6180bcbd622b25de58c4cd36a50da20dc87c7a0508",
+      "observed_summary": "83 passed, 8 warnings in 98.75s (0:01:38)"
+    },
+    "legacy_search": {
+      "log": "/tmp/email_legacy_search_regressions_13376.log",
+      "sha256": "c0242158f1bce6788bc9af0e374c6df8e87f93cd37dce8e705a915fbff75e98b",
+      "observed_summary": "24 passed, 33 deselected, 4 warnings in 2.54s"
+    },
+    "postgres_scope_transactions": {
+      "log": "/tmp/email_postgres_core_regression_13376.log",
+      "sha256": "9c282ceeb7335b70e092c53179d895ece1a2ca321bc99595e0fbb7090513d831",
+      "observed_summary": "8 passed, 4 warnings in 2.20s"
+    },
+    "mock_connector_query_metrics": {
+      "log": "/tmp/email_final_mock_and_query_tests_13376.log",
+      "sha256": "251433e9454192d400b437af5c46dd6ba099419639b6d51753fa21d10ac05061",
+      "observed_summary": "35 passed, 4 warnings in 1.65s"
+    },
+    "fixture_statistics": {
+      "log": "/tmp/email_fixture_analyze_green_13376.log",
+      "sha256": "c8c13f3697a161bb1d9b09b69e14fd6a9515fa3aed0a7899099c6c16c9d67f1b",
+      "observed_summary": "21 passed, 4 warnings in 1.47s"
+    },
+    "postgres_reuse_guards": {
+      "log": "/tmp/email_pg_reuse_verified_13376.log",
+      "sha256": "5d8bb46e281ff973cfdcecd1dc605b7420defd057850bba75a14b118723843f7",
+      "observed_summary": "55 passed, 4 warnings in 2.91s"
+    },
+    "postgres_graph_identity_logging": {
+      "log": "/tmp/email_pg_graph_regressions_13376.log",
+      "sha256": "9cafbb590acf1b1d224c8586ffc56ef117005b69d58dd990ed185c1443594519",
+      "observed_summary": "96 passed, 8 warnings in 78.27s (0:01:18)"
+    },
+    "postgres_acceleration_compatibility": {
+      "log": "/tmp/email_pg_acceleration_compatibility_13376.log",
+      "sha256": "342439e64bb5231b28272e738688733fd414da6a4463faaea39525ff56953951",
+      "observed_summary": "51 passed, 72 warnings in 18.50s"
+    },
+    "postgres_rls_with_read_contract_setup_error": {
+      "log": "/tmp/email_pg_acceleration_rls_regressions_13376.log",
+      "sha256": "6784c36166895409ed78b87c8107dbb7538b16cc5b57e353551d6cd38202e0ca",
+      "observed_summary": "28 passed, 4 warnings, 1 error in 10.03s",
+      "resolved_by": "postgres_read_contract_fixture_retry"
+    },
+    "postgres_read_contract_fixture_retry": {
+      "log": "/tmp/email_pg_read_contract_13376.log",
+      "sha256": "5cc5f39f94dca5d8a4951acc08a37e852871ed0a295d651e50dc841d398527b3",
+      "observed_summary": "1 passed, 4 warnings in 7.63s"
+    },
+    "postgres_parity_budget": {
+      "log": "/tmp/email_pg_parity_budget_green_13376.log",
+      "sha256": "ad8c9c4b03cd58959c3265cc2def6f67c0b2699d28897ecafe93b3a5209fb7b2",
+      "observed_summary": "11 passed, 4 warnings in 1.82s"
+    },
+    "postgres_custom_planning": {
+      "log": "/tmp/email_pg_custom_plan_green_13376.log",
+      "sha256": "0c8434f3c9f12e225fa1918b4f9c1b0270ccba422e01de5d4f0fa76f623facf4",
+      "observed_summary": "22 passed, 4 warnings in 5.15s"
+    },
+    "postgres_legacy_parameter_phrase_rank": {
+      "log": "/tmp/email_pg_legacy_final_regressions_13376.log",
+      "sha256": "53d6fccd2931e2e20d9d7269bd66ea0363a00ce56a37295744725e7ac0935ffc",
+      "observed_summary": "28 passed, 4 warnings in 8.78s"
+    },
+    "sql_rewrite_cache": {
+      "log": "/tmp/email_sql_rewrite_cache_green_13376.log",
+      "sha256": "4a4d118fb8c697182e39aad86b034ddc7142b8f5b1b065c06ec2d0a623811447",
+      "observed_summary": "65 passed, 4 warnings in 1.58s"
+    },
+    "source_identity_query_utils": {
+      "log": "/tmp/email_source_sql_utils_green_13376.log",
+      "sha256": "4dacd3d141f2c4ef9e19f2d6a97d534781234d455b807b2047cd939eab0c8c0d",
+      "observed_summary": "56 passed, 4 warnings in 2.64s"
+    },
+    "postgres_identity_keyword": {
+      "log": "/tmp/email_pg_identity_final_verified_13376.log",
+      "sha256": "242be9ed3b1758239feb045afc86751e732201b7f8a08f1ffb833ba3afd178ef",
+      "observed_summary": "51 passed, 4 warnings in 5.59s"
+    },
+    "final_combined_postgres": {
+      "log": "/tmp/email_postgres_final_combined_regression_13376.log",
+      "sha256": "d2c1b800591c245e282ec09be8867ab41c24672f636c8066424e6479eee79344",
+      "observed_summary": "211 passed, 4 warnings in 13.85s"
+    },
+    "dedicated_port_source_guard_full": {
+      "log": "/tmp/email_pg_port_guard_full_green_13376.log",
+      "sha256": "406a88458cfaa10efb95b367bf6f14de2945074313d025c1b0f6d9c52f7cfc98",
+      "observed_summary": "91 passed, 4 warnings in 2.95s"
+    }
+  },
+  "counts_are_additive": false,
+  "optional_skips": "Two real PST adapter tests require pypff and PST_FIXTURE_PATH.",
+  "independent_review": {
+    "findings": [],
+    "scope": "Native graph, query/RLS/schema, guarded runner, full fixture verification, legacy parameter/phrase/rank, bounded SQL rewrite cache and source identity, prioritized email identity, fresh empty keywords and configured loopback-port/private-generated-resource/source-identity guards"
+  }
+}
