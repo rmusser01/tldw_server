@@ -17,7 +17,6 @@ import os
 import subprocess
 import sys
 
-
 CORE = [
     "torch>=2.0.0",
     "torchaudio>=2.0.0",
@@ -36,9 +35,8 @@ CORE = [
 
 LANG = [
     "pykakasi>=2.2.1",
-    "dicta-onnx>=0.2.0",
+    "dicta-onnx>=0.2.0; python_version >= '3.11'",
     "spacy-pkuseg>=0.0.33",
-    "russian_text_stresser>=1.0.5",
 ]
 
 

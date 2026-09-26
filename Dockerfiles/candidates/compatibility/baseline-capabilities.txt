@@ -1,0 +1,1991 @@
+Encoders:
+ V..... = Video
+ A..... = Audio
+ S..... = Subtitle
+ .F.... = Frame-level multithreading
+ ..S... = Slice-level multithreading
+ ...X.. = Codec is experimental
+ ....B. = Supports draw_horiz_band
+ .....D = Supports direct rendering method 1
+ ------
+ V....D a64multi             Multicolor charset for Commodore 64 (codec a64_multi)
+ V....D a64multi5            Multicolor charset for Commodore 64, extended with 5th color (colram) (codec a64_multi5)
+ V....D alias_pix            Alias/Wavefront PIX image
+ V..... amv                  AMV Video
+ V....D apng                 APNG (Animated Portable Network Graphics) image
+ V....D asv1                 ASUS V1
+ V....D asv2                 ASUS V2
+ V....D libaom-av1           libaom AV1 (codec av1)
+ V....D librav1e             librav1e AV1 (codec av1)
+ V..... libsvtav1            SVT-AV1(Scalable Video Technology for AV1) encoder (codec av1)
+ V....D av1_nvenc            NVIDIA NVENC av1 encoder (codec av1)
+ V..... av1_qsv              AV1 (Intel Quick Sync Video acceleration) (codec av1)
+ V....D av1_vaapi            AV1 (VAAPI) (codec av1)
+ V....D avrp                 Avid 1:1 10-bit RGB Packer
+ V..X.D avui                 Avid Meridien Uncompressed
+ VF...D bitpacked            Bitpacked
+ V....D bmp                  BMP (Windows and OS/2 bitmap)
+ VF...D cfhd                 GoPro CineForm HD
+ V....D cinepak              Cinepak
+ V....D cljr                 Cirrus Logic AccuPak
+ V.S..D vc2                  SMPTE VC-2 (codec dirac)
+ VFS..D dnxhd                VC3/DNxHD
+ V....D dpx                  DPX (Digital Picture Exchange) image
+ VFS..D dvvideo              DV (Digital Video)
+ VFS..D dxv                  Resolume DXV
+ VF...D exr                  OpenEXR image
+ V.S..D ffv1                 FFmpeg video codec #1
+ VF...D ffvhuff              Huffyuv FFmpeg variant
+ V....D fits                 Flexible Image Transport System
+ V....D flashsv              Flash Screen Video
+ V....D flashsv2             Flash Screen Video Version 2
+ V..... flv                  FLV / Sorenson Spark / Sorenson H.263 (Flash Video) (codec flv1)
+ V....D gif                  GIF (Graphics Interchange Format)
+ V..... h261                 H.261
+ V..... h263                 H.263 / H.263-1996
+ V..... h263_v4l2m2m         V4L2 mem2mem H.263 encoder wrapper (codec h263)
+ V.S... h263p                H.263+ / H.263-1998 / H.263 version 2
+ V....D libx264              libx264 H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 (codec h264)
+ V....D libx264rgb           libx264 H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 RGB (codec h264)
+ V....D h264_nvenc           NVIDIA NVENC H.264 encoder (codec h264)
+ V..... h264_qsv             H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10 (Intel Quick Sync Video acceleration) (codec h264)
+ V..... h264_v4l2m2m         V4L2 mem2mem H.264 encoder wrapper (codec h264)
+ V....D h264_vaapi           H.264/AVC (VAAPI) (codec h264)
+ V....D h264_vulkan          H.264/AVC (Vulkan) (codec h264)
+ V.S..D hap                  Vidvox Hap
+ VF...D hdr                  HDR (Radiance RGBE format) image
+ V....D libx265              libx265 H.265 / HEVC (codec hevc)
+ V....D hevc_nvenc           NVIDIA NVENC hevc encoder (codec hevc)
+ V..... hevc_qsv             HEVC (Intel Quick Sync Video acceleration) (codec hevc)
+ V..... hevc_v4l2m2m         V4L2 mem2mem HEVC encoder wrapper (codec hevc)
+ V....D hevc_vaapi           H.265/HEVC (VAAPI) (codec hevc)
+ V....D hevc_vulkan          H.265/HEVC (Vulkan) (codec hevc)
+ VF...D huffyuv              Huffyuv / HuffYUV
+ VF...D jpeg2000             JPEG 2000
+ VF.... libopenjpeg          OpenJPEG JPEG 2000 (codec jpeg2000)
+ VF...D jpegls               JPEG-LS
+ V....D libjxl               libjxl JPEG XL (codec jpegxl)
+ VF...D ljpeg                Lossless JPEG
+ VFS..D magicyuv             MagicYUV video
+ VFS... mjpeg                MJPEG (Motion JPEG)
+ V..... mjpeg_qsv            MJPEG (Intel Quick Sync Video acceleration) (codec mjpeg)
+ V....D mjpeg_vaapi          MJPEG (VAAPI) (codec mjpeg)
+ V.S... mpeg1video           MPEG-1 video
+ V.S... mpeg2video           MPEG-2 video
+ V..... mpeg2_qsv            MPEG-2 video (Intel Quick Sync Video acceleration) (codec mpeg2video)
+ V....D mpeg2_vaapi          MPEG-2 (VAAPI) (codec mpeg2video)
+ V.S... mpeg4                MPEG-4 part 2
+ V....D libxvid              libxvidcore MPEG-4 part 2 (codec mpeg4)
+ V..... mpeg4_v4l2m2m        V4L2 mem2mem MPEG4 encoder wrapper (codec mpeg4)
+ V..... msmpeg4v2            MPEG-4 part 2 Microsoft variant version 2
+ V..... msmpeg4              MPEG-4 part 2 Microsoft variant version 3 (codec msmpeg4v3)
+ V....D msrle                Microsoft RLE
+ V..... msvideo1             Microsoft Video-1
+ V....D pam                  PAM (Portable AnyMap) image
+ V....D pbm                  PBM (Portable BitMap) image
+ V....D pcx                  PC Paintbrush PCX image
+ V....D pfm                  PFM (Portable FloatMap) image
+ V....D pgm                  PGM (Portable GrayMap) image
+ V....D pgmyuv               PGMYUV (Portable GrayMap YUV) image
+ V....D phm                  PHM (Portable HalfFloatMap) image
+ VF...D png                  PNG (Portable Network Graphics) image
+ V....D ppm                  PPM (Portable PixelMap) image
+ VF...D prores               Apple ProRes
+ VF...D prores_aw            Apple ProRes (codec prores)
+ VFS... prores_ks            Apple ProRes (iCodec Pro) (codec prores)
+ VF...D qoi                  QOI (Quite OK Image format) image
+ V....D qtrle                QuickTime Animation (RLE) video
+ V....D r10k                 AJA Kona 10-bit RGB Codec
+ V....D r210                 Uncompressed RGB 10-bit
+ VF...D rawvideo             raw video
+ V....D roqvideo             id RoQ video (codec roq)
+ V....D rpza                 QuickTime video (RPZA)
+ V..... rv10                 RealVideo 1.0
+ V..... rv20                 RealVideo 2.0
+ V....D sgi                  SGI image
+ V....D smc                  QuickTime Graphics (SMC)
+ V....D snow                 Snow
+ V..... speedhq              NewTek SpeedHQ
+ V....D sunrast              Sun Rasterfile image
+ V....D svq1                 Sorenson Vector Quantizer 1 / Sorenson Video 1 / SVQ1
+ V....D targa                Truevision Targa image
+ V....D libtheora            libtheora Theora (codec theora)
+ VF...D tiff                 TIFF image
+ VF...D utvideo              Ut Video
+ VF...D v210                 Uncompressed 4:2:2 10-bit
+ V....D v308                 Uncompressed packed 4:4:4
+ V....D v408                 Uncompressed packed QT 4:4:4:4
+ V....D v410                 Uncompressed 4:4:4 10-bit
+ V.S..D vbn                  Vizrt Binary Image
+ V..... vnull                null video
+ V....D libvpx               libvpx VP8 (codec vp8)
+ V..... vp8_v4l2m2m          V4L2 mem2mem VP8 encoder wrapper (codec vp8)
+ V....D vp8_vaapi            VP8 (VAAPI) (codec vp8)
+ V....D libvpx-vp9           libvpx VP9 (codec vp9)
+ V....D vp9_vaapi            VP9 (VAAPI) (codec vp9)
+ V..... vp9_qsv              VP9 video (Intel Quick Sync Video acceleration) (codec vp9)
+ VF...D wbmp                 WBMP (Wireless Application Protocol Bitmap) image
+ V....D libwebp_anim         libwebp WebP image (codec webp)
+ V....D libwebp              libwebp WebP image (codec webp)
+ V..... wmv1                 Windows Media Video 7
+ V..... wmv2                 Windows Media Video 8
+ V..... wrapped_avframe      AVFrame to AVPacket passthrough
+ V....D xbm                  XBM (X BitMap) image
+ V....D xface                X-face image
+ V....D xwd                  XWD (X Window Dump) image
+ V....D y41p                 Uncompressed YUV 4:1:1 12-bit
+ V....D yuv4                 Uncompressed packed 4:2:0
+ VF...D zlib                 LCL (LossLess Codec Library) ZLIB
+ V....D zmbv                 Zip Motion Blocks Video
+ A....D aac                  AAC (Advanced Audio Coding)
+ A....D ac3                  ATSC A/52A (AC-3)
+ A....D ac3_fixed            ATSC A/52A (AC-3) (codec ac3)
+ A....D adpcm_adx            SEGA CRI ADX ADPCM
+ A....D adpcm_argo           ADPCM Argonaut Games
+ A....D g722                 G.722 ADPCM (codec adpcm_g722)
+ A....D g726                 G.726 ADPCM (codec adpcm_g726)
+ A....D g726le               G.726 little endian ADPCM ("right-justified") (codec adpcm_g726le)
+ A....D adpcm_ima_alp        ADPCM IMA High Voltage Software ALP
+ A....D adpcm_ima_amv        ADPCM IMA AMV
+ A....D adpcm_ima_apm        ADPCM IMA Ubisoft APM
+ A....D adpcm_ima_qt         ADPCM IMA QuickTime
+ A....D adpcm_ima_ssi        ADPCM IMA Simon & Schuster Interactive
+ A....D adpcm_ima_wav        ADPCM IMA WAV
+ A....D adpcm_ima_ws         ADPCM IMA Westwood
+ A....D adpcm_ms             ADPCM Microsoft
+ A....D adpcm_swf            ADPCM Shockwave Flash
+ A....D adpcm_yamaha         ADPCM Yamaha
+ A....D alac                 ALAC (Apple Lossless Audio Codec)
+ A..... anull                null audio
+ A....D aptx                 aptX (Audio Processing Technology for Bluetooth)
+ A....D aptx_hd              aptX HD (Audio Processing Technology for Bluetooth)
+ A....D libcodec2            codec2 encoder using libcodec2 (codec codec2)
+ A....D comfortnoise         RFC 3389 comfort noise generator
+ A....D dfpwm                DFPWM1a audio
+ A..X.D dca                  DCA (DTS Coherent Acoustics) (codec dts)
+ A....D eac3                 ATSC A/52 E-AC-3
+ A....D flac                 FLAC (Free Lossless Audio Codec)
+ A....D g723_1               G.723.1
+ A....D libgsm               libgsm GSM (codec gsm)
+ A....D libgsm_ms            libgsm GSM Microsoft variant (codec gsm_ms)
+ A..X.D mlp                  MLP (Meridian Lossless Packing)
+ A....D mp2                  MP2 (MPEG audio layer 2)
+ A....D mp2fixed             MP2 fixed point (MPEG audio layer 2) (codec mp2)
+ A....D libtwolame           libtwolame MP2 (MPEG audio layer 2) (codec mp2)
+ A....D libmp3lame           libmp3lame MP3 (MPEG audio layer 3) (codec mp3)
+ A....D libshine             libshine MP3 (MPEG audio layer 3) (codec mp3)
+ A....D nellymoser           Nellymoser Asao
+ A..X.D opus                 Opus
+ A....D libopus              libopus Opus (codec opus)
+ A....D pcm_alaw             PCM A-law / G.711 A-law
+ A....D pcm_bluray           PCM signed 16|20|24-bit big-endian for Blu-ray media
+ A....D pcm_dvd              PCM signed 16|20|24-bit big-endian for DVD media
+ A....D pcm_f32be            PCM 32-bit floating point big-endian
+ A....D pcm_f32le            PCM 32-bit floating point little-endian
+ A....D pcm_f64be            PCM 64-bit floating point big-endian
+ A....D pcm_f64le            PCM 64-bit floating point little-endian
+ A....D pcm_mulaw            PCM mu-law / G.711 mu-law
+ A....D pcm_s16be            PCM signed 16-bit big-endian
+ A....D pcm_s16be_planar     PCM signed 16-bit big-endian planar
+ A....D pcm_s16le            PCM signed 16-bit little-endian
+ A....D pcm_s16le_planar     PCM signed 16-bit little-endian planar
+ A....D pcm_s24be            PCM signed 24-bit big-endian
+ A....D pcm_s24daud          PCM D-Cinema audio signed 24-bit
+ A....D pcm_s24le            PCM signed 24-bit little-endian
+ A....D pcm_s24le_planar     PCM signed 24-bit little-endian planar
+ A....D pcm_s32be            PCM signed 32-bit big-endian
+ A....D pcm_s32le            PCM signed 32-bit little-endian
+ A....D pcm_s32le_planar     PCM signed 32-bit little-endian planar
+ A....D pcm_s64be            PCM signed 64-bit big-endian
+ A....D pcm_s64le            PCM signed 64-bit little-endian
+ A....D pcm_s8               PCM signed 8-bit
+ A....D pcm_s8_planar        PCM signed 8-bit planar
+ A....D pcm_u16be            PCM unsigned 16-bit big-endian
+ A....D pcm_u16le            PCM unsigned 16-bit little-endian
+ A....D pcm_u24be            PCM unsigned 24-bit big-endian
+ A....D pcm_u24le            PCM unsigned 24-bit little-endian
+ A....D pcm_u32be            PCM unsigned 32-bit big-endian
+ A....D pcm_u32le            PCM unsigned 32-bit little-endian
+ A....D pcm_u8               PCM unsigned 8-bit
+ A....D pcm_vidc             PCM Archimedes VIDC
+ A....D real_144             RealAudio 1.0 (14.4K) (codec ra_144)
+ A....D roq_dpcm             id RoQ DPCM
+ A..X.D s302m                SMPTE 302M
+ A....D sbc                  SBC (low-complexity subband codec)
+ A..X.D sonic                Sonic
+ A..X.D sonicls              Sonic lossless
+ A....D libspeex             libspeex Speex (codec speex)
+ A..X.D truehd               TrueHD
+ A....D tta                  TTA (True Audio)
+ A..X.D vorbis               Vorbis
+ A....D libvorbis            libvorbis (codec vorbis)
+ A....D wavpack              WavPack
+ A....D wmav1                Windows Media Audio 1
+ A....D wmav2                Windows Media Audio 2
+ S..... ssa                  ASS (Advanced SubStation Alpha) subtitle (codec ass)
+ S..... ass                  ASS (Advanced SubStation Alpha) subtitle
+ S..... dvbsub               DVB subtitles (codec dvb_subtitle)
+ S..... dvdsub               DVD subtitles (codec dvd_subtitle)
+ S..... mov_text             3GPP Timed Text subtitle
+ S..... srt                  SubRip subtitle (codec subrip)
+ S..... subrip               SubRip subtitle
+ S..... text                 Raw text subtitle
+ S..... ttml                 TTML subtitle
+ S..... webvtt               WebVTT subtitle
+ S..... xsub                 DivX subtitles (XSUB)
+Decoders:
+ V..... = Video
+ A..... = Audio
+ S..... = Subtitle
+ .F.... = Frame-level multithreading
+ ..S... = Slice-level multithreading
+ ...X.. = Codec is experimental
+ ....B. = Supports draw_horiz_band
+ .....D = Supports direct rendering method 1
+ ------
+ V....D 012v                 Uncompressed 4:2:2 10-bit
+ V....D 4xm                  4X Movie
+ V....D 8bps                 QuickTime 8BPS video
+ V....D aasc                 Autodesk RLE
+ V....D agm                  Amuse Graphics Movie
+ VF...D aic                  Apple Intermediate Codec
+ V....D alias_pix            Alias/Wavefront PIX image
+ V....D amv                  AMV Video
+ V....D anm                  Deluxe Paint Animation
+ V....D ansi                 ASCII/ANSI art
+ VF...D apng                 APNG (Animated Portable Network Graphics) image
+ V....D arbc                 Gryphon's Anim Compressor
+ V....D argo                 Argonaut Games Video
+ V....D asv1                 ASUS V1
+ V....D asv2                 ASUS V2
+ V....D aura                 Auravision AURA
+ V....D aura2                Auravision Aura 2
+ V..... libdav1d             dav1d AV1 decoder by VideoLAN (codec av1)
+ V....D libaom-av1           libaom AV1 (codec av1)
+ V....D av1                  Alliance for Open Media AV1
+ V..... av1_cuvid            Nvidia CUVID AV1 decoder (codec av1)
+ V....D av1_qsv              AV1 video (Intel Quick Sync Video acceleration) (codec av1)
+ V....D avrn                 Avid AVI Codec
+ V....D avrp                 Avid 1:1 10-bit RGB Packer
+ V....D avs                  AVS (Audio Video Standard) video
+ V....D avui                 Avid Meridien Uncompressed
+ V....D bethsoftvid          Bethesda VID video
+ V....D bfi                  Brute Force & Ignorance
+ V....D binkvideo            Bink video
+ V....D bintext              Binary text
+ VF.... bitpacked            Bitpacked
+ V....D bmp                  BMP (Windows and OS/2 bitmap)
+ V....D bmv_video            Discworld II BMV video
+ V....D brender_pix          BRender PIX image
+ V....D c93                  Interplay C93
+ V....D cavs                 Chinese AVS (Audio Video Standard) (AVS1-P2, JiZhun profile)
+ V....D cdgraphics           CD Graphics video
+ V....D cdtoons              CDToons video
+ V....D cdxl                 Commodore CDXL video
+ VF...D cfhd                 GoPro CineForm HD
+ V....D cinepak              Cinepak
+ V....D clearvideo           Iterated Systems ClearVideo
+ V....D cljr                 Cirrus Logic AccuPak
+ VF...D cllc                 Canopus Lossless Codec
+ V....D eacmv                Electronic Arts CMV video (codec cmv)
+ V....D cpia                 CPiA video format
+ VF...D cri                  Cintel RAW
+ V....D camstudio            CamStudio (codec cscd)
+ V....D cyuv                 Creative YUV (CYUV)
+ V.S..D dds                  DirectDraw Surface image decoder
+ V....D dfa                  Chronomaster DFA
+ V.S..D dirac                BBC Dirac VC-2
+ VFS..D dnxhd                VC3/DNxHD
+ V....D dpx                  DPX (Digital Picture Exchange) image
+ V....D dsicinvideo          Delphine Software International CIN video
+ VFS..D dvvideo              DV (Digital Video)
+ V....D dxa                  Feeble Files/ScummVM DXA
+ VF...D dxtory               Dxtory
+ VFS..D dxv                  Resolume DXV
+ V....D escape124            Escape 124
+ V....D escape130            Escape 130
+ VFS..D exr                  OpenEXR image
+ VFS..D ffv1                 FFmpeg video codec #1
+ VF..BD ffvhuff              Huffyuv FFmpeg variant
+ V.S..D fic                  Mirillis FIC
+ V....D fits                 Flexible Image Transport System
+ V....D flashsv              Flash Screen Video v1
+ V....D flashsv2             Flash Screen Video v2
+ V....D flic                 Autodesk Animator Flic video
+ V...BD flv                  FLV / Sorenson Spark / Sorenson H.263 (Flash Video) (codec flv1)
+ V....D fmvc                 FM Screen Capture Codec
+ VF...D fraps                Fraps
+ V....D frwu                 Forward Uncompressed
+ V....D g2m                  Go2Meeting
+ V....D gdv                  Gremlin Digital Video
+ V....D gem                  GEM Raster image
+ V....D gif                  GIF (Graphics Interchange Format)
+ V....D h261                 H.261
+ V...BD h263                 H.263 / H.263-1996, H.263+ / H.263-1998 / H.263 version 2
+ V..... h263_v4l2m2m         V4L2 mem2mem H.263 decoder wrapper (codec h263)
+ V...BD h263i                Intel H.263
+ V...BD h263p                H.263 / H.263-1996, H.263+ / H.263-1998 / H.263 version 2
+ VFS..D h264                 H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10
+ V..... h264_v4l2m2m         V4L2 mem2mem H.264 decoder wrapper (codec h264)
+ V....D h264_qsv             H264 video (Intel Quick Sync Video acceleration) (codec h264)
+ V..... h264_cuvid           Nvidia CUVID H264 decoder (codec h264)
+ VFS..D hap                  Vidvox Hap
+ VF...D hdr                  HDR (Radiance RGBE format) image
+ VFS..D hevc                 HEVC (High Efficiency Video Coding)
+ V....D hevc_qsv             HEVC video (Intel Quick Sync Video acceleration) (codec hevc)
+ V..... hevc_v4l2m2m         V4L2 mem2mem HEVC decoder wrapper (codec hevc)
+ V..... hevc_cuvid           Nvidia CUVID HEVC decoder (codec hevc)
+ V....D hnm4video            HNM 4 video
+ V....D hq_hqa               Canopus HQ/HQA
+ VFS..D hqx                  Canopus HQX
+ VF..BD huffyuv              Huffyuv / HuffYUV
+ VF..BD hymt                 HuffYUV MT
+ V....D idcinvideo           id Quake II CIN video (codec idcin)
+ V....D idf                  iCEDraw text
+ V....D iff                  IFF ACBM/ANIM/DEEP/ILBM/PBM/RGB8/RGBN (codec iff_ilbm)
+ V....D imm4                 Infinity IMM4
+ V..... imm5                 Infinity IMM5
+ V....D indeo2               Intel Indeo 2
+ V....D indeo3               Intel Indeo 3
+ V....D indeo4               Intel Indeo Video Interactive 4
+ V....D indeo5               Intel Indeo Video Interactive 5
+ V....D interplayvideo       Interplay MVE video
+ V....D ipu                  IPU Video
+ VFS..D jpeg2000             JPEG 2000
+ V....D jpegls               JPEG-LS
+ V....D libjxl               libjxl JPEG XL (codec jpegxl)
+ V....D jv                   Bitmap Brothers JV video
+ V....D kgv1                 Kega Game Video
+ V....D kmvc                 Karl Morton's video codec
+ VF...D lagarith             Lagarith lossless
+ V....D lead                 LEAD MCMP
+ V....D loco                 LOCO
+ V....D lscr                 LEAD Screen Capture
+ V....D m101                 Matrox Uncompressed SD
+ V....D eamad                Electronic Arts Madcow Video (codec mad)
+ VFS..D magicyuv             MagicYUV video
+ VF...D mdec                 Sony PlayStation MDEC (Motion DECoder)
+ V....D media100             Media 100
+ VF...D mimic                Mimic
+ V....D mjpeg                MJPEG (Motion JPEG)
+ V..... mjpeg_cuvid          Nvidia CUVID MJPEG decoder (codec mjpeg)
+ V....D mjpeg_qsv            MJPEG video (Intel Quick Sync Video acceleration) (codec mjpeg)
+ V....D mjpegb               Apple MJPEG-B
+ V....D mmvideo              American Laser Games MM Video
+ V....D mobiclip             MobiClip Video
+ V....D motionpixels         Motion Pixels video
+ V.S.BD mpeg1video           MPEG-1 video
+ V..... mpeg1_v4l2m2m        V4L2 mem2mem MPEG1 decoder wrapper (codec mpeg1video)
+ V..... mpeg1_cuvid          Nvidia CUVID MPEG1VIDEO decoder (codec mpeg1video)
+ V.S.BD mpeg2video           MPEG-2 video
+ V.S.BD mpegvideo            MPEG-1 video (codec mpeg2video)
+ V..... mpeg2_v4l2m2m        V4L2 mem2mem MPEG2 decoder wrapper (codec mpeg2video)
+ V....D mpeg2_qsv            MPEG2VIDEO video (Intel Quick Sync Video acceleration) (codec mpeg2video)
+ V..... mpeg2_cuvid          Nvidia CUVID MPEG2VIDEO decoder (codec mpeg2video)
+ VF..BD mpeg4                MPEG-4 part 2
+ V..... mpeg4_v4l2m2m        V4L2 mem2mem MPEG4 decoder wrapper (codec mpeg4)
+ V..... mpeg4_cuvid          Nvidia CUVID MPEG4 decoder (codec mpeg4)
+ V....D msa1                 MS ATC Screen
+ V....D mscc                 Mandsoft Screen Capture Codec
+ V...BD msmpeg4v1            MPEG-4 part 2 Microsoft variant version 1
+ V...BD msmpeg4v2            MPEG-4 part 2 Microsoft variant version 2
+ V...BD msmpeg4              MPEG-4 part 2 Microsoft variant version 3 (codec msmpeg4v3)
+ V....D msp2                 Microsoft Paint (MSP) version 2
+ V....D msrle                Microsoft RLE
+ V....D mss1                 MS Screen 1
+ V....D mss2                 MS Windows Media Video V9 Screen
+ V....D msvideo1             Microsoft Video 1
+ VF...D mszh                 LCL (LossLess Codec Library) MSZH
+ V....D mts2                 MS Expression Encoder Screen
+ V....D mv30                 MidiVid 3.0
+ V....D mvc1                 Silicon Graphics Motion Video Compressor 1
+ V....D mvc2                 Silicon Graphics Motion Video Compressor 2
+ V....D mvdv                 MidiVid VQ
+ V....D mvha                 MidiVid Archive Codec
+ V....D mwsc                 MatchWare Screen Capture Codec
+ V....D mxpeg                Mobotix MxPEG video
+ VF...D notchlc              NotchLC
+ V....D nuv                  NuppelVideo/RTJPEG
+ V....D paf_video            Amazing Studio Packed Animation File Video
+ V....D pam                  PAM (Portable AnyMap) image
+ V....D pbm                  PBM (Portable BitMap) image
+ V....D pcx                  PC Paintbrush PCX image
+ V....D pdv                  PDV (PlayDate Video)
+ V....D pfm                  PFM (Portable FloatMap) image
+ V....D pgm                  PGM (Portable GrayMap) image
+ V....D pgmyuv               PGMYUV (Portable GrayMap YUV) image
+ V....D pgx                  PGX (JPEG2000 Test Format)
+ V....D phm                  PHM (Portable HalfFloatMap) image
+ VF...D photocd              Kodak Photo CD
+ V....D pictor               Pictor/PC Paint
+ VF...D pixlet               Apple Pixlet
+ VF...D png                  PNG (Portable Network Graphics) image
+ V....D ppm                  PPM (Portable PixelMap) image
+ VFS..D prores               Apple ProRes (iCodec Pro)
+ V....D prosumer             Brooktree ProSumer Video
+ VF...D psd                  Photoshop PSD file
+ V....D ptx                  V.Flash PTX image
+ V....D qdraw                Apple QuickDraw
+ VF...D qoi                  QOI (Quite OK Image format) image
+ V....D qpeg                 Q-team QPEG
+ V....D qtrle                QuickTime Animation (RLE) video
+ V....D r10k                 AJA Kona 10-bit RGB Codec
+ V....D r210                 Uncompressed RGB 10-bit
+ V....D rasc                 RemotelyAnywhere Screen Capture
+ V..... rawvideo             raw video
+ V....D rl2                  RL2 video
+ V....D roqvideo             id RoQ video (codec roq)
+ V....D rpza                 QuickTime video (RPZA)
+ V....D rscc                 innoHeim/Rsupport Screen Capture Codec
+ VF...D rtv1                 RTV1 (RivaTuner Video)
+ V....D rv10                 RealVideo 1.0
+ V....D rv20                 RealVideo 2.0
+ VF...D rv30                 RealVideo 3.0
+ VF...D rv40                 RealVideo 4.0
+ V....D sanm                 LucasArts SANM/Smush video
+ V....D scpr                 ScreenPressor
+ V....D screenpresso         Screenpresso
+ V....D sga                  Digital Pictures SGA Video
+ V....D sgi                  SGI image
+ V....D sgirle               Silicon Graphics RLE 8-bit video
+ VF...D sheervideo           BitJazz SheerVideo
+ V....D simbiosis_imx        Simbiosis Interactive IMX Video
+ V....D smackvid             Smacker video (codec smackvideo)
+ V....D smc                  QuickTime Graphics (SMC)
+ V....D smvjpeg              SMV JPEG
+ V....D snow                 Snow
+ V....D sp5x                 Sunplus JPEG (SP5X)
+ VFS..D speedhq              NewTek SpeedHQ
+ V....D srgc                 Screen Recorder Gold Codec
+ V....D sunrast              Sun Rasterfile image
+ V....D librsvg              Librsvg rasterizer (codec svg)
+ V....D svq1                 Sorenson Vector Quantizer 1 / Sorenson Video 1 / SVQ1
+ V...BD svq3                 Sorenson Vector Quantizer 3 / Sorenson Video 3 / SVQ3
+ V....D targa                Truevision Targa image
+ V....D targa_y216           Pinnacle TARGA CineWave YUV16
+ V....D tdsc                 TDSC
+ V....D eatgq                Electronic Arts TGQ video (codec tgq)
+ V....D eatgv                Electronic Arts TGV video (codec tgv)
+ VF..BD theora               Theora
+ V....D thp                  Nintendo Gamecube THP video
+ V....D tiertexseqvideo      Tiertex Limited SEQ video
+ VF...D tiff                 TIFF image
+ V....D tmv                  8088flex TMV
+ V....D eatqi                Electronic Arts TQI Video (codec tqi)
+ V....D truemotion1          Duck TrueMotion 1.0
+ V....D truemotion2          Duck TrueMotion 2.0
+ V....D truemotion2rt        Duck TrueMotion 2.0 Real Time
+ V....D camtasia             TechSmith Screen Capture Codec (codec tscc)
+ V....D tscc2                TechSmith Screen Codec 2
+ V....D txd                  Renderware TXD (TeXture Dictionary) image
+ V....D ultimotion           IBM UltiMotion (codec ulti)
+ VF...D utvideo              Ut Video
+ VFS..D v210                 Uncompressed 4:2:2 10-bit
+ V....D v210x                Uncompressed 4:2:2 10-bit
+ V....D v308                 Uncompressed packed 4:4:4
+ V....D v408                 Uncompressed packed QT 4:4:4:4
+ VFS..D v410                 Uncompressed 4:4:4 10-bit
+ V....D vb                   Beam Software VB
+ VF...D vble                 VBLE Lossless Codec
+ V.S..D vbn                  Vizrt Binary Image
+ V....D vc1                  SMPTE VC-1
+ V....D vc1_qsv              VC1 video (Intel Quick Sync Video acceleration) (codec vc1)
+ V..... vc1_v4l2m2m          V4L2 mem2mem VC1 decoder wrapper (codec vc1)
+ V..... vc1_cuvid            Nvidia CUVID VC1 decoder (codec vc1)
+ V....D vc1image             Windows Media Video 9 Image v2
+ V....D vcr1                 ATI VCR1
+ V....D xl                   Miro VideoXL (codec vixl)
+ V....D vmdvideo             Sierra VMD video
+ VFS..D vmix                 vMix Video
+ V....D vmnc                 VMware Screen Codec / VMware Video
+ V....D vnull                null video
+ VF..BD vp3                  On2 VP3
+ VF..BD vp4                  On2 VP4
+ V....D vp5                  On2 VP5
+ V....D vp6                  On2 VP6
+ V.S..D vp6a                 On2 VP6 (Flash version, with alpha channel)
+ V....D vp6f                 On2 VP6 (Flash version)
+ V....D vp7                  On2 VP7
+ VFS..D vp8                  On2 VP8
+ V..... vp8_v4l2m2m          V4L2 mem2mem VP8 decoder wrapper (codec vp8)
+ V....D libvpx               libvpx VP8 (codec vp8)
+ V..... vp8_cuvid            Nvidia CUVID VP8 decoder (codec vp8)
+ V....D vp8_qsv              VP8 video (Intel Quick Sync Video acceleration) (codec vp8)
+ VFS..D vp9                  Google VP9
+ V..... vp9_v4l2m2m          V4L2 mem2mem VP9 decoder wrapper (codec vp9)
+ V..... libvpx-vp9           libvpx VP9 (codec vp9)
+ V..... vp9_cuvid            Nvidia CUVID VP9 decoder (codec vp9)
+ V....D vp9_qsv              VP9 video (Intel Quick Sync Video acceleration) (codec vp9)
+ V....D vqc                  ViewQuest VQC
+ V....D vvc                  VVC (Versatile Video Coding)
+ V....D vvc_qsv              VVC video (Intel Quick Sync Video acceleration) (codec vvc)
+ VF...D wbmp                 WBMP (Wireless Application Protocol Bitmap) image
+ V....D wcmv                 WinCAM Motion Video
+ VF...D webp                 WebP image
+ V...BD wmv1                 Windows Media Video 7
+ V...BD wmv2                 Windows Media Video 8
+ V....D wmv3                 Windows Media Video 9
+ V....D wmv3image            Windows Media Video 9 Image
+ V....D wnv1                 Winnov WNV1
+ V..... wrapped_avframe      AVPacket to AVFrame passthrough
+ V....D vqavideo             Westwood Studios VQA (Vector Quantized Animation) video (codec ws_vqa)
+ V....D xan_wc3              Wing Commander III / Xan
+ V....D xan_wc4              Wing Commander IV / Xxan
+ V....D xbin                 eXtended BINary text
+ V....D xbm                  XBM (X BitMap) image
+ V....D xface                X-face image
+ V....D xpm                  XPM (X PixMap) image
+ V....D xwd                  XWD (X Window Dump) image
+ V....D y41p                 Uncompressed YUV 4:1:1 12-bit
+ VF...D ylc                  YUY2 Lossless Codec
+ V....D yop                  Psygnosis YOP Video
+ V....D yuv4                 Uncompressed packed 4:2:0
+ V....D zerocodec            ZeroCodec Lossless Video
+ VF...D zlib                 LCL (LossLess Codec Library) ZLIB
+ V....D zmbv                 Zip Motion Blocks Video
+ A....D 8svx_exp             8SVX exponential
+ A....D 8svx_fib             8SVX fibonacci
+ A....D aac                  AAC (Advanced Audio Coding)
+ A....D aac_fixed            AAC (Advanced Audio Coding) (codec aac)
+ A....D aac_latm             AAC LATM (Advanced Audio Coding LATM syntax)
+ A....D ac3                  ATSC A/52A (AC-3)
+ A....D ac3_fixed            ATSC A/52A (AC-3) (codec ac3)
+ A....D acelp.kelvin         Sipro ACELP.KELVIN
+ A....D adpcm_4xm            ADPCM 4X Movie
+ A....D adpcm_adx            SEGA CRI ADX ADPCM
+ A....D adpcm_afc            ADPCM Nintendo Gamecube AFC
+ A....D adpcm_agm            ADPCM AmuseGraphics Movie
+ A....D adpcm_aica           ADPCM Yamaha AICA
+ A....D adpcm_argo           ADPCM Argonaut Games
+ A....D adpcm_ct             ADPCM Creative Technology
+ A....D adpcm_dtk            ADPCM Nintendo Gamecube DTK
+ A....D adpcm_ea             ADPCM Electronic Arts
+ A....D adpcm_ea_maxis_xa    ADPCM Electronic Arts Maxis CDROM XA
+ A....D adpcm_ea_r1          ADPCM Electronic Arts R1
+ A....D adpcm_ea_r2          ADPCM Electronic Arts R2
+ A....D adpcm_ea_r3          ADPCM Electronic Arts R3
+ A....D adpcm_ea_xas         ADPCM Electronic Arts XAS
+ A....D g722                 G.722 ADPCM (codec adpcm_g722)
+ A....D g726                 G.726 ADPCM (codec adpcm_g726)
+ A....D g726le               G.726 ADPCM little-endian (codec adpcm_g726le)
+ A....D adpcm_ima_acorn      ADPCM IMA Acorn Replay
+ A....D adpcm_ima_alp        ADPCM IMA High Voltage Software ALP
+ A....D adpcm_ima_amv        ADPCM IMA AMV
+ A....D adpcm_ima_apc        ADPCM IMA CRYO APC
+ A....D adpcm_ima_apm        ADPCM IMA Ubisoft APM
+ A....D adpcm_ima_cunning    ADPCM IMA Cunning Developments
+ A....D adpcm_ima_dat4       ADPCM IMA Eurocom DAT4
+ A....D adpcm_ima_dk3        ADPCM IMA Duck DK3
+ A....D adpcm_ima_dk4        ADPCM IMA Duck DK4
+ A....D adpcm_ima_ea_eacs    ADPCM IMA Electronic Arts EACS
+ A....D adpcm_ima_ea_sead    ADPCM IMA Electronic Arts SEAD
+ A....D adpcm_ima_iss        ADPCM IMA Funcom ISS
+ A....D adpcm_ima_moflex     ADPCM IMA MobiClip MOFLEX
+ A....D adpcm_ima_mtf        ADPCM IMA Capcom's MT Framework
+ A....D adpcm_ima_oki        ADPCM IMA Dialogic OKI
+ A....D adpcm_ima_qt         ADPCM IMA QuickTime
+ A....D adpcm_ima_rad        ADPCM IMA Radical
+ A....D adpcm_ima_smjpeg     ADPCM IMA Loki SDL MJPEG
+ A....D adpcm_ima_ssi        ADPCM IMA Simon & Schuster Interactive
+ A....D adpcm_ima_wav        ADPCM IMA WAV
+ A....D adpcm_ima_ws         ADPCM IMA Westwood
+ A....D adpcm_ms             ADPCM Microsoft
+ A....D adpcm_mtaf           ADPCM MTAF
+ A....D adpcm_psx            ADPCM Playstation
+ A....D adpcm_sbpro_2        ADPCM Sound Blaster Pro 2-bit
+ A....D adpcm_sbpro_3        ADPCM Sound Blaster Pro 2.6-bit
+ A....D adpcm_sbpro_4        ADPCM Sound Blaster Pro 4-bit
+ A....D adpcm_swf            ADPCM Shockwave Flash
+ A....D adpcm_thp            ADPCM Nintendo THP
+ A....D adpcm_thp_le         ADPCM Nintendo THP (little-endian)
+ A....D adpcm_vima           LucasArts VIMA audio
+ A....D adpcm_xa             ADPCM CDROM XA
+ A....D adpcm_xmd            ADPCM Konami XMD
+ A....D adpcm_yamaha         ADPCM Yamaha
+ A....D adpcm_zork           ADPCM Zork
+ AF...D alac                 ALAC (Apple Lossless Audio Codec)
+ A....D amrnb                AMR-NB (Adaptive Multi-Rate NarrowBand) (codec amr_nb)
+ A....D amrwb                AMR-WB (Adaptive Multi-Rate WideBand) (codec amr_wb)
+ A....D anull                null audio
+ A....D apac                 Marian's A-pac audio
+ A....D ape                  Monkey's Audio
+ A....D aptx                 aptX (Audio Processing Technology for Bluetooth)
+ A....D aptx_hd              aptX HD (Audio Processing Technology for Bluetooth)
+ A....D atrac1               ATRAC1 (Adaptive TRansform Acoustic Coding)
+ A....D atrac3               ATRAC3 (Adaptive TRansform Acoustic Coding 3)
+ A....D atrac3al             ATRAC3 AL (Adaptive TRansform Acoustic Coding 3 Advanced Lossless)
+ A....D atrac3plus           ATRAC3+ (Adaptive TRansform Acoustic Coding 3+) (codec atrac3p)
+ A....D atrac3plusal         ATRAC3+ AL (Adaptive TRansform Acoustic Coding 3+ Advanced Lossless) (codec atrac3pal)
+ A....D atrac9               ATRAC9 (Adaptive TRansform Acoustic Coding 9)
+ A....D on2avc               On2 Audio for Video Codec (codec avc)
+ A....D binkaudio_dct        Bink Audio (DCT)
+ A....D binkaudio_rdft       Bink Audio (RDFT)
+ A....D bmv_audio            Discworld II BMV audio
+ A....D bonk                 Bonk audio
+ A....D cbd2_dpcm            DPCM Cuberoot-Delta-Exact
+ A..... libcodec2            codec2 decoder using libcodec2 (codec codec2)
+ A....D comfortnoise         RFC 3389 comfort noise generator
+ A....D cook                 Cook / Cooker / Gecko (RealAudio G2)
+ A....D derf_dpcm            DPCM Xilam DERF
+ A....D dfpwm                DFPWM1a audio
+ A....D dolby_e              Dolby E
+ A.S..D dsd_lsbf             DSD (Direct Stream Digital), least significant bit first
+ A.S..D dsd_lsbf_planar      DSD (Direct Stream Digital), least significant bit first, planar
+ A.S..D dsd_msbf             DSD (Direct Stream Digital), most significant bit first
+ A.S..D dsd_msbf_planar      DSD (Direct Stream Digital), most significant bit first, planar
+ A....D dsicinaudio          Delphine Software International CIN audio
+ A....D dss_sp               Digital Speech Standard - Standard Play mode (DSS SP)
+ A....D dst                  DST (Digital Stream Transfer)
+ A....D dca                  DCA (DTS Coherent Acoustics) (codec dts)
+ A....D dvaudio              Ulead DV Audio
+ A....D eac3                 ATSC A/52B (AC-3, E-AC-3)
+ A....D evrc                 EVRC (Enhanced Variable Rate Codec)
+ A....D fastaudio            MobiClip FastAudio
+ AF...D flac                 FLAC (Free Lossless Audio Codec)
+ A....D ftr                  FTR Voice
+ A....D g723_1               G.723.1
+ A....D g729                 G.729
+ A....D gremlin_dpcm         DPCM Gremlin
+ A....D gsm                  GSM
+ A....D libgsm               libgsm GSM (codec gsm)
+ A....D gsm_ms               GSM Microsoft variant
+ A....D libgsm_ms            libgsm GSM Microsoft variant (codec gsm_ms)
+ A....D hca                  CRI HCA
+ A....D hcom                 HCOM Audio
+ A....D iac                  IAC (Indeo Audio Coder)
+ A....D ilbc                 iLBC (Internet Low Bitrate Codec)
+ A....D imc                  IMC (Intel Music Coder)
+ A....D interplay_dpcm       DPCM Interplay
+ A....D interplayacm         Interplay ACM
+ A....D mace3                MACE (Macintosh Audio Compression/Expansion) 3:1
+ A....D mace6                MACE (Macintosh Audio Compression/Expansion) 6:1
+ A....D metasound            Voxware MetaSound
+ A....D misc4                Micronas SC-4 Audio
+ A....D mlp                  MLP (Meridian Lossless Packing)
+ A....D mp1                  MP1 (MPEG audio layer 1)
+ A....D mp1float             MP1 (MPEG audio layer 1) (codec mp1)
+ A....D mp2                  MP2 (MPEG audio layer 2)
+ A....D mp2float             MP2 (MPEG audio layer 2) (codec mp2)
+ A....D mp3float             MP3 (MPEG audio layer 3) (codec mp3)
+ A....D mp3                  MP3 (MPEG audio layer 3)
+ A....D mp3adufloat          ADU (Application Data Unit) MP3 (MPEG audio layer 3) (codec mp3adu)
+ A....D mp3adu               ADU (Application Data Unit) MP3 (MPEG audio layer 3)
+ A....D mp3on4float          MP3onMP4 (codec mp3on4)
+ A....D mp3on4               MP3onMP4
+ A....D als                  MPEG-4 Audio Lossless Coding (ALS) (codec mp4als)
+ A....D msnsiren             MSN Siren
+ A....D mpc7                 Musepack SV7 (codec musepack7)
+ A....D mpc8                 Musepack SV8 (codec musepack8)
+ A....D nellymoser           Nellymoser Asao
+ A....D opus                 Opus
+ A....D libopus              libopus Opus (codec opus)
+ A....D osq                  OSQ (Original Sound Quality)
+ A....D paf_audio            Amazing Studio Packed Animation File Audio
+ A....D pcm_alaw             PCM A-law / G.711 A-law
+ A....D pcm_bluray           PCM signed 16|20|24-bit big-endian for Blu-ray media
+ A....D pcm_dvd              PCM signed 16|20|24-bit big-endian for DVD media
+ A....D pcm_f16le            PCM 16.8 floating point little-endian
+ A....D pcm_f24le            PCM 24.0 floating point little-endian
+ A....D pcm_f32be            PCM 32-bit floating point big-endian
+ A....D pcm_f32le            PCM 32-bit floating point little-endian
+ A....D pcm_f64be            PCM 64-bit floating point big-endian
+ A....D pcm_f64le            PCM 64-bit floating point little-endian
+ A....D pcm_lxf              PCM signed 20-bit little-endian planar
+ A....D pcm_mulaw            PCM mu-law / G.711 mu-law
+ A....D pcm_s16be            PCM signed 16-bit big-endian
+ A....D pcm_s16be_planar     PCM signed 16-bit big-endian planar
+ A....D pcm_s16le            PCM signed 16-bit little-endian
+ A....D pcm_s16le_planar     PCM signed 16-bit little-endian planar
+ A....D pcm_s24be            PCM signed 24-bit big-endian
+ A....D pcm_s24daud          PCM D-Cinema audio signed 24-bit
+ A....D pcm_s24le            PCM signed 24-bit little-endian
+ A....D pcm_s24le_planar     PCM signed 24-bit little-endian planar
+ A....D pcm_s32be            PCM signed 32-bit big-endian
+ A....D pcm_s32le            PCM signed 32-bit little-endian
+ A....D pcm_s32le_planar     PCM signed 32-bit little-endian planar
+ A....D pcm_s64be            PCM signed 64-bit big-endian
+ A....D pcm_s64le            PCM signed 64-bit little-endian
+ A....D pcm_s8               PCM signed 8-bit
+ A....D pcm_s8_planar        PCM signed 8-bit planar
+ A....D pcm_sga              PCM SGA
+ A....D pcm_u16be            PCM unsigned 16-bit big-endian
+ A....D pcm_u16le            PCM unsigned 16-bit little-endian
+ A....D pcm_u24be            PCM unsigned 24-bit big-endian
+ A....D pcm_u24le            PCM unsigned 24-bit little-endian
+ A....D pcm_u32be            PCM unsigned 32-bit big-endian
+ A....D pcm_u32le            PCM unsigned 32-bit little-endian
+ A....D pcm_u8               PCM unsigned 8-bit
+ A....D pcm_vidc             PCM Archimedes VIDC
+ A....D qcelp                QCELP / PureVoice
+ A....D qdm2                 QDesign Music Codec 2
+ A....D qdmc                 QDesign Music Codec 1
+ A....D qoa                  QOA (Quite OK Audio)
+ A....D real_144             RealAudio 1.0 (14.4K) (codec ra_144)
+ A....D real_288             RealAudio 2.0 (28.8K) (codec ra_288)
+ A....D ralf                 RealAudio Lossless
+ A....D rka                  RKA (RK Audio)
+ A....D roq_dpcm             DPCM id RoQ
+ A....D s302m                SMPTE 302M
+ A....D sbc                  SBC (low-complexity subband codec)
+ A....D sdx2_dpcm            DPCM Squareroot-Delta-Exact
+ A....D shorten              Shorten
+ A....D sipr                 RealAudio SIPR / ACELP.NET
+ A....D siren                Siren
+ A....D smackaud             Smacker audio (codec smackaudio)
+ A....D sol_dpcm             DPCM Sol
+ A..X.D sonic                Sonic
+ A....D speex                Speex
+ A....D libspeex             libspeex Speex (codec speex)
+ AF...D tak                  TAK (Tom's lossless Audio Kompressor)
+ A....D truehd               TrueHD
+ A....D truespeech           DSP Group TrueSpeech
+ AF...D tta                  TTA (True Audio)
+ A....D twinvq               VQF TwinVQ
+ A....D vmdaudio             Sierra VMD audio
+ A....D vorbis               Vorbis
+ A..... libvorbis            libvorbis (codec vorbis)
+ A....D wady_dpcm            DPCM Marble WADY
+ A....D wavarc               Waveform Archiver
+ A....D wavesynth            Wave synthesis pseudo-codec
+ AFS..D wavpack              WavPack
+ A....D ws_snd1              Westwood Audio (SND1) (codec westwood_snd1)
+ A....D wmalossless          Windows Media Audio Lossless
+ A....D wmapro               Windows Media Audio 9 Professional
+ A....D wmav1                Windows Media Audio 1
+ A....D wmav2                Windows Media Audio 2
+ A....D wmavoice             Windows Media Audio Voice
+ A....D xan_dpcm             DPCM Xan
+ A....D xma1                 Xbox Media Audio 1
+ A....D xma2                 Xbox Media Audio 2
+ S..... ssa                  ASS (Advanced SubStation Alpha) subtitle (codec ass)
+ S..... ass                  ASS (Advanced SubStation Alpha) subtitle
+ S..... dvbsub               DVB subtitles (codec dvb_subtitle)
+ S..... libzvbi_teletextdec  Libzvbi DVB teletext decoder (codec dvb_teletext)
+ S..... dvdsub               DVD subtitles (codec dvd_subtitle)
+ S..... cc_dec               Closed Captions (EIA-608 / CEA-708) (codec eia_608)
+ S..... pgssub               HDMV Presentation Graphic Stream subtitles (codec hdmv_pgs_subtitle)
+ S..... jacosub              JACOsub subtitle
+ S..... microdvd             MicroDVD subtitle
+ S..... mov_text             3GPP Timed Text subtitle
+ S..... mpl2                 MPL2 subtitle
+ S..... pjs                  PJS subtitle
+ S..... realtext             RealText subtitle
+ S..... sami                 SAMI subtitle
+ S..... stl                  Spruce subtitle format
+ S..... srt                  SubRip subtitle (codec subrip)
+ S..... subrip               SubRip subtitle
+ S..... subviewer            SubViewer subtitle
+ S..... subviewer1           SubViewer1 subtitle
+ S..... text                 Raw text subtitle
+ S..... vplayer              VPlayer subtitle
+ S..... webvtt               WebVTT subtitle
+ S..... xsub                 XSUB
+Formats:
+ D.. = Demuxing supported
+ .E. = Muxing supported
+ ..d = Is a device
+ ---
+ D   3dostr          3DO STR
+ D   4xm             4X Technologies
+ D   aa              Audible AA format files
+ D   aac             raw ADTS AAC (Advanced Audio Coding)
+ D   aax             CRI AAX
+ D   ac3             raw AC-3
+ D   ac4             raw AC-4
+ D   ace             tri-Ace Audio Container
+ D   acm             Interplay ACM
+ D   act             ACT Voice file format
+ D   adf             Artworx Data Format
+ D   adp             ADP
+ D   ads             Sony PS2 ADS
+ D   adx             CRI ADX
+ D   aea             MD STUDIO audio
+ D   afc             AFC
+ D   aiff            Audio IFF
+ D   aix             CRI AIX
+ D   alaw            PCM A-law
+ D   alias_pix       Alias/Wavefront PIX image
+ D   alp             LEGO Racers ALP
+ D d alsa            ALSA audio input
+ D   amr             3GPP AMR
+ D   amrnb           raw AMR-NB
+ D   amrwb           raw AMR-WB
+ D   anm             Deluxe Paint Animation
+ D   apac            raw APAC
+ D   apc             CRYO APC
+ D   ape             Monkey's Audio
+ D   apm             Ubisoft Rayman 2 APM
+ D   apng            Animated Portable Network Graphics
+ D   aptx            raw aptX
+ D   aptx_hd         raw aptX HD
+ D   aqtitle         AQTitle subtitles
+ D   argo_asf        Argonaut Games ASF
+ D   argo_brp        Argonaut Games BRP
+ D   argo_cvg        Argonaut Games CVG
+ D   asf             ASF (Advanced / Active Streaming Format)
+ D   asf_o           ASF (Advanced / Active Streaming Format)
+ D   ass             SSA (SubStation Alpha) subtitle
+ D   ast             AST (Audio Stream)
+ D   au              Sun AU
+ D   av1             AV1 Annex B
+ D   avi             AVI (Audio Video Interleaved)
+ D   avr             AVR (Audio Visual Research)
+ D   avs             Argonaut Games Creature Shock
+ D   avs2            raw AVS2-P2/IEEE1857.4
+ D   avs3            raw AVS3-P2/IEEE1857.10
+ D   bethsoftvid     Bethesda Softworks VID
+ D   bfi             Brute Force & Ignorance
+ D   bfstm           BFSTM (Binary Cafe Stream)
+ D   bin             Binary text
+ D   bink            Bink
+ D   binka           Bink Audio
+ D   bit             G.729 BIT file format
+ D   bitpacked       Bitpacked
+ D   bmp_pipe        piped bmp sequence
+ D   bmv             Discworld II BMV
+ D   boa             Black Ops Audio
+ D   bonk            raw Bonk
+ D   brender_pix     BRender PIX image
+ D   brstm           BRSTM (Binary Revolution Stream)
+ D   c93             Interplay C93
+ D   caf             Apple CAF (Core Audio Format)
+ D   cavsvideo       raw Chinese AVS (Audio Video Standard)
+ D   cdg             CD Graphics
+ D   cdxl            Commodore CDXL video
+ D   cine            Phantom Cine
+ D   codec2          codec2 .c2 demuxer
+ D   codec2raw       raw codec2 demuxer
+ D   concat          Virtual concatenation script
+ D   cri_pipe        piped cri sequence
+ D   dash            Dynamic Adaptive Streaming over HTTP
+ D   data            raw data
+ D   daud            D-Cinema audio
+ D   dcstr           Sega DC STR
+ D   dds_pipe        piped dds sequence
+ D   derf            Xilam DERF
+ D   dfa             Chronomaster DFA
+ D   dfpwm           raw DFPWM1a
+ D   dhav            Video DAV
+ D   dirac           raw Dirac
+ D   dnxhd           raw DNxHD (SMPTE VC-3)
+ D   dpx_pipe        piped dpx sequence
+ D   dsf             DSD Stream File (DSF)
+ D   dsicin          Delphine Software International CIN
+ D   dss             Digital Speech Standard (DSS)
+ D   dts             raw DTS
+ D   dtshd           raw DTS-HD
+ D   dv              DV (Digital Video)
+ D   dvbsub          raw dvbsub
+ D   dvbtxt          dvbtxt
+ D   dvdvideo        DVD-Video
+ D   dxa             DXA
+ D   ea              Electronic Arts Multimedia
+ D   ea_cdata        Electronic Arts cdata
+ D   eac3            raw E-AC-3
+ D   epaf            Ensoniq Paris Audio File
+ D   evc             EVC Annex B
+ D   exr_pipe        piped exr sequence
+ D   f32be           PCM 32-bit floating-point big-endian
+ D   f32le           PCM 32-bit floating-point little-endian
+ D   f64be           PCM 64-bit floating-point big-endian
+ D   f64le           PCM 64-bit floating-point little-endian
+ D d fbdev           Linux framebuffer
+ D   ffmetadata      FFmpeg metadata in text
+ D   film_cpk        Sega FILM / CPK
+ D   filmstrip       Adobe Filmstrip
+ D   fits            Flexible Image Transport System
+ D   flac            raw FLAC
+ D   flic            FLI/FLC/FLX animation
+ D   flv             FLV (Flash Video)
+ D   frm             Megalux Frame
+ D   fsb             FMOD Sample Bank
+ D   fwse            Capcom's MT Framework sound
+ D   g722            raw G.722
+ D   g723_1          G.723.1
+ D   g726            raw big-endian G.726 ("left aligned")
+ D   g726le          raw little-endian G.726 ("right aligned")
+ D   g729            G.729 raw format demuxer
+ D   gdv             Gremlin Digital Video
+ D   gem_pipe        piped gem sequence
+ D   genh            GENeric Header
+ D   gif             CompuServe Graphics Interchange Format (GIF)
+ D   gif_pipe        piped gif sequence
+ D   gsm             raw GSM
+ D   gxf             GXF (General eXchange Format)
+ D   h261            raw H.261
+ D   h263            raw H.263
+ D   h264            raw H.264 video
+ D   hca             CRI HCA
+ D   hcom            Macintosh HCOM
+ D   hdr_pipe        piped hdr sequence
+ D   hevc            raw HEVC video
+ D   hls             Apple HTTP Live Streaming
+ D   hnm             Cryo HNM v4
+ D   iamf            Raw Immersive Audio Model and Formats
+ D   ico             Microsoft Windows ICO
+ D   idcin           id Cinematic
+ D   idf             iCE Draw File
+ D d iec61883        libiec61883 (new DV1394) A/V input device
+ D   iff             IFF (Interchange File Format)
+ D   ifv             IFV CCTV DVR
+ D   ilbc            iLBC storage
+ D   image2          image2 sequence
+ D   image2pipe      piped image2 sequence
+ D   imf             IMF (Interoperable Master Format)
+ D   ingenient       raw Ingenient MJPEG
+ D   ipmovie         Interplay MVE
+ D   ipu             raw IPU Video
+ D   ircam           Berkeley/IRCAM/CARL Sound Format
+ D   iss             Funcom ISS
+ D   iv8             IndigoVision 8000 video
+ D   ivf             On2 IVF
+ D   ivr             IVR (Internet Video Recording)
+ D   j2k_pipe        piped j2k sequence
+ D d jack            JACK Audio Connection Kit
+ D   jacosub         JACOsub subtitle format
+ D   jpeg_pipe       piped jpeg sequence
+ D   jpegls_pipe     piped jpegls sequence
+ D   jpegxl_anim     Animated JPEG XL
+ D   jpegxl_pipe     piped jpegxl sequence
+ D   jv              Bitmap Brothers JV
+ D d kmsgrab         KMS screen capture
+ D   kux             KUX (YouKu)
+ D   kvag            Simon & Schuster Interactive VAG
+ D   laf             LAF (Limitless Audio Format)
+ D d lavfi           Libavfilter virtual input device
+ D   lc3             LC3 (Low Complexity Communication Codec)
+ D d libcdio          
+ D d libdc1394       dc1394 v.2 A/V grab
+ D   libgme          Game Music Emu demuxer
+ D   libopenmpt      Tracker formats (libopenmpt)
+ D   live_flv        live RTMP FLV (Flash Video)
+ D   lmlm4           raw lmlm4
+ D   loas            LOAS AudioSyncStream
+ D   lrc             LRC lyrics
+ D   luodat          Video CCTV DAT
+ D   lvf             LVF
+ D   lxf             VR native stream (LXF)
+ D   m4v             raw MPEG-4 video
+ D   matroska,webm   Matroska / WebM
+ D   mca             MCA Audio Format
+ D   mcc             MacCaption
+ D   mgsts           Metal Gear Solid: The Twin Snakes
+ D   microdvd        MicroDVD subtitle format
+ D   mjpeg           raw MJPEG video
+ D   mjpeg_2000      raw MJPEG 2000 video
+ D   mlp             raw MLP
+ D   mlv             Magic Lantern Video (MLV)
+ D   mm              American Laser Games MM
+ D   mmf             Yamaha SMAF
+ D   mods            MobiClip MODS
+ D   moflex          MobiClip MOFLEX
+ D   mov,mp4,m4a,3gp,3g2,mj2 QuickTime / MOV
+ D   mp3             MP2/3 (MPEG audio layer 2/3)
+ D   mpc             Musepack
+ D   mpc8            Musepack SV8
+ D   mpeg            MPEG-PS (MPEG-2 Program Stream)
+ D   mpegts          MPEG-TS (MPEG-2 Transport Stream)
+ D   mpegtsraw       raw MPEG-TS (MPEG-2 Transport Stream)
+ D   mpegvideo       raw MPEG video
+ D   mpjpeg          MIME multipart JPEG
+ D   mpl2            MPL2 subtitles
+ D   mpsub           MPlayer subtitles
+ D   msf             Sony PS3 MSF
+ D   msnwctcp        MSN TCP Webcam stream
+ D   msp             Microsoft Paint (MSP))
+ D   mtaf            Konami PS2 MTAF
+ D   mtv             MTV
+ D   mulaw           PCM mu-law
+ D   musx            Eurocom MUSX
+ D   mv              Silicon Graphics Movie
+ D   mvi             Motion Pixels MVI
+ D   mxf             MXF (Material eXchange Format)
+ D   mxg             MxPEG clip
+ D   nc              NC camera feed
+ D   nistsphere      NIST SPeech HEader REsources
+ D   nsp             Computerized Speech Lab NSP
+ D   nsv             Nullsoft Streaming Video
+ D   nut             NUT
+ D   nuv             NuppelVideo
+ D   obu             AV1 low overhead OBU
+ D   ogg             Ogg
+ D   oma             Sony OpenMG audio
+ D d openal          OpenAL audio capture device
+ D   osq             raw OSQ
+ D d oss             OSS (Open Sound System) capture
+ D   paf             Amazing Studio Packed Animation File
+ D   pam_pipe        piped pam sequence
+ D   pbm_pipe        piped pbm sequence
+ D   pcx_pipe        piped pcx sequence
+ D   pdv             PlayDate Video
+ D   pfm_pipe        piped pfm sequence
+ D   pgm_pipe        piped pgm sequence
+ D   pgmyuv_pipe     piped pgmyuv sequence
+ D   pgx_pipe        piped pgx sequence
+ D   phm_pipe        piped phm sequence
+ D   photocd_pipe    piped photocd sequence
+ D   pictor_pipe     piped pictor sequence
+ D   pjs             PJS (Phoenix Japanimation Society) subtitles
+ D   pmp             Playstation Portable PMP
+ D   png_pipe        piped png sequence
+ D   pp_bnk          Pro Pinball Series Soundbank
+ D   ppm_pipe        piped ppm sequence
+ D   psd_pipe        piped psd sequence
+ D   psxstr          Sony Playstation STR
+ D d pulse           Pulse audio input
+ D   pva             TechnoTrend PVA
+ D   pvf             PVF (Portable Voice Format)
+ D   qcp             QCP
+ D   qdraw_pipe      piped qdraw sequence
+ D   qoa             QOA
+ D   qoi_pipe        piped qoi sequence
+ D   r3d             REDCODE R3D
+ D   rawvideo        raw video
+ D   rcwt            RCWT (Raw Captions With Time)
+ D   realtext        RealText subtitle format
+ D   redspark        RedSpark
+ D   rka             RKA (RK Audio)
+ D   rl2             RL2
+ D   rm              RealMedia
+ D   roq             id RoQ
+ D   rpl             RPL / ARMovie
+ D   rsd             GameCube RSD
+ D   rso             Lego Mindstorms RSO
+ D   rtp             RTP input
+ D   rtsp            RTSP input
+ D   s16be           PCM signed 16-bit big-endian
+ D   s16le           PCM signed 16-bit little-endian
+ D   s24be           PCM signed 24-bit big-endian
+ D   s24le           PCM signed 24-bit little-endian
+ D   s32be           PCM signed 32-bit big-endian
+ D   s32le           PCM signed 32-bit little-endian
+ D   s337m           SMPTE 337M
+ D   s8              PCM signed 8-bit
+ D   sami            SAMI subtitle format
+ D   sap             SAP input
+ D   sbc             raw SBC (low-complexity subband codec)
+ D   sbg             SBaGen binaural beats script
+ D   scc             Scenarist Closed Captions
+ D   scd             Square Enix SCD
+ D   sdns            Xbox SDNS
+ D   sdp             SDP
+ D   sdr2            SDR2
+ D   sds             MIDI Sample Dump Standard
+ D   sdx             Sample Dump eXchange
+ D   ser             SER (Simple uncompressed video format for astronomical capturing)
+ D   sga             Digital Pictures SGA
+ D   sgi_pipe        piped sgi sequence
+ D   shn             raw Shorten
+ D   siff            Beam Software SIFF
+ D   simbiosis_imx   Simbiosis Interactive IMX
+ D   sln             Asterisk raw pcm
+ D   smjpeg          Loki SDL MJPEG
+ D   smk             Smacker
+ D   smush           LucasArts Smush
+ D   sol             Sierra SOL
+ D   sox             SoX (Sound eXchange) native
+ D   spdif           IEC 61937 (compressed data in S/PDIF)
+ D   srt             SubRip subtitle
+ D   stl             Spruce subtitle format
+ D   subviewer       SubViewer subtitle format
+ D   subviewer1      SubViewer v1 subtitle format
+ D   sunrast_pipe    piped sunrast sequence
+ D   sup             raw HDMV Presentation Graphic Stream subtitles
+ D   svag            Konami PS2 SVAG
+ D   svg_pipe        piped svg sequence
+ D   svs             Square SVS
+ D   swf             SWF (ShockWave Flash)
+ D   tak             raw TAK
+ D   tedcaptions     TED Talks captions
+ D   thp             THP
+ D   tiertexseq      Tiertex Limited SEQ
+ D   tiff_pipe       piped tiff sequence
+ D   tmv             8088flex TMV
+ D   truehd          raw TrueHD
+ D   tta             TTA (True Audio)
+ D   tty             Tele-typewriter
+ D   txd             Renderware TeXture Dictionary
+ D   ty              TiVo TY Stream
+ D   u16be           PCM unsigned 16-bit big-endian
+ D   u16le           PCM unsigned 16-bit little-endian
+ D   u24be           PCM unsigned 24-bit big-endian
+ D   u24le           PCM unsigned 24-bit little-endian
+ D   u32be           PCM unsigned 32-bit big-endian
+ D   u32le           PCM unsigned 32-bit little-endian
+ D   u8              PCM unsigned 8-bit
+ D   usm             CRI USM
+ D   v210            Uncompressed 4:2:2 10-bit
+ D   v210x           Uncompressed 4:2:2 10-bit
+ D   vag             Sony PS2 VAG
+ D   vbn_pipe        piped vbn sequence
+ D   vc1             raw VC-1
+ D   vc1test         VC-1 test bitstream
+ D   vidc            PCM Archimedes VIDC
+ D d video4linux2,v4l2 Video4Linux2 device grab
+ D   vividas         Vividas VIV
+ D   vivo            Vivo
+ D   vmd             Sierra VMD
+ D   vobsub          VobSub subtitle format
+ D   voc             Creative Voice
+ D   vpk             Sony PS2 VPK
+ D   vplayer         VPlayer subtitles
+ D   vqf             Nippon Telegraph and Telephone Corporation (NTT) TwinVQ
+ D   vvc             raw H.266/VVC video
+ D   w64             Sony Wave64
+ D   wady            Marble WADY
+ D   wav             WAV / WAVE (Waveform Audio)
+ D   wavarc          Waveform Archiver
+ D   wc3movie        Wing Commander III movie
+ D   webm_dash_manifest WebM DASH Manifest
+ D   webp_pipe       piped webp sequence
+ D   webvtt          WebVTT subtitle
+ D   wsaud           Westwood Studios audio
+ D   wsd             Wideband Single-bit Data (WSD)
+ D   wsvqa           Westwood Studios VQA
+ D   wtv             Windows Television (WTV)
+ D   wv              WavPack
+ D   wve             Psion 3 audio
+ D d x11grab         X11 screen capture, using XCB
+ D   xa              Maxis XA
+ D   xbin            eXtended BINary text (XBIN)
+ D   xbm_pipe        piped xbm sequence
+ D   xmd             Konami XMD
+ D   xmv             Microsoft XMV
+ D   xpm_pipe        piped xpm sequence
+ D   xvag            Sony PS3 XVAG
+ D   xwd_pipe        piped xwd sequence
+ D   xwma            Microsoft xWMA
+ D   yop             Psygnosis YOP
+ D   yuv4mpegpipe    YUV4MPEG pipe
+Formats:
+ D.. = Demuxing supported
+ .E. = Muxing supported
+ ..d = Is a device
+ ---
+  E  3g2             3GP2 (3GPP2 file format)
+  E  3gp             3GP (3GPP file format)
+  E  a64             a64 - video for Commodore 64
+  E  ac3             raw AC-3
+  E  ac4             raw AC-4
+  E  adts            ADTS AAC (Advanced Audio Coding)
+  E  adx             CRI ADX
+  E  aea             MD STUDIO audio
+  E  aiff            Audio IFF
+  E  alaw            PCM A-law
+  E  alp             LEGO Racers ALP
+  Ed alsa            ALSA audio output
+  E  amr             3GPP AMR
+  E  amv             AMV
+  E  apm             Ubisoft Rayman 2 APM
+  E  apng            Animated Portable Network Graphics
+  E  aptx            raw aptX (Audio Processing Technology for Bluetooth)
+  E  aptx_hd         raw aptX HD (Audio Processing Technology for Bluetooth)
+  E  argo_asf        Argonaut Games ASF
+  E  argo_cvg        Argonaut Games CVG
+  E  asf             ASF (Advanced / Active Streaming Format)
+  E  asf_stream      ASF (Advanced / Active Streaming Format)
+  E  ass             SSA (SubStation Alpha) subtitle
+  E  ast             AST (Audio Stream)
+  E  au              Sun AU
+  E  avi             AVI (Audio Video Interleaved)
+  E  avif            AVIF
+  E  avm2            SWF (ShockWave Flash) (AVM2)
+  E  avs2            raw AVS2-P2/IEEE1857.4 video
+  E  avs3            AVS3-P2/IEEE1857.10
+  E  bit             G.729 BIT file format
+  Ed caca            caca (color ASCII art) output device
+  E  caf             Apple CAF (Core Audio Format)
+  E  cavsvideo       raw Chinese AVS (Audio Video Standard) video
+  E  chromaprint     Chromaprint
+  E  codec2          codec2 .c2 muxer
+  E  codec2raw       raw codec2 muxer
+  E  crc             CRC testing
+  E  dash            DASH Muxer
+  E  data            raw data
+  E  daud            D-Cinema audio
+  E  dfpwm           raw DFPWM1a
+  E  dirac           raw Dirac
+  E  dnxhd           raw DNxHD (SMPTE VC-3)
+  E  dts             raw DTS
+  E  dv              DV (Digital Video)
+  E  dvd             MPEG-2 PS (DVD VOB)
+  E  eac3            raw E-AC-3
+  E  evc             raw EVC video
+  E  f32be           PCM 32-bit floating-point big-endian
+  E  f32le           PCM 32-bit floating-point little-endian
+  E  f4v             F4V Adobe Flash Video
+  E  f64be           PCM 64-bit floating-point big-endian
+  E  f64le           PCM 64-bit floating-point little-endian
+  Ed fbdev           Linux framebuffer
+  E  ffmetadata      FFmpeg metadata in text
+  E  fifo            FIFO queue pseudo-muxer
+  E  film_cpk        Sega FILM / CPK
+  E  filmstrip       Adobe Filmstrip
+  E  fits            Flexible Image Transport System
+  E  flac            raw FLAC
+  E  flv             FLV (Flash Video)
+  E  framecrc        framecrc testing
+  E  framehash       Per-frame hash testing
+  E  framemd5        Per-frame MD5 testing
+  E  g722            raw G.722
+  E  g723_1          raw G.723.1
+  E  g726            raw big-endian G.726 ("left-justified")
+  E  g726le          raw little-endian G.726 ("right-justified")
+  E  gif             CompuServe Graphics Interchange Format (GIF)
+  E  gsm             raw GSM
+  E  gxf             GXF (General eXchange Format)
+  E  h261            raw H.261
+  E  h263            raw H.263
+  E  h264            raw H.264 video
+  E  hash            Hash testing
+  E  hds             HDS Muxer
+  E  hevc            raw HEVC video
+  E  hls             Apple HTTP Live Streaming
+  E  iamf            Raw Immersive Audio Model and Formats
+  E  ico             Microsoft Windows ICO
+  E  ilbc            iLBC storage
+  E  image2          image2 sequence
+  E  image2pipe      piped image2 sequence
+  E  ipod            iPod H.264 MP4 (MPEG-4 Part 14)
+  E  ircam           Berkeley/IRCAM/CARL Sound Format
+  E  ismv            ISMV/ISMA (Smooth Streaming)
+  E  ivf             On2 IVF
+  E  jacosub         JACOsub subtitle format
+  E  kvag            Simon & Schuster Interactive VAG
+  E  latm            LOAS/LATM
+  E  lc3             LC3 (Low Complexity Communication Codec)
+  E  lrc             LRC lyrics
+  E  m4v             raw MPEG-4 video
+  E  matroska        Matroska
+  E  md5             MD5 testing
+  E  microdvd        MicroDVD subtitle format
+  E  mjpeg           raw MJPEG video
+  E  mkvtimestamp_v2 extract pts as timecode v2 format, as defined by mkvtoolnix
+  E  mlp             raw MLP
+  E  mmf             Yamaha SMAF
+  E  mov             QuickTime / MOV
+  E  mp2             MP2 (MPEG audio layer 2)
+  E  mp3             MP3 (MPEG audio layer 3)
+  E  mp4             MP4 (MPEG-4 Part 14)
+  E  mpeg            MPEG-1 Systems / MPEG program stream
+  E  mpeg1video      raw MPEG-1 video
+  E  mpeg2video      raw MPEG-2 video
+  E  mpegts          MPEG-TS (MPEG-2 Transport Stream)
+  E  mpjpeg          MIME multipart JPEG
+  E  mulaw           PCM mu-law
+  E  mxf             MXF (Material eXchange Format)
+  E  mxf_d10         MXF (Material eXchange Format) D-10 Mapping
+  E  mxf_opatom      MXF (Material eXchange Format) Operational Pattern Atom
+  E  null            raw null video
+  E  nut             NUT
+  E  obu             AV1 low overhead OBU
+  E  oga             Ogg Audio
+  E  ogg             Ogg
+  E  ogv             Ogg Video
+  E  oma             Sony OpenMG audio
+  Ed opengl          OpenGL output
+  E  opus            Ogg Opus
+  Ed oss             OSS (Open Sound System) playback
+  E  psp             PSP MP4 (MPEG-4 Part 14)
+  Ed pulse           Pulse audio output
+  E  rawvideo        raw video
+  E  rcwt            RCWT (Raw Captions With Time)
+  E  rm              RealMedia
+  E  roq             raw id RoQ
+  E  rso             Lego Mindstorms RSO
+  E  rtp             RTP output
+  E  rtp_mpegts      RTP/mpegts output format
+  E  rtsp            RTSP output
+  E  s16be           PCM signed 16-bit big-endian
+  E  s16le           PCM signed 16-bit little-endian
+  E  s24be           PCM signed 24-bit big-endian
+  E  s24le           PCM signed 24-bit little-endian
+  E  s32be           PCM signed 32-bit big-endian
+  E  s32le           PCM signed 32-bit little-endian
+  E  s8              PCM signed 8-bit
+  E  sap             SAP output
+  E  sbc             raw SBC
+  E  scc             Scenarist Closed Captions
+  Ed sdl,sdl2        SDL2 output device
+  E  segment         segment
+  E  smjpeg          Loki SDL MJPEG
+  E  smoothstreaming Smooth Streaming Muxer
+  E  sox             SoX (Sound eXchange) native
+  E  spdif           IEC 61937 (used on S/PDIF - IEC958)
+  E  spx             Ogg Speex
+  E  srt             SubRip subtitle
+  E  stream_segment,ssegment streaming segment muxer
+  E  streamhash      Per-stream hash testing
+  E  sup             raw HDMV Presentation Graphic Stream subtitles
+  E  svcd            MPEG-2 PS (SVCD)
+  E  swf             SWF (ShockWave Flash)
+  E  tee             Multiple muxer tee
+  E  truehd          raw TrueHD
+  E  tta             TTA (True Audio)
+  E  ttml            TTML subtitle
+  E  u16be           PCM unsigned 16-bit big-endian
+  E  u16le           PCM unsigned 16-bit little-endian
+  E  u24be           PCM unsigned 24-bit big-endian
+  E  u24le           PCM unsigned 24-bit little-endian
+  E  u32be           PCM unsigned 32-bit big-endian
+  E  u32le           PCM unsigned 32-bit little-endian
+  E  u8              PCM unsigned 8-bit
+  E  uncodedframecrc uncoded framecrc testing
+  E  vc1             raw VC-1 video
+  E  vc1test         VC-1 test bitstream
+  E  vcd             MPEG-1 Systems / MPEG program stream (VCD)
+  E  vidc            PCM Archimedes VIDC
+  Ed video4linux2,v4l2 Video4Linux2 output device
+  E  vob             MPEG-2 PS (VOB)
+  E  voc             Creative Voice
+  E  vvc             raw H.266/VVC video
+  E  w64             Sony Wave64
+  E  wav             WAV / WAVE (Waveform Audio)
+  E  webm            WebM
+  E  webm_chunk      WebM Chunk Muxer
+  E  webm_dash_manifest WebM DASH Manifest
+  E  webp            WebP
+  E  webvtt          WebVTT subtitle
+  E  wsaud           Westwood Studios audio
+  E  wtv             Windows Television (WTV)
+  E  wv              raw WavPack
+  Ed xv              XV (XVideo) output device
+  E  yuv4mpegpipe    YUV4MPEG pipe
+Filters:
+  T.. = Timeline support
+  .S. = Slice threading
+  ..C = Command support
+  A = Audio input/output
+  V = Video input/output
+  N = Dynamic number and/or type of input/output
+  | = Source or sink filter
+ TSC aap               AA->A      Apply Affine Projection algorithm to first audio stream.
+ ... abench            A->A       Benchmark part of a filtergraph.
+ ..C acompressor       A->A       Audio compressor.
+ ... acontrast         A->A       Simple audio dynamic range compression/expansion filter.
+ ... acopy             A->A       Copy the input audio unchanged to the output.
+ ... acue              A->A       Delay filtering to match a cue.
+ ... acrossfade        AA->A      Cross fade two input audio streams.
+ .S. acrossover        A->N       Split audio into per-bands streams.
+ T.C acrusher          A->A       Reduce audio bit resolution.
+ TS. adeclick          A->A       Remove impulsive noise from input audio.
+ TS. adeclip           A->A       Remove clipping from input audio.
+ TS. adecorrelate      A->A       Apply decorrelation to input audio.
+ T.C adelay            A->A       Delay one or more audio channels.
+ TSC adenorm           A->A       Remedy denormals by adding extremely low-level noise.
+ T.. aderivative       A->A       Compute derivative of input audio.
+ TSC adrc              A->A       Audio Spectral Dynamic Range Controller.
+ TSC adynamicequalizer A->A       Apply Dynamic Equalization of input audio.
+ T.C adynamicsmooth    A->A       Apply Dynamic Smoothing of input audio.
+ ... aecho             A->A       Add echoing to the audio.
+ TSC aemphasis         A->A       Audio emphasis.
+ T.. aeval             A->A       Filter audio signal according to a specified expression.
+ T.C aexciter          A->A       Enhance high frequency part of audio.
+ T.C afade             A->A       Fade in/out input audio.
+ TSC afftdn            A->A       Denoise audio samples using FFT.
+ TS. afftfilt          A->A       Apply arbitrary expressions to samples in frequency domain.
+ TSC afir              N->A       Apply Finite Impulse Response filter with supplied coefficients in additional stream(s).
+ ... aformat           A->A       Convert the input audio to one of the specified formats.
+ TSC afreqshift        A->A       Apply frequency shifting to input audio.
+ TSC afwtdn            A->A       Denoise audio stream using Wavelets.
+ T.C agate             A->A       Audio gate.
+ .S. aiir              A->N       Apply Infinite Impulse Response filter with supplied coefficients.
+ T.. aintegral         A->A       Compute integral of input audio.
+ ... ainterleave       N->A       Temporally interleave audio inputs.
+ T.. alatency          A->A       Report audio filtering latency.
+ T.C alimiter          A->A       Audio lookahead limiter.
+ TSC allpass           A->A       Apply a two-pole all-pass filter.
+ ... aloop             A->A       Loop audio samples.
+ ... amerge            N->A       Merge two or more audio streams into a single multi-channel stream.
+ T.. ametadata         A->A       Manipulate audio frame metadata.
+ ..C amix              N->A       Audio mixing.
+ ... amultiply         AA->A      Multiply two audio streams.
+ TSC anequalizer       A->N       Apply high-order audio parametric multi band equalizer.
+ TSC anlmdn            A->A       Reduce broadband noise from stream using Non-Local Means.
+ TSC anlmf             AA->A      Apply Normalized Least-Mean-Fourth algorithm to first audio stream.
+ TSC anlms             AA->A      Apply Normalized Least-Mean-Squares algorithm to first audio stream.
+ ... anull             A->A       Pass the source unchanged to the output.
+ T.. apad              A->A       Pad audio with silence.
+ T.C aperms            A->A       Set permissions for the output audio frame.
+ ... aphaser           A->A       Add a phasing effect to the audio.
+ TSC aphaseshift       A->A       Apply phase shifting to input audio.
+ TS. apsnr             AA->A      Measure Audio Peak Signal-to-Noise Ratio.
+ TSC apsyclip          A->A       Audio Psychoacoustic Clipper.
+ ... apulsator         A->A       Audio pulsator.
+ ..C arealtime         A->A       Slow down filtering to match realtime.
+ ... aresample         A->A       Resample audio data.
+ ... areverse          A->A       Reverse an audio clip.
+ TSC arls              AA->A      Apply Recursive Least Squares algorithm to first audio stream.
+ TSC arnndn            A->A       Reduce noise from speech using Recurrent Neural Networks.
+ TS. asdr              AA->A      Measure Audio Signal-to-Distortion Ratio.
+ ... asegment          A->N       Segment audio stream.
+ ... aselect           A->N       Select audio frames to pass in output.
+ ... asendcmd          A->A       Send commands to filters.
+ T.C asetnsamples      A->A       Set the number of samples for each output audio frames.
+ ..C asetpts           A->A       Set PTS for the output audio frame.
+ ... asetrate          A->A       Change the sample rate without altering the data.
+ ... asettb            A->A       Set timebase for the audio output link.
+ ... ashowinfo         A->A       Show textual information for each audio frame.
+ T.. asidedata         A->A       Manipulate audio frame side data.
+ TS. asisdr            AA->A      Measure Audio Scale-Invariant Signal-to-Distortion Ratio.
+ TSC asoftclip         A->A       Audio Soft Clipper.
+ .S. aspectralstats    A->A       Show frequency domain statistics about audio frames.
+ ... asplit            A->N       Pass on the audio input to N audio outputs.
+ ... asr               A->A       Automatic Speech Recognition.
+ .S. astats            A->A       Show time domain statistics about audio frames.
+ ..C astreamselect     N->N       Select audio streams
+ TSC asubboost         A->A       Boost subwoofer frequencies.
+ TSC asubcut           A->A       Cut subwoofer frequencies.
+ TSC asupercut         A->A       Cut super frequencies.
+ TSC asuperpass        A->A       Apply high order Butterworth band-pass filter.
+ TSC asuperstop        A->A       Apply high order Butterworth band-stop filter.
+ ..C atempo            A->A       Adjust audio tempo.
+ TSC atilt             A->A       Apply spectral tilt to audio.
+ ... atrim             A->A       Pick one continuous section from the input, drop the rest.
+ ... axcorrelate       AA->A      Cross-correlate two audio streams.
+ ... azmq              A->A       Receive commands through ZMQ and broker them to filters.
+ TSC bandpass          A->A       Apply a two-pole Butterworth band-pass filter.
+ TSC bandreject        A->A       Apply a two-pole Butterworth band-reject filter.
+ TSC bass              A->A       Boost or cut lower frequencies.
+ TSC biquad            A->A       Apply a biquad IIR filter with the given coefficients.
+ ... bs2b              A->A       Bauer stereo-to-binaural filter.
+ ... channelmap        A->A       Remap audio channels.
+ ... channelsplit      A->N       Split audio into per-channel streams.
+ ... chorus            A->A       Add a chorus effect to the audio.
+ ... compand           A->A       Compress or expand audio dynamic range.
+ T.C compensationdelay A->A       Audio Compensation Delay Line.
+ T.C crossfeed         A->A       Apply headphone crossfeed filter.
+ TSC crystalizer       A->A       Simple audio noise sharpening filter.
+ T.. dcshift           A->A       Apply a DC shift to the audio.
+ T.. deesser           A->A       Apply de-essing to the audio.
+ T.C dialoguenhance    A->A       Audio Dialogue Enhancement.
+ ... drmeter           A->A       Measure audio dynamic range.
+ TSC dynaudnorm        A->A       Dynamic Audio Normalizer.
+ ... earwax            A->A       Widen the stereo image.
+ ... ebur128           A->N       EBU R128 scanner.
+ TSC equalizer         A->A       Apply two-pole peaking equalization (EQ) filter.
+ T.C extrastereo       A->A       Increase difference between stereo audio channels.
+ ..C firequalizer      A->A       Finite Impulse Response Equalizer.
+ ... flanger           A->A       Apply a flanging effect to the audio.
+ ... haas              A->A       Apply Haas Stereo Enhancer.
+ ... hdcd              A->A       Apply High Definition Compatible Digital (HDCD) decoding.
+ .S. headphone         N->A       Apply headphone binaural spatialization with HRTFs in additional streams.
+ TSC highpass          A->A       Apply a high-pass filter with 3dB point frequency.
+ TSC highshelf         A->A       Apply a high shelf filter.
+ ... join              N->A       Join multiple audio streams into multi-channel output.
+ ..C ladspa            N->A       Apply LADSPA effect.
+ ... loudnorm          A->A       EBU R128 loudness normalization
+ TSC lowpass           A->A       Apply a low-pass filter with 3dB point frequency.
+ TSC lowshelf          A->A       Apply a low shelf filter.
+ ..C lv2               N->A       Apply LV2 effect.
+ ... mcompand          A->A       Multiband Compress or expand audio dynamic range.
+ ... pan               A->A       Remix channels with coefficients (panning).
+ ... replaygain        A->A       ReplayGain scanner.
+ ..C rubberband        A->A       Apply time-stretching and pitch-shifting.
+ ..C sidechaincompress AA->A      Sidechain compressor.
+ T.C sidechaingate     AA->A      Audio sidechain gate.
+ ... silencedetect     A->A       Detect silence.
+ T.C silenceremove     A->A       Remove silence.
+ .S. sofalizer         A->A       SOFAlizer (Spatially Oriented Format for Acoustics).
+ T.C speechnorm        A->A       Speech Normalizer.
+ T.C stereotools       A->A       Apply various stereo tools.
+ T.C stereowiden       A->A       Apply stereo widening effect.
+ ... superequalizer    A->A       Apply 18 band equalization filter.
+ .SC surround          A->A       Apply audio surround upmix filter.
+ TSC tiltshelf         A->A       Apply a tilt shelf filter.
+ TSC treble            A->A       Boost or cut upper frequencies.
+ T.. tremolo           A->A       Apply tremolo effect.
+ T.. vibrato           A->A       Apply vibrato effect.
+ T.C virtualbass       A->A       Audio Virtual Bass.
+ T.C volume            A->A       Change input volume.
+ ... volumedetect      A->A       Detect audio volume.
+ ... aevalsrc          |->A       Generate an audio signal generated by an expression.
+ ... afdelaysrc        |->A       Generate a Fractional delay FIR coefficients.
+ ... afireqsrc         |->A       Generate a FIR equalizer coefficients audio stream.
+ ... afirsrc           |->A       Generate a FIR coefficients audio stream.
+ ... anoisesrc         |->A       Generate a noise audio signal.
+ ... anullsrc          |->A       Null audio source, return empty audio frames.
+ ... flite             |->A       Synthesize voice from text using libflite.
+ ... hilbert           |->A       Generate a Hilbert transform FIR coefficients.
+ ... sinc              |->A       Generate a sinc kaiser-windowed low-pass, high-pass, band-pass, or band-reject FIR coefficients.
+ ... sine              |->A       Generate sine wave audio signal.
+ ... anullsink         A->|       Do absolutely nothing with the input audio.
+ ... addroi            V->V       Add region of interest to frame.
+ ... alphaextract      V->V       Extract an alpha channel as a grayscale image component.
+ T.. alphamerge        VV->V      Copy the luma value of the second input into the alpha channel of the first input.
+ TSC amplify           V->V       Amplify changes between successive video frames.
+ ... ass               V->V       Render ASS subtitles onto input video using the libass library.
+ TSC atadenoise        V->V       Apply an Adaptive Temporal Averaging Denoiser.
+ T.C avgblur           V->V       Apply Average Blur filter.
+ ... avgblur_opencl    V->V       Apply average blur filter
+ ... avgblur_vulkan    V->V       Apply avgblur mask to input video
+ TSC backgroundkey     V->V       Turns a static background into transparency.
+ T.C bbox              V->V       Compute bounding box for each frame.
+ ... bench             V->V       Benchmark part of a filtergraph.
+ TSC bilateral         V->V       Apply Bilateral filter.
+ ... bilateral_cuda    V->V       GPU accelerated bilateral filter
+ T.. bitplanenoise     V->V       Measure bit plane noise.
+ .S. blackdetect       V->V       Detect video intervals that are (almost) black.
+ ... blackframe        V->V       Detect frames that are (almost) black.
+ TSC blend             VV->V      Blend two video frames into each other.
+ ..C blend_vulkan      VV->V      Blend two video frames in Vulkan
+ ... blockdetect       V->V       Blockdetect filter.
+ ... blurdetect        V->V       Blurdetect filter.
+ TS. bm3d              N->V       Block-Matching 3D denoiser.
+ T.. boxblur           V->V       Blur the input.
+ ... boxblur_opencl    V->V       Apply boxblur filter to input video
+ TS. bwdif             V->V       Deinterlace the input image.
+ T.. bwdif_cuda        V->V       Deinterlace CUDA frames
+ T.. bwdif_vulkan      V->V       Deinterlace Vulkan frames via bwdif
+ TSC cas               V->V       Contrast Adaptive Sharpen.
+ ... ccrepack          V->V       Repack CEA-708 closed caption metadata
+ ... chromaber_vulkan  V->V       Offset chroma of input video (chromatic aberration)
+ TSC chromahold        V->V       Turns a certain color range into gray.
+ TSC chromakey         V->V       Turns a certain color into transparency. Operates on YUV colors.
+ ... chromakey_cuda    V->V       GPU accelerated chromakey filter
+ TSC chromanr          V->V       Reduce chrominance noise.
+ TSC chromashift       V->V       Shift chroma.
+ ... ciescope          V->V       Video CIE scope.
+ T.. codecview         V->V       Visualize information about some codecs.
+ TSC colorbalance      V->V       Adjust the color balance.
+ TSC colorchannelmixer V->V       Adjust colors by mixing color channels.
+ TSC colorcontrast     V->V       Adjust color contrast between RGB components.
+ TSC colorcorrect      V->V       Adjust color white balance selectively for blacks and whites.
+ TSC colorize          V->V       Overlay a solid color on the video stream.
+ TSC colorkey          V->V       Turns a certain color into transparency. Operates on RGB colors.
+ ... colorkey_opencl   V->V       Turns a certain color into transparency. Operates on RGB colors.
+ TSC colorhold         V->V       Turns a certain color range into gray. Operates on RGB colors.
+ TSC colorlevels       V->V       Adjust the color levels.
+ TSC colormap          VVV->V     Apply custom Color Maps to video stream.
+ TS. colormatrix       V->V       Convert color matrix.
+ TS. colorspace        V->V       Convert between colorspaces.
+ ... colorspace_cuda   V->V       CUDA accelerated video color converter
+ TSC colortemperature  V->V       Adjust color temperature of video.
+ TSC convolution       V->V       Apply convolution filter.
+ ... convolution_opencl V->V       Apply convolution mask to input video
+ TS. convolve          VV->V      Convolve first video stream with second video stream.
+ ... copy              V->V       Copy the input video unchanged to the output.
+ TS. corr              VV->V      Calculate the correlation between two video streams.
+ ... cover_rect        V->V       Find and cover a user specified object.
+ ..C crop              V->V       Crop the input video.
+ T.C cropdetect        V->V       Auto-detect crop size.
+ ... cue               V->V       Delay filtering to match a cue.
+ TSC curves            V->V       Adjust components curves.
+ .SC datascope         V->V       Video data analysis.
+ T.C dblur             V->V       Apply Directional Blur filter.
+ TS. dctdnoiz          V->V       Denoise frames using 2D DCT.
+ TSC deband            V->V       Debands video.
+ T.C deblock           V->V       Deblock video.
+ ... decimate          N->V       Decimate frames (post field matching filter).
+ TS. deconvolve        VV->V      Deconvolve first video stream with second video stream.
+ TS. dedot             V->V       Reduce cross-luminance and cross-color.
+ TSC deflate           V->V       Apply deflate effect.
+ ... deflicker         V->V       Remove temporal frame luminance variations.
+ ... deinterlace_qsv   V->V       Quick Sync Video "deinterlacing"
+ ... deinterlace_vaapi V->V       Deinterlacing of VAAPI surfaces
+ ... dejudder          V->V       Remove judder produced by pullup.
+ T.. delogo            V->V       Remove logo from input video.
+ ... denoise_vaapi     V->V       VAAPI VPP for de-noise
+ ... deshake           V->V       Stabilize shaky video.
+ ... deshake_opencl    V->V       Feature-point based video stabilization filter
+ TSC despill           V->V       Despill video.
+ ... detelecine        V->V       Apply an inverse telecine pattern.
+ TSC dilation          V->V       Apply dilation effect.
+ ... dilation_opencl   V->V       Apply dilation effect
+ TSC displace          VVV->V     Displace pixels.
+ .S. doubleweave       V->V       Weave input video fields into double number of frames.
+ T.C drawbox           V->V       Draw a colored box on the input video.
+ ... drawgraph         V->V       Draw a graph using input video metadata.
+ T.C drawgrid          V->V       Draw a colored grid on the input video.
+ T.C drawtext          V->V       Draw text on top of video frames using libfreetype library.
+ T.. edgedetect        V->V       Detect and draw edge.
+ ... elbg              V->V       Apply posterize effect, using the ELBG algorithm.
+ T.. entropy           V->V       Measure video frames entropy.
+ .S. epx               V->V       Scale the input using EPX algorithm.
+ T.C eq                V->V       Adjust brightness, contrast, gamma, and saturation.
+ TSC erosion           V->V       Apply erosion effect.
+ ... erosion_opencl    V->V       Apply erosion effect
+ TSC estdif            V->V       Apply Edge Slope Tracing deinterlace.
+ TSC exposure          V->V       Adjust exposure of the video stream.
+ ... extractplanes     V->N       Extract planes as grayscale frames.
+ TS. fade              V->V       Fade in/out input video.
+ T.C feedback          VV->VV     Apply feedback video filter.
+ TSC fftdnoiz          V->V       Denoise frames using 3D FFT.
+ TS. fftfilt           V->V       Apply arbitrary expressions to pixels in frequency domain.
+ ... field             V->V       Extract a field from the input video.
+ ... fieldhint         V->V       Field matching using hints.
+ ... fieldmatch        N->V       Field matching for inverse telecine.
+ T.. fieldorder        V->V       Set the field order.
+ T.C fillborders       V->V       Fill borders of the input video.
+ ... find_rect         V->V       Find a user specified object.
+ ... flip_vulkan       V->V       Flip both horizontally and vertically
+ T.. floodfill         V->V       Fill area with same color with another color.
+ ... format            V->V       Convert the input video to one of the specified pixel formats.
+ ... fps               V->V       Force constant framerate.
+ ... framepack         VV->V      Generate a frame packed stereoscopic video.
+ .S. framerate         V->V       Upsamples or downsamples progressive source between specified frame rates.
+ T.. framestep         V->V       Select one frame every N frames.
+ ... freezedetect      V->V       Detects frozen video input.
+ ... freezeframes      VV->V      Freeze video frames.
+ T.C frei0r            V->V       Apply a frei0r effect.
+ T.. fspp              V->V       Apply Fast Simple Post-processing filter.
+ ... fsync             V->V       Synchronize video frames from external source.
+ TSC gblur             V->V       Apply Gaussian Blur filter.
+ ... gblur_vulkan      V->V       Gaussian Blur in Vulkan
+ TS. geq               V->V       Apply generic equation to each pixel.
+ T.. gradfun           V->V       Debands video quickly using gradients.
+ ..C graphmonitor      V->V       Show various filtergraph stats.
+ TS. grayworld         V->V       Adjust white balance using LAB gray world algorithm
+ TS. greyedge          V->V       Estimates scene illumination by grey edge assumption.
+ TSC guided            N->V       Apply Guided filter.
+ TSC haldclut          VV->V      Adjust colors using a Hald CLUT.
+ TS. hflip             V->V       Horizontally flip the input video.
+ ... hflip_vulkan      V->V       Horizontally flip the input video in Vulkan
+ T.. histeq            V->V       Apply global color histogram equalization.
+ ... histogram         V->V       Compute and draw a histogram.
+ TSC hqdn3d            V->V       Apply a High Quality 3D Denoiser.
+ .S. hqx               V->V       Scale the input by 2, 3 or 4 using the hq*x magnification algorithm.
+ .S. hstack            N->V       Stack video inputs horizontally.
+ TSC hsvhold           V->V       Turns a certain HSV range into gray.
+ TSC hsvkey            V->V       Turns a certain HSV range into transparency. Operates on YUV colors.
+ T.C hue               V->V       Adjust the hue and saturation of the input video.
+ TSC huesaturation     V->V       Apply hue-saturation-intensity adjustments.
+ ... hwdownload        V->V       Download a hardware frame to a normal frame
+ ... hwmap             V->V       Map hardware frames
+ ... hwupload          V->V       Upload a normal frame to a hardware frame
+ ... hwupload_cuda     V->V       Upload a system memory frame to a CUDA device.
+ T.. hysteresis        VV->V      Grow first stream into second stream by connecting components.
+ TS. identity          VV->V      Calculate the Identity between two video streams.
+ ... idet              V->V       Interlace detect Filter.
+ T.C il                V->V       Deinterleave or interleave fields.
+ TSC inflate           V->V       Apply inflate effect.
+ ... interlace         V->V       Convert progressive video into interlaced.
+ ... interleave        N->V       Temporally interleave video inputs.
+ ... kerndeint         V->V       Apply kernel deinterlacing to the input.
+ TSC kirsch            V->V       Apply kirsch operator.
+ TSC lagfun            V->V       Slowly update darker pixels.
+ T.. latency           V->V       Report video filtering latency.
+ TSC lenscorrection    V->V       Rectify the image by correcting for lens distortion.
+ ..C libplacebo        N->V       Apply various GPU filters from libplacebo
+ TSC limitdiff         N->V       Apply filtering with limiting difference.
+ TSC limiter           V->V       Limit pixels components to the specified range.
+ ... loop              V->V       Loop video frames.
+ TSC lumakey           V->V       Turns a certain luma into transparency.
+ TSC lut               V->V       Compute and apply a lookup table to the RGB/YUV input video.
+ TSC lut1d             V->V       Adjust colors using a 1D LUT.
+ TSC lut2              VV->V      Compute and apply a lookup table from two video inputs.
+ TSC lut3d             V->V       Adjust colors using a 3D LUT.
+ TSC lutrgb            V->V       Compute and apply a lookup table to the RGB input video.
+ TSC lutyuv            V->V       Compute and apply a lookup table to the YUV input video.
+ TSC maskedclamp       VVV->V     Clamp first stream with second stream and third stream.
+ TSC maskedmax         VVV->V     Apply filtering with maximum difference of two streams.
+ TSC maskedmerge       VVV->V     Merge first stream with second stream using third stream as mask.
+ TSC maskedmin         VVV->V     Apply filtering with minimum difference of two streams.
+ TSC maskedthreshold   VV->V      Pick pixels comparing absolute difference of two streams with threshold.
+ TSC maskfun           V->V       Create Mask.
+ ... mcdeint           V->V       Apply motion compensating deinterlacing.
+ TSC median            V->V       Apply Median filter.
+ ... mergeplanes       N->V       Merge planes.
+ ... mestimate         V->V       Generate motion vectors.
+ T.. metadata          V->V       Manipulate video frame metadata.
+ T.. midequalizer      VV->V      Apply Midway Equalization.
+ ... minterpolate      V->V       Frame rate conversion using Motion Interpolation.
+ TSC mix               N->V       Mix video inputs.
+ TSC monochrome        V->V       Convert video to gray using custom color filter.
+ TSC morpho            VV->V      Apply Morphological filter.
+ ... mpdecimate        V->V       Remove near-duplicate frames.
+ TS. msad              VV->V      Calculate the MSAD between two video streams.
+ TSC multiply          VV->V      Multiply first video stream with second video stream.
+ TSC negate            V->V       Negate input video.
+ TS. nlmeans           V->V       Non-local means denoiser.
+ ... nlmeans_opencl    V->V       Non-local means denoiser through OpenCL
+ ... nlmeans_vulkan    V->V       Non-local means denoiser (Vulkan)
+ TSC nnedi             V->V       Apply neural network edge directed interpolation intra-only deinterlacer.
+ ... noformat          V->V       Force libavfilter not to use any of the specified pixel formats for the input to the next filter.
+ TS. noise             V->V       Add noise.
+ T.C normalize         V->V       Normalize RGB video.
+ ... null              V->V       Pass the source unchanged to the output.
+ T.C oscilloscope      V->V       2D Video Oscilloscope.
+ TSC overlay           VV->V      Overlay a video source on top of the input.
+ ... overlay_opencl    VV->V      Overlay one video on top of another
+ ... overlay_qsv       VV->V      Quick Sync Video overlay.
+ ... overlay_vaapi     VV->V      Overlay one video on top of another
+ ... overlay_vulkan    VV->V      Overlay a source on top of another
+ ... overlay_cuda      VV->V      Overlay one video on top of another using CUDA
+ T.. owdenoise         V->V       Denoise using wavelets.
+ ... pad               V->V       Pad the input video.
+ ... pad_opencl        V->V       Pad the input video.
+ ... palettegen        V->V       Find the optimal palette for a given stream.
+ ... paletteuse        VV->V      Use a palette to downsample an input video stream.
+ T.C perms             V->V       Set permissions for the output video frame.
+ TS. perspective       V->V       Correct the perspective of video.
+ T.C phase             V->V       Phase shift fields.
+ ... photosensitivity  V->V       Filter out photosensitive epilepsy seizure-inducing flashes.
+ ... pixdesctest       V->V       Test pixel format definitions.
+ TSC pixelize          V->V       Pixelize video.
+ T.C pixscope          V->V       Pixel data analysis.
+ T.C pp                V->V       Filter video using libpostproc.
+ T.. pp7               V->V       Apply Postprocessing 7 filter.
+ TS. premultiply       N->V       PreMultiply first stream with first plane of second stream.
+ TSC prewitt           V->V       Apply prewitt operator.
+ ... prewitt_opencl    V->V       Apply prewitt operator
+ ... procamp_vaapi     V->V       ProcAmp (color balance) adjustments for hue, saturation, brightness, contrast
+ ... program_opencl    N->V       Filter video using an OpenCL program
+ TSC pseudocolor       V->V       Make pseudocolored video frames.
+ TS. psnr              VV->V      Calculate the PSNR between two video streams.
+ ... pullup            V->V       Pullup from field sequence to frames.
+ T.. qp                V->V       Change video quantization parameters.
+ ... random            V->V       Return random frames.
+ TSC readeia608        V->V       Read EIA-608 Closed Caption codes from input video and write them to frame metadata.
+ ... readvitc          V->V       Read vertical interval timecode and write it to frame metadata.
+ ..C realtime          V->V       Slow down filtering to match realtime.
+ .S. remap             VVV->V     Remap pixels.
+ ... remap_opencl      VVV->V     Remap pixels using OpenCL.
+ TS. removegrain       V->V       Remove grain.
+ T.. removelogo        V->V       Remove a TV logo based on a mask image.
+ ... repeatfields      V->V       Hard repeat fields based on MPEG repeat field flag.
+ ... reverse           V->V       Reverse a clip.
+ TSC rgbashift         V->V       Shift RGBA.
+ TSC roberts           V->V       Apply roberts cross operator.
+ ... roberts_opencl    V->V       Apply roberts operator
+ TSC rotate            V->V       Rotate the input image.
+ T.. sab               V->V       Apply shape adaptive blur.
+ ..C scale             V->V       Scale the input video size and/or convert the image format.
+ ... scale_cuda        V->V       GPU accelerated video resizer
+ ... scale_qsv         V->V       Quick Sync Video "scaling and format conversion"
+ ... scale_vaapi       V->V       Scale to/from VAAPI surfaces.
+ ... scale_vulkan      V->V       Scale Vulkan frames
+ ..C scale2ref         VV->VV     Scale the input video size and/or convert the image format to the given reference.
+ ... scdet             V->V       Detect video scene change
+ TSC scharr            V->V       Apply scharr operator.
+ TSC scroll            V->V       Scroll input video.
+ ... segment           V->N       Segment video stream.
+ ... select            V->N       Select video frames to pass in output.
+ TS. selectivecolor    V->V       Apply CMYK adjustments to specific color ranges.
+ ... sendcmd           V->V       Send commands to filters.
+ ... separatefields    V->V       Split input video frames into fields.
+ ... setdar            V->V       Set the frame display aspect ratio.
+ ... setfield          V->V       Force field for the output video frame.
+ ... setparams         V->V       Force field, or color property for the output video frame.
+ ..C setpts            V->V       Set PTS for the output video frame.
+ ... setrange          V->V       Force color range for the output video frame.
+ ... setsar            V->V       Set the pixel sample aspect ratio.
+ ... settb             V->V       Set timebase for the video output link.
+ ... sharpness_vaapi   V->V       VAAPI VPP for sharpness
+ TSC shear             V->V       Shear transform the input image.
+ ... showinfo          V->V       Show textual information for each video frame.
+ ... showpalette       V->V       Display frame palette.
+ T.. shuffleframes     V->V       Shuffle video frames.
+ TS. shufflepixels     V->V       Shuffle video pixels.
+ T.. shuffleplanes     V->V       Shuffle video planes.
+ T.. sidedata          V->V       Manipulate video frame side data.
+ .S. signalstats       V->V       Generate statistics from video analysis.
+ ... signature         N->V       Calculate the MPEG-7 video signature
+ ... siti              V->V       Calculate spatial information (SI) and temporal information (TI).
+ T.. smartblur         V->V       Blur the input video without impacting the outlines.
+ TSC sobel             V->V       Apply sobel operator.
+ ... sobel_opencl      V->V       Apply sobel operator
+ ... split             V->N       Pass on the input to N video outputs.
+ T.C spp               V->V       Apply a simple post processing filter.
+ TS. ssim              VV->V      Calculate the SSIM between two video streams.
+ ... ssim360           VV->V      Calculate the SSIM between two 360 video streams.
+ .S. stereo3d          V->V       Convert video stereoscopic 3D view.
+ ..C streamselect      N->N       Select video streams
+ ... subtitles         V->V       Render text subtitles onto input video using the libass library.
+ .S. super2xsai        V->V       Scale the input by 2x using the Super2xSaI pixel art algorithm.
+ T.C swaprect          V->V       Swap 2 rectangular objects in video.
+ T.. swapuv            V->V       Swap U and V components.
+ TSC tblend            V->V       Blend successive frames.
+ ... telecine          V->V       Apply a telecine pattern.
+ ... thistogram        V->V       Compute and draw a temporal histogram.
+ TSC threshold         VVVV->V    Threshold first video stream using other video streams.
+ TS. thumbnail         V->V       Select the most representative frame in a given sequence of consecutive frames.
+ ... thumbnail_cuda    V->V       Select the most representative frame in a given sequence of consecutive frames.
+ ... tile              V->V       Tile several successive frames together.
+ ... tiltandshift      V->V       Generate a tilt-and-shift'd video.
+ ... tinterlace        V->V       Perform temporal field interlacing.
+ TSC tlut2             V->V       Compute and apply a lookup table from two successive frames.
+ TSC tmedian           V->V       Pick median pixels from successive frames.
+ T.. tmidequalizer     V->V       Apply Temporal Midway Equalization.
+ TSC tmix              V->V       Mix successive video frames.
+ .S. tonemap           V->V       Conversion to/from different dynamic ranges.
+ ... tonemap_opencl    V->V       Perform HDR to SDR conversion with tonemapping.
+ ... tonemap_vaapi     V->V       VAAPI VPP for tone-mapping
+ ... tpad              V->V       Temporarily pad video frames.
+ .S. transpose         V->V       Transpose input video.
+ ... transpose_opencl  V->V       Transpose input video
+ ... transpose_vaapi   V->V       VAAPI VPP for transpose
+ ... transpose_vulkan  V->V       Transpose Vulkan Filter
+ ... trim              V->V       Pick one continuous section from the input, drop the rest.
+ TS. unpremultiply     N->V       UnPreMultiply first stream with first plane of second stream.
+ TS. unsharp           V->V       Sharpen or blur the input video.
+ ... unsharp_opencl    V->V       Apply unsharp mask to input video
+ ... untile            V->V       Untile a frame into a sequence of frames.
+ TS. uspp              V->V       Apply Ultra Simple / Slow Post-processing filter.
+ .SC v360              V->V       Convert 360 projection of video.
+ T.. vaguedenoiser     V->V       Apply a Wavelet based Denoiser.
+ TSC varblur           VV->V      Apply Variable Blur filter.
+ ..C vectorscope       V->V       Video vectorscope.
+ T.. vflip             V->V       Flip the input video vertically.
+ ... vflip_vulkan      V->V       Vertically flip the input video in Vulkan
+ ... vfrdet            V->V       Variable frame rate detect filter.
+ TSC vibrance          V->V       Boost or alter saturation.
+ ... vidstabdetect     V->V       Extract relative transformations, pass 1 of 2 for stabilization (see vidstabtransform for pass 2).
+ ... vidstabtransform  V->V       Transform the frames, pass 2 of 2 for stabilization (see vidstabdetect for pass 1).
+ TS. vif               VV->V      Calculate the VIF between two video streams.
+ T.. vignette          V->V       Make or reverse a vignette effect.
+ ... vmafmotion        V->V       Calculate the VMAF Motion score.
+ ... vpp_qsv           V->V       Quick Sync Video "VPP"
+ .S. vstack            N->V       Stack video inputs vertically.
+ TSC w3fdif            V->V       Apply Martin Weston three field deinterlace.
+ .SC waveform          V->V       Video waveform monitor.
+ .S. weave             V->V       Weave input video fields into frames.
+ .S. xbr               V->V       Scale the input using xBR algorithm.
+ TS. xcorrelate        VV->V      Cross-correlate first video stream with second video stream.
+ .S. xfade             VV->V      Cross fade one video with another video.
+ ... xfade_opencl      VV->V      Cross fade one video with another video.
+ ... xfade_vulkan      VV->V      Cross fade one video with another video.
+ TSC xmedian           N->V       Pick median pixels from several video inputs.
+ T.. xpsnr             VV->V      Calculate the extended perceptually weighted peak signal-to-noise ratio (XPSNR) between two video streams.
+ .S. xstack            N->V       Stack video inputs into custom layout.
+ TS. yadif             V->V       Deinterlace the input image.
+ T.. yadif_cuda        V->V       Deinterlace CUDA frames
+ TSC yaepblur          V->V       Yet another edge preserving blur filter.
+ ... zmq               V->V       Receive commands through ZMQ and broker them to filters.
+ ... zoompan           V->V       Apply Zoom & Pan effect.
+ .SC zscale            V->V       Apply resizing, colorspace and bit depth conversion.
+ ... hstack_vaapi      N->V       "VA-API" hstack
+ ... vstack_vaapi      N->V       "VA-API" vstack
+ ... xstack_vaapi      N->V       "VA-API" xstack
+ ... hstack_qsv        N->V       "Quick Sync Video" hstack
+ ... vstack_qsv        N->V       "Quick Sync Video" vstack
+ ... xstack_qsv        N->V       "Quick Sync Video" xstack
+ ... pad_vaapi         V->V       Pad the input video.
+ ... drawbox_vaapi     V->V       Draw a colored box on the input video.
+ ... allrgb            |->V       Generate all RGB colors.
+ ... allyuv            |->V       Generate all yuv colors.
+ ... cellauto          |->V       Create pattern generated by an elementary cellular automaton.
+ ..C color             |->V       Provide an uniformly colored input.
+ ... color_vulkan      |->V       Generate a constant color (Vulkan)
+ ... colorchart        |->V       Generate color checker chart.
+ ... colorspectrum     |->V       Generate colors spectrum.
+ ... frei0r_src        |->V       Generate a frei0r source.
+ .SC gradients         |->V       Draw a gradients.
+ ... haldclutsrc       |->V       Provide an identity Hald CLUT.
+ ... life              |->V       Create life.
+ ... mandelbrot        |->V       Render a Mandelbrot fractal.
+ ... mptestsrc         |->V       Generate various test pattern.
+ ... nullsrc           |->V       Null video source, return unprocessed video frames.
+ ... openclsrc         |->V       Generate video using an OpenCL program
+ ... pal75bars         |->V       Generate PAL 75% color bars.
+ ... pal100bars        |->V       Generate PAL 100% color bars.
+ ... perlin            |->V       Generate Perlin noise
+ ... rgbtestsrc        |->V       Generate RGB test pattern.
+ .S. sierpinski        |->V       Render a Sierpinski fractal.
+ ... smptebars         |->V       Generate SMPTE color bars.
+ ... smptehdbars       |->V       Generate SMPTE HD color bars.
+ ... testsrc           |->V       Generate test pattern.
+ ... testsrc2          |->V       Generate another test pattern.
+ ... yuvtestsrc        |->V       Generate YUV test pattern.
+ .SC zoneplate         |->V       Generate zone-plate.
+ ... nullsink          V->|       Do absolutely nothing with the input video.
+ ..C a3dscope          A->V       Convert input audio to 3d scope video output.
+ ... abitscope         A->V       Convert input audio to audio bit scope video output.
+ ... adrawgraph        A->V       Draw a graph using input audio metadata.
+ ..C agraphmonitor     A->V       Show various filtergraph stats.
+ ... ahistogram        A->V       Convert input audio to histogram video output.
+ ... aphasemeter       A->N       Convert input audio to phase meter video output.
+ .SC avectorscope      A->V       Convert input audio to vectorscope video output.
+ ..C concat            N->N       Concatenate audio and video streams.
+ ... showcqt           A->V       Convert input audio to a CQT (Constant/Clamped Q Transform) spectrum video output.
+ .S. showcwt           A->V       Convert input audio to a CWT (Continuous Wavelet Transform) spectrum video output.
+ ... showfreqs         A->V       Convert input audio to a frequencies video output.
+ .S. showspatial       A->V       Convert input audio to a spatial video output.
+ .S. showspectrum      A->V       Convert input audio to a spectrum video output.
+ .S. showspectrumpic   A->V       Convert input audio to a spectrum video output single picture.
+ ... showvolume        A->V       Convert input audio volume to video output.
+ ... showwaves         A->V       Convert input audio to a video output.
+ ... showwavespic      A->V       Convert input audio to a video output single picture.
+ ... spectrumsynth     VV->A      Convert input spectrum videos to audio output.
+ ..C avsynctest        |->AV      Generate an Audio Video Sync Test.
+ ..C amovie            |->N       Read audio from a movie source.
+ ..C movie             |->N       Read from a movie source.
+ ... abuffer           |->A       Buffer audio frames, and make them accessible to the filterchain.
+ ... buffer            |->V       Buffer video frames, and make them accessible to the filterchain.
+ ... abuffersink       A->|       Buffer audio frames, and make them available to the end of the filter graph.
+ ... buffersink        V->|       Buffer video frames, and make them available to the end of the filter graph.
+Supported file protocols:
+Input:
+  async
+  bluray
+  cache
+  concat
+  concatf
+  crypto
+  data
+  fd
+  ffrtmphttp
+  file
+  ftp
+  gopher
+  gophers
+  hls
+  http
+  httpproxy
+  https
+  mmsh
+  mmst
+  pipe
+  rtmp
+  rtmps
+  rtmpt
+  rtmpts
+  rtp
+  sctp
+  srtp
+  subfile
+  tcp
+  tls
+  udp
+  udplite
+  unix
+  amqp
+  rist
+  srt
+  sftp
+  zmq
+  ipfs
+  ipns
+Output:
+  crypto
+  fd
+  ffrtmphttp
+  file
+  ftp
+  gopher
+  gophers
+  http
+  httpproxy
+  https
+  icecast
+  md5
+  pipe
+  prompeg
+  rtmp
+  rtmps
+  rtmpt
+  rtmpts
+  rtp
+  sctp
+  srtp
+  tee
+  tcp
+  tls
+  udp
+  udplite
+  unix
+  amqp
+  rist
+  srt
+  sftp
+  zmq

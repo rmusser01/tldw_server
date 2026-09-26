@@ -83,6 +83,7 @@
     "mode": "paths",
     "patterns": [
       "pyproject.toml",
+      "uv.lock",
       "README.md",
       "Makefile",
       "tldw_Server_API/**",

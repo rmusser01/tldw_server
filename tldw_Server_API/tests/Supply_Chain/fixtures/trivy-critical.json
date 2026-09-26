@@ -1,0 +1,17 @@
+{
+  "Results": [
+    {
+      "Target": "image-app",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2026-1000",
+          "PkgIdentifier": {
+            "PURL": "pkg:pypi/example@1.0.0"
+          },
+          "InstalledVersion": "1.0.0",
+          "Severity": "CRITICAL"
+        }
+      ]
+    }
+  ]
+}

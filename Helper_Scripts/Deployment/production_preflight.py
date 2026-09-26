@@ -76,16 +76,11 @@ DENIED_PROXY_PATHS = (
     "/api/v1/setup/*",
 )
 
-APP_IMAGE_PATTERNS = (
-    re.compile(r"^.+@sha256:[0-9a-f]{64}$"),
-    re.compile(r"^.+:sha-[0-9a-f]{7,64}$"),
-)
-
 _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _DNS_LABEL = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$", re.ASCII)
 _EMAIL_LOCAL = re.compile(r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+$", re.ASCII)
-_THIRD_PARTY_VERSION = re.compile(r"(?:^|[^0-9])\d+\.\d+(?:\.\d+)?(?:[^0-9]|$)")
-_DIGEST_IMAGE = re.compile(r"^.+@sha256:[0-9a-f]{64}$")
+_DIGEST = re.compile(r"^[0-9a-f]{64}$")
+_NAME_TAG = re.compile(r"^[A-Za-z0-9._:/-]+$")
 _SAMPLE_MARKERS = ("example.com", "example.invalid", "localhost", "change-me")
 _PLACEHOLDER_SECRETS = {
     "password",
@@ -98,11 +93,11 @@ _PLACEHOLDER_SECRETS = {
     "default",
 }
 _STATIC_IMAGE_INPUTS = {
-    "preflight": "${TLDW_APP_IMAGE:?Set immutable TLDW_APP_IMAGE}",
-    "app": "${TLDW_APP_IMAGE:?Set immutable TLDW_APP_IMAGE}",
-    "caddy": "${CADDY_IMAGE:?Set exact CADDY_IMAGE version or digest}",
-    "postgres": "${POSTGRES_IMAGE:?Set exact POSTGRES_IMAGE version or digest}",
-    "redis": "${REDIS_IMAGE:?Set exact REDIS_IMAGE version or digest}",
+    "preflight": "${TLDW_APP_IMAGE:?Set TLDW_APP_IMAGE to version tag plus @sha256 digest}",
+    "app": "${TLDW_APP_IMAGE:?Set TLDW_APP_IMAGE to version tag plus @sha256 digest}",
+    "caddy": "${CADDY_IMAGE:?Set CADDY_IMAGE to version tag plus @sha256 digest}",
+    "postgres": "${POSTGRES_IMAGE:?Set POSTGRES_IMAGE to version tag plus @sha256 digest}",
+    "redis": "${REDIS_IMAGE:?Set REDIS_IMAGE to version tag plus @sha256 digest}",
 }
 _EXPECTED_NETWORKS = {
     "caddy": {"edge"},
@@ -493,32 +488,45 @@ def _validate_networks(values: Mapping[str, str]) -> list[PreflightIssue]:
     return issues
 
 
-def _is_immutable_app_image(value: str) -> bool:
-    """Return whether an application image is digest or commit pinned."""
+def is_digest_pinned_image(value: str) -> bool:
+    """Return whether an image uses a readable non-latest tag plus SHA-256."""
 
-    return any(pattern.fullmatch(value) for pattern in APP_IMAGE_PATTERNS)
-
-
-def _is_exact_third_party_image(value: str) -> bool:
-    """Return whether a third-party image uses a digest or full numeric tag."""
-
-    if _DIGEST_IMAGE.fullmatch(value):
-        return True
-    last_segment = value.rsplit("/", 1)[-1]
+    name_tag, separator, digest = value.rpartition("@sha256:")
+    if separator != "@sha256:" or not _DIGEST.fullmatch(digest):
+        return False
+    if not _NAME_TAG.fullmatch(name_tag):
+        return False
+    last_segment = name_tag.rsplit("/", 1)[-1]
     if ":" not in last_segment:
         return False
-    tag = last_segment.rsplit(":", 1)[-1].lower()
-    return tag != "latest" and bool(_THIRD_PARTY_VERSION.search(tag))
+    tag = last_segment.rsplit(":", 1)[-1]
+    return bool(tag) and tag.lower() != "latest"
 
 
 def _validate_images(values: Mapping[str, str]) -> list[PreflightIssue]:
     """Validate current, rollback, and dependency image immutability."""
 
     issues: list[PreflightIssue] = []
-    for field in ("TLDW_APP_IMAGE", "TLDW_ROLLBACK_IMAGE"):
+    image_fields = (
+        "TLDW_APP_IMAGE",
+        "TLDW_ROLLBACK_IMAGE",
+        "CADDY_IMAGE",
+        "POSTGRES_IMAGE",
+        "REDIS_IMAGE",
+        "PROMETHEUS_IMAGE",
+        "ALERTMANAGER_IMAGE",
+        "GRAFANA_IMAGE",
+    )
+    for field in image_fields:
         value = values.get(field, "")
-        if value and not _is_immutable_app_image(value):
-            issues.append(_issue("mutable_image", field, "must use a digest or commit-pinned tag"))
+        if value and not is_digest_pinned_image(value):
+            issues.append(
+                _issue(
+                    "immutable_image_required",
+                    field,
+                    "must use a version tag plus lowercase SHA-256 digest",
+                )
+            )
     if values.get("TLDW_APP_IMAGE") and values.get("TLDW_APP_IMAGE") == values.get("TLDW_ROLLBACK_IMAGE"):
         issues.append(
             _issue(
@@ -527,16 +535,6 @@ def _validate_images(values: Mapping[str, str]) -> list[PreflightIssue]:
                 "must differ from the target application image",
             )
         )
-    for field in ("CADDY_IMAGE", "POSTGRES_IMAGE", "REDIS_IMAGE"):
-        value = values.get(field, "")
-        if value and not _is_exact_third_party_image(value):
-            issues.append(
-                _issue(
-                    "inexact_third_party_image",
-                    field,
-                    "must use a digest or full numeric version tag",
-                )
-            )
     return issues
 
 

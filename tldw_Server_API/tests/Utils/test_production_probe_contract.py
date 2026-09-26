@@ -216,10 +216,10 @@ def test_production_monitoring_render_preserves_private_credential_boundary(tmp_
     alertmanager_config = tmp_path / "tldw-alertmanager.yml"
     env = {
         **os.environ,
-        "TLDW_APP_IMAGE": ("ghcr.io/example/tldw@sha256:" + "a" * 64),
-        "PROMETHEUS_IMAGE": "prom/prometheus:v2.55.1",
-        "ALERTMANAGER_IMAGE": "prom/alertmanager:v0.30.1",
-        "GRAFANA_IMAGE": "grafana/grafana:11.5.2",
+        "TLDW_APP_IMAGE": ("ghcr.io/example/tldw:0.1.0@sha256:" + "a" * 64),
+        "PROMETHEUS_IMAGE": "prom/prometheus:v3.13.2@sha256:" + "b" * 64,
+        "ALERTMANAGER_IMAGE": "prom/alertmanager:v0.34.0@sha256:" + "c" * 64,
+        "GRAFANA_IMAGE": "grafana/grafana:13.2.1@sha256:" + "d" * 64,
         "PROMETHEUS_UID": "65534",
         "PROMETHEUS_GID": "65534",
         "TLDW_METRICS_API_KEY_FILE": str(metrics_key),

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import Field
+from pydantic import ConfigDict, Field
 
 from tldw_Server_API.app.core.Workflows.adapters._base import BaseAdapterConfig
 
@@ -58,8 +58,10 @@ class JSONTransformConfig(BaseAdapterConfig):
 class JSONValidateConfig(BaseAdapterConfig):
     """Config for JSON validation adapter."""
 
+    model_config = ConfigDict(serialize_by_alias=True)
+
     data: Any = Field(..., description="JSON data to validate")
-    schema: dict[str, Any] = Field(..., description="JSON Schema for validation")
+    schema_definition: dict[str, Any] = Field(..., alias="schema", description="JSON Schema for validation")
     strict: bool = Field(False, description="Strict validation mode")
 
 

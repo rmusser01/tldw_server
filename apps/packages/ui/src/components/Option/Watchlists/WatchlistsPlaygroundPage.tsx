@@ -142,6 +142,12 @@ const SECONDARY_IN_PRIMARY: Record<string, string> = {
   templates: "outputs" // Templates section inside Reports tab
 }
 
+const SECONDARY_EXPANSION_KEY: Record<string, string> = {
+  jobs: "monitors",
+  runs: "activity",
+  templates: "templates"
+}
+
 const readShowAllViews = (): boolean => {
   if (typeof window === "undefined") return false
   try {
@@ -706,7 +712,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
     if (isProgressive && SECONDARY_IN_PRIMARY[key]) {
       const primaryTab = SECONDARY_IN_PRIMARY[key]
       setActiveTab(primaryTab as typeof activeTab)
-      const sectionKey = key === "jobs" ? "monitors" : key === "runs" ? "activity" : "templates"
+      const sectionKey = SECONDARY_EXPANSION_KEY[key]
       setSecondaryExpanded((prev) => {
         const next = { ...prev, [sectionKey]: true }
         writeSecondaryExpanded(next)
@@ -716,6 +722,32 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
     }
     setActiveTab(key as typeof activeTab)
   }, [
+    iaExperimentEnabled,
+    isConstrained,
+    setActiveTab,
+    showAllViews,
+    watchlistsBasicsTutorialActive
+  ])
+
+  useEffect(() => {
+    const isProgressive =
+      !isConstrained &&
+      !showAllViews &&
+      !iaExperimentEnabled &&
+      !watchlistsBasicsTutorialActive
+    const primaryTab = isProgressive ? SECONDARY_IN_PRIMARY[activeTab] : undefined
+    if (!primaryTab) return
+
+    setActiveTab(primaryTab as typeof activeTab)
+    const sectionKey = SECONDARY_EXPANSION_KEY[activeTab]
+    setSecondaryExpanded((prev) => {
+      if (prev[sectionKey]) return prev
+      const next = { ...prev, [sectionKey]: true }
+      writeSecondaryExpanded(next)
+      return next
+    })
+  }, [
+    activeTab,
     iaExperimentEnabled,
     isConstrained,
     setActiveTab,

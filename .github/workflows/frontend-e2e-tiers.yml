@@ -82,8 +82,20 @@ jobs:
           --health-retries 5
     env:
       AUTH_MODE: single_user
-      TEST_MODE: '1'
       SINGLE_USER_API_KEY: test-api-key-for-e2e-testing-12345
+      TLDW_CONFIG_FILE: tldw_Server_API/Config_Files/e2e-critical-config.txt
+      DEFAULT_LLM_PROVIDER: openai
+      OPENAI_API_KEY: sk-uat-mock-openai
+      OPENAI_API_BASE_URL: http://127.0.0.1:5000/v1
+      CUSTOM_OPENAI_API_IP: http://127.0.0.1:5000/v1
+      CUSTOM_OPENAI_API_KEY: sk-uat-mock-openai
+      CUSTOM_OPENAI_API_MODEL: local-uat-chat
+      TLDW_E2E_CHARACTER_CALLABLE_MODEL: tldw:custom-openai-api:local-uat-chat
+      # CI-only relaxation: the real Watchlist journey fetches a tracked fixture
+      # from the local WebUI. The localhost suffix allowlist remains subject to
+      # the production default port allowlist.
+      WORKFLOWS_EGRESS_ALLOWLIST: localhost
+      WORKFLOWS_EGRESS_BLOCK_PRIVATE: 'false'
       REDIS_URL: redis://127.0.0.1:6379/0
       TLDW_WEB_AUTOSTART: 'true'
       TLDW_WEB_URL: http://localhost:8080
@@ -115,15 +127,28 @@ jobs:
             uv.lock
           extras: dev
 
+      - name: Start deterministic mock OpenAI provider
+        working-directory: apps/tldw-frontend/e2e/onboarding-uat/mock-openai
+        run: |
+          PYTHONPATH="${GITHUB_WORKSPACE}/mock_openai_server${PYTHONPATH:+:${PYTHONPATH}}" \
+            python -m mock_openai.server --config configs/local-success.json \
+              --host 127.0.0.1 --port 5000 &
+          for _ in $(seq 1 30); do
+            curl -sf http://127.0.0.1:5000/health && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:5000/health
+
       - name: Start backend server
         run: |
           python -m uvicorn tldw_Server_API.app.main:app \
             --host 0.0.0.0 --port 8000 &
           # Wait for server to be ready
           for _ in $(seq 1 30); do
-            curl -sf http://127.0.0.1:8000/api/v1/health && break
+            curl -sf -H "X-API-KEY: ${SINGLE_USER_API_KEY}" http://127.0.0.1:8000/api/v1/health && break
             sleep 2
           done
+          curl -sf -H "X-API-KEY: ${SINGLE_USER_API_KEY}" http://127.0.0.1:8000/api/v1/health
 
       - uses: actions/setup-node@v6
         with:

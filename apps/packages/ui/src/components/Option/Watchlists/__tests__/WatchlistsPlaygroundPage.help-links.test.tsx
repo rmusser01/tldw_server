@@ -393,6 +393,7 @@ describe("WatchlistsPlaygroundPage help surfaces", () => {
   })
 
   it("keeps context docs routing aligned with each canonical tab help label", () => {
+    localStorage.setItem("watchlists:show-all-views:v1", "true")
     const expectations: Array<{
       tab: typeof mocks.state.activeTab
       href: string
@@ -545,6 +546,7 @@ describe("WatchlistsPlaygroundPage help surfaces", () => {
   })
 
   it("shows first-time teach points for jobs/templates and persists dismissal", () => {
+    localStorage.setItem("watchlists:show-all-views:v1", "true")
     mocks.state.activeTab = "jobs"
     const { rerender } = render(<WatchlistsPlaygroundPage />)
     fireEvent.click(screen.getByTestId("watchlists-help-icon"))

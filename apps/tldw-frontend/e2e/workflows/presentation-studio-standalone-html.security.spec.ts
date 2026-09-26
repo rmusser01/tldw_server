@@ -1178,7 +1178,7 @@ const installPageSecurityInstrumentation = async (
           return operation
         }
       })
-      const chromeLike = scope.chrome ?? {}
+      const chromeLike: Record<string, unknown> = scope.chrome ?? {}
       const existingChromeStorage = chromeLike.storage as Record<string, ExistingStorageArea> | undefined
       chromeLike.storage = Object.assign({}, existingChromeStorage, {
         local: createStorageArea("chrome.local", existingChromeStorage?.local, true),
@@ -1187,8 +1187,8 @@ const installPageSecurityInstrumentation = async (
       })
       const existingChromeRuntime = chromeLike.runtime as ExistingRuntime | undefined
       chromeLike.runtime = createRuntime("chrome.runtime", existingChromeRuntime, true)
-      scope.chrome = chromeLike
-      const browserLike = scope.browser ?? {}
+      scope.chrome = chromeLike as SecurityWindow["chrome"]
+      const browserLike: Record<string, unknown> = scope.browser ?? {}
       const existingBrowserStorage = browserLike.storage as Record<string, ExistingStorageArea> | undefined
       browserLike.storage = Object.assign({}, existingBrowserStorage, {
         local: createStorageArea("browser.local", existingBrowserStorage?.local, false),

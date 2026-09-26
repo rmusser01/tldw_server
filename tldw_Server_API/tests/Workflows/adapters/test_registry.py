@@ -35,6 +35,16 @@ def test_registry_get_adapter():
     assert callable(adapter)
 
 
+def test_json_validate_catalog_preserves_schema_input_key():
+    """Catalog consumers receive the public schema key after the Python rename."""
+    from tldw_Server_API.app.core.Workflows.adapters import registry
+
+    entry = next(item for item in registry.get_catalog()["text"] if item["name"] == "json_validate")
+    metadata = entry["config_schema"]
+    assert set(metadata["properties"]) == {"timeout_seconds", "save_artifact", "data", "schema", "strict"}
+    assert set(metadata["required"]) == {"data", "schema"}
+
+
 def test_registry_get_adapter_unknown():
     """Test get_adapter returns None for unknown adapter."""
     from tldw_Server_API.app.core.Workflows.adapters import get_adapter

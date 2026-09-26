@@ -492,6 +492,7 @@ describe('UsagePage router analytics status shell', () => {
     render(<UsagePage />);
 
     await screen.findByRole('heading', { name: 'Usage Stats' });
+    await screen.findByRole('option', { name: 'Ops' });
     const tokenSelect = screen.getByLabelText('Token');
     await user.selectOptions(tokenSelect, '12');
 
@@ -542,7 +543,7 @@ describe('UsagePage router analytics status shell', () => {
 
   it('exposes PP and TG headers with accessible names and hides the decorative tab separator', async () => {
     const user = userEvent.setup();
-    const { container } = render(<UsagePage />);
+    render(<UsagePage />);
 
     await screen.findByRole('heading', { name: 'Usage Stats' });
     await user.click(screen.getByRole('tab', { name: /Providers/i }));
@@ -550,10 +551,9 @@ describe('UsagePage router analytics status shell', () => {
     expect(await screen.findByRole('columnheader', { name: 'Prompt Tokens' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Total Generated Tokens' })).toBeInTheDocument();
 
-    const separator = Array.from(container.querySelectorAll('span')).find(
-      (element) => element.textContent === '|'
-    );
-    expect(separator).not.toBeNull();
+    const tabList = screen.getByRole('tablist');
+    const separator = tabList.querySelector('span[aria-hidden="true"]');
+    expect(separator).toBeInTheDocument();
     expect(separator?.getAttribute('aria-hidden')).toBe('true');
   });
 

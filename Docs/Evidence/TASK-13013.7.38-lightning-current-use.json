@@ -1,0 +1,2190 @@
+{
+  "acl_followup": {
+    "advisory": {
+      "components": [
+        "image-app",
+        "image-worker",
+        "image-audio-worker"
+      ],
+      "id": "CVE-2026-54369",
+      "package": "libacl1",
+      "primary_urls": [
+        "https://security-tracker.debian.org/tracker/CVE-2026-54369",
+        "https://openwall.com/lists/oss-security/2026/06/29/1",
+        "https://openwall.com/lists/oss-security/2026/06/29/2"
+      ],
+      "version": "2.3.2-2+b1"
+    },
+    "confirmed_deployed_impact": false,
+    "disposition": "unresolved-current-deployment-prerequisites",
+    "elf_review": {
+      "binaries": [
+        {
+          "acl_imports": [
+            "acl_set_fd",
+            "acl_entries",
+            "flistxattr",
+            "llistxattr",
+            "lgetxattr",
+            "listxattr",
+            "acl_delete_def_file",
+            "acl_get_tag_type",
+            "acl_set_file",
+            "acl_from_mode",
+            "attr_copy_action",
+            "attr_copy_fd",
+            "fgetxattr",
+            "acl_get_entry",
+            "attr_copy_file",
+            "attr_copy_check_permissions",
+            "getxattr",
+            "acl_free"
+          ],
+          "member": "./usr/bin/cp",
+          "mode": "0o755",
+          "needed": [
+            "libselinux.so.1",
+            "libacl.so.1",
+            "libattr.so.1",
+            "libc.so.6"
+          ],
+          "sha256": "5a3a8808bab81a67c6ac578670f5608595f1569948d4dc7d7d604c1d08d596d9"
+        },
+        {
+          "acl_imports": [
+            "flistxattr",
+            "llistxattr",
+            "lgetxattr",
+            "listxattr",
+            "fgetxattr",
+            "getxattr"
+          ],
+          "member": "./usr/bin/dir",
+          "mode": "0o755",
+          "needed": [
+            "libselinux.so.1",
+            "libcap.so.2",
+            "libc.so.6"
+          ],
+          "sha256": "8116c93774202ad783b0728842a5f7eea736503bb64956e3b8f0c700b7f76405"
+        },
+        {
+          "acl_imports": [
+            "acl_set_fd",
+            "acl_entries",
+            "flistxattr",
+            "llistxattr",
+            "lgetxattr",
+            "listxattr",
+            "acl_delete_def_file",
+            "acl_get_tag_type",
+            "acl_set_file",
+            "acl_from_mode",
+            "attr_copy_action",
+            "attr_copy_fd",
+            "fgetxattr",
+            "acl_get_entry",
+            "attr_copy_file",
+            "attr_copy_check_permissions",
+            "getxattr",
+            "acl_free"
+          ],
+          "member": "./usr/bin/install",
+          "mode": "0o755",
+          "needed": [
+            "libselinux.so.1",
+            "libacl.so.1",
+            "libattr.so.1",
+            "libc.so.6"
+          ],
+          "sha256": "daa4c9bda9ae0ebc3c778b7778c2634d85674690673facea20f6984b976f4e91"
+        },
+        {
+          "acl_imports": [
+            "flistxattr",
+            "llistxattr",
+            "lgetxattr",
+            "listxattr",
+            "fgetxattr",
+            "getxattr"
+          ],
+          "member": "./usr/bin/ls",
+          "mode": "0o755",
+          "needed": [
+            "libselinux.so.1",
+            "libcap.so.2",
+            "libc.so.6"
+          ],
+          "sha256": "833d6f9cf3ede2225d80eaa159ef78a141c92842a691179aec37d182cc808a5c"
+        },
+        {
+          "acl_imports": [
+            "acl_set_fd",
+            "acl_entries",
+            "flistxattr",
+            "llistxattr",
+            "lgetxattr",
+            "listxattr",
+            "acl_delete_def_file",
+            "acl_get_tag_type",
+            "acl_set_file",
+            "acl_from_mode",
+            "attr_copy_action",
+            "attr_copy_fd",
+            "fgetxattr",
+            "acl_get_entry",
+            "attr_copy_file",
+            "attr_copy_check_permissions",
+            "getxattr",
+            "acl_free"
+          ],
+          "member": "./usr/bin/mv",
+          "mode": "0o755",
+          "needed": [
+            "libselinux.so.1",
+            "libacl.so.1",
+            "libattr.so.1",
+            "libc.so.6"
+          ],
+          "sha256": "7db4661c6397fe5fd5ba6837692aa5adb7dce1efc656369d7b08dfd6ece525a0"
+        },
+        {
+          "acl_imports": [
+            "flistxattr",
+            "llistxattr",
+            "lgetxattr",
+            "listxattr",
+            "fgetxattr",
+            "getxattr"
+          ],
+          "member": "./usr/bin/vdir",
+          "mode": "0o755",
+          "needed": [
+            "libselinux.so.1",
+            "libcap.so.2",
+            "libc.so.6"
+          ],
+          "sha256": "ff2df509495d29e6fa9bec81f0314f49107187682d34e7cbbe09db5d12bd6ffc"
+        }
+      ],
+      "control": "Package: coreutils\nVersion: 9.7-3\nArchitecture: amd64\nEssential: yes\nMaintainer: Michael Stone <mstone@debian.org>\nInstalled-Size: 18457\nPre-Depends: libacl1 (>= 2.2.23), libattr1 (>= 1:2.4.48), libc6 (>= 2.38), libcap2 (>= 1:2.10), libgmp10 (>= 2:6.3.0+dfsg), libselinux1 (>= 3.1~), libssl3t64 (>= 3.0.0), libsystemd0 (>= 254)\nSection: utils\nPriority: required\nMulti-Arch: foreign\nHomepage: https://gnu.org/software/coreutils\nDescription: GNU core utilities\n This package contains the basic file, shell and text manipulation\n utilities which are expected to exist on every operating system.\n .\n Specifically, this package includes:\n arch base64 basename cat chcon chgrp chmod chown chroot cksum comm cp\n csplit cut date dd df dir dircolors dirname du echo env expand expr\n factor false flock fmt fold groups head hostid id install join link ln\n logname ls md5sum mkdir mkfifo mknod mktemp mv nice nl nohup nproc numfmt\n od paste pathchk pinky pr printenv printf ptx pwd readlink realpath rm\n rmdir runcon sha*sum seq shred sleep sort split stat stty sum sync tac\n tail tee test timeout touch tr true truncate tsort tty uname unexpand\n uniq unlink users vdir wc who whoami yes\n",
+      "deb_sha256": "1299ab6f9389a288eb2f5f3dd222c26cc777b9a2d5ecb6ee4cbd340cebcdada2"
+    },
+    "file_sha256": {
+      "acl-internal.c": "c6f926970f489fd7fec4422a9db9dc74adec5959af26fa5162672fc8ad8e0b2f",
+      "acl-internal.h": "91834ab70496849e1c958b93040612b299847880cd1123ddbabd240fcc03d1a7",
+      "acl.m4": "fc2bbf5d7927bc85a8f91913903b23b5d3195bdbc4f98bcd9698e01dc618bbe2",
+      "copy-acl.c": "f4ecb517395a87dd42c1e79e245c2d6d566e37859e860a93899b53b625302956",
+      "copy.c": "7280de5f2eae246a48c252c4491100d04ada66bcb6dd0368d267d2583fa4cb22",
+      "coreutils-9.7.tar.xz": "e8bb26ad0293f9b5a1fc43fb42ba970e312c66ce92c1b0b16713d7500db251bf",
+      "coreutils-elf-review.json": "e7cebb4421d998b4286bd1a42ed28fb460908b6810b49a55d585c5025bf7426f",
+      "coreutils_9.7-3.debian.tar.xz": "483f77876a080577f63da1d004cc1cf17d16df65d6925aefdd3294c6101eccfb",
+      "coreutils_9.7-3.dsc": "c3a207e3aaad165765c7a6fab89045f5fd20035fea6830b9f9ebbb92ebfbff89",
+      "coreutils_9.7-3_amd64.deb": "1299ab6f9389a288eb2f5f3dd222c26cc777b9a2d5ecb6ee4cbd340cebcdada2",
+      "debian-control": "ddb7355a9b5b913c71bdfcaa57fc79d92200cdc8d9616e1ddcc040dfba4daf4b",
+      "debian-rules": "4a8872082d081107cf416afb1718993446416d25014c445a3019109590e22e26",
+      "get-permissions.c": "7a49b4c77a2503e538aeb65bb2f7cdff7ed9b5ae808b8cac165e786f8b469f0c",
+      "install.c": "03ea876bdada8c22850c7cb39f4ef6ed4a7904f015324760acf371c9adf78059",
+      "ls.c": "4371c530b5566bb76ca43ce9f0591b3b58caea0f92cf453da5fe0ef9df4ffc97",
+      "patch-72_id_checkngroups.patch": "5352ee85bff68800be0d8c7252892770c92c17e0b50f98fedf3cc2e30d4b50b4",
+      "patch-gnulib-nfs-acl.patch": "5b8d055c8307cb2a135e65ab4ab2719b2d48e9c5bcef77e910c535b60a3136ab",
+      "patch-series": "ddf8ffdb750abcbb6a600a5bf8826c95964d866cb1ed530f0ce051f642c78e6d",
+      "qcopy-acl.c": "ef3d9d75ec703526fe7d9c8a17761eef50f219276a1fd6899754747fc4ee9ce4",
+      "qset-acl.c": "0ae57c2e5d203d4e93b0c1bec974003d72ea5b9d439df2814ef7f85f9a4a59d9",
+      "set-permissions.c": "5ce102236ec463ca0cdc2866c0dc5915cd6b4d9edf8b789e6ba83922b1f74b10",
+      "xattr.m4": "afdeaf53d533ee0dd63884685d521b8f0a53a38edcae4f46134d69b15a6097f7"
+    },
+    "first_party_findings": [
+      "No reviewed API/embedding-worker/audio-worker path directly dispatches native cp/mv/install/sed/tar or the backup/restore/upgrade shell helpers. Docker cp references invoke the Docker engine, and pip/uv install references are not the native install program.",
+      "Helper_Scripts/upgrade.sh uses operator repo paths, git state and a timestamp backup destination; git rev-parse runs before cp -a. This is not evidence that ordinary worker jobs perform privileged directory ACL changes.",
+      "App entrypoint moves adjacent temporary environment files at startup using server-selected paths; read-only sed formats errors. No request-controlled checkpoint or ACL path is inferred from this.",
+      "The two worker recipes do not copy Helper_Scripts and dispatch fixed embedding stages or audio_transcribe jobs. Provider/native consumer closure and effective deployment directory ownership remain unproved.",
+      "The app recipe specifies UID 10001; worker recipes lack USER. Neither root process presence nor a callable library proves the advisory prerequisites. No blanket current-use ACL exclusion is added."
+    ],
+    "first_party_sha256": {
+      "Dockerfiles/Dockerfile.audio_gpu_worker": "164c292971453bd23c251b302e4e5b1c1f8921d31bdaf4af7eebd823786ed852",
+      "Dockerfiles/Dockerfile.prod": "41b089583aea3d2133988dca751a0ab8c4f31d4e7be9510c02790d919058db74",
+      "Dockerfiles/Dockerfile.worker": "ad33d289e1f0c7954e9aeeb36aeeb7c7b85138ed426185534bff218b9c126577",
+      "Dockerfiles/docker-compose.production.yml": "e3f4c7338f542e02a97946648769d83a27b1581e417ee308e930057ea30df996",
+      "Dockerfiles/entrypoints/tldw-app-first-run.sh": "85a9348cdb26569780392fe722dd660d08fad75b5f8b49722d3b50b6ae23c5b3",
+      "Helper_Scripts/backup_all.sh": "98ab7f71b96c6d73978bc6635ef7a102d551f6435af097720f12d8cdd7ae1e91",
+      "Helper_Scripts/restore_all.sh": "b6837a82144668db4e72886ca0cbbf1a509d60f4148479d0fc58e6ab96e06809",
+      "Helper_Scripts/upgrade.sh": "33731d617de675b3ac63f9459c902cdd36fe1af232096edb8df208313553d0d9",
+      "tldw_Server_API/app/core/Embeddings/services/redis_worker.py": "39be026e9f72ac8bf4cee12bcd1f7eff7d7eea7f87f84742b09253ce60a6bbf6",
+      "tldw_Server_API/app/services/audio_transcribe_gpu_worker.py": "9278243acb1a83889364f990c8d5872176570b03c4769fa9c71208eebd374fee"
+    },
+    "limits": [
+      "No package installation, image build/pull/run, native utility execution, exploit payload or race test.",
+      "Source and ELF analysis only. Full backend image filesystem, privileges, ACL-capable third-party consumer closure and attacker control remain unbound."
+    ],
+    "new_policy_records": 0,
+    "package_binding": {
+      "debian_source_base_url": "https://deb.debian.org/debian/pool/main/c/coreutils/",
+      "dsc_sha256_matches": true,
+      "origin": "Official Debian binary package matching retained SBOM version; not extracted from backend image",
+      "signature_verified": false,
+      "upstream_source_url": "https://ftp.gnu.org/gnu/coreutils/coreutils-9.7.tar.xz",
+      "version": "coreutils 9.7-3 amd64"
+    },
+    "source_findings": [
+      {
+        "debian_patch": "gnulib-nfs-acl adds an EOPNOTSUPP/source-ACL check, not a switch to get_permissions.",
+        "finding": "The default USE_XATTR copy branch uses attr_copy_fd with valid descriptors or attr_copy_file for pathname copies. Debian builds with libattr, and exact cp/mv/install import both attr copy APIs but no acl_get_file/acl_get_fd. The ordinary directory xcopy_acl path cannot be attributed to libacl merely because the binary links it.",
+        "path": "qcopy-acl.c:72-100; xattr.m4:15-52; debian-rules; debian-control"
+      },
+      {
+        "finding": "Regular-file copy opens descriptors and supplies the destination descriptor to ownership, copy-ACL and set-ACL paths.",
+        "path": "copy.c:1256,1650-1689"
+      },
+      {
+        "finding": "A separate ownership-preservation operation on a pre-existing non-symlink directory with changed owner/group can invoke set_owner with descriptor -1; when preserve_mode/move_mode/set_mode applies, qset_acl passes a mode-derived permission context to set_permissions and pathname acl_set_file. This prevents a descriptor-only conclusion for every utility operation. It does not establish an attacker-controlled pathname or actual invocation in these deployed workers.",
+        "path": "copy.c:3237-3248,925-970; qset-acl.c:40-48; set-permissions.c:487-520"
+      },
+      {
+        "finding": "Non-regular preserve-mode/move copying goes through xcopy_acl (the libattr branch); explicit mode and no-preserve-mode paths can separately invoke pathname xset_acl.",
+        "path": "copy.c:3260-3287"
+      }
+    ]
+  },
+  "approval_basis": "Requester authorized supported exclusions in the conversation; rmusser01 owns the record and PR2869 is the review location. No new GitHub approval comment claimed.",
+  "baseline_record_ids": [
+    "TASK-13013.7.23-OS-01",
+    "TASK-13013.7.23-OS-02",
+    "TASK-13013.7.23-OS-03",
+    "TASK-13013.7.23-OS-04",
+    "TASK-13013.7.23-OS-05",
+    "TASK-13013.7.28-CHROMA-01",
+    "TASK-13013.7.28-CHROMA-02",
+    "TASK-13013.7.28-CHROMA-03",
+    "TASK-13013.7.28-CHROMA-04",
+    "TASK-13013.7.28-CHROMA-05",
+    "TASK-13013.7.28-CHROMA-06",
+    "TASK-13013.7.28-CHROMA-07",
+    "TASK-13013.7.28-CHROMA-08",
+    "TASK-13013.7.28-CHROMA-09",
+    "TASK-13013.7.28-CHROMA-10",
+    "TASK-13013.7.28-CHROMA-11",
+    "TASK-13013.7.28-CHROMA-12",
+    "TASK-13013.7.28-CHROMA-13",
+    "TASK-13013.7.28-CHROMA-14",
+    "TASK-13013.7.28-CHROMA-15",
+    "TASK-13013.7.28-CHROMA-16",
+    "TASK-13013.7.29-OS-01",
+    "TASK-13013.7.29-OS-02",
+    "TASK-13013.7.29-OS-03",
+    "TASK-13013.7.29-OS-04",
+    "TASK-13013.7.29-OS-05",
+    "TASK-13013.7.29-OS-06",
+    "TASK-13013.7.29-OS-07",
+    "TASK-13013.7.29-OS-08",
+    "TASK-13013.7.29-OS-09",
+    "TASK-13013.7.29-OS-10",
+    "TASK-13013.7.29-OS-11",
+    "TASK-13013.7.29-OS-12",
+    "TASK-13013.7.29-OS-13",
+    "TASK-13013.7.29-OS-14",
+    "TASK-13013.7.29-OS-15",
+    "TASK-13013.7.29-OS-16",
+    "TASK-13013.7.29-OS-17",
+    "TASK-13013.7.29-OS-18",
+    "TASK-13013.7.29-OS-19",
+    "TASK-13013.7.29-OS-20",
+    "TASK-13013.7.29-OS-21",
+    "TASK-13013.7.29-OS-22",
+    "TASK-13013.7.29-OS-23",
+    "TASK-13013.7.29-OS-24",
+    "TASK-13013.7.29-OS-25",
+    "TASK-13013.7.29-OS-26",
+    "TASK-13013.7.29-OS-27",
+    "TASK-13013.7.29-OS-28",
+    "TASK-13013.7.29-OS-29",
+    "TASK-13013.7.29-OS-30",
+    "TASK-13013.7.29-OS-31",
+    "TASK-13013.7.29-OS-32",
+    "TASK-13013.7.29-OS-33",
+    "TASK-13013.7.29-OS-34",
+    "TASK-13013.7.29-OS-35",
+    "TASK-13013.7.29-OS-36",
+    "TASK-13013.7.29-OS-37",
+    "TASK-13013.7.29-OS-38",
+    "TASK-13013.7.29-OS-39",
+    "TASK-13013.7.29-OS-40",
+    "TASK-13013.7.29-OS-41",
+    "TASK-13013.7.29-OS-42",
+    "TASK-13013.7.29-OS-43",
+    "TASK-13013.7.29-OS-44",
+    "TASK-13013.7.29-OS-45",
+    "TASK-13013.7.29-OS-46",
+    "TASK-13013.7.29-OS-47",
+    "TASK-13013.7.29-OS-48",
+    "TASK-13013.7.29-OS-49",
+    "TASK-13013.7.29-OS-50",
+    "TASK-13013.7.29-OS-51",
+    "TASK-13013.7.29-OS-52",
+    "TASK-13013.7.29-OS-53",
+    "TASK-13013.7.29-OS-54",
+    "TASK-13013.7.29-OS-55",
+    "TASK-13013.7.29-OS-56",
+    "TASK-13013.7.29-OS-57",
+    "TASK-13013.7.29-OS-58",
+    "TASK-13013.7.29-OS-59",
+    "TASK-13013.7.29-OS-60",
+    "TASK-13013.7.29-OS-61",
+    "TASK-13013.7.29-OS-62",
+    "TASK-13013.7.29-OS-63",
+    "TASK-13013.7.29-OS-64",
+    "TASK-13013.7.29-OS-65",
+    "TASK-13013.7.29-OS-66",
+    "TASK-13013.7.29-OS-67",
+    "TASK-13013.7.29-OS-68",
+    "TASK-13013.7.29-OS-69",
+    "TASK-13013.7.29-OS-70",
+    "TASK-13013.7.29-OS-71",
+    "TASK-13013.7.29-OS-72",
+    "TASK-13013.7.30-NATIVE-001",
+    "TASK-13013.7.30-NATIVE-002",
+    "TASK-13013.7.30-NATIVE-003",
+    "TASK-13013.7.30-NATIVE-004",
+    "TASK-13013.7.30-NATIVE-005",
+    "TASK-13013.7.30-NATIVE-006",
+    "TASK-13013.7.30-NATIVE-007",
+    "TASK-13013.7.30-NATIVE-008",
+    "TASK-13013.7.30-NATIVE-009",
+    "TASK-13013.7.30-NATIVE-010",
+    "TASK-13013.7.30-NATIVE-011",
+    "TASK-13013.7.30-NATIVE-012",
+    "TASK-13013.7.30-NATIVE-013",
+    "TASK-13013.7.30-NATIVE-014",
+    "TASK-13013.7.30-NATIVE-015",
+    "TASK-13013.7.30-NATIVE-016",
+    "TASK-13013.7.30-NATIVE-017",
+    "TASK-13013.7.30-NATIVE-018",
+    "TASK-13013.7.30-NATIVE-019",
+    "TASK-13013.7.30-NATIVE-020",
+    "TASK-13013.7.30-NATIVE-021",
+    "TASK-13013.7.30-NATIVE-022",
+    "TASK-13013.7.30-NATIVE-023",
+    "TASK-13013.7.30-NATIVE-024",
+    "TASK-13013.7.30-NATIVE-025",
+    "TASK-13013.7.30-NATIVE-026",
+    "TASK-13013.7.30-NATIVE-027",
+    "TASK-13013.7.30-NATIVE-028",
+    "TASK-13013.7.30-NATIVE-029",
+    "TASK-13013.7.30-NATIVE-030",
+    "TASK-13013.7.30-NATIVE-031",
+    "TASK-13013.7.30-NATIVE-032",
+    "TASK-13013.7.30-NATIVE-033",
+    "TASK-13013.7.30-NATIVE-034",
+    "TASK-13013.7.30-NATIVE-035",
+    "TASK-13013.7.30-NATIVE-036",
+    "TASK-13013.7.30-NATIVE-037",
+    "TASK-13013.7.30-NATIVE-038",
+    "TASK-13013.7.30-NATIVE-039",
+    "TASK-13013.7.30-NATIVE-040",
+    "TASK-13013.7.30-NATIVE-041",
+    "TASK-13013.7.30-NATIVE-042",
+    "TASK-13013.7.30-NATIVE-043",
+    "TASK-13013.7.30-NATIVE-044",
+    "TASK-13013.7.30-NATIVE-045",
+    "TASK-13013.7.30-NATIVE-046",
+    "TASK-13013.7.30-NATIVE-047",
+    "TASK-13013.7.30-NATIVE-048",
+    "TASK-13013.7.30-NATIVE-049",
+    "TASK-13013.7.30-NATIVE-050",
+    "TASK-13013.7.30-NATIVE-051",
+    "TASK-13013.7.30-NATIVE-052",
+    "TASK-13013.7.30-NATIVE-053",
+    "TASK-13013.7.30-NATIVE-054",
+    "TASK-13013.7.30-NATIVE-055",
+    "TASK-13013.7.30-NATIVE-056",
+    "TASK-13013.7.30-NATIVE-057",
+    "TASK-13013.7.30-NATIVE-058",
+    "TASK-13013.7.30-NATIVE-059",
+    "TASK-13013.7.30-NATIVE-060",
+    "TASK-13013.7.30-NATIVE-061",
+    "TASK-13013.7.30-NATIVE-062",
+    "TASK-13013.7.30-NATIVE-063",
+    "TASK-13013.7.30-NATIVE-064",
+    "TASK-13013.7.30-NATIVE-065",
+    "TASK-13013.7.30-NATIVE-066",
+    "TASK-13013.7.30-NATIVE-067",
+    "TASK-13013.7.30-NATIVE-068",
+    "TASK-13013.7.30-NATIVE-069",
+    "TASK-13013.7.30-NATIVE-070",
+    "TASK-13013.7.30-NATIVE-071",
+    "TASK-13013.7.30-NATIVE-072",
+    "TASK-13013.7.30-NATIVE-073",
+    "TASK-13013.7.30-NATIVE-074",
+    "TASK-13013.7.30-NATIVE-075",
+    "TASK-13013.7.30-NATIVE-076",
+    "TASK-13013.7.30-NATIVE-077",
+    "TASK-13013.7.30-NATIVE-078",
+    "TASK-13013.7.30-NATIVE-079",
+    "TASK-13013.7.30-NATIVE-080",
+    "TASK-13013.7.30-NATIVE-081",
+    "TASK-13013.7.30-NATIVE-082",
+    "TASK-13013.7.30-NATIVE-083",
+    "TASK-13013.7.30-NATIVE-084",
+    "TASK-13013.7.30-NATIVE-085",
+    "TASK-13013.7.30-NATIVE-086",
+    "TASK-13013.7.30-NATIVE-087",
+    "TASK-13013.7.30-NATIVE-088",
+    "TASK-13013.7.30-NATIVE-089",
+    "TASK-13013.7.30-NATIVE-090",
+    "TASK-13013.7.30-NATIVE-091",
+    "TASK-13013.7.30-NATIVE-092",
+    "TASK-13013.7.30-NATIVE-093",
+    "TASK-13013.7.30-NATIVE-094",
+    "TASK-13013.7.30-NATIVE-095",
+    "TASK-13013.7.30-NATIVE-096",
+    "TASK-13013.7.30-NATIVE-097",
+    "TASK-13013.7.30-NATIVE-098",
+    "TASK-13013.7.30-NATIVE-099",
+    "TASK-13013.7.30-NATIVE-100",
+    "TASK-13013.7.30-NATIVE-101",
+    "TASK-13013.7.30-NATIVE-102",
+    "TASK-13013.7.30-NATIVE-103",
+    "TASK-13013.7.30-NATIVE-104",
+    "TASK-13013.7.30-NATIVE-105",
+    "TASK-13013.7.30-NATIVE-106",
+    "TASK-13013.7.30-NATIVE-107",
+    "TASK-13013.7.30-NATIVE-108",
+    "TASK-13013.7.30-NATIVE-109",
+    "TASK-13013.7.30-NATIVE-110",
+    "TASK-13013.7.30-NATIVE-111",
+    "TASK-13013.7.30-NATIVE-112",
+    "TASK-13013.7.30-NATIVE-113",
+    "TASK-13013.7.30-NATIVE-114",
+    "TASK-13013.7.30-NATIVE-115",
+    "TASK-13013.7.30-NATIVE-116",
+    "TASK-13013.7.30-NATIVE-117",
+    "TASK-13013.7.30-NATIVE-118",
+    "TASK-13013.7.30-NATIVE-119",
+    "TASK-13013.7.30-NATIVE-120",
+    "TASK-13013.7.30-NATIVE-121",
+    "TASK-13013.7.30-NATIVE-122",
+    "TASK-13013.7.30-NATIVE-123",
+    "TASK-13013.7.30-NATIVE-124",
+    "TASK-13013.7.30-NATIVE-125",
+    "TASK-13013.7.30-NATIVE-126",
+    "TASK-13013.7.30-NATIVE-127",
+    "TASK-13013.7.30-NATIVE-128",
+    "TASK-13013.7.30-NATIVE-129",
+    "TASK-13013.7.30-NATIVE-130",
+    "TASK-13013.7.30-NATIVE-131",
+    "TASK-13013.7.30-NATIVE-132",
+    "TASK-13013.7.30-NATIVE-133",
+    "TASK-13013.7.30-NATIVE-134",
+    "TASK-13013.7.30-NATIVE-135",
+    "TASK-13013.7.30-NATIVE-136",
+    "TASK-13013.7.30-NATIVE-137",
+    "TASK-13013.7.30-NATIVE-138",
+    "TASK-13013.7.30-NATIVE-139",
+    "TASK-13013.7.30-NATIVE-140",
+    "TASK-13013.7.30-NATIVE-141",
+    "TASK-13013.7.30-NATIVE-142",
+    "TASK-13013.7.30-NATIVE-143",
+    "TASK-13013.7.30-NATIVE-144",
+    "TASK-13013.7.30-NATIVE-145",
+    "TASK-13013.7.30-NATIVE-146",
+    "TASK-13013.7.30-NATIVE-147",
+    "TASK-13013.7.30-NATIVE-148",
+    "TASK-13013.7.30-NATIVE-149",
+    "TASK-13013.7.30-NATIVE-150",
+    "TASK-13013.7.30-NATIVE-151",
+    "TASK-13013.7.30-NATIVE-152",
+    "TASK-13013.7.30-NATIVE-153",
+    "TASK-13013.7.30-NATIVE-154",
+    "TASK-13013.7.30-NATIVE-155",
+    "TASK-13013.7.30-NATIVE-156",
+    "TASK-13013.7.30-NATIVE-157",
+    "TASK-13013.7.30-NATIVE-158",
+    "TASK-13013.7.30-NATIVE-159",
+    "TASK-13013.7.30-NATIVE-160",
+    "TASK-13013.7.30-NATIVE-161",
+    "TASK-13013.7.30-NATIVE-162",
+    "TASK-13013.7.30-NATIVE-163",
+    "TASK-13013.7.30-NATIVE-164",
+    "TASK-13013.7.30-NATIVE-165",
+    "TASK-13013.7.30-NATIVE-166",
+    "TASK-13013.7.30-NATIVE-167",
+    "TASK-13013.7.30-NATIVE-168",
+    "TASK-13013.7.30-NATIVE-169",
+    "TASK-13013.7.30-NATIVE-170",
+    "TASK-13013.7.30-NATIVE-171",
+    "TASK-13013.7.30-NATIVE-172",
+    "TASK-13013.7.30-NATIVE-173",
+    "TASK-13013.7.30-NATIVE-174",
+    "TASK-13013.7.30-NATIVE-175",
+    "TASK-13013.7.32-NLTK-01",
+    "TASK-13013.7.32-NLTK-02",
+    "TASK-13013.7.32-NLTK-03",
+    "TASK-13013.7.32-NLTK-04",
+    "TASK-13013.7.34-CONSUMER-001",
+    "TASK-13013.7.34-CONSUMER-002",
+    "TASK-13013.7.34-CONSUMER-003",
+    "TASK-13013.7.34-CONSUMER-004",
+    "TASK-13013.7.34-CONSUMER-005",
+    "TASK-13013.7.34-CONSUMER-006",
+    "TASK-13013.7.34-CONSUMER-007",
+    "TASK-13013.7.34-CONSUMER-008",
+    "TASK-13013.7.34-CONSUMER-009",
+    "TASK-13013.7.34-CONSUMER-010",
+    "TASK-13013.7.34-CONSUMER-011",
+    "TASK-13013.7.34-CONSUMER-012",
+    "TASK-13013.7.34-CONSUMER-013",
+    "TASK-13013.7.34-CONSUMER-014",
+    "TASK-13013.7.34-CONSUMER-015",
+    "TASK-13013.7.34-CONSUMER-016",
+    "TASK-13013.7.34-CONSUMER-017",
+    "TASK-13013.7.34-CONSUMER-018",
+    "TASK-13013.7.34-CONSUMER-019",
+    "TASK-13013.7.34-CONSUMER-020",
+    "TASK-13013.7.34-CONSUMER-021",
+    "TASK-13013.7.34-CONSUMER-022",
+    "TASK-13013.7.34-CONSUMER-023",
+    "TASK-13013.7.34-CONSUMER-024",
+    "TASK-13013.7.34-CONSUMER-025",
+    "TASK-13013.7.34-CONSUMER-026",
+    "TASK-13013.7.34-CONSUMER-027",
+    "TASK-13013.7.34-CONSUMER-028",
+    "TASK-13013.7.34-CONSUMER-029",
+    "TASK-13013.7.34-CONSUMER-030",
+    "TASK-13013.7.34-CONSUMER-031",
+    "TASK-13013.7.34-CONSUMER-032",
+    "TASK-13013.7.34-CONSUMER-033",
+    "TASK-13013.7.34-CONSUMER-034",
+    "TASK-13013.7.34-CONSUMER-035",
+    "TASK-13013.7.37-RNG-01",
+    "TASK-13013.7.37-RNG-02"
+  ],
+  "caller_evidence": [
+    {
+      "excerpts": [
+        {
+          "line": 564,
+          "text": "    parakeet_use_rnnt_streamer: bool = True\n    parakeet_rnnt_model_name: str = \"nvidia/parakeet-tdt-0.6b-v3\"\n    parakeet_rnnt_device: Optional[str] = None\n    parakeet_rnnt_left_context_s: float = 10.0\n    parakeet_rnnt_max_buffer_s: float = 40.0"
+        },
+        {
+          "line": 1299,
+          "text": "        self.model = (\n            nemo_asr.models.EncDecRNNTModel.from_pretrained(model_name)\n            .to(self.device)\n            .eval()\n        )"
+        },
+        {
+          "line": 1618,
+          "text": "            try:\n                self.model = load_parakeet_model(variant)\n                if self.model is None:\n                    raise RuntimeError(f\"Failed to load Parakeet {variant} model\")\n                logger.info(f\"Loaded Parakeet {variant} model\")"
+        },
+        {
+          "line": 1633,
+          "text": "                            self.config,\n                            \"parakeet_rnnt_model_name\",\n                            \"nvidia/parakeet-tdt-0.6b-v3\",\n                        )\n                        device = getattr(self.config, \"parakeet_rnnt_device\", None)"
+        },
+        {
+          "line": 1652,
+          "text": "\n                        self._rnnt_streamer = _ParakeetRNNTStreamer(\n                            model_name=model_name,\n                            device=device,\n                            left_context_s=left_context_s,"
+        },
+        {
+          "line": 2719,
+          "text": "\n            if \"parakeet_rnnt_model_name\" in config_data:\n                requested_rnnt_model = config_data[\"parakeet_rnnt_model_name\"]\n                if not isinstance(requested_rnnt_model, str) or requested_rnnt_model not in (\n                    config.parakeet_rnnt_model_name,"
+        },
+        {
+          "line": 2791,
+          "text": "            config.parakeet_use_rnnt_streamer = config_data.get(\"parakeet_use_rnnt_streamer\", config.parakeet_use_rnnt_streamer)\n            config.parakeet_rnnt_model_name = config_data.get(\"parakeet_rnnt_model_name\", config.parakeet_rnnt_model_name)\n            config.parakeet_rnnt_device = config_data.get(\"parakeet_rnnt_device\", config.parakeet_rnnt_device)\n            config.parakeet_rnnt_left_context_s = float(config_data.get(\"parakeet_rnnt_left_context_s\", config.parakeet_rnnt_left_context_s))\n            config.parakeet_rnnt_max_buffer_s = float(config_data.get(\"parakeet_rnnt_max_buffer_s\", config.parakeet_rnnt_max_buffer_s))"
+        }
+      ],
+      "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Streaming_Unified.py",
+      "sha256": "9ff6a1b8899c50f2897364bcdda179c42fcbc87cb8955405e27b317015fbd51e"
+    },
+    {
+      "excerpts": [
+        {
+          "line": 1335,
+          "text": "    if not await _guard_audio_ws_work_start(\n        websocket,\n        kind=\"audio.stream.transcribe\",\n        outer_stream=_outer_stream,\n        request_id=request_id,"
+        },
+        {
+          "line": 1383,
+          "text": "        config = _new_unified_streaming_config(\n            model=default_model,\n            model_variant=default_variant,\n            sample_rate=16000,\n            chunk_duration=2.0,"
+        },
+        {
+          "line": 1594,
+          "text": "\n        async def _on_stream_config_resolved(\n            config_payload: dict[str, Any],\n            resolved_config: \"_UnifiedStreamingConfig\",\n        ) -> None:"
+        },
+        {
+          "line": 1762,
+          "text": "        try:\n            await handle_unified_websocket(\n                policy_websocket,\n                config,\n                on_audio_seconds=_on_audio_quota,"
+        }
+      ],
+      "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/api/v1/endpoints/audio/audio_streaming.py",
+      "sha256": "eab3918d63231aeec3b48990e69275cb172f9d9e56b2f90c01dfc76e03a8b39e"
+    },
+    {
+      "excerpts": [
+        {
+          "line": 348,
+          "text": "    base_cfg = config or StreamingConfig()\n    unified_cfg = UnifiedStreamingConfig(\n        model='parakeet',\n        model_variant=base_cfg.model_variant,\n        sample_rate=base_cfg.sample_rate,"
+        },
+        {
+          "line": 378,
+          "text": "                cfg = payload.get(\"config\") or {}\n                payload = {\n                    \"type\": \"config\",\n                    **cfg\n                }"
+        },
+        {
+          "line": 401,
+          "text": "\n    await handle_unified_websocket(websocket, config=unified_cfg)\n\n\ndef create_streaming_generator("
+        }
+      ],
+      "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Streaming_Parakeet.py",
+      "sha256": "9798350ed434091270f70fbc7da79603c20bfa377386f31a8c7375512d23e868"
+    },
+    {
+      "excerpts": [
+        {
+          "line": 309,
+          "text": "\ndef _require_local_nemo_path(model_path: str | None) -> Path:\n    if model_path is None:\n        raise STTExecutionUnsupportedError(\n            \"No-download NeMo execution requires an explicit local .nemo artifact\""
+        },
+        {
+          "line": 379,
+          "text": "    hub_model_id: str,\n    model_path: str | None,\n    device: str | None,\n    dtype_name: str | None,\n    allow_download: bool,"
+        },
+        {
+          "line": 393,
+          "text": "    local_path = (\n        _require_local_nemo_path(model_path)\n        if not allow_download\n        else Path(model_path).resolve() if model_path is not None else None\n    )"
+        },
+        {
+          "line": 416,
+          "text": "            model = (\n                model_class.restore_from(str(local_path), map_location=device)\n                if local_path is not None\n                else model_class.from_pretrained(hub_model_id)\n            )"
+        },
+        {
+          "line": 418,
+          "text": "                if local_path is not None\n                else model_class.from_pretrained(hub_model_id)\n            )\n            if configure_decoding:\n                model.change_decoding_strategy(None)"
+        },
+        {
+          "line": 495,
+          "text": "        # Load the model\n        model = nemo_asr.models.EncDecMultiTaskModel.from_pretrained(\"nvidia/canary-1b-v2\")\n\n        # Configure device\n        device = 'cuda' if _torch_cuda_available(allow_import=True) else 'cpu'"
+        },
+        {
+          "line": 603,
+          "text": "    # Load the model\n    model = nemo_asr.models.EncDecRNNTBPEModel.from_pretrained(\"nvidia/parakeet-tdt-0.6b-v3\")\n\n    # Configure for efficient inference\n    model.change_decoding_strategy(None)  # Use greedy decoding for speed"
+        },
+        {
+          "line": 756,
+          "text": "        loaded = _loaded_runtime or load_canary_model(\n            model_path=str(runtime.get(_RUNTIME_MODEL_PATH) or \"\"),\n            device=str(runtime.get(_RUNTIME_DEVICE) or \"\"),\n            dtype_name=str(runtime.get(_RUNTIME_DTYPE) or \"\"),\n            allow_download=False,"
+        },
+        {
+          "line": 923,
+          "text": "            variant,\n            model_path=str(runtime.get(_RUNTIME_MODEL_PATH) or \"\"),\n            device=str(runtime.get(_RUNTIME_DEVICE) or \"\"),\n            compute_type=str(runtime.get(_RUNTIME_DTYPE) or \"\"),\n            allow_download=False,"
+        }
+      ],
+      "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Transcription_Nemo.py",
+      "sha256": "6b069a0a59054d4531a5767c88f2ecb51459544aded7bced6c9f8d84dd5a11fe"
+    },
+    {
+      "excerpts": [
+        {
+          "line": 215,
+          "text": "\ndef _safe_requested_model_label(model: str) -> str:\n    normalized = model.strip()\n    if (\n        not normalized"
+        },
+        {
+          "line": 1051,
+          "text": "    ) -> SttBatchExecutionPlan:\n        _require_benchmark_mode(mode)\n        requested = model or \"parakeet-standard\"\n        requested_label = _safe_requested_model_label(requested)\n        lowered = requested.lower()"
+        },
+        {
+          "line": 1079,
+          "text": "\n            path_value = (\n                requested\n                if requested_label == \"local-model\"\n                else stt_cfg.get(\"parakeet_model_path\")"
+        },
+        {
+          "line": 1084,
+          "text": "            )\n            model_path = nemo._require_local_nemo_path(path_value)\n            backend = \"nemo\"\n            device = (\n                \"cuda\""
+        },
+        {
+          "line": 1206,
+          "text": "        cancel_check: Callable[[], bool] | None = None,\n        execution_plan: SttBatchExecutionPlan | None = None,\n    ) -> dict[str, Any]:\n        if execution_plan is not None:\n            return self._run_planned_batch("
+        },
+        {
+          "line": 1297,
+          "text": "        requested = model or \"nemo-canary-1b\"\n        requested_label = _safe_requested_model_label(requested)\n        primary_language = _primary_language(language)\n        from .Audio_Transcription_Nemo import CANARY_SUPPORTED_LANG_CODES\n"
+        },
+        {
+          "line": 1308,
+          "text": "\n        path_value = (\n            requested\n            if requested_label == \"local-model\"\n            else stt_cfg.get(\"canary_model_path\")"
+        },
+        {
+          "line": 1313,
+          "text": "        )\n        model_path = nemo._require_local_nemo_path(path_value)\n        device = str(stt_cfg.get(\"nemo_device\") or \"cpu\").strip().lower()\n        device = _require_planned_device(\n            device,"
+        },
+        {
+          "line": 1381,
+          "text": "        cancel_check: Callable[[], bool] | None = None,\n        execution_plan: SttBatchExecutionPlan | None = None,\n    ) -> dict[str, Any]:\n        if execution_plan is not None:\n            return self._run_planned_batch("
+        }
+      ],
+      "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/stt_provider_adapter.py",
+      "sha256": "f664028a20cfecef129eea1acfc7f8d1019cbdbf24c723753eafbece9c5f5ab1"
+    },
+    {
+      "excerpts": [
+        {
+          "line": 1165,
+          "text": "\n            diarization_config = load_diarization_config()\n            backend = str(diarization_config.get(\"backend\", \"embedding\") or \"embedding\").lower()\n\n            # Only require embedding diarization deps when using embedding backend."
+        },
+        {
+          "line": 1242,
+          "text": "\n                            diarized_result = transcribe_with_nemo_multitalk(\n                                audio_file_path,\n                                diarization_config,\n                                output_path=str(diarized_json_path),"
+        },
+        {
+          "line": 2104,
+          "text": "    # When no model is provided, resolve the config default via the registry.\n    requested_model = (model or \"\").strip()\n    provider, provider_model, _ = registry.resolve_provider_for_model(requested_model)\n    adapter = registry.get_adapter(provider)\n    hotwords_norm = _normalize_hotwords(hotwords)"
+        },
+        {
+          "line": 2131,
+          "text": "        wav_path,\n        model=requested_model or provider_model,\n        language=language or None,\n        task=\"transcribe\",\n        word_timestamps=False,"
+        },
+        {
+          "line": 3371,
+          "text": "\n            loaded = load_parakeet_model(\n                variant,\n                model_path=model_path,\n                device=device,"
+        },
+        {
+          "line": 3652,
+          "text": "        runtime = execution_plan.runtime_values()\n        loaded = load_canary_model(\n            model_path=str(runtime.get(_RUNTIME_MODEL_PATH) or \"\"),\n            device=str(runtime.get(_RUNTIME_DEVICE) or \"\"),\n            dtype_name=str(runtime.get(_RUNTIME_DTYPE) or \"\"),"
+        }
+      ],
+      "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Transcription_Lib.py",
+      "sha256": "3561a6e61172f40b1db6d3ecd40983eaca954e301fc77345a50233ce53369d91"
+    },
+    {
+      "excerpts": [
+        {
+          "line": 20,
+          "text": "\nDEFAULT_ASR_MODEL = \"nvidia/multitalker-parakeet-streaming-0.6b-v1\"\nDEFAULT_DIAR_MODEL = \"nvidia/diar_streaming_sortformer_4spk-v2.1\"\nDEFAULT_MAX_SPEAKERS = 4\nDEFAULT_ATT_CONTEXT_SIZE = [70, 13]"
+        },
+        {
+          "line": 182,
+          "text": "            dcomp.cuda_graphs_mode = None\n\n\n@lru_cache(maxsize=2)\ndef _load_models("
+        },
+        {
+          "line": 200,
+          "text": "    logger.info(\"Loading NeMo multitalk diarization model: {}\", diar_model_name)\n    diar_model = SortformerEncLabelModel.from_pretrained(diar_model_name).eval().to(device)\n    logger.info(\"Loading NeMo multitalk ASR model: {}\", asr_model_name)\n    asr_model = ASRModel.from_pretrained(asr_model_name).eval().to(device)\n"
+        },
+        {
+          "line": 202,
+          "text": "    logger.info(\"Loading NeMo multitalk ASR model: {}\", asr_model_name)\n    asr_model = ASRModel.from_pretrained(asr_model_name).eval().to(device)\n\n    return diar_model, asr_model\n"
+        },
+        {
+          "line": 221,
+          "text": "    start_time = time.time()\n    diar_model_name = str(config.get(\"nemo_multitalk_diar_model\") or DEFAULT_DIAR_MODEL)\n    asr_model_name = str(config.get(\"nemo_multitalk_asr_model\") or DEFAULT_ASR_MODEL)\n    device_value = str(config.get(\"nemo_multitalk_device\") or \"auto\")\n    if device_value.strip().lower().startswith(\"cuda\") and not torch.cuda.is_available():"
+        },
+        {
+          "line": 222,
+          "text": "    diar_model_name = str(config.get(\"nemo_multitalk_diar_model\") or DEFAULT_DIAR_MODEL)\n    asr_model_name = str(config.get(\"nemo_multitalk_asr_model\") or DEFAULT_ASR_MODEL)\n    device_value = str(config.get(\"nemo_multitalk_device\") or \"auto\")\n    if device_value.strip().lower().startswith(\"cuda\") and not torch.cuda.is_available():\n        raise DiarizationError(\"nemo_multitalk_device is set to CUDA but CUDA is unavailable\")"
+        },
+        {
+          "line": 231,
+          "text": "    diar_model, asr_model = _load_models(diar_model_name, asr_model_name, device_value, cache_dir)\n    device = _resolve_device(device_value)\n\n    if disable_cuda_graphs:\n        _disable_cuda_graphs(asr_model)"
+        }
+      ],
+      "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Diarization_Nemo_Multitalk.py",
+      "sha256": "6f7937a4f9914ef01e15287d265279838ea530c5690dfe886d1ef292d80ee76c"
+    },
+    {
+      "excerpts": [
+        {
+          "line": 182,
+          "text": "\ndef load_diarization_config() -> dict[str, Any]:\n    \"\"\"Return the merged diarization configuration (defaults + user overrides).\"\"\"\n    config = dict(DIARIZATION_CONFIG)\n    if loaded_config_data:"
+        },
+        {
+          "line": 185,
+          "text": "    config = dict(DIARIZATION_CONFIG)\n    if loaded_config_data:\n        diarization_config = loaded_config_data.get('diarization', {})\n        if isinstance(diarization_config, dict):\n            config.update(diarization_config)"
+        },
+        {
+          "line": 186,
+          "text": "    if loaded_config_data:\n        diarization_config = loaded_config_data.get('diarization', {})\n        if isinstance(diarization_config, dict):\n            config.update(diarization_config)\n    return config"
+        }
+      ],
+      "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Diarization_Lib.py",
+      "sha256": "10e6e28f6b22d110f9c82048a9234602e5dffd9bf7cd6d179936865e5a60ab5a"
+    },
+    {
+      "excerpts": [
+        {
+          "line": 767,
+          "text": "    # NeMo multitalk (Parakeet + Sortformer diarization)\n    \"nemo_multitalk_asr_model\": \"nvidia/multitalker-parakeet-streaming-0.6b-v1\",\n    \"nemo_multitalk_diar_model\": \"nvidia/diar_streaming_sortformer_4spk-v2.1\",\n    \"nemo_multitalk_device\": \"auto\",  # auto, cpu, cuda\n    \"nemo_multitalk_cache_dir\": None,"
+        },
+        {
+          "line": 768,
+          "text": "    \"nemo_multitalk_asr_model\": \"nvidia/multitalker-parakeet-streaming-0.6b-v1\",\n    \"nemo_multitalk_diar_model\": \"nvidia/diar_streaming_sortformer_4spk-v2.1\",\n    \"nemo_multitalk_device\": \"auto\",  # auto, cpu, cuda\n    \"nemo_multitalk_cache_dir\": None,\n    \"nemo_multitalk_max_speakers\": 4,"
+        },
+        {
+          "line": 4602,
+          "text": "            # NeMo multitalk settings\n            diarization_config['nemo_multitalk_asr_model'] = _get_str('Diarization', 'nemo_multitalk_asr_model', diarization_config.get('nemo_multitalk_asr_model')) or diarization_config.get('nemo_multitalk_asr_model')\n            diarization_config['nemo_multitalk_diar_model'] = _get_str('Diarization', 'nemo_multitalk_diar_model', diarization_config.get('nemo_multitalk_diar_model')) or diarization_config.get('nemo_multitalk_diar_model')\n            diarization_config['nemo_multitalk_device'] = _get_str('Diarization', 'nemo_multitalk_device', diarization_config.get('nemo_multitalk_device')) or diarization_config.get('nemo_multitalk_device')\n            diarization_config['nemo_multitalk_cache_dir'] = _get_str('Diarization', 'nemo_multitalk_cache_dir', diarization_config.get('nemo_multitalk_cache_dir')) or diarization_config.get('nemo_multitalk_cache_dir')"
+        },
+        {
+          "line": 4603,
+          "text": "            diarization_config['nemo_multitalk_asr_model'] = _get_str('Diarization', 'nemo_multitalk_asr_model', diarization_config.get('nemo_multitalk_asr_model')) or diarization_config.get('nemo_multitalk_asr_model')\n            diarization_config['nemo_multitalk_diar_model'] = _get_str('Diarization', 'nemo_multitalk_diar_model', diarization_config.get('nemo_multitalk_diar_model')) or diarization_config.get('nemo_multitalk_diar_model')\n            diarization_config['nemo_multitalk_device'] = _get_str('Diarization', 'nemo_multitalk_device', diarization_config.get('nemo_multitalk_device')) or diarization_config.get('nemo_multitalk_device')\n            diarization_config['nemo_multitalk_cache_dir'] = _get_str('Diarization', 'nemo_multitalk_cache_dir', diarization_config.get('nemo_multitalk_cache_dir')) or diarization_config.get('nemo_multitalk_cache_dir')\n            diarization_config['nemo_multitalk_max_speakers'] = _get_int('Diarization', 'nemo_multitalk_max_speakers', diarization_config.get('nemo_multitalk_max_speakers', 4))"
+        }
+      ],
+      "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/config.py",
+      "sha256": "983a314ccff65b7c807899811f9f2ccae44cad6c698df66bde0897adcf3179a5"
+    },
+    {
+      "excerpts": [
+        {
+          "line": 75,
+          "text": "    min_speakers = int(config.get(\"min_speakers\", 1))\n    max_speakers = int(config.get(\"max_speakers\", 10))\n\n    try:\n        # Try to use pyannote for diarization"
+        },
+        {
+          "line": 84,
+          "text": "            # Load diarization pipeline\n            pipeline = Pipeline.from_pretrained(\n                \"pyannote/speaker-diarization-3.1\",\n                use_auth_token=os.getenv(\"HF_TOKEN\"),\n            )"
+        },
+        {
+          "line": 95,
+          "text": "            if num_speakers:\n                diarization = pipeline(str(audio_path), num_speakers=num_speakers)\n            else:\n                diarization = pipeline(\n                    str(audio_path),"
+        },
+        {
+          "line": 99,
+          "text": "                    str(audio_path),\n                    min_speakers=min_speakers,\n                    max_speakers=max_speakers,\n                )\n"
+        }
+      ],
+      "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Workflows/adapters/audio/diarize.py",
+      "sha256": "a4a412de50a3ddb1a6a495136e0a7062826ba50475fb561cd3db7124583b92b2"
+    },
+    {
+      "excerpts": [
+        {
+          "line": 1367,
+          "text": "            if not isinstance(target_spec, str) or target_spec.count(\"=\") < 1:\n                raise ValueError(\"target must use provider=model\")\n            provider, model = target_spec.split(\"=\", 1)\n            provider = provider.strip()\n            model = model.strip()"
+        },
+        {
+          "line": 1388,
+          "text": "                raise ValueError(\"adapter is unavailable for batch transcription\")\n            planner = getattr(adapter, \"plan_batch_execution\", None)\n            if not callable(planner):\n                raise ValueError(\"adapter has no execution planner\")\n            plan = planner(model=model, **planner_settings)"
+        },
+        {
+          "line": 1391,
+          "text": "                raise ValueError(\"adapter has no execution planner\")\n            plan = planner(model=model, **planner_settings)\n            normalized_provider, model_label = _validate_preflight_plan(\n                plan=plan,\n                adapter=adapter,"
+        },
+        {
+          "line": 6913,
+          "text": "            common_settings[name] = value\n    prepared_targets = preflight_targets(\n        tuple(arguments.target),\n        mode=arguments.mode,\n        allow_network_targets=arguments.allow_network_targets,"
+        },
+        {
+          "line": 6946,
+          "text": "    )\n    completed = execute_prepared_targets(\n        run_directory=run_directory,\n        run_metadata=run_metadata,\n        prepared_targets=prepared_targets,"
+        },
+        {
+          "line": 6980,
+          "text": "    run.add_argument(\"--dataset-root\", required=True, type=Path)\n    run.add_argument(\"--target\", required=True, action=\"append\")\n    run.add_argument(\"--profile\", choices=sorted(_KNOWN_SAMPLE_PROFILES), default=\"comparison\")\n    run.add_argument(\n        \"--mode\","
+        }
+      ],
+      "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/Helper_Scripts/benchmarks/stt_bench.py",
+      "sha256": "ccfbfeb50648691824d6457d5b7a1dca68a8e7f3809564ff2c20d664ec43690d"
+    },
+    {
+      "excerpts": [
+        {
+          "line": 99,
+          "text": "    \"\"\"Approve one exact no-download plan before candidate transcription.\"\"\"\n    from Helper_Scripts.benchmarks.stt_bench import preflight_targets\n\n    prepared = preflight_targets(\n        (f\"{provider}={model}\",),"
+        },
+        {
+          "line": 101,
+          "text": "\n    prepared = preflight_targets(\n        (f\"{provider}={model}\",),\n        mode=\"neutral-v1\",\n        allow_network_targets=allow_network,"
+        },
+        {
+          "line": 295,
+          "text": "    parser.add_argument(\n        \"--model\",\n        help=\"Adapter model identifier required for candidate snapshots.\",\n    )\n    parser.add_argument("
+        }
+      ],
+      "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/Helper_Scripts/Audio/generate_stt_golden.py",
+      "sha256": "1b693261ecd5672d51e0ebb0118685be6e8b1a1a4def25b8626b47c98fd85bf9"
+    },
+    {
+      "excerpts": [
+        {
+          "line": 28,
+          "text": "_GHSA_PATTERN = re.compile(r\"GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}\")\n_MANIFESTS = frozenset({\"pyproject.toml\", \"uv.lock\"})\n\n\ndef _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:"
+        },
+        {
+          "line": 79,
+          "text": "                raise PolicyError(\"dependency review: invalid vulnerability record\")\n            ghsa = vulnerability.get(\"advisory_ghsa_id\")\n            severity = vulnerability.get(\"severity\")\n            if not isinstance(ghsa, str) or not _GHSA_PATTERN.fullmatch(ghsa):\n                raise PolicyError(\"dependency review: invalid advisory_ghsa_id\")"
+        },
+        {
+          "line": 97,
+          "text": "                and change[\"version\"] == item.installed_version == version\n                and item.component == \"source-python-root\"\n                and item.vulnerability_id == cve\n                and item.severity == severity.upper()\n                and item.created_on <= today <= item.expires_on"
+        }
+      ],
+      "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/Helper_Scripts/Supply_Chain/dependency_review.py",
+      "sha256": "856f3c1a74132f71f964fabcfb63dd19d1797984c312e879356aa0ca1d083181"
+    },
+    {
+      "excerpts": [
+        {
+          "line": 1305,
+          "text": "    logger.info(\"Loading NeMo Parakeet variant {} to trigger download\", variant)\n    model = load_parakeet_model(variant)\n    if model is None:\n        raise RuntimeError(f'Failed to load Parakeet variant {variant}; check nemo dependencies.')\n"
+        },
+        {
+          "line": 1318,
+          "text": "    logger.info('Loading NeMo Canary to trigger download')\n    model = load_canary_model()\n    if model is None:\n        raise RuntimeError('Failed to load NeMo Canary model; verify nemo_toolkit installation.')\n"
+        }
+      ],
+      "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Setup/install_manager.py",
+      "sha256": "0e49e84695b7de4998f9e9950ab62926238443c735db26ccd4d7660ec668ce70"
+    },
+    {
+      "excerpts": [
+        {
+          "line": 137,
+          "text": "            if self.config.model.lower() == 'canary':\n                self.model = load_canary_model()\n            else:  # parakeet\n                self.model = load_parakeet_model(self.config.variant)\n"
+        },
+        {
+          "line": 139,
+          "text": "            else:  # parakeet\n                self.model = load_parakeet_model(self.config.variant)\n\n            if self.model is not None:\n                self.model_loaded = True"
+        },
+        {
+          "line": 478,
+          "text": "        if self.model_name.lower() == 'canary':\n            self.model = load_canary_model()\n        else:\n            self.model = load_parakeet_model(self.variant)\n"
+        },
+        {
+          "line": 480,
+          "text": "        else:\n            self.model = load_parakeet_model(self.variant)\n\n        if self.model is None:\n            raise RuntimeError(f\"Failed to load {self.model_name} model\")"
+        }
+      ],
+      "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Live_Transcription_Nemo.py",
+      "sha256": "4fac229e81967464cf66facdbaa959c67e4eee5a6bb5e037924acf94467ea6e0"
+    },
+    {
+      "excerpts": [
+        {
+          "line": 854,
+          "text": "\n        stt_registry = get_stt_provider_registry()\n        provider, provider_model_name, provider_variant = stt_registry.resolve_provider_for_model(model or \"\")\n        metrics_provider = str(provider or \"\").strip().lower() or metrics_provider\n        metrics_model = str(provider_model_name or model or \"\").strip() or metrics_model"
+        },
+        {
+          "line": 855,
+          "text": "        stt_registry = get_stt_provider_registry()\n        provider, provider_model_name, provider_variant = stt_registry.resolve_provider_for_model(model or \"\")\n        metrics_provider = str(provider or \"\").strip().lower() or metrics_provider\n        metrics_model = str(provider_model_name or model or \"\").strip() or metrics_model\n        provider_envelope = _stt_provider_envelope(stt_registry, provider)"
+        }
+      ],
+      "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/api/v1/endpoints/audio/audio_transcriptions.py",
+      "sha256": "1182c4cf3683ca98daab7f6e12f18b70640582ce38818bb6c6566a715e9f90d7"
+    }
+  ],
+  "exact_dependency_rows": {
+    "comparison": "/private/tmp/task-13013-7-28-chroma.tFu6fO/github-dependency-diff-pages.json",
+    "comparison_sha256": "3c6f6459322a9fd47293ee551a776737f5138131b94200b8eeb27aeb9ba9ccfb",
+    "normalized_advisory_rows": [
+      {
+        "advisory_url": "https://github.com/advisories/GHSA-2cp2-2r3c-7p7r",
+        "component": "source-python-root",
+        "ghsa": "GHSA-2cp2-2r3c-7p7r",
+        "installed_version": "1.3.2",
+        "manifest": "uv.lock",
+        "package": "hydra-core",
+        "purl": "pkg:pypi/hydra-core@1.3.2",
+        "severity": "HIGH",
+        "vulnerability_id": "CVE-2026-68508"
+      },
+      {
+        "advisory_url": "https://github.com/advisories/GHSA-qqmf-gpg7-g8gw",
+        "component": "source-python-root",
+        "ghsa": "GHSA-qqmf-gpg7-g8gw",
+        "installed_version": "2.6.5",
+        "manifest": "uv.lock",
+        "package": "lightning",
+        "purl": "pkg:pypi/lightning@2.6.5",
+        "severity": "HIGH",
+        "vulnerability_id": "CVE-2026-58659"
+      },
+      {
+        "advisory_url": "https://github.com/advisories/GHSA-9379-mwvr-7wxx",
+        "component": "source-python-root",
+        "ghsa": "GHSA-9379-mwvr-7wxx",
+        "installed_version": "2.0.0",
+        "manifest": "uv.lock",
+        "package": "nemo-toolkit",
+        "purl": "pkg:pypi/nemo-toolkit@2.0.0",
+        "severity": "HIGH",
+        "vulnerability_id": "CVE-2025-33245"
+      },
+      {
+        "advisory_url": "https://github.com/advisories/GHSA-hvjw-vp7g-39h5",
+        "component": "source-python-root",
+        "ghsa": "GHSA-hvjw-vp7g-39h5",
+        "installed_version": "2.0.0",
+        "manifest": "uv.lock",
+        "package": "nemo-toolkit",
+        "purl": "pkg:pypi/nemo-toolkit@2.0.0",
+        "severity": "HIGH",
+        "vulnerability_id": "CVE-2025-33253"
+      },
+      {
+        "advisory_url": "https://github.com/advisories/GHSA-m4jw-wgmf-889x",
+        "component": "source-python-root",
+        "ghsa": "GHSA-m4jw-wgmf-889x",
+        "installed_version": "2.0.0",
+        "manifest": "uv.lock",
+        "package": "nemo-toolkit",
+        "purl": "pkg:pypi/nemo-toolkit@2.0.0",
+        "severity": "HIGH",
+        "vulnerability_id": "CVE-2026-24157"
+      },
+      {
+        "advisory_url": "https://github.com/advisories/GHSA-v7v2-m736-cf3c",
+        "component": "source-python-root",
+        "ghsa": "GHSA-v7v2-m736-cf3c",
+        "installed_version": "2.0.0",
+        "manifest": "uv.lock",
+        "package": "nemo-toolkit",
+        "purl": "pkg:pypi/nemo-toolkit@2.0.0",
+        "severity": "HIGH",
+        "vulnerability_id": "CVE-2026-24159"
+      }
+    ],
+    "raw_dependency_changes": [
+      {
+        "change_type": "added",
+        "ecosystem": "pip",
+        "license": "MIT",
+        "manifest": "uv.lock",
+        "name": "hydra-core",
+        "package_url": "pkg:pypi/hydra-core@1.3.2",
+        "scope": "runtime",
+        "source_repository_url": "https://github.com/hydra-ecosystem/hydra",
+        "version": "1.3.2",
+        "vulnerabilities": [
+          {
+            "advisory_ghsa_id": "GHSA-2cp2-2r3c-7p7r",
+            "advisory_summary": "Hydra: hydra.utils.instantiate with untrusted config can lead to code execution",
+            "advisory_url": "https://github.com/advisories/GHSA-2cp2-2r3c-7p7r",
+            "severity": "high"
+          }
+        ]
+      },
+      {
+        "change_type": "added",
+        "ecosystem": "pip",
+        "license": "Apache-2.0",
+        "manifest": "uv.lock",
+        "name": "lightning",
+        "package_url": "pkg:pypi/lightning@2.6.5",
+        "scope": "runtime",
+        "source_repository_url": "https://github.com/Lightning-AI/pytorch-lightning",
+        "version": "2.6.5",
+        "vulnerabilities": [
+          {
+            "advisory_ghsa_id": "GHSA-qqmf-gpg7-g8gw",
+            "advisory_summary": " PyTorch Lightning allows arbitrary code execution through checkpoint _instantiator hyperparameters",
+            "advisory_url": "https://github.com/advisories/GHSA-qqmf-gpg7-g8gw",
+            "severity": "high"
+          }
+        ]
+      },
+      {
+        "change_type": "added",
+        "ecosystem": "pip",
+        "license": "Apache-2.0",
+        "manifest": "uv.lock",
+        "name": "nemo-toolkit",
+        "package_url": "pkg:pypi/nemo-toolkit@2.0.0",
+        "scope": "runtime",
+        "source_repository_url": "https://github.com/NVIDIA-NeMo/Speech",
+        "version": "2.0.0",
+        "vulnerabilities": [
+          {
+            "advisory_ghsa_id": "GHSA-9379-mwvr-7wxx",
+            "advisory_summary": "NVIDIA NeMo Framework contains a vulnerability where malicious data could cause remote code execution",
+            "advisory_url": "https://github.com/advisories/GHSA-9379-mwvr-7wxx",
+            "severity": "high"
+          },
+          {
+            "advisory_ghsa_id": "GHSA-hvjw-vp7g-39h5",
+            "advisory_summary": "NVIDIA NeMo Framework Deserializes Untrusted Data",
+            "advisory_url": "https://github.com/advisories/GHSA-hvjw-vp7g-39h5",
+            "severity": "high"
+          },
+          {
+            "advisory_ghsa_id": "GHSA-m4jw-wgmf-889x",
+            "advisory_summary": "NVIDIA NeMo Framework contains an RCE vulnerability in checkpoint loading",
+            "advisory_url": "https://github.com/advisories/GHSA-m4jw-wgmf-889x",
+            "severity": "high"
+          },
+          {
+            "advisory_ghsa_id": "GHSA-v7v2-m736-cf3c",
+            "advisory_summary": "NVIDIA NeMo Framework contains a vulnerability leading to Remote Code Execution",
+            "advisory_url": "https://github.com/advisories/GHSA-v7v2-m736-cf3c",
+            "severity": "high"
+          }
+        ]
+      }
+    ],
+    "selected_locked_packages": [
+      {
+        "dependencies": [
+          {
+            "name": "antlr4-python3-runtime"
+          },
+          {
+            "name": "omegaconf"
+          },
+          {
+            "name": "packaging"
+          }
+        ],
+        "name": "hydra-core",
+        "sdist": {
+          "hash": "sha256:8a878ed67216997c3e9d88a8e72e7b4767e81af37afb4ea3334b269a4390a824",
+          "size": 3263494,
+          "upload-time": "2023-02-23T18:33:43.03Z",
+          "url": "https://files.pythonhosted.org/packages/6d/8e/07e42bc434a847154083b315779b0a81d567154504624e181caf2c71cd98/hydra-core-1.3.2.tar.gz"
+        },
+        "source": {
+          "registry": "https://pypi.org/simple"
+        },
+        "version": "1.3.2",
+        "wheels": [
+          {
+            "hash": "sha256:fa0238a9e31df3373b35b0bfb672c34cc92718d21f81311d8996a16de1141d8b",
+            "size": 154547,
+            "upload-time": "2023-02-23T18:33:40.801Z",
+            "url": "https://files.pythonhosted.org/packages/c6/50/e0edd38dcd63fb26a8547f13d28f7a008bc4a3fd4eb4ff030673f22ad41a/hydra_core-1.3.2-py3-none-any.whl"
+          }
+        ]
+      },
+      {
+        "dependencies": [
+          {
+            "extra": [
+              "http"
+            ],
+            "name": "fsspec"
+          },
+          {
+            "name": "lightning-utilities"
+          },
+          {
+            "name": "packaging"
+          },
+          {
+            "name": "pytorch-lightning"
+          },
+          {
+            "name": "pyyaml"
+          },
+          {
+            "name": "torch"
+          },
+          {
+            "name": "torchmetrics"
+          },
+          {
+            "name": "tqdm"
+          },
+          {
+            "name": "typing-extensions"
+          }
+        ],
+        "name": "lightning",
+        "sdist": {
+          "hash": "sha256:16a30310ed69afde3748491feb5d13508908effd70390d2bfc203dc0812a4b4a",
+          "size": 659201,
+          "upload-time": "2026-05-27T14:33:41.806Z",
+          "url": "https://files.pythonhosted.org/packages/c9/1d/83be8536bec71a0173e762a9a1fd92a24a5ad0d0f74c59550c3c4e6c103b/lightning-2.6.5.tar.gz"
+        },
+        "source": {
+          "registry": "https://pypi.org/simple"
+        },
+        "version": "2.6.5",
+        "wheels": [
+          {
+            "hash": "sha256:3702fb7ef4ab51a8c3d4a140f4674514fe72973a9673dfa05e07a078e2767389",
+            "size": 848611,
+            "upload-time": "2026-05-27T14:33:39.714Z",
+            "url": "https://files.pythonhosted.org/packages/e7/c5/fca7144236b6fa3279d0fb3172b32576c5ad8b84a63b9432ad6592d24847/lightning-2.6.5-py3-none-any.whl"
+          }
+        ]
+      },
+      {
+        "dependencies": [
+          {
+            "name": "huggingface-hub"
+          },
+          {
+            "marker": "extra == 'extra-11-tldw-server-backend-vllm'",
+            "name": "numba",
+            "source": {
+              "registry": "https://pypi.org/simple"
+            },
+            "version": "0.65.0"
+          },
+          {
+            "marker": "extra == 'group-11-tldw-server-release' or extra != 'extra-11-tldw-server-backend-vllm'",
+            "name": "numba",
+            "source": {
+              "registry": "https://pypi.org/simple"
+            },
+            "version": "0.67.0"
+          },
+          {
+            "name": "numpy"
+          },
+          {
+            "name": "onnx"
+          },
+          {
+            "name": "python-dateutil"
+          },
+          {
+            "name": "ruamel-yaml"
+          },
+          {
+            "name": "scikit-learn"
+          },
+          {
+            "marker": "(python_full_version >= '3.12' and extra == 'extra-11-tldw-server-backend-vllm') or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')",
+            "name": "setuptools",
+            "source": {
+              "registry": "https://pypi.org/simple"
+            },
+            "version": "80.10.2"
+          },
+          {
+            "marker": "python_full_version < '3.12' or extra != 'extra-11-tldw-server-backend-vllm' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')",
+            "name": "setuptools",
+            "source": {
+              "registry": "https://pypi.org/simple"
+            },
+            "version": "84.0.0"
+          },
+          {
+            "name": "tensorboard"
+          },
+          {
+            "name": "text-unidecode"
+          },
+          {
+            "name": "torch"
+          },
+          {
+            "name": "tqdm"
+          },
+          {
+            "name": "wget"
+          },
+          {
+            "name": "wrapt"
+          }
+        ],
+        "name": "nemo-toolkit",
+        "optional-dependencies": {
+          "asr": [
+            {
+              "name": "braceexpand"
+            },
+            {
+              "name": "cloudpickle"
+            },
+            {
+              "name": "datasets"
+            },
+            {
+              "name": "editdistance"
+            },
+            {
+              "name": "einops"
+            },
+            {
+              "name": "fiddle"
+            },
+            {
+              "name": "g2p-en"
+            },
+            {
+              "name": "hydra-core"
+            },
+            {
+              "name": "inflect"
+            },
+            {
+              "name": "jiwer"
+            },
+            {
+              "name": "kaldi-python-io"
+            },
+            {
+              "name": "kaldiio"
+            },
+            {
+              "name": "lhotse"
+            },
+            {
+              "marker": "python_full_version < '3.12' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')",
+              "name": "librosa",
+              "source": {
+                "registry": "https://pypi.org/simple"
+              },
+              "version": "0.11.0"
+            },
+            {
+              "marker": "python_full_version >= '3.12' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')",
+              "name": "librosa",
+              "source": {
+                "registry": "https://pypi.org/simple"
+              },
+              "version": "1.0.0"
+            },
+            {
+              "name": "marshmallow"
+            },
+            {
+              "name": "omegaconf"
+            },
+            {
+              "name": "packaging"
+            },
+            {
+              "name": "pandas"
+            },
+            {
+              "name": "pyannote-core"
+            },
+            {
+              "name": "pyannote-metrics"
+            },
+            {
+              "name": "pydub"
+            },
+            {
+              "name": "pyloudnorm"
+            },
+            {
+              "name": "pytorch-lightning"
+            },
+            {
+              "name": "resampy"
+            },
+            {
+              "name": "ruamel-yaml"
+            },
+            {
+              "name": "sacremoses"
+            },
+            {
+              "marker": "python_full_version < '3.12' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')",
+              "name": "scipy",
+              "source": {
+                "registry": "https://pypi.org/simple"
+              },
+              "version": "1.17.1"
+            },
+            {
+              "marker": "python_full_version >= '3.12' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')",
+              "name": "scipy",
+              "source": {
+                "registry": "https://pypi.org/simple"
+              },
+              "version": "1.18.1"
+            },
+            {
+              "name": "sentencepiece"
+            },
+            {
+              "name": "soundfile"
+            },
+            {
+              "name": "sox"
+            },
+            {
+              "name": "texterrors"
+            },
+            {
+              "name": "torchmetrics"
+            },
+            {
+              "name": "transformers"
+            },
+            {
+              "name": "wandb"
+            },
+            {
+              "name": "webdataset"
+            }
+          ]
+        },
+        "sdist": {
+          "hash": "sha256:8ebd89e152890832be63eef86a940755fbd8a3e8256ca1bbbf5bbcd120c2bb7d",
+          "size": 3189366,
+          "upload-time": "2024-11-14T18:42:38.054Z",
+          "url": "https://files.pythonhosted.org/packages/c7/04/41844f17002a5c5a671d9edd9b26fa87102902305b4782f5136d46bdab7b/nemo_toolkit-2.0.0.tar.gz"
+        },
+        "source": {
+          "registry": "https://pypi.org/simple"
+        },
+        "version": "2.0.0",
+        "wheels": [
+          {
+            "hash": "sha256:9af25cb1002d75960d410a3e533d9c9d7dbae6e9a67ef48954a816eaaec3651d",
+            "size": 4308525,
+            "upload-time": "2024-11-14T18:42:35.069Z",
+            "url": "https://files.pythonhosted.org/packages/f3/5d/adc38248d91e0d3cae58ddb2d1bee1db9b4c094471aba50eef46a09b5ba7/nemo_toolkit-2.0.0-py3-none-any.whl"
+          }
+        ]
+      },
+      {
+        "dependencies": [
+          {
+            "name": "asteroid-filterbanks"
+          },
+          {
+            "name": "einops"
+          },
+          {
+            "name": "huggingface-hub"
+          },
+          {
+            "name": "lightning"
+          },
+          {
+            "name": "matplotlib"
+          },
+          {
+            "name": "opentelemetry-api"
+          },
+          {
+            "name": "opentelemetry-exporter-otlp"
+          },
+          {
+            "name": "opentelemetry-sdk"
+          },
+          {
+            "name": "pyannote-core"
+          },
+          {
+            "name": "pyannote-database"
+          },
+          {
+            "name": "pyannote-metrics"
+          },
+          {
+            "name": "pyannote-pipeline"
+          },
+          {
+            "name": "pyannoteai-sdk"
+          },
+          {
+            "name": "pytorch-metric-learning"
+          },
+          {
+            "name": "rich"
+          },
+          {
+            "name": "safetensors"
+          },
+          {
+            "name": "torch"
+          },
+          {
+            "name": "torch-audiomentations"
+          },
+          {
+            "name": "torchaudio"
+          },
+          {
+            "name": "torchcodec"
+          },
+          {
+            "name": "torchmetrics"
+          }
+        ],
+        "name": "pyannote-audio",
+        "sdist": {
+          "hash": "sha256:3a903dfb5ca711d134cc2522561c9158b186836f5d62e8a57c46c6648e8a8229",
+          "size": 13963479,
+          "upload-time": "2026-06-30T14:28:53.454Z",
+          "url": "https://files.pythonhosted.org/packages/6d/d7/03b1d00d431c7be1d98635fefb99c2da64d9b84b4b8a06d5302666a96c88/pyannote_audio-4.0.7.tar.gz"
+        },
+        "source": {
+          "registry": "https://pypi.org/simple"
+        },
+        "version": "4.0.7",
+        "wheels": [
+          {
+            "hash": "sha256:852ea15c4d85bc34773e618267603ffca6a521669a74d33742692cc67fc700d6",
+            "size": 894598,
+            "upload-time": "2026-06-30T14:28:51.779Z",
+            "url": "https://files.pythonhosted.org/packages/66/a3/1d03ed6c7669f7b94ce4a7ebe3b21f5c3b6331999a5680837e371e0a0537/pyannote_audio-4.0.7-py3-none-any.whl"
+          }
+        ]
+      },
+      {
+        "dependencies": [
+          {
+            "extra": [
+              "http"
+            ],
+            "name": "fsspec"
+          },
+          {
+            "name": "lightning-utilities"
+          },
+          {
+            "name": "packaging"
+          },
+          {
+            "name": "pyyaml"
+          },
+          {
+            "name": "torch"
+          },
+          {
+            "name": "torchmetrics"
+          },
+          {
+            "name": "tqdm"
+          },
+          {
+            "name": "typing-extensions"
+          }
+        ],
+        "name": "pytorch-lightning",
+        "sdist": {
+          "hash": "sha256:1c32cefa76a1a9c4c5250338272d961d1e48b180e68396849efe128538ddb28e",
+          "size": 661673,
+          "upload-time": "2026-05-27T14:33:41.961Z",
+          "url": "https://files.pythonhosted.org/packages/52/2c/8e73a3929b4c4bd600cafd38a97aaf7242a8cf518fb9f33d27c274ec898f/pytorch_lightning-2.6.5.tar.gz"
+        },
+        "source": {
+          "registry": "https://pypi.org/simple"
+        },
+        "version": "2.6.5",
+        "wheels": [
+          {
+            "hash": "sha256:62d9c8549b2278fedc3364f0a5607a56c6063d18635008f8cf3fae8d802b0d76",
+            "size": 852407,
+            "upload-time": "2026-05-27T14:33:39.856Z",
+            "url": "https://files.pythonhosted.org/packages/8b/4d/5740c27110b83634d8491c3b5facf0111b3e554c3164f4fb953be9bddaf6/pytorch_lightning-2.6.5-py3-none-any.whl"
+          }
+        ]
+      },
+      {
+        "dependencies": [
+          {
+            "marker": "(python_full_version < '3.15' and sys_platform == 'linux') or (python_full_version >= '3.15' and extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release') or (sys_platform != 'linux' and extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')",
+            "name": "cuda-bindings"
+          },
+          {
+            "extra": [
+              "cublas",
+              "cudart",
+              "cufft",
+              "cufile",
+              "cupti",
+              "curand",
+              "cusolver",
+              "cusparse",
+              "nvjitlink",
+              "nvrtc",
+              "nvtx"
+            ],
+            "marker": "sys_platform == 'linux' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')",
+            "name": "cuda-toolkit"
+          },
+          {
+            "name": "filelock"
+          },
+          {
+            "name": "fsspec"
+          },
+          {
+            "name": "jinja2"
+          },
+          {
+            "name": "networkx"
+          },
+          {
+            "marker": "sys_platform == 'linux' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')",
+            "name": "nvidia-cudnn-cu13"
+          },
+          {
+            "marker": "sys_platform == 'linux' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')",
+            "name": "nvidia-cusparselt-cu13"
+          },
+          {
+            "marker": "sys_platform == 'linux' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')",
+            "name": "nvidia-nccl-cu13"
+          },
+          {
+            "marker": "sys_platform == 'linux' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')",
+            "name": "nvidia-nvshmem-cu13"
+          },
+          {
+            "marker": "(python_full_version >= '3.12' and extra == 'extra-11-tldw-server-backend-vllm') or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')",
+            "name": "setuptools",
+            "source": {
+              "registry": "https://pypi.org/simple"
+            },
+            "version": "80.10.2"
+          },
+          {
+            "marker": "python_full_version < '3.12' or extra != 'extra-11-tldw-server-backend-vllm' or (extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')",
+            "name": "setuptools",
+            "source": {
+              "registry": "https://pypi.org/simple"
+            },
+            "version": "84.0.0"
+          },
+          {
+            "name": "sympy"
+          },
+          {
+            "marker": "(python_full_version < '3.15' and sys_platform == 'linux') or (python_full_version >= '3.15' and extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release') or (sys_platform != 'linux' and extra == 'extra-11-tldw-server-backend-vllm' and extra == 'group-11-tldw-server-release')",
+            "name": "triton"
+          },
+          {
+            "name": "typing-extensions"
+          }
+        ],
+        "name": "torch",
+        "source": {
+          "registry": "https://pypi.org/simple"
+        },
+        "version": "2.13.0",
+        "wheels": [
+          {
+            "hash": "sha256:e76f9bcecc52b8ff711239a2f7547d5353df95878ab232f0773c1d95928b92f8",
+            "size": 111187938,
+            "upload-time": "2026-07-08T16:05:17.065Z",
+            "url": "https://files.pythonhosted.org/packages/5b/fe/cba54dc58523434919b66f13a667e36e436deddd77ca519e96553617d4ec/torch-2.13.0-cp311-cp311-macosx_14_0_arm64.whl"
+          },
+          {
+            "hash": "sha256:092790c696a760c729fd5722835f50b9d81fd7c8f141571f3f3cf4081a8f664c",
+            "size": 427199369,
+            "upload-time": "2026-07-08T16:04:51.054Z",
+            "url": "https://files.pythonhosted.org/packages/c2/59/1e3160e18e12aa3038390efab3ce02b36a9d4d6a527ecdd8520dca2e68d8/torch-2.13.0-cp311-cp311-manylinux_2_28_aarch64.whl"
+          },
+          {
+            "hash": "sha256:60fcdcb2f3876e21146cb4524ef06397d727ca9ad5f020818547e25075fe3cb7",
+            "size": 526574961,
+            "upload-time": "2026-07-08T16:04:07.075Z",
+            "url": "https://files.pythonhosted.org/packages/01/79/1f2d34ad7034ee1c7ffc1cf8bf0f8213af2a81df6ecdb3997ecec107c09d/torch-2.13.0-cp311-cp311-manylinux_2_28_x86_64.whl"
+          },
+          {
+            "hash": "sha256:a0d8b11f16a48d60e2015d8213aa0390744cbebb98e58b62b3514dddc656e330",
+            "size": 122015870,
+            "upload-time": "2026-07-08T16:05:27.59Z",
+            "url": "https://files.pythonhosted.org/packages/6c/fd/0f2ce40f58aefbdb3392f9acce3c8171940943ae2d661f70558bfa73befb/torch-2.13.0-cp311-cp311-win_amd64.whl"
+          },
+          {
+            "hash": "sha256:2fe228aba290d14b9f31b049be550dbd469c3fd3013d7a19705b30454da97027",
+            "size": 111213045,
+            "upload-time": "2026-07-08T16:05:22.997Z",
+            "url": "https://files.pythonhosted.org/packages/c4/3a/ed0f4d4d1dcde03bced7aac9a28e800abcdc0cbd06b6775044c9fbd877b7/torch-2.13.0-cp312-cp312-macosx_14_0_arm64.whl"
+          },
+          {
+            "hash": "sha256:572df8be8ffb4599c88cbd6a0726f1f854f4da65d2e3c09f0e2c2283333cd6d4",
+            "size": 427210998,
+            "upload-time": "2026-07-08T16:04:37.708Z",
+            "url": "https://files.pythonhosted.org/packages/df/a9/f6a2a4d763ff1df02e9a64c477029db614295bc9367f4131223791ccc243/torch-2.13.0-cp312-cp312-manylinux_2_28_aarch64.whl"
+          },
+          {
+            "hash": "sha256:796633c4cdf0fe2cdced72d8f88f22e73dbcfce83132763162f6d4bff13b820b",
+            "size": 526605292,
+            "upload-time": "2026-07-08T16:04:22.81Z",
+            "url": "https://files.pythonhosted.org/packages/f3/82/fea946351658e6534db52d2cc12bc53087cbf87f9440c5f180f367c1950b/torch-2.13.0-cp312-cp312-manylinux_2_28_x86_64.whl"
+          },
+          {
+            "hash": "sha256:024c6cc0c1b085f2f91f20a3dc27b0471d021c31ce84b81be3afdc39f791fd9d",
+            "size": 122057313,
+            "upload-time": "2026-07-08T16:03:53.43Z",
+            "url": "https://files.pythonhosted.org/packages/21/d6/e8f3c6f7e01f626f77259de9860d2a78bc84c40539e28e79b7e98b0bb659/torch-2.13.0-cp312-cp312-win_amd64.whl"
+          },
+          {
+            "hash": "sha256:33449899ce5496c1b84b4853179d94fd102028ae1407314d9fb956bb79e70d09",
+            "size": 111213743,
+            "upload-time": "2026-07-08T16:03:28.579Z",
+            "url": "https://files.pythonhosted.org/packages/0d/fa/c1c10b7aff4a9a3e8956d4f0a5f468fa6db7abc3208805719076772b4833/torch-2.13.0-cp313-cp313-macosx_14_0_arm64.whl"
+          },
+          {
+            "hash": "sha256:1e09d6a722504957c694faceca843acde562786df1144ebcc5a74075ec7f6005",
+            "size": 427213008,
+            "upload-time": "2026-07-08T16:03:44.106Z",
+            "url": "https://files.pythonhosted.org/packages/11/18/9ecb37b56293a0be8d80f810bf672a72fe7e02f8b475d5ef1b9bf8a0d748/torch-2.13.0-cp313-cp313-manylinux_2_28_aarch64.whl"
+          },
+          {
+            "hash": "sha256:a3a9a21312872af8a26950b2c15680335a386a1f56ed03e780653d78b9607e9e",
+            "size": 526602329,
+            "upload-time": "2026-07-08T16:03:12.649Z",
+            "url": "https://files.pythonhosted.org/packages/d4/5a/7c50ba1b7b713d71d34669c6d13dab0a11531a3eceb0307a5162dbfec0f7/torch-2.13.0-cp313-cp313-manylinux_2_28_x86_64.whl"
+          },
+          {
+            "hash": "sha256:49b58f1e2c52440abb6f17c28f0335fe6c6d01ad1a7f55b0183b81e4b34d64e6",
+            "size": 122057920,
+            "upload-time": "2026-07-08T16:03:01.808Z",
+            "url": "https://files.pythonhosted.org/packages/91/3d/e7adcc6aaf36961cd18f56cf8ad0f3058c3a5c84ccf391762176c94581b8/torch-2.13.0-cp313-cp313-win_amd64.whl"
+          },
+          {
+            "hash": "sha256:d849b390e07d8d333ce8ecaf91b273c656c598379a19c9acf1318a883f6b391c",
+            "size": 111227066,
+            "upload-time": "2026-07-08T16:03:33.6Z",
+            "url": "https://files.pythonhosted.org/packages/36/76/6dcc7f0c07052102dd36f83cbc5800842a909c8c3fbf1a7f8a5844954de9/torch-2.13.0-cp314-cp314-macosx_14_0_arm64.whl"
+          },
+          {
+            "hash": "sha256:a3893dc2da0a972a8ca5d698c85a9f967559ac5f8ee1797b77408aa8734d073c",
+            "size": 427226309,
+            "upload-time": "2026-07-08T16:02:53.127Z",
+            "url": "https://files.pythonhosted.org/packages/e9/09/2c10e8cd0e00fa5d23c052df6ce467eaa7182399f5e0f824f1e4ff42ccae/torch-2.13.0-cp314-cp314-manylinux_2_28_aarch64.whl"
+          },
+          {
+            "hash": "sha256:49f1ea385c754e54919408a9bb3b5a72b0b755bbe2c916c1d6f70afbec4908a2",
+            "size": 526614507,
+            "upload-time": "2026-07-08T16:02:16.441Z",
+            "url": "https://files.pythonhosted.org/packages/76/c6/22c2102bbef14ca6a6cb4c20e42f088e49c5f812be4e160ae57502e325f9/torch-2.13.0-cp314-cp314-manylinux_2_28_x86_64.whl"
+          },
+          {
+            "hash": "sha256:4f8573e3ce9ebcd53fe922f01077a6085ccdfbe5f12fd215883a9d87d7a744fd",
+            "size": 122051871,
+            "upload-time": "2026-07-08T16:03:23.521Z",
+            "url": "https://files.pythonhosted.org/packages/2b/0c/7d1deb6bce5bc3e6042caf39100ac768eba3b9a098e1dddd16f75bd6489b/torch-2.13.0-cp314-cp314-win_amd64.whl"
+          },
+          {
+            "hash": "sha256:c28def70706c2f9ecc752574766e8ae4da9b810ab6676b611166761a78a9f1e1",
+            "size": 111537025,
+            "upload-time": "2026-07-08T16:02:44.28Z",
+            "url": "https://files.pythonhosted.org/packages/f4/ce/aa8b7f9949d32e0f2f624f342bc3b48112c1b8a130288465938bc83bcbf9/torch-2.13.0-cp314-cp314t-macosx_14_0_arm64.whl"
+          },
+          {
+            "hash": "sha256:31061ff56ed8fbf26c749806905aeb749ebeb819810fd5d52508aa5afd90dddc",
+            "size": 427219769,
+            "upload-time": "2026-07-08T16:02:31.18Z",
+            "url": "https://files.pythonhosted.org/packages/69/d1/491e3a0389430946145888b0203f2b6a759ce2a61481b96a85c2da4f2ced/torch-2.13.0-cp314-cp314t-manylinux_2_28_aarch64.whl"
+          },
+          {
+            "hash": "sha256:cc26eead4cf51d0b544e31e364dcf000846549c273bd148936fe9d24d29acb92",
+            "size": 526571320,
+            "upload-time": "2026-07-08T16:01:59.348Z",
+            "url": "https://files.pythonhosted.org/packages/9a/1d/38006e045bf0a1fc28ef01e757c554e59e59a8770c284bc4f47b14e60441/torch-2.13.0-cp314-cp314t-manylinux_2_28_x86_64.whl"
+          },
+          {
+            "hash": "sha256:a7de8a313090dc5c7d7ba4bfe5c3be222528f9a4dba1acc83bddb1157360c4b8",
+            "size": 122306773,
+            "upload-time": "2026-07-08T16:02:39.832Z",
+            "url": "https://files.pythonhosted.org/packages/56/94/655c91992a882bd5071aa0b5d22a07dbb130d801e872be97c0b627a7c693/torch-2.13.0-cp314-cp314t-win_amd64.whl"
+          }
+        ]
+      }
+    ]
+  },
+  "implementation_stages": "All three stages complete; own temporary plan removed after verification and independent review.",
+  "independent_review": {
+    "findings": [],
+    "independent_checks": {
+      "all_previous_records_unchanged": true,
+      "baseline_policy_sha256": "94b9e41fb09bc7716fc99712ccd00823e0cdc3e7a8cad4eba9cfa746974b9a4f",
+      "canonical_policy_sha256": "c3d58a68b18933badb2129425efc1586fa10814191a01d74d0a5339e8596152f",
+      "companion_matches_retained_acl_review": true,
+      "companion_matches_retained_optional_review": true,
+      "companion_matches_retained_replay": true,
+      "diff_check_passed": true,
+      "only_new_record": "TASK-13013.7.38-LIGHTNING-01",
+      "policy_current_records": 310,
+      "policy_previous_records": 309,
+      "tests": {
+        "exit_code": 0,
+        "files": [
+          "tldw_Server_API/tests/Supply_Chain/test_lightning_applicability_policy.py",
+          "tldw_Server_API/tests/Supply_Chain/test_dependency_review.py"
+        ],
+        "isolation": "Existing proposal venv; PYTEST_DISABLE_PLUGIN_AUTOLOAD=1; --noconftest; -c /dev/null; --import-mode=importlib; -p no:cacheprovider; unique basetemp; no ML imports.",
+        "log": "/private/tmp/task-13013-7-optional-followup/task38-independent-tests.log",
+        "passed": 91,
+        "warning_scope": "Unknown unit marker because isolated pytest used -c /dev/null; no functional failure.",
+        "warnings": 2
+      }
+    },
+    "limits": [
+      "No package/model installation or download, ML execution, native utility or exploit execution, image execution, network publication, restricted investigation or repository edit.",
+      "Retained upstream source and existing advisory evidence were reviewed locally; no fresh advisory retrieval, artifact qualification or deployed-impact confirmation.",
+      "Whole-source Hydra/NeMo prerequisites and ACL deployment privileges, directory ownership and third-party consumer closure remain unresolved.",
+      "Parent lint, schema and Bandit completion remains separate from the independently executed tests."
+    ],
+    "review_date_utc": "2026-09-10",
+    "reviewed_base": "31304cbb9a04f3eeb8a660702ee18e3d3a9cf89b",
+    "reviewed_reasoning": [
+      "Exact Lightning GHSA/CVE/package/version/severity alias agrees with the retained dependency row and canonical source-python-root record.",
+      "Current first-party pyannote caller supplies a literal pipeline identifier; audio and speaker inputs do not select checkpoints. Retained pyannote and Lightning source confirms the affected checkpoint metadata mechanism. Model-source/cache integrity remains an explicit condition, not an enforced or runtime-qualified guarantee.",
+      "Tests cover activation and expiry boundaries, altered identity and manifest scope, uncovered additional occurrences, missing canonical authorization and unrelated Hydra/NeMo advisories. Existing adapter tests also cover policy component, all dependency scopes and malformed/changed action output.",
+      "The retained 695-change replay adds only Lightning; the five Hydra/NeMo rows remain unresolved and all eight retained report decisions are unchanged. This review inspected the replay results rather than independently replaying those reports.",
+      "The ACL draft is consistent with the inspected retained qcopy_acl, set_owner, qset_acl and set_permissions source and ELF-import summary. It distinguishes libattr copy operations from the separate pathname ACL-setting path and does not infer actual worker invocation or attacker control. No native waiver was added."
+    ],
+    "task": "TASK-13013.7.38",
+    "verdict": "no_actionable_findings",
+    "worktree": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design"
+  },
+  "input_file_sha256": {
+    "/private/tmp/task-13013-7-optional-followup/caller-evidence.json": "a93d256a6ab11e2b164837be9db6de705a0d3b97ccba63d76c6cddeb8486d5a1",
+    "/private/tmp/task-13013-7-optional-followup/exact-rows.json": "f9d22ee031afed1855b3d48a57abcfe02c9fe5fa2bb09317d18bed83e8207d99",
+    "/private/tmp/task-13013-7-optional-followup/findings.json": "2c5d26014c69569beb0ac89a6935ccd814cd8cab7d5aac837281c68c4e25ec8e",
+    "/private/tmp/task-13013-7-optional-followup/findings.md": "eee71c6219575799f08df28c733a42192974109b2610d035bd347cc65ae44ea0",
+    "/private/tmp/task-13013-7-optional-followup/task38-bandit-production.json": "42881b93200765d83a04b6c99629d24fe8f770b962f301cf5d176fe01f4b319c",
+    "/private/tmp/task-13013-7-optional-followup/task38-bandit-tests.json": "640e9c6bde957ade5a4879d5ad1b8146649a529c48944186644666a3d55ef28c",
+    "/private/tmp/task-13013-7-optional-followup/task38-final-tests.log": "f29becc6dc6bee0abadb83cb7aa5d108937c3b119af1bb6d43ea09252624f90f",
+    "/private/tmp/task-13013-7-optional-followup/task38-green.log": "4ecf68c29f216f358521321a717cf459b52659707d4c47dd55c9c867d1eec56f",
+    "/private/tmp/task-13013-7-optional-followup/task38-independent-review.json": "3e5699d8ac24c84e4435c4884c3aade0fbc0220a35e74cbfecbb1c61ac8a0383",
+    "/private/tmp/task-13013-7-optional-followup/task38-independent-review.md": "81f39aa0c585cf57520dcf48d81a745d652a6080babd5e41422b2e2f30d00f1b",
+    "/private/tmp/task-13013-7-optional-followup/task38-independent-tests.log": "529d50eb4893479b58c4bc5b2232b50656e15d3d0e0983a0b9448b09b8c15955",
+    "/private/tmp/task-13013-7-optional-followup/task38-red.log": "1e8f1885c713425e1ae5f1dd3b669b05086815644b9c64e9f00022303850ebfc",
+    "/private/tmp/task-13013-7-optional-followup/task38-replay.json": "e5c0ab711a71a79b73751945479c1c8e277a03203c9e958f89003344f1d99ce7"
+  },
+  "limits": [
+    "No patched-library or deployed-impact claim.",
+    "Fixed model-source and cache integrity is a reviewed scope condition, not enforced by policy.",
+    "No new native exclusions. Three backend ACL rows retain unresolved prerequisites.",
+    "No ML runtime or model downloads, package changes, native utility execution, images, restricted investigations or publication."
+  ],
+  "optional_source_review": {
+    "base_image_scope": "TASK29 separately establishes absent optional distributions in retained base SBOMs. That fact was not used for these source-policy recommendations.",
+    "binding_checks": {
+      "current_lock_versions_match": true,
+      "exact_advisory_rows": 6,
+      "exact_raw_changes": 3,
+      "retained_upstream_source_sha256_match_count": 7
+    },
+    "caller_evidence": "/private/tmp/task-13013-7-optional-followup/caller-evidence.json",
+    "findings": [
+      {
+        "advisory_url": "https://github.com/advisories/GHSA-2cp2-2r3c-7p7r",
+        "affected_api": "hydra.utils.instantiate(config) with attacker-controlled _target_ and arguments",
+        "component": "source-python-root",
+        "confirmed_deployed_cve_impact": false,
+        "confirmed_new_source_validation_defect": false,
+        "current_call_chain": "TASK33 constrains RNNT request overrides before initialization. Fixed/default inference and multitalk sources are server-controlled. A distinct supported local benchmark/golden-candidate path accepts operator-selected .nemo files: CLI target -> preflight_targets -> ParakeetAdapter/CanaryAdapter.plan_batch_execution -> _require_local_nemo_path -> _load_controlled_nemo_model.restore_from -> NeMo YAML -> from_config_dict -> hydra.utils.instantiate.",
+        "disposition": "unresolved",
+        "ghsa": "GHSA-2cp2-2r3c-7p7r",
+        "installed_version": "1.3.2",
+        "manifest": "uv.lock",
+        "narrow_scope": "Current authenticated RNNT API path is no longer client-selectable outside two builtins/server selection. That narrow fact does not cover operator-chosen local models.",
+        "package": "hydra-core",
+        "prerequisite": "Untrusted config/model metadata reaches the callable-selection API.",
+        "primary_urls": [
+          "https://github.com/hydra-ecosystem/hydra/security/advisories/GHSA-2cp2-2r3c-7p7r"
+        ],
+        "purl": "pkg:pypi/hydra-core@1.3.2",
+        "severity": "HIGH",
+        "source_policy_recommendation": "retain_for_whole_source_scope",
+        "unproved": "No actual attacker-supplied model, functioning optional deployment or new request bypass was established. The local helper verifies extension/existence/non-symlink and artifact identity, not provenance or allowed Hydra targets, so full-source absence of the untrusted-model prerequisite is not established.",
+        "vulnerability_id": "CVE-2026-68508"
+      },
+      {
+        "advisory_url": "https://github.com/advisories/GHSA-qqmf-gpg7-g8gw",
+        "affected_api": "LightningModule.load_from_checkpoint -> _load_state imports and invokes checkpoint hyper_parameters._instantiator",
+        "component": "source-python-root",
+        "conditions": [
+          "Integrity of the fixed pyannote pipeline/model source and local cache is assumed.",
+          "Reassess added checkpoint import routes, configurable pipeline IDs, user-writable checkpoint caches or custom model workflows.",
+          "Affected loader remains in the optional graph; this is not patched-code or default-weights-only reasoning.",
+          "The advisory legacy version-table inconsistency is not used as an exclusion."
+        ],
+        "confirmed_deployed_cve_impact": false,
+        "confirmed_new_source_validation_defect": false,
+        "current_call_chain": "Workflows/adapters/audio/diarize.py:84 supplies the literal pyannote/speaker-diarization-3.1; pyannote Pipeline.from_pretrained -> SpeakerDiarization.get_model -> Model.from_pretrained -> Klass.load_from_checkpoint (retained model.py:621 and fallback640) -> Lightning _load_state (saving.py:157-167).",
+        "disposition": "not-applicable-with-scope",
+        "ghsa": "GHSA-qqmf-gpg7-g8gw",
+        "installed_version": "2.6.5",
+        "manifest": "uv.lock",
+        "missing_prerequisite": "The only current first-party pyannote caller does not take a checkpoint identifier, path or metadata from its input config; request values supply audio and speaker counts. No direct application Lightning checkpoint-loader caller was found. The NeMo restore connector uses its own restore/config/state-dict path.",
+        "package": "lightning",
+        "prerequisite": "Attacker-controlled checkpoint metadata must reach that loader.",
+        "primary_urls": [
+          "https://github.com/Lightning-AI/pytorch-lightning/pull/21832",
+          "https://github.com/advisories/GHSA-qqmf-gpg7-g8gw"
+        ],
+        "purl": "pkg:pypi/lightning@2.6.5",
+        "severity": "HIGH",
+        "source_policy_recommendation": "supported_for_exact_current_use",
+        "vulnerability_id": "CVE-2026-58659"
+      },
+      {
+        "advisory_url": "https://github.com/advisories/GHSA-9379-mwvr-7wxx",
+        "affected_api": "Exact individual CVE-to-callable mapping remains incomplete.",
+        "component": "source-python-root",
+        "confirmed_deployed_cve_impact": false,
+        "confirmed_new_source_validation_defect": false,
+        "current_call_chain": "Same fixed/server-selected NeMo inference and operator-selected local .nemo restoration paths as Hydra; audio input is separately supplied to transcription. The RNNT client-selection defect is fixed.",
+        "disposition": "unresolved",
+        "ghsa": "GHSA-9379-mwvr-7wxx",
+        "installed_version": "2.0.0",
+        "manifest": "uv.lock",
+        "package": "nemo-toolkit",
+        "prerequisite": "Malicious serialized model/checkpoint data; NVIDIA Curator associates the CVE pair with ASRModel.from_pretrained and unsafe torch.load/pickle.load.",
+        "primary_urls": [
+          "https://nvidia.custhelp.com/app/answers/detail/a_id/5762",
+          "https://docs.nvidia.com/nemo/curator/v26.04/about/release-notes"
+        ],
+        "purl": "pkg:pypi/nemo-toolkit@2.0.0",
+        "severity": "HIGH",
+        "source_policy_recommendation": "retain",
+        "unproved": "Primary descriptions do not establish the complete distinct affected path under locked NeMo2.0.0/torch2.13.0. The observed NeMo connector omits weights_only in torch.load, but omission alone does not establish unsafe behavior with current torch defaults. No separate pickle.load path for the reported pair was bound. No actual malicious artifact or impact was tested; the Hydra mechanism is not automatically attributed to these different CVEs.",
+        "vulnerability_id": "CVE-2025-33245"
+      },
+      {
+        "advisory_url": "https://github.com/advisories/GHSA-hvjw-vp7g-39h5",
+        "affected_api": "Exact individual CVE-to-callable mapping remains incomplete.",
+        "component": "source-python-root",
+        "confirmed_deployed_cve_impact": false,
+        "confirmed_new_source_validation_defect": false,
+        "current_call_chain": "Same fixed/server-selected NeMo inference and operator-selected local .nemo restoration paths as Hydra; audio input is separately supplied to transcription. The RNNT client-selection defect is fixed.",
+        "disposition": "unresolved",
+        "ghsa": "GHSA-hvjw-vp7g-39h5",
+        "installed_version": "2.0.0",
+        "manifest": "uv.lock",
+        "package": "nemo-toolkit",
+        "prerequisite": "User induced to load a malicious file; NVIDIA Curator associates the pair with .nemo/.ckpt checkpoint deserialization.",
+        "primary_urls": [
+          "https://nvidia.custhelp.com/app/answers/detail/a_id/5762",
+          "https://docs.nvidia.com/nemo/curator/v26.04/about/release-notes"
+        ],
+        "purl": "pkg:pypi/nemo-toolkit@2.0.0",
+        "severity": "HIGH",
+        "source_policy_recommendation": "retain",
+        "unproved": "Primary descriptions do not establish the complete distinct affected path under locked NeMo2.0.0/torch2.13.0. The observed NeMo connector omits weights_only in torch.load, but omission alone does not establish unsafe behavior with current torch defaults. No separate pickle.load path for the reported pair was bound. No actual malicious artifact or impact was tested; the Hydra mechanism is not automatically attributed to these different CVEs.",
+        "vulnerability_id": "CVE-2025-33253"
+      },
+      {
+        "advisory_url": "https://github.com/advisories/GHSA-m4jw-wgmf-889x",
+        "affected_api": "Exact individual CVE-to-callable mapping remains incomplete.",
+        "component": "source-python-root",
+        "confirmed_deployed_cve_impact": false,
+        "confirmed_new_source_validation_defect": false,
+        "current_call_chain": "Same fixed/server-selected NeMo inference and operator-selected local .nemo restoration paths as Hydra; audio input is separately supplied to transcription. The RNNT client-selection defect is fixed.",
+        "disposition": "unresolved",
+        "ghsa": "GHSA-m4jw-wgmf-889x",
+        "installed_version": "2.0.0",
+        "manifest": "uv.lock",
+        "package": "nemo-toolkit",
+        "prerequisite": "Malicious checkpoint parsed by the affected loader; ZDI describes insufficient validation during checkpoint parsing.",
+        "primary_urls": [
+          "https://nvidia.custhelp.com/app/answers/detail/a_id/5800",
+          "https://www.zerodayinitiative.com/advisories/ZDI-26-429/"
+        ],
+        "purl": "pkg:pypi/nemo-toolkit@2.0.0",
+        "severity": "HIGH",
+        "source_policy_recommendation": "retain",
+        "unproved": "Primary descriptions do not establish the complete distinct affected path under locked NeMo2.0.0/torch2.13.0. The observed NeMo connector omits weights_only in torch.load, but omission alone does not establish unsafe behavior with current torch defaults. No separate pickle.load path for the reported pair was bound. No actual malicious artifact or impact was tested; the Hydra mechanism is not automatically attributed to these different CVEs.",
+        "vulnerability_id": "CVE-2026-24157"
+      },
+      {
+        "advisory_url": "https://github.com/advisories/GHSA-v7v2-m736-cf3c",
+        "affected_api": "Exact individual CVE-to-callable mapping remains incomplete.",
+        "component": "source-python-root",
+        "confirmed_deployed_cve_impact": false,
+        "confirmed_new_source_validation_defect": false,
+        "current_call_chain": "Same fixed/server-selected NeMo inference and operator-selected local .nemo restoration paths as Hydra; audio input is separately supplied to transcription. The RNNT client-selection defect is fixed.",
+        "disposition": "unresolved",
+        "ghsa": "GHSA-v7v2-m736-cf3c",
+        "installed_version": "2.0.0",
+        "manifest": "uv.lock",
+        "package": "nemo-toolkit",
+        "prerequisite": "Untrusted deserialization; vendor bulletin does not identify the exact callable or input artifact.",
+        "primary_urls": [
+          "https://nvidia.custhelp.com/app/answers/detail/a_id/5800"
+        ],
+        "purl": "pkg:pypi/nemo-toolkit@2.0.0",
+        "severity": "HIGH",
+        "source_policy_recommendation": "retain",
+        "unproved": "Primary descriptions do not establish the complete distinct affected path under locked NeMo2.0.0/torch2.13.0. The observed NeMo connector omits weights_only in torch.load, but omission alone does not establish unsafe behavior with current torch defaults. No separate pickle.load path for the reported pair was bound. No actual malicious artifact or impact was tested; the Hydra mechanism is not automatically attributed to these different CVEs.",
+        "vulnerability_id": "CVE-2026-24159"
+      }
+    ],
+    "markdown_sha256": "eee71c6219575799f08df28c733a42192974109b2610d035bd347cc65ae44ea0",
+    "methods": [
+      "Read current first-party source and transitive tagged upstream code retained by TASK29.",
+      "Reviewed public vendor/researcher advisories and exact retained dependency comparison.",
+      "Did not execute/import any ML package, create model/checkpoint/payload files, download models, install packages, or execute images/native programs.",
+      "No new tests; TASK33 harmless config reproduction/regression evidence reused.",
+      "No repository edits, policy changes, other checkouts, restricted NLTK/FFmpeg investigations or publication."
+    ],
+    "review_date_utc": "2026-09-10",
+    "reviewed_file_sha256": {
+      "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/Docs/Evidence/TASK-13013.7.29-deployment-applicability.json": "94fb04bb9c4b1a89da92a17815248ed183bbaa9aaa2e04d0c7cc8c2e012902ef",
+      "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/Docs/Evidence/TASK-13013.7.33-parakeet-client-model-selection.json": "00e5ece9881303e5ab7cefe87fb6700cc5d31105f5277e10cf5cfecd3ffb6eac",
+      "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/Docs/Evidence/TASK-13013.7.33-parakeet-client-model-selection.md": "1d3c81f73a1ad18c17071249caaedc3b217a81b63dcf61e9bb77e61b6c42f12d",
+      "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/pyproject.toml": "9689bb626d595033bffb43f18e6103a06f1f62c98a8e0f698ecb1b6acb03c87a",
+      "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/tests/Audio/test_parakeet_rnnt_client_selection.py": "af783a9cadf27d6ac901e362efd910080b1f551701132857eec2b9799572dee9",
+      "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/uv.lock": "d565706e62c808e55fa03e2861ce4795603c5d42a4d7f487a93b89f3899ce9bd",
+      "/private/tmp/task-13013-7-28-chroma.tFu6fO/github-dependency-diff-pages.json": "3c6f6459322a9fd47293ee551a776737f5138131b94200b8eeb27aeb9ba9ccfb",
+      "/private/tmp/task-13013-7-applicability.8kX3cp/python/findings.json": "2a2638ea033ca2972655656804763bca4b9d7a871f3bc3497e3a33f400193657",
+      "/private/tmp/task-13013-7-applicability.8kX3cp/python/inventory.json": "3bf2a6c0b822a5de44c583ee0a7dadbe9ba1ef607071f68b53e602d71570549d",
+      "/private/tmp/task-13013-7-applicability.8kX3cp/python/lightning-2.6.5-saving.py": "3e440ec318bbc088f672f3bb0e90d90d9c74135b73f481da94979da5529a4730",
+      "/private/tmp/task-13013-7-applicability.8kX3cp/python/nemo-2.0.0-common.py": "2558e22f5794078566a78710a8378eb9fb511f60d32473bd2150c4dfb48a2097",
+      "/private/tmp/task-13013-7-applicability.8kX3cp/python/nemo-2.0.0-save_restore_connector.py": "5847379f0a4f26a7f794f4fda6c198d41521c04998a9987acb7802215fcccec4",
+      "/private/tmp/task-13013-7-applicability.8kX3cp/python/pyannote-4.0.7-getter.py": "42bc13a1ba61a7a297e311c0f881f2e5abb8cff6dad219ed7ea654752480eab5",
+      "/private/tmp/task-13013-7-applicability.8kX3cp/python/pyannote-4.0.7-model.py": "baef26b0d3bcb0027b179f9d472cc5795f77073fa8e5210bdd2ce53a267275e3",
+      "/private/tmp/task-13013-7-applicability.8kX3cp/python/pyannote-4.0.7-pipeline.py": "c126c1ecf3a7172be311e61616145f45fbb5e52f06307adb28ac11103c8ee615",
+      "/private/tmp/task-13013-7-applicability.8kX3cp/python/pyannote-4.0.7-speaker_diarization.py": "cbb358abedef5042fcc71bb970b12a2936a16686be4bda15691a224f172656fd",
+      "/private/tmp/task-13013-7-optional-followup/caller-evidence.json": "a93d256a6ab11e2b164837be9db6de705a0d3b97ccba63d76c6cddeb8486d5a1",
+      "/private/tmp/task-13013-7-optional-followup/exact-rows.json": "f9d22ee031afed1855b3d48a57abcfe02c9fe5fa2bb09317d18bed83e8207d99"
+    },
+    "reviewed_head": "31304cbb9a04f3eeb8a660702ee18e3d3a9cf89b",
+    "scope": "Six retained GitHub dependency-review rows after TASK33, current first-party callers and retained optional dependency source.",
+    "summary": {
+      "confirmed_deployed_cve_impacts": 0,
+      "confirmed_new_source_validation_defects": 0,
+      "retained_unresolved_rows": 5,
+      "supported_current_use_rows": 1
+    }
+  },
+  "replay": {
+    "allow_ghsas_after": [
+      "GHSA-2wm9-hf6c-p5cr",
+      "GHSA-36p7-vc44-83pf",
+      "GHSA-8mgp-746c-j5xp",
+      "GHSA-f4j7-r4q5-qw2c",
+      "GHSA-qqmf-gpg7-g8gw",
+      "GHSA-xph7-9rjv-w5fr"
+    ],
+    "allow_ghsas_before": [
+      "GHSA-2wm9-hf6c-p5cr",
+      "GHSA-36p7-vc44-83pf",
+      "GHSA-8mgp-746c-j5xp",
+      "GHSA-f4j7-r4q5-qw2c",
+      "GHSA-xph7-9rjv-w5fr"
+    ],
+    "baseline_policy_sha256": "94b9e41fb09bc7716fc99712ccd00823e0cdc3e7a8cad4eba9cfa746974b9a4f",
+    "canonical_policy_sha256": "c3d58a68b18933badb2129425efc1586fa10814191a01d74d0a5339e8596152f",
+    "comparison_records": 695,
+    "comparison_sha256": "3c6f6459322a9fd47293ee551a776737f5138131b94200b8eeb27aeb9ba9ccfb",
+    "new_policy_records": 1,
+    "prior_policy_records_preserved": 309,
+    "protected_inputs_match_task35_baseline": {
+      ".github/supply-chain/vulnerability-exceptions.schema.json": "0f36741f71d326f86d675eaf97984a69fd03cc66b8d8380f6234ceeae30a1eed",
+      ".github/workflows/publish-docker.yml": "1fcbf84525a62221fb04b15031f0df33fb76d686c2e6ed3c9188bdc2029676ba",
+      ".github/workflows/publish-ghcr-main.yml": "76725210fbf47e15d3527eacf2584d0ae000eef9965407d69d925052d1f00ac1",
+      ".github/workflows/sbom.yml": "5dad2bd88b20ee009412c9aed8ec25558bf52dc5f9ce0b7aa78d043cadd87634",
+      "Docs/Evidence/TASK-13013.7.23-applicability-dispositions.json": "d0fcaff69d7f248628ddb1d199ef016b3d45797ac1062d4ecd9ca6544d0ac039",
+      "Helper_Scripts/Supply_Chain/exception_policy.py": "75644b98c6b98adc5fa7492dfd3b1b416f36d06648d7f476793ee6726c83feaf",
+      "Helper_Scripts/Supply_Chain/runtime_probe.py": "decdde660b68345f1d51a3350724bfc337bf30c6cfd36860c2c549058c4c624b",
+      "pyproject.toml": "9689bb626d595033bffb43f18e6103a06f1f62c98a8e0f698ecb1b6acb03c87a",
+      "uv.lock": "d565706e62c808e55fa03e2861ce4795603c5d42a4d7f487a93b89f3899ce9bd"
+    },
+    "raw_reports_unmodified": true,
+    "remaining_advisory_rows": [
+      {
+        "advisory_ghsa_id": "GHSA-2cp2-2r3c-7p7r",
+        "advisory_summary": "Hydra: hydra.utils.instantiate with untrusted config can lead to code execution",
+        "advisory_url": "https://github.com/advisories/GHSA-2cp2-2r3c-7p7r",
+        "manifest": "uv.lock",
+        "name": "hydra-core",
+        "severity": "high",
+        "version": "1.3.2"
+      },
+      {
+        "advisory_ghsa_id": "GHSA-9379-mwvr-7wxx",
+        "advisory_summary": "NVIDIA NeMo Framework contains a vulnerability where malicious data could cause remote code execution",
+        "advisory_url": "https://github.com/advisories/GHSA-9379-mwvr-7wxx",
+        "manifest": "uv.lock",
+        "name": "nemo-toolkit",
+        "severity": "high",
+        "version": "2.0.0"
+      },
+      {
+        "advisory_ghsa_id": "GHSA-hvjw-vp7g-39h5",
+        "advisory_summary": "NVIDIA NeMo Framework Deserializes Untrusted Data",
+        "advisory_url": "https://github.com/advisories/GHSA-hvjw-vp7g-39h5",
+        "manifest": "uv.lock",
+        "name": "nemo-toolkit",
+        "severity": "high",
+        "version": "2.0.0"
+      },
+      {
+        "advisory_ghsa_id": "GHSA-m4jw-wgmf-889x",
+        "advisory_summary": "NVIDIA NeMo Framework contains an RCE vulnerability in checkpoint loading",
+        "advisory_url": "https://github.com/advisories/GHSA-m4jw-wgmf-889x",
+        "manifest": "uv.lock",
+        "name": "nemo-toolkit",
+        "severity": "high",
+        "version": "2.0.0"
+      },
+      {
+        "advisory_ghsa_id": "GHSA-v7v2-m736-cf3c",
+        "advisory_summary": "NVIDIA NeMo Framework contains a vulnerability leading to Remote Code Execution",
+        "advisory_url": "https://github.com/advisories/GHSA-v7v2-m736-cf3c",
+        "manifest": "uv.lock",
+        "name": "nemo-toolkit",
+        "severity": "high",
+        "version": "2.0.0"
+      }
+    ],
+    "report_replays": {
+      "image-admin-ui": {
+        "blocking": 0,
+        "decisions_unchanged": true,
+        "excepted": 56,
+        "report_sha256": "f238929e5ace33d170f37cebd0faaf8418b96fb89b0ebc517d5f2f629be51d26"
+      },
+      "image-app": {
+        "blocking": 164,
+        "decisions_unchanged": true,
+        "excepted": 70,
+        "report_sha256": "f88d77cf89a0f1b8a9a7e91b2eb58970b64e8094f593cf01e0252bfa825802da"
+      },
+      "image-audio-worker": {
+        "blocking": 164,
+        "decisions_unchanged": true,
+        "excepted": 70,
+        "report_sha256": "4c01e656130515310e5396aec02a2de5fc974c495591d4b90a033496920c81f6"
+      },
+      "image-webui": {
+        "blocking": 0,
+        "decisions_unchanged": true,
+        "excepted": 56,
+        "report_sha256": "f1e0e15a4966175f8fd08c682f75c02143bf2fd17748a8ff36e5c2b8cf668869"
+      },
+      "image-worker": {
+        "blocking": 7,
+        "decisions_unchanged": true,
+        "excepted": 52,
+        "report_sha256": "8899e5580af6b7fefc061d972a1f63f10e93d57235edaedaf9e5f572c8cc3bf3"
+      },
+      "source-admin-ui": {
+        "blocking": 0,
+        "decisions_unchanged": true,
+        "excepted": 0,
+        "report_sha256": "f3b2d0cbd7f87b1d3d8dad3e6b1afd8b4320f20fdff57052436b4e31f63fd0b7"
+      },
+      "source-apps-workspace": {
+        "blocking": 0,
+        "decisions_unchanged": true,
+        "excepted": 0,
+        "report_sha256": "a26319262f82d9f6e809a858e3c3140527cd1b6ef731ebfaa09be27b102a614b"
+      },
+      "source-python-root": {
+        "blocking": 0,
+        "decisions_unchanged": true,
+        "excepted": 5,
+        "report_sha256": "914a6c3ea35734da3df35b79ba2e55aa05969d480d59062ecdb95ea6b4a232bb"
+      }
+    }
+  },
+  "reviewed_head": "31304cbb9a04f3eeb8a660702ee18e3d3a9cf89b",
+  "task": "TASK-13013.7.38",
+  "verification": {
+    "bandit": {
+      "interpretation": "Only test assertions; no production findings or scan errors.",
+      "production_findings": 0,
+      "test_findings": 4,
+      "test_ids": [
+        "B101"
+      ]
+    },
+    "black": "Both touched Python files pass --check.",
+    "compile": "Both touched Python files compile without importing ML libraries or writing bytecode.",
+    "final_tests": {
+      "passed": 521,
+      "scope": [
+        "test_lightning_applicability_policy.py",
+        "test_dependency_review.py",
+        "test_exception_policy.py",
+        "test_nltk_applicability_policy.py",
+        "test_chroma_dispositions.py",
+        "test_os_package_dispositions.py"
+      ],
+      "warnings": 0
+    },
+    "red": {
+      "failed": 5,
+      "passed": 10
+    },
+    "ruff": "Both touched Python files pass ruff check.",
+    "schema": "Canonical policy validates against the unchanged JSON schema."
+  }
+}

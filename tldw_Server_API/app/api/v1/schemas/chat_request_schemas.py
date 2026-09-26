@@ -732,8 +732,12 @@ ChatCompletionMessageParam = Union[
 class ResponseFormatJsonSchemaSpec(BaseModel):
     """Schema spec for structured output response format."""
 
+    model_config = ConfigDict(serialize_by_alias=True)
+
     name: str = Field(..., description="Unique schema name for provider-side schema routing.")
-    schema: dict[str, Any] = Field(..., description="JSON Schema object used to validate output.")
+    schema_definition: dict[str, Any] = Field(
+        ..., alias="schema", description="JSON Schema object used to validate output."
+    )
     strict: Optional[bool] = Field(None, description="Provider hint to enforce strict schema adherence.")
 
 

@@ -268,7 +268,7 @@ exports[`StatsGrid > matches snapshot at viewport width 375 1`] = `
             class="mt-2"
           >
             <div
-              aria-label="Storage usage"
+              aria-label="Storage usage: 25%"
               aria-valuemax="100"
               aria-valuemin="0"
               aria-valuenow="25"
@@ -1076,7 +1076,7 @@ exports[`StatsGrid > matches snapshot at viewport width 768 1`] = `
             class="mt-2"
           >
             <div
-              aria-label="Storage usage"
+              aria-label="Storage usage: 25%"
               aria-valuemax="100"
               aria-valuemin="0"
               aria-valuenow="25"
@@ -1884,7 +1884,7 @@ exports[`StatsGrid > matches snapshot at viewport width 1280 1`] = `
             class="mt-2"
           >
             <div
-              aria-label="Storage usage"
+              aria-label="Storage usage: 25%"
               aria-valuemax="100"
               aria-valuemin="0"
               aria-valuenow="25"
