@@ -113,7 +113,7 @@ def validate_provider_timezones(payload: str) -> None:
 def _validate_timezone_rule(properties: dict[str, str]) -> int:
     """Validate productive annual patterns and bound their lifetime transition count.
 
-    Month days must exist even in non-leap years; weekday ordinals are limited
+    Month-day sets must yield in non-leap years; weekday ordinals are limited
     to the first/last four, with no intersecting BYMONTHDAY filter. Full provider
     rules remain unchanged when supported, never replaced by approximations.
     The conservative estimate covers every supported query year through 9999.
@@ -153,8 +153,10 @@ def _validate_timezone_rule(properties: dict[str, str]) -> int:
             )
         else:
             days = [int(day) for day in fields.get("BYMONTHDAY", [start.day])]
-            shortest_month = min(monthrange(2001, month)[1] for month in months)
-            if not days or len(days) > 31 or any(not 1 <= abs(day) <= shortest_month for day in days):
+            if (
+                not days or len(days) > 31 or any(not 1 <= abs(day) <= 31 for day in days)
+                or not any(abs(day) <= monthrange(2001, month)[1] for month in months for day in days)
+            ):
                 raise CalendarValidationError("VTIMEZONE requires productive month-day rules")
             per_year = len(months) * len(days)
         last_year = 9999
