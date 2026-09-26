@@ -81,5 +81,6 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-047](047-per-user-audio-preset-ownership.md) | Accepted | Store reusable TTS/STT presets as authenticated per-user Audio API state in Media DB, separate from speech outputs and history. |
 | [ADR-048](048-sync-blob-upload-expiry-as-a-read-time-predicate.md) | Accepted | Judge Sync blob upload-session expiry by comparing expires_at at read time rather than transitioning rows to an expired status. |
 | [ADR-049](049-chat-history-selection-ownership.md) | Accepted | Bind chat continuation to owner-validated history selection and give local copies independent identity and assets. |
+| [ADR-050](050-native-chat-fork-storage-lifecycle.md) | Accepted | Retain owner-bound native fork receipts independently of child chats and fence closing workspaces. |
 
 The original backfill inventory is [the 2026-06-03 decision inventory](inventory/2026-06-03-decision-inventory.md). See the [2026-09-25 reconciliation](inventory/2026-09-25-decision-inventory-reconciliation.md) for current dispositions of its unresolved rows.
