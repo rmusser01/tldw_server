@@ -97,6 +97,27 @@ def test_webui_dockerfile_bakes_in_quickstart_same_origin_defaults() -> None:
         "TLDW_INTERNAL_API_ORIGIN=${TLDW_INTERNAL_API_ORIGIN}" in quickstart,
         "Dockerfile.webui should export the quickstart internal origin argument",
     )
+    logical_lines = re.sub(r"\\\s*\n\s*", " ", quickstart).splitlines()
+    builder_configuration = tuple(
+        " ".join(line.split()) for line in logical_lines if line.lstrip().upper().startswith(("ARG ", "ENV "))
+    )
+    _require(
+        builder_configuration
+        == (
+            "ARG NEXT_PUBLIC_API_URL=",
+            "ARG NEXT_PUBLIC_API_BASE_URL=",
+            "ARG NEXT_PUBLIC_API_VERSION=v1",
+            "ARG NEXT_PUBLIC_X_API_KEY=",
+            "ARG TLDW_INTERNAL_API_ORIGIN=http://app:8000",
+            "ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL} "
+            "NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL} "
+            "NEXT_PUBLIC_API_VERSION=${NEXT_PUBLIC_API_VERSION} "
+            "NEXT_PUBLIC_X_API_KEY=${NEXT_PUBLIC_X_API_KEY} "
+            "NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=quickstart "
+            "TLDW_INTERNAL_API_ORIGIN=${TLDW_INTERNAL_API_ORIGIN}",
+        ),
+        "Dockerfile.webui should keep its complete quickstart builder configuration without overrides",
+    )
     _require(
         "TLDW_INTERNAL_API_ORIGIN=http://app:8000" in final_stage,
         "Dockerfile.webui should preserve the runtime app service origin",
@@ -145,4 +166,24 @@ def test_quickstart_default_guard_rejects_unsafe_fixture_changes(old, new, messa
     mutated = text.replace(old, new, 1)
     monkeypatch.setitem(globals(), "_read", lambda _: mutated)
     with pytest.raises(pytest.fail.Exception, match=message):
+        test_webui_dockerfile_bakes_in_quickstart_same_origin_defaults()
+
+
+@pytest.mark.parametrize(
+    "override",
+    (
+        "NEXT_PUBLIC_API_URL=https://fixture.invalid",
+        "TLDW_INTERNAL_API_ORIGIN=https://fixture.invalid",
+        "NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=managed",
+    ),
+    ids=("browser-origin", "internal-origin", "deployment-mode"),
+)
+def test_quickstart_same_origin_guard_rejects_later_builder_override(override, monkeypatch) -> None:
+    """Later builder ENV instructions must not defeat the default networking guard."""
+    text = _read("Dockerfiles/Dockerfile.webui")
+    build = "RUN bun scripts/validate-networking-config.mjs && bun run build:prod"
+    _require(build in text, "Builder override mutation fixture must exist")
+    mutated = text.replace(build, f"ENV {override}\n{build}", 1)
+    monkeypatch.setitem(globals(), "_read", lambda _: mutated)
+    with pytest.raises(pytest.fail.Exception, match="complete quickstart builder configuration"):
         test_webui_dockerfile_bakes_in_quickstart_same_origin_defaults()

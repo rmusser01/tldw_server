@@ -294,6 +294,27 @@ def test_webui_dockerfile_bakes_quickstart_mode_build_args():
         "ARG NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE" not in quickstart,
         "Expected target selection to fix quickstart deployment mode",
     )
+    logical_lines = re.sub(r"\\\s*\n\s*", " ", quickstart).splitlines()
+    configuration = tuple(
+        " ".join(line.split()) for line in logical_lines if line.lstrip().upper().startswith(("ARG ", "ENV "))
+    )
+    _require(
+        configuration
+        == (
+            "ARG NEXT_PUBLIC_API_URL=",
+            "ARG NEXT_PUBLIC_API_BASE_URL=",
+            "ARG NEXT_PUBLIC_API_VERSION=v1",
+            "ARG NEXT_PUBLIC_X_API_KEY=",
+            "ARG TLDW_INTERNAL_API_ORIGIN=http://app:8000",
+            "ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL} "
+            "NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL} "
+            "NEXT_PUBLIC_API_VERSION=${NEXT_PUBLIC_API_VERSION} "
+            "NEXT_PUBLIC_X_API_KEY=${NEXT_PUBLIC_X_API_KEY} "
+            "NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=quickstart "
+            "TLDW_INTERNAL_API_ORIGIN=${TLDW_INTERNAL_API_ORIGIN}",
+        ),
+        "Expected complete quickstart builder configuration with approved legacy arguments and no overrides",
+    )
 
 
 def test_webui_dockerfile_managed_stages_are_origin_and_secret_independent():
@@ -444,6 +465,26 @@ def test_webui_ownership_guard_rejects_each_unowned_asset(builder, asset, monkey
     monkeypatch.setitem(globals(), "_read_text", lambda _: mutated)
     with pytest.raises(pytest.fail.Exception, match="copy only its own built assets with --chown"):
         test_webui_dockerfile_uses_copy_chown_instead_of_recursive_chown()
+
+
+@pytest.mark.parametrize(
+    "override",
+    (
+        "NEXT_PUBLIC_API_URL=https://fixture.invalid",
+        "TLDW_INTERNAL_API_ORIGIN=https://fixture.invalid",
+        "NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=managed",
+    ),
+    ids=("browser-origin", "internal-origin", "deployment-mode"),
+)
+def test_quickstart_build_args_guard_rejects_later_builder_override(override, monkeypatch):
+    """An appended ENV must not override the approved quickstart build inputs."""
+    text = _read_text("Dockerfiles/Dockerfile.webui")
+    build = "RUN bun scripts/validate-networking-config.mjs && bun run build:prod"
+    _require(build in text, "Builder override mutation fixture must exist")
+    mutated = text.replace(build, f"ENV {override}\n{build}", 1)
+    monkeypatch.setitem(globals(), "_read_text", lambda _: mutated)
+    with pytest.raises(pytest.fail.Exception, match="complete quickstart builder configuration"):
+        test_webui_dockerfile_bakes_quickstart_mode_build_args()
 
 
 def test_base_docker_compose_keeps_backward_compatible_named_volumes():
