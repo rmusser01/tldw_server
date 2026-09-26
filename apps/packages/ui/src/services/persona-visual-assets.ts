@@ -82,7 +82,7 @@ const signatureMatches = (mimeType: string, bytes: Uint8Array): boolean => {
 }
 
 const sha256 = async (bytes: ArrayBuffer): Promise<string> => {
-  const digest = await crypto.subtle.digest("SHA-256", bytes)
+  const digest = await crypto.subtle.digest("SHA-256", new Uint8Array(bytes))
   return [...new Uint8Array(digest)]
     .map((value) => value.toString(16).padStart(2, "0"))
     .join("")
