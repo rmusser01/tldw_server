@@ -1054,9 +1054,11 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_postgres.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_postgres.py
+              tldw_Server_API/tests/Workspaces/test_assistant_startup_projection.py
               tldw_Server_API/tests/Workspaces/test_workspace_context_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_creation.py
+              tldw_Server_API/tests/Workspaces/test_workspace_assistant_provenance.py
               tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
               tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle.py
               tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle_postgres.py
@@ -2572,9 +2574,11 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_postgres.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_postgres.py
+              tldw_Server_API/tests/Workspaces/test_assistant_startup_projection.py
               tldw_Server_API/tests/Workspaces/test_workspace_context_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_creation.py
+              tldw_Server_API/tests/Workspaces/test_workspace_assistant_provenance.py
               tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
               tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle.py
               tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle_postgres.py
@@ -3954,9 +3958,11 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_postgres.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_postgres.py
+              tldw_Server_API/tests/Workspaces/test_assistant_startup_projection.py
               tldw_Server_API/tests/Workspaces/test_workspace_context_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_creation.py
+              tldw_Server_API/tests/Workspaces/test_workspace_assistant_provenance.py
               tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
               tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle.py
               tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle_postgres.py
@@ -5259,9 +5265,11 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_postgres.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_postgres.py
+              tldw_Server_API/tests/Workspaces/test_assistant_startup_projection.py
               tldw_Server_API/tests/Workspaces/test_workspace_context_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_creation.py
+              tldw_Server_API/tests/Workspaces/test_workspace_assistant_provenance.py
               tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
               tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle.py
               tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle_postgres.py
@@ -6570,9 +6578,11 @@ jobs:
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_source_saved_views_postgres.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py
               tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_postgres.py
+              tldw_Server_API/tests/Workspaces/test_assistant_startup_projection.py
               tldw_Server_API/tests/Workspaces/test_workspace_context_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_creation.py
+              tldw_Server_API/tests/Workspaces/test_workspace_assistant_provenance.py
               tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
               tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle.py
               tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle_postgres.py
