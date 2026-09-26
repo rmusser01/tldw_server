@@ -8,7 +8,7 @@ labels:
 - integration
 documentation:
 - Docs/superpowers/plans/2026-09-26-calendar-pr3019-qodo-remediation.md
-updated_date: 2026-09-26 06:22
+updated_date: 2026-09-26 11:37
 references:
 - https://github.com/rmusser01/tldw_server/pull/3019
 modified_files:
@@ -53,6 +53,7 @@ Final focused verification advanced to 175 backend and 59 frontend tests, TypeSc
 Both independent scoped re-reviews are now clear: frontend spec/quality approved; backend no remaining P1/P2, seven targeted temporal probes pass. Publishing verified review fixes and requesting final exact-head Qodo review. No merge attempted while required CI/smoke/human-summary gates remain unsatisfied.
 Fresh full Qodo review on34e644438e reports bugs0 and one new test-only rule finding: CalendarTemporalViews labels hard-code English while production intentionally follows host locale. Reproducing under French locale, then changing expected labels to actual locale formatting; no production behavior change. Current merge gates unchanged.
 Locale regression reproduced with LANG/LC_ALL fr_FR:10 temporal-view tests failed. Test-only formatter now generates expected labels in the active locale while retaining numeric civil-date and negative-offset assertions. Full59 Calendar frontend tests plus TypeScript pass in French. Production backend/source unchanged from verified175-test head. Preparing normal test-only commit and exact-head follow-up review; heartbeat calendar-pr-3019-follow-up active for pending external gates.
+2026-09-26 rebase checkpoint: dev advanced to a2826f103f02a67f57adb40ed048dbfa2ecfc6e5 via unrelated VZ startup-drill work. Rebased all ten Calendar commits without conflicts; range-diff reports every commit unchanged, and all PR-owned file contents match previous published eb1bb493a1025e2d6f1440ac3fe7b8d246647d78. Revalidated 175 Calendar backend tests, 59 frontend tests under French locale, 11 default-locale temporal-view tests, 3 shared-UI route tests, TypeScript, Calendar-source Ruff and diff checks. Bandit over all touched backend sources: zero findings/errors; shard guard: 4803 test files, zero newly uncovered. Publishing the rebased head after normal hooks and requesting review only once on the new head. All 25 inline threads remain resolved, no new actionable comments; previous review/CI do not establish exact-new-head approval. Task remains In Progress: required hosted checks, final exact-head review, authorized live-provider smoke and human-summary rationale gates are outstanding. Requester text preserved verbatim.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
