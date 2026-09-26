@@ -175,8 +175,8 @@ The code paths above are the planned ownership boundaries. If an existing helper
 
 - [x] **Step 2: Run** `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Release/test_app_bundle_control.py -q`; expected collection failure observed before implementation, and env-injection regression was red before its guard.
 - [x] **Step 3: Implement** transactional initialization through a temporary directory + atomic replace, strict ownership/permissions, secret-safe messages, and refusal to overwrite valid credentials. WebUI/gateway/control Dockerfiles and a frozen gateway-only dependency lock are present; the managed WebUI stage omits build-time private origins/keys and copies traced plus public/static assets. Actual image builds remain in Step 4.
-- [ ] **Step 4: Run** control tests, Docker builds for both Linux architectures in CI, image-content guards, `docker image inspect`, and scoped Bandit. Verify no development database, `.env`, `node_modules` source tree, or build cache leaks into runtime images. Local verifier tests: 25 pass across manifest/control; gateway frozen lock and Node syntax pass; Bandit 0 findings. Docker recovered and a local arm64 build exposed missing `tldw_profile_core` in the backend image; the corrected image imports the package and starts healthy. The exact corrected four-image bundle and amd64 CI remain open.
-- [x] **Step 5: Commit** image/control changes at `80ba4ec172` with `feat: build paired managed application images (TASK-13343)`; image execution remains an explicit open acceptance check in Step 4.
+- [x] **Step 4: Run** control tests, Docker builds for both Linux architectures in CI, image-content guards, `docker image inspect`, and scoped Bandit. Verify no development database, `.env`, `node_modules` source tree, or build cache leaks into runtime images. Corrected run 36210634045 at e759322854 builds all four images on each native architecture, passes the content/runtime guards and extracted first/repeat startup, and records image metadata in the acceptance review. The local missing `tldw_profile_core` regression is corrected; both platforms execute its import guard. Production Bandit has zero findings. Broader browser and joined-release qualification remain in Tasks 6–8.
+- [x] **Step 5: Commit** image/control changes at `80ba4ec172` with `feat: build paired managed application images (TASK-13343)`; corrected image execution is recorded in Step 4.
 
 ### Task 6: Add Docker-only host helpers and Compose bundle
 
@@ -223,8 +223,8 @@ The code paths above are the planned ownership boundaries. If an existing helper
 
 - [x] **Step 2: Run** the focused candidate-gate pytest; expected missing-module failure observed before implementation, then unsupported-runtime regression failed before its guard.
 - [x] **Step 3: Implement** clean-checkout builds and artifact inventory from allowlisted bundle files, ephemeral job-local registry digest capture, exact-byte Ed25519 signing, per-platform signature/hash verification, and a required-both-platform CI status job. Each native runner builds and smokes its own local single-platform candidate; these are provisional artifacts, not a published multi-platform manifest. The evidence keeps G2/G4/G12 false until browser setup, two-instance networking, and runtime-support checks exist; the promotion verifier must refuse that candidate. The existing `publish-docker.yml` remains unchanged.
-- [ ] **Step 4: Run** focused tests plus the extracted-bundle smoke on amd64 and arm64 CI runners; record exact runtime patches and limitations. Run frontend lint/typecheck, focused backend tests, gateway tests, `git diff --check`, and Bandit on touched Python source. Failure in either required tuple blocks promotion. Local lean release tests: 46 pass; Black, shell syntax, YAML parse, Compose config for both platform settings, diff check, and Bandit (0 findings) pass. A local native arm64 candidate built and reached signed verification/init but failed backend readiness; the corrected backend image starts healthy in isolation. Exact corrected bundle smoke, PowerShell parsing, downloaded/installed sizes, and both runner results are not yet evidence. The whole-frontend typecheck baseline is still 93 untouched-file diagnostics; CI runs it and records its status without treating it as new code success. The manual lane emits only provisional evidence until the remaining G2/G4/G12 scenarios are implemented and passed.
-- [x] **Step 5: Commit** qualification workflow and evidence tooling with `test: qualify paired Docker candidate before release (TASK-13343)`; actual CI execution remains open in Step 4.
+- [x] **Step 4: Run** focused tests plus the extracted-bundle smoke on amd64 and arm64 CI runners; record exact runtime patches and limitations. Run frontend lint/typecheck, focused backend tests, gateway tests, `git diff --check`, and Bandit on touched Python source. Run 36210634045 at e759322854 passes both native extracted smokes, Windows parsing, and the required-both status. Each native job passes 49 Release, 207 frontend, and 13 gateway tests, scoped lint/format checks, shell syntax, and production Bandit (0 findings). Both run Python 3.12.14 and Node 24.21.0; downloaded signatures and helper hashes independently verify. The acceptance review records immutable manifest hashes, Compose first/repeat health timings, and Docker image metadata; actual download/installed footprints remain outstanding. The whole-frontend typecheck baseline remains 93 untouched-file diagnostics and is recorded without counting it as success. The lane emits provisional evidence and refuses promotion while G2/G4/G12 remain false.
+- [x] **Step 5: Commit** qualification workflow and evidence tooling with `test: qualify paired Docker candidate before release (TASK-13343)`; corrected provisional CI execution is recorded in Step 4.
 
 ### Task 8: Review WP1 against the product contract
 
@@ -262,7 +262,14 @@ configured cookie names and authenticates the profile using only the cookie
 jar. Both-platform run 36208320371 passed its older smoke, whose generic cookie
 assertion did not establish authenticated browser behavior. Run 36209873850
 was cancelled before exercising the obsolete configuration. Corrected native
-smoke remains required, with G2/G4/G12 still open.
+smoke passed on both platforms in run 36210634045 at e759322854. Each job passes
+49 Release, 207 frontend, and 13 gateway tests, production Bandit, and the
+strengthened cookie-only profile/setup/docs checks. Downloaded signatures and
+all eight helper hashes independently verify for each provisional manifest;
+promotion is correctly refused. Focused independent review found no actionable
+issues. G2 interactive browser setup, G4 broader browser/two-instance networking,
+and full G12 policy/footprint qualification remain open; a qualified combined
+multi-platform candidate is still required.
 
 - Sections 5/10/11 and gates G2/G4/G10/G12 map to Tasks 1–8. Backend dependency slimming and complete storage inventory are WP2; native lifecycle and the single-source verifier packaging check are WP3; automatic update/backup/restore is WP4; guided heavy components and final public promotion are WP5.
 - Verify exact code symbols in the interface blocks when implementing each task; preserve existing quickstart/hosted paths and test both managed and legacy modes.

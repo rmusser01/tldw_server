@@ -7,19 +7,20 @@ entry has been published.
 
 | Contract | Current evidence | Status |
 | --- | --- | --- |
-| Section 5: one browser gateway, same-origin managed WebUI, private backend/Next ports | Gateway real-socket tests cover routing, Host/Origin rejection, forwarded-header stripping, multipart body forwarding, redirects, cookies, SSE cancellation, and WebSocket upgrade. Managed standalone Next and runtime session tests cover the private hop. Compose publishes only `127.0.0.1:${TLDW_PUBLIC_PORT}:8080`; `docker compose config` parsed on both platform settings. | Implemented locally; exact extracted-container and two-instance browser proof pending. |
-| Section 10: Docker-only extracted first start, stable identity, stop/status, retained data | Control tests cover signature-before-init, mode-0600 credentials, repeat identity, conflicting release, and tampering. Fake-Docker helper tests cover ordering, unavailable daemon/Compose, occupied port, and stop/status from another directory. The backend DB and generated config use named volumes. | Live G2 first/repeat/stop/restart and browser setup pending. |
-| Section 11: signed manifest and immutable artifacts | Ed25519 exact-byte manifest verification, per-file SHA-256, platform selection, path/symlink checks, fixed control-image/key bootstrap, and candidate-gate tests pass. Native amd64 and arm64 CI built all four images; signed extracted-bundle verification and initialization passed. | Both CI smoke checks stopped after service readiness; one qualified multi-platform manifest is not produced. |
-| G2 Docker first install | Native amd64 and arm64 CI signed bundles ran outside the checkout and reached healthy backend, WebUI, and gateway services. | Open: an HTTP smoke request failed before repeat start and guided setup. A missing WebUI auth-mode setting is fixed and awaiting the corrected CI smoke. |
+| Section 5: one browser gateway, same-origin managed WebUI, private backend/Next ports | Gateway real-socket tests cover routing, Host/Origin rejection, forwarded-header stripping, multipart body forwarding, redirects, cookies, SSE cancellation, and WebSocket upgrade. Run 36210634045 passes real-container setup/docs routing, named session cookies, cookie-only profile authentication, hostile Host rejection, and private-port checks on both native platforms. | One-instance extracted-container proof passes; two-instance browser/network qualification remains open. |
+| Section 10: Docker-only extracted first start, stable identity, stop/status, retained data | Control tests cover signature-before-init, mode-0600 credentials, repeat identity, conflicting release, and tampering. Fake-Docker helper tests cover ordering, unavailable daemon/Compose, occupied port, and stop/status from another directory. Both native jobs in run 36210634045 passed first/repeat/stop/restart and persistence with the corrected configuration. | Container lifecycle proof passes; interactive browser setup and Windows helper runtime qualification remain open. |
+| Section 11: signed manifest and immutable artifacts | Ed25519 exact-byte manifest verification, per-file SHA-256, platform selection, path/symlink checks, fixed control-image/key bootstrap, and candidate-gate tests pass. Both corrected native candidates pass extracted initialization/tampering; independently downloaded signatures and all eight helper hashes verify for each platform. | Per-platform provisional artifacts verified; one qualified multi-platform manifest is not produced. |
+| G2 Docker first install | Both corrected native signed bundles ran outside the checkout, reached healthy services, served managed setup, authenticated the profile with cookies only, and retained credentials/data across stop/start from another directory. | Remains false in provisional evidence until its planned interactive browser setup qualification is implemented. |
 | G4 networking/auth | Focused gateway, backend AuthNZ, Next runtime, and browser-networking tests pass; real standalone Next session exchange through the gateway passed before image work. | Open: exact two-instance browser/auth and real-container upload/stream/WebSocket cases are not yet qualified. |
-| G10 artifact trust | Manifest/control/candidate test suites pass, including altered signature, wrong platform, unsafe path, changed file, and missing image. Local image-content guards and extracted control verification passed. | Partially evidenced; the extracted tamper check was after the failed readiness step and has not run. |
-| G12 release policy | The local arm64 images reported Python 3.12.14 and Node 24.21.0. The candidate code records exact patches and refuses unsupported families/mismatches. | Open: upstream support/security status, both-platform results, download size, and protected publication gate are unverified. |
+| G10 artifact trust | Manifest/control/candidate test suites pass, including altered signature, wrong platform, unsafe path, changed file, and missing image. Both corrected native jobs pass image-content guards, extracted verification, and refusal of a tampered manifest before instance initialization. Downloaded signatures and helper bytes independently verify. | True in both corrected per-platform provisional records; full product qualification is not implied. |
+| G12 release policy | Both native jobs recorded Python 3.12.14 and Node 24.21.0. Their upstream support status was checked on September 25. The candidate code records exact patches and refuses unsupported families/mismatches. | Open: full dependency/security review, download/installed-footprint measurements, joined matrix qualification, and protected publication remain outstanding. |
 
-Local verification after the CI follow-up: 47 lean Release tests pass;
+Local verification after the cookie follow-up: 49 lean Release tests and three
+focused AuthNZ integration tests pass;
 Black checks, shell syntax, Compose config for amd64 and arm64 settings,
 gateway dependency lock installation, `git diff --check`, and scoped Bandit
 (zero findings) pass. Prior slices recorded 64 managed-WebUI Vitest tests,
-32 AuthNZ unit tests, 6 focused HTTP/logout tests, 12 gateway socket tests,
+32 AuthNZ unit tests, 6 focused HTTP/logout tests, 13 gateway socket tests,
 and the standalone Next through-gateway session test. Whole-frontend
 typechecking still reports 93 diagnostics in untouched files; that baseline
 is not counted as a passing gate.
@@ -127,8 +128,44 @@ to avoid qualifying the obsolete configuration. All 49 lean release tests and
 three existing AuthNZ integration tests pass, as do Black, shell syntax, and
 Compose validation. Test-file Bandit reports only assertions and existing
 subprocess harness warnings; production Release code still has no findings.
-Authenticated container behavior remains pending the corrected native run;
-the earlier run is not evidence that the browser session authenticated.
+The earlier run is not evidence that the browser session authenticated; the
+corrected run below provides that HTTP authentication proof.
+
+The [corrected native run](https://github.com/rmusser01/tldw_server/actions/runs/36210634045)
+at `e759322854d3547e239bc97c9dfe1b232b5f6da3` completed successfully, including
+both native candidates, Windows parsing, and the required-both status job.
+The strengthened extracted smoke on each platform checks the managed setup
+page, real backend docs assets, both configured cookie names, and authenticated profile access
+with only the cookie jar, followed by Host/private-port, restart persistence,
+and manifest-tamper checks. Windows helper parsing also passes. Each Linux job
+passes 49 Release tests, 207 frontend tests, 13 gateway tests, scoped lint/format
+checks, and production Bandit with no findings. An independent focused code
+review of `dbc1100323..e759322854` found no actionable issues and independently
+reran the 13 gateway tests.
+
+Downloaded public-key signature verification and all eight helper hashes pass
+for each candidate, and both source revisions match the exact run commit.
+Both inventories record Python 3.12.14 and Node 24.21.0. The signed provisional
+G10 flag is true; G2/G4/G12 remain false, and both promotion checks reject them.
+
+| Platform | Verified manifest SHA-256 | First / repeat Compose health wait |
+| --- | --- | --- |
+| linux/arm64 | `924401d1667ced52d519ead6e112e0b80a42cb786d5c10d3ccf62b51e2f2da61` | 121.75 s / 91.74 s |
+| linux/amd64 | `d95a6bb908abf3ee9cf5bd8baf189808a965981604c052f2a6338166672b0d29` | 122.57 s / 92.19 s |
+
+These timings run from the backend container's Starting event to the gateway's
+Healthy event in the CI log. They include healthcheck polling and exclude image
+downloads, control/helper initialization, and browser interaction. They are not
+end-to-end first-install durations.
+
+| Platform | Backend Docker `.Size` | WebUI | Gateway | Control |
+| --- | ---: | ---: | ---: | ---: |
+| linux/arm64 | 8,515,099,267 | 534,186,958 | 249,105,023 | 164,181,011 |
+| linux/amd64 | 8,803,264,108 | 515,154,934 | 230,428,225 | 139,435,839 |
+
+Sizes are Docker image metadata bytes, not measured network download or
+installed storage footprints. The job-local image registries have expired;
+uploaded bundles are review evidence and cannot install those images elsewhere.
 
 The manual `verify-app-bundle.yml` lane builds separate job-local candidates
 for linux/amd64 and linux/arm64 and leaves G2/G4/G12 false. Its required-both
@@ -138,9 +175,9 @@ remain WP5 work after WP1's applicable gates pass. Native runtime slimming,
 full storage inventory, native supervision, update/restore, and optional
 component management remain the explicit WP2–WP5 boundaries in the design.
 
-TASK-13343 stays **In Progress**. To close it, rebuild the corrected exact
-candidate and run the manual candidate lane on both platforms, add the missing
-browser/two-instance and runtime-support evidence, produce a single qualified
+TASK-13343 stays **In Progress**. The corrected native smoke now passes on both
+platforms. To close it, add the missing interactive browser/two-instance and
+full runtime/security-policy evidence, produce a single qualified
 multi-platform signed candidate, and record its immutable manifest plus
 measured sizes and startup times. Public promotion remains a separate
 authorized release action.

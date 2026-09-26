@@ -4,7 +4,7 @@ title: Plan and implement paired Docker distribution and runtime gateway
 status: In Progress
 assignee: []
 created_date: '2026-09-23 06:15'
-updated_date: '2026-09-26 02:05'
+updated_date: '2026-09-26 02:42'
 labels:
   - distribution
   - docker
@@ -27,7 +27,7 @@ WP1 of TASK-13265: establish the shared manifest/artifact contract, runtime gate
 <!-- AC:BEGIN -->
 - [x] #1 Write an executable WP1 plan with exact file responsibilities, test cycles, and G2/G4/G10/G12 coverage.
 - [x] #2 Create a runtime-configured gateway and managed WebUI build with authenticated routing and same-origin behavior.
-- [ ] #3 Build a paired Docker bundle with pinned artifacts, idempotent initialization, and Docker-only host helpers.
+- [x] #3 Build a paired Docker bundle with pinned artifacts, idempotent initialization, and Docker-only host helpers.
 - [ ] #4 Verify a fresh Docker setup and networking/security paths outside a repository checkout before publication.
 <!-- AC:END -->
 
@@ -71,6 +71,8 @@ Further G4 review found /setup routed to legacy FastAPI setup rather than the Ne
 Run 36208320371 at dbc1100323: complete arm64 extracted smoke passes assets/session cookies/host rejection/private ports/repeat persisted config-data/tamper rejection. Downloaded all 8 helper hashes match manifest SHA256 1b7201d4730e230ef59661878e532b5ff87e3ed48a9b39500354ecc054e806db. Actual Python 3.12.14/Node 24.21.0; G10 true, provisional G2/G4/G12 false and promotion rejected as intended. amd64 pending. Setup/docs routing fix committed 9755c7eaaf needs exact candidate run; next CI evidence upload adds public key for independent signature verification, never private key.
 
 Cookie configuration follow-up: both native jobs in run 36208320371 passed the older smoke, but its generic Set-Cookie assertion could accept CSRF alone. Two red regressions exposed missing backend instance session-cookie name and HTTPS-only cookie default on the HTTP loopback gateway. Compose corrected both; smoke now requires both configured cookie names and authenticates /api/v1/users/me/profile using only the cookie jar. All 49 lean Release tests and three focused existing AuthNZ integration tests pass; Black, shell syntax, Compose validation pass. Test Bandit findings are assertions and unchanged subprocess harness warnings, no new production finding. Cancelled obsolete run 36209873850. Corrected native amd64/arm64 candidate run remains required; G2/G4/G12 remain open.
+
+Corrected exact candidate e759322854d3547e239bc97c9dfe1b232b5f6da3 completed successfully in https://github.com/rmusser01/tldw_server/actions/runs/36210634045: both native amd64/arm64 smoke jobs, Windows helper parsing, and required-both status pass. Each Linux job passes 49 Release, 207 frontend, 13 gateway tests and production Bandit (zero findings). Smoke proves managed setup/docs routing, both named cookies, cookie-only authenticated profile access, Host/private-port rejection, first/repeat startup, credential/data persistence, and tamper rejection. Downloaded Ed25519 signatures and all eight helper hashes independently verify per platform. Manifest SHA256 arm64 924401d1667ced52d519ead6e112e0b80a42cb786d5c10d3ccf62b51e2f2da61; amd64 d95a6bb908abf3ee9cf5bd8baf189808a965981604c052f2a6338166672b0d29. Python 3.12.14 / Node 24.21.0 both. Compose backend-start to gateway-health wait first/repeat: arm64 121.75/91.74 s, amd64 122.57/92.19 s; excludes downloads/control/helper/browser. Focused independent review dbc1100323..e759322854 has no actionable findings. G10 true; G2/G4/G12 remain false and promotion rejects correctly. TASK stays In Progress for interactive browser/two-instance/network qualification, full dependency/security policy and measured footprints, and qualified combined manifest. Whole-frontend typecheck still has 93 existing diagnostics. No images, release, or catalog published; ephemeral registry candidates are review evidence only.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
