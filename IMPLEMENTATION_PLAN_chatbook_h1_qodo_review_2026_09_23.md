@@ -2,6 +2,8 @@
 
 **Goal:** Resolve verified Qodo findings on PR #2968 without weakening history ownership, and keep stacked PR #3002 aligned for review and merge.
 
+**ADR check:** ADR required: yes. `Docs/ADR/049-chat-history-selection-ownership.md` records the durable owner-bound history and local-copy rule; existing `Docs/ADR/011-audio-api-semantics.md` covers the audio-auth alignment in this PR.
+
 **Baseline:** Server `dev` `158287db30a28450e79fdbc38253168a468be88f`; H1 PR #2968 at `1f5a2016f3758014f88c20d6144d8fe3bcfb73c6` before review fixes; H2 PR #3002 stacked at `454635c33cf298ff10dde7e558231209c951e255`. Use only the isolated H1/H2 worktrees. Do not touch the main/UAT worktree or H2's untracked production evidence.
 
 ## Stage 1: Classify and reproduce Qodo findings
