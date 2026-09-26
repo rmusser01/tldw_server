@@ -216,7 +216,7 @@ class VNAssetGenerationWorker:
         if recipe_version == 1:
             recipe = self.repo.get_batch_recipe(batch_id, slot_id, variant_index)
             if recipe is None:
-                self.repo.fail_batch_integrity(batch_id, error="vn_asset_recipe_not_found")
+                await self.repo.fail_batch_integrity_async(batch_id, error="vn_asset_recipe_not_found")
                 raise VNAssetGenerationError(
                     "vn_asset_recipe_not_found", batch_id=batch_id,
                     slot_id=slot_id, variant_index=variant_index,
@@ -384,7 +384,7 @@ class VNAssetGenerationWorker:
         """
         outcome = await self.repo.get_variant_outcome_async(batch_id, slot_id, variant_index)
         if outcome is None:
-            self.repo.fail_batch_integrity(batch_id, error="vn_asset_recipe_not_found")
+            await self.repo.fail_batch_integrity_async(batch_id, error="vn_asset_recipe_not_found")
             raise VNAssetGenerationError("vn_asset_recipe_not_found", batch_id=batch_id, slot_id=slot_id)
         if outcome["outcome_status"] == "failed":
             if allow_publication:

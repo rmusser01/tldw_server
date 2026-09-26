@@ -6,7 +6,10 @@ import asyncio
 import json
 import sqlite3
 from collections.abc import Callable, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
+from contextvars import copy_context
+from functools import partial
 from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
@@ -2139,6 +2142,43 @@ class VNAssetPacksRepository:
                 for row in slots:
                     self._refresh_slot_generation_status(conn, int(row["slot_id"]))
         return self.get_batch(batch_id)
+
+    async def fail_batch_integrity_async(self, batch_id: int, *, error: str) -> dict[str, Any] | None:
+        """Await complete integrity reconciliation on a new connection-owning thread.
+
+        Keep this repository's inline activity and callback context. A dedicated
+        one-operation executor cannot inherit an existing thread-local handle;
+        only its new ChaChaNotes connection is closed, never caller/global pools.
+        Cancellation waits for commit/rollback and cleanup; original operation
+        failures still propagate even when cancellation was requested.
+        Private memory and active caller transactions stay on the owner thread
+        to preserve identity and caller rollback, so those modes may block.
+        Schema setup remains caller-owned, as with async outcome observations.
+        """
+        self._ensure_schema_initialized()
+        if self.db.is_memory_db or self.db.get_connection().in_transaction:
+            return self.fail_batch_integrity(batch_id, error=error)
+        with ThreadPoolExecutor(max_workers=1, thread_name_prefix="vn-integrity") as executor:
+            operation = asyncio.get_running_loop().run_in_executor(
+                executor, copy_context().run, partial(self._fail_batch_integrity_owned, batch_id, error=error),
+            )
+            cancellation: asyncio.CancelledError | None = None
+            while not operation.done():
+                try:
+                    await asyncio.shield(operation)
+                except asyncio.CancelledError as exc:
+                    cancellation = exc
+            result = operation.result()
+            if cancellation is not None:
+                raise cancellation
+            return result
+
+    def _fail_batch_integrity_owned(self, batch_id: int, *, error: str) -> dict[str, Any] | None:
+        """Run integrity reconciliation and dispose only the new executor-thread handle."""
+        try:
+            return self.fail_batch_integrity(batch_id, error=error)
+        finally:
+            self.db.close_connection()
 
     def list_batch_recipes(self, batch_id: int) -> list[dict[str, Any]]:
         """Return decoded recipes for batch_id in slot/variant order.
