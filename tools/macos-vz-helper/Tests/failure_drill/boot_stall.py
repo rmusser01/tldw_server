@@ -1,4 +1,9 @@
-"""Test-only initramfs overlay and bounded serial proof reader."""
+"""Test-only initramfs overlay construction and bounded serial-proof validation.
+
+Callers must select disposable bundles before appending archives. Overlay and
+challenge creation use native cpio with private temporary files; serial-proof
+validation reads an existing log without modifying it. No helper starts a VM.
+"""
 
 import json
 import os
@@ -10,7 +15,19 @@ from pathlib import Path
 
 
 def initrd_path(bundle: Path) -> Path:
-    """Require the manifest-selected, regular initrd inside a disposable bundle."""
+    """Select the manifest's regular initrd without modifying the bundle.
+
+    Args:
+        bundle: Disposable bundle containing manifest.json and its initrd.
+
+    Returns:
+        Path to the initrd named by the manifest's simple filename.
+
+    Raises:
+        ValueError: The manifest is invalid JSON, the filename is absent or
+            unsafe, or the selected initrd is a symlink or not a regular file.
+        OSError: The manifest cannot be read.
+    """
     manifest = json.loads((bundle / "manifest.json").read_text())
     name = manifest.get("initrd") if isinstance(manifest, dict) else None
     if not isinstance(name, str) or re.fullmatch(r"[a-zA-Z0-9._-]+", name) is None or name in (".", ".."):
@@ -22,7 +39,23 @@ def initrd_path(bundle: Path) -> Path:
 
 
 def append_archive(path: Path, archive: bytes) -> None:
-    """Append aligned newc bytes to an existing regular disposable initrd."""
+    """Append four-byte-aligned archive bytes to a disposable initrd in place.
+
+    Args:
+        path: Existing regular initrd owned by the caller's disposable bundle.
+        archive: Prepared newc archive bytes; this function does not parse them.
+
+    Returns:
+        None.
+
+    Side Effects:
+        Appends zero padding and archive bytes without replacing existing bytes.
+
+    Raises:
+        ValueError: The opened initrd is not regular or is a symlink.
+        OSError: Opening, inspecting, or writing the initrd fails, including a
+            symlink rejected by the platform's O_NOFOLLOW support.
+    """
     fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0))
     try:
         info = os.fstat(fd)
@@ -35,7 +68,22 @@ def append_archive(path: Path, archive: bytes) -> None:
 
 
 def read_proof(path: Path, nonce: str, mode: str, vm_id: str) -> dict[str, str]:
-    """Require one bounded, regular, fresh VM-correlated serial marker."""
+    """Read one exact VM-correlated marker from a log without modifying it.
+
+    Args:
+        path: Regular serial-log file, at most one MiB, not a symlink.
+        nonce: Nonempty nonce generated for this boot.
+        mode: Expected stall or continue control mode.
+        vm_id: Nonempty ID of the VM being validated.
+
+    Returns:
+        The marker's nonce, mode, vm_id, and stage (initramfs), matching exactly.
+
+    Raises:
+        ValueError: The log cannot be read safely, exceeds the bound, contains
+            missing, duplicate or malformed markers, or fails exact correlation.
+            File-access failures are chained as the cause of this error.
+    """
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0))
         try:
@@ -86,12 +134,52 @@ def _settings(nonce: str, mode: str) -> dict[str, bytes]:
 
 
 def challenge(nonce: str, mode: str) -> bytes:
-    """Override only nonce and stall/continue mode for one disposable boot."""
+    """Build an archive overriding only the settings for one disposable boot.
+
+    Args:
+        nonce: Six to 64 lowercase hexadecimal characters for this boot.
+        mode: Either stall or continue.
+
+    Returns:
+        Native newc archive bytes containing only the nonce and mode files.
+
+    Side Effects:
+        Runs cpio in a private temporary directory, removed on exit. Does not
+        append the returned archive to an initrd.
+
+    Raises:
+        ValueError: The nonce or mode is invalid.
+        OSError: Temporary-file operations or starting cpio fails.
+        subprocess.CalledProcessError: cpio exits unsuccessfully.
+        subprocess.TimeoutExpired: cpio exceeds its ten-second timeout.
+    """
     return _archive(_settings(nonce, mode))
 
 
 def overlay(original_init: bytes, nonce: str, mode: str) -> bytes:
-    """Preserve Debian init while prepending the test-only early-userspace wrapper."""
+    """Build a wrapper archive preserving the original Debian init bytes.
+
+    Args:
+        original_init: Original init script starting with #!/bin/sh, at most
+            128 KiB, preserved as init.tldw-original.
+        nonce: Six to 64 lowercase hexadecimal characters for this boot.
+        mode: Either stall or continue.
+
+    Returns:
+        Native newc bytes containing the checked-in wrapper as init, the original
+        script, and the nonce and mode files.
+
+    Side Effects:
+        Reads the checked-in wrapper and runs cpio in a private temporary
+        directory, removed on exit. Does not modify an initrd or source bundle.
+
+    Raises:
+        ValueError: The original script, nonce, or mode is unsupported.
+        OSError: Reading the wrapper, temporary-file operations, or starting
+            cpio fails.
+        subprocess.CalledProcessError: cpio exits unsuccessfully.
+        subprocess.TimeoutExpired: cpio exceeds its ten-second timeout.
+    """
     settings = _settings(nonce, mode)
     if not original_init.startswith(b"#!/bin/sh") or len(original_init) > 128 * 1024:
         raise ValueError("unsupported original initramfs init")

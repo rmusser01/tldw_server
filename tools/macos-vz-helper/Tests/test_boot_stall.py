@@ -3,12 +3,13 @@
 import importlib.util
 import json
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
 
 @pytest.fixture
-def boot_stall():
+def boot_stall() -> ModuleType:
     """Load the test-only boot fixture without starting a VM."""
     path = Path(__file__).resolve().parent / "failure_drill/boot_stall.py"
     assert path.is_file(), "The boot-stall fixture is not implemented"
@@ -19,7 +20,7 @@ def boot_stall():
 
 
 @pytest.mark.unit
-def test_serial_proof_requires_fresh_nonce_vm_and_stage(boot_stall, tmp_path):
+def test_serial_proof_requires_fresh_nonce_vm_and_stage(boot_stall: ModuleType, tmp_path: Path) -> None:
     """A matching line proves only this VM reached the test initramfs wrapper."""
     proof = {"nonce": "abc123", "vm_id": "AB12-34", "mode": "stall", "stage": "initramfs"}
     log = tmp_path / "serial.log"
@@ -31,7 +32,7 @@ def test_serial_proof_requires_fresh_nonce_vm_and_stage(boot_stall, tmp_path):
 @pytest.mark.parametrize(
     "field,value", [("nonce", "stale"), ("vm_id", "other"), ("mode", "continue"), ("stage", "agent")]
 )
-def test_serial_proof_rejects_unrelated_boot(boot_stall, tmp_path, field, value):
+def test_serial_proof_rejects_unrelated_boot(boot_stall: ModuleType, tmp_path: Path, field: str, value: str) -> None:
     """Old or wrong-stage output must not turn transport failure into acceptance."""
     proof = {"nonce": "abc123", "vm_id": "AB12-34", "mode": "stall", "stage": "initramfs"}
     proof[field] = value
@@ -47,7 +48,9 @@ def test_serial_proof_rejects_unrelated_boot(boot_stall, tmp_path, field, value)
     ["", "TLDW_BOOT_PROOF {oops}\n", "TLDW_BOOT_PROOF []\n", "x" * (1024 * 1024 + 1)],
     ids=["missing", "malformed", "wrong-type", "oversized"],
 )
-def test_serial_proof_rejects_missing_malformed_or_oversized_log(boot_stall, tmp_path, raw):
+def test_serial_proof_rejects_missing_malformed_or_oversized_log(
+    boot_stall: ModuleType, tmp_path: Path, raw: str
+) -> None:
     """Read only bounded regular logs, not arbitrary/unrelated console content."""
     log = tmp_path / "serial.log"
     log.write_text(raw)
@@ -56,7 +59,7 @@ def test_serial_proof_rejects_missing_malformed_or_oversized_log(boot_stall, tmp
 
 
 @pytest.mark.unit
-def test_serial_proof_rejects_symlink(boot_stall, tmp_path):
+def test_serial_proof_rejects_symlink(boot_stall: ModuleType, tmp_path: Path) -> None:
     """Do not read an evidence symlink outside the selected VM log."""
     target = tmp_path / "target"
     target.write_text("old")
@@ -68,7 +71,7 @@ def test_serial_proof_rejects_symlink(boot_stall, tmp_path):
 
 @pytest.mark.unit
 @pytest.mark.timeout(2, method="signal")
-def test_serial_proof_rejects_fifo_without_blocking(boot_stall, tmp_path):
+def test_serial_proof_rejects_fifo_without_blocking(boot_stall: ModuleType, tmp_path: Path) -> None:
     """A substituted FIFO must not hang diagnostics or the test harness."""
     import os
 
@@ -80,7 +83,7 @@ def test_serial_proof_rejects_fifo_without_blocking(boot_stall, tmp_path):
 
 @pytest.mark.integration
 @pytest.mark.parametrize("mode", ["stall", "continue"])
-def test_overlay_contains_only_fixed_initramfs_entries(boot_stall, tmp_path, mode):
+def test_overlay_contains_only_fixed_initramfs_entries(boot_stall: ModuleType, tmp_path: Path, mode: str) -> None:
     """Native cpio output preserves original init and binds the one mode change."""
     import subprocess  # nosec B404 - checked-in local archive fixture only
 
@@ -106,14 +109,14 @@ def test_overlay_contains_only_fixed_initramfs_entries(boot_stall, tmp_path, mod
 
 @pytest.mark.unit
 @pytest.mark.parametrize("nonce,mode", [("bad\nnonce", "stall"), ("abc123", "invalid")])
-def test_overlay_refuses_untrusted_marker_values(boot_stall, nonce, mode):
+def test_overlay_refuses_untrusted_marker_values(boot_stall: ModuleType, nonce: str, mode: str) -> None:
     """Only a hex nonce and the two intentional control modes are accepted."""
     with pytest.raises(ValueError):
         boot_stall.overlay(b"#!/bin/sh\n", nonce, mode)
 
 
 @pytest.mark.integration
-def test_challenge_changes_only_nonce_and_mode(boot_stall, tmp_path):
+def test_challenge_changes_only_nonce_and_mode(boot_stall: ModuleType, tmp_path: Path) -> None:
     """The control cannot replace the wrapper or original init."""
     import subprocess  # nosec B404 - fixed local cpio fixture
 
@@ -129,7 +132,9 @@ def test_challenge_changes_only_nonce_and_mode(boot_stall, tmp_path):
 
 @pytest.mark.unit
 @pytest.mark.parametrize("name", ["../initrd", "/initrd", "initrd\nother", ".", "..", None])
-def test_initrd_selection_rejects_unsafe_or_absent_manifest_entry(boot_stall, tmp_path, name):
+def test_initrd_selection_rejects_unsafe_or_absent_manifest_entry(
+    boot_stall: ModuleType, tmp_path: Path, name: str | None
+) -> None:
     """Preparation must not append to a path outside its disposable bundle."""
     (tmp_path / "manifest.json").write_text(json.dumps({"initrd": name}))
     with pytest.raises(ValueError, match="initrd"):
@@ -137,20 +142,27 @@ def test_initrd_selection_rejects_unsafe_or_absent_manifest_entry(boot_stall, tm
 
 
 @pytest.mark.unit
-def test_initrd_selection_uses_manifest_and_refuses_symlinks(boot_stall, tmp_path):
-    """Custom boot artifact names are respected without following aliases."""
+def test_initrd_selection_uses_manifest(boot_stall: ModuleType, tmp_path: Path) -> None:
+    """Select a regular initrd using its custom manifest filename."""
     (tmp_path / "manifest.json").write_text(json.dumps({"initrd": "initramfs"}))
     path = tmp_path / "initramfs"
     path.write_bytes(b"original")
     assert boot_stall.initrd_path(tmp_path) == path
-    path.unlink()
-    path.symlink_to(tmp_path / "elsewhere")
+
+
+@pytest.mark.unit
+def test_initrd_selection_refuses_symlinks(boot_stall: ModuleType, tmp_path: Path) -> None:
+    """Reject a manifest-selected symlink even when its target is a regular file."""
+    (tmp_path / "manifest.json").write_text(json.dumps({"initrd": "initramfs"}))
+    target = tmp_path / "elsewhere"
+    target.write_bytes(b"original")
+    (tmp_path / "initramfs").symlink_to(target)
     with pytest.raises(ValueError, match="initrd"):
         boot_stall.initrd_path(tmp_path)
 
 
 @pytest.mark.unit
-def test_append_archive_preserves_original_bytes_and_aligns_newc_header(boot_stall, tmp_path):
+def test_append_archive_preserves_original_bytes_and_aligns_newc_header(boot_stall: ModuleType, tmp_path: Path) -> None:
     """Linux uncompressed newc headers must start at a four-byte boundary."""
     initrd = tmp_path / "initrd"
     initrd.write_bytes(b"original-gzip")
@@ -160,7 +172,7 @@ def test_append_archive_preserves_original_bytes_and_aligns_newc_header(boot_sta
 
 @pytest.mark.integration
 @pytest.mark.parametrize("mode", ["stall", "continue"])
-def test_wrapper_initializes_console_before_proof_and_only_control_runs_original(tmp_path, mode):
+def test_wrapper_initializes_console_before_proof_and_only_control_runs_original(tmp_path: Path, mode: str) -> None:
     """Execute the real shell flow with mount/module/device calls isolated, not privileged."""
     import os
     import signal

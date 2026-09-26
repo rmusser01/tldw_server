@@ -34,6 +34,12 @@ skipped for a prepared-host evidence packet.
   working copy based on `a2826f103f02a67f57adb40ed048dbfa2ecfc6e5`. The receipt
   records the exact uncommitted fixture, workflow and host-test input hashes.
   Every recorded input hash was rechecked against the final files after the run.
+- PR #3022 review follow-up rebased onto `f5fa1f3a41855aa02871d8b76d0ec0cebbaf9e07`
+  and changed only helper docstrings plus portable test annotations/scenario
+  separation. The receipt's `boot_stall.py` hash matches implementation commit
+  `ae56231b8be42c5601403f14b4186b99f008e10d`, not the expanded docstrings. Its
+  executable AST is unchanged after stripping docstrings; the other 64 of 65
+  recorded input hashes still match. No new live VM run occurred in this follow-up.
 - Earlier September 25 bundle/evidence paths are absent locally; they remain
   historical records, not available prerequisites for this run. The available
   Debian bookworm arm64 source under
