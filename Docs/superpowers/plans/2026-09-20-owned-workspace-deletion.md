@@ -164,6 +164,19 @@ review disposition. This is not generic `update_conversation` certification:
 message edit/enrichment and direct Sync callers remained outstanding at that
 checkpoint; the edit-only follow-up below closes the primary edit endpoint.
 
+Primary workspace send follow-up (September 26): use a fresh endpoint operation,
+reject any pre-existing transaction before preflight, preserve process-before-DB
+and parent/reply/conversation ordering, and opt into verified connection-owned
+strict helper publication. The cap recheck, message/history/metadata and response
+hydration are transactional; optional enrichment scheduling occurs after commit
+and lock release without changing a committed send into an error. Native/raw
+PostgreSQL ownership and independent-worker cap tests are included. Final
+boundary verification passes 142 SQLite/PostgreSQL cases and four real-auth
+SQLite HTTP cases; broader regression verification is recorded separately in
+the writer-fencing report. This does not certify
+completion, generic message, Sync, tagging/keywords or clustering writers; it
+does not implement duplicate-safe retries or enable owned routes.
+
 Remaining chat implementation inventory (not covered by creation/restore):
 - `ConversationStore.upsert_conversation_from_sync` can insert, resurrect, and
   replace scope/workspace identity. The Sync v2 chat materializer calls it

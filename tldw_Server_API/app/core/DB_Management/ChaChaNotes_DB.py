@@ -8500,6 +8500,48 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise CharactersRAGDBError(f"Execute Many failed: {exc}") from exc  # noqa: TRY003
 
     # --- Transaction Context ---
+    @property
+    def in_transaction(self) -> bool:
+        """Whether the current operation already has a transaction.
+
+        Endpoint publication owners use this before acquiring process locks to
+        avoid borrowing an outer transaction with a reversed lock order.
+        PostgreSQL cannot distinguish raw BEGIN from an implicit transaction by
+        driver status. Publication owners must check before their own reads and
+        treat any pre-existing transaction as borrowed, never settle it.
+        """
+        if self.backend_type == BackendType.SQLITE:
+            return bool(self.get_connection().in_transaction)
+        backend = self._get_pinned_backend() or self.backend
+        raw = self._get_thread_connection()
+        driver_status = getattr(getattr(raw, "info", None), "transaction_status", None)
+        return bool(
+            getattr(self._connection_state(), "tx_depth", 0)
+            or backend._tx_depth(raw)
+            or getattr(driver_status, "name", None) not in {None, "IDLE"}
+        )
+
+    def require_managed_transaction_connection(self, conn: Any) -> None:
+        """Require the current operation's ChaCha transaction before publication.
+
+        Native PostgreSQL backend transactions cannot safely use ambient ChaCha
+        metadata methods, which otherwise may commit the caller's transaction.
+        Foreign, idle, or native-only connections reject before any insertion.
+        """
+        current = self.get_connection()
+        if self.backend_type == BackendType.SQLITE:
+            valid = conn is current and current.in_transaction
+        else:
+            valid = (
+                isinstance(conn, BackendConnectionWrapper)
+                and conn._db is self
+                and conn._connection is current._connection
+                and getattr(self._connection_state(), "tx_depth", 0) > 0
+                and conn._backend._tx_depth(conn._connection) == 0
+            )
+        if not valid:
+            raise InputError("Publication requires a connection from the current ChaCha transaction.")
+
     def transaction(self) -> TransactionContextManager | BackendManagedTransaction:
         """Return a context manager for database transactions."""
         if self.backend_type == BackendType.SQLITE:

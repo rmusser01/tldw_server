@@ -55,6 +55,7 @@ from tldw_Server_API.app.core.Character_Chat.character_rate_limiter import get_c
 from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import (
     validate_chat_settings_storage,
 )
+from tldw_Server_API.app.core.Character_Chat.modules.character_chat import get_message_publication_lock
 from tldw_Server_API.app.core.Character_Chat.modules.character_prompt_presets import (
     build_character_system_prompt,
 )
@@ -380,6 +381,9 @@ async def send_message(
     """
     try:
         scope = _resolve_message_scope(scope_type, workspace_id)
+        # Check before preflight reads start our own implicit PostgreSQL transaction.
+        if scope.scope_type == "workspace" and db.in_transaction:
+            raise ConflictError("Message send cannot borrow an outer transaction.", entity="conversations", entity_id=chat_id)
         # Check rate limits (per-minute + per-chat message count)
         rate_limiter = get_character_rate_limiter()
         await rate_limiter.check_message_send_rate(current_user.id)
@@ -523,6 +527,59 @@ async def send_message(
                 )
             except Exception as sync_exc:
                 raise _message_sync_http_error(sync_exc) from sync_exc
+        elif scope.scope_type == "workspace":
+            # This endpoint owns commit. Borrowed callers use the strict helper
+            # directly and keep their own rollback and postcommit responsibilities.
+            with get_message_publication_lock(chat_id):
+                with db.transaction() as conn:
+                    db._lock_workspace_for_content_write(conn, scope.workspace_id)
+                    # Existing-message locks precede conversation locks, matching edit.
+                    if message_data.parent_message_id:
+                        db.lock_message_for_edit(message_data.parent_message_id, conn=conn)
+                        parent = db.get_message_by_id(message_data.parent_message_id, include_deleted=True, strict_images=True)
+                        if not parent or parent.get("deleted") or parent.get("conversation_id") != chat_id:
+                            raise HTTPException(status_code=404, detail="Parent message no longer belongs to this conversation")
+                    resume = db.get_roleplay_resume_state(
+                        chat_id, conn=conn, lock_for_update=True, owner_client_id=str(current_user.id),
+                    )
+                    locked = resume.get("conversation")
+                    if not isinstance(locked, Mapping):
+                        raise CharactersRAGDBError("Message publication has incomplete conversation state")
+                    if (
+                        str(locked.get("client_id", "")).strip() != str(current_user.id).strip()
+                        or locked.get("scope_type") != "workspace"
+                        or locked.get("workspace_id") != scope.workspace_id
+                    ):
+                        raise HTTPException(status_code=404, detail=f"Chat session {chat_id} not found")
+                    rate_limiter.check_message_limit_sync(chat_id, resume["message_count"] + 1)
+                    conversation = db.get_conversation_by_id(chat_id)
+                    if not conversation:
+                        raise NotFoundError("Conversation not found.")
+                    character_id = conversation.get("character_id")
+                    character = db.get_character_card_by_id(character_id) if character_id else None
+                    character_name = character.get("name", "Assistant") if character else "Assistant"
+                    user_name = conversation.get("user_name", "User")
+                    created_id = post_message_to_conversation(
+                        db=db, conversation_id=chat_id, character_name=character_name,
+                        message_content=message_data.content, is_user_message=is_user_message,
+                        parent_message_id=message_data.parent_message_id, image_data=image_data,
+                        image_mime_type=image_mime_type, sender_override=sender_override,
+                        owner_user_id=current_user.id, conn=conn,
+                    )
+                    created_msg = db.get_message_by_id(created_id, strict_images=True)
+                    if not created_msg:
+                        raise CharactersRAGDBError("Message publication could not read the created message")
+                    created_msg["content"] = replace_placeholders(created_msg.get("content") or "", character_name, user_name)
+                    response = _convert_db_message_to_response(created_msg)
+            # Publication is durable and locks are released. Enrichment failure
+            # must not encourage clients to retry a message that was committed.
+            try:
+                from tldw_Server_API.app.core.Chat.conversation_enrichment import schedule_auto_tagging
+
+                schedule_auto_tagging(db, chat_id, owner_user_id=current_user.id)
+            except Exception as exc:  # noqa: BLE001 - Never fail an already committed send for an optional trigger.
+                logger.warning("Postcommit auto-tagging scheduling failed for chat {}: {}", chat_id, type(exc).__name__)
+            return response
         else:
             # Add to database via Character_Chat guardrails
             created_id = post_message_to_conversation(
@@ -564,7 +621,7 @@ async def send_message(
             default_detail="Failed to send message",
             payload_too_large_substrings=("exceeds maximum size",),
         ) from exc
-    except CharactersRAGDBError as exc:
+    except (CharactersRAGDBError, NotFoundError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to send message") from exc
     except _CHARACTER_MESSAGES_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Error sending message to chat {chat_id}: {e}", exc_info=True)

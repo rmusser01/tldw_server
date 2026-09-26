@@ -332,6 +332,79 @@ def test_chat_settings_identity_loss_returns_404_over_http(
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize("role", ["user", "assistant", "system"])
+def test_workspace_message_send_rejects_deleted_parent_with_real_auth(
+    single_user_client, character_db, monkeypatch, role,
+):
+    from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+    from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+
+    client, _, api_key = single_user_client
+    monkeypatch.setattr(character_db, "client_id", str(get_settings().SINGLE_USER_FIXED_ID))
+    monkeypatch.setitem(client.app.dependency_overrides, get_chacha_db_for_user, lambda: character_db)
+    character_db.upsert_workspace("deleted-send-workspace", "Workspace")
+    conversation_id = character_db.add_conversation({
+        "title": "Chat", "scope_type": "workspace", "workspace_id": "deleted-send-workspace",
+    })
+    assert character_db.delete_workspace("deleted-send-workspace", 1)
+    assert character_db.upsert_conversation_from_sync(
+        conversation_id=conversation_id, title="Retained", sync_client_id=character_db.client_id,
+        object_revision=5, object_hash="retained", scope_type="workspace", workspace_id="deleted-send-workspace",
+    )
+
+    def snapshot():
+        return {
+            table: [dict(row) for row in character_db.execute_query(f"SELECT * FROM {table}").fetchall()]
+            for table in ("workspaces", "conversations", "messages", "message_metadata", "conversation_settings", "sync_log")
+        }
+
+    before = snapshot()
+    params = {"scope_type": "workspace", "workspace_id": "deleted-send-workspace"}
+    payload = {"content": "Must not persist", "role": role}
+    unauthenticated = client.post(f"/api/v1/chats/{conversation_id}/messages", params=params, json=payload)
+    assert unauthenticated.status_code == 401, unauthenticated.text
+    assert snapshot() == before
+    response = client.post(
+        f"/api/v1/chats/{conversation_id}/messages", params=params, json=payload, headers={"X-API-KEY": api_key},
+    )
+    assert response.status_code == 409, response.text
+    assert snapshot() == before
+
+
+@pytest.mark.integration
+def test_workspace_message_send_commits_with_real_auth(single_user_client, character_db, monkeypatch):
+    from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+    from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+    from tldw_Server_API.app.core.Chat import conversation_enrichment
+
+    client, _, api_key = single_user_client
+    monkeypatch.setattr(character_db, "client_id", str(get_settings().SINGLE_USER_FIXED_ID))
+    monkeypatch.setitem(client.app.dependency_overrides, get_chacha_db_for_user, lambda: character_db)
+    character_db.upsert_workspace("send-workspace", "Workspace")
+    conversation_id = character_db.add_conversation({
+        "title": "Chat", "scope_type": "workspace", "workspace_id": "send-workspace",
+    })
+    before_parent = character_db.get_workspace("send-workspace")
+    before_chat = character_db.get_conversation_by_id(conversation_id)
+    scheduled = []
+    monkeypatch.setattr(conversation_enrichment, "schedule_auto_tagging", lambda *args, **kwargs: scheduled.append(character_db.in_transaction))
+    response = client.post(
+        f"/api/v1/chats/{conversation_id}/messages", headers={"X-API-KEY": api_key},
+        params={"scope_type": "workspace", "workspace_id": "send-workspace"},
+        json={"role": "user", "content": "Hello {{user}}"},
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["content"] == "Hello User"
+    stored = character_db.get_message_by_id(response.json()["id"])
+    assert stored["content"] == "Hello {{user}}"
+    assert character_db.get_workspace("send-workspace") == before_parent
+    after_chat = character_db.get_conversation_by_id(conversation_id)
+    assert after_chat["version"] == before_chat["version"] + 1
+    assert after_chat["history_version"] == before_chat["history_version"] + 1
+    assert scheduled == [False]
+
+
+@pytest.mark.integration
 @pytest.mark.parametrize("pinned", [None, True])
 def test_workspace_message_edit_rejects_deleted_parent_with_real_auth(
     single_user_client, character_db, monkeypatch, pinned,

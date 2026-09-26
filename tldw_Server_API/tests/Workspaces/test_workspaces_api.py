@@ -6,7 +6,7 @@ import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -610,6 +610,690 @@ def test_workspace_chat_metadata_does_not_lock_child_before_parent(deletion_db, 
         assert exc.value.status_code == 409
     assert db.get_workspace("ws-delete") is None
     assert db.get_conversation_by_id(conversation_id) is None
+
+
+def _send_workspace_message(db, conversation_id, *, role="user", parent_message_id=None, image_base64=None,
+                            content="Sent {{user}}", borrowed_transaction=False):
+    from tldw_Server_API.app.api.v1.endpoints.character_messages import send_message
+    from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import MessageCreate
+
+    # HTTP owns a fresh operation. Borrowed-transaction cases deliberately bypass it.
+    with nullcontext() if borrowed_transaction else chacha_operation(independent=True):
+        return asyncio.run(send_message(
+            message_data=MessageCreate(content=content, role=role, parent_message_id=parent_message_id,
+                                       image_base64=image_base64),
+            chat_id=conversation_id, scope_type="workspace", workspace_id="ws-delete",
+            db=db, current_user=SimpleNamespace(id=db.client_id), idempotency_key=None,
+        ))
+
+
+@pytest.fixture
+def message_send_limiter(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import character_messages
+    from tldw_Server_API.app.core.Character_Chat.character_rate_limiter import CharacterRateLimiter
+    from tldw_Server_API.app.core.Chat import conversation_enrichment
+
+    limiter = CharacterRateLimiter(enabled=False)
+    monkeypatch.setattr(character_messages, "get_character_rate_limiter", lambda: limiter)
+    scheduled = []
+    monkeypatch.setattr(conversation_enrichment, "schedule_auto_tagging", lambda *args, **kwargs: scheduled.append(kwargs))
+    return limiter, scheduled
+
+
+@pytest.mark.parametrize("role", ["user", "assistant", "system"])
+def test_message_send_rejects_deleted_workspace_parent(deletion_db, message_send_limiter, role):
+    db = deletion_db
+    conversation_id, *_ = _seed_deletion_graph(db)
+    assert db.delete_workspace("ws-delete", 1)
+    assert db.upsert_conversation_from_sync(
+        conversation_id=conversation_id, title="Retained", sync_client_id=db.client_id,
+        object_revision=5, object_hash="retained", scope_type="workspace", workspace_id="ws-delete",
+    )
+    before = _message_edit_snapshot(db)
+    with pytest.raises(HTTPException) as exc:
+        _send_workspace_message(db, conversation_id, role=role)
+    assert exc.value.status_code == 409
+    assert _message_edit_snapshot(db) == before
+    assert message_send_limiter[1] == []
+
+
+@pytest.mark.parametrize("failure", ["metadata_bump", "metadata_false", "response"])
+def test_message_send_failure_rolls_back_all_writes(deletion_db, monkeypatch, message_send_limiter, failure):
+    from tldw_Server_API.app.api.v1.endpoints import character_messages
+
+    db = deletion_db
+    conversation_id, *_ = _seed_deletion_graph(db)
+    before = _message_edit_snapshot(db)
+
+    def fail(*args, **kwargs):
+        raise CharactersRAGDBError("injected send failure")
+
+    if failure == "metadata_bump":
+        monkeypatch.setattr(db, "update_conversation", fail)
+    elif failure == "metadata_false":
+        monkeypatch.setattr(db, "update_conversation", lambda *args, **kwargs: False)
+    else:
+        monkeypatch.setattr(character_messages, "_convert_db_message_to_response", fail)
+    with pytest.raises(HTTPException) as exc:
+        _send_workspace_message(db, conversation_id)
+    assert exc.value.status_code == 500
+    assert _message_edit_snapshot(db) == before
+    assert message_send_limiter[1] == []
+
+
+@pytest.mark.parametrize("new_identity", ["global", "other_workspace", "other_owner", "trashed"])
+def test_message_send_rechecks_locked_identity(deletion_db, monkeypatch, message_send_limiter, new_identity):
+    from tldw_Server_API.app.api.v1.endpoints import character_messages
+
+    db = deletion_db
+    conversation_id, *_ = _seed_deletion_graph(db)
+    db.upsert_workspace("ws-other", "Other")
+    verify = character_messages._verify_conversation_access
+    after_move = {}
+
+    def move_after_preflight(*args, **kwargs):
+        conversation = verify(*args, **kwargs)
+        if new_identity == "trashed":
+            assert db.soft_delete_conversation(conversation_id, conversation["version"])
+        else:
+            assert db.upsert_conversation_from_sync(
+                conversation_id=conversation_id, title="Moved", object_revision=5, object_hash="moved",
+                sync_client_id="other-owner" if new_identity == "other_owner" else db.client_id,
+                scope_type="global" if new_identity == "global" else "workspace",
+                workspace_id=None if new_identity == "global" else "ws-other" if new_identity == "other_workspace" else "ws-delete",
+            )
+        after_move.update(_message_edit_snapshot(db))
+        return conversation
+
+    monkeypatch.setattr(character_messages, "_verify_conversation_access", move_after_preflight)
+    with pytest.raises(HTTPException) as exc:
+        _send_workspace_message(db, conversation_id)
+    assert exc.value.status_code == 404
+    assert _message_edit_snapshot(db) == after_move
+
+
+@pytest.mark.parametrize("role", ["user", "assistant", "system"])
+def test_message_send_rechecks_configured_cap_after_preflight(deletion_db, monkeypatch, message_send_limiter, role):
+    db = deletion_db
+    conversation_id, *_ = _seed_deletion_graph(db)
+    limiter, scheduled = message_send_limiter
+    from tldw_Server_API.app.core.Character_Chat.character_rate_limiter import CharacterRateLimiter
+
+    limiter._limits = CharacterRateLimiter(max_messages_per_chat=3, enabled=False)._limits
+    check = limiter.check_message_limit
+    after_fill = {}
+
+    async def fill_after_preflight(*args, **kwargs):
+        await check(*args, **kwargs)
+        db.add_message({"conversation_id": conversation_id, "sender": "user", "content": "Filled cap"})
+        after_fill.update(_message_edit_snapshot(db))
+
+    monkeypatch.setattr(limiter, "check_message_limit", fill_after_preflight)
+    with pytest.raises(HTTPException) as exc:
+        _send_workspace_message(db, conversation_id, role=role)
+    assert exc.value.status_code == 403
+    assert _message_edit_snapshot(db) == after_fill
+    assert scheduled == []
+
+
+@pytest.mark.parametrize("parent_change", ["deleted", "moved"])
+def test_message_send_rechecks_reply_parent(deletion_db, monkeypatch, message_send_limiter, parent_change):
+    from tldw_Server_API.app.api.v1.endpoints import character_messages
+
+    db = deletion_db
+    conversation_id, message_ids, *_ = _seed_deletion_graph(db)
+    destination = db.add_conversation({"title": "Other"})
+    verify = character_messages._verify_message_access
+    after_change = {}
+
+    def change_after_preflight(*args, **kwargs):
+        message = verify(*args, **kwargs)
+        with db.transaction() as conn:
+            if parent_change == "deleted":
+                conn.execute("UPDATE messages SET deleted = TRUE WHERE id = ?", (message_ids[0],))
+            else:
+                conn.execute("UPDATE messages SET conversation_id = ? WHERE id = ?", (destination, message_ids[0]))
+        after_change.update(_message_edit_snapshot(db))
+        return message
+
+    monkeypatch.setattr(character_messages, "_verify_message_access", change_after_preflight)
+    with pytest.raises(HTTPException) as exc:
+        _send_workspace_message(db, conversation_id, parent_message_id=message_ids[0])
+    assert exc.value.status_code in {404, 409}
+    assert _message_edit_snapshot(db) == after_change
+    assert message_send_limiter[1] == []
+
+
+def test_message_send_endpoint_does_not_borrow_outer_transaction(deletion_db, message_send_limiter):
+    db = deletion_db
+    conversation_id, *_ = _seed_deletion_graph(db)
+    before = _message_edit_snapshot(db)
+    with db.transaction():
+        with pytest.raises(HTTPException) as exc:
+            _send_workspace_message(db, conversation_id, borrowed_transaction=True)
+        assert exc.value.status_code == 409
+        assert _message_edit_snapshot(db) == before
+    assert message_send_limiter[1] == []
+
+
+def test_message_send_scheduling_failure_does_not_fail_committed_send(deletion_db, monkeypatch, message_send_limiter):
+    from tldw_Server_API.app.core.Chat import conversation_enrichment
+
+    db = deletion_db
+    conversation_id, *_ = _seed_deletion_graph(db)
+    before = db.get_conversation_by_id(conversation_id)
+
+    def fail(*args, **kwargs):
+        raise CharactersRAGDBError("injected postcommit scheduling failure")
+
+    monkeypatch.setattr(conversation_enrichment, "schedule_auto_tagging", fail)
+    response = _send_workspace_message(db, conversation_id)
+    assert db.get_message_by_id(response.id)["content"] == "Sent {{user}}"
+    after = db.get_conversation_by_id(conversation_id)
+    assert after["history_version"] == before["history_version"] + 1
+    assert after["version"] == before["version"] + 1
+
+
+def test_message_send_enrichment_runs_after_commit_and_lock_release(deletion_db, monkeypatch, message_send_limiter):
+    from tldw_Server_API.app.core.Character_Chat.modules import character_chat
+    from tldw_Server_API.app.core.Chat import conversation_enrichment
+
+    db = deletion_db
+    conversation_id, *_ = _seed_deletion_graph(db)
+    observed = []
+
+    def inspect(*args, **kwargs):
+        lock = character_chat.get_message_publication_lock(conversation_id)
+        acquired = lock.acquire(blocking=False)
+        try:
+            observed.append((db.in_transaction, acquired, db.count_messages_for_conversation(conversation_id)))
+        finally:
+            if acquired:
+                lock.release()
+
+    monkeypatch.setattr(conversation_enrichment, "schedule_auto_tagging", inspect)
+    response = _send_workspace_message(db, conversation_id)
+    assert response.content == "Sent User"
+    assert observed == [(False, True, 3)]
+
+
+@pytest.mark.parametrize("is_user_message", [False, True])
+@pytest.mark.parametrize("explicit_operation", [False, True])
+def test_message_send_strict_helper_joins_caller_transaction_without_scheduling(
+    deletion_db, monkeypatch, message_send_limiter, is_user_message, explicit_operation,
+):
+    from tldw_Server_API.app.core.Character_Chat.modules import character_chat
+    from tldw_Server_API.app.core.Character_Chat.modules.character_chat import post_message_to_conversation
+
+    db = deletion_db
+    conversation_id, *_ = _seed_deletion_graph(db)
+    before = _message_edit_snapshot(db)
+
+    class AbortPublication(Exception):
+        pass
+
+    def unexpected_lock(*args, **kwargs):
+        pytest.fail("Borrowed publication must not reacquire the process lock")
+
+    with chacha_operation(independent=True) if explicit_operation else nullcontext(), character_chat.get_message_publication_lock(conversation_id):
+        monkeypatch.setattr(character_chat, "get_message_publication_lock", unexpected_lock)
+        with pytest.raises(AbortPublication):
+            with db.transaction() as conn:
+                created_id = post_message_to_conversation(
+                    db, conversation_id, "Deletion Char", "Borrowed", is_user_message,
+                    owner_user_id=db.client_id, conn=conn,
+                )
+                assert db.get_message_by_id(created_id)["content"] == "Borrowed"
+                assert message_send_limiter[1] == []
+                raise AbortPublication
+    assert _message_edit_snapshot(db) == before
+
+
+@pytest.mark.parametrize("commit_delete", [False, True])
+def test_message_send_waits_for_workspace_deletion(deletion_db, monkeypatch, message_send_limiter, commit_delete):
+    from tldw_Server_API.app.api.v1.endpoints import character_messages
+
+    db = deletion_db
+    conversation_id, *_ = _seed_deletion_graph(db)
+    preflight, proceed, attempting = threading.Event(), threading.Event(), threading.Event()
+    verify = character_messages._verify_conversation_access
+
+    def pause_after_preflight(*args, **kwargs):
+        conversation = verify(*args, **kwargs)
+        preflight.set()
+        assert proceed.wait(10)
+        attempting.set()
+        return conversation
+
+    def send():
+        try:
+            return _send_workspace_message(db, conversation_id)
+        finally:
+            db.close_connection()
+
+    class AbortDeletion(Exception):
+        pass
+
+    monkeypatch.setattr(character_messages, "_verify_conversation_access", pause_after_preflight)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(send)
+        try:
+            assert preflight.wait(10)
+            try:
+                with db.transaction():
+                    assert db.delete_workspace("ws-delete", 1)
+                    after_delete = _message_edit_snapshot(db)
+                    proceed.set()
+                    assert attempting.wait(10)
+                    with pytest.raises(FutureTimeout):
+                        future.result(timeout=0.2)
+                    if not commit_delete:
+                        raise AbortDeletion
+            except AbortDeletion:
+                pass
+        finally:
+            proceed.set()
+        if commit_delete:
+            with pytest.raises(HTTPException) as exc:
+                future.result(timeout=10)
+            assert exc.value.status_code == 409
+            assert _message_edit_snapshot(db) == after_delete
+            assert message_send_limiter[1] == []
+        else:
+            assert future.result(timeout=10).content == "Sent User"
+            assert db.count_messages_for_conversation(conversation_id) == 3
+            assert len(message_send_limiter[1]) == 1
+
+
+@pytest.mark.parametrize("commit_send", [False, True])
+def test_workspace_deletion_waits_for_message_send(deletion_db, monkeypatch, message_send_limiter, commit_send):
+    from tldw_Server_API.app.api.v1.endpoints import character_messages
+
+    db = deletion_db
+    conversation_id, *_ = _seed_deletion_graph(db)
+    hydrating, finish_send, deleting = threading.Event(), threading.Event(), threading.Event()
+    convert = character_messages._convert_db_message_to_response
+
+    def pause_response(*args, **kwargs):
+        response = convert(*args, **kwargs)
+        hydrating.set()
+        assert finish_send.wait(10)
+        if not commit_send:
+            raise CharactersRAGDBError("injected publication rollback")
+        return response
+
+    def send():
+        try:
+            return _send_workspace_message(db, conversation_id)
+        finally:
+            db.close_connection()
+
+    def delete():
+        try:
+            deleting.set()
+            return db.delete_workspace("ws-delete", 1)
+        finally:
+            db.close_connection()
+
+    monkeypatch.setattr(character_messages, "_convert_db_message_to_response", pause_response)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        sending = executor.submit(send)
+        try:
+            assert hydrating.wait(10)
+            deletion = executor.submit(delete)
+            assert deleting.wait(10)
+            with pytest.raises(FutureTimeout):
+                deletion.result(timeout=0.2)
+        finally:
+            finish_send.set()
+        if commit_send:
+            assert sending.result(timeout=10).content == "Sent User"
+        else:
+            with pytest.raises(HTTPException) as exc:
+                sending.result(timeout=10)
+            assert exc.value.status_code == 500
+            assert message_send_limiter[1] == []
+        assert deletion.result(timeout=10)
+    retained = [dict(row) for row in db.execute_query(
+        "SELECT * FROM messages WHERE conversation_id = ?", (conversation_id,),
+    ).fetchall()]
+    assert len(retained) == (3 if commit_send else 2)
+    assert all(message["deleted"] for message in retained)
+
+
+@pytest.mark.parametrize("role", ["user", "assistant", "system"])
+def test_message_send_concurrent_cap_is_serialized(deletion_db, monkeypatch, message_send_limiter, role):
+    from tldw_Server_API.app.core.Character_Chat.character_rate_limiter import CharacterRateLimiter
+
+    db = deletion_db
+    conversation_id, *_ = _seed_deletion_graph(db)
+    limiter, scheduled = message_send_limiter
+    limiter._limits = CharacterRateLimiter(max_messages_per_chat=3, enabled=False)._limits
+    check = limiter.check_message_limit
+    barrier = threading.Barrier(2)
+
+    async def both_pass_preflight(*args, **kwargs):
+        await check(*args, **kwargs)
+        barrier.wait(timeout=10)
+
+    def send():
+        try:
+            try:
+                return _send_workspace_message(db, conversation_id, role=role)
+            except HTTPException as exc:
+                return exc
+        finally:
+            db.close_connection()
+
+    monkeypatch.setattr(limiter, "check_message_limit", both_pass_preflight)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(send) for _ in range(2)]
+        results = [future.result(timeout=15) for future in futures]
+    assert sum(isinstance(result, HTTPException) and result.status_code == 403 for result in results) == 1
+    assert db.count_messages_for_conversation(conversation_id) == 3
+    assert len(scheduled) == 1
+
+
+@pytest.mark.parametrize("deletion_db", ["postgresql"], indirect=True)
+def test_message_send_reply_lock_precedes_conversation_lock(deletion_db, monkeypatch, message_send_limiter):
+    db = deletion_db
+    conversation_id, message_ids, *_ = _seed_deletion_graph(db)
+    attempting = threading.Event()
+    lock = db.lock_message_for_edit
+
+    def observe(*args, **kwargs):
+        attempting.set()
+        return lock(*args, **kwargs)
+
+    def send():
+        try:
+            return _send_workspace_message(db, conversation_id, parent_message_id=message_ids[0])
+        finally:
+            db.close_connection()
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        with db.transaction() as conn:
+            db._lock_workspace_for_content_write(conn, "ws-delete")
+            lock(message_ids[0], conn=conn)
+            monkeypatch.setattr(db, "lock_message_for_edit", observe)
+            future = executor.submit(send)
+            assert attempting.wait(10)
+            with pytest.raises(FutureTimeout):
+                future.result(timeout=0.2)
+            db.get_roleplay_resume_state(conversation_id, conn=conn, lock_for_update=True)
+            assert db.update_message(message_ids[0], {"content": "Edited parent"}, 1, conn=conn)
+        assert future.result(timeout=10).parent_message_id == message_ids[0]
+
+
+def test_message_send_response_sql_failure_rolls_back(deletion_db, monkeypatch, message_send_limiter):
+    db = deletion_db
+    conversation_id, *_ = _seed_deletion_graph(db)
+    before = _message_edit_snapshot(db)
+    execute = db.execute_query
+    update = db.update_conversation
+    ready = False
+
+    def mark_updated(*args, **kwargs):
+        nonlocal ready
+        result = update(*args, **kwargs)
+        ready = True
+        return result
+
+    def fail_sql(query, *args, **kwargs):
+        if ready and "FROM message_images" in query:
+            return execute("SELECT * FROM missing_send_response_table")
+        return execute(query, *args, **kwargs)
+
+    monkeypatch.setattr(db, "update_conversation", mark_updated)
+    monkeypatch.setattr(db, "execute_query", fail_sql)
+    with pytest.raises(HTTPException) as exc:
+        _send_workspace_message(db, conversation_id)
+    assert exc.value.status_code == 500
+    assert _message_edit_snapshot(db) == before
+    assert message_send_limiter[1] == []
+
+
+def test_message_send_image_only_preserves_parent_and_limits(deletion_db, monkeypatch, message_send_limiter):
+    from tldw_Server_API.app.core.Character_Chat.modules import character_chat
+
+    db = deletion_db
+    conversation_id, *_ = _seed_deletion_graph(db)
+    parent = db.get_workspace("ws-delete")
+    image = "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+    response = _send_workspace_message(db, conversation_id, content=None, image_base64=image)
+    stored = db.get_message_by_id(response.id, strict_images=True)
+    assert stored["image_data"] == base64.b64decode(image)
+    assert stored["image_mime_type"] == "image/gif"
+    assert response.has_image is True
+    assert db.get_workspace("ws-delete") == parent
+    before = _message_edit_snapshot(db)
+    monkeypatch.setattr(character_chat, "settings", {"MAX_PERSIST_CONTENT_LENGTH": 4})
+    with pytest.raises(HTTPException) as exc:
+        _send_workspace_message(db, conversation_id, content="Too long")
+    assert exc.value.status_code == 400
+    assert _message_edit_snapshot(db) == before
+    assert len(message_send_limiter[1]) == 1
+
+
+def test_message_send_commit_boundary_failure_rolls_back(deletion_db, monkeypatch, message_send_limiter):
+    db = deletion_db
+    conversation_id, *_ = _seed_deletion_graph(db)
+    before = _message_edit_snapshot(db)
+    transaction = db.transaction
+    published = False
+    add = db.add_message
+
+    def mark_published(*args, **kwargs):
+        nonlocal published
+        result = add(*args, **kwargs)
+        published = True
+        return result
+
+    @contextmanager
+    def fail_before_commit():
+        outermost = (
+            not db.in_transaction if db.backend_type == BackendType.SQLITE
+            else getattr(db._connection_state(), "tx_depth", 0) == 0
+        )
+        with transaction() as conn:
+            yield conn
+            if published and outermost:
+                raise CharactersRAGDBError("injected failure at publication commit boundary")
+
+    monkeypatch.setattr(db, "add_message", mark_published)
+    monkeypatch.setattr(db, "transaction", fail_before_commit)
+    with pytest.raises(HTTPException) as exc:
+        _send_workspace_message(db, conversation_id)
+    assert exc.value.status_code == 500
+    assert _message_edit_snapshot(db) == before
+    assert message_send_limiter[1] == []
+
+
+@pytest.mark.parametrize("deletion_db", ["postgresql"], indirect=True)
+def test_message_send_claims_workspace_before_reply_and_conversation(deletion_db, monkeypatch, message_send_limiter):
+    db = deletion_db
+    conversation_id, message_ids, *_ = _seed_deletion_graph(db)
+    parent_claimed, finish_delete, attempting = threading.Event(), threading.Event(), threading.Event()
+    get_messages = db.get_messages_for_conversation
+    lock_parent = db._lock_workspace_for_content_write
+
+    def pause_before_children(*args, **kwargs):
+        parent_claimed.set()
+        assert finish_delete.wait(10)
+        return get_messages(*args, **kwargs)
+
+    def observe_parent(conn, workspace_id):
+        attempting.set()
+        return lock_parent(conn, workspace_id)
+
+    def delete():
+        try:
+            return db.delete_workspace("ws-delete", 1)
+        finally:
+            db.close_connection()
+
+    def send():
+        try:
+            return _send_workspace_message(db, conversation_id, parent_message_id=message_ids[0])
+        finally:
+            db.close_connection()
+
+    monkeypatch.setattr(db, "get_messages_for_conversation", pause_before_children)
+    monkeypatch.setattr(db, "_lock_workspace_for_content_write", observe_parent)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        deleting = executor.submit(delete)
+        try:
+            assert parent_claimed.wait(10)
+            sending = executor.submit(send)
+            assert attempting.wait(10)
+            with pytest.raises(FutureTimeout):
+                sending.result(timeout=0.2)
+        finally:
+            finish_delete.set()
+        assert deleting.result(timeout=10)
+        with pytest.raises(HTTPException) as exc:
+            sending.result(timeout=10)
+        assert exc.value.status_code == 409
+
+
+@pytest.mark.parametrize("deletion_db", ["postgresql"], indirect=True)
+@pytest.mark.parametrize("strict_helper", [False, True])
+@pytest.mark.parametrize("native_kind", ["backend", "raw"])
+def test_message_send_rejects_native_backend_transaction_without_committing(
+    deletion_db, monkeypatch, message_send_limiter, strict_helper, native_kind,
+):
+    from tldw_Server_API.app.api.v1.endpoints import character_messages
+    from tldw_Server_API.app.core.Character_Chat.modules.character_chat import post_message_to_conversation
+
+    db = deletion_db
+    conversation_id, *_ = _seed_deletion_graph(db)
+    before = _message_edit_snapshot(db)
+    connection = db.get_connection()
+    connection.rollback()
+
+    @contextmanager
+    def caller_transaction():
+        if native_kind == "backend":
+            with connection._backend.transaction(connection=connection._connection):
+                yield
+        else:
+            connection.execute("BEGIN")
+            try:
+                yield
+            finally:
+                connection.rollback()
+
+    def unexpected_lock(*args, **kwargs):
+        pytest.fail("Publication must reject borrowed transactions before acquiring a process lock")
+
+    monkeypatch.setattr(character_messages, "get_message_publication_lock", unexpected_lock)
+
+    class AbortCaller(Exception):
+        pass
+
+    with pytest.raises(AbortCaller):
+        with caller_transaction():
+            connection.execute("UPDATE workspaces SET name = ? WHERE id = ?", ("Caller pending", "ws-delete"))
+            if strict_helper:
+                with pytest.raises(InputError, match="transaction"):
+                    post_message_to_conversation(
+                        db, conversation_id, "Deletion Char", "Must not publish", True,
+                        conn=connection, owner_user_id=db.client_id,
+                    )
+            else:
+                with pytest.raises(HTTPException) as exc:
+                    _send_workspace_message(db, conversation_id, borrowed_transaction=True)
+                assert exc.value.status_code == 409
+            assert db.get_workspace("ws-delete")["name"] == "Caller pending"
+            raise AbortCaller
+    assert _message_edit_snapshot(db) == before
+    assert message_send_limiter[1] == []
+
+
+def test_message_send_cap_is_database_serialized_without_shared_process_lock(deletion_db, monkeypatch, message_send_limiter):
+    from tldw_Server_API.app.api.v1.endpoints import character_messages
+    from tldw_Server_API.app.core.Character_Chat.character_rate_limiter import CharacterRateLimiter
+
+    db = deletion_db
+    conversation_id, *_ = _seed_deletion_graph(db)
+    limiter, scheduled = message_send_limiter
+    limiter._limits = CharacterRateLimiter(max_messages_per_chat=3, enabled=False)._limits
+    check = limiter.check_message_limit
+    barrier = threading.Barrier(2)
+
+    async def preflight(*args, **kwargs):
+        await check(*args, **kwargs)
+        barrier.wait(timeout=10)
+
+    def send():
+        try:
+            try:
+                return _send_workspace_message(db, conversation_id, role="assistant")
+            except HTTPException as exc:
+                return exc
+        finally:
+            db.close_connection()
+
+    monkeypatch.setattr(limiter, "check_message_limit", preflight)
+    # Independent locks model workers in separate processes, proving DB admission.
+    monkeypatch.setattr(character_messages, "get_message_publication_lock", lambda _: threading.Lock())
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(send) for _ in range(2)]
+        results = [future.result(timeout=15) for future in futures]
+    assert sum(isinstance(result, HTTPException) and result.status_code == 403 for result in results) == 1
+    assert db.count_messages_for_conversation(conversation_id) == 3
+    assert len(scheduled) == 1
+
+
+@pytest.mark.parametrize("invalid_connection", ["idle", "foreign"])
+def test_message_send_strict_helper_rejects_unsupported_connection(deletion_db, message_send_limiter, invalid_connection):
+    from tldw_Server_API.app.core.Character_Chat.modules.character_chat import post_message_to_conversation
+
+    db = deletion_db
+    conversation_id, *_ = _seed_deletion_graph(db)
+    before = _message_edit_snapshot(db)
+    with chacha_operation(independent=True):
+        context = db.transaction() if invalid_connection == "foreign" else nullcontext()
+        with context:
+            connection = object() if invalid_connection == "foreign" else db.get_connection()
+            with pytest.raises(InputError, match="transaction"):
+                post_message_to_conversation(db, conversation_id, "Deletion Char", "Must not publish", True, conn=connection)
+    assert _message_edit_snapshot(db) == before
+    assert message_send_limiter[1] == []
+
+
+@pytest.mark.parametrize("deletion_db", ["postgresql"], indirect=True)
+def test_message_send_driver_commit_failure_rolls_back(deletion_db, monkeypatch, message_send_limiter):
+    db = deletion_db
+    conversation_id, *_ = _seed_deletion_graph(db)
+    before = _message_edit_snapshot(db)
+    connection_type = type(db.get_connection()._connection)
+    commit = connection_type.commit
+    add = db.add_message
+    published = False
+    failed = False
+
+    def mark_published(*args, **kwargs):
+        nonlocal published
+        result = add(*args, **kwargs)
+        published = True
+        return result
+
+    def fail_commit(connection):
+        nonlocal failed
+        if published and not failed:
+            failed = True
+            raise OSError("injected driver commit failure")
+        return commit(connection)
+
+    monkeypatch.setattr(db, "add_message", mark_published)
+    monkeypatch.setattr(connection_type, "commit", fail_commit)
+    with pytest.raises(HTTPException) as exc:
+        _send_workspace_message(db, conversation_id)
+    assert failed is True
+    assert exc.value.status_code == 500
+    assert _message_edit_snapshot(db) == before
+    assert message_send_limiter[1] == []
 
 
 def _edit_workspace_message(db, message_id, *, pinned=None, content="Edited", workspace_scoped=True):

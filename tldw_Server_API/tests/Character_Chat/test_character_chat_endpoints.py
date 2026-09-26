@@ -2,14 +2,14 @@
 Integration tests for Character Chat endpoints: sessions, messages, and world books.
 """
 
-import asyncio
 import os
 import shutil
 import tempfile
-from datetime import datetime, timezone
-import pytest
-import httpx
 import uuid as _uuid
+from datetime import datetime, timezone
+
+import httpx
+import pytest
 
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 
@@ -131,7 +131,9 @@ async def test_character_chat_flow_sessions_messages_worldbooks():
 
             # 3b) Chat settings read/write
             r = await client.get(f"/api/v1/chats/{chat_id}/settings", headers=headers)
-            assert r.status_code == 404
+            assert r.status_code == 200
+            assert r.json()["conversation_id"] == chat_id
+            assert isinstance(r.json()["settings"], dict)
 
             settings_payload = {
                 "settings": {
@@ -644,8 +646,7 @@ async def test_edit_message_returns_generic_500_for_db_error(monkeypatch):
     os.environ["USER_DB_BASE_DIR"] = tmpdir
 
     try:
-        from tldw_Server_API.app.api.v1.endpoints import character_messages as character_messages_endpoint
-        from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError
+        from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
         from tldw_Server_API.app.main import app
 
         settings = get_settings()
@@ -672,13 +673,13 @@ async def test_edit_message_returns_generic_500_for_db_error(monkeypatch):
             assert message_resp.status_code == 201
             message = message_resp.json()
 
-            def fake_edit_message_content(*args, **kwargs):
+            def fake_update_message(*args, **kwargs):
                 raise CharactersRAGDBError("message edit backend unavailable")
 
             monkeypatch.setattr(
-                character_messages_endpoint,
-                "edit_message_content",
-                fake_edit_message_content,
+                CharactersRAGDB,
+                "update_message",
+                fake_update_message,
             )
 
             response = await client.put(
@@ -690,6 +691,10 @@ async def test_edit_message_returns_generic_500_for_db_error(monkeypatch):
 
             assert response.status_code == 500
             assert response.json()["detail"] == "Failed to edit message"
+            stored = await client.get(f"/api/v1/messages/{message['id']}", headers=headers)
+            assert stored.status_code == 200
+            assert stored.json()["content"] == "Original"
+            assert stored.json()["version"] == message["version"]
     finally:
         try:
             shutil.rmtree(tmpdir, ignore_errors=True)
@@ -703,8 +708,7 @@ async def test_edit_message_maps_conflict_error_to_409(monkeypatch):
     os.environ["USER_DB_BASE_DIR"] = tmpdir
 
     try:
-        from tldw_Server_API.app.api.v1.endpoints import character_messages as character_messages_endpoint
-        from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError
+        from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError
         from tldw_Server_API.app.main import app
 
         settings = get_settings()
@@ -731,13 +735,13 @@ async def test_edit_message_maps_conflict_error_to_409(monkeypatch):
             assert message_resp.status_code == 201
             message = message_resp.json()
 
-            def fake_edit_message_content(*args, **kwargs):
+            def fake_update_message(*args, **kwargs):
                 raise ConflictError("message edit conflict")
 
             monkeypatch.setattr(
-                character_messages_endpoint,
-                "edit_message_content",
-                fake_edit_message_content,
+                CharactersRAGDB,
+                "update_message",
+                fake_update_message,
             )
 
             response = await client.put(
@@ -749,6 +753,10 @@ async def test_edit_message_maps_conflict_error_to_409(monkeypatch):
 
             assert response.status_code == 409
             assert response.json()["detail"] == "message edit conflict"
+            stored = await client.get(f"/api/v1/messages/{message['id']}", headers=headers)
+            assert stored.status_code == 200
+            assert stored.json()["content"] == "Original"
+            assert stored.json()["version"] == message["version"]
     finally:
         try:
             shutil.rmtree(tmpdir, ignore_errors=True)
@@ -878,9 +886,9 @@ async def test_chat_endpoint_lists_linked_research_runs():
     os.environ["USER_DB_BASE_DIR"] = tmpdir
 
     try:
-        from tldw_Server_API.app.main import app
-        from tldw_Server_API.app.core.Research.service import ResearchService
         from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+        from tldw_Server_API.app.core.Research.service import ResearchService
+        from tldw_Server_API.app.main import app
 
         class DummyJobs:
             def create_job(self, **kwargs):

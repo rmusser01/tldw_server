@@ -510,3 +510,81 @@ direct Sync, generic message writers, other settings/runtime/root/inventory/
 membership/study/migration writers and durable sharing cleanup are not certified
 by this edit-only slice. No WebUI/CDP or full-project acceptance is claimed.
 All verification processes and the reviewer have finished.
+
+## Primary Workspace Message Send Admission
+
+The next September 26 slice fences only workspace-scoped, non-Sync
+`POST /api/v1/chats/{chat_id}/messages`. The endpoint checks transaction ownership
+before preflight reads: SQLite transactions, ChaCha/native PostgreSQL managed
+depth, and non-IDLE PostgreSQL driver state all reject as borrowed. This avoids
+committing another caller's pending work, including raw `BEGIN`. HTTP's existing
+middleware provides a fresh operation; direct endpoint tests now model that
+ownership, while borrowed-transaction tests deliberately retain the caller's
+checkout. PostgreSQL cannot distinguish an existing implicit read transaction
+from raw BEGIN, so both reject at entry; the endpoint's own later preflight
+reads are not classified as borrowed.
+
+Publication takes the process limit lock before its database transaction, then
+the workspace parent, an optional existing reply message, and the conversation.
+Owner/scope and reply identity are checked under locks. The configured cap is
+rechecked for every accepted role under the conversation lock, without awaiting
+inside the critical section. Independent test locks model separate workers and
+prove that the database, not just process serialization, protects the final slot.
+
+`post_message_to_conversation(conn=...)` is an additive strict persistence mode.
+It requires a current-operation transaction connection before inserting; native,
+idle and foreign connections outside that contract reject. Its metadata reads
+and nested updates are safe only under that verified ownership. It does not
+reacquire the process lock, commit, or schedule enrichment. Callers must propagate
+errors to their outer owner rather than catch and commit partial SQLite writes.
+Legacy calls retain the string-ID return and best-effort behavior. Global Sync,
+completion, and recipient-owned shared chat contracts are not changed.
+
+Message/attachments, history advancement, conversation metadata and strict
+response hydration share the transaction. The response model is constructed
+before commit; this is not a guarantee of successful network delivery or
+idempotent retry. The non-Sync path still does not implement Idempotency-Key.
+Enrichment is triggered only after commit and process-lock release, and trigger
+errors cannot report a committed message as an HTTP failure. **Moving the
+trigger does not fence enrichment's own writes**: tagging/keyword coordination
+and clustering remain a separate writer family. Tagging is not silently removed.
+Owned routes remain disabled until these and the other outstanding boundaries
+are certified.
+
+Review reproduced and addressed native-backend ownership bypass (two failures)
+and raw-BEGIN bypass (one failure). Initial domain/rollback/cap/reply contracts
+produced 34 expected failures before implementation. Final boundary verification
+passes 142 SQLite/PostgreSQL cases without skips (four warnings, 156.96 seconds):
+`/tmp/workspace-send-final.log` and `.xml`. This includes an actual PostgreSQL
+driver commit fault, explicit operation scopes, invalid connection rejection,
+and rollback after metadata or response failure. Final real-authentication HTTP
+verification passes four cases (147 deselected, eleven warnings, 19.14 seconds):
+`/tmp/workspace-send-http-reviewed.log` and `.xml`. These credential cases use
+SQLite and isolated AuthNZ bootstrap; they are not PostgreSQL/JWT or live CDP
+acceptance.
+
+Three legacy endpoint failures reproduce at the exact pre-change commit
+`32d6c9072f8b32c51d9773847e56c26b6d764f02`. Two target a removed edit helper;
+the third expects absent settings even though creation initializes them. The
+tests now inject faults at the actual database update, retain exact HTTP error
+assertions and verify unchanged stored content/version, and assert the canonical
+initialized settings response. The focused correction passes three cases:
+`/tmp/workspace-send-baseline.log` and `/tmp/workspace-send-legacy-fixed.log`.
+Final affected regression passes 124 cases, with one pre-existing module-level
+skip and 24 warnings, exit 0 in 1588.36 seconds:
+`/tmp/workspace-send-regression-final.log` and `.xml`. It covers legacy HTTP
+endpoints, message storage, limiter units, completion prechecks, stream lookup,
+enrichment, and SQLite/PostgreSQL operation/transaction lifecycle. The dedicated
+legacy rate-limit module requires `TEST_MODE=0` and is intentionally skipped by
+the established `TEST_MODE=1` fixture; this slice's configured cap and independent
+worker races were exercised in the separate real-backend boundary suite. Counts
+overlap across runs and are not a unique-test total. Background teardown was
+slow, but the process finished normally; no checks were cancelled or disabled.
+
+Independent production and test review has no remaining findings. Ruff and
+Python compilation pass for all seven touched Python files; scoped production
+Bandit reports zero findings/errors (`/tmp/workspace-send-final-bandit.json`).
+No full workstream completion or WebUI/CDP acceptance is claimed by this
+checkpoint.
+All verification processes and the reviewer have finished. TASK-12020.50
+remains In Progress and the owned route remains disabled.
