@@ -1,5 +1,7 @@
 # ADR-023: Data Tables Backend Storage, Jobs, And Exports
 
+**Task identity note (2026-09-25):** TASK-2272 is now TASK-12693. See the [task-reference reconciliation](inventory/2026-09-25-adr-task-reference-reconciliation.md). Original references elsewhere in this record remain historical.
+
 **Status:** Accepted
 **Date:** 2026-06-07
 **Backfilled from:** `Docs/Design/Data_Tables_Backend.md`

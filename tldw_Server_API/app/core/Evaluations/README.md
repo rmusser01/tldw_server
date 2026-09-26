@@ -51,6 +51,7 @@ The Evaluations module provides a unified, API- and CLI-driven system for model 
   - Infra: `connection_pool.py`, `db_adapter.py`, `circuit_breaker.py`
 
 - Database & Storage
+  - Persistence decision: [ADR-048](../../../../Docs/ADR/048-backend-aware-evaluations-persistence.md) covers EvaluationsDatabase's SQLite/PostgreSQL structured-storage boundary and its explicit compatibility caveats.
   - DB manager: `DB_Management/Evaluations_DB.py` with optional PostgreSQL backend and RLS policies
   - Per-user DB paths via `db_path_utils.DatabasePaths.get_evaluations_db_path(user_id)`
   - Idempotency store for evaluations/runs/A/B tests; admin cleanup endpoint available

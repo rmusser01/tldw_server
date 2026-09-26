@@ -79,5 +79,8 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-045](045-persona-live-pending-plan-handoff.md) | Accepted | Project the latest active owned pending Persona plan through authenticated session detail for explicit full Live review. |
 | [ADR-046](046-persona-live-conversation-and-voice-runtime.md) | Accepted | Reuse authenticated Chat admission for Live conversation and require owned runtime preparation before voice capture. |
 | [ADR-047](047-per-user-audio-preset-ownership.md) | Accepted | Store reusable TTS/STT presets as authenticated per-user Audio API state in Media DB, separate from speech outputs and history. |
+| [ADR-048](048-backend-aware-evaluations-persistence.md) | Accepted | Keep EvaluationsDatabase backend-aware with SQLite JSON TEXT, PostgreSQL JSONB, and DB-owned normalization for converted CRUD records. |
 
 The original backfill inventory is [the 2026-06-03 decision inventory](inventory/2026-06-03-decision-inventory.md). See the [2026-09-25 reconciliation](inventory/2026-09-25-decision-inventory-reconciliation.md) for current dispositions of its unresolved rows.
+
+Historical task numbers can have different current owners. Use the [task-reference reconciliation](inventory/2026-09-25-adr-task-reference-reconciliation.md) for verified renames and unresolved or ambiguous identities rather than assuming a bare TASK number still identifies the original work.

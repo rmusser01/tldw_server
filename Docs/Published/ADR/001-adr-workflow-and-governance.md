@@ -1,5 +1,7 @@
 # ADR-001: ADR Workflow And Governance
 
+**Task identity note (2026-09-25):** No verified current mapping is recorded for TASK-506, TASK-507, TASK-508. See the [task-reference reconciliation](inventory/2026-09-25-adr-task-reference-reconciliation.md). Original references elsewhere in this record remain historical.
+
 **Status:** Accepted
 **Date:** 2026-06-02
 **Backfilled from:** not backfilled

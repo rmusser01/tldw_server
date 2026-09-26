@@ -1,5 +1,7 @@
 # ADR-018: Resource Governance Endpoint Policy and Route Map
 
+**Task identity note (2026-09-25):** TASK-2234 is now TASK-12671. See the [task-reference reconciliation](inventory/2026-09-25-adr-task-reference-reconciliation.md). Original references elsewhere in this record remain historical.
+
 **Status:** Accepted
 **Date:** 2026-06-04
 **Backfilled from:** `tldw_Server_API/app/core/Resource_Governance/README.md`
