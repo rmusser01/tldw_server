@@ -4,7 +4,7 @@ title: Plan and implement paired Docker distribution and runtime gateway
 status: In Progress
 assignee: []
 created_date: '2026-09-23 06:15'
-updated_date: '2026-09-26 16:56'
+updated_date: '2026-09-26 17:02'
 labels:
   - distribution
   - docker
@@ -151,6 +151,10 @@ Finalexact builtba12489e0d7b7219140394784d1556cd0bfc0fe5 qualifies localarm and 
 Reopened at the user’s explicit instruction after review: the closure at bff2bb5581 improperly deferred the original Task8 measurement requirement. Prior ba124 Linux proofs remain historical evidence only. Correct the three reviewed technical defects test-first, restore the original requirement, record real measurements and fresh exact-source qualification, and retain full provider/document onboarding as an explicit acceptance checkpoint. No release, merge, publication or changed product scope is authorized.
 
 User-approved corrections restored Task8 measurements and reopened acceptance. Remote/TCP Docker contexts are refused before state initialization with Docker context precedence preserved; paired CI now follows runtime/dependency inputs; hostile browser requests use a 10-second absolute deadline. Measurement records count SHA256-verified local-registry response bytes, per-image filesystem allocation and fresh owned-volume/helper state, plus signed-helper first/repeat authenticated startup with prefetched images. Missing/mismatched/zero records fail the candidate gate. TDD reproduced and fixed a measurement body reader that hid its elapsed bound until EOF. Current Release suite: 226 passed; measurement suite 15 passed; Python Black/Ruff, shell syntax, diff check and production measurement Bandit (zero findings) pass. Full provider/document workflow is explicitly open TASK-13376; TASK-13265 is the completed design. Windows regression execution and fresh exact-source local/native qualification remain required; no closure or publication.
+
+Scoped independent review found an additional real build-input trigger gap for Docs outside Published, README, LICENSE/LICENSES and THIRD_PARTY_NOTICES. Confirmed against Dockerfile.prod COPY directives. Added five regression paths: expected red 5 failures /24 passes; expanded workflow to Docs/** and these root inputs; green29/29, Ruff/Black/diff clean. Awaiting final bounded review assessment before committing this follow-up and rebuilding exact-source candidates.
+
+Bounded independent review of bff2bb5..091145b plus the trigger follow-up now has no remaining code findings and approves fresh qualification after commit/source freeze. Reviewer independently passed measurement15, workflow29, and all5 actual browser transport variants (slow response rejected ~10.15s). Stages A complete/B and C In Progress. Fresh local arm64/native both targets and Windows execution remain mandatory; no task closure/publication.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

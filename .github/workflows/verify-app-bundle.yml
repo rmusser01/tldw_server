@@ -14,6 +14,10 @@ on:
       - packages/tldw_profile_core/**
       - Helper_Scripts/**
       - pyproject.toml
+      - README.md
+      - LICENSE
+      - LICENSES/**
+      - THIRD_PARTY_NOTICES.txt
       - .dockerignore
       - Dockerfiles/Dockerfile.*
       - Dockerfiles/app-bundle/**
@@ -28,7 +32,7 @@ on:
       - apps/package.json
       - apps/bun.lock
       - apps/mcp-unified/src/**
-      - Docs/Published/**
+      - Docs/**
 
 permissions:
   contents: read

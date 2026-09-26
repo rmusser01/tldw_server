@@ -941,7 +941,7 @@ and absolute adversarial-request deadlines using the existing interfaces.
 runtime/dependency changes trigger paired qualification; trickling HTTP responses
 fail within an absolute deadline. Historical evidence is labeled accurately.
 **Tests:** Real helper invocations, workflow path matching and real HTTP regressions.
-**Status:** In Progress
+**Status:** Complete
 
 ### Stage B: Measure and qualify exact candidates
 **Goal:** Record actual compressed image downloads, unpacked image bytes, fresh
@@ -951,7 +951,7 @@ targets, with raw measurement provenance and owned cleanup.
 and browser checks; measurements are not inferred from build duration or .Size.
 **Tests:** Measurement calculation/refusal tests; local arm64 and native amd64/arm64
 qualification; independent signed-artifact verification.
-**Status:** Not Started
+**Status:** In Progress
 
 ### Stage C: Review and record the corrected outcome
 **Goal:** Review amended scope, run targeted tests/lint/Bandit, and update task/docs
@@ -959,4 +959,11 @@ from actual evidence without waiving missing provider/document acceptance.
 **Success Criteria:** Reviewed fixes and measurements are recorded; remaining
 product checkpoints are explicit; task closure meets the original criteria.
 **Tests:** Scoped review and fresh verification evidence.
-**Status:** Not Started
+**Status:** In Progress
+
+The bounded independent review of `bff2bb5..091145b` and its trigger follow-up
+found one omitted-input defect (backend documentation, readme, licenses and
+notices). Five red regressions reproduced it; all 29 trigger cases pass after
+the reviewed correction. No code findings remain. The reviewer independently
+passed 15 measurement tests and all five real-browser transport variants,
+including absolute slow-response rejection. Fresh candidate proof remains open.

@@ -36,6 +36,11 @@ WORKFLOW = Path(__file__).resolve().parents[3] / ".github/workflows/verify-app-b
         "Dockerfiles/entrypoints/tldw-app-first-run.sh",
         ".dockerignore",
         "Docs/Published/API-related/AuthNZ-API-Guide.md",
+        "Docs/Documentation.md",
+        "README.md",
+        "LICENSE",
+        "LICENSES/CC-BY-4.0.txt",
+        "THIRD_PARTY_NOTICES.txt",
     ],
 )
 def test_runtime_build_input_dispatches_paired_qualification(changed_path: str) -> None:

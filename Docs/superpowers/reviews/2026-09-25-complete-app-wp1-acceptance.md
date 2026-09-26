@@ -14,6 +14,18 @@ explicit product acceptance checkpoint; initial wizard progression does not prov
 it. Existing signed candidates below are historical evidence for their exact
 source, not evidence that these corrections are complete.
 
+The bounded correction review of `bff2bb5..091145b` plus its CI-trigger follow-up
+has no remaining code findings. It identified copied backend documentation and
+license inputs missing from the trigger; five red cases reproduced the gap and
+all 29 trigger cases now pass. Release verification passed 226 tests before that
+five-case addition; browser verification passed 59 tests, including the 10-second
+slow-response deadline. Black, Ruff, ESLint, shell syntax and diff checks pass;
+production measurement Bandit reports zero findings. The reviewer independently
+passed 15 measurement cases and all five real-browser transport variants.
+Windows execution and exact corrected local/native artifacts remain unqualified.
+Measurements distinguish actual registry payload bytes from filesystem allocation;
+first/repeat startup uses fresh/retained application state with images prefetched.
+
 ## Historical candidate evidence (2026-09-26)
 
 Historical Linux Docker development qualification passed for exact built source `ba12489e0d7b7219140394784d1556cd0bfc0fe5`. Fresh local arm64 and native amd64/arm64 [CI 36244097597](https://github.com/rmusser01/tldw_server/actions/runs/36244097597) each built four roles and passed the built-backend MCP and setup tests, all 13 lifecycle checks, all 38 browser checks, and owned cleanup. All three candidate raw Ed25519 signatures, production verification, source/platform identities and eight helper hashes independently verify. Both native jobs, required-both job, and Windows helper parser pass. The final review fix wave and Tasks19–23 have scoped independent approval. G2/G4/G10 are true for managed connection and initial wizard progression only; planned_setup_complete remains false, G12 false and promotion refused. Superseded failed/cancelled candidates supply no current acceptance. The two corrected local installs complete without a stall; prior intermittent dependency waiting has no established cause/fix. A later documentation-only branch commit is not the built revision; artifact evidence always names `ba12489e0d`.
