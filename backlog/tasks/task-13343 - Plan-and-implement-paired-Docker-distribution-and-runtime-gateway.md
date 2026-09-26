@@ -4,7 +4,7 @@ title: Plan and implement paired Docker distribution and runtime gateway
 status: In Progress
 assignee: []
 created_date: '2026-09-23 06:15'
-updated_date: '2026-09-26 05:07'
+updated_date: '2026-09-26 05:35'
 labels:
   - distribution
   - docker
@@ -83,6 +83,10 @@ Actual fresh Docker/Chromium regression confirmed at clean inspection commit 079
 Additional actual transport inspection at0790: browser-managed session bootstrap200, notification SSE200 with first chunk and browser cancellation; cookie MCP WebSocket fails upgrade (opened=false close1006). Backend trusted_webui_origins does not include configured public127.0.0.1:18090; wildcard=false. Task10 additionally configures existing ALLOWED_ORIGINS to the exact persisted gateway origin and tests refusal of other origins. No wildcard/global policy change.
 
 Further bounded actual-image inspection: Next documentation manifest500/content404; read-only mount of existing Docs/Published gives200/200, confirming missing runtime content. Added scoped Task11 packaging/API regression checks. Exact ALLOWED_ORIGINS enables cookie audio WebSocket upgrade; MCP still403, and bounded log inspection confirms IP-policy rejection of bridge peer. Task12 will reuse bounded managed hop for MCP local policy and exact MCP origins without disabling allow/block/auth rules. Task13 qualifies remaining actual docs/redirect/upload/SSE/WS/hostile forwarding paths before native CI and final review.
+
+Managed Docker setup fix6e983653e5 passes focused security review,93Python/10metadata/gateway14 checks and productionBandit0. Published documentation fix65fe64ec83 passes scoped review; actual absent-image guard is red, readonlyPublished mount returns manifest/content200 and traversal400. Harmless actual multipartMarkdown process returns200/results1/accepted status/content fidelity, no analysis/chunking or paidcalls. Inspection stack and its owned volumes removed; unrelated PostgreSQL services remain. Task12 shared bounded MCP ingress correction active; Task14 will repair five obsolete whole-WP1 packaging guards before Task13 exact local/native transport qualification. G2/G4/G12 and AC4 remain open; no protected publication.
+
+Task12 committed e5a77d0f83: one shared bounded managed-hop validator, setup reuse, MCP effective-loopback resolution before unchanged allow/block/auth/permissions, raw-peer certificate policy preserved, exact MCP origins.128focusedPython/15realSocketGateway pass,39leanMCP plus60leanSetup pass with productionbypassfalse; Bandit before/after0. Independent security review active; actual clean candidate still required.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

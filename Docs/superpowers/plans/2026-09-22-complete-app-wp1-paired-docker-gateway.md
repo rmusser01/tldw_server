@@ -394,6 +394,28 @@ fixture; wire any exact required evidence into the candidate workflow.
   policy remains separately gated. Review the whole WP1 branch and update final
   acceptance/Backlog records without publishing protected artifacts.
 
+### Task 14: Keep packaging regression guards aligned with paired targets
+
+**Problem:** Five existing Dockerfile regression tests fail at the Task 11 base.
+Four assert the single-builder spelling replaced earlier in WP1; the API
+allowlist omits the intentionally added local profile package. These are not
+Task 11 regressions, but must be resolved before whole-WP1 acceptance.
+
+**Files:** `tldw_Server_API/tests/Utils/test_docker_quickstart_hardening.py`,
+`test_makefile_quickstart_same_origin.py`; lean candidate workflow test wiring.
+Execute this bounded task after Task 12 review and before Task 13 qualification.
+
+- [ ] **Step 1:** Preserve the current red evidence and replace obsolete exact
+  builder/argument spellings with checks of both targets' actual inherited
+  configuration, scoped source copies and ownership. Keep default quickstart
+  same-origin behavior and managed artifact secret/origin independence guarded.
+- [ ] **Step 2:** Extend the API COPY allowlist only for the reviewed local
+  profile package; retain protected-frontend exclusion and legal-file checks.
+  Add meaningful negative fixtures proving the guards still reject unsafe
+  packaging. Do not remove or disable tests or broaden the allowlist.
+- [ ] **Step 3:** Run the focused suite, wire it into lean CI, lint/format and
+  review. Keep real artifact qualification in Task 13.
+
 ## Plan self-review checklist
 
 CI follow-up (September 25): user-authorized branch push bootstrapped the new
