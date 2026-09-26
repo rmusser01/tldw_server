@@ -35,6 +35,13 @@ Examples
     --db-path .benchmarks/email_search_bench.sqlite \
     --workload-trace-file Helper_Scripts/benchmarks/email_search_workload_trace.sample.json \
     --capture-query-plans
+
+  # 5) PostgreSQL (configure an isolated TLDW_CONTENT_PG_* target first)
+  TLDW_CONTENT_DB_BACKEND=postgresql \
+    python Helper_Scripts/benchmarks/email_search_bench.py \
+    --backend postgresql --scope-user-id 42 \
+    --ensure-fixture --fixture-messages 10000 \
+    --out /tmp/email_search_postgresql.json
 """
 
 from __future__ import annotations
@@ -47,6 +54,7 @@ import random
 import sqlite3
 import sys
 import time
+from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -65,6 +73,8 @@ for _parent in [_HELPERS_ROOT, *_HELPERS_ROOT.parents]:
 from common.repo_utils import ensure_repo_root
 
 ensure_repo_root()
+
+from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
 
 try:
     from tldw_Server_API.app.core.DB_Management.media_db.api import create_media_database
@@ -176,7 +186,7 @@ def _load_query_mix_from_workload_trace(
             count = 1
         if count < min_count_int:
             continue
-        name = str(row.get("name") or "").strip() or f"trace_query_{idx+1}"
+        name = str(row.get("name") or "").strip() or f"trace_query_{idx + 1}"
         notes = str(row.get("notes") or "").strip()
         existing = normalized.get(query)
         if existing is None or int(existing["count"]) < count:
@@ -202,7 +212,7 @@ def _load_query_mix_from_workload_trace(
         notes = f"{notes}; {count_note}".strip("; ").strip()
         cases.append(
             QueryCase(
-                name=str(row.get("name") or f"trace_{idx+1:02d}"),
+                name=str(row.get("name") or f"trace_{idx + 1:02d}"),
                 query=str(row["query"]),
                 notes=notes,
             )
@@ -251,6 +261,10 @@ def _fetch_fixture_profile(db: MediaDbLike, tenant_id: str) -> dict[str, Any]:
         )
         min_date = span_row.get("min_date") if span_row else None
         max_date = span_row.get("max_date") if span_row else None
+        if isinstance(min_date, datetime):
+            min_date = min_date.isoformat()
+        if isinstance(max_date, datetime):
+            max_date = max_date.isoformat()
 
         sender_row = db._fetchone_with_connection(  # noqa: SLF001
             conn,
@@ -340,7 +354,7 @@ def _build_default_query_mix(profile: dict[str, Any]) -> list[QueryCase]:
         midpoint = min_dt + (max_dt - min_dt) / 2
         after_date = midpoint.date().isoformat()
         before_date = midpoint.date().isoformat()
-    except Exception:
+    except (TypeError, ValueError, OverflowError):
         # Fallback to static date windows if profile lacks date span.
         after_date = "2025-01-01"
         before_date = "2030-01-01"
@@ -395,7 +409,7 @@ def _build_fixture(
         return profile_before
 
     rnd = random.Random(seed)  # nosec B311 - deterministic benchmark fixture generator, not cryptographic
-    label_names = [f"Label-{idx+1:02d}" for idx in range(max(1, label_cardinality))]
+    label_names = [f"Label-{idx + 1:02d}" for idx in range(max(1, label_cardinality))]
     subject_topics = [
         "Quarterly Report",
         "Budget Update",
@@ -635,7 +649,11 @@ def _capture_sqlite_query_plan(
                     detail = str(row[3]) if len(row) > 3 else str(row)
                     details.append(detail)
                     detail_upper = detail.upper()
-                    if "USING INDEX" in detail_upper or "USING COVERING INDEX" in detail_upper or "USING AUTOMATIC INDEX" in detail_upper:
+                    if (
+                        "USING INDEX" in detail_upper
+                        or "USING COVERING INDEX" in detail_upper
+                        or "USING AUTOMATIC INDEX" in detail_upper
+                    ):
                         index_hits.append(detail)
                         uses_index = True
                         detail_parts = detail.replace(",", " ").split()
@@ -774,10 +792,22 @@ def _run_warm_pass(
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Benchmark email operator search performance.")
     parser.add_argument(
+        "--backend",
+        choices=("sqlite", "postgresql"),
+        default="sqlite",
+        help="Expected content backend. PostgreSQL connection comes from TLDW_CONTENT_PG_* settings.",
+    )
+    parser.add_argument(
+        "--scope-user-id",
+        type=int,
+        default=None,
+        help="Positive user ID required for PostgreSQL RLS scope.",
+    )
+    parser.add_argument(
         "--db-path",
         type=Path,
         default=Path(".benchmarks/email_search_bench.sqlite"),
-        help="Path to Media DB (SQLite file).",
+        help="Path to Media DB (SQLite file); ignored for PostgreSQL.",
     )
     parser.add_argument("--client-id", type=str, default="email-bench", help="Media DB client_id context.")
     parser.add_argument("--tenant-id", type=str, default="bench-tenant", help="Email tenant scope to benchmark.")
@@ -850,15 +880,43 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
-    args = _build_parser().parse_args()
+    parser = _build_parser()
+    args = parser.parse_args()
+    if args.backend == "postgresql":
+        if args.scope_user_id is None or args.scope_user_id <= 0:
+            parser.error("--backend postgresql requires a positive --scope-user-id")
+        if args.client_id not in {"email-bench", str(args.scope_user_id)}:
+            parser.error("PostgreSQL --client-id must match --scope-user-id")
+        args.client_id = str(args.scope_user_id)
+        if args.tenant_id == "bench-tenant":
+            args.tenant_id = f"user:{args.scope_user_id}"
+    elif args.scope_user_id is not None:
+        parser.error("--scope-user-id is only used with --backend postgresql")
+
+    context = scoped_context(user_id=args.scope_user_id) if args.backend == "postgresql" else nullcontext()
+    with context:
+        return _run_benchmark(args)
+
+
+def _run_benchmark(args: argparse.Namespace) -> int:
+    """Run the fixture and query passes under the selected backend scope."""
     db_path: Path = args.db_path.expanduser().resolve()
-    db_path.parent.mkdir(parents=True, exist_ok=True)
+    if args.backend == "sqlite":
+        db_path.parent.mkdir(parents=True, exist_ok=True)
 
     report_started = time.perf_counter()
     fixture_profile: dict[str, Any]
 
     db = _open_media_db(db_path=db_path, client_id=args.client_id)
     try:
+        actual_backend = str(getattr(db.backend_type, "name", "")).lower()
+        if actual_backend != args.backend:
+            logger.error(
+                "Email benchmark requested backend={} but opened backend={}",
+                args.backend,
+                actual_backend,
+            )
+            return 2
         if args.ensure_fixture:
             fixture_profile = _build_fixture(
                 db=db,
@@ -920,6 +978,24 @@ def main() -> int:
         query_plan_statements_max=max(1, int(args.query_plan_statements_max)),
     )
 
+    required_operator_names = (
+        "from_filter",
+        "subject_filter",
+        "label_filter",
+        "has_attachment",
+        "after_date",
+        "before_date",
+    )
+    warm_cases = {row["name"]: row for row in warm["queries"]}
+    operator_coverage_met = all(
+        name in warm_cases and int(warm_cases[name]["total_matches"]) > 0 for name in required_operator_names
+    )
+    operator_latency_met = operator_coverage_met and all(
+        warm_cases[name]["latency"]["p50_ms"] <= 250.0 and warm_cases[name]["latency"]["p95_ms"] <= 900.0
+        for name in required_operator_names
+    )
+    mailbox_size_met = total_messages >= 1_000_000
+
     report = {
         "report_version": 1,
         "generated_at": _iso_utc_now(),
@@ -932,7 +1008,9 @@ def main() -> int:
             "cpu_count": os.cpu_count(),
         },
         "benchmark": {
-            "db_path": str(db_path),
+            "backend": actual_backend,
+            "db_path": str(db_path) if actual_backend == "sqlite" else None,
+            "scope_user_id": args.scope_user_id,
             "client_id": str(args.client_id),
             "tenant_id": str(args.tenant_id),
             "limit": int(max(1, args.limit)),
@@ -952,6 +1030,11 @@ def main() -> int:
             "nfr_p95_ms": 900.0,
             "warm_pass_met_p50": warm["summary"]["p50_ms"] <= 250.0,
             "warm_pass_met_p95": warm["summary"]["p95_ms"] <= 900.0,
+            "required_mailbox_messages": 1_000_000,
+            "mailbox_size_met": mailbox_size_met,
+            "operator_coverage_met": operator_coverage_met,
+            "operator_latency_met": operator_latency_met,
+            "nfr_performance_gate_met": mailbox_size_met and operator_latency_met,
         },
     }
 
