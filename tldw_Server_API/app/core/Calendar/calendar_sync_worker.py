@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import json
 import os
 from dataclasses import dataclass
@@ -14,7 +13,7 @@ from loguru import logger
 
 from tldw_Server_API.app.core.Calendar.errors import CalendarPermissionDenied, CalendarValidationError
 from tldw_Server_API.app.core.Calendar.providers.caldav import CalDavProvider, sanitize_provider_metadata
-from tldw_Server_API.app.core.Calendar.secret_store import CalendarSecretStore
+from tldw_Server_API.app.core.Calendar.provider_operations import call_provider, resolve_caldav_credentials
 from tldw_Server_API.app.core.DB_Management.Calendar_DB import (
     CalendarDatabase,
     ExternalCalendarAccountRow,
@@ -156,17 +155,19 @@ async def handle_calendar_sync_job(
             raise CalendarValidationError("External calendar account is not active")
         if not binding.sync_enabled or binding.disabled_at:
             raise CalendarValidationError("External calendar binding is not enabled for sync")
-        credentials = _resolve_sync_credentials(calendar_db, account=account, binding=binding)
+        credentials = resolve_caldav_credentials(
+            calendar_db, account_id=account.id, actor_user_id=int(job["owner_user_id"]),
+            tenant_id=account.tenant_id, fallback_server_url=binding.remote_calendar_id,
+        )
         CalDavProvider.same_origin_url(credentials["server_url"], binding.remote_calendar_id)
         sync_provider = provider or CalDavProvider()
-        events = await _maybe_await(
-            sync_provider.fetch_vevents(
+        events = await call_provider(
+            sync_provider.fetch_vevents,
                 remote_calendar_url=binding.remote_calendar_id,
                 username=credentials["username"],
                 password=credentials["password"],
                 window_start=window_start,
                 window_end=window_end,
-            )
         )
         result = _upsert_events(
             calendar_db,
@@ -286,32 +287,6 @@ def _coerce_payload(raw_payload: Any) -> dict[str, Any]:
     raise CalendarValidationError("Calendar sync job payload must be an object")
 
 
-def _resolve_sync_credentials(
-    db: CalendarDatabase,
-    *,
-    account: ExternalCalendarAccountRow,
-    binding: ExternalCalendarBindingRow,
-) -> dict[str, str]:
-    metadata = _json_dict(account.account_metadata_json)
-    stored_secret: dict[str, Any] = {}
-    if account.secret_ref:
-        stored_secret = CalendarSecretStore(db=db, tenant_id=account.tenant_id).resolve_secret(
-            owner_user_id=account.user_id,
-            secret_ref=account.secret_ref,
-        )
-
-    username = stored_secret.get("username") or metadata.get("username")
-    password = stored_secret.get("password") or stored_secret.get("token")
-    server_url = stored_secret.get("server_url") or metadata.get("server_url") or binding.remote_calendar_id
-    if not username or not password or not server_url:
-        raise CalendarValidationError("CalDAV sync requires server_url, username, and password/token")
-    return {
-        "server_url": str(server_url),
-        "username": str(username),
-        "password": str(password),
-    }
-
-
 def _upsert_events(
     db: CalendarDatabase,
     *,
@@ -389,12 +364,6 @@ def _next_scan_at(binding: ExternalCalendarBindingRow, synced_at: str) -> str | 
         return None
     parsed = datetime.fromisoformat(synced_at.replace("Z", "+00:00"))
     return (parsed + timedelta(minutes=int(binding.sync_interval_minutes))).astimezone(timezone.utc).isoformat()
-
-
-async def _maybe_await(value: Any) -> Any:
-    if inspect.isawaitable(value):
-        return await value
-    return value
 
 
 def _utcnow_iso() -> str:
