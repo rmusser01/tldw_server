@@ -290,24 +290,28 @@ const fetchRuntimeConfig = async (): Promise<RuntimeConfigPayload | null> => {
 
 const bootstrapCookieSession = async (): Promise<boolean> => {
   try {
-    const response = await withRuntimeRequestTimeout((signal) =>
-      fetch(RUNTIME_SESSION_ENDPOINT, {
+    const response = await withRuntimeRequestTimeout(async (signal) => {
+      const response = await fetch(RUNTIME_SESSION_ENDPOINT, {
         method: "POST",
         credentials: "include",
         cache: "no-store",
         signal
       })
-    )
+      await response.arrayBuffer()
+      return response
+    })
     if (!response.ok) return false
 
-    const probe = await withRuntimeRequestTimeout((signal) =>
-      fetch(RUNTIME_PROFILE_PROBE_ENDPOINT, {
+    const probe = await withRuntimeRequestTimeout(async (signal) => {
+      const response = await fetch(RUNTIME_PROFILE_PROBE_ENDPOINT, {
         method: "GET",
         credentials: "same-origin",
         cache: "no-store",
         signal
       })
-    )
+      await response.arrayBuffer()
+      return response
+    })
     return probe.ok
   } catch {
     return false

@@ -67,11 +67,13 @@ const importAndAwaitBootstrap = async () => {
 const stubCookieRuntimeFetch = ({
   bootstrapOk = true,
   probeOk = true,
-  csrfCookieName = "csrf_token"
+  csrfCookieName = "csrf_token",
+  body = () => null
 }: {
   bootstrapOk?: boolean
   probeOk?: boolean
   csrfCookieName?: string
+  body?: (url: string, signal?: AbortSignal | null) => BodyInit | null
 } = {}) => {
   const fetchMock = vi.fn(async (
     input: RequestInfo | URL,
@@ -96,10 +98,10 @@ const stubCookieRuntimeFetch = ({
       }
     }
     if (url === "/api/_tldw-webui/session") {
-      return { ok: bootstrapOk }
+      return new Response(body(url, _init?.signal), { status: bootstrapOk ? 200 : 503 })
     }
     if (url === "/api/v1/users/me/profile") {
-      return { ok: probeOk }
+      return new Response(body(url, _init?.signal), { status: probeOk ? 200 : 401 })
     }
     throw new Error(`Unexpected request: ${url}`)
   })
@@ -443,6 +445,75 @@ describe("runtime-bootstrap chrome shim", () => {
     expect(getRuntimeCsrfCookieName()).toBe("tldw_csrf_a1")
   })
 
+  describe.each([
+    ["session bootstrap", "/api/_tldw-webui/session"],
+    ["profile probe", "/api/v1/users/me/profile"]
+  ])("%s response body", (_label, bodyUrl) => {
+    it("waits for complete consumption before activating cookie auth", async () => {
+      vi.useFakeTimers()
+      process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "managed"
+      let finishBody: (() => void) | undefined
+      stubCookieRuntimeFetch({ body: url => url === bodyUrl
+        ? new ReadableStream<Uint8Array>({ start(controller) {
+          controller.enqueue(new TextEncoder().encode("public fixture"))
+          finishBody = () => controller.close()
+        } })
+        : null })
+      const mod = await import("@web/extension/shims/runtime-bootstrap")
+      let settled = false
+      void mod.runtimeBootstrapReady.then(() => { settled = true })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(settled).toBe(false)
+      expect(readStoredValue("tldwCookieSessionConfig")).toBeNull()
+      finishBody?.()
+      await mod.runtimeBootstrapReady
+      expect(readStoredValue("tldwCookieSessionConfig")).toEqual({
+        authMode: "single-user", authSource: "cookie-session", serverUrl: window.location.origin
+      })
+    })
+
+    it("preserves manual credentials when body consumption fails", async () => {
+      process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "managed"
+      const existing = { authMode: "multi-user", accessToken: "manual-token", serverUrl: "https://remote.example.test" }
+      localStorage.setItem("tldwConfig", JSON.stringify(existing))
+      localStorage.setItem("apiKey", "legacy-key")
+      stubCookieRuntimeFetch({ body: url => url === bodyUrl
+        ? new ReadableStream({ start(controller) { controller.error(new Error("private-body-error")) } })
+        : null })
+      await importAndAwaitBootstrap()
+      expect(readStoredValue("tldwCookieSessionConfig")).toBeNull()
+      expect(readStoredValue("tldwConfig")).toEqual(existing)
+      expect(localStorage.getItem("apiKey")).toBe("legacy-key")
+      expect(localStorage.getItem("tldwRuntimeAuthMetadata")).toBeNull()
+      expect(JSON.stringify(readStoredValue("tldwConfig"))).not.toContain("private-body-error")
+    })
+
+    it("aborts a stalled body at the existing eight-second deadline", async () => {
+      vi.useFakeTimers()
+      process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "managed"
+      const existing = { authMode: "multi-user", accessToken: "manual-token", serverUrl: "https://remote.example.test" }
+      localStorage.setItem("tldwConfig", JSON.stringify(existing))
+      let bodySignal: AbortSignal | null | undefined
+      stubCookieRuntimeFetch({ body: (url, signal) => {
+        if (url !== bodyUrl) return null
+        bodySignal = signal
+        return new ReadableStream({ start(controller) {
+          signal?.addEventListener("abort", () => controller.error(new DOMException("Aborted", "AbortError")), { once: true })
+        } })
+      } })
+      const mod = await import("@web/extension/shims/runtime-bootstrap")
+      let settled = false
+      void mod.runtimeBootstrapReady.then(() => { settled = true })
+      await vi.advanceTimersByTimeAsync(7_999)
+      expect(settled).toBe(false)
+      await vi.advanceTimersByTimeAsync(1)
+      await mod.runtimeBootstrapReady
+      expect(bodySignal?.aborted).toBe(true)
+      expect(readStoredValue("tldwCookieSessionConfig")).toBeNull()
+      expect(readStoredValue("tldwConfig")).toEqual(existing)
+    })
+  })
+
   it.each([
     ["runtime config", "/api/_tldw-webui/runtime-config"],
     ["session bootstrap", "/api/_tldw-webui/session"],
@@ -489,7 +560,7 @@ describe("runtime-bootstrap chrome shim", () => {
               })
             } as Response
           }
-          return { ok: true } as Response
+          return new Response()
         }
       )
       vi.stubGlobal("fetch", fetchMock)

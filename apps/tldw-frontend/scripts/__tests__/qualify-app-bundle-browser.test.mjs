@@ -42,7 +42,7 @@ for (const [name, change] of [
 }
 
 const cookies = () => [
-  { name: 'session_a', value: 'secret-session', domain: '127.0.0.1', path: '/', httpOnly: true, secure: false, sameSite: 'Lax', expires: 2000000000 },
+  { name: 'session_a', value: 'secret-session', domain: '127.0.0.1', path: '/api', httpOnly: true, secure: false, sameSite: 'Lax', expires: 2000000000 },
   { name: 'csrf_a', value: 'secret-csrf', domain: '127.0.0.1', path: '/', httpOnly: false, secure: false, sameSite: 'Lax', expires: 2000000000 },
 ]
 test('requires an HttpOnly session and readable CSRF with loopback attributes', async () => {
@@ -54,7 +54,9 @@ for (const [name, change] of [
   ['readable session', x => { x[0].httpOnly = false }],
   ['HttpOnly CSRF', x => { x[1].httpOnly = true }],
   ['empty token', x => { x[1].value = '' }],
-  ['wrong path', x => { x[0].path = '/api' }],
+  ['broader session path', x => { x[0].path = '/' }],
+  ['wrong session path', x => { x[0].path = '/api/v1' }],
+  ['wrong CSRF path', x => { x[1].path = '/api' }],
   ['remote domain', x => { x[0].domain = 'example.org' }],
   ['insecure SameSite', x => { x[0].sameSite = 'None' }],
   ['expired session', x => { x[0].expires = 1 }],
@@ -349,16 +351,53 @@ test('browser shutdown keeps an earlier failure code', async () => {
 
 // These fixtures use real HTTP, multipart bytes, streaming cancellation and
 // Chromium WebSockets. They are deliberately separate from the live candidate.
-async function transportFixture(change = '') {
+async function transportFixture(change = '', pairedIndex) {
   const { createServer } = await import('node:http')
   const { createHash } = await import('node:crypto')
   const sockets = new Set()
   let uploadSeen = false
   let streamClosed = false
+  let sessionActive = false
+  const sessionName = pairedIndex ? `session_${pairedIndex}` : 'fixture_session'
+  const csrfName = `csrf_${pairedIndex}`
+  const sessionValue = pairedIndex ? `public-fixture-session-${pairedIndex}` : 'public-fixture-session'
+  const csrfValue = pairedIndex ? `public-fixture-csrf-${pairedIndex}` : 'public-fixture-csrf'
   const server = createServer((req, res) => {
     const path = new URL(req.url, 'http://fixture').pathname
     if (req.headers.host === 'hostile.invalid' || (req.headers.origin && req.headers.origin !== origin)) {
       res.writeHead(403); res.end(); return
+    }
+    if (pairedIndex && path === '/setup') {
+      res.setHeader('Content-Type', 'text/html')
+      res.end(`<h1>Setup</h1><div id="controls"></div><script>
+        function provider() { controls.innerHTML = '<h1>Chat provider setup</h1>' }
+        function docker() { controls.innerHTML = '<h1>First-time setup</h1><button onclick="provider()">Continue</button>' }
+        function wizard() { controls.innerHTML = '<h1>First-time setup</h1><button onclick="docker()">Solo, Docker</button>' }
+        (async () => {
+          const session = await fetch('/api/_tldw-webui/session', { method: 'POST' }); await session.arrayBuffer();
+          const state = await fetch('/api/v1/setup/first-run/state'); await state.arrayBuffer();
+          controls.innerHTML = '<button onclick="wizard()">Set up in WebUI</button>';
+        })()
+      </script>`)
+      return
+    }
+    if (pairedIndex && path === '/api/_tldw-webui/session') {
+      sessionActive = true
+      res.setHeader('Set-Cookie', [
+        `${sessionName}=${sessionValue}; Path=/api; HttpOnly; SameSite=Lax`,
+        `${csrfName}=${csrfValue}; Path=/; SameSite=Lax`,
+      ])
+      res.end(); return
+    }
+    if (pairedIndex && path === '/api/v1/users/me/profile') {
+      res.writeHead(sessionActive && req.headers.cookie?.includes(`${sessionName}=${sessionValue}`) ? 200 : 401)
+      res.end('{}'); return
+    }
+    if (pairedIndex && path === '/api/v1/auth/single-user/session' && req.method === 'DELETE') {
+      if (req.headers['x-csrf-token'] !== csrfValue) { res.writeHead(403); res.end(); return }
+      sessionActive = false
+      res.setHeader('Set-Cookie', `${sessionName}=; Path=/api; Max-Age=0; HttpOnly; SameSite=Lax`)
+      res.end('{}'); return
     }
     if (path === '/api/documentation/manifest') { res.end(JSON.stringify({ docsBySource: { server: [{ source: 'server', relativePath: 'API-related/AuthNZ-API-Guide.md' }] } })); return }
     if (path === '/api/documentation/content') {
@@ -368,7 +407,7 @@ async function transportFixture(change = '') {
     if (path === '/api/v1/health/live/') { res.writeHead(307, { Location: origin + '/api/v1/health/live' }); res.end(); return }
     if (path === '/api/v1/media/process-documents') {
       let body = ''; req.on('data', chunk => { body += chunk }); req.on('end', () => {
-        uploadSeen = body.includes('A harmless public upload sentinel.') && body.includes('name="files"') && body.includes('name="perform_analysis"') && body.includes('false') && req.headers['x-csrf-token'] === 'public-fixture-csrf'
+        uploadSeen = body.includes('A harmless public upload sentinel.') && body.includes('name="files"') && body.includes('name="perform_analysis"') && body.includes('false') && req.headers['x-csrf-token'] === csrfValue
         res.end(JSON.stringify({ results: [{ status: 'Success', content: change === 'content' ? 'lost' : '# WP1 qualification\nA harmless public upload sentinel.\n' }], errors: [] }))
       }); return
     }
@@ -381,7 +420,7 @@ async function transportFixture(change = '') {
   })
   server.on('upgrade', (req, socket) => {
     sockets.add(socket); socket.on('error', () => {}); socket.on('close', () => sockets.delete(socket))
-    if (req.headers.origin !== origin || !req.headers.cookie?.includes('fixture_session=public-fixture-session')) {
+    if (req.headers.origin !== origin || !req.headers.cookie?.includes(`${sessionName}=${sessionValue}`)) {
       socket.end('HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n'); return
     }
     const key = createHash('sha1').update(req.headers['sec-websocket-key'] + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64')
@@ -401,6 +440,23 @@ async function transportFixture(change = '') {
   } }
 }
 
+test('paired browser discovers API-scoped session cookies at setup, hostile checks and rebootstrap', async () => {
+  const first = await transportFixture('', 1)
+  const second = await transportFixture('', 2)
+  const root = mkdtempSync(join(tmpdir(), 'wp1-cookie-path-'))
+  try {
+    const { qualify } = await load()
+    const evidence = await qualify({ instances: [first, second].map((fixture, index) => ({
+      publicUrl: fixture.origin, sessionCookieName: `session_${index + 1}`, csrfCookieName: `csrf_${index + 1}`,
+    })) }, join(root, 'evidence.json'))
+    for (const name of ['cookie_attributes_1', 'cookie_attributes_2', 'hostile_inputs_1', 'hostile_inputs_2', 'rebootstrap']) {
+      assert.equal(evidence.checks[name].passed, true)
+    }
+    assert.equal(evidence.passed, true)
+    assert.ok(!JSON.stringify(evidence).includes('public-fixture-session'))
+  } finally { await first.close(); await second.close(); rmSync(root, { recursive: true, force: true }) }
+})
+
 for (const change of ['', 'content', 'ws', 'reflect']) {
   test(`real browser transports ${change ? 'reject ' + change + ' contract loss' : 'verify content, cancellation and cookie MCP roundtrip'}`, async () => {
     const fixture = await transportFixture(change)
@@ -409,7 +465,7 @@ for (const change of ['', 'content', 'ws', 'reflect']) {
     const browser = await chromium.launch({ headless: true })
     try {
       const context = await browser.newContext()
-      await context.addCookies([{ name: 'fixture_session', value: 'public-fixture-session', url: fixture.origin }])
+      await context.addCookies([{ name: 'fixture_session', value: 'public-fixture-session', domain: '127.0.0.1', path: '/api' }])
       const page = await context.newPage()
       await page.goto(fixture.origin)
       const tracker = createNetworkTracker(page, fixture.origin)

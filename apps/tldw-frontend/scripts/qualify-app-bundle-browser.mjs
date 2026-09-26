@@ -41,10 +41,10 @@ export function validateInput(input) {
 }
 
 export function assertCookiePolicy(cookies, instance, now = Date.now() / 1000) {
-  for (const [name, httpOnly] of [[instance.sessionCookieName, true], [instance.csrfCookieName, false]]) {
+  for (const [name, httpOnly, path] of [[instance.sessionCookieName, true, '/api'], [instance.csrfCookieName, false, '/']]) {
     const matches = cookies.filter(cookie => cookie.name === name)
     const cookie = matches[0]
-    if (matches.length !== 1 || !cookie.value || cookie.httpOnly !== httpOnly || cookie.domain !== '127.0.0.1' || cookie.path !== '/' || cookie.secure || cookie.sameSite !== 'Lax' || (cookie.expires !== -1 && cookie.expires <= now)) {
+    if (matches.length !== 1 || !cookie.value || cookie.httpOnly !== httpOnly || cookie.domain !== '127.0.0.1' || cookie.path !== path || cookie.secure || cookie.sameSite !== 'Lax' || (cookie.expires !== -1 && cookie.expires <= now)) {
       throw new Error('cookie_attributes_failed')
     }
   }
@@ -276,7 +276,7 @@ export async function qualifyTransports(page, context, instance, csrf, tracker, 
   })
   await check('hostile_inputs', async () => {
     const origin = instance.publicUrl
-    const cookies = await context.cookies(origin)
+    const cookies = await context.cookies(origin + '/api')
     const session = cookies.find(cookie => cookie.name === instance.sessionCookieName)
     assert.ok(session)
     const cookie = `${instance.sessionCookieName}=${session.value}`
@@ -347,7 +347,7 @@ export async function qualify(input, outputPath) {
         await masterKey.or(page.getByRole('button', { name: 'Set up in WebUI', exact: true })).first().waitFor({ state: 'visible' })
         assert.equal(await masterKey.isVisible(), false)
       })
-      await instanceCheck('cookie_attributes', async () => assertCookiePolicy(await context.cookies(instance.publicUrl), instance))
+      await instanceCheck('cookie_attributes', async () => assertCookiePolicy(await context.cookies(instance.publicUrl + '/api'), instance))
       await instanceCheck('cookie_only_profile', async () => assert.equal(await browserFetch(page, PROFILE), 200))
       await instanceCheck('setup_interaction', async () => inspectManagedSetup(page))
       await instanceCheck('setup_api_access', async () => setupResponses.assertSucceeded())
@@ -384,7 +384,7 @@ export async function qualify(input, outputPath) {
       const response = pages[0].waitForResponse(response => response.url() === instances[0].publicUrl + '/api/_tldw-webui/session' && response.request().method() === 'POST').then(response => response.status(), () => 0)
       await pages[0].reload({ waitUntil: 'domcontentloaded' })
       assert.ok([200, 204].includes(await response))
-      assertCookiePolicy(await context.cookies(instances[0].publicUrl), instances[0])
+      assertCookiePolicy(await context.cookies(instances[0].publicUrl + '/api'), instances[0])
       assert.equal(await browserFetch(pages[0], PROFILE), 200)
       assert.equal(await browserFetch(pages[1], PROFILE), 200)
     })
