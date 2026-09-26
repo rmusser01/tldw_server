@@ -452,6 +452,11 @@ def search_email_messages(
             ordering = " ORDER BY em.internal_date DESC NULLS LAST, em.id DESC "
 
         with self.transaction() as conn:
+            if self.backend_type == BackendType.POSTGRESQL:
+                # Repeated parameterized searches must retain label/text
+                # selectivity; a generic prepared plan can become a large
+                # parallel hash join. Restore the session mode at transaction end.
+                self.backend.execute("SET LOCAL plan_cache_mode = 'force_custom_plan'", connection=conn)
             for parameter_index, pattern in postgres_label_patterns.items():
                 matching_labels = self._fetchall_with_connection(
                     conn,

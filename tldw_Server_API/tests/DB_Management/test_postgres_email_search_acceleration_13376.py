@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
+from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig, DatabaseError
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.core.DB_Management.media_db.schema.email_schema_structures import ensure_postgres_email_schema
@@ -102,6 +102,50 @@ def test_label_query_binds_resolved_ids_in_same_search_transaction(accelerated_d
     with scoped_context(user_id=42, session_role=role):
         assert db.search_email_messages(query='label:Inbo', tenant_id='email-benchmark:42')[1] == 2
     assert len(bound_ids) == 1 and len(bound_ids[0]) == 2
+
+
+def test_repeated_search_uses_parameter_aware_plans_without_leaking_session_setting(accelerated_db, monkeypatch):
+    db, role, ids = accelerated_db
+    original = db._fetchone_with_connection
+    planning = []
+
+    def observe(conn, sql, params=None):
+        if sql.startswith('SELECT COUNT('):
+            planning.append(db.backend.execute(
+                "SELECT current_setting('plan_cache_mode') AS mode", connection=conn,
+            ).rows[0]['mode'])
+        return original(conn, sql, params)
+
+    monkeypatch.setattr(db, '_fetchone_with_connection', observe)
+    with scoped_context(user_id=42, session_role=role):
+        for _ in range(23):
+            rows, total = db.search_email_messages(query='label:Inbo', tenant_id='email-benchmark:42')
+            assert total == 2 and {row['media_id'] for row in rows} == {ids['alpha'], ids['body']}
+        with db.transaction() as conn:
+            restored = db.backend.execute(
+                "SELECT current_setting('plan_cache_mode') AS mode", connection=conn,
+            ).rows[0]['mode']
+    assert planning == ['force_custom_plan'] * 23 and restored == 'auto'
+
+
+def test_failed_search_restores_planning_mode_before_pooled_reuse(accelerated_db, monkeypatch):
+    db, role, _ = accelerated_db
+    original = db._fetchone_with_connection
+
+    def fail_count(conn, sql, params=None):
+        if sql.startswith('SELECT COUNT('):
+            return db.backend.execute('SELECT 1 / 0', connection=conn)
+        return original(conn, sql, params)
+
+    monkeypatch.setattr(db, '_fetchone_with_connection', fail_count)
+    with scoped_context(user_id=42, session_role=role):
+        with pytest.raises(DatabaseError):
+            db.search_email_messages(query='label:Inbo', tenant_id='email-benchmark:42')
+        with db.transaction() as conn:
+            setting = db.backend.execute(
+                "SELECT current_setting('plan_cache_mode') AS mode", connection=conn,
+            ).rows[0]['mode']
+        assert setting == 'auto'
 
 
 def test_optional_trigram_denial_rolls_back_savepoint_and_keeps_search_working(accelerated_db, monkeypatch):
