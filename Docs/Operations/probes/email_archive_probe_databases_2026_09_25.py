@@ -13,10 +13,11 @@ from pathlib import Path
 from secrets import token_hex
 
 import asyncpg
+from email_million_search_13376 import _configured_postgres_port
 
 MANIFEST = Path(os.environ["EMAIL_PROBE_PG_MANIFEST"])
 HOST = "127.0.0.1"
-PORT = 5434
+PORT = _configured_postgres_port()
 CONTAINER = os.environ["EMAIL_PROBE_PG_CONTAINER"]
 
 
@@ -28,6 +29,7 @@ def validate_manifest(manifest: dict) -> None:
     suffix = match.group(1)
     if (
         manifest.get("host") != HOST
+        or type(manifest.get("port")) is not int
         or manifest.get("port") != PORT
         or manifest.get("auth_db") != f"email_auth_{suffix}"
         or manifest.get("content_db") != f"email_content_{suffix}"

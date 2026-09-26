@@ -78,8 +78,20 @@ def _load_sqlite_provenance(path: Path, tenant_id: str, messages: int) -> dict[s
     return marker
 
 
+def _configured_postgres_port() -> int:
+    """Accept only an explicitly configured decimal loopback service port."""
+    configured = os.environ.get("EMAIL_PROBE_PG_PORT", "5434")
+    if not isinstance(configured, str) or re.fullmatch(r"[0-9]+", configured) is None:
+        raise ValueError("EMAIL_PROBE_PG_PORT must be an integer between 1 and 65535")
+    port = int(configured)
+    if not 1 <= port <= 65535:
+        raise ValueError("EMAIL_PROBE_PG_PORT must be an integer between 1 and 65535")
+    return port
+
+
 def _validate_postgres_manifest(path: Path) -> dict[str, Any]:
     """Validate the private local generated target before the guard probe imports it."""
+    port = _configured_postgres_port()
     if path.is_symlink() or not path.is_file() or stat.S_IMODE(path.stat().st_mode) & 0o077:
         raise ValueError("PostgreSQL probe manifest must be a private regular file")
     manifest = json.loads(path.read_text(encoding="utf-8"))
@@ -90,7 +102,8 @@ def _validate_postgres_manifest(path: Path) -> dict[str, Any]:
     if (
         match is None
         or manifest.get("host") != "127.0.0.1"
-        or manifest.get("port") != 5434
+        or type(manifest.get("port")) is not int
+        or manifest.get("port") != port
         or manifest.get("auth_db") != f"email_auth_{suffix}"
         or manifest.get("content_db") != f"email_content_{suffix}"
     ):
@@ -204,8 +217,9 @@ def _load_postgres_provenance(path: Path, manifest: dict[str, Any], messages: in
         raise ValueError("PostgreSQL original fixture provenance must be an object")
     origin = previous.get("origin_source_identity", identity)
     measured_files = set(_source_identity()["sha256"])
-    # Original reports predate these later RLS/native-persistence changes.
+    # Original reports predate these later additions to measured sources.
     required_files = measured_files - {
+        "Docs/Operations/probes/email_archive_probe_databases_2026_09_25.py",
         "tldw_Server_API/app/core/DB_Management/media_db/schema/features/postgres_rls.py",
         "tldw_Server_API/app/core/DB_Management/media_db/runtime/email_graph_persistence_ops.py",
         "tldw_Server_API/app/core/DB_Management/backends/query_utils.py",
@@ -294,6 +308,7 @@ def _source_identity() -> dict[str, Any]:
     """Hash the measured search code, fixture loader and guards, including local edits."""
     files = (
         "Docs/Operations/probes/email_million_search_13376.py",
+        "Docs/Operations/probes/email_archive_probe_databases_2026_09_25.py",
         "Docs/Operations/probes/email_archive_throughput_sqlite_2026_09_25.py",
         "Docs/Operations/probes/email_archive_throughput_postgres_2026_09_25.py",
         "Docs/Operations/probes/email_local_release_checks_13376.py",

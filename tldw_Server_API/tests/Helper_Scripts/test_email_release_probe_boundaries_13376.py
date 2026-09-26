@@ -227,3 +227,39 @@ def test_postgres_guard_accepts_private_generated_target_before_application_impo
         "status": "configured", "roots_created": 1,
         "content_mode": "postgresql", "backend": "postgresql", "has_pg_dsn": True,
     }
+
+
+@pytest.mark.parametrize("configured,port,accepted", [
+    ("5435", 5435, True), (None, 5435, False), ("5435", 5434, False),
+    ("1", True, False), ("65535", 65535, True), ("1", 1, True),
+])
+def test_private_manifest_port_matches_configured_loopback_only(monkeypatch, tmp_path, configured, port, accepted):
+    if configured is None:
+        monkeypatch.delenv("EMAIL_PROBE_PG_PORT", raising=False)
+    else:
+        monkeypatch.setenv("EMAIL_PROBE_PG_PORT", configured)
+    manifest = tmp_path / "private.json"
+    manifest.write_text(json.dumps({
+        "host": "127.0.0.1", "port": port, "role": "email_probe_012345abcd",
+        "password": token_urlsafe(24), "auth_db": "email_auth_012345abcd",
+        "content_db": "email_content_012345abcd",
+    }))
+    manifest.chmod(0o600)
+    observed = guard_preamble("email_archive_throughput_postgres_2026_09_25.py", tmp_path, manifest=manifest)
+    assert observed["status"] == ("configured" if accepted else "rejected")
+    assert observed["roots_created"] == (1 if accepted else 0)
+
+
+@pytest.mark.parametrize("configured", ["", "true", "false", "5435.0", "invalid", "0", "65536", "-1"])
+def test_private_manifest_rejects_invalid_port_configuration_before_roots(monkeypatch, tmp_path, configured):
+    monkeypatch.setenv("EMAIL_PROBE_PG_PORT", configured)
+    manifest = tmp_path / "private.json"
+    manifest.write_text(json.dumps({
+        "host": "127.0.0.1", "port": 5434, "role": "email_probe_012345abcd",
+        "password": token_urlsafe(24), "auth_db": "email_auth_012345abcd",
+        "content_db": "email_content_012345abcd",
+    }))
+    manifest.chmod(0o600)
+    observed = guard_preamble("email_archive_throughput_postgres_2026_09_25.py", tmp_path, manifest=manifest)
+    assert observed["status"] == "rejected"
+    assert observed["roots_created"] == 0

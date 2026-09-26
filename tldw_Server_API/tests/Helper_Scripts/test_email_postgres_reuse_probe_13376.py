@@ -66,10 +66,13 @@ def test_postgres_reuse_accepts_matching_failed_latency_report_and_preserves_set
     assert loaded["source_report_sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def test_measured_source_identity_detects_sql_rewrite_changes(runner, tmp_path, monkeypatch):
+@pytest.mark.parametrize("utility", [
+    'tldw_Server_API/app/core/DB_Management/backends/query_utils.py',
+    'Docs/Operations/probes/email_archive_probe_databases_2026_09_25.py',
+])
+def test_measured_source_identity_detects_guard_or_sql_rewrite_changes(runner, tmp_path, monkeypatch, utility):
     identity = runner['_source_identity']
     original_root = runner['REPOSITORY']
-    utility = 'tldw_Server_API/app/core/DB_Management/backends/query_utils.py'
     for name in set(identity()['sha256']) | {utility}:
         destination = tmp_path / name
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -81,6 +84,17 @@ def test_measured_source_identity_detects_sql_rewrite_changes(runner, tmp_path, 
         output.write('\n# synthetic rewrite change\n')
     after = identity()['sha256']
     assert before != after
+
+
+def test_reuse_preserves_historical_provenance_before_provisioner_was_measured(runner, provenance):
+    path, manifest, report = provenance
+    historical = copy.deepcopy(report["source_identity"])
+    historical["sha256"].pop("Docs/Operations/probes/email_archive_probe_databases_2026_09_25.py", None)
+    report["source_identity"] = historical
+    report["source_identity_after_probe"] = historical
+    path.write_text(json.dumps(report))
+    loaded = runner["_load_postgres_provenance"](path, manifest, 120)
+    assert loaded["origin_source_identity"] == historical
 
 
 @pytest.mark.parametrize("invalid", ["resource", "scope", "shape", "guard", "privileged", "index", "setup", "source"])
