@@ -114,3 +114,15 @@ Ten thousand messages are only 1% of the specified mailbox size. The new report'
 This evidence does not measure archive parsing/ingestion throughput, HTTP latency,
 multi-worker behavior, production parity, or the 1M-message target. Those release
 gates remain open.
+
+## Cleanup follow-up
+
+Later on 2026-09-25, the host reported 237 GiB free. Docker Desktop started
+successfully on the same `desktop-linux` context, but the previous test store
+was gone: both container and volume inventories were empty, the old
+`tldw_postgres_test` container was absent, and port 5434 refused connections.
+The disposable databases and role no longer exist in that removed store.
+This confirms resource absence, not successful execution of the earlier SQL
+cleanup script. The obsolete private credential manifest was removed.
+This follow-up did not delete unrelated Docker resources. TASK-13369 is closed;
+the benchmark's scale and deployment limitations above remain unchanged.
