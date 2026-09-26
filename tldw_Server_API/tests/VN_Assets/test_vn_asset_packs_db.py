@@ -1,7 +1,10 @@
 import asyncio
 import json
 import sqlite3
+import threading
 from collections.abc import Generator
+from contextlib import closing
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +17,12 @@ from tldw_Server_API.app.core.DB_Management.VNAssetPacks_DB import (
     ensure_vn_asset_tables,
 )
 from tldw_Server_API.app.core.exceptions import VNAssetGenerationError
+from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.VN_Assets.jobs import (
+    build_legacy_activity_reader,
+    create_generate_variant_job,
+    vn_asset_generation_jobs_queue,
+)
 
 
 @pytest.fixture
@@ -151,6 +160,278 @@ def test_integrity_failure_reconciles_interrupted_cancellation_without_recountin
     assert repo.get_variant_outcome(batch_id, state["slots"][0]["id"], 3)["outcome_status"] == "cancelled"
     assert repo.get_slot(state["slots"][0]["id"])["status"] == "generating"
     assert repo.fail_batch_integrity(batch_id, error="vn_asset_recipe_count_mismatch") == cancelled
+
+
+def _file_integrity_repository(state: dict[str, Any], tmp_path: Path) -> VNAssetPacksRepository:
+    """Copy the existing damaged-history fixture to a real file-backed repository."""
+    path = tmp_path / "integrity.db"
+    with closing(sqlite3.connect(path)) as target:
+        state["repo"].db.get_connection().backup(target)
+    return VNAssetPacksRepository.initialized(CharactersRAGDB(path, client_id="integrity-owner"))
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancelled", [False, True])
+async def test_async_integrity_preserves_history_and_terminal_fences(
+    integrity_state: dict[str, Any], tmp_path: Path, cancelled: bool,
+) -> None:
+    """Owned reconciliation preserves approvals, sibling activity and terminal counts."""
+    state = integrity_state
+    repo = _file_integrity_repository(state, tmp_path)
+    batch_id, slot_id = state["batch"]["id"], state["slots"][0]["id"]
+    try:
+        if cancelled:
+            repo.update_batch(batch_id, {"status": "cancelled", "cancelled_count": 7})
+        sibling_before = repo.get_batch(state["sibling"]["id"])
+        first = await repo.fail_batch_integrity_async(batch_id, error="vn_asset_recipe_not_found")
+        assert await repo.fail_batch_integrity_async(batch_id, error="vn_asset_recipe_not_found") == first
+        assert (first["completed_count"], first["failed_count"], first["cancelled_count"]) == ((2, 1, 9) if cancelled else (2, 3, 1))
+        assert first["status"] == ("cancelled" if cancelled else "failed")
+        assert (first["planned_count"], first["enqueued_count"]) == (6, 3)
+        assert repo.get_batch(state["sibling"]["id"]) == sibling_before
+        assert repo.get_variant_outcome(batch_id, slot_id, 5) is None
+        assert repo.count_items_for_generation(state["pack"]["id"]) == 3
+        assert repo.get_slot(slot_id)["status"] == "generating"
+        assert repo.get_slot(state["slots"][1]["id"])["status"] == ("cancelled" if cancelled else "failed")
+        for item in state["approvals"]:
+            assert repo.get_item(item["id"]) == item
+            assert Path(item["storage_ref"]).read_bytes() == b"approved"
+        identity = {"batch_id": batch_id, "slot_id": slot_id, "variant_index": 3}
+        late_attempt = "late"
+        with pytest.raises(VNAssetGenerationError):
+            repo.claim_variant(**identity, lease_id="late", attempt_token=late_attempt, item_fields={"pack_id": state["pack"]["id"]})
+        with pytest.raises(VNAssetGenerationError):
+            repo.complete_variant(**identity, item_id=state["reserved"]["id"], attempt_token=state["old_attempt"])
+        with pytest.raises(VNAssetGenerationError):
+            repo.update_item_storage(state["reserved"]["id"], **identity, attempt_token=state["old_attempt"],
+                                     generated_file_id=88, storage_ref="late.png", mime_type="image/png",
+                                     width=10, height=10, bytes=3)
+    finally:
+        repo.db.close_connection()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_delivery", [False, True])
+@pytest.mark.parametrize("fail", [False, True])
+async def test_async_integrity_owns_atomic_reconciliation_and_cleanup(
+    integrity_state: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    fail: bool, cancel_delivery: bool,
+) -> None:
+    """Readers see no partial writes; cancellation drains commit/rollback and closure."""
+    state = integrity_state
+    repo = _file_integrity_repository(state, tmp_path)
+    database, batch_id = repo.db, state["batch"]["id"]
+    owner = database.get_connection()
+    pool = database.backend.get_pool()
+    pool_before = dict(pool._connections)
+    batch_before = repo.get_batch(batch_id)
+    slots_before = [repo.get_slot(slot["id"]) for slot in state["slots"]]
+    outcome_before = repo.get_variant_outcome(batch_id, state["slots"][0]["id"], 3)
+    blocked, release = threading.Event(), threading.Event()
+    owned: list[tuple[threading.Thread, sqlite3.Connection]] = []
+    cleanup_transactions: list[bool] = []
+    failure = RuntimeError("second slot reconciliation failed")
+    original_refresh = repo._refresh_slot_generation_status
+    original_open, original_close = database._open_new_connection, database.close_connection
+
+    def observed_open(*args: Any, **kwargs: Any) -> sqlite3.Connection:
+        """Record the actual new thread's handle, not a transferred caller handle."""
+        connection = original_open(*args, **kwargs)
+        owned.append((threading.current_thread(), connection))
+        return connection
+
+    def observed_close() -> None:
+        """Observe transaction completion before the thread-local handle is detached."""
+        cleanup_transactions.append(database.get_connection().in_transaction)
+        original_close()
+
+    def blocked_refresh(conn: Any, slot_id: int, **kwargs: Any) -> None:
+        """Block after both slots have changed but before the atomic commit."""
+        original_refresh(conn, slot_id, **kwargs)
+        if slot_id == state["slots"][1]["id"]:
+            blocked.set()
+            assert release.wait(5), "test reconciliation was not released"
+            if fail:
+                raise failure
+
+    monkeypatch.setattr(database, "_open_new_connection", observed_open)
+    monkeypatch.setattr(database, "close_connection", observed_close)
+    monkeypatch.setattr(repo, "_refresh_slot_generation_status", blocked_refresh)
+    pending = asyncio.create_task(repo.fail_batch_integrity_async(batch_id, error="vn_asset_recipe_not_found"))
+    try:
+        assert await asyncio.to_thread(blocked.wait, 3)
+        assert repo.get_batch(batch_id) == batch_before
+        assert [repo.get_slot(slot["id"]) for slot in state["slots"]] == slots_before
+        assert repo.get_variant_outcome(batch_id, state["slots"][0]["id"], 3) == outcome_before
+        assert repo.count_items_for_generation(state["pack"]["id"]) == 5
+        if cancel_delivery:
+            for _ in range(2):
+                pending.cancel()
+                await asyncio.sleep(0)
+                assert not pending.done(), "cancellation abandoned an owned transaction"
+        release.set()
+        if fail:
+            with pytest.raises(RuntimeError) as raised:
+                await pending
+            assert raised.value is failure
+            assert repo.get_batch(batch_id) == batch_before
+            assert [repo.get_slot(slot["id"]) for slot in state["slots"]] == slots_before
+            assert repo.get_variant_outcome(batch_id, state["slots"][0]["id"], 3) == outcome_before
+            assert repo.count_items_for_generation(state["pack"]["id"]) == 5
+        else:
+            if cancel_delivery:
+                with pytest.raises(asyncio.CancelledError):
+                    await pending
+            else:
+                assert (await pending)["failed_count"] == 3
+            assert repo.get_batch(batch_id)["failed_count"] == 3
+            assert repo.get_slot(state["slots"][1]["id"])["status"] == "failed"
+            assert repo.count_items_for_generation(state["pack"]["id"]) == 3
+        assert cleanup_transactions == [False]
+        assert len(owned) == 1
+        for thread, connection in owned:
+            assert thread.ident != threading.get_ident() and not thread.is_alive()
+            assert connection is not owner
+            with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+                connection.execute("SELECT 1")
+        assert pool._connections == pool_before
+        assert database.get_connection() is owner and not owner.in_transaction
+        assert owner.execute("SELECT 1").fetchone()[0] == 1
+    finally:
+        release.set()
+        await asyncio.gather(pending, return_exceptions=True)
+        original_close()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["private-memory", "caller-transaction"])
+async def test_async_integrity_preserves_owner_thread_fallback(
+    integrity_state: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str,
+) -> None:
+    """Connection-local writes stay inline and caller rollback retains ownership."""
+    repo = integrity_state["repo"] if mode == "private-memory" else _file_integrity_repository(integrity_state, tmp_path)
+    owner = repo.db.get_connection()
+    main_thread = threading.get_ident()
+    batch_id = integrity_state["batch"]["id"]
+    before = repo.get_batch(batch_id)
+    threads: list[int] = []
+    original = repo._refresh_slot_generation_status
+
+    def observed_refresh(conn: Any, slot_id: int, **kwargs: Any) -> None:
+        """Record the real transaction's owner while preserving reconciliation."""
+        assert conn is owner
+        threads.append(threading.get_ident())
+        original(conn, slot_id, **kwargs)
+
+    monkeypatch.setattr(repo, "_refresh_slot_generation_status", observed_refresh)
+    try:
+        if mode == "caller-transaction":
+            owner.execute("BEGIN IMMEDIATE")
+            owner.execute("UPDATE vn_asset_batches SET enqueue_error='caller-uncommitted' WHERE id=?", (batch_id,))
+        result = await repo.fail_batch_integrity_async(batch_id, error="vn_asset_recipe_not_found")
+        assert (result["status"], result["failed_count"]) == ("failed", 3)
+        assert threads == [main_thread, main_thread]
+        assert repo.db.get_connection() is owner
+        if mode == "caller-transaction":
+            assert owner.in_transaction
+            owner.rollback()
+            assert repo.get_batch(batch_id) == before
+            assert repo.count_items_for_generation(integrity_state["pack"]["id"]) == 5
+        assert owner.execute("SELECT 1").fetchone()[0] == 1
+    finally:
+        if owner.in_transaction:
+            owner.rollback()
+        if mode != "private-memory":
+            repo.db.close_connection()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("activity", ["inline", "queued-jobs", "active-jobs", "reader-error"])
+async def test_async_integrity_preserves_inline_and_actual_jobs_activity(
+    integrity_state: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, activity: str,
+) -> None:
+    """Reconciliation keeps instance-local activity and the real Jobs reader contract."""
+    state = integrity_state
+    repo = _file_integrity_repository(state, tmp_path)
+    batch_id, slot_id, pack_id = state["batch"]["id"], state["slots"][1]["id"], state["pack"]["id"]
+    legacy = repo.create_batch(pack_id=pack_id, requested_by_user_id=1, total_variants=1,
+                               options={"slot_ids": [slot_id], "variant_count": 1})
+    jobs = JobManager(db_path=tmp_path / "integrity-jobs.db")
+    create_generate_variant_job(jobs, pack_id=pack_id, slot_id=slot_id, batch_id=legacy["id"], variant_index=0, user_id=1)
+    if activity == "active-jobs":
+        assert jobs.acquire_next_job(domain="vn_assets", queue=vn_asset_generation_jobs_queue(),
+                                     worker_id="legacy", lease_seconds=120) is not None
+    if activity == "inline":
+        repo.begin_inline_legacy_display(legacy["id"], slot_id)
+    context = ContextVar("integrity-reader-context", default="missing")
+    token = context.set("owner-context")
+    observed_context: list[str] = []
+    opened: list[tuple[sqlite3.Connection, int]] = []
+    closed: list[tuple[sqlite3.Connection, int]] = []
+    reader = build_legacy_activity_reader(jobs)
+    original_connect = jobs._connect
+    failure = RuntimeError("Jobs activity read failed")
+
+    class ObservedJobsConnection:
+        """Delegate reads to real Jobs handles and observe their owned disposal."""
+
+        def __init__(self, connection: sqlite3.Connection) -> None:
+            """Keep the thread-owned Jobs handle until its normal finally cleanup."""
+            self.connection = connection
+
+        def __getattr__(self, name: str) -> Any:
+            """Leave the actual SQLite query and transaction behavior intact."""
+            return getattr(self.connection, name)
+
+        def close(self) -> None:
+            """Close on the same thread as acquisition, without touching VN handles."""
+            closed.append((self.connection, threading.get_ident()))
+            self.connection.close()
+
+    def observed_connect() -> ObservedJobsConnection:
+        """Record each actual Jobs connection created during reconciliation."""
+        connection = original_connect()
+        opened.append((connection, threading.get_ident()))
+        return ObservedJobsConnection(connection)
+
+    def observed_reader(*args: Any, **kwargs: Any) -> tuple[bool, bool]:
+        """Exercise the real activity callback with the originating context."""
+        observed_context.append(context.get())
+        return reader(*args, **kwargs)
+
+    def failed_get_job(*_args: Any, **_kwargs: Any) -> None:
+        """Fail after real Jobs pagination to check VN rollback and reader cleanup."""
+        raise failure
+
+    monkeypatch.setattr(jobs, "_connect", observed_connect)
+    if activity == "reader-error":
+        monkeypatch.setattr(jobs, "get_job", failed_get_job)
+    repo.legacy_activity_reader = observed_reader
+    before = repo.get_batch(batch_id)
+    slots_before = [repo.get_slot(slot["id"]) for slot in state["slots"]]
+    try:
+        if activity == "reader-error":
+            with pytest.raises(RuntimeError) as raised:
+                await repo.fail_batch_integrity_async(batch_id, error="vn_asset_recipe_not_found")
+            assert raised.value is failure
+            assert repo.get_batch(batch_id) == before
+            assert [repo.get_slot(slot["id"]) for slot in state["slots"]] == slots_before
+        else:
+            await repo.fail_batch_integrity_async(batch_id, error="vn_asset_recipe_not_found")
+            assert repo.get_slot(slot_id)["status"] == ("queued" if activity == "queued-jobs" else "generating")
+            assert repo.get_slot(state["slots"][0]["id"])["status"] == "generating"
+        assert observed_context and set(observed_context) == {"owner-context"}
+        assert opened and closed == opened
+        assert all(thread != threading.get_ident() for _, thread in opened)
+        if activity == "inline":
+            assert repo._inline_legacy_activity == {(legacy["id"], slot_id): 1}
+    finally:
+        context.reset(token)
+        repo.db.close_connection()
 
 
 @pytest.mark.integration

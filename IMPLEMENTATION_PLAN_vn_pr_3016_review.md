@@ -1,6 +1,55 @@
 # PR 3016 VN Durability Review Implementation Plan
 
-## Current Review Wave: Task 22
+## Current Review Wave: Task 23
+
+Full Qodo review5325946065 completed12:45:31Z on88aefac2ba95c9f743d3e67b34fd55858479315a,
+acknowledgment5846379125. Request5846349629 fulfilled; no review pending.
+One new finding4111405382/PRRT_kwDOL1aGf86mQtxJ;40threads1unresolved.
+Tasks1-22 remain locally complete/frozen/independently approved. AC5 reopened.
+
+### Task 23: Offload Complete Integrity Reconciliation
+
+**Base:** 88aefac2ba95c9f743d3e67b34fd55858479315a.
+**Tracking:** TASK-13369. **Spec:** Docs/Design/2026-09-25-vn-pr-3016-review.md.
+**Scope:** VNAssetPacks_DB.py, VN_Assets/worker.py and focused existing VN tests.
+No shared fixtures, global configuration, Jobs authority, storage or UI edits.
+
+- [x] Add an awaitable repository boundary for the complete integrity write and
+  per-slot reconciliation. Both async missing-recipe paths await it; synchronous
+  parent fanout retains its synchronous operation. Never transfer an active
+  connection, cursor or caller transaction between threads.
+- [x] Preserve cancellation precedence, exactly-once terminal counters,
+  reservation release, rollback, approved bytes/outcomes and sibling activity.
+  Retain Jobs legacy-activity callback semantics and inline instance state.
+  Preserve private-memory/active caller-transaction identity with documented
+  owner-thread fallback, as approved for async observations.
+- [x] Prove RED/GREEN responsiveness while reconciliation blocks, both worker
+  call sites, owned resource closure/error propagation and compatibility modes.
+  Run only affected covering modules once; exact-tier/doc/type metadata for all
+  added tests/helpers. Use project venv and Bandit; qualify baseline warnings.
+- [ ] Freeze delta/report/evidence; independent spec/quality and scoped changed-
+  contract review. Controller normal commit after review; no hook bypass.
+- [ ] Push, individual tested reply/resolution and one full exact-new-head Qodo
+  review. All seven CI/current strict dev/human summary gates precede merge.
+
+**Ruling:** The read-only Task22 helper cannot own this write transaction.
+Choose a cohesive thread-owned write boundary retaining established repository
+semantics, not fragmented SQL offloads or a new queue/pool authority. This is
+a correction to approved durability, not a new feature. Cost if wrong: bounded
+ownership/reconciliation rework with regression evidence.
+
+Task23 frozen four-file implementation,62source/evidence hashes verified by
+implementer/Main/independent reviewer. Two actual REDassertionfailures ->14GREEN;
+293coveringpassed0skips5summarywarnings200.01s. Main fresh14passed135deselected
+0skips4summarywarnings11.07s; productionBandit0findings0errors. Ruff1exactbase
+BLE001/testBandit18exactbaseB106, no additions; warnings retained/qualified.
+Huygens and Lovelace CLOSED; SPEC/QUALITY/changed-contract PASS/noactionable
+findings. Dedicated single-operation thread retains repo/callback/context/inline
+semantics; owns and closes only its handle, drains cancellation through cleanup.
+Memory/active-caller fallback remains synchronous, no universalasync claim.
+Currentdev freshlya2826f unchanged; normal seven-file hooks/commit/push next.
+AC5open/AC6pending; no reply/resolution/newreview/mergeattempt yet.
+## Historical Review Wave: Task 22
 
 Full Qodo review5325783656 completed11:35:55Z on exact head
 a3f62da0a29eac3743cd184341d97206e028e238, acknowledgment5845933607.
@@ -86,6 +135,20 @@ changed-contract PASS, no actionable findings. Main bounded integration16passed
 0skips plus fresh TypeScript/ESLint/Bandit passed, Ruff samebaselineBLE001.
 Dev a2826f unchanged. Normal scoped commit next; AC5 open until tested evidence
 replies and AC6/external gates pending. No merge attempted.
+
+Task22 locally complete: normal13-file commit/FFpush/GitHubverified head
+88aefac2ba95c9f743d3e67b34fd55858479315a; all93hashes match aftercommit.
+Applicable precommitcheckspassed; normalcommit no hookoutput, no stageclaim.
+Individual replies4111392924/2972/3012/3039/3073/3262 at12:39:54-12:40:04Z,
+six verified threads resolved. Paginated39threads0unresolved/no remainingpages,
+all24conversationcomments inspected. ONEfullrequest5846349629 at12:41:02Z
+on88aefac2 PENDING, busy5846351222 at12:41:18Z; no duplicate. Pushsummary
+5836873877 at12:39:25Z0bugs0rules24historicalomitted NOTfullreviewcompletion.
+Verification-onlybodyupdate humanparagraph/allothersections/Cubic preserved.
+Actual54checks33queued21done/sevenrequiredabsent/noactionablefailure; skipped/
+cancellednotpasses. AC5checked/AC6pending, OPEN/BLOCKED/no mergeattempt.
+Alltaskneededagents/tests/shellsessionsclosed. Onlylocalintegrationnotesdirty;
+no trackingonlypush duringpendingreview. Preserveworktree/evidence/main.
 
 **Ruling:** These are corrections to approved durability contracts, not a new
 feature. Keep the worker/read and integrity paths in one coordinated wave to

@@ -4,7 +4,7 @@ title: Address PR 3016 Qodo durability findings
 status: In Progress
 assignee: []
 created_date: '2026-09-26 00:52'
-updated_date: '2026-09-26 12:38'
+updated_date: '2026-09-26 13:16'
 labels:
   - vn-assets
   - review
@@ -146,6 +146,16 @@ Task22 independent Gibbs review SPEC PASS / QUALITY PASS / changed-contract inte
 Correction to preceding Main integration count: fresh structured XML proves16 tests, not15;0failures/errors/skips. The earlier note was a transcription error, not a missing/passing case. Raw /tmp/vn3016-task22-main.log/xml retained. Other verification unchanged.
 
 Normal applicable13-file pre-commit checks passed; YAML/TOML and scopedwizard Ruff/Black had no files and were skipped, not passes. Existing deprecated hook-stage warnings retained. All93 source/evidence hashes matched afterward; no source alteration. Main16passed124deselected0skips4summarywarnings8.63s. Normal reviewed13-file commit/push next; no hook bypass, no related fixture/globalconfig edits.
+
+Task22 normal13-file commit/FF push/GitHub exact head88aefac2ba95c9f743d3e67b34fd55858479315a, currentdev a2826f unchanged. All93 frozen hashes matched postcommit. Normal applicable pre-commit checks passed; normal commit output had no hook execution, no commit-stage claim/bypass. Individual tested replies4111392924/2972/3012/3039/3073/3262 posted12:39:54-12:40:04Z; six verified threads resolved. Fresh paginated39threads0unresolved/no remaining review/thread/comment pages; all24 conversation comments inspected. Push-only summary5836873877 at12:39:25Z0bugs0rules24historicalomitted is NOT full new-head completion. ONEfull request5846349629 at12:41:02Z on88aefac2 is PENDING, busy5846351222 at12:41:18Z; do not duplicate. Verification-only body update freshly verified human summary/all other sections/Cubic footer preserved. Actual54checks33queued21completed/no actionablefailure/sevenrequiredabsent; skips+cancellationsnotpasses. AC5checked/AC6pending, OPEN/BLOCKED/no merge attempted. All task-needed agents/tests/shellsessions closed; only local integration notes remain, preserve worktree/evidence/main/backupref/already-applied stash. No tracking-only push while review pending.
+
+Full exact-head Qodo review 5325946065 completed 2026-09-26T12:45:31Z on 88aefac2ba95c9f743d3e67b34fd55858479315a; request 5846349629 fulfilled, terminal acknowledgment 5846379125. One new verified candidate finding 4111405382/PRRT_kwDOL1aGf86mQtxJ: async worker directly calls synchronous integrity write/reconciliation. Paginated40threads1unresolved; prior39 preserved. AC5 reopened; inspecting ownership before bounded Task23 TDD and independent review. No review pending or merge attempt. Required checks remain queued/absent.
+
+Task23 active with Huygens01a0ddc5-58dc-7ef1-81a1-b9260c3628a0; brief/plan/design added. Verified both async missing-recipe paths directly invoke full synchronous write/reconciliation. Controller owns tracking, implementer owns bounded VN DB/worker/tests plus evidence. Ruling: cohesive thread-owned transaction boundary, not read-only helper reuse or transferring active handles; retain private-memory/active-caller fallback and legacy/inline semantics. Independent task review contract prepared; prior1-22 remain frozen. No review pending or merge attempt.
+
+Task23 Huygens frozen locally complete and CLOSED. Four source/test files; actual2REDassertionfailures then14focusedGREEN and293affectedcovering passed0skips5summarywarnings. Dedicated one-operation executor runs unchanged atomic integrity operation on newly owned thread-local handle, retaining callback/context/inline semantics; drain cancellation through cleanup, documented memory/active-caller synchronous fallback. ProductionBandit0/Ruff1baselineBLE001/testBandit18exactbaselineB106, no additions. Lovelace01a0ddd4-f46b-7292-a719-f250ab236447 independent SPEC/QUALITY/changed-contract review ACTIVE. Main fresh hash audit passed; initial unsupported finalize.py verify selector returned1 (no source/evidence mutation); corrected standard shasum -c validates62entries, not claiming first command success. Dev freshlyfetched unchangeda2826f, no rebase. AC5open/AC6pending, no new push/reply/resolution/merge.
+
+Task23 independent Lovelace SPEC/QUALITY/changed-contract PASS with no actionable findings; reviewer CLOSED. Audited62hashes, actual RED/GREEN293covering/XML and concrete thread/pool/context/legacy callback ownership. Main fresh14focusedpassed0skips4summarywarnings11.07s, Bandit0findings0errors. All taskneeded sessions/agents closed. Dev unchangeda2826f, no rebase. Scoped seven-file normal hooks/commit/push next; AC5open until tested reply, AC6externalgates pending, no mergeattempt.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

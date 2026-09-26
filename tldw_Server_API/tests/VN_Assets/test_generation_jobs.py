@@ -295,6 +295,72 @@ async def test_integrity_admission_releases_surviving_partial_fanout_reservation
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.parametrize("admission", ["child", "replay"])
+async def test_integrity_reconciliation_does_not_block_async_worker_loop(
+    service: VNAssetPackService, pack_with_slots: SimpleNamespace,
+    fake_jobs: FakeJobs, admission: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both missing-recipe paths yield while the real slot reconciliation waits."""
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    slots = pack_with_slots.slots[:2]
+    batch = service.start_generation(
+        pack_with_slots.id, user_id=1,
+        request=VNAssetGenerationRequest(slot_ids=[slot.id for slot in slots], variant_count=2),
+    )
+    service.repo.db.execute_query(
+        "DELETE FROM vn_asset_generation_recipes WHERE batch_id=? AND slot_id=? AND variant_index=1",
+        (batch.batch_id, slots[0].id),
+    )
+    owner = service.repo.db.get_connection()
+    main_thread = threading.get_ident()
+    reconciliation_threads: list[int] = []
+    blocked, release, responsive = threading.Event(), threading.Event(), threading.Event()
+    original = service.repo._refresh_slot_generation_status
+
+    def blocked_reconciliation(conn: Any, slot_id: int, **kwargs: Any) -> None:
+        """Hold the second slot inside the real integrity transaction."""
+        reconciliation_threads.append(threading.get_ident())
+        original(conn, slot_id, **kwargs)
+        if slot_id == slots[1].id:
+            blocked.set()
+            assert release.wait(3), "reconciliation safety release timed out"
+
+    def safety_release() -> None:
+        """Bound the RED loop stall without needing the blocked event loop."""
+        if blocked.wait(3):
+            responsive.wait(0.5)
+        release.set()
+
+    monkeypatch.setattr(service.repo, "_refresh_slot_generation_status", blocked_reconciliation)
+    worker = VNAssetGenerationWorker(repo=service.repo, jobs_manager=fake_jobs)
+    payload = {"pack_id": pack_with_slots.id, "batch_id": batch.batch_id, "user_id": 1,
+               "slot_id": slots[0].id, "variant_index": 1}
+    watchdog = threading.Thread(target=safety_release)
+    watchdog.start()
+    operation = worker.handle_generate_variant(payload) if admission == "child" else worker._replay_variant(**payload)
+    pending = asyncio.create_task(operation)
+    try:
+        assert await asyncio.to_thread(blocked.wait, 3)
+        was_blocked = not release.is_set()
+        responsive.set()
+        with pytest.raises(VNAssetGenerationError, match="vn_asset_recipe_not_found"):
+            await pending
+        assert was_blocked, "event loop resumed only after synchronous reconciliation unblocked"
+        assert reconciliation_threads and all(thread != main_thread for thread in reconciliation_threads)
+        assert service.repo.get_batch(batch.batch_id)["failed_count"] == 3
+        assert all(service.repo.get_slot(slot.id)["status"] == "failed" for slot in slots)
+        assert service.repo.db.get_connection() is owner
+        assert owner.execute("SELECT 1").fetchone()[0] == 1
+    finally:
+        release.set()
+        await asyncio.gather(pending, return_exceptions=True)
+        watchdog.join(timeout=3)
+        assert not watchdog.is_alive()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_outcome_query_does_not_block_async_worker_loop(
     service: VNAssetPackService, pack_with_slots: SimpleNamespace,
     fake_jobs: FakeJobs, monkeypatch: pytest.MonkeyPatch,
