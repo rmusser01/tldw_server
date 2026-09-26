@@ -1,14 +1,22 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
+from pytest import MonkeyPatch
 
-from tldw_Server_API.app.core.DB_Management.Calendar_DB import CalendarDatabase
 from tldw_Server_API.app.core.Calendar.errors import CalendarReadOnlyError, CalendarValidationError
+from tldw_Server_API.app.core.DB_Management.Calendar_DB import (
+    CalendarDatabase,
+    CalendarRow,
+    ExternalCalendarBindingRow,
+)
+
+pytestmark = pytest.mark.unit
 
 
-def test_outer_transaction_rolls_back_nested_item_and_recurrence(calendar_db):
+def test_outer_transaction_rolls_back_nested_item_and_recurrence(calendar_db: CalendarDatabase) -> None:
     calendar = _create_calendar(calendar_db)
     with pytest.raises(RuntimeError):
         with calendar_db.transaction():
@@ -27,13 +35,13 @@ def test_outer_transaction_rolls_back_nested_item_and_recurrence(calendar_db):
 
 
 @pytest.fixture
-def calendar_db(tmp_path):
+def calendar_db(tmp_path: Path) -> CalendarDatabase:
     db = CalendarDatabase(db_path=tmp_path / "calendar.db")
     db.ensure_schema()
     return db
 
 
-def _create_calendar(db: CalendarDatabase):
+def _create_calendar(db: CalendarDatabase) -> CalendarRow:
     return db.create_calendar(
         tenant_id="default",
         owner_user_id=1,
@@ -44,7 +52,60 @@ def _create_calendar(db: CalendarDatabase):
     )
 
 
-def test_calendar_db_creates_personal_calendar(calendar_db):
+def _create_binding(
+    db: CalendarDatabase, *, tenant_id: str = "default", user_id: int = 1,
+) -> ExternalCalendarBindingRow:
+    """Create a personal calendar and provider account in the isolated test database."""
+    calendar = db.create_calendar(
+        tenant_id=tenant_id, owner_user_id=user_id, org_id=None, name="Imported", timezone="UTC"
+    )
+    account = db.create_external_account(
+        tenant_id=tenant_id, user_id=user_id, provider="caldav", display_name="Private", secret_ref=None
+    )
+    return db.create_external_binding(account_id=account.id, calendar_id=calendar.id, remote_calendar_id="remote")
+
+
+def test_provider_binding_owners_filters_tenant_and_omits_missing_ids(calendar_db: CalendarDatabase) -> None:
+    first = _create_binding(calendar_db)
+    second = _create_binding(calendar_db, user_id=2)
+    other_tenant = _create_binding(calendar_db, tenant_id="other")
+
+    owners = calendar_db.list_provider_binding_owners(
+        iter([first.id, second.id, other_tenant.id, first.id, -1]), tenant_id="default"
+    )
+
+    assert owners == {first.id: 1, second.id: 2}
+    assert calendar_db.list_provider_binding_owners([first.id, other_tenant.id], tenant_id="other") == {
+        other_tenant.id: 1
+    }
+    assert calendar_db.list_provider_binding_owners([-1], tenant_id="default") == {}
+
+
+@pytest.mark.parametrize("cleanup_kind", ["account", "binding"])
+def test_provider_binding_owners_retains_deleted_ownership(
+    calendar_db: CalendarDatabase, cleanup_kind: str,
+) -> None:
+    binding = _create_binding(calendar_db)
+    if cleanup_kind == "account":
+        calendar_db.delete_external_account(binding.account_id)
+    else:
+        calendar_db.delete_external_binding(binding.id)
+
+    assert calendar_db.list_provider_binding_owners([binding.id], tenant_id="default") == {binding.id: 1}
+
+
+def test_provider_binding_owners_empty_input_does_not_open_connection(
+    calendar_db: CalendarDatabase, monkeypatch: MonkeyPatch,
+) -> None:
+    def unexpected_connection() -> None:
+        pytest.fail("An empty ownership batch must not open a DB connection")
+
+    monkeypatch.setattr(calendar_db, "connection", unexpected_connection)
+
+    assert calendar_db.list_provider_binding_owners(iter([]), tenant_id="default") == {}
+
+
+def test_calendar_db_creates_personal_calendar(calendar_db: CalendarDatabase) -> None:
     calendar = _create_calendar(calendar_db)
 
     assert calendar.name == "Research"
@@ -52,7 +113,7 @@ def test_calendar_db_creates_personal_calendar(calendar_db):
     assert calendar.archived_at is None
 
 
-def test_calendar_db_creates_owner_membership_automatically(calendar_db):
+def test_calendar_db_creates_owner_membership_automatically(calendar_db: CalendarDatabase) -> None:
     calendar = _create_calendar(calendar_db)
 
     memberships = calendar_db.list_memberships(calendar.id)
@@ -64,7 +125,7 @@ def test_calendar_db_creates_owner_membership_automatically(calendar_db):
     assert memberships[0].role == "owner"
 
 
-def test_create_item_rejects_provider_owned_local_creates(calendar_db):
+def test_create_item_rejects_provider_owned_local_creates(calendar_db: CalendarDatabase) -> None:
     calendar = _create_calendar(calendar_db)
     start_at = datetime(2026, 6, 5, 17, 0, tzinfo=timezone.utc).isoformat()
     end_at = datetime(2026, 6, 5, 18, 0, tzinfo=timezone.utc).isoformat()
@@ -81,7 +142,7 @@ def test_create_item_rejects_provider_owned_local_creates(calendar_db):
         )
 
 
-def test_remote_deleted_provider_tombstones_are_hidden_from_window_queries(calendar_db):
+def test_remote_deleted_provider_tombstones_are_hidden_from_window_queries(calendar_db: CalendarDatabase) -> None:
     calendar = _create_calendar(calendar_db)
     account = calendar_db.create_external_account(
         tenant_id="default",
@@ -124,7 +185,7 @@ def test_remote_deleted_provider_tombstones_are_hidden_from_window_queries(calen
     assert visible_items == []
 
 
-def test_external_account_rows_expose_secret_ref_not_credential_payload(calendar_db):
+def test_external_account_rows_expose_secret_ref_not_credential_payload(calendar_db: CalendarDatabase) -> None:
     secret_ref = calendar_db.create_secret_ref(
         tenant_id="default",
         user_id=1,
@@ -149,7 +210,9 @@ def test_external_account_rows_expose_secret_ref_not_credential_payload(calendar
 
 
 @pytest.mark.parametrize("account_cleanup_method", ["revoke", "delete"])
-def test_external_account_cleanup_wipes_secret_payload(calendar_db, account_cleanup_method):
+def test_external_account_cleanup_wipes_secret_payload(
+    calendar_db: CalendarDatabase, account_cleanup_method: str,
+) -> None:
     secret_ref = calendar_db.create_secret_ref(
         tenant_id="default",
         user_id=1,
@@ -185,7 +248,7 @@ def test_external_account_cleanup_wipes_secret_payload(calendar_db, account_clea
     assert row["deleted_at"] is not None
 
 
-def test_external_binding_stores_window_and_provider_capabilities(calendar_db):
+def test_external_binding_stores_window_and_provider_capabilities(calendar_db: CalendarDatabase) -> None:
     calendar = _create_calendar(calendar_db)
     account = calendar_db.create_external_account(
         tenant_id="default",
@@ -218,10 +281,10 @@ def test_external_binding_stores_window_and_provider_capabilities(calendar_db):
     ],
 )
 def test_external_binding_rejects_org_or_other_user_calendar(
-    calendar_db,
-    calendar_owner_user_id,
-    org_id,
-):
+    calendar_db: CalendarDatabase,
+    calendar_owner_user_id: int,
+    org_id: int | None,
+) -> None:
     calendar = calendar_db.create_calendar(
         tenant_id="default",
         owner_user_id=calendar_owner_user_id,
@@ -246,7 +309,7 @@ def test_external_binding_rejects_org_or_other_user_calendar(
         )
 
 
-def test_provider_upsert_rejects_calendar_id_that_does_not_match_binding(calendar_db):
+def test_provider_upsert_rejects_calendar_id_that_does_not_match_binding(calendar_db: CalendarDatabase) -> None:
     calendar = _create_calendar(calendar_db)
     other_calendar = calendar_db.create_calendar(
         tenant_id="default",
@@ -287,7 +350,9 @@ def test_provider_upsert_rejects_calendar_id_that_does_not_match_binding(calenda
         {"tenant_id": "default", "user_id": 1, "provider": "google"},
     ],
 )
-def test_create_external_account_rejects_secret_ref_scope_mismatch(calendar_db, account_kwargs):
+def test_create_external_account_rejects_secret_ref_scope_mismatch(
+    calendar_db: CalendarDatabase, account_kwargs: dict[str, str | int],
+) -> None:
     secret_ref = calendar_db.create_secret_ref(
         tenant_id="default",
         user_id=1,
@@ -303,7 +368,7 @@ def test_create_external_account_rejects_secret_ref_scope_mismatch(calendar_db, 
         )
 
 
-def test_scoped_secret_ref_access_rejects_mismatched_owner(calendar_db):
+def test_scoped_secret_ref_access_rejects_mismatched_owner(calendar_db: CalendarDatabase) -> None:
     secret_ref = calendar_db.create_secret_ref(
         tenant_id="default",
         user_id=1,
@@ -337,7 +402,7 @@ def test_scoped_secret_ref_access_rejects_mismatched_owner(calendar_db):
         calendar_db.resolve_secret_ref(secret_ref)
 
 
-def test_external_binding_can_rebind_remote_calendar_after_soft_delete(calendar_db):
+def test_external_binding_can_rebind_remote_calendar_after_soft_delete(calendar_db: CalendarDatabase) -> None:
     calendar = _create_calendar(calendar_db)
     account = calendar_db.create_external_account(
         tenant_id="default",
@@ -368,7 +433,7 @@ def test_external_binding_can_rebind_remote_calendar_after_soft_delete(calendar_
     assert rebound.remote_display_name == "Remote Calendar Rebound"
 
 
-def test_external_binding_rejects_non_active_account(calendar_db):
+def test_external_binding_rejects_non_active_account(calendar_db: CalendarDatabase) -> None:
     calendar = _create_calendar(calendar_db)
     account = calendar_db.create_external_account(
         tenant_id="default",
@@ -388,7 +453,7 @@ def test_external_binding_rejects_non_active_account(calendar_db):
 
 
 @pytest.mark.parametrize("account_state", ["inactive", "revoked", "deleted"])
-def test_due_scan_excludes_non_active_accounts(calendar_db, account_state):
+def test_due_scan_excludes_non_active_accounts(calendar_db: CalendarDatabase, account_state: str) -> None:
     calendar = _create_calendar(calendar_db)
     account = calendar_db.create_external_account(
         tenant_id="default",
@@ -429,7 +494,7 @@ def test_due_scan_excludes_non_active_accounts(calendar_db, account_state):
     assert binding.id not in {due_binding.id for due_binding in due_bindings}
 
 
-def test_destructive_account_cleanup_preserves_copied_tldw_item(calendar_db):
+def test_destructive_account_cleanup_preserves_copied_tldw_item(calendar_db: CalendarDatabase) -> None:
     calendar = _create_calendar(calendar_db)
     account = calendar_db.create_external_account(
         tenant_id="default",
@@ -471,7 +536,65 @@ def test_destructive_account_cleanup_preserves_copied_tldw_item(calendar_db):
     assert copied_after_cleanup.copied_from_item_id is None
 
 
-def test_remote_tombstone_cleanup_preserves_copied_tldw_item(calendar_db):
+def test_tag_overlays_batch_filters_actor_body_deletion_and_requested_ids(
+    calendar_db: CalendarDatabase,
+) -> None:
+    calendar = _create_calendar(calendar_db)
+    items = [
+        calendar_db.create_item(
+            calendar_id=calendar.id, kind="event", title=f"Item {index}", start_at="2026-06-05T09:00:00Z"
+        )
+        for index in range(3)
+    ]
+    first = calendar_db.create_annotation(calendar_item_id=items[1].id, author_user_id=1, body="", tags_json=["a"])
+    second = calendar_db.create_annotation(calendar_item_id=items[0].id, author_user_id=1, body="", tags_json=["b"])
+    third = calendar_db.create_annotation(calendar_item_id=items[1].id, author_user_id=1, body="", tags_json=["c"])
+    calendar_db.create_annotation(calendar_item_id=items[1].id, author_user_id=2, body="", tags_json=["private"])
+    calendar_db.create_annotation(calendar_item_id=items[1].id, author_user_id=1, body="Comment", tags_json=["comment"])
+    calendar_db.create_annotation(calendar_item_id=items[2].id, author_user_id=1, body="", tags_json=["outside"])
+    deleted = calendar_db.create_annotation(calendar_item_id=items[1].id, author_user_id=1, body="", tags_json=["deleted"])
+    calendar_db.delete_annotation(deleted.id)
+
+    overlays = calendar_db.list_tag_overlays_for_items(
+        iter([items[1].id, items[0].id, items[1].id, -1]), author_user_id=1
+    )
+
+    assert overlays == {items[1].id: [first, third], items[0].id: [second]}
+
+
+def test_tag_overlays_batch_returns_empty_without_opening_connection(
+    calendar_db: CalendarDatabase, monkeypatch: MonkeyPatch,
+) -> None:
+    def unexpected_connection() -> None:
+        pytest.fail("An empty overlay batch must not open a DB connection")
+
+    monkeypatch.setattr(calendar_db, "connection", unexpected_connection)
+
+    assert calendar_db.list_tag_overlays_for_items(iter([]), author_user_id=1) == {}
+
+
+def test_tag_overlays_batch_reads_fifty_items_in_one_select(calendar_db: CalendarDatabase) -> None:
+    calendar = _create_calendar(calendar_db)
+    item_ids: list[int] = []
+    for index in range(50):
+        item = calendar_db.create_item(
+            calendar_id=calendar.id, kind="event", title=f"Item {index}", start_at="2026-06-05T09:00:00Z"
+        )
+        item_ids.append(item.id)
+        calendar_db.create_annotation(calendar_item_id=item.id, author_user_id=1, body="", tags_json=["tag"])
+    statements: list[str] = []
+    with calendar_db.transaction() as conn:
+        conn.set_trace_callback(statements.append)
+        try:
+            overlays = calendar_db.list_tag_overlays_for_items(iter(item_ids), author_user_id=1)
+        finally:
+            conn.set_trace_callback(None)
+
+    assert len(overlays) == 50
+    assert len([sql for sql in statements if sql.lstrip().upper().startswith("SELECT")]) == 1
+
+
+def test_remote_tombstone_cleanup_preserves_copied_tldw_item(calendar_db: CalendarDatabase) -> None:
     calendar = _create_calendar(calendar_db)
     account = calendar_db.create_external_account(
         tenant_id="default",

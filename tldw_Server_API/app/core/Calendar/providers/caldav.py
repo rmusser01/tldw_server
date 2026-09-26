@@ -467,7 +467,18 @@ class CalDavProvider:
 
     @staticmethod
     def _validate_http_url(url: str) -> str:
-        parsed = urlparse(str(url).strip())
+        """Validate public HTTPS URL syntax, including ports, without network I/O.
+
+        Return its normalized spelling or raise CalendarValidationError; never
+        propagate urlparse/port ValueError for account or provider-supplied input.
+        """
+        try:
+            parsed = urlparse(str(url).strip())
+            port = parsed.port
+        except ValueError as exc:
+            raise CalendarValidationError("CalDAV server URL must have a valid host and port") from exc
+        if port is not None and not 1 <= port <= 65535:
+            raise CalendarValidationError("CalDAV server URL port must be between 1 and 65535")
         if parsed.scheme != "https":
             raise CalendarValidationError("CalDAV server URL must use https")
         if not parsed.hostname:
@@ -494,8 +505,13 @@ class CalDavProvider:
 
     @staticmethod
     def same_origin_url(base_url: str, href: str) -> str:
+        """Resolve a collection URL and reject invalid or cross-origin destinations."""
         base = urlparse(CalDavProvider._validate_http_url(base_url))
-        resolved = CalDavProvider._validate_http_url(urljoin(base_url, href))
+        try:
+            joined = urljoin(base_url, href)
+        except ValueError as exc:
+            raise CalendarValidationError("CalDAV calendar URL must have a valid host and port") from exc
+        resolved = CalDavProvider._validate_http_url(joined)
         target = urlparse(resolved)
         base_origin = (base.scheme, base.hostname, base.port or (443 if base.scheme == "https" else 80))
         target_origin = (target.scheme, target.hostname, target.port or (443 if target.scheme == "https" else 80))

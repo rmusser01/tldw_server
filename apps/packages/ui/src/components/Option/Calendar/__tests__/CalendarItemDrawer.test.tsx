@@ -279,10 +279,34 @@ describe("CalendarItemDrawer", () => {
     await waitFor(() => expect(screen.queryByRole("link", { name: "Saved notes" })).toBeNull())
   })
 
-  it("requires confirmation before deleting a local item", async () => {
+  it.each([
+    { kind: "event", recurrence_id: 3, occurrence_index: null },
+    { kind: "todo", recurrence_id: 3, occurrence_index: null },
+    { kind: "event", recurrence_id: null, occurrence_index: 0 },
+    { kind: "todo", recurrence_id: null, occurrence_index: 0 }
+  ])("hides deletion for $kind occurrences (recurrence_id=$recurrence_id, occurrence_index=$occurrence_index)", (occurrence) => {
+    renderDrawer({
+      ...localItem,
+      ...occurrence,
+      id: "calendar_item:7:occurrence:0:2026-06-05T09:00:00Z",
+      end_at: occurrence.kind === "event" ? localItem.end_at : null,
+      due_at: occurrence.kind === "todo" ? localItem.start_at : null
+    })
+
+    expect(screen.queryByRole("button", { name: "Delete item" })).toBeNull()
+  })
+
+  it.each(["event", "todo"])("requires confirmation before deleting a local %s item", async (kind) => {
     const user = userEvent.setup()
+    const onSaved = vi.fn()
+    const onClose = vi.fn()
     mocks.deleteCalendarItem.mockResolvedValue({ deleted: true })
-    renderDrawer(localItem)
+    renderDrawer({
+      ...localItem,
+      kind,
+      end_at: kind === "event" ? localItem.end_at : null,
+      due_at: kind === "todo" ? localItem.start_at : null
+    }, { onSaved, onClose })
 
     await user.click(screen.getByRole("button", { name: "Delete item" }))
     expect(mocks.deleteCalendarItem).not.toHaveBeenCalled()
@@ -291,6 +315,8 @@ describe("CalendarItemDrawer", () => {
     await waitFor(() => expect(mocks.deleteCalendarItem).toHaveBeenCalledWith(
       expect.objectContaining({ calendar_item_id: 7, source_owner: "tldw" })
     ))
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1))
   })
 
   it("disables provider-owned field editing and offers copy into tldw", async () => {
@@ -316,6 +342,7 @@ describe("CalendarItemDrawer", () => {
     expect(title).toHaveProperty("disabled", true)
     expectPresent(screen.getByText("Managed by CalDAV"))
     expect(screen.queryByRole("button", { name: "Save item" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Delete item" })).toBeNull()
 
     await user.click(screen.getByRole("button", { name: "Copy into tldw" }))
 

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import importlib
 import json
+import sqlite3
+from collections.abc import Generator
 from datetime import date, datetime, timedelta, timezone
 
 import pytest
@@ -17,6 +19,110 @@ from tldw_Server_API.app.core.Calendar.errors import (
     CalendarValidationError,
 )
 from tldw_Server_API.app.core.DB_Management.Calendar_DB import CalendarDatabase
+
+pytestmark = pytest.mark.unit
+
+
+def test_org_calendar_creation_denies_unverified_membership(calendar_db: CalendarDatabase) -> None:
+    """Non-HTTP callers cannot attach calendars to an unverified organization."""
+    service = CalendarService(db=calendar_db)
+    with pytest.raises(CalendarPermissionDenied):
+        service.create_calendar(actor_user_id=1, name="Forged org", org_id=42)
+    assert calendar_db.list_calendars(tenant_id="default") == []
+
+
+def test_org_calendar_creation_uses_actor_scoped_membership(calendar_db: CalendarDatabase) -> None:
+    """Verified members may create only in the organization and actor they resolved."""
+    service = CalendarService(
+        db=calendar_db, org_membership_resolver=lambda actor, org: actor == 1 and org == 42,
+    )
+    created = service.create_calendar(actor_user_id=1, name="Verified org", org_id=42)
+    for actor, org in [(2, 42), (1, 43)]:
+        with pytest.raises(CalendarPermissionDenied):
+            service.create_calendar(actor_user_id=actor, name="Unrelated", org_id=org)
+    assert [row.id for row in calendar_db.list_calendars(tenant_id="default")] == [created.id]
+
+
+def test_batched_visibility_preserves_private_provider_rows_and_tenant_scope(
+    calendar_db: CalendarDatabase,
+) -> None:
+    """Sharing a calendar never shares its private imports or foreign-tenant rows."""
+    from dataclasses import replace
+
+    calendar, provider_item = _create_provider_item(calendar_db)
+    service = CalendarService(db=calendar_db)
+    service.add_membership(actor_user_id=1, calendar_id=calendar.id, principal_type="user", principal_id="2", role="viewer")
+    native = service.create_item(
+        actor_user_id=1, calendar_id=calendar.id, kind="event", title="Shared native", start_at="2026-06-05T09:00:00Z",
+    )
+    assert service.filter_readable_items(actor_user_id=2, items=[provider_item, native]) == [native]
+    assert service.filter_readable_items(actor_user_id=1, items=[provider_item, native]) == [provider_item, native]
+    assert CalendarService(db=calendar_db, tenant_id="other").filter_readable_items(
+        actor_user_id=1, items=[provider_item, native],
+    ) == []
+    assert service.filter_readable_items(actor_user_id=2, items=[replace(provider_item, external_binding_id=99999)]) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("next_run", ["2026-06-06T00:00:00Z", "2026-06-06T02:00:00+02:00"])
+async def test_scheduled_projection_uses_exclusive_window_end(
+    calendar_db: CalendarDatabase, next_run: str,
+) -> None:
+    """A task on the shared boundary belongs only to the following window."""
+    from tldw_Server_API.app.core.Calendar.view_service import CalendarViewService
+
+    task = ScheduledTask(
+        id="reminder:boundary", primitive="reminder_task", title="Boundary", status="scheduled",
+        enabled=True, next_run_at=next_run, edit_mode="native",
+    )
+    view = CalendarViewService(
+        calendar_service=CalendarService(db=calendar_db), scheduled_tasks_service=_ScheduledTasksStub([task]),
+    )
+    before = await view.load_scheduled_task_projections(
+        actor_user_id=1, start_at="2026-06-05T00:00:00Z", end_at="2026-06-06T00:00:00Z",
+    )
+    after = await view.load_scheduled_task_projections(
+        actor_user_id=1, start_at="2026-06-06T00:00:00Z", end_at="2026-06-07T00:00:00Z",
+    )
+    assert [item.id for item in before] == []
+    assert [item.id for item in after] == ["projection:scheduled_task:reminder:boundary"]
+
+
+@pytest.mark.parametrize("candidate_count", [5, 50])
+def test_agenda_authorization_query_count_is_bounded(
+    calendar_db: CalendarDatabase, monkeypatch: pytest.MonkeyPatch, candidate_count: int,
+) -> None:
+    """Loaded agenda rows are not fetched again for each permission check."""
+    import contextlib
+
+    from tldw_Server_API.app.core.Calendar.view_service import CalendarViewService
+
+    service = CalendarService(db=calendar_db)
+    calendar = service.create_calendar(actor_user_id=1, name="Large agenda")
+    for index in range(candidate_count):
+        service.create_item(
+            actor_user_id=1, calendar_id=calendar.id, kind="event", title=f"Item {index}",
+            start_at="2026-06-05T09:00:00Z",
+        )
+    selects: list[str] = []
+    original_connection = calendar_db.connection
+
+    @contextlib.contextmanager
+    def counted_connection() -> Generator[sqlite3.Connection, None, None]:
+        """Count SELECT statements across real isolated SQLite connections."""
+        with original_connection() as connection:
+            connection.set_trace_callback(lambda sql: selects.append(sql) if sql.lstrip().upper().startswith("SELECT") else None)
+            try:
+                yield connection
+            finally:
+                connection.set_trace_callback(None)
+
+    monkeypatch.setattr(calendar_db, "connection", counted_connection)
+    items = CalendarViewService(calendar_service=service).expand_items_window(
+        actor_user_id=1, start_at="2026-06-05T00:00:00Z", end_at="2026-06-06T00:00:00Z",
+    )
+    assert len(items) == candidate_count
+    assert len(selects) <= 12, selects
 
 
 @pytest.mark.parametrize(
@@ -235,7 +341,8 @@ def test_org_role_membership_grants_access_only_through_resolver(calendar_db):
 
     denied_service = CalendarService(db=calendar_db)
     allowed_service = CalendarService(db=calendar_db, org_role_resolver=resolver)
-    calendar = denied_service.create_calendar(
+    creator = CalendarService(db=calendar_db, org_membership_resolver=lambda actor, org: actor == 1 and org == 42)
+    calendar = creator.create_calendar(
         actor_user_id=1,
         name="Org research",
         timezone="UTC",
