@@ -5,7 +5,7 @@ import hashlib
 import os
 import sqlite3
 import threading
-from collections.abc import Generator
+from collections.abc import Generator, Mapping
 from contextlib import closing
 from pathlib import Path
 from types import SimpleNamespace
@@ -298,7 +298,7 @@ async def test_integrity_admission_releases_surviving_partial_fanout_reservation
 @pytest.mark.parametrize("admission", ["child", "replay"])
 async def test_integrity_reconciliation_does_not_block_async_worker_loop(
     service: VNAssetPackService, pack_with_slots: SimpleNamespace,
-    fake_jobs: FakeJobs, admission: str, monkeypatch: pytest.MonkeyPatch,
+    fake_jobs: FakeJobs, admission: str,
 ) -> None:
     """Both missing-recipe paths yield while the real slot reconciliation waits."""
     from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
@@ -312,19 +312,29 @@ async def test_integrity_reconciliation_does_not_block_async_worker_loop(
         "DELETE FROM vn_asset_generation_recipes WHERE batch_id=? AND slot_id=? AND variant_index=1",
         (batch.batch_id, slots[0].id),
     )
+    service.repo.create_batch(
+        pack_id=pack_with_slots.id, requested_by_user_id=1, total_variants=2,
+        options={"slot_ids": [slot.id for slot in slots], "variant_count": 1},
+    )
     owner = service.repo.db.get_connection()
     main_thread = threading.get_ident()
-    reconciliation_threads: list[int] = []
+    owned: list[tuple[threading.Thread, sqlite3.Connection]] = []
     blocked, release, responsive = threading.Event(), threading.Event(), threading.Event()
-    original = service.repo._refresh_slot_generation_status
 
-    def blocked_reconciliation(conn: Any, slot_id: int, **kwargs: Any) -> None:
-        """Hold the second slot inside the real integrity transaction."""
-        reconciliation_threads.append(threading.get_ident())
-        original(conn, slot_id, **kwargs)
+    def blocked_reader(
+        _pack_id: int, slot_id: int, _user_id: int, _batches: Mapping[int, str],
+        _settled: set[tuple[int, int, str]], _finishing: tuple[int, str] | None,
+    ) -> tuple[bool, bool]:
+        """Hold the supported activity read after real first-slot reconciliation."""
+        connection = service.repo.db.get_connection()
+        owned.append((threading.current_thread(), connection))
+        assert connection.in_transaction
         if slot_id == slots[1].id:
+            assert service.repo.get_batch(batch.batch_id)["failed_count"] == 3
+            assert service.repo.get_slot(slots[0].id)["status"] == "failed"
             blocked.set()
             assert release.wait(3), "reconciliation safety release timed out"
+        return False, False
 
     def safety_release() -> None:
         """Bound the RED loop stall without needing the blocked event loop."""
@@ -332,8 +342,8 @@ async def test_integrity_reconciliation_does_not_block_async_worker_loop(
             responsive.wait(0.5)
         release.set()
 
-    monkeypatch.setattr(service.repo, "_refresh_slot_generation_status", blocked_reconciliation)
     worker = VNAssetGenerationWorker(repo=service.repo, jobs_manager=fake_jobs)
+    service.repo.legacy_activity_reader = blocked_reader
     payload = {"pack_id": pack_with_slots.id, "batch_id": batch.batch_id, "user_id": 1,
                "slot_id": slots[0].id, "variant_index": 1}
     watchdog = threading.Thread(target=safety_release)
@@ -347,7 +357,12 @@ async def test_integrity_reconciliation_does_not_block_async_worker_loop(
         with pytest.raises(VNAssetGenerationError, match="vn_asset_recipe_not_found"):
             await pending
         assert was_blocked, "event loop resumed only after synchronous reconciliation unblocked"
-        assert reconciliation_threads and all(thread != main_thread for thread in reconciliation_threads)
+        assert owned
+        for thread, connection in owned:
+            assert thread.ident != main_thread and not thread.is_alive()
+            assert connection is not owner
+            with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+                connection.execute("SELECT 1")
         assert service.repo.get_batch(batch.batch_id)["failed_count"] == 3
         assert all(service.repo.get_slot(slot.id)["status"] == "failed" for slot in slots)
         assert service.repo.db.get_connection() is owner
