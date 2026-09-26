@@ -34,7 +34,12 @@ from tldw_Server_API.app.core.VN_Assets.portability.importer import VNPackImport
 from tldw_Server_API.app.core.VN_Assets.portability.models import VNPackExportOptions
 from tldw_Server_API.app.core.VN_Assets.portability.preview import VNPackImportPreviewer
 from tldw_Server_API.app.core.VN_Assets.prompts import build_prompt_preview
-from tldw_Server_API.app.core.VN_Assets.recipe import RECIPE_VERSION, load_recipe, slot_recipe
+from tldw_Server_API.app.core.VN_Assets.recipe import (
+    RECIPE_VERSION,
+    load_execution_recipe,
+    load_recipe,
+    slot_recipe,
+)
 
 
 class VNAssetGenerationWorker:
@@ -771,17 +776,7 @@ class VNAssetGenerationWorker:
     @staticmethod
     def _execution_recipe(batch: Mapping[str, Any]) -> dict[str, Any]:
         """Read the batch's pinned execution recipe or reject an invalid snapshot."""
-        try:
-            recipe = json.loads(batch["execution_recipe_json"])
-        except (TypeError, ValueError) as exc:
-            raise ValueError("vn_asset_execution_recipe_unavailable") from exc
-        if (
-            not isinstance(recipe, dict)
-            or recipe.get("version") != RECIPE_VERSION
-            or not isinstance(recipe.get("slots"), list)
-        ):
-            raise ValueError("vn_asset_execution_recipe_invalid")
-        return recipe
+        return load_execution_recipe(batch["execution_recipe_json"])
 
     def _record_generation_success(self, *, batch_id: int) -> None:
         """Advance batch completion without reopening a terminal batch."""

@@ -57,7 +57,12 @@ from tldw_Server_API.app.core.VN_Assets.models import (
     VNAssetSlot,
 )
 from tldw_Server_API.app.core.VN_Assets.prompts import PromptBudgets, build_prompt_preview
-from tldw_Server_API.app.core.VN_Assets.recipe import build_authored_recipe, load_recipe, slot_recipe
+from tldw_Server_API.app.core.VN_Assets.recipe import (
+    build_authored_recipe,
+    load_execution_recipe,
+    load_recipe,
+    slot_recipe,
+)
 from tldw_Server_API.app.core.VN_Assets.state import derive_pack_readiness, derive_slot_status
 from tldw_Server_API.app.core.VN_Assets.storage import (
     detect_image_dimensions,
@@ -749,10 +754,12 @@ class VNAssetPackService:
         retry_recipe = {**recipe, "slots": [authored_slot]}
         execution_recipe = None
         if source["execution_recipe_json"] is not None:
-            execution = json.loads(source["execution_recipe_json"])
-            if not isinstance(execution, dict) or execution.get("version") != recipe["version"]:
-                raise ValueError("vn_asset_execution_recipe_invalid")
-            execution_recipe = {**execution, "slots": [slot_recipe(execution, slot_id)]}
+            execution = load_execution_recipe(source["execution_recipe_json"])
+            try:
+                execution_slot = slot_recipe(execution, slot_id)
+            except ValueError as exc:
+                raise ValueError("vn_asset_execution_recipe_invalid") from exc
+            execution_recipe = {**execution, "slots": [execution_slot]}
         batch = self.repo.create_batch(
             pack_id=pack_id,
             requested_by_user_id=owner_user_id,

@@ -56,3 +56,11 @@
 - Rebase completed without conflicts. `git range-diff` confirms all seven prior PR patches unchanged.
 - Fresh verification: 312 VN backend tests passed using the CI-aligned temporary overlay; 37 frontend VN tests, frontend typecheck, OpenAPI drift, scoped Ruff with the documented BLE001/UP035 exclusions, and diff check passed. Bandit returned zero findings/errors. The temporary shared-UI dependency link was removed after verification.
 - No runtime code, shared dependency installation, or unrelated work changed. The requester-owned Change summary remains verbatim. Current-head Qodo/CodeRabbit review and all required remote gates remain prerequisites to merge; Stage 4 stays In Progress.
+
+### Malformed Snapshot Review Follow-Up (2026-09-26 UTC)
+
+- Qodo's review of head `689bbe20eb` identified malformed stored Retry snapshots bypassing the documented conflict codes. All 18 API regressions failed before the fix, reproducing raw errors, incorrectly accepted retries, and inconsistent conflict codes.
+- Validate consumed authored/execution slot fields with strict Pydantic models, preserving recorded values and unknown metadata. Share execution snapshot parsing between Retry and the worker. Invalid snapshots are rejected before creating any batch or job; absent legacy recipes retain their unavailable code.
+- The first broader run exposed legitimate zero-variant lazy-depth slots. Matched the existing slot schema's `ge=0` bound and retained exact seed-count validation. A unit regression demonstrated the initial rejection and now verifies valid lazy-depth replay.
+- Final verification: 336 VN backend tests passed, including 18 new API regressions and six recipe unit cases. The focused 81-test run also passed. Scoped Ruff with documented exclusions, compilation, OpenAPI drift, and diff checks passed; Bandit returned zero findings/errors.
+- The 37 frontend VN tests and typecheck passed earlier in this same rebase. This follow-up changes no frontend or public schema. Stage 4 remains In Progress until the new head passes review and all remote gates, followed by a verified normal merge commit.
