@@ -32,10 +32,15 @@ _UNSET = object()
 
 
 def _utcnow_iso() -> str:
+    """Return a timezone-aware UTC ISO timestamp for persisted lifecycle fields."""
     return datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
 
 
 def _widened_date_bounds(window_start: str, window_end: str) -> tuple[str, str]:
+    """Pad ISO window dates by one day for timezone-safe candidate selection.
+
+    Raise CalendarValidationError when either boundary cannot be parsed.
+    """
     try:
         start = datetime.fromisoformat(window_start.replace("Z", "+00:00")).date()
         end = datetime.fromisoformat(window_end.replace("Z", "+00:00")).date()
@@ -48,10 +53,12 @@ def _widened_date_bounds(window_start: str, window_end: str) -> tuple[str, str]:
 
 
 def _default_calendar_db_path() -> Path:
+    """Resolve the repository-local Calendar SQLite path without creating the file."""
     return Path(__file__).resolve().parents[4] / "Databases" / "calendar.db"
 
 
 def _json_or_none(value: Any) -> str | None:
+    """Preserve null/JSON strings or serialize structured values with stable key order."""
     if value is None:
         return None
     if isinstance(value, str):
@@ -60,6 +67,7 @@ def _json_or_none(value: Any) -> str | None:
 
 
 def _coerce_patch(patch: dict[str, Any] | None, kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Return a new mutation mapping with keyword fields taking precedence over the patch."""
     merged: dict[str, Any] = {}
     if patch:
         merged.update(patch)
@@ -69,6 +77,8 @@ def _coerce_patch(patch: dict[str, Any] | None, kwargs: dict[str, Any]) -> dict[
 
 @dataclass(frozen=True)
 class CalendarRow:
+    """Immutable calendar ownership, display policy, and archive-state snapshot."""
+
     id: int
     tenant_id: str
     owner_user_id: int
@@ -87,6 +97,8 @@ class CalendarRow:
 
 @dataclass(frozen=True)
 class CalendarMembershipRow:
+    """Immutable role assignment for a calendar principal; principal IDs are stored as text."""
+
     id: int
     calendar_id: int
     principal_type: str
@@ -98,6 +110,8 @@ class CalendarMembershipRow:
 
 @dataclass(frozen=True)
 class CalendarItemRow:
+    """Immutable item content, provider provenance, raw JSON, and local/remote deletion state."""
+
     id: int
     calendar_id: int
     kind: str
@@ -131,6 +145,8 @@ class CalendarItemRow:
 
 @dataclass(frozen=True)
 class CalendarRecurrenceRow:
+    """Immutable recurrence rule and raw inclusion/exclusion date JSON for an item."""
+
     id: int
     calendar_item_id: int
     rrule: str | None
@@ -143,6 +159,8 @@ class CalendarRecurrenceRow:
 
 @dataclass(frozen=True)
 class CalendarAnnotationRow:
+    """Immutable authored annotation; empty bodies represent actor-local tag overlays."""
+
     id: int
     calendar_item_id: int
     author_user_id: int
@@ -155,6 +173,8 @@ class CalendarAnnotationRow:
 
 @dataclass(frozen=True)
 class CalendarLinkRow:
+    """Immutable item context target and optional display metadata stored as raw JSON."""
+
     id: int
     calendar_item_id: int
     target_type: str
@@ -168,6 +188,8 @@ class CalendarLinkRow:
 
 @dataclass(frozen=True)
 class ExternalCalendarAccountRow:
+    """Immutable tenant/user provider account state with an opaque ref, never a credential payload."""
+
     id: int
     tenant_id: str
     user_id: int
@@ -184,6 +206,8 @@ class ExternalCalendarAccountRow:
 
 @dataclass(frozen=True)
 class ExternalCalendarBindingRow:
+    """Immutable remote-calendar binding, polling policy, sync progress, and deletion state."""
+
     id: int
     account_id: int
     calendar_id: int
@@ -206,6 +230,8 @@ class ExternalCalendarBindingRow:
 
 @dataclass(frozen=True)
 class CalendarSyncEventRow:
+    """Immutable sync-history entry with item counters, outcome, and raw diagnostic JSON."""
+
     id: int
     binding_id: int | None
     account_id: int | None
@@ -224,7 +250,8 @@ class CalendarSyncEventRow:
 class CalendarSecretStore:
     """Stores encrypted external account secrets behind opaque references."""
 
-    def __init__(self, database: CalendarDatabase):
+    def __init__(self, database: CalendarDatabase) -> None:
+        """Share the repository's connections and transactions for secret storage."""
         self._database = database
 
     def create_secret_ref(
@@ -235,6 +262,7 @@ class CalendarSecretStore:
         provider: str,
         encrypted_payload: str,
     ) -> str:
+        """Persist an already encrypted payload atomically and return a new opaque reference."""
         with self._database.transaction() as conn:
             return self.create_secret_ref_in_connection(
                 conn,
@@ -253,6 +281,7 @@ class CalendarSecretStore:
         provider: str,
         encrypted_payload: str,
     ) -> str:
+        """Insert an encrypted payload in the caller's transaction and return its opaque reference."""
         secret_ref = f"calendar_secret_{uuid4().hex}"
         now = _utcnow_iso()
         conn.execute(
@@ -266,6 +295,10 @@ class CalendarSecretStore:
         return secret_ref
 
     def resolve_secret_ref(self, secret_ref: str) -> str:
+        """Return the live encrypted payload; raise CalendarValidationError if the ref is unavailable.
+
+        This unscoped internal lookup requires the caller to establish ownership.
+        """
         with self._database.connection() as conn:
             row = self._get_secret_row(conn, secret_ref)
         return str(row["encrypted_payload"])
@@ -278,6 +311,7 @@ class CalendarSecretStore:
         user_id: int,
         provider: str,
     ) -> str:
+        """Return a live payload matching tenant, user, and provider or raise CalendarValidationError."""
         with self._database.connection() as conn:
             row = self._get_secret_row(
                 conn,
@@ -295,6 +329,7 @@ class CalendarSecretStore:
         tenant_id: str,
         user_id: int,
     ) -> str:
+        """Return a live payload for the tenant/user or raise CalendarValidationError on a scope mismatch."""
         with self._database.connection() as conn:
             row = self._get_secret_row(
                 conn,
@@ -305,6 +340,10 @@ class CalendarSecretStore:
         return str(row["encrypted_payload"])
 
     def delete_secret_ref(self, secret_ref: str) -> None:
+        """Wipe a live payload and tombstone its ref; missing refs raise CalendarValidationError.
+
+        Ownership must be established before this unscoped internal operation.
+        """
         with self._database.transaction() as conn:
             self.delete_secret_ref_in_connection(conn, secret_ref)
 
@@ -316,6 +355,7 @@ class CalendarSecretStore:
         user_id: int,
         provider: str,
     ) -> None:
+        """Wipe the tenant/user/provider's live secret or raise CalendarValidationError on mismatch."""
         with self._database.transaction() as conn:
             self.delete_secret_ref_in_connection(
                 conn,
@@ -334,6 +374,11 @@ class CalendarSecretStore:
         user_id: int | None = None,
         provider: str | None = None,
     ) -> None:
+        """Wipe and tombstone a scoped secret within the caller's transaction.
+
+        Null/empty references are no-ops; missing or mismatched live refs raise
+        CalendarValidationError before any payload is changed.
+        """
         if not secret_ref:
             return
         self._get_secret_row(
@@ -374,6 +419,7 @@ class CalendarSecretStore:
         user_id: int,
         provider: str,
     ) -> None:
+        """Require a live tenant/user/provider reference or raise CalendarValidationError."""
         self._get_secret_row(
             conn,
             secret_ref,
@@ -389,6 +435,7 @@ class CalendarSecretStore:
         tenant_id: str,
         user_id: int,
     ) -> None:
+        """Wipe the tenant/user's live secret or raise CalendarValidationError on mismatch."""
         with self._database.transaction() as conn:
             self.delete_secret_ref_in_connection(
                 conn,
@@ -406,6 +453,7 @@ class CalendarSecretStore:
         user_id: int | None = None,
         provider: str | None = None,
     ) -> sqlite3.Row:
+        """Return a live payload row matching optional scope constraints; fail with CalendarValidationError."""
         clauses = ["secret_ref = ?", "deleted_at IS NULL"]
         params: list[Any] = [secret_ref]
         if tenant_id is not None:
@@ -433,7 +481,8 @@ class CalendarSecretStore:
 class CalendarDatabase:
     """Repository for calendars, calendar items, and external calendar sync state."""
 
-    def __init__(self, db_path: str | Path | None = None):
+    def __init__(self, db_path: str | Path | None = None) -> None:
+        """Initialize SQLite schema and secret storage at the supplied or repository-default path."""
         self.db_path = Path(db_path) if db_path is not None else _default_calendar_db_path()
         self._transaction_connection: ContextVar[sqlite3.Connection | None] = ContextVar(
             f"calendar_transaction_{id(self)}", default=None
@@ -443,6 +492,7 @@ class CalendarDatabase:
 
     @contextlib.contextmanager
     def connection(self) -> Generator[sqlite3.Connection, None, None]:
+        """Yield the active transaction or a temporary row-mapped connection with foreign keys enabled."""
         active = self._transaction_connection.get()
         if active is not None:
             yield active
@@ -458,6 +508,11 @@ class CalendarDatabase:
 
     @contextlib.contextmanager
     def transaction(self) -> Generator[sqlite3.Connection, None, None]:
+        """Yield an atomic write scope, using savepoints when nested.
+
+        Commit on success; roll back the applicable scope and re-raise errors.
+        The outer transaction owns and closes its connection.
+        """
         active = self._transaction_connection.get()
         if active is not None:
             savepoint = f"calendar_{uuid4().hex}"
@@ -483,6 +538,7 @@ class CalendarDatabase:
                 self._transaction_connection.reset(token)
 
     def ensure_schema(self) -> None:
+        """Create missing Calendar tables and indexes without replacing existing data."""
         with self.transaction() as conn:
             conn.executescript(
                 """
@@ -685,6 +741,7 @@ class CalendarDatabase:
         default_reminder_policy_json: str | dict[str, Any] | None = None,
         rbac_policy_ref: str | None = None,
     ) -> CalendarRow:
+        """Create a calendar and its owner membership atomically, returning the persisted row."""
         now = _utcnow_iso()
         with self.transaction() as conn:
             cursor = conn.execute(
@@ -729,6 +786,7 @@ class CalendarDatabase:
         patch: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> CalendarRow:
+        """Apply allowed calendar fields and return even archived rows; missing IDs raise CalendarNotFound."""
         updates = _coerce_patch(patch, kwargs)
         with self.transaction() as conn:
             self._apply_update(
@@ -751,6 +809,7 @@ class CalendarDatabase:
             return self._get_calendar_row(conn, calendar_id, include_archived=True)
 
     def get_calendar(self, calendar_id: int, *, include_archived: bool = False) -> CalendarRow:
+        """Return a calendar or raise CalendarNotFound; archived rows are excluded unless requested."""
         with self.connection() as conn:
             return self._get_calendar_row(conn, calendar_id, include_archived=include_archived)
 
@@ -760,6 +819,7 @@ class CalendarDatabase:
         tenant_id: str | None = None,
         include_archived: bool = False,
     ) -> list[CalendarRow]:
+        """List calendars ordered by name/ID, optionally filtering tenant and including archived rows."""
         clauses: list[str] = []
         params: list[Any] = []
         if tenant_id is not None:
@@ -785,6 +845,12 @@ class CalendarDatabase:
         include_archived: bool = False,
         org_ids: Iterable[int] | None = None,
     ) -> list[CalendarRow]:
+        """List owned or directly user-shared calendars ordered by name/ID.
+
+        Optionally restrict tenant/archive state; a nonempty org_ids filter
+        retains personal calendars and calendars in those organizations.
+        This lookup does not evaluate organization-role grants.
+        """
         params: list[Any] = [user_id, str(user_id)]
         clauses = [
             """
@@ -815,6 +881,7 @@ class CalendarDatabase:
         return [self._calendar_from_row(row) for row in rows]
 
     def archive_calendar(self, calendar_id: int, *, archived_at: str | None = None) -> CalendarRow:
+        """Timestamp and return the archived calendar; raise CalendarNotFound for a missing ID."""
         return self.update_calendar(calendar_id, archived_at=archived_at or _utcnow_iso())
 
     def create_membership(
@@ -825,6 +892,7 @@ class CalendarDatabase:
         principal_id: str | int,
         role: str,
     ) -> CalendarMembershipRow:
+        """Create or replace a principal's role and return its assignment; failed readback raises CalendarValidationError."""
         now = _utcnow_iso()
         with self.transaction() as conn:
             conn.execute(
@@ -850,6 +918,7 @@ class CalendarDatabase:
             return self._membership_from_row(row)
 
     def list_memberships(self, calendar_id: int) -> list[CalendarMembershipRow]:
+        """Return all principal assignments in ID order, or an empty list when none exist."""
         with self.connection() as conn:
             rows = conn.execute(
                 """
@@ -868,6 +937,7 @@ class CalendarDatabase:
         principal_type: str,
         principal_id: str | int,
     ) -> int:
+        """Remove the exact principal assignment and return the number of rows deleted."""
         with self.transaction() as conn:
             cursor = conn.execute(
                 """
@@ -900,6 +970,7 @@ class CalendarDatabase:
         linked_projection_type: str | None = None,
         linked_projection_id: str | None = None,
     ) -> CalendarItemRow:
+        """Create and return a local item; reject provider ownership with CalendarReadOnlyError."""
         if provider_owned or source_owner == CALENDAR_SOURCE_OWNER_PROVIDER:
             raise CalendarReadOnlyError("Provider-owned items must be imported through provider upsert")
         now = _utcnow_iso()
@@ -939,6 +1010,7 @@ class CalendarDatabase:
             return self._get_item_row(conn, int(cursor.lastrowid), include_deleted=True)
 
     def get_item(self, item_id: int, *, include_deleted: bool = False) -> CalendarItemRow:
+        """Return an item or raise CalendarItemNotFound, hiding local/remote tombstones unless requested."""
         with self.connection() as conn:
             return self._get_item_row(conn, item_id, include_deleted=include_deleted)
 
@@ -948,6 +1020,7 @@ class CalendarDatabase:
         patch: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> CalendarItemRow:
+        """Apply allowed local-item fields; missing IDs or provider-owned rows raise domain errors."""
         updates = _coerce_patch(patch, kwargs)
         with self.transaction() as conn:
             current = self._get_item_row(conn, item_id, include_deleted=True)
@@ -980,6 +1053,7 @@ class CalendarDatabase:
             return self._get_item_row(conn, item_id, include_deleted=True)
 
     def soft_delete_item(self, item_id: int, *, deleted_at: str | None = None) -> CalendarItemRow:
+        """Tombstone and return a local item; missing/provider-owned rows raise not-found/read-only errors."""
         with self.transaction() as conn:
             current = self._get_item_row(conn, item_id, include_deleted=True)
             if current.provider_owned:
@@ -1003,6 +1077,11 @@ class CalendarDatabase:
         include_deleted: bool = False,
         include_remote_deleted: bool = False,
     ) -> list[CalendarItemRow]:
+        """Return stored items overlapping inclusive timestamp bounds, ordered by time/ID.
+
+        Skip empty calendar sets and hide local/remote tombstones by default.
+        Recurrences are not expanded here.
+        """
         ids = list(calendar_ids)
         if not ids:
             return []
@@ -1039,6 +1118,12 @@ class CalendarDatabase:
         include_deleted: bool = False,
         include_remote_deleted: bool = False,
     ) -> list[CalendarItemRow]:
+        """Return broad candidates for service-level timezone and recurrence expansion.
+
+        Include recurrence masters and provider overrides, widen date bounds
+        for zone offsets, and hide tombstones by default. Invalid nonempty
+        window bounds raise CalendarValidationError; empty calendar sets yield [].
+        """
         ids = list(calendar_ids)
         if not ids:
             return []
@@ -1096,6 +1181,7 @@ class CalendarDatabase:
         exdate_json: str | list[str] | None = None,
         timezone: str | None = None,
     ) -> CalendarRecurrenceRow:
+        """Create or replace an item's first recurrence and return it; missing items raise CalendarItemNotFound."""
         now = _utcnow_iso()
         with self.transaction() as conn:
             self._get_item_row(conn, calendar_item_id, include_deleted=True)
@@ -1152,6 +1238,7 @@ class CalendarDatabase:
         self,
         calendar_item_ids: Iterable[int],
     ) -> dict[int, CalendarRecurrenceRow]:
+        """Batch the first recurrence by ID for each requested item; omit items without a recurrence."""
         ids = list(calendar_item_ids)
         if not ids:
             return {}
@@ -1191,6 +1278,12 @@ class CalendarDatabase:
         source_updated_at: str | None = None,
         metadata_json: str | dict[str, Any] | None = None,
     ) -> CalendarItemRow:
+        """Import or refresh a provider-owned item keyed by binding and source UID.
+
+        Require an active account and matching personal owner/tenant calendar;
+        invalid bindings raise validation/not-found errors. A refresh clears
+        remote deletion, and failed readback raises CalendarSyncError.
+        """
         now = _utcnow_iso()
         payload_json = _json_or_none(provider_payload_json)
         metadata = _json_or_none(metadata_json)
@@ -1274,6 +1367,7 @@ class CalendarDatabase:
         source_uid: str,
         remote_deleted_at: str | None = None,
     ) -> CalendarItemRow:
+        """Tombstone a provider item by binding/UID; raise CalendarItemNotFound when no import matches."""
         now = _utcnow_iso()
         with self.transaction() as conn:
             conn.execute(
@@ -1302,6 +1396,7 @@ class CalendarDatabase:
         include_deleted: bool = False,
         include_remote_deleted: bool = False,
     ) -> list[CalendarItemRow]:
+        """List one binding's imported rows ordered by time/ID, hiding local/remote tombstones by default."""
         clauses = ["external_binding_id = ?", "provider_owned = 1"]
         params: list[Any] = [external_binding_id]
         if not include_deleted:
@@ -1323,6 +1418,10 @@ class CalendarDatabase:
         before_iso: str,
         limit: int = 500,
     ) -> int:
+        """Delete up to limit old remote tombstones without live annotations or links.
+
+        Detach local copies before deleting sources and return the deletion count.
+        """
         with self.transaction() as conn:
             rows = conn.execute(
                 """
@@ -1362,6 +1461,7 @@ class CalendarDatabase:
         body: str,
         tags_json: str | list[str] | None = None,
     ) -> CalendarAnnotationRow:
+        """Create and return an authored annotation; an empty body stores a local tag overlay."""
         now = _utcnow_iso()
         with self.transaction() as conn:
             cursor = conn.execute(
@@ -1381,6 +1481,7 @@ class CalendarDatabase:
         patch: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> CalendarAnnotationRow:
+        """Apply allowed annotation fields and return even deleted rows; missing IDs raise CalendarItemNotFound."""
         updates = _coerce_patch(patch, kwargs)
         with self.transaction() as conn:
             self._apply_update(
@@ -1399,6 +1500,7 @@ class CalendarDatabase:
         *,
         include_deleted: bool = False,
     ) -> CalendarAnnotationRow:
+        """Return an annotation or raise CalendarItemNotFound, excluding tombstones unless requested."""
         with self.connection() as conn:
             return self._get_annotation_row(
                 conn,
@@ -1407,6 +1509,7 @@ class CalendarDatabase:
             )
 
     def delete_annotation(self, annotation_id: int, *, deleted_at: str | None = None) -> int:
+        """Soft-delete a live annotation and return 0 for missing or already deleted rows, otherwise 1."""
         with self.transaction() as conn:
             cursor = conn.execute(
                 """
@@ -1424,6 +1527,7 @@ class CalendarDatabase:
         *,
         include_deleted: bool = False,
     ) -> list[CalendarAnnotationRow]:
+        """List an item's annotations by creation time/ID, excluding tombstones unless requested."""
         clauses = ["calendar_item_id = ?"]
         if not include_deleted:
             clauses.append("deleted_at IS NULL")
@@ -1436,6 +1540,38 @@ class CalendarDatabase:
             rows = conn.execute(sql, (calendar_item_id,)).fetchall()
         return [self._annotation_from_row(row) for row in rows]
 
+    def list_tag_overlays_for_items(
+        self,
+        calendar_item_ids: Iterable[int],
+        *,
+        author_user_id: int,
+    ) -> dict[int, list[CalendarAnnotationRow]]:
+        """Batch an actor's live empty-body tag overlays for already authorized items.
+
+        Use one query ordered by annotation ID; omit items without overlays and
+        return an empty mapping without querying for empty input. Callers must
+        enforce item/tenant access before supplying IDs.
+        """
+        ids = list(calendar_item_ids)
+        if not ids:
+            return {}
+        placeholders = ", ".join("?" for _ in ids)
+        sql = f"""
+            SELECT * FROM calendar_annotations
+            WHERE calendar_item_id IN ({placeholders})
+              AND author_user_id = ?
+              AND deleted_at IS NULL
+              AND body = ''
+            ORDER BY id ASC
+            """  # nosec B608 - only parameter placeholders are interpolated
+        with self.connection() as conn:
+            rows = conn.execute(sql, (*ids, author_user_id)).fetchall()
+        overlays: dict[int, list[CalendarAnnotationRow]] = {}
+        for row in rows:
+            annotation = self._annotation_from_row(row)
+            overlays.setdefault(annotation.calendar_item_id, []).append(annotation)
+        return overlays
+
     def create_link(
         self,
         *,
@@ -1446,6 +1582,7 @@ class CalendarDatabase:
         url: str | None = None,
         metadata_json: str | dict[str, Any] | None = None,
     ) -> CalendarLinkRow:
+        """Create and return an item context link, storing target IDs as text and metadata as JSON."""
         now = _utcnow_iso()
         with self.transaction() as conn:
             cursor = conn.execute(
@@ -1470,11 +1607,13 @@ class CalendarDatabase:
             return self._get_link_row(conn, int(cursor.lastrowid))
 
     def delete_link(self, link_id: int) -> int:
+        """Physically remove a context link and return the affected-row count, including 0 for missing IDs."""
         with self.transaction() as conn:
             cursor = conn.execute("DELETE FROM calendar_links WHERE id = ?", (link_id,))
             return int(cursor.rowcount or 0)
 
     def get_link(self, link_id: int) -> CalendarLinkRow:
+        """Return a context link or raise CalendarItemNotFound when its ID is absent."""
         with self.connection() as conn:
             return self._get_link_row(conn, link_id)
 
@@ -1494,6 +1633,7 @@ class CalendarDatabase:
         return links
 
     def list_links(self, calendar_item_id: int) -> list[CalendarLinkRow]:
+        """Return an item's context links ordered by creation time and ID, or [] when none exist."""
         with self.connection() as conn:
             rows = conn.execute(
                 """
@@ -1513,6 +1653,7 @@ class CalendarDatabase:
         provider: str,
         encrypted_payload: str,
     ) -> str:
+        """Store an already encrypted provider payload and return a new opaque secret reference."""
         return self.secret_store.create_secret_ref(
             tenant_id=tenant_id,
             user_id=user_id,
@@ -1521,6 +1662,7 @@ class CalendarDatabase:
         )
 
     def resolve_secret_ref(self, secret_ref: str) -> str:
+        """Return a live encrypted payload after caller authorization; missing refs raise CalendarValidationError."""
         return self.secret_store.resolve_secret_ref(secret_ref)
 
     def resolve_secret_ref_scoped(
@@ -1531,6 +1673,7 @@ class CalendarDatabase:
         user_id: int,
         provider: str,
     ) -> str:
+        """Return the scoped encrypted payload or raise CalendarValidationError for unavailable/mismatched refs."""
         return self.secret_store.resolve_secret_ref_scoped(
             secret_ref,
             tenant_id=tenant_id,
@@ -1545,6 +1688,7 @@ class CalendarDatabase:
         tenant_id: str,
         user_id: int,
     ) -> str:
+        """Return a tenant/user's encrypted payload or raise CalendarValidationError on unavailable/mismatched refs."""
         return self.secret_store.resolve_secret_ref_for_user(
             secret_ref,
             tenant_id=tenant_id,
@@ -1552,6 +1696,7 @@ class CalendarDatabase:
         )
 
     def delete_secret_ref(self, secret_ref: str) -> None:
+        """Wipe and tombstone a caller-authorized live secret; missing refs raise CalendarValidationError."""
         self.secret_store.delete_secret_ref(secret_ref)
 
     def delete_secret_ref_scoped(
@@ -1562,6 +1707,7 @@ class CalendarDatabase:
         user_id: int,
         provider: str,
     ) -> None:
+        """Wipe a matching tenant/user/provider secret or raise CalendarValidationError before mutation."""
         self.secret_store.delete_secret_ref_scoped(
             secret_ref,
             tenant_id=tenant_id,
@@ -1576,6 +1722,7 @@ class CalendarDatabase:
         tenant_id: str,
         user_id: int,
     ) -> None:
+        """Wipe a matching tenant/user secret or raise CalendarValidationError before mutation."""
         self.secret_store.delete_secret_ref_for_user(
             secret_ref,
             tenant_id=tenant_id,
@@ -1593,6 +1740,11 @@ class CalendarDatabase:
         account_metadata_json: str | dict[str, Any] | None = None,
         status: str = "active",
     ) -> ExternalCalendarAccountRow:
+        """Create and return provider account metadata without storing credentials in the account row.
+
+        A supplied secret ref must match tenant, user, and provider or creation
+        raises CalendarValidationError.
+        """
         now = _utcnow_iso()
         with self.transaction() as conn:
             if secret_ref is not None:
@@ -1631,6 +1783,7 @@ class CalendarDatabase:
         *,
         include_deleted: bool = False,
     ) -> ExternalCalendarAccountRow:
+        """Return an account or raise CalendarNotFound, hiding soft-deleted accounts unless requested."""
         with self.connection() as conn:
             return self._get_external_account_row(conn, account_id, include_deleted=include_deleted)
 
@@ -1641,6 +1794,7 @@ class CalendarDatabase:
         tenant_id: str | None = None,
         include_deleted: bool = False,
     ) -> list[ExternalCalendarAccountRow]:
+        """List a user's accounts by provider/name/ID, optionally restricting tenant and including deleted rows."""
         clauses = ["user_id = ?"]
         params: list[Any] = [user_id]
         if tenant_id is not None:
@@ -1664,6 +1818,12 @@ class CalendarDatabase:
         destructive_imported_record_cleanup: bool = False,
         deleted_at: str | None = None,
     ) -> ExternalCalendarAccountRow:
+        """Delete an account atomically, wiping its secret and disabling its bindings.
+
+        Tombstone imported items unless destructive cleanup is requested, which
+        preserves detached local copies. Return deleted account state; missing
+        accounts or unavailable referenced secrets raise domain errors.
+        """
         now = deleted_at or _utcnow_iso()
         with self.transaction() as conn:
             account = self._get_external_account_row(conn, account_id, include_deleted=True)
@@ -1706,6 +1866,11 @@ class CalendarDatabase:
         *,
         revoked_at: str | None = None,
     ) -> ExternalCalendarAccountRow:
+        """Revoke an account, wipe its secret, disable bindings, and tombstone imports atomically.
+
+        Return revoked account state; missing accounts or unavailable referenced
+        secrets raise domain errors.
+        """
         now = revoked_at or _utcnow_iso()
         with self.transaction() as conn:
             account = self._get_external_account_row(conn, account_id, include_deleted=True)
@@ -1754,6 +1919,12 @@ class CalendarDatabase:
         sync_cursor: str | None = None,
         next_scan_at: str | None = None,
     ) -> ExternalCalendarBindingRow:
+        """Bind an active account to its owner's personal same-tenant calendar.
+
+        Return a new binding or revive a deleted binding with reset sync state.
+        Missing resources raise CalendarNotFound; invalid ownership/account state
+        or a duplicate live remote calendar raises CalendarValidationError.
+        """
         now = _utcnow_iso()
         with self.transaction() as conn:
             account = self._get_external_account_row(conn, account_id)
@@ -1838,12 +2009,35 @@ class CalendarDatabase:
             )
             return self._get_external_binding_row(conn, int(cursor.lastrowid), include_deleted=True)
 
+    def list_provider_binding_owners(
+        self, binding_ids: Iterable[int], *, tenant_id: str,
+    ) -> dict[int, int]:
+        """Return binding/account ownership in one tenant-scoped lookup.
+
+        Include deleted bindings/accounts to preserve imported-row visibility
+        semantics; missing bindings have no owner. This exposes no credentials.
+        """
+        ids = sorted(set(binding_ids))
+        if not ids:
+            return {}
+        placeholders = ", ".join("?" for _ in ids)
+        sql = f"""
+            SELECT b.id AS binding_id, a.user_id
+            FROM external_calendar_bindings b
+            JOIN external_calendar_accounts a ON a.id = b.account_id
+            WHERE b.id IN ({placeholders}) AND a.tenant_id = ?
+            """  # nosec B608
+        with self.connection() as conn:
+            rows = conn.execute(sql, (*ids, tenant_id)).fetchall()
+        return {int(row["binding_id"]): int(row["user_id"]) for row in rows}
+
     def get_external_binding(
         self,
         binding_id: int,
         *,
         include_deleted: bool = False,
     ) -> ExternalCalendarBindingRow:
+        """Return a binding or raise CalendarNotFound, hiding tombstones unless requested."""
         with self.connection() as conn:
             return self._get_external_binding_row(conn, binding_id, include_deleted=include_deleted)
 
@@ -1853,6 +2047,7 @@ class CalendarDatabase:
         *,
         include_deleted: bool = False,
     ) -> list[ExternalCalendarBindingRow]:
+        """List an account's bindings by remote name/ID, hiding tombstones unless requested."""
         with self.connection() as conn:
             return self._list_external_bindings_for_account_rows(
                 conn,
@@ -1866,6 +2061,7 @@ class CalendarDatabase:
         now_iso: str | None = None,
         limit: int = 100,
     ) -> list[ExternalCalendarBindingRow]:
+        """Return up to limit due enabled bindings for live active accounts, ordered by scan time/ID."""
         now = now_iso or _utcnow_iso()
         with self.connection() as conn:
             rows = conn.execute(
@@ -1892,6 +2088,7 @@ class CalendarDatabase:
         patch: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> ExternalCalendarBindingRow:
+        """Apply allowed binding fields and return even deleted state; missing IDs raise CalendarNotFound."""
         updates = _coerce_patch(patch, kwargs)
         with self.transaction() as conn:
             self._apply_update(
@@ -1923,6 +2120,7 @@ class CalendarDatabase:
         *,
         disabled_at: str | None = None,
     ) -> ExternalCalendarBindingRow:
+        """Stop polling while preserving the first disabled timestamp; return state or raise CalendarNotFound."""
         now = disabled_at or _utcnow_iso()
         with self.transaction() as conn:
             self._disable_binding_in_connection(conn, binding_id, now)
@@ -1935,6 +2133,11 @@ class CalendarDatabase:
         destructive_imported_record_cleanup: bool = False,
         deleted_at: str | None = None,
     ) -> ExternalCalendarBindingRow:
+        """Disable and soft-delete a binding, tombstoning imports unless destructive cleanup is requested.
+
+        Detach local copies before destructive cleanup; return deleted binding
+        state or raise CalendarNotFound for a missing ID.
+        """
         now = deleted_at or _utcnow_iso()
         with self.transaction() as conn:
             self._disable_binding_in_connection(conn, binding_id, now)
@@ -1963,6 +2166,10 @@ class CalendarDatabase:
         next_scan_at: str | None | object = _UNSET,
         last_error: str | None | object = _UNSET,
     ) -> ExternalCalendarBindingRow:
+        """Return updated sync state, preserving omitted fields while allowing explicit null clears.
+
+        Missing binding IDs raise CalendarNotFound.
+        """
         patch: dict[str, Any] = {}
         if sync_cursor is not _UNSET:
             patch["sync_cursor"] = sync_cursor
@@ -1989,6 +2196,10 @@ class CalendarDatabase:
         error_message: str | None = None,
         metadata_json: str | dict[str, Any] | None = None,
     ) -> CalendarSyncEventRow:
+        """Record and return a sync-history event, deriving the account from a binding when omitted.
+
+        Missing binding IDs raise CalendarNotFound; failed readback raises CalendarSyncError.
+        """
         created_at = _utcnow_iso()
         with self.transaction() as conn:
             if account_id is None and binding_id is not None:
@@ -2028,6 +2239,7 @@ class CalendarDatabase:
         limit: int = 50,
         offset: int = 0,
     ) -> list[CalendarSyncEventRow]:
+        """Return newest-first sync history with optional binding/account filters and limit/offset paging."""
         clauses: list[str] = []
         params: list[Any] = []
         if binding_id is not None:
@@ -2057,6 +2269,11 @@ class CalendarDatabase:
         patch: dict[str, Any],
         allowed_columns: set[str],
     ) -> None:
+        """Apply whitelisted fields with parameterized values, JSON conversion, and an updated timestamp.
+
+        Ignore unknown keys and empty patches; table and column identifiers
+        must come from trusted repository call sites.
+        """
         updates: dict[str, Any] = {}
         for key, value in patch.items():
             if key not in allowed_columns:
@@ -2078,6 +2295,7 @@ class CalendarDatabase:
         binding_id: int,
         disabled_at: str,
     ) -> None:
+        """Disable polling in the caller's transaction, preserving any existing disabled timestamp."""
         conn.execute(
             """
             UPDATE external_calendar_bindings
@@ -2091,6 +2309,7 @@ class CalendarDatabase:
 
     @staticmethod
     def _validate_external_account_active(account: ExternalCalendarAccountRow) -> None:
+        """Raise CalendarValidationError unless the account is active, unrevoked, and undeleted."""
         if account.status != "active" or account.revoked_at is not None or account.deleted_at is not None:
             raise CalendarValidationError("External calendar account is not active")
 
@@ -2099,6 +2318,7 @@ class CalendarDatabase:
         account: ExternalCalendarAccountRow,
         calendar: CalendarRow,
     ) -> None:
+        """Raise CalendarValidationError unless a binding targets its owner's personal same-tenant calendar."""
         if calendar.org_id is not None:
             raise CalendarValidationError("Personal external calendar accounts cannot bind to org calendars")
         if calendar.owner_user_id != account.user_id:
@@ -2114,6 +2334,7 @@ class CalendarDatabase:
         remote_deleted_at: str,
         destructive: bool,
     ) -> None:
+        """Tombstone one binding's imports or delete them after detaching local copies, without committing."""
         if destructive:
             self._detach_copied_items_for_binding(conn, binding_id)
             conn.execute(
@@ -2135,6 +2356,7 @@ class CalendarDatabase:
         )
 
     def _detach_copied_items_for_binding(self, conn: sqlite3.Connection, binding_id: int) -> None:
+        """Clear copy-source references before deleting a binding's imported source rows."""
         conn.execute(
             """
             UPDATE calendar_items
@@ -2153,6 +2375,7 @@ class CalendarDatabase:
         conn: sqlite3.Connection,
         item_ids: Iterable[int],
     ) -> None:
+        """Clear local copy-source references to a batch of imports; empty batches perform no SQL."""
         ids = list(item_ids)
         if not ids:
             return
@@ -2174,6 +2397,7 @@ class CalendarDatabase:
         *,
         include_archived: bool = False,
     ) -> CalendarRow:
+        """Read calendar state in the caller's connection or raise CalendarNotFound, honoring archive filtering."""
         clauses = ["id = ?"]
         if not include_archived:
             clauses.append("archived_at IS NULL")
@@ -2190,6 +2414,7 @@ class CalendarDatabase:
         *,
         include_deleted: bool = False,
     ) -> CalendarItemRow:
+        """Read item state or raise CalendarItemNotFound, honoring local and remote tombstone filtering."""
         clauses = ["id = ?"]
         if not include_deleted:
             clauses.extend(["deleted_at IS NULL", "remote_deleted_at IS NULL"])
@@ -2204,6 +2429,7 @@ class CalendarDatabase:
         conn: sqlite3.Connection,
         recurrence_id: int,
     ) -> CalendarRecurrenceRow:
+        """Read a recurrence by ID in the caller's connection or raise CalendarItemNotFound."""
         row = conn.execute(
             "SELECT * FROM calendar_recurrences WHERE id = ?",
             (recurrence_id,),
@@ -2219,6 +2445,7 @@ class CalendarDatabase:
         *,
         include_deleted: bool = False,
     ) -> CalendarAnnotationRow:
+        """Read annotation state or raise CalendarItemNotFound, honoring soft-deletion filtering."""
         clauses = ["id = ?"]
         if not include_deleted:
             clauses.append("deleted_at IS NULL")
@@ -2229,6 +2456,7 @@ class CalendarDatabase:
         return self._annotation_from_row(row)
 
     def _get_link_row(self, conn: sqlite3.Connection, link_id: int) -> CalendarLinkRow:
+        """Read a context link in the caller's connection or raise CalendarItemNotFound."""
         row = conn.execute("SELECT * FROM calendar_links WHERE id = ?", (link_id,)).fetchone()
         if row is None:
             raise CalendarItemNotFound(f"Calendar link not found: {link_id}")
@@ -2241,6 +2469,7 @@ class CalendarDatabase:
         *,
         include_deleted: bool = False,
     ) -> ExternalCalendarAccountRow:
+        """Read provider account state or raise CalendarNotFound, honoring soft-deletion filtering."""
         clauses = ["id = ?"]
         if not include_deleted:
             clauses.append("deleted_at IS NULL")
@@ -2257,6 +2486,7 @@ class CalendarDatabase:
         *,
         include_deleted: bool = False,
     ) -> ExternalCalendarBindingRow:
+        """Read remote binding state or raise CalendarNotFound, honoring soft-deletion filtering."""
         clauses = ["id = ?"]
         if not include_deleted:
             clauses.append("deleted_at IS NULL")
@@ -2273,6 +2503,7 @@ class CalendarDatabase:
         *,
         include_deleted: bool = False,
     ) -> list[ExternalCalendarBindingRow]:
+        """Read an account's bindings by remote name/ID in the supplied connection, with optional tombstones."""
         clauses = ["account_id = ?"]
         if not include_deleted:
             clauses.append("deleted_at IS NULL")
@@ -2289,6 +2520,7 @@ class CalendarDatabase:
         conn: sqlite3.Connection,
         event_id: int,
     ) -> CalendarSyncEventRow:
+        """Read a sync-history event in the supplied connection or raise CalendarSyncError."""
         row = conn.execute("SELECT * FROM calendar_sync_events WHERE id = ?", (event_id,)).fetchone()
         if row is None:
             raise CalendarSyncError(f"Calendar sync event not found: {event_id}")
@@ -2296,14 +2528,17 @@ class CalendarDatabase:
 
     @staticmethod
     def _calendar_from_row(row: sqlite3.Row) -> CalendarRow:
+        """Return an immutable calendar snapshot, retaining raw JSON storage fields."""
         return CalendarRow(**dict(row))
 
     @staticmethod
     def _membership_from_row(row: sqlite3.Row) -> CalendarMembershipRow:
+        """Return an immutable principal-role assignment from a complete membership row."""
         return CalendarMembershipRow(**dict(row))
 
     @staticmethod
     def _item_from_row(row: sqlite3.Row) -> CalendarItemRow:
+        """Return an immutable item snapshot, normalizing integer ownership/all-day flags to booleans."""
         data = dict(row)
         data["provider_owned"] = bool(data["provider_owned"])
         data["all_day"] = bool(data["all_day"])
@@ -2311,28 +2546,34 @@ class CalendarDatabase:
 
     @staticmethod
     def _recurrence_from_row(row: sqlite3.Row) -> CalendarRecurrenceRow:
+        """Return an immutable recurrence snapshot without decoding stored date-list JSON."""
         return CalendarRecurrenceRow(**dict(row))
 
     @staticmethod
     def _annotation_from_row(row: sqlite3.Row) -> CalendarAnnotationRow:
+        """Return an immutable authored annotation snapshot with raw tag JSON."""
         return CalendarAnnotationRow(**dict(row))
 
     @staticmethod
     def _link_from_row(row: sqlite3.Row) -> CalendarLinkRow:
+        """Return an immutable context-link snapshot with raw metadata JSON."""
         return CalendarLinkRow(**dict(row))
 
     @staticmethod
     def _external_account_from_row(row: sqlite3.Row) -> ExternalCalendarAccountRow:
+        """Return an immutable account snapshot containing only an opaque credential reference."""
         return ExternalCalendarAccountRow(**dict(row))
 
     @staticmethod
     def _external_binding_from_row(row: sqlite3.Row) -> ExternalCalendarBindingRow:
+        """Return an immutable binding snapshot, normalizing the stored sync-enabled flag to bool."""
         data = dict(row)
         data["sync_enabled"] = bool(data["sync_enabled"])
         return ExternalCalendarBindingRow(**data)
 
     @staticmethod
     def _sync_event_from_row(row: sqlite3.Row) -> CalendarSyncEventRow:
+        """Return an immutable sync-history snapshot with counters and raw diagnostic JSON."""
         return CalendarSyncEventRow(**dict(row))
 
 

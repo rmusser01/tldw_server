@@ -1,19 +1,38 @@
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any
-import contextlib
 
 import httpx
 import pytest
 from loguru import logger
 
 from tldw_Server_API.app.core.Calendar.errors import CalendarValidationError
-from tldw_Server_API.app.core.Calendar.providers.caldav import CalDavProvider, sanitize_provider_metadata
 from tldw_Server_API.app.core.Calendar.providers import caldav as caldav_module
+from tldw_Server_API.app.core.Calendar.providers.caldav import CalDavProvider, sanitize_provider_metadata
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.mark.parametrize("url", ["https://example.test:bad/dav/", "https://example.test:65536/dav/", "https://example.test:0/dav/", "https://[invalid/dav/"])
+def test_url_validation_rejects_malformed_ports_and_hosts(url: str) -> None:
+    """Malformed URL parsing remains a domain validation error before any I/O."""
+    with pytest.raises(CalendarValidationError):
+        CalDavProvider._validate_http_url(url)
+
+
+@pytest.mark.parametrize("base, href", [
+    ("https://example.test:bad/dav/", "/calendar/"),
+    ("https://example.test/dav/", "https://example.test:bad/calendar/"),
+    ("https://example.test/dav/", "https://[invalid/calendar/"),
+    ("https://example.test/dav/", "//[invalid/calendar/"),
+])
+def test_same_origin_rejects_malformed_ports_with_domain_error(base: str, href: str) -> None:
+    """Untrusted account or collection authorities never escape as ValueError."""
+    with pytest.raises(CalendarValidationError):
+        CalDavProvider.same_origin_url(base, href)
 
 
 @pytest.mark.parametrize(

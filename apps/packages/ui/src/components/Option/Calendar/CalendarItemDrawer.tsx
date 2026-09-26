@@ -259,7 +259,7 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
   }
 
   const handleDelete = async () => {
-    if (!item) return
+    if (!item || isOccurrence) return
     setSaving(true)
     try {
       await deleteCalendarItem({
@@ -518,7 +518,7 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
                 Save context
               </Button>
             ) : null}
-            {canEditItemFields && item ? (
+            {canEditItemFields && item && !isOccurrence ? (
               <Popconfirm
                 title="Delete this calendar item?"
                 okText="Confirm delete"
