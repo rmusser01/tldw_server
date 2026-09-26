@@ -45,6 +45,54 @@ END:VTIMEZONE"""
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("view_name", ["agenda", "week"])
+@pytest.mark.parametrize("zone_name", ["America/Los_Angeles", "Custom/Research"])
+async def test_floating_recurrence_dates_survive_import_refresh_and_dst_views(
+    calendar_db: CalendarDatabase, view_name: str, zone_name: str,
+) -> None:
+    """Floating additions/exclusions use the persisted series zone across a DST change."""
+    from tldw_Server_API.app.core.Calendar.calendar_sync_worker import _upsert_events
+    from tldw_Server_API.app.core.Calendar.providers.caldav import CalDavProvider
+    from tldw_Server_API.app.core.Calendar.view_service import CalendarViewFilters, CalendarViewService
+
+    fixture = _create_sync_fixture(calendar_db)
+    definition = _CUSTOM_VTIMEZONE if zone_name == "Custom/Research" else ""
+    payload = (
+        f"BEGIN:VCALENDAR\n{definition}\nBEGIN:VEVENT\nUID:floating-dst\n"
+        f"DTSTART;TZID={zone_name}:20260306T090000\nDURATION:PT1H\nRRULE:FREQ=DAILY;COUNT=3\n"
+        "RDATE:20260309T090000\nRDATE:20260310T160000Z\nEXDATE:20260308T090000\n"
+        "END:VEVENT\nEND:VCALENDAR"
+    )
+    binding = calendar_db.get_external_binding(fixture.binding_id)
+    _upsert_events(calendar_db, binding=binding, events=CalDavProvider().parse_vevents(payload))
+    rows = calendar_db.list_items_for_expansion(
+        calendar_ids=[fixture.calendar_id], window_start="2026-03-07", window_end="2026-03-11",
+    )
+    item_id = rows[0].id
+    _upsert_events(calendar_db, binding=binding, events=CalDavProvider().parse_vevents(payload))
+    reopened = CalendarDatabase(db_path=calendar_db.db_path)
+    view = CalendarViewService(calendar_service=CalendarService(db=reopened))
+    filters = CalendarViewFilters(include_scheduled_tasks=False)
+    if view_name == "agenda":
+        result = await view.agenda(
+            actor_user_id=1, start_at="2026-03-07", end_at="2026-03-11", filters=filters,
+        )
+    else:
+        result = await view.week(actor_user_id=1, week_start="2026-03-07", timezone="UTC", filters=filters)
+    assert [item.start_at for item in result.items] == [
+        "2026-03-07T09:00:00-08:00", "2026-03-09T09:00:00-07:00", "2026-03-10T09:00:00-07:00",
+    ]
+    assert [item.end_at for item in result.items] == [
+        "2026-03-07T10:00:00-08:00", "2026-03-09T10:00:00-07:00", "2026-03-10T10:00:00-07:00",
+    ]
+    assert result.partial is False and result.warnings == []
+    assert all(item.calendar_item_id == item_id and item.read_only_reason == "provider" for item in result.items)
+    stored = json.loads(rows[0].source_payload_json)
+    assert stored["rdate"] == ["2026-03-09T09:00:00", "2026-03-10T16:00:00+00:00"]
+    assert stored["exdate"] == ["2026-03-08T09:00:00"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("view_name", ["agenda", "week"])
 @pytest.mark.parametrize(("master", "window_start", "window_end", "expected"), [
     ("20260306T120000", "2026-03-07", "2026-03-10", [
         "2026-03-07T12:00:00-08:00", "2026-03-08T12:00:00-07:00", "2026-03-09T12:00:00-07:00",
