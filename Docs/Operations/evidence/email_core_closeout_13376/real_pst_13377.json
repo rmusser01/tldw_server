@@ -196,5 +196,55 @@
     "Actual OST containers and live Gmail/provider behavior were not tested",
     "Large-scale benchmark certificates retain their earlier source revisions and were not rerun for this merged source",
     "Test suites overlap; counts must not be added into a unique-test total"
-  ]
+  ],
+  "publication": {
+    "url": "https://github.com/rmusser01/tldw_server/pull/3023",
+    "base": "dev",
+    "tested_merge_commit": "650fc72a98822233dd1a6fb53bf8d62bdb0e6cd9",
+    "draft": true,
+    "mergeable_at_creation": true,
+    "human_change_summary": "Pending before merge"
+  },
+  "cleanup": {
+    "owned_resources": [
+      {
+        "path": "/tmp/tldw-real-pst-13376-python",
+        "existed_before": true,
+        "absent_after": true
+      },
+      {
+        "path": "/tmp/tldw-real-pst-13377-synthetic.pst",
+        "existed_before": true,
+        "absent_after": true
+      },
+      {
+        "path": "/tmp/tldw-real-pst-13376-testPST.pst",
+        "existed_before": true,
+        "absent_after": true
+      },
+      {
+        "path": "/tmp/tldw-real-pst-13376-upstream-test.java",
+        "existed_before": true,
+        "absent_after": true
+      },
+      {
+        "path": "/tmp/email_pst_guard_plugin_13377.py",
+        "existed_before": true,
+        "absent_after": true
+      },
+      {
+        "path": "/tmp/email_scope_trace_13377.py",
+        "existed_before": true,
+        "absent_after": true
+      },
+      {
+        "path": "/tmp/email_bandit_dev_baseline_13377",
+        "existed_before": true,
+        "absent_after": true
+      }
+    ],
+    "retained": "Credential-free evidence, guard source and verification summaries",
+    "shared_venv_modified": false,
+    "shared_postgresql_service_removed": false
+  }
 }

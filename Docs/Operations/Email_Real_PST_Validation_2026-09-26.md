@@ -113,3 +113,10 @@ original source revisions. Those benchmarks were not rerun for this merged sourc
 The PR targets `dev` and remains draft until the requester supplies the required
 human-written `Change summary` under the repository's merge policy. Creating the
 PR is not the separate owner release approval.
+
+Published [draft PR #3023](https://github.com/rmusser01/tldw_server/pull/3023) against `dev`; GitHub confirms it is mergeable.
+Tested merge commit: `650fc72a98822233dd1a6fb53bf8d62bdb0e6cd9`. The subsequent
+closeout commit changes documentation, evidence and task tracking only. Cleanup
+removed the exact temporary parser target, both downloaded PST fixtures, upstream
+test source and diagnostic plugins/baseline copies; the shared venv and PostgreSQL
+service were preserved. Cleanup receipts are in the evidence JSON.
