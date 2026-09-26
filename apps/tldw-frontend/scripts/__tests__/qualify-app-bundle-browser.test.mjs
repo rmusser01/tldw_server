@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { existsSync, readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve, join } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -207,6 +207,110 @@ for (const [name, mutate, success] of [
       } else {
         assert.equal(existsSync(join(root, 'public-input.json')), false)
         assert.equal(result.stderr.trim(), 'Paired runtime identity check failed (private details suppressed).')
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+}
+
+for (const timing of ['early', 'late']) {
+  test(`setup tracker rejects ${timing} 403 and keeps success false`, async () => {
+    const { createEvidence, createSetupResponseTracker, completeEvidence } = await load()
+    assert.equal(typeof createSetupResponseTracker, 'function', 'setup response tracker is missing')
+    const evidence = createEvidence()
+    const first = createSetupResponseTracker(evidence, 1, 'http://127.0.0.1:18081')
+    const second = createSetupResponseTracker(evidence, 2, 'http://127.0.0.1:18082')
+    if (timing === 'early') first.observe('http://127.0.0.1:18081/api/v1/setup/first-run/state', 403)
+    first.observe('http://127.0.0.1:18081/api/v1/setup/first-run/state', 200)
+    second.observe('http://127.0.0.1:18082/api/v1/setup/first-run/state', 200)
+    if (timing === 'late') {
+      completeEvidence(evidence)
+      first.observe('http://127.0.0.1:18081/api/v1/setup/readiness/status', 403)
+    }
+    assert.throws(() => completeEvidence(evidence), { message: 'required_checks_failed' })
+    assert.equal(evidence.checks.setup_api_access_1.passed, false)
+    assert.equal(evidence.passed, false)
+  })
+}
+
+test('expected negative auth probes do not fail setup access', async () => {
+  const { createEvidence, createSetupResponseTracker, completeEvidence } = await load()
+  assert.equal(typeof createSetupResponseTracker, 'function', 'setup response tracker is missing')
+  const evidence = createEvidence()
+  for (const index of [1, 2]) {
+    const origin = `http://127.0.0.1:${18080 + index}`
+    const tracker = createSetupResponseTracker(evidence, index, origin)
+    tracker.observe(origin + '/api/v1/setup/first-run/state', 200)
+    tracker.observe(origin + '/api/v1/users/me/profile', 401)
+    tracker.observe(origin + '/api/v1/auth/single-user/session', 403)
+    tracker.observe('http://unrelated.invalid/api/v1/setup/first-run/state', 403)
+  }
+  completeEvidence(evidence)
+  assert.equal(evidence.passed, true)
+  assert.equal(evidence.G2, false)
+  assert.equal(evidence.G4, false)
+  assert.equal(evidence.G12, false)
+})
+
+test('any required false check prohibits successful evidence', async () => {
+  const { createEvidence, completeEvidence } = await load()
+  assert.equal(typeof completeEvidence, 'function', 'evidence completion gate is missing')
+  const evidence = createEvidence()
+  evidence.checks = { setup_api_access_1: { passed: true }, setup_api_access_2: { passed: true }, cookie_only_profile_1: { passed: false } }
+  assert.throws(() => completeEvidence(evidence), { message: 'required_checks_failed' })
+  assert.equal(evidence.passed, false)
+})
+
+test('missing setup responses cannot qualify an instance', async () => {
+  const { createEvidence, createSetupResponseTracker, completeEvidence } = await load()
+  assert.equal(typeof createSetupResponseTracker, 'function', 'setup response tracker is missing')
+  const evidence = createEvidence()
+  createSetupResponseTracker(evidence, 1, 'http://127.0.0.1:18081')
+  createSetupResponseTracker(evidence, 2, 'http://127.0.0.1:18082')
+  assert.throws(() => completeEvidence(evidence), { message: 'required_checks_failed' })
+})
+
+for (const [name, downExit, originalExit, expectedExit] of [
+  ['cleanup succeeds', 0, 0, 0],
+  ['cleanup fails after passing probe', 1, 0, 1],
+  ['cleanup fails after original failure', 1, 7, 7],
+]) {
+  test(`helper ${name} with recoverable state and bounded output`, () => {
+    const root = mkdtempSync(join(tmpdir(), 'bundle-cleanup-test-'))
+    try {
+      const owned = join(root, 'owned-state')
+      mkdirSync(owned)
+      runtimeFixture(owned)
+      const evidencePath = join(root, 'browser-evidence.json')
+      writeFileSync(evidencePath, JSON.stringify({ schema_version: 1, passed: originalExit === 0,
+        failure_code: originalExit === 0 ? undefined : 'manual_master_key_required',
+        G2: false, G4: false, G12: false, checks: {} }))
+      const repo = resolve(new URL('../../../..', import.meta.url).pathname)
+      const shell = readFileSync(join(repo, 'Helper_Scripts/test_app_bundle_browser.sh'), 'utf8')
+      const cleanup = shell.slice(shell.indexOf('cleanup() {'), shell.indexOf('trap cleanup EXIT'))
+      mkdirSync(join(root, 'bin'))
+      writeFileSync(join(root, 'bin/docker'), `#!${process.execPath}\nconst fs=require('node:fs');const args=process.argv.slice(2);fs.appendFileSync(${JSON.stringify(join(root, 'calls.jsonl'))},JSON.stringify(args)+'\\n');console.error('secret-token-must-be-suppressed');process.exit(${downExit});`, { mode: 0o700 })
+      writeFileSync(join(root, 'cleanup.sh'), `#!/bin/bash\nset -Eeuo pipefail\numask 077\ntest_root=$1\nbundle_dir=$2\nevidence_path=$3\n${cleanup}\ntrap cleanup EXIT\nexit "$4"\n`)
+      const result = spawnSync('/bin/bash', ['-c', 'source "$1/.venv/bin/activate" && bash "$2" "$3" "$4" "$5" "$6"', 'fixture', repo, join(root, 'cleanup.sh'), owned, root, evidencePath, `${originalExit}`], {
+        env: { ...process.env, PATH: join(root, 'bin') + ':' + process.env.PATH }, encoding: 'utf8', timeout: 10_000,
+      })
+      assert.equal(result.status, expectedExit, result.stderr)
+      assert.equal(existsSync(join(owned, 'instance-1/instance/config.env')), downExit !== 0)
+      const calls = readFileSync(join(root, 'calls.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line))
+      assert.deepEqual(calls.map(args => args[args.indexOf('--project-name') + 1]), ['paired-1', 'paired-2'])
+      assert.ok(calls.every(args => args.slice(-2).join() === 'down,--volumes'))
+      assert.ok(!result.stderr.includes('secret-token'))
+      const evidence = JSON.parse(readFileSync(evidencePath, 'utf8'))
+      assert.ok(evidence.checks.owned_resources_removed, 'cleanup outcome is missing from evidence')
+      assert.equal(evidence.checks.owned_resources_removed.passed, downExit === 0)
+      if (downExit !== 0) {
+        assert.equal(evidence.passed, false)
+        assert.ok(result.stderr.includes('Cleanup failed; disposable instance state retained for recovery.'))
+        const pointer = join(root, '.browser-cleanup-recovery')
+        assert.equal(readFileSync(pointer, 'utf8').trim(), owned)
+        assert.equal(statSync(pointer).mode & 0o777, 0o600)
+        if (originalExit !== 0) assert.equal(evidence.failure_code, 'manual_master_key_required')
       }
     } finally {
       rmSync(root, { recursive: true, force: true })

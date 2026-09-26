@@ -7,7 +7,7 @@ const CHECKS = [
   'setup_interaction', 'browser_managed_bootstrap', 'cookie_attributes',
   'cookie_only_profile', 'same_context_instances', 'missing_csrf_refused',
   'foreign_csrf_refused', 'foreign_session_refused', 'logout_isolated',
-  'rebootstrap', 'live_errors_absent',
+  'rebootstrap', 'live_errors_absent', 'setup_api_access',
 ]
 const PROFILE = '/api/v1/users/me/profile'
 const LOGOUT = '/api/v1/auth/single-user/session'
@@ -46,6 +46,41 @@ export function createEvidence() {
   return { schema_version: 1, passed: false, planned_setup_complete: false,
     setup_scope: 'managed_connection_and_initial_wizard_only',
     G2: false, G4: false, G12: false, checks: {} }
+}
+
+// Keep setup access live through wizard interaction, reload, and browser shutdown.
+export function createSetupResponseTracker(evidence, index, publicUrl) {
+  if (![1, 2].includes(index)) throw new Error('invalid_check')
+  const name = `setup_api_access_${index}`
+  const start = performance.now()
+  let observed = false
+  let refused = false
+  evidence.checks[name] = { passed: false, duration_ms: 0 }
+  return {
+    observe(url, status) {
+      const parsed = new URL(url)
+      if (parsed.origin !== publicUrl || !parsed.pathname.startsWith('/api/v1/setup/')) return
+      observed = true
+      if (!Number.isInteger(status) || status < 200 || status >= 400) refused = true
+      evidence.checks[name] = { passed: observed && !refused, duration_ms: Math.round(performance.now() - start) }
+      if (refused) {
+        evidence.passed = false
+        evidence.failure_code ||= name
+      }
+    },
+    assertSucceeded() {
+      if (!observed || refused) throw new Error(name)
+    },
+  }
+}
+
+export function completeEvidence(evidence) {
+  evidence.passed = false
+  if (evidence.checks.setup_api_access_1?.passed !== true || evidence.checks.setup_api_access_2?.passed !== true || Object.values(evidence.checks).some(check => check.passed !== true)) {
+    evidence.failure_code ||= 'required_checks_failed'
+    throw new Error('required_checks_failed')
+  }
+  evidence.passed = true
 }
 
 export async function recordCheck(evidence, name, action) {
@@ -90,6 +125,7 @@ export async function qualify(input, outputPath) {
   const instances = validateInput(input)
   const evidence = createEvidence()
   let browser
+  let completed = false
   const check = (name, action) => recordCheck(evidence, name, action)
   try {
     await check('browser_launch', async () => {
@@ -114,11 +150,8 @@ export async function qualify(input, outputPath) {
       page.on('response', response => {
         if (response.status() >= 500) liveError = true
       })
-      let setupApiRefused = false
-      page.on('response', response => {
-        const path = new URL(response.url()).pathname
-        if (path.startsWith('/api/v1/setup/first-run/') && response.status() >= 400) setupApiRefused = true
-      })
+      const setupResponses = createSetupResponseTracker(evidence, index + 1, instance.publicUrl)
+      page.on('response', response => setupResponses.observe(response.url(), response.status()))
       const bootstrap = page.waitForResponse(response => response.url() === instance.publicUrl + '/api/_tldw-webui/session' && response.request().method() === 'POST')
       // Consume rejections immediately so a navigation failure cannot leak a raw error.
       const bootstrapStatus = bootstrap.then(response => response.status(), () => 0)
@@ -136,12 +169,12 @@ export async function qualify(input, outputPath) {
         await page.getByText('Loading setup...', { exact: true }).waitFor({ state: 'hidden' })
         const masterKey = page.getByLabel('API Key', { exact: true })
         await masterKey.or(page.getByRole('button', { name: 'Set up in WebUI', exact: true })).first().waitFor({ state: 'visible' })
-        evidence.checks[`setup_api_access_${index + 1}`] = { passed: !setupApiRefused }
         assert.equal(await masterKey.isVisible(), false)
       })
       await instanceCheck('cookie_attributes', async () => assertCookiePolicy(await context.cookies(instance.publicUrl), instance))
       await instanceCheck('cookie_only_profile', async () => assert.equal(await browserFetch(page, PROFILE), 200))
       await instanceCheck('setup_interaction', async () => inspectManagedSetup(page))
+      await instanceCheck('setup_api_access', async () => setupResponses.assertSucceeded())
     }
     await check('same_context_instances', async () => {
       assert.equal(context.pages().length, 2)
@@ -179,11 +212,17 @@ export async function qualify(input, outputPath) {
       assert.equal(await browserFetch(pages[1], PROFILE), 200)
     })
     await check('live_errors_absent', async () => assert.equal(liveError, false))
-    evidence.passed = true
+    completeEvidence(evidence)
+    completed = true
     return evidence
   } finally {
     if (browser) await browser.close().catch(() => {})
-    writeFileSync(outputPath, JSON.stringify(evidence, null, 2) + '\n', { mode: 0o600 })
+    try {
+      // A late setup failure during shutdown must still reject the completed run.
+      if (completed) completeEvidence(evidence)
+    } finally {
+      writeFileSync(outputPath, JSON.stringify(evidence, null, 2) + '\n', { mode: 0o600 })
+    }
   }
 }
 

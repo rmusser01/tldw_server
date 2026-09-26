@@ -14,18 +14,59 @@ test_root=$(mktemp -d)
 chmod 700 "$test_root"
 export TLDW_APP_NO_BROWSER=1
 cleanup() {
+  local original_exit=$?
+  local cleanup_failed=0
+  trap - EXIT
   for index in 1 2; do
     local env_file="$test_root/instance-$index/instance/config.env"
     if [[ -f "$env_file" ]]; then
       local project_id
-      project_id=$(sed -n 's/^TLDW_PROJECT_ID=//p' "$env_file")
+      project_id=$(sed -n 's/^TLDW_PROJECT_ID=//p' "$env_file" 2>/dev/null) || cleanup_failed=1
       if [[ "$project_id" =~ ^[a-zA-Z0-9_.-]+$ ]]; then
-        docker compose --project-name "$project_id" --env-file "$env_file" \
-          -f "$bundle_dir/compose.yaml" down --volumes >/dev/null 2>&1 || true
+        if ! docker compose --project-name "$project_id" --env-file "$env_file" \
+          -f "$bundle_dir/compose.yaml" down --volumes >/dev/null 2>&1; then
+          cleanup_failed=1
+        fi
+      else
+        cleanup_failed=1
       fi
     fi
   done
-  rm -rf "$test_root"
+  if [[ $cleanup_failed == 0 ]]; then
+    rm -rf "$test_root" >/dev/null 2>&1 || cleanup_failed=1
+  fi
+  if [[ $cleanup_failed != 0 ]]; then
+    # Private recovery pointer is deliberately outside the uploaded whitelist.
+    printf '%s\n' "$test_root" > "$(dirname "$evidence_path")/.browser-cleanup-recovery" || true
+    echo 'Cleanup failed; disposable instance state retained for recovery.' >&2
+  fi
+  if ! python - "$evidence_path" "$cleanup_failed" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+try:
+    evidence = json.loads(path.read_text()) if path.exists() else {
+        "schema_version": 1, "passed": False, "G2": False, "G4": False,
+        "G12": False, "checks": {},
+    }
+    removed = sys.argv[2] == "0"
+    evidence["checks"]["owned_resources_removed"] = {"passed": removed}
+    if not removed:
+        evidence["passed"] = False
+        evidence.setdefault("failure_code", "owned_resources_removed")
+    path.write_text(json.dumps(evidence, indent=2) + "\n")
+except Exception:
+    sys.exit("Cleanup evidence update failed (private details suppressed).")
+PY
+  then
+    cleanup_failed=1
+  fi
+  if [[ $original_exit == 0 && $cleanup_failed != 0 ]]; then
+    original_exit=1
+  fi
+  exit "$original_exit"
 }
 trap cleanup EXIT
 # Keep failure output public and bounded, including failures before browser launch.
