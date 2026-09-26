@@ -25,7 +25,48 @@ core-route-identity suite has the same setup-heading failure on unchanged
 `d3d1083adc` (1 failed / 6 passed); it mocks the modified hook. That baseline
 failure remains open and is not counted as a passing test.
 
-## Stage 2: Qualify the ordinary fresh browser workflow
+## Stage 2: Correct the approved model and configuration root causes
+**Goal**: Make cookie-authenticated model discovery use real server requests,
+and persist editable setup configuration in the existing config volume.
+**Success Criteria**: Cookie and unauthenticated caches remain separate;
+rejected sessions and key/JWT paths retain coverage. Managed startup seeds
+only missing packaged configuration assets, preserves existing credentials and
+settings, and fails clearly on initialization errors. Non-managed startup is
+unchanged.
+**Tests**: `TldwModels.test.ts`, the managed entrypoint/config initialization
+tests, existing public Docker entrypoint tests, release helper contracts,
+scoped lint/format and Bandit on new Python code. Actual signed recreation
+and ordinary provider/document chat remain required in Stages 3 and 4.
+**Status**: Complete
+
+The user approved both root-cause corrections on 2026-09-26. They are tracked
+as TASK-13376.7 (model catalog) and TASK-13376.8 (persistent configuration).
+Model discovery changes are confined to its existing auth precheck/cache scope.
+Managed startup will resolve configuration through the existing
+`TLDW_CONFIG_DIR` override into `/app/managed-config`, initialize missing
+packaged assets there before auth/server startup, and preserve existing files.
+No auth bypass, strict-model-selection relaxation or provider-status API change.
+
+Model/readiness verification now passes 52 tests. Corrected persistence tests
+first failed 9 / passed 2, then the managed config, legacy Docker entrypoint,
+release helper and setup-writer suites passed 108 tests. Python lint/format,
+shell syntax and Bandit pass (zero production findings). Scoped TypeScript
+ESLint has zero errors and the existing unrelated `inputMods` unused-variable
+warning; new code introduces no warning. Independent review found no critical
+or important findings and independently passed 40 model / 14 managed-config
+tests. Its minor diagnostics finding is corrected: safe validation details or
+asset/errno are reported without file contents (new assertion red, then 108
+tests green again). Existing browser-helper contract tests passed 59 tests after
+the sandbox's localhost-listen restriction required an authorized rerun.
+Rebuilt signed candidate verification remains pending. The lifecycle restart check now verifies
+saved provider fields as well as the existing data sentinel.
+
+The fresh local build needs additional free host disk space: approximately
+12 GiB available versus an 8.8 GiB backend rootfs plus build/export overhead.
+Permission to reclaim Docker's reported 14.7 GB unused shared build cache is
+pending; no cache pruning or retained-image/evidence deletion has occurred.
+
+## Stage 3: Qualify the ordinary fresh browser workflow
 **Goal**: Build and verify a candidate from clean committed source; complete
 provider setup, Markdown ingestion, lexical search and application chat through
 the real WebUI.
@@ -46,7 +87,8 @@ removed its owned fixtures and signing key. Manifest SHA256:
 The final archive is extracted outside the checkout at
 `/private/tmp/task13376-workflow-cb581a1e16/bundle` for the separate ordinary
 provider/document workflow. Initial-wizard scope stays unchanged; full
-qualification remains false. Native CI run `36265212062` is still in progress.
+qualification remains false. Native CI run `36265212062` ended with amd64 browser
+failure and an arm64 180-minute build timeout; neither result is waived.
 
 Ordinary WebUI provider validation/save and first test chat passed. Home now
 accepts the live cookie session. Markdown ingestion and lexical content search
@@ -55,7 +97,7 @@ falsely reports no providers/models because its separate precheck omits the
 cookie session. Additional behavior changes await review/approval; see
 `Docs/superpowers/reviews/2026-09-26-complete-app-provider-document-qualification.md`.
 
-## Stage 3: Verify persistence and record the actual result
+## Stage 4: Verify persistence and record the actual result
 **Goal**: Stop/start retains provider configuration and document data, with an
 accurate acceptance record and recoverable evidence.
 **Success Criteria**: Repeat ordinary search/chat after restart; task criteria

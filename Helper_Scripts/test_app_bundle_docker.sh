@@ -241,6 +241,17 @@ fi
 docker compose --project-name "$project_id" --env-file "$env_file" \
   -f "$bundle_dir/compose.yaml" exec -T app sh -c \
   'printf durable > /app/Databases/wp1-candidate-sentinel'
+# Exercise the same config writer used by onboarding before container recreation.
+docker compose --project-name "$project_id" --env-file "$env_file" \
+  -f "$bundle_dir/compose.yaml" exec -T app python - >"$test_root/provider-save.log" 2>&1 <<'PY_PROVIDER_SAVE'
+from tldw_Server_API.app.core.Setup.setup_manager import update_config
+update_config({"API": {
+    "custom_openai_api_ip": "http://provider.invalid/v1",
+    "custom_openai_api_model": "retained-candidate-model",
+    "custom_openai_api_key": "disposable-candidate-provider-key",
+    "default_api": "custom-openai-api",
+}})
+PY_PROVIDER_SAVE
 (cd /tmp && "$bundle_dir/stop.sh")
 repeat_started_ns=$(python -c 'import time; print(time.monotonic_ns())')
 "$bundle_dir/start.sh"
@@ -250,6 +261,23 @@ second_config_hash=$(sha256sum "$env_file" | awk '{print $1}')
 docker compose --project-name "$project_id" --env-file "$env_file" \
   -f "$bundle_dir/compose.yaml" exec -T app sh -c \
   'test "$(cat /app/Databases/wp1-candidate-sentinel)" = durable'
+docker compose --project-name "$project_id" --env-file "$env_file" \
+  -f "$bundle_dir/compose.yaml" exec -T app python - >"$test_root/provider-retained.log" 2>&1 <<'PY_PROVIDER_RETAINED'
+import configparser
+from tldw_Server_API.app.core.config_paths import resolve_config_file
+path = resolve_config_file()
+assert str(path) == "/app/managed-config/config.txt"
+config = configparser.ConfigParser(interpolation=None)
+config.read(path)
+for field, expected in {
+    "custom_openai_api_ip": "http://provider.invalid/v1",
+    "custom_openai_api_model": "retained-candidate-model",
+    "custom_openai_api_key": "disposable-candidate-provider-key",
+    "default_api": "custom-openai-api",
+}.items():
+    if config.get("API", field, fallback="") != expected:
+        raise SystemExit("Provider configuration did not survive signed stop/start")
+PY_PROVIDER_RETAINED
 
 bad_bundle="$test_root/tampered-bundle"
 cp -R "$bundle_dir" "$bad_bundle"

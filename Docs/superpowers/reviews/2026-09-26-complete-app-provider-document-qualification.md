@@ -156,3 +156,37 @@ Owned workflow containers are stopped/removed through the signed helper and
 exact recorded mock/registry IDs. Private state, named data/config volumes,
 images, workspaces and evidence are retained. Unrelated containers are preserved.
 Native/core-format qualification and G12 remain separate mandatory product gates.
+
+## Approved root-cause corrections and implementation review
+
+On 2026-09-26 the user approved the two bounded corrections above. TASK-13376.7
+adds cookie-session model discovery and cache scope; TASK-13376.8 directs
+managed configuration to the existing persistent volume and initializes only
+missing packaged assets. Existing settings/credentials are preserved, default
+publication is atomic without overwrite, and legacy non-managed startup is
+unchanged. The signed lifecycle helper now verifies provider fields as well as
+data after recreation. The bundle README describes the retained configuration.
+
+Verification: 52 model/readiness tests, 108 managed/legacy Docker, release-helper
+and setup-writer tests, and 59 browser-helper contract tests passed. The first
+model/persistence runs demonstrated failures before implementation. Python
+lint/format, shell syntax and Bandit pass; Bandit has zero production findings.
+Changed TypeScript regions match formatting; ESLint has zero errors and the
+same pre-existing unrelated `inputMods` warning. Whole-repository tests and
+whole-frontend typecheck are not claimed clean.
+
+An independent read-only reviewer found no critical/important issues and
+independently passed 40 model and 14 managed-configuration tests. Its minor
+diagnostics issue was corrected and the affected test first failed, then the
+108-test suite passed again. Initialization errors report safe asset/reason or
+filesystem errno without configuration contents.
+
+These are implementation results, not a replacement for fresh signed ordinary
+browser qualification. The prior failed evidence remains unchanged. That old
+native CI run ultimately ended with amd64's browser failure and an arm64
+180-minute timeout during Bun install. Those failures remain unwaived.
+
+The next local build is constrained by approximately 12 GiB free host storage
+versus the measured 8.8 GiB backend rootfs plus build/export overhead. Reclaiming
+the shared unused build cache requires the separately requested permission;
+no pruning or retained-state/evidence/image deletion has occurred.

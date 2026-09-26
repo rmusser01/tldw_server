@@ -30,6 +30,11 @@ if [ -z "$PYTHON_BIN" ]; then
   fi
 fi
 
+if [ "${TLDW_MANAGED_GATEWAY:-0}" = "1" ]; then
+  "$PYTHON_BIN" -m tldw_Server_API.scripts.initialize_managed_config \
+    --destination "${TLDW_CONFIG_DIR:?Managed deployments require TLDW_CONFIG_DIR}"
+fi
+
 generate_key() {
   if command -v openssl >/dev/null 2>&1; then
     openssl rand -base64 32 | tr -d '\n'

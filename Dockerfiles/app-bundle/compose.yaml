@@ -17,6 +17,7 @@ services:
       # This bundle publishes HTTP on loopback only.
       SESSION_COOKIE_SECURE: "0"
       TLDW_ENV_FILE: /app/managed-config/.env
+      TLDW_CONFIG_DIR: /app/managed-config
       TLDW_RUN_AUTH_INIT_ON_START: "1"
       HOST: 0.0.0.0
       PORT: "8000"

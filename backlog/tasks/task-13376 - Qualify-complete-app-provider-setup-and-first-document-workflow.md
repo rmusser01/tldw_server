@@ -4,7 +4,7 @@ title: Qualify complete-app provider setup and first-document workflow
 status: In Progress
 assignee: []
 created_date: '2026-09-26 16:38'
-updated_date: '2026-09-26 21:58'
+updated_date: '2026-09-26 23:49'
 labels:
   - distribution
   - qualification
@@ -62,6 +62,8 @@ Stage 1 verified: hook12+Home setup6 =18 passed; read-only provider_readiness_re
 Approved fix committed and pushed as cb581a1e16032df27e4026afd784c9a682b584c1. Fresh linux/arm64 candidate pipeline exited 0: built-backend setup/MCP, 13 lifecycle and 38 initial-browser checks passed; signature and all local artifact hashes verified, owned fixtures removed, signing key removed. Final manifest SHA256 4e5c4173e5437196412de3211a83534f7adb7f4b44b94995d127386a79214de7; archive SHA256 aadeaa3a05754943017475eab33eb30c4c9e04bebba61bec03427c0c9c8578ee. Promotion correctly refused G12=false. Initial setup scope remains unchanged and full provider/document qualification false. Final archive extracted fresh at /private/tmp/task13376-workflow-cb581a1e16/bundle and signed start underway at loopback port19083. Native CI 36265212062 remains running; Windows syntax passed, native amd64/arm64 build/smoke jobs in progress.
 
 Fresh signed-candidate ordinary browser run: provider validation/save/wizard chat passed; Home media readiness no longer demands the master key. First-source File upload of the harmless Markdown fixture passed (1 succeeded/0 failed, UI2s); full-text search cobaltparcel13376 returned exact stored content. Chat with this media returned the deterministic mock response, but falsely displayed No LLM provider configured / No chat models configured, reproduced by Refresh. TldwModels.ts isConfiguredForModels and cache scope omit cookie-session auth. Signed stop/start passed and document/search retained, but new chat failed model_not_available for custom-openai-api/gpt-4. Read-only sanitized backend probe confirms packaged config.txt outside persistent volume lost saved URL/model/key/default on recreation; persistent .env retained. Full qualification false. Review/proposal recorded in Docs/superpowers/reviews/2026-09-26-complete-app-provider-document-qualification.md. Two bounded additional corrections presented for approval; no additional production edits. CI amd64 lifecycle passed but manual_master_key_absent_2 failed; root cause unverified. Arm64 still running, not cancelled. Exact engine version unavailable via supported browser API, not claimed. Owned application/mock/registry cleanup verified with retained state/volumes/images/evidence; unrelated PostgreSQL containers remain running. AC2/3 and task completion remain open.
+
+User approved both root causes on 2026-09-26. Child tasks TASK-13376.7 and TASK-13376.8 now implement cookie catalog auth/cache and persistent managed config. 52 model/readiness tests, 108 Python entrypoint/helper/setup regressions pass; Bandit0 production findings. Native run36265212062 ultimately failed amd64 manual_master_key_absent_2 and arm64 timed out after180min during Bun install; no waiver/retry/cancellation. Fresh build currently constrained by12GiB host free disk versus8.8GiB backend rootfs plus build/export overhead. Cleanup of unused shared build cache requested separately; no pruning occurred. Existing evidence/state/images retained.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

@@ -62,3 +62,7 @@ moving an installation; the directory includes the instance API key.
 Updates, backup/restore, and optional component replacement are not included
 in this WP1 bundle. They require the separately planned host-helper work;
 stopping and restarting this candidate retains the named volumes.
+Provider settings, `config.txt`, and configuration assets live alongside `.env`
+in the existing `backend_config` volume. Startup initializes only missing
+packaged defaults; it preserves saved settings and credentials. The
+`backend_data` volume retains ingested documents and other application data.
