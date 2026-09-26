@@ -122,6 +122,10 @@ async def get_calendar_service(
     """Build request-local permissions from current active AuthNZ organization roles."""
     user_id = _user_id(current_user)
     memberships = await list_org_memberships_for_user(user_id) if current_user.org_ids else []
+    active_orgs = frozenset(
+        int(row["org_id"]) for row in memberships
+        if row.get("status") == "active" and row.get("org_id") in current_user.org_ids
+    )
     roles = frozenset(
         (int(row["org_id"]), str(row["role"]).lower())
         for row in memberships
@@ -131,6 +135,7 @@ async def get_calendar_service(
         db=db,
         tenant_id=_tenant_id(current_user),
         org_role_resolver=lambda actor, org, role: actor == user_id and (org, role.lower()) in roles,
+        org_membership_resolver=lambda actor, org: actor == user_id and org in active_orgs,
     )
 
 
@@ -916,6 +921,10 @@ async def create_external_calendar_account(
 ) -> ExternalCalendarAccountResponse:
     """Create owner-scoped external account metadata and encrypt optional credentials."""
     try:
+        account_metadata = _external_account_metadata(payload)
+        server_url = (account_metadata or {}).get("server_url")
+        if payload.provider.lower() == "caldav" and server_url:
+            CalDavProvider._validate_http_url(str(server_url))
         secret_ref = payload.secret_ref
         secret_payload = _external_account_secret_payload(payload)
         if secret_payload is not None:
@@ -930,7 +939,7 @@ async def create_external_calendar_account(
             provider=payload.provider,
             display_name=payload.display_name,
             secret_ref=secret_ref,
-            account_metadata_json=_external_account_metadata(payload),
+            account_metadata_json=account_metadata,
         )
     except CalendarValidationError as exc:
         raise _map_calendar_error(exc) from exc

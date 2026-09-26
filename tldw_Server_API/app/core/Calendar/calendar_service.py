@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import timezone as utc_timezone
 from typing import Any, get_args
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -11,6 +12,7 @@ from dateutil import parser as date_parser
 from tldw_Server_API.app.core.Calendar.constants import CALENDAR_SOURCE_OWNER_PROVIDER
 from tldw_Server_API.app.core.Calendar.errors import (
     CalendarItemNotFound,
+    CalendarNotFound,
     CalendarPermissionDenied,
     CalendarReadOnlyError,
     CalendarValidationError,
@@ -45,11 +47,18 @@ class CalendarService:
         db: CalendarDatabase,
         tenant_id: str = "default",
         org_role_resolver: OrgRoleResolver | None = None,
+        org_membership_resolver: Callable[[int, int], bool] | None = None,
         job_manager: Any | None = None,
     ) -> None:
+        """Bind persistence to one tenant and trusted request-scoped authorization.
+
+        Resolvers must verify the actor's active memberships; organization creation
+        fails closed when no membership resolver is supplied. Jobs remains optional.
+        """
         self.db = db
         self.tenant_id = tenant_id
         self.org_role_resolver = org_role_resolver
+        self.org_membership_resolver = org_membership_resolver
         self.job_manager = job_manager
 
     def create_calendar(
@@ -65,6 +74,15 @@ class CalendarService:
         default_reminder_policy_json: str | dict[str, Any] | None = None,
         rbac_policy_ref: str | None = None,
     ) -> CalendarRow:
+        """Create a personal calendar or one in an actively verified organization.
+
+        Organization membership must be supplied by the caller's trusted resolver;
+        missing or denied membership raises CalendarPermissionDenied before writes.
+        """
+        if org_id is not None and (
+            self.org_membership_resolver is None or not self.org_membership_resolver(actor_user_id, org_id)
+        ):
+            raise CalendarPermissionDenied("Calendar organization is outside the current user's active memberships")
         return self.db.create_calendar(
             tenant_id=self.tenant_id,
             owner_user_id=actor_user_id,
@@ -238,7 +256,39 @@ class CalendarService:
             window_start=window_start,
             window_end=window_end,
         )
-        return [item for item in items if self._can_read_item(actor_user_id=actor_user_id, item=item)]
+        return self.filter_readable_items(actor_user_id=actor_user_id, items=items)
+
+    def filter_readable_items(
+        self, *, actor_user_id: int, items: list[CalendarItemRow],
+    ) -> list[CalendarItemRow]:
+        """Authorize loaded rows with per-calendar contexts and batch provider ownership.
+
+        Missing, foreign-tenant, or unreadable calendars and private provider imports
+        are omitted. No item rows are re-fetched, and caches live only for this call.
+        """
+        contexts: dict[int, CalendarAccessContext] = {}
+        for calendar_id in {item.calendar_id for item in items}:
+            try:
+                contexts[calendar_id] = self._assert_calendar_access(actor_user_id, calendar_id, "read")
+            except (CalendarNotFound, CalendarPermissionDenied):
+                continue
+        binding_ids = {
+            item.external_binding_id for item in items
+            if (context := contexts.get(item.calendar_id)) is not None
+            and actor_user_id != context.calendar.owner_user_id
+            and (item.provider_owned or item.source_owner == CALENDAR_SOURCE_OWNER_PROVIDER)
+            and item.external_binding_id is not None
+        }
+        owners = self.db.list_provider_binding_owners(binding_ids, tenant_id=self.tenant_id)
+        return [
+            item for item in items
+            if (context := contexts.get(item.calendar_id)) is not None
+            and (
+                not (item.provider_owned or item.source_owner == CALENDAR_SOURCE_OWNER_PROVIDER)
+                or actor_user_id == context.calendar.owner_user_id
+                or owners.get(item.external_binding_id) == actor_user_id
+            )
+        ]
 
     def create_annotation(
         self,

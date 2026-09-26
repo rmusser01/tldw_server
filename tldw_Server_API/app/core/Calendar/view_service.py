@@ -19,8 +19,6 @@ from tldw_Server_API.app.core.Calendar.constants import (
     CALENDAR_SOURCE_OWNER_PROVIDER,
 )
 from tldw_Server_API.app.core.Calendar.errors import (
-    CalendarItemNotFound,
-    CalendarPermissionDenied,
     CalendarValidationError,
 )
 from tldw_Server_API.app.core.Calendar.recurrence import (
@@ -30,6 +28,7 @@ from tldw_Server_API.app.core.Calendar.recurrence import (
     validate_query_window,
 )
 from tldw_Server_API.app.core.DB_Management.Calendar_DB import (
+    CalendarAnnotationRow,
     CalendarItemRow,
     CalendarLinkRow,
     CalendarRecurrenceRow,
@@ -207,6 +206,9 @@ class CalendarViewService:
         )
         readable_rows = self._filter_readable_items(actor_user_id=actor_user_id, rows=rows)
         recurrences = self.calendar_service.db.list_recurrences_for_items(row.id for row in readable_rows)
+        tag_overlays = self.calendar_service.db.list_tag_overlays_for_items(
+            (row.id for row in readable_rows), author_user_id=actor_user_id,
+        )
         exceptions: dict[tuple[int | None, str], list[str]] = {}
         for item in readable_rows:
             metadata = json.loads(item.source_payload_json or "{}")
@@ -218,7 +220,7 @@ class CalendarViewService:
         for item in readable_rows:
             if item.source_owner == CALENDAR_SOURCE_OWNER_PROVIDER and item.status.lower() == "cancelled":
                 continue
-            local_tags = self._local_tags_for_actor(actor_user_id=actor_user_id, item=item)
+            local_tags = self._local_tags_for_actor(item=item, overlays=tag_overlays.get(item.id, []))
             recurrence = recurrences.get(item.id)
             if recurrence:
                 try:
@@ -265,7 +267,7 @@ class CalendarViewService:
                 next_run_at = _coerce_datetime(task.next_run_at)
             except CalendarValidationError:
                 continue
-            if not (window_start <= next_run_at <= window_end):
+            if not (window_start <= next_run_at < window_end):
                 continue
             projections.append(
                 CalendarViewItem(
@@ -314,18 +316,8 @@ class CalendarViewService:
         actor_user_id: int,
         rows: list[CalendarItemRow],
     ) -> list[CalendarItemRow]:
-        readable: list[CalendarItemRow] = []
-        for row in rows:
-            try:
-                readable.append(
-                    self.calendar_service.get_item(
-                        actor_user_id=actor_user_id,
-                        item_id=row.id,
-                    )
-                )
-            except (CalendarItemNotFound, CalendarPermissionDenied):
-                continue
-        return readable
+        """Keep authorized loaded rows without per-candidate item lookups."""
+        return self.calendar_service.filter_readable_items(actor_user_id=actor_user_id, items=rows)
 
     def _expand_recurring_item(
         self,
@@ -368,15 +360,14 @@ class CalendarViewService:
     def _local_tags_for_actor(
         self,
         *,
-        actor_user_id: int,
         item: CalendarItemRow,
+        overlays: list[CalendarAnnotationRow],
     ) -> list[str]:
         """Return item tags plus the actor's empty-body local tag overlay."""
 
         tags = _json_list(item.local_tags_json)
-        for annotation in self.calendar_service.db.list_annotations(item.id):
-            if annotation.author_user_id == actor_user_id and annotation.body == "":
-                tags = _merge_tags(tags, _json_list(annotation.tags_json))
+        for annotation in overlays:
+            tags = _merge_tags(tags, _json_list(annotation.tags_json))
         return tags
 
 
