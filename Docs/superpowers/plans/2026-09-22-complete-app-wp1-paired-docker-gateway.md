@@ -570,3 +570,61 @@ abandoned-body cancellation. Both body reads remain inside eight-second
 deadlines; existing session /api scope stays unchanged. Owned proof resources
 removed. This scoped result does not qualify the rebuilt candidate; Task13
 exact local/native checks and whole-WP1 review remain pending.
+
+### Task 18: One combined whole-branch review fix wave
+
+**Spec clarification:**
+`Docs/Design/2026-09-26-complete-app-wp1-installer-trust-readiness-follow-up.md`.
+**Review:** plan workspace `final-review.md`, findings I1-I4 and M1.
+
+**Files:** All six host helpers, `tldw_Server_API/scripts/app_bundle_control.py`,
+`Helper_Scripts/verify_app_bundle.py`, paired-inventory definitions as needed
+within existing Release source, existing Release control/helper/candidate tests,
+`Dockerfiles/app-bundle/README.md`; narrow new focused readiness module/tests or
+Dockerfile.control copy adjustment only if required by the maintained layout.
+No generic parser restriction for native formats, host dependencies or socket
+mounts. Existing workflow/qualification fixtures may receive narrow adaptation
+required by the new helper contract; no gates/tests are weakened.
+
+#### Stage 1: Trusted configuration and complete inventory
+**Goal:** Fix I1/I2.
+**Success Criteria:** Conflicting inherited image/origin/credential/cookie input
+cannot override verified state, and both consumers refuse incomplete bundles.
+**Tests:** Red/green helper-child and actual Compose config regressions; omitted,
+missing, wrong-platform and tampered required files in control and promotion.
+**Status:** Not Started
+- [ ] Add failing tests, implement minimal paired-boundary fixes, run covering
+  Release/helper suites and preserve generic native manifest compatibility.
+
+#### Stage 2: Authenticated readiness and honest cleanup
+**Goal:** Fix I3/M1.
+**Success Criteria:** Helpers check actual runtime identity and gateway paths,
+cookie-only auth and exact temporary-session revocation before URL announcement;
+failed readiness/cleanup cannot report success or erase persistent config.
+**Tests:** Real HTTP upstream fixtures including healthy containers/broken auth,
+wrong role/source, failed/stalled body, failed revoke and cleanup failure.
+**Status:** Not Started
+- [ ] Add failing behavior tests, implement bounded existing-control readiness
+  and mirror host invocation on Unix/PowerShell; run targeted proof and Bandit.
+
+#### Stage 3: Safe first-origin choice
+**Goal:** Fix I4.
+**Success Criteria:** Occupied default yields an available choice before init,
+explicit occupied choice permits alternate retry, established origin never moves.
+**Tests:** Docker-owned port preflight/failure cleanup, unrelated listener
+preserved, explicit retry and existing-state refusal without credential rotation.
+**Status:** Not Started
+- [ ] Add failing first-install regressions, implement owned preflight and
+  truthful failure messages, run helper tests; label Windows runtime unqualified.
+
+#### Stage 4: Final fix-wave review and actual acceptance
+**Goal:** Complete the single final fix wave without claiming scoped tests are
+artifact qualification.
+**Success Criteria:** Covering tests/lint/security pass, one scoped rereview
+resolves I1-I4/M1 or records residual rulings; exact candidate local/native proof
+and final acceptance record remain controller-owned Task13.
+**Tests:** Focused amended scopes only, immutable candidate identities and
+full mapped lifecycle/browser checklists after clean source is committed.
+**Status:** Not Started
+- [ ] Commit working slices, append fix report with exact tests/results and
+  limitations; controller dispatches one scoped rereview and fresh qualification.
