@@ -1,12 +1,14 @@
 import { readFileSync } from "node:fs"
-import { resolve } from "node:path"
+import { dirname, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 import { createInstance } from "i18next"
 import { describe, expect, it } from "vitest"
 import optionEnglish from "../../assets/locale/en/option.json"
 
-const frontendRoot = resolve(process.cwd(), "../../tldw-frontend")
+const testDirectory = dirname(fileURLToPath(import.meta.url))
+const frontendRoot = resolve(testDirectory, "../../../../../tldw-frontend")
 const routeSource = () =>
-  readFileSync(resolve(process.cwd(), "src/routes/option-calendar.tsx"), "utf8")
+  readFileSync(resolve(testDirectory, "../option-calendar.tsx"), "utf8")
 
 describe("calendar route wiring", () => {
   it("provides the shared route imported by the Next page", () => {
