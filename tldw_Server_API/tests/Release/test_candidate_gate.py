@@ -730,6 +730,28 @@ def test_control_public_key_copy_overrides_restrictive_source_mode(tmp_path: Pat
     assert stat.S_IMODE(source.stat().st_mode) == 0o600
 
 
+def test_control_public_trust_directory_is_precreated_traversable(tmp_path: Path) -> None:
+    """COPY's 0444 autodirectory must not prevent the caller reading public keys."""
+    import stat
+    import subprocess
+
+    root = Path(__file__).resolve().parents[3]
+    destination = tmp_path / "trusted-keys"
+    lines = (root / "Dockerfiles/Dockerfile.control").read_text().splitlines()
+    for line in lines:
+        if line.startswith("COPY ") and "--from=trust" in line.split():
+            break
+        if line.startswith("RUN ") and "/opt/tldw/trusted-keys" in line:
+            subprocess.run(
+                ["sh", "-c", line.removeprefix("RUN ").replace("/opt/tldw/trusted-keys", str(destination))],
+                check=True,
+            )
+    # BuildKit applies COPY --chmod to a newly created destination directory.
+    if not destination.exists():
+        destination.mkdir(mode=0o444)
+    assert stat.S_IMODE(destination.stat().st_mode) == 0o755
+
+
 @pytest.mark.parametrize("key_mode, key_size, private_present, expected", [
     (0o444, 32, False, 0),
     (0o000, 32, False, 1),

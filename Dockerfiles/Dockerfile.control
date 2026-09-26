@@ -9,5 +9,6 @@ WORKDIR /opt/tldw
 COPY tldw_Server_API/scripts/app_bundle_control.py /opt/tldw/tldw_Server_API/scripts/app_bundle_control.py
 COPY tldw_Server_API/app/core/Release/manifest.py /opt/tldw/tldw_Server_API/app/core/Release/manifest.py
 COPY tldw_Server_API/app/core/AuthNZ/api_key_crypto.py /opt/tldw/tldw_Server_API/app/core/AuthNZ/api_key_crypto.py
+RUN mkdir -m 0755 /opt/tldw/trusted-keys
 COPY --from=trust --chmod=0444 /*.pub /opt/tldw/trusted-keys/
 ENTRYPOINT ["python", "-m", "tldw_Server_API.scripts.app_bundle_control"]
