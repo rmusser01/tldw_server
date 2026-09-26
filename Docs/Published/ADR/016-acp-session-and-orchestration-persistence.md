@@ -1,5 +1,7 @@
 # ADR-016: ACP Session And Orchestration Persistence
 
+**Task identity note (2026-09-25):** TASK-520 is now TASK-12541; TASK-519 is now TASK-12537. See the [task-reference reconciliation](inventory/2026-09-25-adr-task-reference-reconciliation.md). Original references elsewhere in this record remain historical.
+
 **Status:** Accepted
 **Date:** 2026-06-04
 **Backfilled from:** `Docs/Plans/2026-03-08-acp-persistence-registry-expansion-design.md`

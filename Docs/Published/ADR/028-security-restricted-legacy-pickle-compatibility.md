@@ -1,5 +1,7 @@
 # ADR-028: Security Restricted Legacy Pickle Compatibility
 
+**Task identity note (2026-09-25):** TASK-2312 is now TASK-12705. See the [task-reference reconciliation](inventory/2026-09-25-adr-task-reference-reconciliation.md). Original references elsewhere in this record remain historical.
+
 **Status:** Accepted
 **Date:** 2026-06-07
 **Backfilled from:** `Docs/ADR/inventory/2026-06-07-security-secrets-serialization-adoption-audit.md`

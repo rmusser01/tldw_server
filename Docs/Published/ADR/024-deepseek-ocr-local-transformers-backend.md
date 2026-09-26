@@ -1,5 +1,7 @@
 # ADR-024: DeepSeek OCR Local Transformers Backend
 
+**Task identity note (2026-09-25):** TASK-2275 is now TASK-12694; TASK-2276 is now TASK-12696. See the [task-reference reconciliation](inventory/2026-09-25-adr-task-reference-reconciliation.md). Original references elsewhere in this record remain historical.
+
 **Status:** Accepted
 **Date:** 2026-06-07
 **Backfilled from:** `Docs/Design/DeepSeek_OCR_Backend.md`

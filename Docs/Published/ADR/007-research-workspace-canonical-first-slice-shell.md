@@ -1,5 +1,7 @@
 # ADR-007: Research Workspace Canonical First-Slice Shell
 
+**Task identity note (2026-09-25):** No verified current mapping is recorded for TASK-509, TASK-514. See the [task-reference reconciliation](inventory/2026-09-25-adr-task-reference-reconciliation.md). Original references elsewhere in this record remain historical.
+
 **Status:** Accepted
 **Date:** 2026-06-03
 **Backfilled from:** `Docs/Design/Workspace_Canonical_Model_Decision_2026_05.md`, `Docs/superpowers/specs/2026-05-06-tldw-product-roadmap-design.md`, `Docs/superpowers/plans/2026-05-06-tldw-product-roadmap-first-slice-implementation-plan.md`

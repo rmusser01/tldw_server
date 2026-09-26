@@ -357,6 +357,8 @@ async def verify_api_key(credentials: HTTPAuthorizationCredentials = Security(se
 
 ## Architecture Decision Records (ADRs)
 
+Historical embedded records: [ADR-048](../ADR/048-backend-aware-evaluations-persistence.md) now covers backend-aware Evaluations persistence and JSON representation. The SQLite-only completeness claims in embedded ADR-001 and ADR-004 below are retained as original planning evidence, not the complete current contract.
+
 ### ADR-001: Database Choice for Evaluations
 **Date**: 2024-01-09
 **Status**: Implemented

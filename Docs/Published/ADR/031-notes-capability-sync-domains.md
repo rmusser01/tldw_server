@@ -1,5 +1,7 @@
 # ADR-031: Canonical synchronized Notes capability domains
 
+**Task identity note (2026-09-25):** No verified current mapping is recorded for TASK-3701. See the [task-reference reconciliation](inventory/2026-09-25-adr-task-reference-reconciliation.md). Original references elsewhere in this record remain historical.
+
 **Status:** Accepted
 **Date:** 2026-08-08
 **Backfilled from:** `tldw_chatbook/backlog/decisions/046-synchronized-database-notes-parity.md`

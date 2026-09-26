@@ -4,6 +4,8 @@
 **Follow-up backfill task:** TASK-518
 **Scope:** `Docs/Evals/Evals-Plan-1.md` embedded ADRs mapped to inventory rows INV-009 through INV-015.
 
+**Subsequent resolution (2026-09-25):** TASK-13374 reviewed current persistence and backfilled INV-009/INV-012 as [ADR-048](../048-backend-aware-evaluations-persistence.md). The exclusions and task numbers below describe the June audit; INV-014 remains separate. TASK-517/TASK-518 have no verified current mapping in the [task-reference reconciliation](2026-09-25-adr-task-reference-reconciliation.md).
+
 ## Purpose
 
 Confirm which embedded Evaluations ADRs still describe current governing behavior before promoting any of them into canonical ADRs.

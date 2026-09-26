@@ -1,5 +1,7 @@
 # ADR-010: Sandbox VZ Runtime Ownership
 
+**Task identity note (2026-09-25):** No verified current mapping is recorded for TASK-515. See the [task-reference reconciliation](inventory/2026-09-25-adr-task-reference-reconciliation.md). Original references elsewhere in this record remain historical.
+
 **Status:** Accepted
 **Date:** 2026-06-03
 **Backfilled from:** `Docs/Design/2026-05-02-apple-containerization-evaluation.md`

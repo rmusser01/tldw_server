@@ -1,5 +1,7 @@
 # ADR-022: Embeddings API And Media Pipeline
 
+**Task identity note (2026-09-25):** TASK-2261 is now TASK-12684; TASK-2262 is now TASK-12685. See the [task-reference reconciliation](inventory/2026-09-25-adr-task-reference-reconciliation.md). Original references elsewhere in this record remain historical.
+
 **Status:** Accepted
 **Date:** 2026-06-05
 **Backfilled from:** `tldw_Server_API/app/core/Embeddings/README.md`

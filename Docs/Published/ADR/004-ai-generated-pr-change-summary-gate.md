@@ -1,5 +1,7 @@
 # ADR-004: AI-Generated PR Change Summary Gate
 
+**Task identity note (2026-09-25):** No verified current mapping is recorded for TASK-506, TASK-507, TASK-508. See the [task-reference reconciliation](inventory/2026-09-25-adr-task-reference-reconciliation.md). Original references elsewhere in this record remain historical.
+
 **Status:** Accepted
 **Date:** 2026-06-02
 **Backfilled from:** `AGENTS.md`, `Docs/superpowers/AI_GENERATED_PR_CHANGE_SUMMARY_POLICY_2026_04_17.md`
