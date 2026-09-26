@@ -4,7 +4,7 @@ title: Plan and implement paired Docker distribution and runtime gateway
 status: In Progress
 assignee: []
 created_date: '2026-09-23 06:15'
-updated_date: '2026-09-26 04:43'
+updated_date: '2026-09-26 04:47'
 labels:
   - distribution
   - docker
@@ -77,6 +77,8 @@ Corrected exact candidate e759322854d3547e239bc97c9dfe1b232b5f6da3 completed suc
 Continuing live qualification after verified native run 36210634045. Add a real Chromium novice setup and same-host two-instance cookie/CSRF isolation probe against the extracted signed bundle, with one managed WebUI image reused against different private backend/Next hostnames and ports via a qualification-only Compose override. Do not emit cookie values/API keys/browser storage/traces. Docker now responds and host free disk is 273 GiB; no local candidate images remain, so rebuild a clean local native candidate once the checks are implemented. Keep G4/G12 false until their complete cases pass; do not publish protected images.
 
 Live qualification follow-up: Task 9 browser/two-instance probe is being implemented with bounded secret-free evidence. Actual Docker gateway probe forwards loopback requests as bridge addresses (172.18.0.1 client, 172.18.0.3 upstream peer); forged forwarding headers are stripped. Existing setup guard rejects the measured scope with 403. Task 10 records a scoped authenticated private-hop fix; full backend HTTP/browser reproduction and security review remain required. G2/G4/G12 remain open.
+
+Actual fresh Docker/Chromium regression confirmed at clean inspection commit 0790f7e385: first-run/state=403, first-run/metadata=403, manual_master_key_required=true. Public bounded evidence /tmp/task13343-setup-inspection-red.json. This is inspection proof, not signed-candidate acceptance. Task9 probe committed 9d8d3108ee; independent scoped review in progress. Task10 must correct access and metadata together using bounded authenticated managed hop; no global remote-setup bypass.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
