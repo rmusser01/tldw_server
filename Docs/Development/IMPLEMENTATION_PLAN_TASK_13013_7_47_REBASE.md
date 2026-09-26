@@ -1,7 +1,7 @@
 # TASK-13013.7.47 — PR 2869 integration
 
 ## Stage 1: Integrate latest dev
-**Goal**: Preserve a recovery ref and rebase onto fetched dev a2f5e1b816cfe189db7f553a1ccf8d481dc2edbe.
+**Goal**: Preserve recovery refs and rebase onto latest fetched dev; updated from a2f5e1b816cfe189db7f553a1ccf8d481dc2edbe to 59bd5845038342013a2d84d0130f6164f14b54fd after dev advanced.
 **Success Criteria**: No unresolved conflicts; upstream changes and reviewed local behavior preserved.
 **Tests**: Range-diff, targeted conflict review, lock and workflow contracts.
 **Status**: Complete

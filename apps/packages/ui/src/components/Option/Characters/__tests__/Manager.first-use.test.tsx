@@ -1050,7 +1050,7 @@ describe("CharactersManager first-use onboarding", () => {
       editScope.getByText("Description: brief blurb shown in character lists and cards.")
     ).toBeInTheDocument()
     expect(editScope.getByText("Prompt preset")).toBeInTheDocument()
-    await user.click(editScope.getByRole("button", { name: "Show advanced fields" }))
+    fireEvent.click(editScope.getByRole("button", { name: "Show advanced fields" }))
 
     expect(editScope.getByRole("button", { name: "Prompt control" })).toBeInTheDocument()
     expect(editScope.getByRole("button", { name: "Generation settings" })).toBeInTheDocument()
@@ -1061,7 +1061,7 @@ describe("CharactersManager first-use onboarding", () => {
       )
     ).toBeInTheDocument()
 
-    await user.click(editScope.getByRole("button", { name: "Metadata" }))
+    fireEvent.click(editScope.getByRole("button", { name: "Metadata" }))
     expect(editScope.getByText("Expression packs available after save")).toBeInTheDocument()
     expect(editScope.getByText("Expression images")).toBeInTheDocument()
   }, 60000)
@@ -1949,8 +1949,8 @@ describe("CharactersManager first-use onboarding", () => {
     expect(editFormElement).not.toBeNull()
     const editScope = within(editFormElement as HTMLElement)
 
-    await user.click(editScope.getByRole("button", { name: "Show advanced fields" }))
-    await user.click(editScope.getByRole("button", { name: "Metadata" }))
+    fireEvent.click(editScope.getByRole("button", { name: "Show advanced fields" }))
+    fireEvent.click(editScope.getByRole("button", { name: "Metadata" }))
 
     const folderField = editScope
       .getByText("Folder")
@@ -3608,9 +3608,9 @@ describe("CharactersManager first-use onboarding", () => {
       name: /advanced fields/i
     })
     if (advancedToggle.textContent?.includes("Show")) {
-      await user.click(advancedToggle)
+      fireEvent.click(advancedToggle)
     }
-    await user.click(editScope.getByRole("button", { name: "Metadata" }))
+    fireEvent.click(editScope.getByRole("button", { name: "Metadata" }))
 
     expect(
       await editScope.findByLabelText("Expression image URL for happy")
