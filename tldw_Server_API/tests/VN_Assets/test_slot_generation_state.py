@@ -1151,6 +1151,165 @@ def _finish(repo: VNAssetPacksRepository, batch: int, pack: SimpleNamespace, ite
         repo.cancel_batch(batch)
 
 
+@pytest.mark.parametrize("fallback", ["failed", "reviewing", None])
+@pytest.mark.parametrize(
+    ("existing", "expected"),
+    [
+        ("approved", "approved"), ("draft", "reviewing"),
+        ("skipped", "skipped"), ("failed", "failed"),
+        ("cancelled", "cancelled"), ("empty", "planned"),
+        ("active", "generating"), ("queued", "queued"),
+    ],
+)
+def test_legacy_fallback_preserves_derived_slot_precedence(
+    service: VNAssetPackService, pack_with_slots: SimpleNamespace,
+    existing: str, expected: str, fallback: str | None,
+) -> None:
+    """Fallback fills empty terminal display, never review/skip/failure/live work."""
+    pack = pack_with_slots
+    slot_id = pack.slots[0].id
+    batch = _batch(service, pack)
+    if existing in {"approved", "draft", "skipped"}:
+        item = _claim(service.repo, batch, pack)
+        _finish(service.repo, batch, pack, item, "completed")
+        service.repo.update_item_review(item["id"], review_status="approved" if existing == "approved" else "draft")
+        if existing == "skipped":
+            service.repo.update_slot(slot_id, {"status": "skipped"})
+    elif existing == "failed":
+        item = _claim(service.repo, batch, pack)
+        _finish(service.repo, batch, pack, item, "failed")
+        service.repo.cancel_batch(_batch(service, pack))
+    elif existing == "cancelled":
+        service.repo.cancel_batch(batch)
+    elif existing == "empty":
+        # Historical completion without publication cannot manufacture readiness.
+        service.repo.update_batch(batch, {"status": "completed"})
+    elif existing == "active":
+        _claim(service.repo, batch, pack)
+    before = service.repo.get_batch(batch)
+    items = service.repo.list_items(pack.id)
+
+    service.repo.finish_legacy_display(_legacy_batch(service, pack), slot_id, inline=False, fallback_status=fallback)
+
+    if existing in {"empty", "cancelled"} and fallback is not None:
+        expected = fallback
+    assert service.repo.get_slot(slot_id)["status"] == expected
+    assert service.repo.get_batch(batch) == before
+    assert service.repo.list_items(pack.id) == items
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("review_status", ["approved", "draft"])
+@pytest.mark.parametrize("jobs_delivery", [False, True], ids=["inline", "real-jobs"])
+async def test_failed_legacy_worker_preserves_completed_v1_review_and_readiness(
+    service: VNAssetPackService, pack_with_slots: SimpleNamespace,
+    fake_jobs: FakeJobs, tmp_path: Path, review_status: str, jobs_delivery: bool,
+) -> None:
+    """A genuine V0 model failure cannot demote the same slot's published V1 item."""
+    pack = pack_with_slots
+    slot_id = pack.slots[0].id
+    for slot in pack.slots[1:]:
+        service.repo.update_slot(slot.id, {"required_for_runtime": False})
+    batch = _batch(service, pack)
+    adapter = FakeImageAdapter()
+    saver = RecordingVNSaver()
+    worker = VNAssetGenerationWorker(
+        repo=service.repo, jobs_manager=fake_jobs, image_registry=FakeImageRegistry(adapter),
+        backend_gate=FakeGenerationGate(), save_vn_asset_image=saver,
+    )
+    result = await worker.handle_generate_variant(
+        {"pack_id": pack.id, "slot_id": slot_id, "batch_id": batch, "variant_index": 0, "user_id": 1},
+    )
+    service.review_item_for_pack(
+        pack.id, result["item_id"], VNAssetReviewRequest(review_status=review_status, preferred=review_status == "approved"),
+    )
+    v1_before = service.repo.get_batch(batch)
+    outcome_before = service.repo.get_variant_outcome(batch, slot_id, 0)
+    item_before = service.repo.get_item(result["item_id"])
+    readiness_before = service.get_readiness(pack.id)
+    assert readiness_before.ready is (review_status == "approved")
+    legacy = _legacy_batch(service, pack)
+    jobs = JobManager(db_path=tmp_path / "legacy-review.db") if jobs_delivery else fake_jobs
+    job = None
+    if jobs_delivery:
+        create_generate_variant_job(jobs, pack_id=pack.id, slot_id=slot_id, batch_id=legacy, variant_index=0, user_id=1)
+        job = jobs.acquire_next_job(
+            domain="vn_assets", queue=vn_asset_generation_jobs_queue(), worker_id="legacy-review", lease_seconds=120,
+        )
+        assert job is not None
+    original_error = VNAssetGenerationError("legacy_model_failure")
+
+    class FailingAdapter(FakeImageAdapter):
+        """Fail the actual legacy model call, recording its unchanged invocation."""
+
+        def generate(self, request: Any) -> Any:
+            self.requests.append(request)
+            raise original_error
+
+    failing = FailingAdapter()
+    worker = VNAssetGenerationWorker(
+        repo=service.repo, jobs_manager=jobs, image_registry=FakeImageRegistry(failing),
+        backend_gate=FakeGenerationGate(), save_vn_asset_image=saver,
+    )
+    with pytest.raises(VNAssetGenerationError) as raised:
+        await worker.handle_generate_variant(
+            {"pack_id": pack.id, "slot_id": slot_id, "batch_id": legacy, "variant_index": 0, "user_id": 1}, job=job,
+        )
+
+    assert raised.value is original_error
+    assert service.repo.get_slot(slot_id)["status"] == ("approved" if review_status == "approved" else "reviewing")
+    assert service.get_readiness(pack.id) == readiness_before
+    assert service.repo.get_item(result["item_id"]) == item_before
+    assert service.repo.get_variant_outcome(batch, slot_id, 0) == outcome_before
+    assert service.repo.get_batch(batch) == v1_before
+    legacy_row = service.repo.get_batch(legacy)
+    assert (legacy_row["status"], legacy_row["completed_count"], legacy_row["failed_count"]) == ("failed", 0, 1)
+    assert service.repo.list_batch_recipes(legacy) == []
+    assert (len(adapter.requests), len(failing.requests), len(saver.calls)) == (1, 1, 1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("history", ["empty-completed", "cancelled", "failed"])
+async def test_legacy_worker_failure_without_publication_remains_failed(
+    service: VNAssetPackService, pack_with_slots: SimpleNamespace, fake_jobs: FakeJobs, history: str,
+) -> None:
+    """Actual empty legacy failure outranks cancellation without creating a V1 outcome."""
+    pack = pack_with_slots
+    slot_id = pack.slots[0].id
+    batch = _batch(service, pack)
+    if history == "empty-completed":
+        service.repo.update_batch(batch, {"status": "completed"})
+    elif history == "cancelled":
+        service.repo.cancel_batch(batch)
+    else:
+        service.repo.fail_variant(batch_id=batch, slot_id=slot_id, variant_index=0, error="V1 failed")
+    before = service.repo.get_variant_outcome(batch, slot_id, 0)
+    legacy = _legacy_batch(service, pack)
+
+    class FailingAdapter(FakeImageAdapter):
+        """Make one actual legacy model attempt fail before publication."""
+
+        def generate(self, request: Any) -> Any:
+            self.requests.append(request)
+            raise VNAssetGenerationError("legacy_model_failure")
+
+    adapter = FailingAdapter()
+    saver = RecordingVNSaver()
+    worker = VNAssetGenerationWorker(
+        repo=service.repo, jobs_manager=fake_jobs, image_registry=FakeImageRegistry(adapter),
+        backend_gate=FakeGenerationGate(), save_vn_asset_image=saver,
+    )
+    with pytest.raises(VNAssetGenerationError, match="legacy_model_failure"):
+        await worker.handle_generate_variant(
+            {"pack_id": pack.id, "slot_id": slot_id, "batch_id": legacy, "variant_index": 0, "user_id": 1},
+        )
+    assert service.repo.get_slot(slot_id)["status"] == "failed"
+    assert service.repo.get_variant_outcome(batch, slot_id, 0) == before
+    assert service.repo.list_items(pack.id) == []
+    assert service.repo.get_batch(legacy)["failed_count"] == 1
+    assert (len(adapter.requests), len(saver.calls)) == (1, 0)
+
+
 @pytest.mark.parametrize(
     ("other_batch", "kind"),
     [(False, "completed"), (False, "failed"), (True, "completed"), (True, "failed"), (True, "cancelled")],

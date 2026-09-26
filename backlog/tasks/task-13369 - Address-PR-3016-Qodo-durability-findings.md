@@ -3,16 +3,16 @@ id: TASK-13369
 title: Address PR 3016 Qodo durability findings
 status: In Progress
 assignee: []
-created_date: '2026-09-26 00:52'
-updated_date: '2026-09-26 05:44'
+created_date: 2026-09-26 00:52
+updated_date: 2026-09-26 06:35
 labels:
-  - vn-assets
-  - review
-  - durability
+- vn-assets
+- review
+- durability
 dependencies: []
 references:
-  - 'https://github.com/rmusser01/tldw_server/pull/3016'
-  - 'https://github.com/rmusser01/tldw_server/issues/2021'
+- https://github.com/rmusser01/tldw_server/pull/3016
+- https://github.com/rmusser01/tldw_server/issues/2021
 priority: high
 ---
 
@@ -40,7 +40,7 @@ IMPLEMENTATION_PLAN_vn_pr_3016_review.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Resumed after disk capacity was restored. Confirmed PR 3016 remains open and latest dev has four newer commits. Original eight Qodo threads remain outstanding. Independent review exposed missing-byte/quota accounting recovery and stale claim/publication windows; assigned non-overlapping Storage/AuthNZ and VN worker/DB implementers. Added and observed four new fencing regressions fail before implementation. Frontend verification underway; latest dev fetched; requester-provided Change summary preserved.
 
 Frontend verification: 37 VN asset Vitest tests passed; TypeScript tsc --noEmit passed; scoped ESLint passed; 4 Chromium VN asset smoke tests passed in 58.7s (desktop/mobile and reload recovery). Temporary worktree UI dependency symlink removed after verification. Backend worker/storage fixes and independent re-review still underway.
@@ -88,8 +88,17 @@ Task15finalRamanreview foundP2 publishedlegacycandidate hideslive replacement le
 Final single fix wave and scoped re-review approved: published V0 results now correlate only with the exact current delivery via opaque provenance, preserving live replacements and historical unknowns without exposing lease tokens or changing model inputs. Main final frozen VN suite: 520 passed, zero skips, 10 existing warnings, 307.06s. Final three-source Bandit zero findings/errors; expanded manager scope has one verified baseline B608. Ruff only two verified baseline BLE001; compileall and diff checks pass. Task11-14 independent reviews and Task15 scoped final re-review all clean. Live dev59bd584503 and remotehead9e5fb2fd unchanged; normal final commit hooks, push, seven evidence replies, fresh exact-head Qodo and required CI/merge still pending. Preserve worktree and reports; no whole-repository green claim.
 
 Final normal commit-stage hooks passed on the 23 owned files (all applicable guards, syntax, whitespace and secret checks); inapplicable hooks skipped, existing deprecated-stage warnings remain qualified. Live paginated review state has 23 threads, seven unresolved, no remaining thread/comment pages. Task15 local gate complete; external evidence replies and exact-head gates still pending.
-<!-- SECTION:NOTES:END -->
 
+Pushed and verified head4666d4994b13b32e5fda8f4642cef9ca60f1e48f via normal fast-forward; fetched dev59bd584503 remains ancestor so no new rebase needed. All seven fresh findings now have individual fix/test evidence replies and resolved threads. Paginated GraphQL verifies 23 threads, zero unresolved and no remaining thread/comment pages. Human summary preserved verbatim and PR verification updated. One full exact-head Qodo request5843635886 posted at2026-09-26T05:46:59Z, pending; edited zero-findings summary reflects replies, not full new-head completion. Exact-head CI55runs:33queued22completed, no actionable failure, required gate contexts not present; skipped/cancelled checks not passes. No merge attempted; AC6 and task completion remain pending. These final integration records are local pending true finalization, not another code push.
+
+Full Qodo review5324805354 completed on4666d4994b at05:50:11Z and adds four new findings: legacy fallback overrides approved review state; alleged PostgreSQL legacy table/index ordering; centralized display exception; public retry-admission contracts. Paginated GraphQL27threads4unresolved/no remaining pages; old23resolved preserved. Reopening AC5 and preparing one bounded Task16 fix/verification wave. Base DDL visibly creates job_events before index, so verify the migration allegation on a real legacy database before changing production or post a reasoned regression-backed rebuttal. CI unchanged33queued/no actionable failure; no duplicate review request or merge.
+
+Task16 frozen implementation: 309 affected tests passed with zero skips/failures/errors and required official PostgreSQL. Valid RED11 then GREEN29; initial test-only API mistake and initial PG skip/setup failure are explicitly excluded as evidence. The alleged missing-events PG ordering failure does not reproduce: actual unmodified migration ensures events/index and preserves existing Job; production migration byte-identical, regression-backed rebuttal pending. Central exception move preserves executable class and safe logging; fallback now fills only planned/cancelled derived state. Main verified freeze hashes, production Bandit4files zero findings/errors, Ruff only unchanged worker BLE001, compileall/diff pass. Helmholtz independent Task16 spec/quality review active; Main full VN+central exception suite running, not yet passing. No new commit/push/replies or merge.
+
+Task16 locally complete and independent Helmholtz spec/quality PASS, no actionable findings. Frozen affected309 passed required official PG zero skips; Main final VN+central units554passed zero skips10warnings327.30s. Post-run freeze hashes match including unchanged production PG migration; allegation not reproduced, regression-backed rebuttal pending. MainBandit4runtime0findings/errors, Ruff8onlybaselineworkerBLE001, compile/diffpass, applicable normalhooks11ownedfilespass; inapplicable hooks/skipped checks and existing stage warnings qualified. Reviewer closed; Task17 final fresh-wave interaction review/integration pending. No new commit/push/replies/resolutions/merge; AC5/6 still pending.
+Task17 final fresh-wave interaction reviewer Harvey active (01a0dc64-c5ca-7d53-8a3b-6993e4ba77be), report task-17-final-review.md. Main live fetch verifies unchanged dev59bd584503 ancestor of4666d4994b. Paginated external review inventory27threads4unresolved/no remaining review/thread/comment pages, no new findings beyond known4; no review request pending. ActualCI55runs33queued22completed/no actionable failure, seven required contexts not yet present. Requester human summary remains exact. No merge attempt; all external gates pending.
+Task17 final independent Harvey fresh-wave interaction review local spec/qualityPASS, no actionable findings/named code risks. Reviewer closed; all frozen source/test hashes reverified match. Boundaries/declined judgments remain qualified: prior completed matrices unchanged, instance-local legacy display not execution authority, global infrastructure logging outside bounded fix, actual PG absent-events probe not exhaustive historic installation certification, no exactly-once external execution promise. All local implementation/review/verification complete. Main normal commit/push and four evidence replies/resolutions next; exact-head fullQodo/requiredCI/currentbase/human gates still pending, no merge readiness claimed.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed

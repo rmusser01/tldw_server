@@ -320,7 +320,7 @@ The external exact-head gates remain pending.
 
 - [x] Independent task and whole-delta review, scoped backend/frontend matrix,
   production Bandit, no new Ruff findings and normal commit checks.
-- [ ] Commit/rebase/push, seven individual evidence replies and verified thread
+- [x] Commit/rebase/push, seven individual evidence replies and verified thread
   resolution. Request one new full exact-head Qodo review, then await CI.
 - [ ] Merge only after review/required CI/human summary/current dev gates pass;
   finalize Backlog and pause the heartbeat on verified merge or closed PR.
@@ -340,6 +340,19 @@ YAML/TOML/wizard hooks were skipped, not counted as passes. Push/replies remain
 integration steps. Live dev
 remains 59bd584503 and PR head remains 9e5fb2fd before this commit; no merge
 readiness is claimed while exact-head external review and CI are pending.
+
+Integration: normal fast-forward push verified GitHub head
+4666d4994b13b32e5fda8f4642cef9ca60f1e48f. Fetched dev remains
+59bd5845038342013a2d84d0130f6164f14b54fd and is an ancestor of this head;
+no additional rebase was needed. Seven individual evidence replies are posted
+and resolved; paginated GraphQL verifies 23 threads, zero unresolved, no
+remaining thread/comment pages. The human summary remains verbatim. Full
+Qodo review requested exactly once in comment 5843635886 at 05:46:59Z.
+Edited summary 5836873877 reports zero bugs/rule violations after replies,
+but is not yet a completed full review of this head. Actual check runs show
+33 queued, no new actionable failure; required gate contexts are not yet
+present. Skipped admission and cancelled audit runs are not passes. No merge
+attempt; final integration records remain local pending merge finalization.
 
 **Ruling:** Existing Jobs retry_now_jobs only accepts failures with retries left
 and is not owner-scoped; deterministic create replays the same dead row. A
@@ -379,3 +392,80 @@ coverage-required, frontend-required, e2e-required, container-build-check and
 frontend-license-policy/trusted/dev. Strict base integration applies, and only
 the merge method is allowed. The legacy protection API returns 404 because
 these controls are ruleset-based, not absent. Never use admin bypass.
+
+## Full Qodo Review on 4666d4994b
+
+Review 5324805354 completed at 05:50:11Z with four new findings. Prior 23
+resolved threads remain preserved; AC5 is reopened. Do not redispatch earlier
+completed tasks. One bounded implementer handles this fresh four-finding wave.
+
+### Task 16: Legacy Review Precedence and Public Contracts
+
+**Base:** 4666d4994b13b32e5fda8f4642cef9ca60f1e48f.
+**Files:** VNAssetPacks_DB.py, VN_Assets/worker.py, core/exceptions.py,
+DB_Management/jobs_failed_requeue.py, and narrowly scoped VN/Jobs tests.
+Jobs/pg_migrations.py may change only if the actual migration defect reproduces.
+
+- [x] Reproduce a failed legacy delivery after a completed V1 item on the same
+  required slot is approved. Preserve approved/reviewing/skipped review
+  precedence and readiness, current active/queued precedence, stronger derived
+  failures and empty legacy terminal fallback; add actual worker mixed-version
+  controls without changing outcomes, counters, approvals or model calls.
+- [x] Centralize LegacyDisplayReconciliationError in core/exceptions.py and
+  update DB/worker imports without altering safe rollback messages, retained
+  internal type/traceback, SDK disposition or logging redaction. Regression
+  coverage must use the centralized class and existing full-sink controls.
+- [x] Verify the alleged PostgreSQL upgrade ordering on a real Jobs database
+  with existing jobs but absent job_events, using the official Jobs fixture.
+  Run the unmodified actual ensure_jobs_tables_pg entry point: its base DDL
+  appears to create job_events first. If it passes, retain production behavior
+  and add regression-backed rebuttal evidence; do not manufacture RED by
+  replacing current DDL with an old script. If a real failure reproduces,
+  minimally correct required ordering and fail-closed behavior with RED/GREEN.
+- [x] Expand all three public retry-admission helper docstrings to describe
+  parameters/shapes, supported backend/executor, transaction and connection
+  ownership, return value, side effects and actual exceptions, including
+  callback/policy/driver failure propagation. Keep runtime code unchanged.
+- [x] Run bounded affected VN, centralized-exception and required real PG
+  migration/index tests once, scoped Ruff/compileall/Bandit/diff checks and
+  self-review. Report precise RED/GREEN, including any non-reproduced finding;
+  no frontend, storage matrix, all-Jobs, whole-repo or native3.14 reruns.
+- [x] Independent task spec/quality review with no actionable findings.
+
+Task 16 is locally complete. Helmholtz independently approved spec compliance
+and code quality with no actionable findings. The frozen affected matrix passed
+309 cases with required official PostgreSQL and zero skips; Main's final VN and
+central exception scope passed 554 cases, zero skips, 10 warnings, 327.30s.
+Post-run source/test hashes match the freeze. Main production Bandit on four
+files has zero findings/errors; Ruff has only the unchanged worker BLE001.
+Compileall, diff checks and all applicable normal hooks on the eleven owned
+files pass; inapplicable hooks and existing hook-stage warnings are qualified.
+The PG allegation did not reproduce through actual current migration; its
+production bytes remain unchanged. Final interaction review and external
+integration gates remain pending, so this is not merge readiness.
+
+**Rulings:** A fallback cannot override an existing published review state or
+skip/stronger failure; actual legacy failure still supplies an empty terminal
+outcome. Verify the helper's established failure-versus-cancellation precedence
+with focused controls rather than rewriting the state machine. The PG claim
+is provisional until a real pre-events installation exercises current DDL.
+Changing proven-correct migration ordering solely to match a bot suggestion is
+not required. Cost if wrong: a small predicate or migration correction, not
+silent approval regression or unnecessary shared-schema behavior change.
+
+### Task 17: Fresh Integration Gates
+
+- [x] Independent final review of only this fresh wave and its interaction
+  boundaries; no duplicate whole-branch rediscovery of completed work.
+- [ ] Main affected verification, normal hooks, safe/current dev integration,
+  commit/push, four individual evidence replies and verified resolution.
+- [ ] Request one full exact-head Qodo review, pass all required checks and
+  human summary gate, authorized normal merge, truthful finalization/pause.
+
+Harvey's final fresh-wave review approved local spec/quality with no actionable
+findings or unresolved named risks. It independently inspected the unchanged
+shared-work/readiness, rollback/SDK, PostgreSQL ensure/index and native helper
+ownership boundaries and retained evidence, without duplicate suites. Excluded
+whole-branch/other platform matrices, global infrastructure logging, exhaustive
+historic PG versions and exactly-once model execution are unchanged qualified
+limits, not claims added by this fix. External gates remain pending.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
@@ -11,7 +12,9 @@ from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.jobs_failed_requeue import retry_failed_job_admission
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Jobs.operations.contracts import CreateJobCommand
 from tldw_Server_API.app.core.Jobs.operations.postgres import admission as pg_admission
 from tldw_Server_API.app.core.Jobs.operations.sqlite import admission as sqlite_admission
 
@@ -230,6 +233,65 @@ def test_counter_failure_rolls_back_retry_and_event(jobs: JobManager, monkeypatc
     with pytest.raises(RuntimeError, match="counter persistence interrupted"):
         retry(jobs, job)
     assert snapshot(jobs, job) == ("failed", 0, 0)
+
+
+@pytest.mark.parametrize("failure", ["decode", "policy", "driver"])
+def test_retry_helper_propagates_failures_and_obeys_connection_ownership(jobs: JobManager, failure: str) -> None:
+    """Public helper propagates callback/native driver errors and rolls back writes."""
+    job = failed_job(jobs)
+    command = CreateJobCommand(
+        domain=job["domain"], queue=job["queue"], job_type=job["job_type"],
+        payload=job["payload"], owner_user_id=job["owner_user_id"], idempotency_key=job["idempotency_key"],
+    )
+    callback_error = LookupError(f"{failure} callback unavailable")
+
+    def decode(payload: Any) -> Any:
+        """Raise from the actual decoder callback without replacing SQL."""
+        if failure == "decode":
+            raise callback_error
+        return payload
+
+    def policy() -> None:
+        """Raise from policy evaluation inside the admitted transaction."""
+        if failure == "policy":
+            raise callback_error
+
+    error_type: type[Exception] = LookupError
+    if failure == "driver":
+        if jobs.backend == "postgres":
+            import psycopg
+
+            error_type = psycopg.errors.UndefinedTable
+        else:
+            error_type = sqlite3.OperationalError
+        with closing(jobs._connect()) as setup, setup, closing(setup.cursor()) as cur:
+            cur.execute("DROP TABLE job_events")
+    conn = jobs._connect()
+    try:
+        with pytest.raises(error_type) as raised:
+            retry_failed_job_admission(
+                conn, backend=jobs.backend, cursor_factory=jobs._pg_cursor, command=command,
+                job_id=job["id"], expected_uuid=job["uuid"], now=jobs._clock.now_utc(),
+                max_queued_quota=0, submits_per_minute_quota=0, counters_enabled=True,
+                decode_payload=decode, check_policy=policy,
+            )
+        if failure != "driver":
+            assert raised.value is callback_error
+        if jobs.backend == "postgres":
+            assert conn.closed  # psycopg connection context commits/rolls back and closes.
+        else:
+            assert not conn.in_transaction
+            assert conn.execute("SELECT 1").fetchone()[0] == 1  # SQLite context does not close.
+    finally:
+        conn.close()
+    assert jobs.get_job(job["id"], owner_user_id="42") == job
+    if failure != "driver":
+        assert snapshot(jobs, job) == ("failed", 0, 0)
+    else:
+        with closing(jobs._connect()) as observer, observer, closing(observer.cursor()) as cur:
+            cur.execute("SELECT ready_count FROM job_counters WHERE domain='vn_assets' AND queue='default'")
+            row = cur.fetchone()
+            assert (row["ready_count"] if isinstance(row, dict) else row[0]) == 0
 
 
 @pytest.mark.parametrize("health", ["live", "expired", "missing_expiry", "no_lease", "no_worker", "cancel_requested"])

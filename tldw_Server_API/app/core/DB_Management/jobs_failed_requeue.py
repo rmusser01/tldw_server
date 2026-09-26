@@ -85,14 +85,35 @@ def _lock_pg_retry_admission_index(executor: Any) -> None:
 
 
 def ensure_retry_admission_index(executor: Any, *, backend: str) -> None:
-    """Index only explicit retry admissions through the existing schema ensure.
+    """Ensure the partial index for explicit retry admissions; return None.
 
-    PostgreSQL callers use an autocommit connection for its established
-    concurrent-index phase; SQLite callers own the schema transaction.
-    Repeated ensures preserve ready indexes. PostgreSQL repairs only this exact
-    owned definition after failed concurrent builds, under a session advisory
-    lock and the caller's configured timeouts. Foreign collisions fail closed.
-    Lock contention uses the minimum positive timeout, or 30s if both are zero.
+    Args:
+        executor: SQLite connection/cursor with ``execute``, or a psycopg 3
+            cursor with ``execute`` and tuple-row ``fetchone`` on an autocommit
+            connection. The Jobs ``job_events`` table must already exist in
+            the current schema; PostgreSQL also reads system catalogs/settings.
+        backend: Exactly ``"sqlite"`` or ``"postgres"``.
+
+    Ownership and side effects:
+        The caller owns and closes the executor/connection. This helper does
+        not begin, commit or roll back a transaction. SQLite executes CREATE
+        INDEX IF NOT EXISTS in the caller's schema transaction. PostgreSQL's
+        concurrent-index phase requires autocommit, acquires a session advisory
+        lock, verifies ready indexes and repairs only the exact owned definition
+        after failed builds. It releases the lock best-effort, suppressing only
+        psycopg errors from unlock. Foreign definition collisions fail closed.
+        Lock contention uses the minimum positive lock/statement timeout, or
+        30s when both are zero. No Jobs rows, counters or events are changed;
+        PostgreSQL failed concurrent DDL can leave an invalid index for retry.
+
+    Raises:
+        ValueError: Unsupported backend.
+        RuntimeError: PostgreSQL advisory-lock timeout, foreign index collision
+            or failed index verification.
+        ImportError: The PostgreSQL branch cannot import psycopg.
+        sqlite3.Error / psycopg.Error: Native DDL, catalog, timeout, permission
+            or transaction-mode failures propagate unchanged (except unlock).
+        Other executor/result errors also propagate; there are no callbacks.
     """
     if backend == "sqlite":
         executor.execute(
@@ -128,10 +149,32 @@ def ensure_retry_admission_index(executor: Any, *, backend: str) -> None:
 def count_recent_job_admissions(
     executor: Any, *, backend: str, domain: str, owner_user_id: str, now: datetime | str,
 ) -> int:
-    """Count initial Jobs and explicit same-row retry admissions in the rate window.
+    """Return the initial-job plus explicit retry count in a 60-second window.
 
-    Called under the existing owner quota lock; legacy admin retry events are
-    deliberately excluded. A duplicate queued replay emits no admission event.
+    Args:
+        executor: SQLite connection/cursor whose ``execute`` returns a cursor
+            with ``fetchone``, or a psycopg 3 cursor with both methods. Count
+            rows may be positional (including sqlite3.Row) or dicts with ``c``.
+        backend: Exactly ``"sqlite"`` or ``"postgres"``.
+        domain: Jobs domain string matched exactly in both tables.
+        owner_user_id: Owner string matched exactly; no unscoped fallback.
+        now: SQLite-compatible datetime/timestamp string, or a PostgreSQL
+            datetime, used as the inclusive lower boundary ``now - 60s``.
+
+    Ownership and side effects:
+        The caller holds the existing owner quota lock and owns the transaction,
+        executor and connection. This helper neither acquires that lock nor
+        begins/ends transactions or closes resources. It performs one read-only
+        SELECT against jobs/job_events. The nonnegative integer sum counts
+        initial jobs and ``job.retry_admitted`` events, excluding legacy admin
+        retry events. There is no upper time boundary or status filter; a queued
+        replay contributes no new event, but prior admissions still count.
+
+    Raises:
+        ValueError: Unsupported backend, or failed integer conversion.
+        sqlite3.Error / psycopg.Error: Native query, binding, missing-schema and
+            connection failures propagate unchanged.
+        Malformed executor/result shape errors propagate; no callbacks run.
     """
     if backend == "sqlite":
         row = executor.execute(
@@ -176,12 +219,69 @@ def retry_failed_job_admission(
     decode_payload: Callable[[Any], Any],
     check_policy: Callable[[], None],
 ) -> AdmissionResult:
-    """Requeue only an exactly matched failed Job with transactional admission.
+    """Transactionally admit one exactly matched failed Job, returning facts.
 
-    SQLite uses its write lock; PostgreSQL shares create's owner advisory lock
-    and READ COMMITTED isolation, then locks the Job and queue-control row.
-    Concurrent queued/processing replays precede policy checks. Any rejection
-    or bookkeeping error leaves state, counters and events unchanged.
+    Args:
+        conn: Idle SQLite connection with sqlite3.Row-compatible mapping rows,
+            or an idle, non-autocommit psycopg 3 connection. Do not call inside
+            an existing transaction. The caller supplies initialized Jobs schema.
+        backend: Exactly ``"sqlite"`` or ``"postgres"``; this lower-level helper
+            indexes the backend map directly, unlike the other public helpers.
+        cursor_factory: PostgreSQL connection-to-context-manager callable
+            yielding a cursor with mapping rows; ignored on SQLite, which
+            creates and closes its own cursor.
+        command: CreateJobCommand containing the expected domain, queue,
+            job_type, owner_user_id, idempotency_key and payload. Its decoded
+            payload must be an exactly matching dict with integer-only values
+            (bools excluded). Other command fields do not replace Job controls.
+        job_id: Target Jobs integer ID, scoped by command.owner_user_id.
+        expected_uuid: Exact immutable UUID string for that row.
+        now: Admission datetime; SQLite stores its normalized timestamp.
+        max_queued_quota: Domain/owner queued limit; zero disables it.
+        submits_per_minute_quota: Domain/owner 60-second admission limit;
+            zero disables it. Quota values are expected to be nonnegative;
+            this helper does not validate them.
+        counters_enabled: Whether to increment the ready counter on admission.
+        decode_payload: Callable accepting persisted payload (JSON strings are
+            parsed first) and returning its decoded value; runs even on replay.
+        check_policy: Zero-argument policy callback, run only after exact
+            identity and failed/non-cancelled checks, before queue/quota checks.
+
+    Ownership and side effects:
+        The caller creates the connection and must close it on all exit paths.
+        This helper owns the transaction: SQLite BEGIN IMMEDIATE serializes
+        writes; PostgreSQL temporarily selects READ COMMITTED, shares create's
+        owner advisory lock, then locks the Job and queue-control row. Its
+        connection context commits on normal return and rolls back exceptions.
+        SQLite leaves conn open; psycopg 3's context closes it. Isolation is
+        restored only if the PostgreSQL connection remains open. Errors before
+        entering the connection context leave cleanup to the caller.
+
+        An applied AdmissionResult contains the requeued row with decoded
+        payload: retry_count resets to zero, execution/result/error state clears,
+        updated_at advances, one job.retry_admitted event is inserted, and ready
+        counters optionally advance. ID, UUID, payload, idempotency key and
+        immutable execution controls are preserved; no new Job is inserted.
+        APPLIED's was_inserted flag follows the existing AdmissionResult
+        convention, not physical insertion. Matching queued/processing rows
+        return an existing/no-transition result before policy checks, without
+        a new event or charge. Quotas return an admission-rejected result rather
+        than raising. A quota rejection may commit a newly created queue-control
+        row, but does not change the Job, counters or admission events.
+
+    Raises:
+        KeyError: Unsupported backend.
+        ValueError: Identity/payload mismatch, non-failed/cancel-requested Job,
+            paused/draining queue, or lost conditional transition. Malformed
+            persisted JSON raises json.JSONDecodeError (a ValueError).
+        RuntimeError: PostgreSQL transaction support cannot import psycopg.
+        sqlite3.Error / psycopg.Error: Native SQL, binding, connection, isolation,
+            locking and bookkeeping failures propagate unchanged.
+        Exceptions from cursor_factory, decode_payload and check_policy
+            (including policy rejection) propagate unchanged, as do malformed
+            row/result errors. Once the transaction context is entered, errors
+            roll back Job/counter/event writes; this helper does not translate
+            errors into SDK dispositions or facade HTTP/policy exceptions.
     """
     # Reuse create's serialized policy and counter operations, without insertion.
     from tldw_Server_API.app.core.Jobs.operations.postgres import admission as pg
