@@ -4,7 +4,7 @@ title: Plan and implement paired Docker distribution and runtime gateway
 status: In Progress
 assignee: []
 created_date: '2026-09-23 06:15'
-updated_date: '2026-09-26 07:04'
+updated_date: '2026-09-26 07:17'
 labels:
   - distribution
   - docker
@@ -99,6 +99,10 @@ Exact local candidate at087e77ce4a built and captured all four arm64 image diges
 Task15 b0e847166e approved: enabled MCP audit logging uses /app/Databases/mcp-audit.log in managed Compose and matching built-image test env. Actual cached image UID10001 audit init/write passes, MCP39/Setup60 and Release81 pass; owned diagnostic/test storage removed. Default production logging and dependencies unchanged. Fresh full candidate retry next. Known container Hypothesis example database falls back to memory under read-only /app; dependency warnings are disclosed, not counted as clean output. G2/G4 and AC4 still await actual full qualification.
 
 Clean retry d081a4dd43 built all four arm64 images and passed built-image MCP39/Setup60 with owned cleanup. Extracted helper verification then refused PermissionError /opt/tldw/trusted-keys/ci-test.pub: strict candidate umask077 created public key mode0600, embedded COPY preserves root-only permissions while start helper runs as caller UID. G2/G4 correctly remain false and failed manifest/signature invalidated; owned registry/test removed, no cleanup recovery markers. Add scoped Task16 explicit read-only public-key image mode and non-root image-content guard before next retry; private key permissions stay restricted.
+
+Task16 scoped control image exposed COPY chmod destination-directory behavior: new public trust directory and key both0444, preventing non-root traversal. Narrow correction precreates root-owned directory0755 while retaining public files0444, private keys0600 and caller/read-only isolation. Actual signature proof pending corrected harness with required state argument; no false passing signature claim. Controller ruling and cost recorded in plan ledger.
+
+Task16 commits537581410c/db9157a342 approved: root-owned trusted-key directory0755 and public-key files0444 preserve non-root caller access under strict source umask; private signing keys0600/outsideimage. Scoped exact control image UID501 reads32bytes, valid signature passes, tampering refuses; exact candidate content guard passes, Release87 passes. Owned proof containers/tags/signing state removed. Full fresh local candidate retry next; no branch push/native follow-up until that succeeds.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

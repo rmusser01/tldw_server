@@ -415,17 +415,21 @@ control under the host caller UID. Private signing key restriction is correct.
 and focused Release packaging/tool tests. No verifier/key/trust-policy changes.
 Execute before resuming Task13 actual local/native qualification.
 
-**Contract:** Explicitly copy embedded public keys read-only as0444 independently
-of source umask. Keep private signing keys0600/outsideimage, trust fixed in the
+**Contract:** Precreate the root-owned public trust directory as0755 so caller
+UIDs can traverse it; explicitly copy embedded public keys read-only as0444
+independently of source umask. Actual BuildKit COPY --chmod also applies the
+mode to a newly created destination directory, so implicit directory creation
+is insufficient. Keep private signing keys0600/outsideimage, trust fixed in the
 control digest, and helper caller UID/no-new-privileges/read-only isolation.
 Check actual public-key readability under the helper caller UID in candidate
 content guards rather than only checking size as image-default root.
 
-- [ ] **Step 1:** Preserve actual PermissionError and write red packaging/guard
+- [x] **Step 1:** Preserve actual PermissionError and write red packaging/guard
   behavior for restrictive public source key mode and non-root caller access.
-- [ ] **Step 2:** Add COPY --chmod=0444 for the existing public-key copy and
-  strengthen only the bounded control-content guard; preserve trust boundaries.
-- [ ] **Step 3:** Build only a scoped control image from a restrictive public-key
+- [x] **Step 2:** Precreate the public trust directory as0755, add COPY
+  --chmod=0444 for the existing public-key copy and strengthen only the bounded
+  control-content guard; preserve trust boundaries.
+- [x] **Step 3:** Build only a scoped control image from a restrictive public-key
   source and verify non-root key read/signature behavior with bounded output.
   Run focused tests/lint/syntax/Bandit where applicable, remove owned test
   containers/state, independently review and commit. Fullcandidate retry belongs
@@ -534,3 +538,10 @@ MCP39 and Setup60 pass; Release81 passes. Owned diagnostic/test resources remove
 Fresh full candidate proof remains pending; cached-image checks do not close
 G2/G4. Container property tests warn that their example database falls back to
 memory under the read-only /app directory; dependency warnings remain visible.
+
+Embedded public-trust correction537581410c/db9157a342 is independently approved.
+Root-owned directory0755 and public files0444 remain readable under callerUID501
+while private signing files stay0600/outsideimage. Scoped exactcontrolimage
+validsignature passes and tampering refuses;87Release tests pass. Owned proof
+containers/tags/signing state removed. Exactfulllocal/nativecandidate remains
+Task13, and G2/G4 are not qualified by these scoped checks.
