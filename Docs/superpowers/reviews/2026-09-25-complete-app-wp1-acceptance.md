@@ -6,13 +6,13 @@ catalog entry, PR or merge is approved by this record.
 
 ## Current evidence (2026-09-26)
 
-The final code review fix wave through `1d0bcb9b28` and Task19 readiness correction `9e4f8fc620` pass scoped spec and quality review. Exact clean candidate `284010040c878d6b749f9d5b1aa7db52024bc269` built all four arm64 images, passed built-backend MCP39/Setup60 and all13 signed lifecycle checks, then failed browser setup API access and wizard progression. Cleanup passed, signatures were invalidated and all candidate gates remain false. Unchanged cached Chromium diagnosis proves the first-run POST lacks its CSRF header and returns403; the same observed body with the instance token returns200. Task20 is planned before source edits. Full local/native artifact qualification remains pending; historical runs do not qualify this source.
+The final code review fix wave through `1d0bcb9b28` and Task19 readiness correction `9e4f8fc620` pass scoped spec and quality review. Exact clean candidate `284010040c878d6b749f9d5b1aa7db52024bc269` built all four arm64 images, passed built-backend MCP39/Setup60 and all13 signed lifecycle checks, then failed browser setup API access and wizard progression. Cleanup passed, signatures were invalidated and all candidate gates remain false. Unchanged cached Chromium diagnosis proves the first-run POST lacks its CSRF header and returns403; the same observed body with the instance token returns200. Task20 correction `e34d3151da` passes scoped spec and quality review with no Critical/Important findings; fresh exact artifacts remain pending. Full local/native artifact qualification remains pending; historical runs do not qualify this source.
 
 | Contract | Current evidence | Status |
 | --- | --- | --- |
 | Sections5/10: Docker-only startup, stable identity, gateway readiness and private ports | Reviewed fixes and scoped Docker fixtures cover signed identities, gateway cookie auth/revoke, first-port conflict/retry, authoritative persisted inputs and owned cleanup. | Exact2840100 signed lifecycle13 passes; browser still fails. Windows runtime unqualified. |
 | Section11 / G10: required signed artifacts | Both consumers now require all eight signed paths for the selected platform; omitted/missing/wrong-platform/tampered cases pass. | Exact final manifest/signature/helper bytes pending independent verification. |
-| G2: credential-free managed connection and initial wizard | Implementation/probe tests exist; authenticated installer readiness is now required before browser success. | Exact2840100 lifecycle13 passes; browser first-run POST403 blocks wizard. Task20 correction pending. |
+| G2: credential-free managed connection and initial wizard | Implementation/probe tests exist; authenticated installer readiness is now required before browser success. | Exact2840100 lifecycle13 passes; browser first-run POST403 blocks wizard. Task20 correction reviewed; fresh exact browser proof pending. |
 | G4: two-instance networking/auth | Full browser checklist remains strict and uses the same managed WebUI artifact against two private target configurations. | Pending exact local and native amd64/arm64 evidence. |
 | G12: release policy | Python3.12 and Node24 upstream eligibility rechecked September26; exact patches will be recorded from built images. | False/open: full matrix, Windows runtime, dependency/security/footprints and protected publication remain separate. |
 
@@ -49,6 +49,17 @@ proof returns operator200/ready, DELETE200 and revoked profile/operator401, with
 owned cleanup; a controlled actual not_ready injection was not exercised.
 The scratch report was briefly committed at `c63cb74bf4` and is removed from the
 tracked final tree; its code/test/proof facts are retained here and in task history.
+
+Task20 changes one shared request-core condition and adds18 behavioral cases including
+the real setup-method request chain. Expected red6fail/8pass becomes focused14pass.
+After correcting test-only runtime-cookie-name cleanup, the affected11-file run
+reports291pass/10fail (10passing suites); unchanged-production baseline persistence
+suite reproduces10fail/6pass. This is not an overall passing run. Scoped ESLint
+has0errors/86identical baseline warnings; whole-file Prettier reproduces baseline
+2warnings plus printer failure, while newly added blocks pass formatting. These
+baseline limits remain disclosed Minor findings. Bandit is inapplicable to this
+TypeScript-only change. Fresh exact compiled/browser artifact evidence is still
+mandatory; no backend guard or qualification latch was changed.
 
 ## Rulings I made
 

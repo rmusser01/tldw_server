@@ -700,8 +700,8 @@ case-insensitive stale auth/CSRF headers replaced; safe requests omit CSRF;
 relative and same-page/configured-origin absolute requests receive only their
 instance token; allowlisted external and configured-but-not-page-origin requests
 receive no page CSRF; missing/foreign instance cookie supplies no fallback token.
-**Status:** Not Started
-- [ ] Add failing behavior tests using the existing request-core harness.
+**Status:** Complete
+- [x] Add failing behavior tests using the existing request-core harness.
 
 #### Stage 2: Separate CSRF from key/bearer omission
 **Goal:** Allow the real managed wizard mutation without weakening server policy.
@@ -712,8 +712,8 @@ external destinations, safe requests, manual/hosted transports retain contracts.
 **Tests:** Focused request-core and affected setup/background-proxy suites;
 existing package lint/format checks and diff review. Bandit has no changed Python
 production scope; record the non-Python limitation explicitly.
-**Status:** Not Started
-- [ ] Make the minimal proven request-core correction, self-review and commit.
+**Status:** Complete
+- [x] Make the minimal proven request-core correction, self-review and commit.
 
 #### Stage 3: Scoped review and actual qualification
 **Goal:** Resolve Task13 browser setup failure on fresh exact artifacts.
@@ -724,5 +724,7 @@ Full parent clean signed local and native13lifecycle/38browser checks remain
 mandatory, with G12 false and Windows runtime explicitly unqualified.
 **Tests:** Bounded changed-source managed production WebUI proof when feasible,
 then controller-owned exact full candidate and independent signatures.
-**Status:** Not Started
+**Status:** In Progress
 - [ ] Report focused evidence/limitations; controller reviews and retries Task13.
+
+Task20 codee34d3151da scoped spec/quality approved, no Critical/Important findings. One production condition plus18behavioral tests, including actualsetupmethod→bgRequest→realrequestcore. Expectedred6fail8pass→focused14pass; finalaffected291pass10baselinepersistencefail across11suites (10pass), baseline10fail6pass unchangedproduction. Overallrunnotpassing. ESLint0errors86identicalbaselinewarnings; baseline/current wholefileformat2warnings+printercrash, addedblocksformatpass. BanditN/AallTS. Actualcompiledlocal/native13lifecycle38browser/signature qualification remainsTask13pending.
