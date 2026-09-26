@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+if not __debug__:
+    raise RuntimeError("Synthetic validation requires Python without optimization")
+
 import asyncio
 import ipaddress
 import json
 import mailbox
+import math
 import os
 import platform
 import socket
@@ -18,6 +22,7 @@ from secrets import token_urlsafe
 ROOT = Path(tempfile.mkdtemp(prefix="tldw-email-live-sqlite-")).resolve()
 for key in ("TEST_MODE", "TESTING", "TLDW_TEST_MODE", "PYTEST_CURRENT_TEST", "MINIMAL_TEST_APP", "ULTRA_MINIMAL_APP"):
     os.environ.pop(key, None)
+os.environ.pop("TLDW_CONTENT_PG_DSN", None)
 os.environ.update(
     {
         "AUTH_MODE": "multi_user",
@@ -25,6 +30,7 @@ os.environ.update(
         "DATABASE_URL": f"sqlite:///{ROOT / 'auth.sqlite'}",
         "USER_DB_BASE_DIR": str(ROOT / "users"),
         "CONTENT_DB_MODE": "sqlite",
+        "TLDW_CONTENT_DB_BACKEND": "sqlite",
         "JWT_SECRET_KEY": token_urlsafe(48),
         "REDIS_URL": "",
         "EMAIL_NATIVE_PERSIST_ENABLED": "true",
@@ -163,6 +169,9 @@ def _port() -> int:
 
 
 async def main() -> None:
+    from email_million_search_13376 import _hardware_profile, _source_identity
+
+    source_identity = _source_identity()
     pool = await get_db_pool()
     repo = AuthnzUsersRepo(pool)
     manager = await get_api_key_manager()
@@ -207,18 +216,26 @@ async def main() -> None:
         async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}", trust_env=False, timeout=180.0) as client:
             health = await client.get("/health")
             ready = await client.get("/internal/ready")
-            assert health.status_code == 200, (health.status_code, health.text)
-            assert ready.status_code == 200, (ready.status_code, ready.text)
+            assert health.status_code == 200, (health.status_code, health.text)  # nosec B101 - validation assertion; optimized execution rejected
+            assert ready.status_code == 200, (ready.status_code, ready.text)  # nosec B101 - validation assertion; optimized execution rejected
 
             write_headers = {"X-API-KEY": str(alice["write_key"]), "X-TLDW-Org-Id": str(alice_org["id"])}
             read_headers = {"X-API-KEY": str(alice["read_key"]), "X-TLDW-Org-Id": str(alice_org["id"])}
             bob_headers = {"X-API-KEY": str(bob["read_key"]), "X-TLDW-Org-Id": str(bob_org["id"])}
             unauth = await client.get("/api/v1/email/search")
-            assert unauth.status_code == 401, (unauth.status_code, unauth.text)
+            assert unauth.status_code == 401, (unauth.status_code, unauth.text)  # nosec B101 - validation assertion; optimized execution rejected
             runs = []
             all_ids = set()
-            archives = [_archive(batch) for batch in range(3)]
-            for batch, payload in enumerate(archives):
+            first_batch_ids = set()
+            archives = []
+            minimum_seconds = float(os.environ.get("EMAIL_PROBE_MIN_SECONDS", "0"))
+            if not math.isfinite(minimum_seconds) or not 0 <= minimum_seconds <= 300:
+                raise ValueError("EMAIL_PROBE_MIN_SECONDS must be finite and between 0 and 300")
+            batch = 0
+            window_started = time.perf_counter()
+            while batch < 3 or sum(row["elapsed_seconds"] for row in runs) < minimum_seconds:
+                payload = _archive(batch)
+                archives.append(payload)
                 start = time.perf_counter()
                 upload = await client.post(
                     "/api/v1/media/add",
@@ -236,13 +253,15 @@ async def main() -> None:
                     },
                 )
                 elapsed = time.perf_counter() - start
-                assert upload.status_code == 200, (upload.status_code, upload.text[:1000])
+                assert upload.status_code == 200, (upload.status_code, upload.text[:1000])  # nosec B101 - validation assertion; optimized execution rejected
                 result = upload.json()["results"][0]
-                assert result["status"] == "Success", result
+                assert result["status"] == "Success", result  # nosec B101 - validation assertion; optimized execution rejected
                 children = result.get("child_db_results") or []
-                assert len(children) == 100, f"Expected 100 persisted children, found {len(children)}"
+                assert len(children) == 100, f"Expected 100 persisted children, found {len(children)}"  # nosec B101 - validation assertion; optimized execution rejected
                 ids = {row["db_id"] for row in children}
-                assert len(ids) == 100 and not (ids & all_ids)
+                assert len(ids) == 100 and not (ids & all_ids)  # nosec B101 - validation assertion; optimized execution rejected
+                if batch == 0:
+                    first_batch_ids = ids.copy()
                 all_ids.update(ids)
                 runs.append(
                     {
@@ -254,17 +273,24 @@ async def main() -> None:
                     }
                 )
                 print("ARCHIVE_RUN " + json.dumps(runs[-1]), flush=True)
-            search = await client.get(
-                "/api/v1/email/search", params={"q": "subject:ArchiveThroughput", "limit": 500}, headers=read_headers
-            )
-            assert search.status_code == 200, search.text
-            assert len(search.json()["items"]) == 300, search.text[:1000]
-            found_ids = {row["media_id"] for row in search.json()["items"]}
-            assert found_ids == all_ids
+                batch += 1
+            window_wall_seconds = time.perf_counter() - window_started
+            async def search_ids():
+                found = set()
+                for offset in range(0, len(all_ids), 500):
+                    page = await client.get(
+                        "/api/v1/email/search", params={"q": "subject:ArchiveThroughput", "limit": 500, "offset": offset}, headers=read_headers
+                    )
+                    assert page.status_code == 200, page.text  # nosec B101 - validation assertion; optimized execution rejected
+                    assert page.json()["pagination"]["total"] == len(all_ids)  # nosec B101 - validation assertion; optimized execution rejected
+                    found.update(row["media_id"] for row in page.json()["items"])
+                return found
+
+            assert await search_ids() == all_ids  # nosec B101 - validation assertion; optimized execution rejected
             for media_id in (min(all_ids), max(all_ids)):
                 detail = await client.get(f"/api/v1/email/messages/{media_id}", headers=read_headers)
-                assert detail.status_code == 200, detail.text
-                assert detail.json()["subject"].startswith("ArchiveThroughput")
+                assert detail.status_code == 200, detail.text  # nosec B101 - validation assertion; optimized execution rejected
+                assert detail.json()["subject"].startswith("ArchiveThroughput")  # nosec B101 - validation assertion; optimized execution rejected
             retry = await client.post(
                 "/api/v1/media/add",
                 headers=write_headers,
@@ -280,18 +306,15 @@ async def main() -> None:
                     "keep_original_file": "false",
                 },
             )
-            assert retry.status_code == 200, retry.text[:1000]
+            assert retry.status_code == 200, retry.text[:1000]  # nosec B101 - validation assertion; optimized execution rejected
             retry_children = retry.json()["results"][0].get("child_db_results") or []
-            assert {row["db_id"] for row in retry_children} <= all_ids and len(retry_children) == 100
-            after = await client.get(
-                "/api/v1/email/search", params={"q": "subject:ArchiveThroughput", "limit": 500}, headers=read_headers
-            )
-            assert {row["media_id"] for row in after.json()["items"]} == all_ids
+            assert {row["db_id"] for row in retry_children} == first_batch_ids and len(retry_children) == 100  # nosec B101 - validation assertion; optimized execution rejected
+            assert await search_ids() == all_ids  # nosec B101 - validation assertion; optimized execution rejected
             bob_search = await client.get("/api/v1/email/search", headers=bob_headers)
-            assert bob_search.status_code == 200 and bob_search.json()["items"] == []
+            assert bob_search.status_code == 200 and bob_search.json()["items"] == []  # nosec B101 - validation assertion; optimized execution rejected
             bob_detail = await client.get(f"/api/v1/email/messages/{min(all_ids)}", headers=bob_headers)
-            assert bob_detail.status_code == 404
-            assert not outbound_attempts and not model_attempts
+            assert bob_detail.status_code == 404  # nosec B101 - validation assertion; optimized execution rejected
+            assert not outbound_attempts and not model_attempts  # nosec B101 - validation assertion; optimized execution rejected
             summary = {
                 "backend": "sqlite",
                 "full_app": True,
@@ -301,19 +324,35 @@ async def main() -> None:
                 "cpu_count": os.cpu_count(),
                 "python": platform.python_version(),
                 "runs": runs,
-                "messages": 300,
+                "messages": len(all_ids),
                 "attachment_ratio": 0,
                 "rerun_messages": 100,
+                "minimum_measurement_seconds": minimum_seconds,
+                "measured_ingestion_seconds": sum(row["elapsed_seconds"] for row in runs),
+                "measured_window_wall_seconds": window_wall_seconds,
+                "wall_messages_per_second": len(all_ids) / window_wall_seconds,
                 "idempotent": True,
+                "retry_matches_first_batch_ids": True,
                 "cross_user_search_count": 0,
                 "cross_user_detail_status": 404,
                 "outbound_attempts": len(outbound_attempts),
                 "model_attempts": len(model_attempts),
-                "aggregate_messages_per_second": 300 / sum(row["elapsed_seconds"] for row in runs),
+                "aggregate_messages_per_second": len(all_ids) / sum(row["elapsed_seconds"] for row in runs),
                 "target_messages_per_second": 50,
                 "root": str(ROOT),
             }
+            if os.environ.get("EMAIL_PROBE_RELEASE_CHECKS") == "true":
+                from email_local_release_checks_13376 import validate_local_release
+                summary["local_release_checks"] = await validate_local_release(
+                    client, read_headers=read_headers, sample_media_id=min(all_ids), expected_media_ids=all_ids,
+                )
             summary["all_batches_meet_target"] = all(row["messages_per_second"] >= 50 for row in runs)
+            summary["environment"] = _hardware_profile()
+            summary["source_identity"] = source_identity
+            summary["source_identity_after_probe"] = _source_identity()
+            summary["source_unchanged_during_probe"] = source_identity == summary["source_identity_after_probe"]
+            if not summary["source_unchanged_during_probe"]:
+                raise AssertionError("Measured source changed during probe")
             Path(os.environ.get("EMAIL_PROBE_OUT", str(ROOT / "throughput.json"))).write_text(
                 json.dumps(summary, indent=2) + "\n"
             )
@@ -321,10 +360,10 @@ async def main() -> None:
 
         alice_db = DatabasePaths.get_media_db_path(int(alice["id"]))
         bob_db = DatabasePaths.get_media_db_path(int(bob["id"]))
-        assert alice_db.exists() and bob_db.exists()
-        assert alice_db.is_relative_to(ROOT) and bob_db.is_relative_to(ROOT)
-        assert not outbound_attempts, outbound_attempts
-        assert not model_attempts, model_attempts
+        assert alice_db.exists() and bob_db.exists()  # nosec B101 - validation assertion; optimized execution rejected
+        assert alice_db.is_relative_to(ROOT) and bob_db.is_relative_to(ROOT)  # nosec B101 - validation assertion; optimized execution rejected
+        assert not outbound_attempts, outbound_attempts  # nosec B101 - validation assertion; optimized execution rejected
+        assert not model_attempts, model_attempts  # nosec B101 - validation assertion; optimized execution rejected
 
     finally:
         server.should_exit = True

@@ -566,11 +566,14 @@ class PostgreSQLBackend(DatabaseBackend):
 
         statements = [
             # Maintain both keys for compatibility across modules/tests
-            ("SELECT set_config('app.current_user_id', %s, false)", (user_id,)),
-            ("SELECT set_config('app.user_id', %s, false)", (user_id,)),
-            ("SELECT set_config('app.org_ids', %s, false)", (org_ids,)),
-            ("SELECT set_config('app.team_ids', %s, false)", (team_ids,)),
-            ("SELECT set_config('app.is_admin', %s, false)", (is_admin,)),
+            (
+                "SELECT set_config('app.current_user_id', %s, false), "
+                "set_config('app.user_id', %s, false), "
+                "set_config('app.org_ids', %s, false), "
+                "set_config('app.team_ids', %s, false), "
+                "set_config('app.is_admin', %s, false)",
+                (user_id, user_id, org_ids, team_ids, is_admin),
+            ),
         ]
 
         def _run_with_cursor(cur) -> None:

@@ -33,7 +33,7 @@ Examples
   # 4) Use workload trace file and capture query plans (SQLite)
   python Helper_Scripts/benchmarks/email_search_bench.py \
     --db-path .benchmarks/email_search_bench.sqlite \
-    --workload-trace-file Helper_Scripts/benchmarks/email_search_workload_trace.sample.json \
+    --workload-trace-file /tmp/synthetic_email_workload_trace.json \
     --capture-query-plans
 
   # 5) PostgreSQL (configure an isolated TLDW_CONTENT_PG_* target first)
@@ -51,6 +51,7 @@ import json
 import os
 import platform
 import random
+import shlex
 import sqlite3
 import sys
 import time
@@ -317,7 +318,7 @@ def _fetch_fixture_profile(db: MediaDbLike, tenant_id: str) -> dict[str, Any]:
         subject_row = db._fetchone_with_connection(  # noqa: SLF001
             conn,
             (
-                "SELECT subject FROM email_messages "
+                "SELECT subject, from_text FROM email_messages "
                 "WHERE tenant_id = ? AND subject IS NOT NULL AND subject <> '' "
                 "ORDER BY id DESC LIMIT 1"
             ),
@@ -335,6 +336,7 @@ def _fetch_fixture_profile(db: MediaDbLike, tenant_id: str) -> dict[str, Any]:
         "top_recipient": top_recipient,
         "top_label": top_label,
         "sample_subject": sample_subject,
+        "sample_sender": str((subject_row or {}).get("from_text") or top_sender),
     }
 
 
@@ -369,7 +371,7 @@ def _build_default_query_mix(profile: dict[str, Any]) -> list[QueryCase]:
         QueryCase(name="before_date", query=f"before:{before_date}", notes="Date upper bound"),
         QueryCase(
             name="mixed_text_and_negation",
-            query=f"{subject_token} -label:{top_label}",
+            query=f"{subject_token} -from:{profile.get('sample_sender') or top_sender}",
             notes="Free text + unary negation",
         ),
         QueryCase(
@@ -520,6 +522,69 @@ def _build_fixture(
         profile_after.get("total_messages"),
     )
     return profile_after
+
+
+def _validate_negation_workload(
+    *,
+    db_path: Path,
+    client_id: str,
+    tenant_id: str,
+    queries: list[QueryCase],
+) -> dict[str, Any]:
+    """Compare the negation case with its positive baseline outside timed passes."""
+    cases = [case for case in queries if case.name == "mixed_text_and_negation"]
+    validation: dict[str, Any] = {
+        "name": "mixed_text_and_negation",
+        "query": cases[0].query if len(cases) == 1 else None,
+        "positive_query": None,
+        "positive_total_matches": None,
+        "negated_total_matches": None,
+        "meaningful": False,
+        "reason": None,
+    }
+    if len(cases) != 1:
+        validation["reason"] = "missing_case" if not cases else "ambiguous_case"
+        return validation
+
+    case = cases[0]
+    db = _open_media_db(db_path=db_path, client_id=client_id)
+    try:
+        groups = db._parse_email_operator_query(case.query)  # noqa: SLF001 - use search grammar
+        terms = [term for group in groups for term in group]
+        if not any(term["negated"] for term in terms):
+            validation["reason"] = "missing_negated_term"
+            return validation
+        if not any(term["kind"] == "text" and not term["negated"] for term in terms):
+            validation["reason"] = "missing_positive_free_text"
+            return validation
+
+        positive_groups: list[list[str]] = [[]]
+        for token in shlex.split(case.query):
+            token = token.strip()
+            if token.upper() == "OR":
+                positive_groups.append([])
+            elif token and not token.startswith("-"):
+                positive_groups[-1].append(token)
+        # A branch consisting only of negated terms becomes true after removal;
+        # OR with that branch makes the baseline the unrestricted mailbox.
+        positive_query = (
+            " OR ".join(shlex.join(group) for group in positive_groups)
+            if all(positive_groups) else ""
+        )
+        validation["positive_query"] = positive_query
+        _, positive_total = db.search_email_messages(query=positive_query, tenant_id=tenant_id, limit=1)
+        _, negated_total = db.search_email_messages(query=case.query, tenant_id=tenant_id, limit=1)
+        validation["positive_total_matches"] = int(positive_total)
+        validation["negated_total_matches"] = int(negated_total)
+        if negated_total <= 0:
+            validation["reason"] = "no_retained_matches"
+        elif negated_total >= positive_total:
+            validation["reason"] = "no_match_reduction"
+        else:
+            validation["meaningful"] = True
+        return validation
+    finally:
+        db.close_connection()
 
 
 def _run_query_once(
@@ -816,6 +881,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Populate deterministic synthetic fixture up to --fixture-messages for --tenant-id.",
     )
+    parser.add_argument("--fixture-loader", choices=("ingestion", "bulk"), default="ingestion", help="Bulk requires an empty disposable synthetic target; never measures production ingestion.")
     parser.add_argument("--fixture-messages", type=int, default=10000, help="Target synthetic fixture size.")
     parser.add_argument("--attachment-ratio", type=float, default=0.25, help="Attachment ratio for fixture creation.")
     parser.add_argument("--label-cardinality", type=int, default=20, help="Distinct label count in fixture.")
@@ -918,7 +984,20 @@ def _run_benchmark(args: argparse.Namespace) -> int:
             )
             return 2
         if args.ensure_fixture:
-            fixture_profile = _build_fixture(
+            fixture_setup = None
+            if args.fixture_loader == "bulk":
+                from tldw_Server_API.app.core.DB_Management.media_db.runtime.email_benchmark_fixture import (
+                    seed_email_benchmark_fixture,
+                )
+                fixture_setup = seed_email_benchmark_fixture(
+                    db, tenant_id=args.tenant_id, source_key=args.source_key, message_target=args.fixture_messages,
+                    attachment_ratio=args.attachment_ratio, label_cardinality=args.label_cardinality,
+                    sender_pool=args.sender_pool, recipient_pool=args.recipient_pool, seed=args.seed,
+                )
+                fixture_profile = _fetch_fixture_profile(db, args.tenant_id)
+                fixture_profile["fixture_setup"] = fixture_setup
+            else:
+                fixture_profile = _build_fixture(
                 db=db,
                 tenant_id=args.tenant_id,
                 source_key=args.source_key,
@@ -978,13 +1057,16 @@ def _run_benchmark(args: argparse.Namespace) -> int:
         query_plan_statements_max=max(1, int(args.query_plan_statements_max)),
     )
 
+    negation_validation = _validate_negation_workload(
+        db_path=db_path,
+        client_id=args.client_id,
+        tenant_id=args.tenant_id,
+        queries=query_mix,
+    )
+
     required_operator_names = (
-        "from_filter",
-        "subject_filter",
-        "label_filter",
-        "has_attachment",
-        "after_date",
-        "before_date",
+        "from_filter", "to_filter", "subject_filter", "label_filter", "has_attachment",
+        "after_date", "before_date", "relative_window", "mixed_text_and_negation", "explicit_or",
     )
     warm_cases = {row["name"]: row for row in warm["queries"]}
     operator_coverage_met = all(
@@ -1025,6 +1107,7 @@ def _run_benchmark(args: argparse.Namespace) -> int:
         "query_mix": [asdict(case) for case in query_mix],
         "cold_pass": cold,
         "warm_pass": warm,
+        "negation_validation": negation_validation,
         "targets": {
             "nfr_p50_ms": 250.0,
             "nfr_p95_ms": 900.0,
@@ -1034,7 +1117,14 @@ def _run_benchmark(args: argparse.Namespace) -> int:
             "mailbox_size_met": mailbox_size_met,
             "operator_coverage_met": operator_coverage_met,
             "operator_latency_met": operator_latency_met,
-            "nfr_performance_gate_met": mailbox_size_met and operator_latency_met,
+            "meaningful_negation_met": negation_validation["meaningful"],
+            "nfr_performance_gate_met": (
+                mailbox_size_met and operator_coverage_met and negation_validation["meaningful"]
+                and warm["summary"]["p50_ms"] <= 250.0
+                and warm["summary"]["p95_ms"] <= 900.0
+            ),
+            "latency_gate_method": "aggregate_warm_pass_per_documented_protocol",
+            "per_operator_latency_is_diagnostic": True,
         },
     }
 

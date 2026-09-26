@@ -38,3 +38,7 @@ Ruff is clean across the touched Python scope. Bandit reports zero findings/erro
 ## Ownership
 
 One repository owner reviews the resulting changes and release evidence. Independent source review checked the reached logging boundaries, metric contracts and preserved exception/transaction behavior; confirmed findings were reproduced and fixed before final validation.
+
+## Additional legacy-search coverage
+
+The sustained parity rehearsal exposed a legacy query-plan defect, extending the touched scope to MediaSearchRepository. Its INFO query/FTS/LIKE/title logs and warning/error exception interpolation now use fixed messages, counts and bounded exception types. Six real success/fallback/failure sentinel paths verify that query, title, pattern and driver exception text stay out of INFO-and-higher logs. The focused legacy suite passed 10 cases; the broader selected legacy/read-contract regression run passed 24 cases. Ruff, Bandit, compilation and whitespace checks passed for this additional scope. DEBUG diagnostics remain outside this narrow INFO-and-higher audit.
