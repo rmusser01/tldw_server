@@ -27,9 +27,6 @@ on:
       - .github/workflows/mcp-unified-publish.yml
       - .github/license-first-paths.json
       - .github/workflows/mcp-unified-rc.yml
-  workflow_run:
-    workflows: [Frontend License Gate Audit]
-    types: [completed]
   workflow_dispatch:
 
 permissions:

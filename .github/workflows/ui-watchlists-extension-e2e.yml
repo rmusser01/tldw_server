@@ -33,9 +33,6 @@ on:
       - "apps/packages/ui/src/types/watchlists.ts"
       - "apps/bun.lock"
       - ".github/workflows/ui-watchlists-extension-e2e.yml"
-  workflow_run:
-    workflows: [Frontend License Gate Audit]
-    types: [completed]
   push:
     branches:
       - main

@@ -35,9 +35,6 @@ on:
       - "apps/extension/playwright.config.ts"
       - "apps/bun.lock"
       - ".github/workflows/ui-research-workspace-parity.yml"
-  workflow_run:
-    workflows: [Frontend License Gate Audit]
-    types: [completed]
   push:
     branches:
       - main

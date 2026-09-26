@@ -16,9 +16,6 @@ on:
       - "apps/packages/ui/vitest.config.ts"
       - "apps/bun.lock"
       - ".github/workflows/ui-watchlists-help-tests.yml"
-  workflow_run:
-    workflows: [Frontend License Gate Audit]
-    types: [completed]
   push:
     branches:
       - main

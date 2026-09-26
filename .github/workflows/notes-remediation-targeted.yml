@@ -17,9 +17,6 @@ on:
       - "tldw_Server_API/tests/Notes_NEW/**"
       - "Docs/Plans/IMPLEMENTATION_PLAN_notes_page_gap_remediation_2026_02_19.md"
       - ".github/workflows/notes-remediation-targeted.yml"
-  workflow_run:
-    workflows: [Frontend License Gate Audit]
-    types: [completed]
   push:
     branches:
       - main

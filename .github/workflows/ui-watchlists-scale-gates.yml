@@ -13,9 +13,6 @@ on:
       - "apps/packages/ui/package.json"
       - "apps/bun.lock"
       - ".github/workflows/ui-watchlists-scale-gates.yml"
-  workflow_run:
-    workflows: [Frontend License Gate Audit]
-    types: [completed]
   push:
     branches:
       - main

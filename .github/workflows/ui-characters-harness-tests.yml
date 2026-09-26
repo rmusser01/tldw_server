@@ -18,9 +18,6 @@ on:
       - "apps/tldw-frontend/package.json"
       - "apps/bun.lock"
       - ".github/workflows/ui-characters-harness-tests.yml"
-  workflow_run:
-    workflows: [Frontend License Gate Audit]
-    types: [completed]
   push:
     branches:
       - main

@@ -6,9 +6,6 @@ on:
       - '.github/actionlint.yaml'
       - '.github/workflows/**'
       - '.github/actions/**'
-  workflow_run:
-    workflows: [Frontend License Gate Audit]
-    types: [completed]
   push:
     branches: [ main, master ]
     paths:

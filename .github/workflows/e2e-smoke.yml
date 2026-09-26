@@ -3,9 +3,6 @@ name: E2E Critical Smoke (In-Process)
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-  workflow_run:
-    workflows: [Frontend License Gate Audit]
-    types: [completed]
   workflow_dispatch: {}
 
 permissions:
