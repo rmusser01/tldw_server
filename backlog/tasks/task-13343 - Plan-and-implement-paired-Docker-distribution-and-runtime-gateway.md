@@ -4,7 +4,7 @@ title: Plan and implement paired Docker distribution and runtime gateway
 status: In Progress
 assignee: []
 created_date: '2026-09-23 06:15'
-updated_date: '2026-09-26 06:30'
+updated_date: '2026-09-26 06:48'
 labels:
   - distribution
   - docker
@@ -93,6 +93,8 @@ Task12 independent security review approves scoped implementation with no import
 Task14 packaging guards approved after e0184ae7aa with 43 passing mutation/contract tests. Task13 tooling committed 9dfce026da: 50 browser, 51 candidate/helper, 39 MCP and 60 setup tests pass; production Bandit zero. Independent review found clean image excludes the setup test used by qualification; original implementer is adding a narrow read-only test mount before exact local/native builds. No Docker image rebuild or publication yet; AC4 remains open.
 
 Task13 fix558fdb814a supplies only the excluded focused setup test through a read-only qualification mount; production image/dependencies unchanged. Regression red then green, 38 candidate tests pass, scoped rereview approves with no new breakage. Tasks9-12/14 implementation reviews complete. Next: exact clean local arm64 candidate on registry15000, both native CI candidates, independent signatures/helper/checklist verification and final whole-WP1 review. G2/G4/AC4 remain open until actual evidence passes; G12 remains blocked.
+
+Exact local candidate at087e77ce4a built and captured all four arm64 image digests, then correctly stopped in built-backend security tests: 38 MCP tests failed on PermissionError /app/audit.log. Owned test container and registry removed; only unrelated PostgreSQL containers remain. Read-only diagnosis confirms actual managed runtime also lacks a writable MCP audit path (appuser, /app cwd, audit enabled). Add scoped Task15 to preserve auditing in existing writable persisted database volume and align qualification env before retry. G2/G4 remain unqualified; no native push or publication.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

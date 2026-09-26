@@ -376,6 +376,33 @@ predicate instead of inventing a second forwarding policy or disabling IP rules.
 - [ ] **Step 3:** Run focused positive/negative tests, scoped lint/format/Bandit,
   independent security review and actual cookie-only MCP WebSocket roundtrip.
 
+### Task 15: Preserve writable MCP audit logging in managed Docker
+
+**Problem:** Exact clean arm64 candidate087e77ce4a builds all four roles, then
+38 MCP security tests fail with PermissionError at /app/audit.log. The runtime
+uses non-root appuser with /app cwd, audit logging is enabled by default, and
+managed Compose supplies no audit path. The default also affects real MCP use.
+
+**Files:** Managed Compose, built-backend qualification environment, and focused
+existing Release/configuration tests. Keep product code and dependencies intact.
+Execute after Task14 review and before resuming Task13 actual qualification.
+
+**Contract:** Keep MCP audit logging enabled. Set MCP_AUDIT_LOG_FILE to
+/app/Databases/mcp-audit.log in managed Compose and the built-backend security
+test container. Reuse the existing writable persisted database volume and image
+user; do not run as root, disable audit, broaden filesystem permissions, or
+alter ordinary developer/hosted logging defaults. Qualification logs and test
+containers stay disposable and excluded from public evidence.
+
+- [ ] **Step 1:** Preserve actual clean-image permission failure and add a red
+  regression for the managed persisted audit path and matching test environment.
+- [ ] **Step 2:** Configure the existing path override minimally, with no new
+  dependency or production source behavior. Validate Compose and focused tests.
+- [ ] **Step 3:** Run the exact lean MCP/setup commands on the already-built
+  backend as its default non-root user with only the path override and narrow
+  read-only test mounts. Keep bounded results, remove owned test resources,
+  independently review, commit, then retry the clean full candidate in Task13.
+
 ### Task 13: Qualify remaining real-container transport paths
 
 **Files:** Extend the existing bounded browser probe/tests and paired shell
