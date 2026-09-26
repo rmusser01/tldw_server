@@ -6,10 +6,11 @@ September 26 continuation: the requester now explicitly authorizes merge after a
 
 `dev` advanced to `f5fa1f3a41855aa02871d8b76d0ec0cebbaf9e07` through Sync upload-expiry PR #3006. Refresh the existing series from published head `0d92194ebe83796ab43dc4d0afe930d35821786a`. Runtime changes do not overlap Persona; upstream includes the same two published-doc corrections already applied here.
 
-- [ ] Preserve both original recovery refs and create `codex/persona-ambient-stage1-pre-20260926-2130` before rebasing.
-- [ ] Rebase onto the fetched dev tip and inspect range-diff for unintended implementation changes.
-- [ ] Re-run the Persona backend/UI matrices, full Docs suite, API drift check with the existing CI overlay, scoped compilation, boundary checks, and Bandit.
-- [ ] Record verification, commit tracking, publish with a fresh exact remote lease, and wait for new-head Qodo and required checks.
+- [x] Preserve both original recovery refs and create `codex/persona-ambient-stage1-pre-20260926-2130` before rebasing. The additional ref retains `c66a85f37e4074d5166eaa894124c26856033e15`.
+- [x] Rebase onto the fetched dev tip and inspect range-diff for unintended implementation changes. Both implementation patches are identical; the two generated-doc corrections were already present upstream and were absorbed into dev.
+- [x] Re-run the Persona backend/UI matrices, full Docs suite, API drift check with the existing CI overlay, scoped compilation, boundary checks, and Bandit. Fresh results: 382 backend passes / 3 fixture-reported PostgreSQL skips; 292 Node 20 UI passes; 212 Docs passes including strict MkDocs; API fingerprint, compilation, public/private boundary and diff checks pass. Bandit: zero findings/errors in relative ignored `bandit_persona_dev2.json`. ESLint: zero errors, one existing warning; full UI typecheck retains its documented pre-existing dev errors.
+- [ ] Commit verification tracking, perform post-commit documentation checks, and publish with a fresh exact remote lease.
+- [ ] Verify new-head Qodo closure and all seven required remote gates before the human-owned rationale and merge-protection checks.
 
 **ADR check**: ADR required: no; this refresh changes history and integration baseline, not durable architecture. ADR-004, ADR-006, and ADR-020 continue to govern. Merge remains blocked until the requester supplies an owned what/why Change summary.
 
