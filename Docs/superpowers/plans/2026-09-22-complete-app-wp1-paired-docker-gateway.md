@@ -290,6 +290,38 @@ without exposing credentials.
   TASK-13343. Update the acceptance record and Backlog with actual evidence,
   discovered fixes, unsupported paths, and exact candidate identity.
 
+### Task 10: Preserve local setup through the private Docker gateway
+
+**Problem:** A real loopback request through the Docker gateway reaches the
+backend with bridge-network peer and forwarded addresses. The existing setup
+guard rejects this scope with 403, causing managed onboarding to fall back to
+manual master-key entry.
+
+**Files:** Scoped changes to `Dockerfiles/app-bundle/compose.yaml`,
+`apps/tldw-frontend/gateway/server.mjs`,
+`tldw_Server_API/app/api/v1/API_Deps/setup_deps.py`, and first-run metadata in
+`tldw_Server_API/app/api/v1/endpoints/setup.py`; focused gateway/setup/Release
+tests. Extend existing secret redaction only if the new private header needs it.
+
+**Interface:** Extend the explicit authenticated gateway-hop contract to the
+private backend. Configure its strong hop secret and exact persisted public
+loopback origin only in managed Compose. One shared predicate validates the
+single authenticated hop, private peer, bounded forwarding envelope and exact
+Host/Origin for both setup access and first-run locality metadata. Ordinary
+developer/hosted setup keeps its existing policy. No blanket proxy trust,
+remote-setup override, API-key injection or client-visible secret is allowed.
+
+- [ ] **Step 1:** Capture actual backend HTTP failure and write red behavioral
+  tests for the measured Docker scope, metadata and Compose contract.
+- [ ] **Step 2:** Implement the bounded managed-hop predicate and gateway/header
+  configuration. Reject missing/wrong/duplicate hop, public peer, mismatched
+  origin/Host, malformed forwarding and disabled/unconfigured managed mode.
+- [ ] **Step 3:** Run focused positive/negative setup and gateway tests, scoped
+  formatting/lint and Bandit. Review before live qualification.
+- [ ] **Step 4:** Rebuild from a clean committed source and run the actual fresh
+  browser/two-instance candidate. Keep broader gates false until their complete
+  requirements pass. Record exact evidence and TASK-13343 notes.
+
 ## Plan self-review checklist
 
 CI follow-up (September 25): user-authorized branch push bootstrapped the new

@@ -4,7 +4,7 @@ title: Plan and implement paired Docker distribution and runtime gateway
 status: In Progress
 assignee: []
 created_date: '2026-09-23 06:15'
-updated_date: '2026-09-26 04:27'
+updated_date: '2026-09-26 04:43'
 labels:
   - distribution
   - docker
@@ -75,6 +75,8 @@ Cookie configuration follow-up: both native jobs in run 36208320371 passed the o
 Corrected exact candidate e759322854d3547e239bc97c9dfe1b232b5f6da3 completed successfully in https://github.com/rmusser01/tldw_server/actions/runs/36210634045: both native amd64/arm64 smoke jobs, Windows helper parsing, and required-both status pass. Each Linux job passes 49 Release, 207 frontend, 13 gateway tests and production Bandit (zero findings). Smoke proves managed setup/docs routing, both named cookies, cookie-only authenticated profile access, Host/private-port rejection, first/repeat startup, credential/data persistence, and tamper rejection. Downloaded Ed25519 signatures and all eight helper hashes independently verify per platform. Manifest SHA256 arm64 924401d1667ced52d519ead6e112e0b80a42cb786d5c10d3ccf62b51e2f2da61; amd64 d95a6bb908abf3ee9cf5bd8baf189808a965981604c052f2a6338166672b0d29. Python 3.12.14 / Node 24.21.0 both. Compose backend-start to gateway-health wait first/repeat: arm64 121.75/91.74 s, amd64 122.57/92.19 s; excludes downloads/control/helper/browser. Focused independent review dbc1100323..e759322854 has no actionable findings. G10 true; G2/G4/G12 remain false and promotion rejects correctly. TASK stays In Progress for interactive browser/two-instance/network qualification, full dependency/security policy and measured footprints, and qualified combined manifest. Whole-frontend typecheck still has 93 existing diagnostics. No images, release, or catalog published; ephemeral registry candidates are review evidence only.
 
 Continuing live qualification after verified native run 36210634045. Add a real Chromium novice setup and same-host two-instance cookie/CSRF isolation probe against the extracted signed bundle, with one managed WebUI image reused against different private backend/Next hostnames and ports via a qualification-only Compose override. Do not emit cookie values/API keys/browser storage/traces. Docker now responds and host free disk is 273 GiB; no local candidate images remain, so rebuild a clean local native candidate once the checks are implemented. Keep G4/G12 false until their complete cases pass; do not publish protected images.
+
+Live qualification follow-up: Task 9 browser/two-instance probe is being implemented with bounded secret-free evidence. Actual Docker gateway probe forwards loopback requests as bridge addresses (172.18.0.1 client, 172.18.0.3 upstream peer); forged forwarding headers are stripped. Existing setup guard rejects the measured scope with 403. Task 10 records a scoped authenticated private-hop fix; full backend HTTP/browser reproduction and security review remain required. G2/G4/G12 remain open.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
