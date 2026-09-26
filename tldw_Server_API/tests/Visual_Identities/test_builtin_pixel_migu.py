@@ -256,9 +256,9 @@ def test_production_factory_closes_connection_after_seed_error(tmp_path: Path, m
 
     connections: list[sqlite3.Connection] = []
 
-    def create_database(*, db_path: str, client_id: str) -> CharactersRAGDB:
+    def create_database(*, db_path: str, client_id: str, owner_user_id: str) -> CharactersRAGDB:
         """Capture the real connection created by the production factory."""
-        database = CharactersRAGDB(db_path, client_id=client_id)
+        database = CharactersRAGDB(db_path, client_id=client_id, owner_user_id=owner_user_id)
         connections.append(database.get_connection())
         return database
 

@@ -33,6 +33,7 @@ from tldw_Server_API.app.core.Character_Chat.modules.character_prompt_presets im
     resolve_character_prompt_preset,
 )
 from tldw_Server_API.app.core.Character_Chat.world_book_manager import WorldBookService
+from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup
 from tldw_Server_API.app.core.Chat.chat_service import is_model_known_for_provider
 from tldw_Server_API.app.core.DB_Management.chacha.conversation_resume_store import (
     build_materialized_behavior_settings,
@@ -2335,6 +2336,7 @@ def create_character_conversation(
     db: CharactersRAGDB,
     *,
     conversation_data: Mapping[str, Any],
+    assistant_startup: AssistantStartup | None = None,
     participant_character_ids: Sequence[int] = (),
     prompt_preset_id: str | None = None,
     memory_by_character_id: Mapping[str, str] | None = None,
@@ -2350,7 +2352,11 @@ def create_character_conversation(
     conversation_settings: Mapping[str, Any] | None = None,
     max_snapshot_bytes: int = DEFAULT_MAX_SNAPSHOT_BYTES,
 ) -> str:
-    """Create conversation, settings, messages, and snapshot in one transaction."""
+    """Create conversation, settings, messages, snapshot and trusted origin atomically.
+
+    Provenance is a separate internal keyword; ordinary callers remain unknown.
+    World-book schema preflight must stay outside the creation transaction.
+    """
     owner_user_id = str(getattr(db, "client_id", "") or "").strip()
     if not owner_user_id:
         raise InputError("Character conversation requires a scoped database owner.")
@@ -2487,7 +2493,9 @@ def create_character_conversation(
                     conversation=conversation_payload,
                 )
 
-                conversation_id = db.add_conversation(conversation_payload, conn=conn)
+                conversation_id = db.add_conversation(
+                    conversation_payload, conn=conn, assistant_startup=assistant_startup,
+                )
                 if not conversation_id:
                     raise InputError("Failed to create character conversation.")
                 db.conversation_resume_store.put_creation_settings(

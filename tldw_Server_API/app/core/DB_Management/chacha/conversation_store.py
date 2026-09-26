@@ -1,3 +1,5 @@
+"""Persist conversation identity, local startup history, lifecycle and settings."""
+
 from __future__ import annotations
 
 import json
@@ -6,13 +8,14 @@ from contextlib import nullcontext
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
+from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup, encode_assistant_startup
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    _CHACHA_NONCRITICAL_EXCEPTIONS,
     BackendType,
     CharactersRAGDBError,
     ConflictError,
     FTSQueryTranslator,
     InputError,
-    _CHACHA_NONCRITICAL_EXCEPTIONS,
     logger,
 )
 from tldw_Server_API.app.core.exceptions import ConversationSettingsTargetMissing
@@ -334,6 +337,7 @@ class ConversationStore:
         assistant_id: Any,
         persona_memory_mode: Any,
     ) -> tuple[str | None, str | None, int | None, str | None]:
+        """Canonicalize the effective assistant binding, retaining Character precedence."""
         normalized_kind = self._db._normalize_nullable_text(assistant_kind)
         normalized_assistant_id = self._db._normalize_nullable_text(assistant_id)
         normalized_memory_mode = self._db._normalize_nullable_text(persona_memory_mode)
@@ -387,12 +391,34 @@ class ConversationStore:
 
         return "persona", normalized_assistant_id, None, normalized_memory_mode
 
+    def _assistant_identity_matches(
+        self,
+        current: Any,
+        binding: tuple[str | None, str | None, int | None, str | None],
+    ) -> bool:
+        """Compare normalized bindings, treating invalid prior identity as non-equivalent."""
+        try:
+            previous = self._normalize_conversation_assistant_identity(
+                character_id=current["character_id"],
+                assistant_kind=current["assistant_kind"],
+                assistant_id=current["assistant_id"],
+                persona_memory_mode=current["persona_memory_mode"],
+            )
+        except InputError:
+            return False
+        return previous == binding
+
     def add_conversation(
         self,
         conv_data: dict[str, Any],
         *,
         conn: Any | None = None,
+        assistant_startup: AssistantStartup | None = None,
     ) -> str | None:
+        """Insert identity and optional trusted local provenance in the same transaction."""
+        if {"assistant_startup", "assistant_startup_json"}.intersection(conv_data):
+            raise InputError("Conversation startup fields are reserved for internal creation.")
+        startup_json = encode_assistant_startup(assistant_startup) if assistant_startup is not None else None
         conv_id = conv_data.get("id") or self._db._generate_uuid()
         root_id = conv_data.get("root_id") or conv_id
 
@@ -426,8 +452,8 @@ class ConversationStore:
                                            character_id, assistant_kind, assistant_id, persona_memory_mode, \
                                            title, state, topic_label, cluster_id, source, external_ref, rating, \
                                            created_at, last_modified, client_id, version, deleted, \
-                                           scope_type, workspace_id) \
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
+                                           scope_type, workspace_id, assistant_startup_json) \
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
                 """
         if self._db.backend_type == BackendType.POSTGRESQL:
             params = (
@@ -453,6 +479,7 @@ class ConversationStore:
                 False,
                 scope_type,
                 workspace_id,
+                startup_json,
             )
         else:
             params = (
@@ -478,6 +505,7 @@ class ConversationStore:
                 0,
                 scope_type,
                 workspace_id,
+                startup_json,
             )
         try:
             transaction = nullcontext(conn) if conn is not None else self._db.transaction()
@@ -535,7 +563,7 @@ class ConversationStore:
         scope_type: str | None = None,
         workspace_id: str | None = None,
     ) -> bool:
-        """Create or update a conversation projection from an accepted Sync v2 envelope."""
+        """Replace Sync fields atomically, preserving local origin only for equivalent bindings."""
 
         del object_hash
         normalized_id = str(conversation_id).strip()
@@ -567,25 +595,7 @@ class ConversationStore:
                 created_at, last_modified, client_id, version, deleted, scope_type, workspace_id
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                root_id = excluded.root_id,
-                character_id = excluded.character_id,
-                assistant_kind = excluded.assistant_kind,
-                assistant_id = excluded.assistant_id,
-                persona_memory_mode = excluded.persona_memory_mode,
-                title = excluded.title,
-                state = excluded.state,
-                topic_label = excluded.topic_label,
-                cluster_id = excluded.cluster_id,
-                source = excluded.source,
-                external_ref = excluded.external_ref,
-                rating = excluded.rating,
-                last_modified = excluded.last_modified,
-                client_id = excluded.client_id,
-                version = excluded.version,
-                deleted = excluded.deleted,
-                scope_type = excluded.scope_type,
-                workspace_id = excluded.workspace_id
+            ON CONFLICT(id) DO NOTHING
         """
         params = (
             normalized_id,
@@ -611,7 +621,38 @@ class ConversationStore:
         )
         try:
             with self._db.transaction() as conn:
-                conn.execute(query, params)
+                inserted = conn.execute(query, params)
+                if inserted.rowcount == 0:
+                    current_query = (
+                        "SELECT character_id, assistant_kind, assistant_id, persona_memory_mode, "
+                        "assistant_startup_json FROM conversations WHERE id = ?"
+                    )
+                    if self._db.backend_type == BackendType.POSTGRESQL:
+                        current_query += " FOR UPDATE"
+                    current = conn.execute(current_query, (normalized_id,)).fetchone()
+                    if current is None:
+                        raise ConflictError(
+                            "Conversation disappeared during Sync replacement; retry the operation.",
+                            entity="conversations", entity_id=normalized_id,
+                        )
+                    binding = (assistant_kind, assistant_id, normalized_character_id, persona_memory_mode)
+                    startup_json = (
+                        current["assistant_startup_json"]
+                        if self._assistant_identity_matches(current, binding) else None
+                    )
+                    conn.execute(
+                        """
+                        UPDATE conversations SET
+                            root_id = ?, character_id = ?, assistant_kind = ?, assistant_id = ?,
+                            persona_memory_mode = ?, title = ?, state = ?, topic_label = ?,
+                            cluster_id = ?, source = ?, external_ref = ?, rating = ?,
+                            last_modified = ?, client_id = ?, version = ?, deleted = ?,
+                            scope_type = ?, workspace_id = ?, assistant_startup_json = ?
+                        WHERE id = ?
+                        """,
+                        # Preserve created_at; replace every other existing Sync field.
+                        (*params[1:13], *params[14:], startup_json, normalized_id),
+                    )
             logger.info("Upserted conversation projection from Sync v2 for ID: {}.", normalized_id)
             return True
         except sqlite3.IntegrityError as exc:
@@ -1021,6 +1062,9 @@ class ConversationStore:
             raise
 
     def update_conversation(self, conversation_id: str, update_data: dict[str, Any], expected_version: int) -> bool | None:
+        """CAS-update a locked binding, invalidating startup only on actual identity changes."""
+        if {"assistant_startup", "assistant_startup_json"}.intersection(update_data):
+            raise InputError("Conversation startup fields cannot be updated directly.")
         logger.debug(
             "Starting update_conversation for ID {}, expected_version {} (FTS handled by DB triggers)",
             conversation_id,
@@ -1058,12 +1102,14 @@ class ConversationStore:
 
         try:
             with self._db.transaction() as conn:
+                current_query = (
+                    "SELECT title, version, deleted, character_id, assistant_kind, assistant_id, persona_memory_mode "
+                    "FROM conversations WHERE id = ?"
+                )
+                if self._db.backend_type == BackendType.POSTGRESQL:
+                    current_query += " FOR UPDATE"
                 current_state = conn.execute(
-                    """
-                    SELECT title, version, deleted, character_id, assistant_kind, assistant_id, persona_memory_mode
-                    FROM conversations
-                    WHERE id = ?
-                    """,
+                    current_query,
                     (conversation_id,),
                 ).fetchone()
 
@@ -1109,11 +1155,8 @@ class ConversationStore:
 
                 if current_db_version != expected_version:
                     raise ConflictError(
-                        "Conversation ID {} update failed: version mismatch (db has {}, client expected {}).".format(
-                            conversation_id,
-                            current_db_version,
-                            expected_version,
-                        ),
+                        f"Conversation ID {conversation_id} update failed: version mismatch "
+                        f"(db has {current_db_version}, client expected {expected_version}).",
                         entity="conversations",
                         entity_id=conversation_id,
                     )  # noqa: TRY003
@@ -1158,6 +1201,12 @@ class ConversationStore:
                     params_for_set_clause.append(self._db._normalize_nullable_text(update_data.get("external_ref")))
 
                 if assistant_update_requested:
+                    binding = (
+                        normalized_assistant_kind, normalized_assistant_id,
+                        normalized_character_id, normalized_persona_memory_mode,
+                    )
+                    if not self._assistant_identity_matches(current_state, binding):
+                        fields_to_update_sql.append("assistant_startup_json = NULL")
                     fields_to_update_sql.extend(
                         [
                             "character_id = ?",

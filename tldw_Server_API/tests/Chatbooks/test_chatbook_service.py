@@ -98,6 +98,59 @@ def sample_manifest():
     )
 
 
+def test_conversation_pipeline_omits_and_distrusts_local_startup(service: ChatbookService, tmp_path: Path) -> None:
+    """Real collection/import must not transport authority from private local history."""
+    from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup, decode_assistant_startup
+
+    db = CharactersRAGDB(tmp_path / "startup-transport.db", client_id="test_user")
+    service.db = db
+    try:
+        db.upsert_workspace("chatbook-private-origin-marker", "Private origin")
+        character_id = db.add_character_card({"name": "Transport", "system_prompt": "Help."})
+        source_id = db.add_conversation(
+            {"title": "Transport source", "character_id": character_id},
+            assistant_startup=AssistantStartup(
+                source="workspace_default", workspace_id="chatbook-private-origin-marker", workspace_version=1,
+            ),
+        )
+        db.add_message({"conversation_id": source_id, "sender": "user", "content": "Keep this message."})
+        manifest = ChatbookManifest(version=ChatbookVersion.V1, name="Startup boundary", description="Local only")
+        content = ChatbookContent()
+        service._collect_conversations([source_id], tmp_path, manifest, content)
+        assert source_id in content.conversations
+        item = next(item for item in manifest.content_items if item.id == source_id)
+        export_path = tmp_path / item.file_path
+        encoded = export_path.read_bytes()
+        for forbidden in (b"assistant_startup", b"assistant_startup_json", b"chatbook-private-origin-marker"):
+            assert forbidden not in encoded
+            assert forbidden not in json.dumps(content.conversations).encode()
+
+        payload = json.loads(encoded)
+        payload["name"] = "Imported startup boundary"
+        payload["assistant_startup"] = {
+            "schema_version": 1, "source": "workspace_default",
+            "workspace_id": "forged-private-origin", "workspace_version": 99,
+        }
+        payload["assistant_startup_json"] = json.dumps(payload["assistant_startup"])
+        export_path.write_text(json.dumps(payload), encoding="utf-8")
+        status = ImportJob(job_id="startup-import", user_id="test_user", status=ImportStatus.PENDING, chatbook_path="local")
+        service._import_conversations(
+            tmp_path, manifest, [source_id], ConflictResolution.SKIP, prefix_imported=False, status=status,
+        )
+        assert status.failed_items == 0, status.warnings
+        imported = db.search_conversations_by_title("Imported startup boundary", character_id=character_id)
+        assert len(imported) == 1
+        assert imported[0]["id"] != source_id
+        assert decode_assistant_startup(imported[0]["assistant_startup_json"]).model_dump() == {
+            "schema_version": 1, "source": "unknown", "workspace_id": None, "workspace_version": None,
+        }
+        messages = db.get_messages_for_conversation(imported[0]["id"])
+        assert [message["content"] for message in messages] == ["Keep this message."]
+        assert db.get_conversation_by_id(source_id)["assistant_startup_json"] is not None
+    finally:
+        db.close_all_connections()
+
+
 @pytest.fixture
 def sample_content_items():
     """Create sample content items."""
