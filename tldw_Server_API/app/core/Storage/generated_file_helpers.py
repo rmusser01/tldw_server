@@ -31,6 +31,7 @@ import asyncio
 import contextlib
 import hashlib
 import re
+import traceback
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -418,7 +419,16 @@ async def _cleanup_unregistered_vn_file(
             await asyncio.to_thread(file_path.unlink, missing_ok=True)
     except Exception as exc:  # noqa: BLE001 - cleanup must not mask the registration failure
         # A failed lookup cannot prove that the bytes are safe to remove.
-        logger.warning("Retaining VN attempt bytes after cleanup check failed: {}", type(exc).__name__)
+        # Keep stack frames, but omit exception messages and diagnostic locals.
+        logger.bind(
+            operation="cleanup_unregistered_vn_file", user_id=user_id,
+            source_ref=source_ref, storage_path=storage_path, error_type=type(exc).__name__,
+        ).warning(
+            "Retaining VN attempt bytes after cleanup check failed\n{}",
+            "".join(traceback.format_exception(
+                RuntimeError, RuntimeError("VN cleanup validation failed"), exc.__traceback__,
+            )),
+        )
 
 
 async def save_and_register_vn_asset_image(

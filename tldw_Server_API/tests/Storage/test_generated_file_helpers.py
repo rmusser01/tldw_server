@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -7,23 +8,30 @@ from tldw_Server_API.app.core.Storage import generated_file_helpers
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_vn_helper_resolves_replay_before_quota_preflight(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """An existing replay bypasses quota admission without writing replacement bytes."""
     outputs_dir = tmp_path / "outputs"
     winning = outputs_dir / "vn_assets" / "winner.png"
     winning.parent.mkdir(parents=True)
     winning.write_bytes(b"winner")
 
     class FullStorageService:
-        async def get_vn_generated_file(self, *, user_id, source_ref):
+        """Resolve committed bytes even when no additional quota is available."""
+
+        async def get_vn_generated_file(self, *, user_id: int, source_ref: str) -> dict[str, Any]:
+            """Return the winner before quota admission."""
             assert (user_id, source_ref) == (5, "vn_asset_item:4")
             return {"id": 17, "storage_path": "vn_assets/winner.png"}
 
-        async def check_combined_quota(self, *_args, **_kwargs):
+        async def check_combined_quota(self, *_args: Any, **_kwargs: Any) -> None:
+            """Reject new bytes in the full-quota scenario."""
             raise RuntimeError("quota denied")
 
-    async def get_service():
+    async def get_service() -> FullStorageService:
+        """Return the replay-only fake storage service."""
         return FullStorageService()
 
     monkeypatch.setattr(generated_file_helpers, "get_storage_service", get_service)
@@ -40,31 +48,41 @@ async def test_vn_helper_resolves_replay_before_quota_preflight(
 
 
 @pytest.mark.asyncio
+@pytest.mark.unit
 async def test_vn_registration_collision_removes_losing_file_write(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Remove an unregistered losing attempt while retaining the winner's bytes."""
     outputs_dir = tmp_path / "outputs"
     winning = outputs_dir / "vn_assets" / "winner.png"
     winning.parent.mkdir(parents=True)
     winning.write_bytes(b"winner")
 
     class ExistingStorageService:
-        async def get_vn_generated_file(self, **_kwargs):
+        """Return another writer's committed registration."""
+
+        async def get_vn_generated_file(self, **_kwargs: Any) -> None:
+            """Simulate no replay before a racing registration."""
             return None
 
-        async def get_generated_files_repo(self):
+        async def get_generated_files_repo(self) -> "ExistingStorageService":
+            """Expose the lookup methods on this fake."""
             return self
 
-        async def get_live_file_by_storage_path(self, **_kwargs):
+        async def get_live_file_by_storage_path(self, **_kwargs: Any) -> None:
+            """The losing path has no committed reference."""
             return None
 
-        async def check_combined_quota(self, *_args, **_kwargs):
+        async def check_combined_quota(self, *_args: Any, **_kwargs: Any) -> tuple[bool, dict[str, Any]]:
+            """Permit a new attempt before registration races."""
             return True, {}
 
-        async def register_generated_file(self, **_kwargs):
+        async def register_generated_file(self, **_kwargs: Any) -> dict[str, Any]:
+            """Return the concurrent winner instead of the losing path."""
             return {"id": 17, "storage_path": "vn_assets/winner.png"}
 
-    async def get_service():
+    async def get_service() -> ExistingStorageService:
+        """Return the racing storage double."""
         return ExistingStorageService()
 
     monkeypatch.setattr(generated_file_helpers, "get_storage_service", get_service)

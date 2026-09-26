@@ -108,11 +108,80 @@ additionally passed 31 focused backend regressions.
 The final review also identified and fixed terminal V1 cleanup on existing
 NO ACTION schemas, invalid-byte replay (including already attached metadata),
 and a browser pending receipt stuck after a definitive missing-slot 404. These
-boundaries have RED/GREEN regression coverage. GitHub review replies, rebase,
-fresh PR checks, and merge are still pending.
+boundaries have RED/GREEN regression coverage. Original Qodo replies and rebase
+onto `3f909e13` are complete; all eight original threads are resolved. Fresh
+exact-head review added the eight findings tracked below. Checks and merge
+remain pending.
 
 - [x] Run the full scoped verification matrix and self-review the changed diff.
-- [ ] Reply in each Qodo thread with the corresponding fix or technical reasoning.
-- [ ] Verify the requester-provided Change summary remains in the PR body.
+- [x] Reply in each original Qodo thread with the corresponding fix or technical reasoning.
+- [x] Verify the requester-provided Change summary remains in the PR body.
 - [ ] Confirm branch is rebased on current `origin/dev`, all required checks pass, then merge through GitHub.
 - [ ] Record PR merge and final test evidence in `TASK-13369`.
+
+## Fresh Qodo Review: September 26
+
+Review 5324270842 on `87b80818` adds eight findings (5-12). Original findings
+remain resolved. Merge is gated on this addendum, independent review, and CI.
+
+### Task 7: Core receipt recovery ownership
+
+- [x] Move receipt claim/recovery/completion decisions to the core service;
+  keep HTTP response validation and error mapping in endpoints.
+- [x] Preserve all existing idempotency scopes and JSON response compatibility;
+  add core-level recovery tests and run generation API regressions.
+
+### Task 8: AuthNZ boundaries and isolation
+
+- [x] Move new VN item locking/lookup SQL behind a DB_Management abstraction,
+  without changing transaction ownership or quota accounting.
+- [x] Make PostgreSQL durability tests use `isolated_test_environment`,
+  delegating lifecycle to the existing official fixture; rerun SQLite/PG cases.
+
+### Task 9: Replay integrity and failure classification
+
+- [x] Verify SHA-256 when a persisted checksum is available, off the event loop;
+  test same-length corruption at storage and worker replay boundaries.
+- [x] Definitive loss/corruption is nonretryable, while transient filesystem
+  errors remain retryable. Fail an unfinished fenced recipe once, freeing its
+  reservation; never reopen a completed outcome or demote an approved asset.
+- [x] Test missing registered bytes, completed review preservation, sibling
+  progress, explicit regeneration, and transient I/O behavior.
+- [x] Bind non-sensitive cleanup identifiers and preserve the traceback without
+  logging exception messages/locals that may contain secrets.
+- [x] Add accepted tier markers and parameter/return annotations to new storage
+  test doubles; retain existing test behavior.
+
+### Task 10: Re-review and Integration
+
+- [x] Independent review of the fresh delta, scoped backend/Storage tests,
+  official PG cases, no new Ruff findings and zero production Bandit findings.
+- [ ] Commit/push, evidence-backed replies on all eight new comments, request
+  fresh exact-head Qodo review, verify CI, then perform the authorized merge.
+
+**Ruling:** Do not adopt Qodo's suggested automatic reset/regeneration of a
+completed variant. The approved design makes completed outcomes and review
+decisions immutable on redelivery. Silent byte replacement under an approval
+would change what was approved. Definitive integrity failure instead stops Job
+retries and allows explicit regeneration as a new draft through existing APIs.
+Transient infrastructure errors still retry, and unfinished outcomes fail only
+under their current fence. If this policy is wrong, recovery needs an explicitly
+designed asset repair workflow rather than a hidden redelivery mutation.
+
+Fresh local verification: full VN suite 395 passed; final Storage plus generation
+worker scope 227 passed; shared-fixture SQLite/PostgreSQL durability cases 30
+passed with zero skips; AuthNZ boundary/repository unit scope 28 passed. Final
+independent review passed 67 narrow cases and found no outstanding actionable
+finding. The Python 3.14 filesystem-error suppression issue was fixed using
+explicit stat; its two obsolete off-loop test probes were updated without
+weakening assertions, and the previously failing random seed passed all 227.
+Production Bandit on all eight fresh source files has zero findings/errors;
+compileall and diff checks pass. Ruff has only the two verified baseline BLE001
+warnings. Earlier frontend verification remains applicable (no fresh UI edits).
+
+A repository-wide attempt stopped at an unrelated existing MCP flashcard test
+with KeyError 'rows'; that test and producer/exporter are identical to dev. The
+producer returns 'No flashcards to export' before the fake exporter is called.
+The isolated test reproduces the failure; no repository-wide green is claimed.
+Dev advanced to 59bd584503 with unrelated MCP sanitizer changes; final rebase,
+fresh exact-head external review, checks, and authorized merge remain pending.

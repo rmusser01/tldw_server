@@ -1,6 +1,8 @@
 """Exercise VN registration races against the real AuthNZ transaction backend."""
 
+import os
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 
@@ -47,16 +49,23 @@ asyncio.run(main())
 '''
 
 
+def _vn_runtime_env(tmp_path: Path, request: pytest.FixtureRequest, backend: str) -> dict[str, str]:
+    """Borrow the shared per-test PostgreSQL database, retaining runtime isolation."""
+    if backend == "postgres":
+        _client, db_name = request.getfixturevalue("isolated_test_environment")
+        database_url = os.environ["DATABASE_URL"]
+        assert urlparse(database_url).path.lstrip("/") == db_name, "Use the fixture-owned database"
+    else:
+        database_url = f"sqlite:///{tmp_path / 'users.db'}"
+    return _runtime_env(tmp_path, database_url, backend=backend)
+
+
 @pytest.mark.integration
 @pytest.mark.parametrize("backend", ["sqlite", "postgres"])
 def test_concurrent_vn_registration_converges_on_one_live_file(
     tmp_path: Path, request: pytest.FixtureRequest, backend: str,
 ) -> None:
-    if backend == "postgres":
-        database_url = str(request.getfixturevalue("pg_temp_db")["dsn"])
-    else:
-        database_url = f"sqlite:///{tmp_path / 'users.db'}"
-    env = _runtime_env(tmp_path, database_url, backend=backend)
+    env = _vn_runtime_env(tmp_path, request, backend)
 
     assert _run_runtime(tmp_path, env, REGISTRATION_SCRIPT) == {
         "distinct_ids": 1, "live_records": 1, "replays": 7,
@@ -284,10 +293,8 @@ asyncio.run(main())
 
 
 def _storage_result(tmp_path: Path, request: pytest.FixtureRequest, backend: str, case: str) -> dict:
-    """Use the official temporary PostgreSQL fixture or an isolated SQLite file."""
-    database_url = (str(request.getfixturevalue("pg_temp_db")["dsn"]) if backend == "postgres"
-                    else f"sqlite:///{tmp_path / 'users.db'}")
-    env = _runtime_env(tmp_path, database_url, backend=backend)
+    """Run against the shared isolated PostgreSQL fixture or a private SQLite file."""
+    env = _vn_runtime_env(tmp_path, request, backend)
     env["VN_STORAGE_CASE"] = case
     return _run_runtime(tmp_path, env, STORAGE_SCRIPT)
 

@@ -32,6 +32,7 @@ from tldw_Server_API.app.core.AuthNZ.repos.storage_quotas_repo import (
 from tldw_Server_API.app.core.AuthNZ.settings import Settings, get_settings
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Metrics import get_metrics_registry
+from tldw_Server_API.app.core.Storage.file_integrity import generated_file_bytes_match
 
 #######################################################################################################################
 #
@@ -811,11 +812,13 @@ class StorageQuotaService:
             return None
 
         def bytes_present() -> bool:
+            """Validate the contained registration bytes on the filesystem thread."""
             root = DatabasePaths.get_user_outputs_dir(user_id).resolve()
             path = (root / str(record.get("storage_path") or "")).resolve()
             return (
-                path.is_relative_to(root) and path.is_file()
-                and path.stat().st_size == int(record["file_size_bytes"])
+                path.is_relative_to(root) and generated_file_bytes_match(
+                    path, expected_size=int(record["file_size_bytes"]), checksum=record.get("checksum"),
+                )
             )
 
         try:

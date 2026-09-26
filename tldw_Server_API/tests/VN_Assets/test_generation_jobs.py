@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import os
 import sqlite3
 import threading
 from collections.abc import Generator
@@ -1485,14 +1487,14 @@ async def test_retry_recovers_registered_file_after_worker_interruption(
     monkeypatch.setattr(service.repo, "update_item_storage", original_update)
     event_loop_thread = threading.get_ident()
     file_check_threads: list[int] = []
-    original_is_file = Path.is_file
+    original_stat = Path.stat
 
-    def checked_is_file(path: Path) -> bool:
+    def checked_stat(path: Path, *, follow_symlinks: bool = True) -> os.stat_result:
         if path == saved_file:
             file_check_threads.append(threading.get_ident())
-        return original_is_file(path)
+        return original_stat(path, follow_symlinks=follow_symlinks)
 
-    monkeypatch.setattr(Path, "is_file", checked_is_file)
+    monkeypatch.setattr(Path, "stat", checked_stat)
 
     result = await worker.handle_generate_variant(payload)
 
@@ -1547,14 +1549,14 @@ async def test_replay_rejects_registered_file_owned_by_another_user(
             batch_id=batch.batch_id, slot_id=slot.id, variant_index=0,
             user_id=1, pack_id=pack_with_slots.id,
         )
-    assert raised.value.retryable is True
+    assert raised.value.retryable is False
     assert service.repo.get_item(item["id"])["generated_file_id"] is None
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("attached,invalid", [
     (attached, invalid) for attached in (False, True)
-    for invalid in ("missing", "zero", "truncated", "owner", "deleted", "id", "feature", "source", "outside")
+    for invalid in ("missing", "zero", "truncated", "corrupt", "owner", "deleted", "id", "feature", "source", "outside")
 ] + [(True, "attached_id"), (True, "attached_path")])
 async def test_planned_replay_rejects_invalid_storage_without_generation_or_publication(
     fake_jobs: FakeJobs, service: VNAssetPackService, pack_with_slots: SimpleNamespace,
@@ -1579,13 +1581,16 @@ async def test_planned_replay_rejects_invalid_storage_without_generation_or_publ
         "id": 77, "user_id": 1, "source_feature": "vn_assets",
         "source_ref": f"vn_asset_item:{item['id']}", "is_deleted": False,
         "storage_path": "replay.png", "file_size_bytes": 8, "mime_type": "image/png",
+        "checksum": hashlib.sha256(b"12345678").hexdigest(),
     }
     if attached:
         service.repo.update_item_storage(
             item["id"], generated_file_id=77, storage_ref="replay.png", mime_type="image/png",
             width=512, height=512, bytes=8,
         )
-    if invalid == "missing":
+    if invalid == "corrupt":
+        image.write_bytes(b"abcdefgh")
+    elif invalid == "missing":
         image.unlink()
     elif invalid in {"zero", "truncated"}:
         image.write_bytes(b"" if invalid == "zero" else b"1234")
@@ -1617,20 +1622,22 @@ async def test_planned_replay_rejects_invalid_storage_without_generation_or_publ
             "pack_id": pack_with_slots.id, "slot_id": slot.id, "variant_index": 0,
             "batch_id": batch.batch_id, "user_id": 1,
         })
-    assert raised.value.retryable is True
-    assert service.repo.get_variant_outcome(batch.batch_id, slot.id, 0)["outcome_status"] == "planned"
+    assert raised.value.retryable is False
+    assert service.repo.get_variant_outcome(batch.batch_id, slot.id, 0)["outcome_status"] == "failed"
     assert service.repo.get_item(item["id"])["review_status"] == "hidden"
     assert service.repo.get_batch(batch.batch_id)["completed_count"] == 0
+    assert service.repo.get_batch(batch.batch_id)["failed_count"] == 1
+    assert service.repo.count_items_for_generation(pack_with_slots.id) == 0
     assert service.repo.list_items(pack_with_slots.id) == []
     assert adapter.requests == []
     assert saver.calls == []
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("missing", [False, True])
+@pytest.mark.parametrize("invalid", ["valid", "missing", "corrupt"])
 async def test_completed_replay_validates_bytes_without_changing_approved_review(
     fake_jobs: FakeJobs, service: VNAssetPackService, pack_with_slots: SimpleNamespace,
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, missing: bool,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, invalid: str,
 ) -> None:
     from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
     from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
@@ -1652,8 +1659,10 @@ async def test_completed_replay_validates_bytes_without_changing_approved_review
     service.repo.complete_variant(batch_id=batch.batch_id, slot_id=slot.id, variant_index=0, item_id=item["id"])
     service.repo.update_item_review(item["id"], review_status="approved", preferred=True)
     before = service.repo.get_item(item["id"])
-    if missing:
+    if invalid == "missing":
         image.unlink()
+    elif invalid == "corrupt":
+        image.write_bytes(b"abcdefgh")
 
     class Files:
         async def get_file_by_id(self, _file_id: int) -> dict[str, Any]:
@@ -1661,19 +1670,82 @@ async def test_completed_replay_validates_bytes_without_changing_approved_review
                 "id": 77, "user_id": 1, "source_feature": "vn_assets",
                 "source_ref": f"vn_asset_item:{item['id']}", "is_deleted": False,
                 "storage_path": "completed.png", "file_size_bytes": 8,
+                "checksum": hashlib.sha256(b"12345678").hexdigest(),
             }
 
     worker = VNAssetGenerationWorker(repo=service.repo, jobs_manager=fake_jobs, generated_files_repo=Files())
     payload = {"pack_id": pack_with_slots.id, "slot_id": slot.id, "variant_index": 0,
                "batch_id": batch.batch_id, "user_id": 1}
-    if missing:
+    if invalid != "valid":
         with pytest.raises(VNAssetGenerationError) as raised:
             await worker.handle_generate_variant(payload)
-        assert raised.value.retryable is True
+        assert raised.value.retryable is False
     else:
         assert (await worker.handle_generate_variant(payload))["item_id"] == item["id"]
     assert service.repo.get_item(item["id"]) == before
     assert service.repo.get_batch(batch.batch_id)["completed_count"] == 1
+
+    if invalid != "valid":
+        replacement = service.regenerate_item(pack_with_slots.id, item["id"], user_id=1)
+        adapter = FakeImageAdapter()
+        saver = StoredVNSaver(tmp_path)
+        replacement_worker = VNAssetGenerationWorker(
+            repo=service.repo, jobs_manager=fake_jobs, image_registry=FakeImageRegistry(adapter),
+            backend_gate=FakeGenerationGate(), save_vn_asset_image=saver, generated_files_repo=saver,
+        )
+        result = await replacement_worker.handle_generate_variant({**payload, "batch_id": replacement.batch_id})
+        assert result["item_id"] != item["id"]
+        assert service.repo.get_item(result["item_id"])["review_status"] == "draft"
+        assert service.repo.get_item(item["id"]) == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_transient_replay_io_does_not_terminalize_variant(
+    fake_jobs: FakeJobs, service: VNAssetPackService, pack_with_slots: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """An I/O outage retries the existing fenced attempt without calling the model."""
+    from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+    from tldw_Server_API.app.core.VN_Assets import worker as worker_module
+
+    slot = pack_with_slots.slots[0]
+    batch = service.start_generation(
+        pack_with_slots.id, user_id=1, request=VNAssetGenerationRequest(slot_ids=[slot.id]),
+    )
+    item = service.repo.reserve_variant_item(
+        batch_id=batch.batch_id, slot_id=slot.id, variant_index=0,
+        item_fields={"pack_id": pack_with_slots.id},
+    )
+    record = {"id": 77, "user_id": 1, "source_feature": "vn_assets",
+              "source_ref": f"vn_asset_item:{item['id']}", "is_deleted": False,
+              "storage_path": "asset.png", "file_size_bytes": 8}
+
+    class Files:
+        """Expose a valid registration while the filesystem is unavailable."""
+
+        async def get_file_by_source_ref(self, **_kwargs: Any) -> dict[str, Any]:
+            """Return the live registered file."""
+            return record
+
+    def unavailable(_path: Path, **_kwargs: Any) -> bool:
+        """Simulate a temporary filesystem permission outage."""
+        raise PermissionError("temporary filesystem outage")
+
+    monkeypatch.setattr(DatabasePaths, "get_user_outputs_dir", staticmethod(lambda _user_id: tmp_path))
+    monkeypatch.setattr(worker_module, "generated_file_bytes_match", unavailable)
+    adapter = FakeImageAdapter()
+    worker = worker_module.VNAssetGenerationWorker(
+        repo=service.repo, jobs_manager=fake_jobs, generated_files_repo=Files(),
+        image_registry=FakeImageRegistry(adapter), backend_gate=FakeGenerationGate(),
+    )
+    with pytest.raises(VNAssetGenerationError) as raised:
+        await worker.handle_generate_variant({"pack_id": pack_with_slots.id, "slot_id": slot.id,
+                                             "variant_index": 0, "batch_id": batch.batch_id, "user_id": 1})
+    assert raised.value.retryable is True
+    assert service.repo.get_variant_outcome(batch.batch_id, slot.id, 0)["outcome_status"] == "planned"
+    assert service.repo.get_batch(batch.batch_id)["failed_count"] == 0
+    assert adapter.requests == []
 
 
 @pytest.mark.asyncio
