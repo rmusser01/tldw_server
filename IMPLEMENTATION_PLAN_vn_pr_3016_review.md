@@ -696,3 +696,82 @@ Named limits and prior failed attempts remain qualified. Reviewer closed;
 all task-needed agents/tests/shell sessions closed. Dev59bd584503 remains
 unchanged ancestor. Normal commit/push and evidence reply next; external
 exact-head review, CI/current-base/human gates and final merge still pending.
+
+Task20 integration: normal five-file commit/push produced GitHub-verified
+f8d4109600d52c02f5c0a9df93a1e50a7fc83726 on unchanged dev59bd584503.
+All268 hashes match after commit. Individual evidence reply4110769088 at
+08:56:24Z posted and thread resolved; paginated GraphQL32threads0unresolved,
+no remaining review/thread/comment pages. Prior31 findings remain resolved.
+All17 conversation comments inspected for new/edited state; edited summary
+08:55:58Z says0bugs0rules17historicalomitted after push, not a completed full
+new-head review. One full request5844787105 at08:57:21Z is pending, with busy
+ack5844788046; do not duplicate. Only Verification was updated; human paragraph
+verified verbatim afterward. Exact-head55checks33queued22done, no actionable
+failure, seven required contexts absent; skipped/cancelled are not passes.
+OPEN/BLOCKED, no merge attempted. AC5 checked; AC6/finalization pending.
+
+External follow-up09:11Z: Qodo busy comment5844788046 was edited09:09:35Z
+to an explicit service-side failure; request5844787105 did not complete a
+full review. No new review/inline findings,32threads remain resolved, no
+remaining pages. Following Qodo's manual-retry instruction, ONE retry request
+5844895225 posted09:12:33Z on unchanged f8d4109600 is pending. This is the
+first service-side retry, not a duplicate pending request. Required CI remains
+55runs33queued22done/no actionablefailure and seven contexts absent. No source,
+new head, merge attempt or completion claim. Do not duplicate the retry.
+
+## Full Qodo Review on f8d4109600
+
+Retry5844895225 completed review5325352669 at09:16:30Z, ack5844925279.
+Prior32 threads resolved; new finding4110861531 verifies generated probes lack
+accepted tier labels. AC5 reopened, no review request pending, required CI
+still queued and no merge attempted.
+
+### Task 21: Classify Generated Probe Tests
+
+**Base:** f8d4109600d52c02f5c0a9df93a1e50a7fc83726.
+**Files:** the same two fixture guards only. Runtime bodies, fixtures, plugins,
+native SQL modules, production and global configuration are frozen.
+
+- [x] Prove through actual public pytest collection that generated test items
+  currently lack exactly one accepted tier; retain a failing classification
+  check before the label-only fix, without database allocation.
+- [x] Add unit classification to every generated database-free test; retain
+  pg_jobs solely as an additional routing marker. Register unit in the local
+  probe ini to avoid unknown-marker warnings. No new general policy engine.
+- [x] Verify actual collected tiers and one bounded changed-unit run, retain
+  negative-control sensitivity, and prove executable bodies/routing/native
+  SQL remain unchanged apart from test metadata. No repeated PG/VN/Storage/UI.
+- [x] Scoped checks, frozen report/evidence and independent spec/quality/final
+  marker-interaction review; bounded Main integration and normal hooks.
+- [ ] Normal commit/push, individual evidence reply/resolution, one full exact-
+  head review and all external CI/current-dev/human gates before normal merge.
+
+**Ruling:** Classification applies to subprocess-generated executable tests,
+not just their outer wrappers. These probes perform no database I/O, so unit
+is their accepted tier and pg_jobs is only routing metadata. Add labels and
+local registration rather than refactoring the established fixture harness.
+Cost if wrong: a few marker corrections, not a new lifecycle or behavior.
+
+Task21 implementation frozen: actual public collection RED14missing tiers,
+GREEN14items exactly unit with routing markers retained. Worker changed-unit
+run10passed3deselected5warnings17.32s; nested9pass3expectedfail2expectederrors
+are separate outcomes, not added to outer counts. Source preservation proves
+only six decorators, ini registration and local literal wrapping changed;
+runtime/generated bodies, fixtures and native SQL remain unchanged.
+
+Main final covering generated-probe selection6passed5warnings17.86s, exit0;
+applicable normal five-file hooks passed, no-file hooks skipped. Scoped Ruff,
+compile/Bandit/diff checks passed, Bandit zero findings/errors. All203 hashes
+match after Main verification/hooks; production/native/fixture/config diff
+unchanged. No PG lifecycle was allocated or connected; existing import-time
+temporary SQLite initialization and warning/formatter baselines are qualified,
+not a literal zero-filesystem-side-effect claim. Independent Noether review
+pending; no push/reply/resolution/merge yet.
+
+Noether independent Task21 spec/quality/final marker-interaction PASS, no
+actionable findings. Audited all203 hashes/archive/actual patch, actual
+RED/GREEN collection records and exact old-versus-new imports/bodies. Inherited
+warning/formatter/SQLite side effects remain qualified, no suppressed behavior.
+Reviewer closed; all task-needed agents/tests/shell sessions closed. Fresh dev
+59bd584503 unchanged ancestor. Normal five-file integration and individual
+evidence reply next; exact-head Qodo/CI/current-base/human/merge gates pending.

@@ -98,7 +98,9 @@ def _run_fixture_probe(
     root = str(Path(__file__).resolve().parents[3])
     monkeypatch.setenv("PYTHONPATH", os.pathsep.join(filter(None, [root, os.getenv("PYTHONPATH")])))
     monkeypatch.delenv("PYTEST_ADDOPTS", raising=False)
-    config = pytester.makeini("[pytest]\nasyncio_mode = auto\nmarkers =\n    pg_jobs: routing probe\n")
+    config = pytester.makeini(
+        "[pytest]\nasyncio_mode = auto\nmarkers =\n    pg_jobs: routing probe\n    unit: database-free probe\n"
+    )
     result = pytester.runpytest_subprocess("-q", "--tb=short", f"--junitxml={name}.xml", *args, timeout=90)
     if evidence_root := os.getenv("TASK20_PROBE_EVIDENCE"):
         evidence = Path(evidence_root) / name
@@ -196,6 +198,7 @@ def test_legacy_jobs_routes_select_dsn_without_database(
         USE_SHARED_JOBS_POSTGRES = {{opt_in}}
 
         {marker}
+        @pytest.mark.unit
         def test_route(request: pytest.FixtureRequest{argument}) -> None:
             assert "isolated_test_environment" not in request.fixturenames
             if {route == "env_override"!r}:
@@ -231,6 +234,7 @@ def test_shared_bypass_is_rejected_before_resolution(
         USE_SHARED_JOBS_POSTGRES = {opt_in}
 
         @pytest.mark.pg_jobs
+        @pytest.mark.unit
         def test_route(request: pytest.FixtureRequest) -> None:
             assert os.environ["JOBS_DB_URL"] == shared, "Shared bypass escaped ownership"
             assert events == ["shared_setup", ("tables", shared), ("counters", shared)]
@@ -258,6 +262,7 @@ def test_sqlite_probe_rejects_unexpected_allocation(
         from conftest import events
         USE_SHARED_JOBS_POSTGRES = True
 
+        @pytest.mark.unit
         def test_sqlite(request: pytest.FixtureRequest) -> None:
             assert events == []
             assert "pg_temp_db" not in request.fixturenames

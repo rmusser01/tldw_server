@@ -28,6 +28,7 @@ def test_bridge_resolution_preserves_jobs_loop_and_isolation(
         import pytest
         loops = []
 
+        @pytest.mark.unit
         def test_no_resets(request: pytest.FixtureRequest) -> None:
             assert {"reset_singletons", "clear_app_overrides"}.isdisjoint(
                 request.fixturenames
@@ -35,10 +36,12 @@ def test_bridge_resolution_preserves_jobs_loop_and_isolation(
             assert "isolated_test_environment" not in request.fixturenames
             assert "pg_temp_db" not in request.fixturenames
 
+        @pytest.mark.unit
         def test_first_loop(request: pytest.FixtureRequest) -> None:
             loops.append(request.getfixturevalue("event_loop"))
             assert not loops[0].is_closed()
 
+        @pytest.mark.unit
         def test_loop_lifetime(request: pytest.FixtureRequest) -> None:
             assert loops[0].is_closed(), "AuthNZ session event loop leaked"
             assert request.getfixturevalue("event_loop") is not loops[0]
