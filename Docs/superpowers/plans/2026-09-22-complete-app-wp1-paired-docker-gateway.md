@@ -650,8 +650,8 @@ image policy, signed inventory, public evidence or qualification gates.
 probe session for /api/v1/health/ready, and reproduces current installer failure.
 **Tests:** Expected red; absent/foreign/operator-forbidden cookie,503/not_ready,
 malformed/truncated/oversized or stalled readiness and exact cleanup on failure.
-**Status:** Not Started
-- [ ] Add focused failing behavior cases matching the existing backend policy.
+**Status:** Complete
+- [x] Add focused failing behavior cases matching the existing backend policy.
 
 #### Stage 2: Use the existing authenticated readiness projection
 **Goal:** Complete the readiness components before opening the browser.
@@ -660,8 +660,8 @@ malformed/truncated/oversized or stalled readiness and exact cleanup on failure.
 session and refuse replay. Preserve request/body/overall/cleanup bounds.
 **Tests:** Focused Release/readiness and affected control coverage; Black/Ruff,
 Bandit on changed production Python, and bounded actual cached gateway proof.
-**Status:** Not Started
-- [ ] Implement the minimal probe ordering/path/result change; do not substitute
+**Status:** Complete
+- [x] Implement the minimal probe ordering/path/result change; do not substitute
   public liveness, inject a master key, or exempt internal loopback restrictions.
 
 #### Stage 3: Review and retry actual qualification
@@ -670,5 +670,7 @@ Bandit on changed production Python, and bounded actual cached gateway proof.
 Linux container architecture bundles pass13lifecycle/38browser checks and signatures.
 Windows runtime remains explicitly unqualified and G12 false.
 **Tests:** Parent-owned full candidate and independent artifact verification.
-**Status:** Not Started
+**Status:** In Progress
 - [ ] Commit scoped code/tests/report; review amended code, then retry Task13.
+
+Task19 implementation9e4f8fc620/reportc63cb74bf4 scoped review approves spec and quality with no Critical/Important findings. Readiness/control52 pass with4disclosed baseline warnings; Black/Ruff pass and production Bandit0. Actual maintained source-mounted cached probe proves operator200/ready, DELETE200 and revoked profile/operator401; ownedcleanup passes. Actual not_ready injection was not exercised; realHTTPfixture covers its cleanup. Fresh signedlocal/native artifact qualification is still pending.

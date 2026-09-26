@@ -6,7 +6,7 @@ catalog entry, PR or merge is approved by this record.
 
 ## Current evidence (2026-09-26)
 
-The final code review fix wave through `1d0bcb9b28` passes scoped spec and quality review. Exact candidate `bd0de93363` built all four images and passed built-backend MCP39/Setup60, then failed first signed startup because the probe used loopback-only /internal/ready through the gateway. Cleanup succeeded and signatures/gates were invalidated. Task19 will use the existing authenticated operator readiness route without changing backend guards. Full local/native artifact qualification remains pending; historical runs below do not qualify this source.
+The final code review fix wave through `1d0bcb9b28` passes scoped spec and quality review. Exact candidate `bd0de93363` built all four images and passed built-backend MCP39/Setup60, then failed first signed startup because the probe used loopback-only /internal/ready through the gateway. Cleanup succeeded and signatures/gates were invalidated. Task19 correction `9e4f8fc620` now uses the existing authenticated operator readiness route without changing backend guards and passes scoped spec/quality review. Its maintained source-mounted cached proof succeeds, but the corrected source has not passed a full signed candidate yet. Full local/native artifact qualification remains pending; historical runs below do not qualify this source.
 
 | Contract | Current evidence | Status |
 | --- | --- | --- |
@@ -40,6 +40,16 @@ and healthy-fixture broken-auth refusal. Owned resources were removed.
 These scoped results support the code review; exact artifact results above
 remain the acceptance evidence.
 
+Task19 repaired the actual gateway/internal-route mismatch with two changed files.
+Its focused readiness/control run passed 52 tests with 4 disclosed environment warnings;
+Black/Ruff passed and production Bandit reported 0 findings. RealHTTP tests require
+operator cookie auth and cover503/not_ready, malformed/non-object/missing-status,
+oversized/truncated/stalled responses and exact cleanup. Maintained-source cached
+proof returns operator200/ready, DELETE200 and revoked profile/operator401, with
+owned cleanup; a controlled actual not_ready injection was not exercised.
+The scratch report was briefly committed at `c63cb74bf4` and is removed from the
+tracked final tree; its code/test/proof facts are retained here and in task history.
+
 ## Rulings I made
 
 - Ruling: Correct the design route table to put `/setup` in Next and backend docs assets in FastAPI — this records the user-approved routing correction already committed/tested at 9755c7eaaf/e759322854, rather than reverting to the legacy backend page. Cost if wrong: route ownership and novice setup need rework; API setup paths remain available.
@@ -55,7 +65,8 @@ remain the acceptance evidence.
 - Ruling: Validate the existing session cookie at /api and CSRF cookie at / rather than broadening the production session scope to satisfy the probe — real Chromium cookie-only profile succeeds and production setter explicitly scopes session to /api; the probe root lookup and / assertion are wrong. Cost if wrong: browser qualification path/discovery must be reworked and isolation evidence repeated; no production cookie-policy relaxation.
 - Ruling: Run bounded installer readiness in the existing pinned control image on the verified private Compose network, checking running signed identities and the actual gateway listener with the persisted public Host/Origin envelope — fulfills approved authenticated-readiness/revocation contract without host Python/Node or Docker socket mounts. Cost if wrong: probe/network identity design must be reworked and exact readiness qualification repeated; real public host binding remains independently required in lifecycle/browser tests.
 - Ruling: Confirm and select the first origin with Docker-owned port preflight before initialization, offering an available alternative for occupied defaults and preserving established origins — current init-before-check makes the documented alternate-port retry unusable. Cost if wrong: preflight ownership/port handoff needs rework and first-install conflict tests repeated; never reset existing credentials/data or stop unrelated listeners.
-
+- Ruling: Preserve the backend loopback-only /internal/ready guard and perform gateway backend readiness via existing permission-protected /api/v1/health/ready after fresh cookie bootstrap/profile, before exact revocation and browser success — actual cached artifacts prove anonymous401/cookie200-ready/revoked401; binding section5 specifies components without requiring their order. Cost if wrong: readiness endpoint/permission/result integration must be reworked and exact local/native readiness qualification repeated, with no master-key or internal-route exemption.
+- Ruling: Repair the newly reproduced actual-candidate integration defect as narrow Task19 within Task13 qualification, with its own focused TDD/review and fresh artifact proof — the sole whole-branch fix-wave rereview has no residual findings, while mandatory actual qualification exposed a different cross-component contract mismatch. Cost if wrong: task/review scope must be reorganized and qualification repeated; this does not authorize a second broad review, deferred load-bearing acceptance, or publication.
 
 ## Historical evidence through September25 and superseded follow-ups
 

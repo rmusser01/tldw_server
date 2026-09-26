@@ -4,7 +4,7 @@ title: Plan and implement paired Docker distribution and runtime gateway
 status: In Progress
 assignee: []
 created_date: '2026-09-23 06:15'
-updated_date: '2026-09-26 09:16'
+updated_date: '2026-09-26 09:30'
 labels:
   - distribution
   - docker
@@ -119,6 +119,8 @@ Final whole-WP1 review19f2174383 is not ready: I1 inherited Compose environment 
 Final combined fix wave commits17ce1a3e99/1d0bcb9b28 independently re-reviewed over19f2174383..1d0bcb9b28: I1-I4 and M1 addressed, scoped spec/quality pass, no new code findings. Authoritative sanitized Compose inputs, required8signedfiles, bounded authenticated gateway readiness/exact probe revoke, Docker-owned preflight before origin persistence and truthful cleanup now covered. Focused Release158 passed; after final established-origin test addition, complete amended control15 passed (not full159 rerun). Black/Ruff/shell pass; all amended production Python Bandit0. Real owned Docker port/runtime network/session/revoke/broken-auth proof passes and cleanup confirmed; only2unrelatedPG remain. Docker inspection Driver classifier defect caught by real fixture and red/green fixed within singlewave. Dependency-only Bun diagnostic completed and ownedimage removed, not fullartifact acceptance/rootcause claim. Next exact clean local arm64 and native amd64/arm64 lifecycle13/browser38 checklist/signatures; Windows actualruntime and G12/fullpublication remain unqualified.
 
 Exact clean candidatebd0de93363 built all4armimages and passed builtMCP39/Setup60, then extracted first-start failed at lifecycle104. Ownedcleanuptrue, signaturesinvalidated/allgatesfalse; no browser/native qualification or push. Read-only cached reproduction proves verify/init/pull/all3healthy and actualruntime identity pass; gateway /internal/ready correctly404 because backend allowsloopbackonly. Existing authenticated /api/v1/health/ready requiresSYSTEM_LOGS and livecookie proof returns200/statusready (anon401); exactsessionDELETE200 then oldcookieprofile/readiness401. All owneddiagnostic containers/networks/volumes/registryremoved, sourceunchanged. Add narrowTask19 actualqualification correction: move backendreadiness to existingoperatorroute after ephemeralcookie profile, require200/statusready, retainfinallyrevoke and internalguard; no generalhop/keyinjection/newroute. FinalreviewI1-I4M1codefixes remain approved, this newactualintegration failure gets scopedTDD/review before newexactlocal/native acceptance.
+
+Task19 correction9e4f8fc620 (reportc63cb74bf4) scoped spec/quality approved; no Critical/Important findings,4baseline project testwarnings retained asMinor. Uses cookie-only existing /api/v1/health/ready after bootstrap/profile, requires200+JSON object statusready; unchangedfinallyexactDELETE/replayrefusal andtime/body/cleanup bounds. RealHTTPfixture mirrorsinternal404/operatorcookieguard and503/not_ready/malformed/nonobject/missingstatus/oversized/truncated/stalled failures withrevocation. Readiness/control52pass, Black/Ruff/diffclean, productionBandit0. Maintainedsource-mounted cachedactualprobe pass operator200/ready+DELETE200+revokedprofile/operator401, allownresourcesremoved/no registry/build; controlledactualnotready notinjected, coveredbyfixtureonly. Rootwillpreserve reportfacts inacceptance anduntrack accidentallycommittedscratchreport; no otherplans/workspaces touched. Next exactcleanlocal13lifecycle/38browser/signatureproof thenauthorizedbranchpush/nativeCI. Windowsruntime/G12/publication remainopen.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
