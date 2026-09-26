@@ -230,6 +230,7 @@ class CalendarViewService:
                             window_end=window_end,
                             local_tags=local_tags,
                             exception_dates=exceptions.get((item.external_binding_id, item.source_uid or ""), []),
+                            warnings=warnings,
                         )
                     )
                 except CalendarValidationError:
@@ -335,6 +336,7 @@ class CalendarViewService:
         window_end: datetime,
         local_tags: list[str],
         exception_dates: list[str],
+        warnings: list[str] | None,
     ) -> list[CalendarViewItem]:
         master_start = item.start_at or item.due_at
         if master_start is None:
@@ -350,6 +352,8 @@ class CalendarViewService:
             timezone_name=recurrence.timezone or item.timezone,
             all_day=item.all_day,
             provider_rule=item.source_owner == CALENDAR_SOURCE_OWNER_PROVIDER,
+            warnings=warnings,
+            duration_text=json.loads(item.source_payload_json or "{}").get("duration"),
         )
         return [
             _view_item_from_occurrence(
@@ -391,15 +395,16 @@ def _view_item_from_row(
         description=item.description,
         location=item.location,
         source_owner=item.source_owner,
-        start_at=start_at,
-        end_at=item.end_at,
-        due_at=item.due_at,
+        start_at=_view_time(start_at, item),
+        end_at=_view_time(item.end_at, item),
+        due_at=_view_time(item.due_at, item),
         all_day=item.all_day,
         status=item.status,
         local_tags=local_tags if local_tags is not None else _json_list(item.local_tags_json),
         read_only_reason="provider"
         if item.provider_owned or item.source_owner == CALENDAR_SOURCE_OWNER_PROVIDER
         else None,
+        metadata={"timezone": item.timezone},
     )
 
 
@@ -430,6 +435,7 @@ def _view_item_from_occurrence(
         recurrence_id=recurrence.id,
         occurrence_index=occurrence.occurrence_index,
         read_only_reason="provider" if item.provider_owned else None,
+        metadata={"timezone": item.timezone},
     )
 
 
@@ -466,12 +472,27 @@ def _item_overlaps_window(item: CalendarItemRow, window_start: datetime, window_
         start_at = _coerce_datetime(start_value).replace(tzinfo=zone)
         end_at = _coerce_datetime(item.end_at).replace(tzinfo=zone) if item.end_at else start_at + timedelta(days=1)
         return end_at > window_start and start_at < window_end
-    start_at = _coerce_datetime(start_value)
-    end_at = _coerce_datetime(item.end_at) if item.end_at else start_at
+    start_at = _item_datetime(start_value, item)
+    end_at = _item_datetime(item.end_at, item) if item.end_at else start_at
     return (end_at > window_start if end_at > start_at else start_at >= window_start) and start_at < window_end
 
 
-def _coerce_datetime(value: TemporalValue | None) -> datetime:
+def _view_time(value: str | None, item: CalendarItemRow) -> str | None:
+    """Keep civil all-day dates intact and make timed values unambiguous to clients."""
+    if value is None or item.all_day:
+        return value
+    if date_parser.isoparse(value).tzinfo is not None:
+        return value
+    return _item_datetime(value, item).isoformat()
+
+
+def _item_datetime(value: str, item: CalendarItemRow) -> datetime:
+    """Resolve an IANA zone only for naive timestamps; custom provider offsets stand alone."""
+    parsed = date_parser.isoparse(value)
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=_zoneinfo(item.timezone or "UTC"))
+
+
+def _coerce_datetime(value: TemporalValue | None, zone: ZoneInfo | timezone = timezone.utc) -> datetime:
     if value is None:
         raise CalendarValidationError("Calendar query window boundaries are required")
     if isinstance(value, datetime):
@@ -482,7 +503,7 @@ def _coerce_datetime(value: TemporalValue | None) -> datetime:
         parsed = date_parser.isoparse(value)
     else:
         raise CalendarValidationError(f"Unsupported temporal value: {value!r}")
-    return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed
+    return parsed.replace(tzinfo=zone) if parsed.tzinfo is None else parsed
 
 
 def _serialize_temporal(value: date | datetime | None) -> str | None:

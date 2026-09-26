@@ -130,6 +130,22 @@ const renderDrawer = (
   )
 
 describe("CalendarItemDrawer", () => {
+  it("lets the item timezone resolve edited dates across DST instead of reusing the old offset", async () => {
+    const user = userEvent.setup()
+    renderDrawer({ ...localItem,
+      start_at: "2026-10-31T09:00:00-07:00", end_at: "2026-10-31T10:00:00-07:00",
+      metadata: { timezone: "America/Los_Angeles" }
+    })
+    for (const [label, value] of [["Start", "2026-11-02T09:00"], ["End", "2026-11-02T10:00"]]) {
+      await user.clear(screen.getByRole("textbox", { name: label }))
+      await user.type(screen.getByRole("textbox", { name: label }), value)
+    }
+    await user.click(screen.getByRole("button", { name: "Save item" }))
+    await waitFor(() => expect(mocks.updateCalendarItem).toHaveBeenCalled())
+    expect(mocks.updateCalendarItem.mock.calls[0][1]).toMatchObject({
+      start_at: "2026-11-02T09:00", end_at: "2026-11-02T10:00"
+    })
+  })
   beforeEach(() => {
     for (const mock of Object.values(mocks)) {
       mock.mockReset()
@@ -143,6 +159,105 @@ describe("CalendarItemDrawer", () => {
     unmount()
     renderDrawer(null)
     expect(screen.getByRole("combobox", { name: "Calendar" })).toHaveProperty("disabled", false)
+  })
+
+  it.each([
+    { kind: "event", start_at: "2026-06-05T09:00:35.123-07:00", end_at: "2026-06-05T10:00:45-07:00", due_at: null },
+    { kind: "todo", start_at: "2026-06-05T17:00:35+05:30", end_at: null, due_at: "2026-06-05T17:00:35+05:30" },
+    { kind: "event", start_at: "2026-06-05", end_at: "2026-06-08", due_at: null, all_day: true }
+  ])("omits unchanged temporal fields when editing $kind text", async (temporal) => {
+    const user = userEvent.setup()
+    renderDrawer({ ...localItem, ...temporal })
+    await user.type(screen.getByRole("textbox", { name: "Title" }), " revised")
+    await user.click(screen.getByRole("button", { name: "Save item" }))
+
+    await waitFor(() => expect(mocks.updateCalendarItem).toHaveBeenCalled())
+    const updates = mocks.updateCalendarItem.mock.calls[0][1]
+    for (const field of ["start_at", "end_at", "due_at", "kind", "all_day", "timezone", "recurrence"]) {
+      expect(updates).not.toHaveProperty(field)
+    }
+  })
+
+  it.each(["event", "todo"])("locks later %s occurrence timing/kind while allowing series text edits", async (kind) => {
+    const user = userEvent.setup()
+    renderDrawer({
+      ...localItem,
+      id: "calendar_item:7:occurrence:2:2026-06-12T09:00:00-07:00",
+      kind,
+      start_at: "2026-06-12T09:00:00-07:00",
+      end_at: kind === "event" ? "2026-06-12T10:00:00-07:00" : null,
+      due_at: kind === "todo" ? "2026-06-12T09:00:00-07:00" : null,
+      recurrence_id: 3,
+      occurrence_index: 2
+    })
+    for (const label of kind === "event" ? ["Start", "End"] : ["Due"]) {
+      expect(screen.getByRole("textbox", { name: label })).toHaveProperty("disabled", true)
+    }
+    for (const label of ["Event", "Todo"]) {
+      expect(screen.getByRole("radio", { name: label })).toHaveProperty("disabled", true)
+    }
+    expect(screen.getByRole("textbox", { name: "Title" })).toHaveProperty("disabled", false)
+    await user.type(screen.getByRole("textbox", { name: "Title" }), " revised")
+    await user.click(screen.getByRole("button", { name: "Save item" }))
+
+    await waitFor(() => expect(mocks.updateCalendarItem).toHaveBeenCalledWith(
+      7, expect.objectContaining({ title: "Draft notes revised" })
+    ))
+    const updates = mocks.updateCalendarItem.mock.calls[0][1]
+    for (const field of ["start_at", "end_at", "due_at", "kind", "recurrence"]) {
+      expect(updates).not.toHaveProperty(field)
+    }
+  })
+
+  it("locks the first occurrence even when its occurrence index is zero", () => {
+    renderDrawer({ ...localItem, recurrence_id: 3, occurrence_index: 0 })
+    expect(screen.getByRole("textbox", { name: "Start" })).toHaveProperty("disabled", true)
+  })
+
+  it.each([
+    { label: "Start", field: "start_at", original: "2026-06-05T09:00:00-07:00", input: "2026-06-05T09:30", expected: "2026-06-05T09:30-07:00" },
+    { label: "End", field: "end_at", original: "2026-06-05T10:00:00+05:30", input: "2026-06-05T10:30", expected: "2026-06-05T10:30+05:30" },
+    { label: "Due", field: "due_at", original: "2026-06-05T17:00:00Z", input: "2026-06-05T17:30", expected: "2026-06-05T17:30Z" },
+    { label: "Start", field: "start_at", original: "2026-06-05T09:00:00-07:00", input: "2026-06-05T09:30+02:00", expected: "2026-06-05T09:30+02:00" },
+    { label: "Due", field: "due_at", original: "2026-06-05T17:00:00-07:00", input: "", expected: null }
+  ])("preserves offsets or explicit clearing for $label edits ($input)", async ({ label, field, original, input, expected }) => {
+    const user = userEvent.setup()
+    renderDrawer({ ...localItem, kind: label === "Due" ? "todo" : "event", [field]: original })
+    const control = screen.getByRole("textbox", { name: label })
+    await user.clear(control)
+    if (input) await user.type(control, input)
+    await user.click(screen.getByRole("button", { name: "Save item" }))
+
+    await waitFor(() => expect(mocks.updateCalendarItem).toHaveBeenCalled())
+    const updates = mocks.updateCalendarItem.mock.calls[0][1]
+    expect(updates[field]).toBe(expected)
+    for (const other of ["start_at", "end_at", "due_at"].filter((key) => key !== field)) {
+      expect(updates).not.toHaveProperty(other)
+    }
+  })
+
+  it("keeps explicit all-day edits as civil dates", async () => {
+    const user = userEvent.setup()
+    renderDrawer({ ...localItem, all_day: true, start_at: "2026-06-05", end_at: "2026-06-08" })
+    await user.clear(screen.getByRole("textbox", { name: "End" }))
+    await user.type(screen.getByRole("textbox", { name: "End" }), "2026-06-09")
+    await user.click(screen.getByRole("button", { name: "Save item" }))
+
+    await waitFor(() => expect(mocks.updateCalendarItem).toHaveBeenCalled())
+    expect(mocks.updateCalendarItem.mock.calls[0][1]).toMatchObject({ end_at: "2026-06-09" })
+    expect(mocks.updateCalendarItem.mock.calls[0][1]).not.toHaveProperty("start_at")
+  })
+
+  it("still clears inactive times when explicitly changing an ordinary item's kind", async () => {
+    const user = userEvent.setup()
+    renderDrawer(localItem)
+    await user.click(screen.getByRole("radio", { name: "Todo" }))
+    await user.type(screen.getByRole("textbox", { name: "Due" }), "2026-06-05T17:00Z")
+    await user.click(screen.getByRole("button", { name: "Save item" }))
+
+    await waitFor(() => expect(mocks.updateCalendarItem).toHaveBeenCalledWith(
+      7, expect.objectContaining({ kind: "todo", start_at: null, end_at: null, due_at: "2026-06-05T17:00Z" })
+    ))
   })
 
   it("loads persisted links after refresh and removes one with confirmation", async () => {
