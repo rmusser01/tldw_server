@@ -27,6 +27,7 @@ Usage:
 """
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import hashlib
 import re
@@ -182,10 +183,12 @@ async def _preflight_generated_file_write(
     org_id: int | None,
     team_id: int | None,
     check_quota: bool,
+    service: Any = None,
 ) -> Any:
     """Resolve the storage service and check size/quota before writing bytes."""
     _validate_generated_file_size(file_size_bytes)
-    service = await get_storage_service()
+    if service is None:
+        service = await get_storage_service()
     if check_quota:
         check_combined_quota = getattr(service, "check_combined_quota", None)
         if callable(check_combined_quota):
@@ -402,6 +405,22 @@ async def save_and_register_image(
         raise
 
 
+async def _cleanup_unregistered_vn_file(
+    service: Any, *, user_id: int, source_ref: str, storage_path: str, file_path: Path,
+) -> None:
+    """Delete only unreferenced VN attempts, retaining bytes when commit is uncertain."""
+    try:
+        repo = await service.get_generated_files_repo()
+        live = await repo.get_live_file_by_storage_path(user_id=user_id, storage_path=storage_path)
+        if live is None:
+            # An invalid competing replay may still need these replacement bytes.
+            await service.get_vn_generated_file(user_id=user_id, source_ref=source_ref)
+            await asyncio.to_thread(file_path.unlink, missing_ok=True)
+    except Exception as exc:  # noqa: BLE001 - cleanup must not mask the registration failure
+        # A failed lookup cannot prove that the bytes are safe to remove.
+        logger.warning("Retaining VN attempt bytes after cleanup check failed: {}", type(exc).__name__)
+
+
 async def save_and_register_vn_asset_image(
     *,
     user_id: int,
@@ -424,12 +443,18 @@ async def save_and_register_vn_asset_image(
     VN asset metadata remains in the user's ChaChaNotes database; the image bytes
     and quota accounting are tracked through generated-file storage.
     """
+    service = await get_storage_service()
+    existing = await service.get_vn_generated_file(user_id=user_id, source_ref=f"vn_asset_item:{item_id}")
+    if existing is not None:
+        return existing
     service = await _preflight_generated_file_write(
         user_id=user_id,
         file_size_bytes=len(image_bytes),
         org_id=org_id,
         team_id=team_id,
-        check_quota=check_quota,
+        # Admission belongs to the serialized registration, after its replay lookup.
+        check_quota=False,
+        service=service,
     )
 
     filename = _generate_filename(f"vn_asset_{item_id}", image_format)
@@ -473,12 +498,19 @@ async def save_and_register_vn_asset_image(
             check_quota=check_quota,
         )
 
+        if file_record.get("storage_path") and file_record["storage_path"] != relative_path:
+            await _cleanup_unregistered_vn_file(
+                service, user_id=user_id, source_ref=f"vn_asset_item:{item_id}",
+                storage_path=relative_path, file_path=file_path,
+            )
         logger.info(f"Registered VN asset image: {filename} ({len(image_bytes)} bytes) for user {user_id}")
         return file_record
 
-    except Exception:
-        with contextlib.suppress(Exception):
-            file_path.unlink()
+    except BaseException:  # Cleanup must also handle cancellation after a commit.
+        await _cleanup_unregistered_vn_file(
+            service, user_id=user_id, source_ref=f"vn_asset_item:{item_id}",
+            storage_path=relative_path, file_path=file_path,
+        )
         raise
 
 

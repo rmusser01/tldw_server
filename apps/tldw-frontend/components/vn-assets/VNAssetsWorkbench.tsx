@@ -1,5 +1,6 @@
 import React, { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Archive, ClipboardList, Images, LayoutGrid, Settings } from 'lucide-react';
+import { ApiError } from '@web/lib/api';
 import {
   clearPendingVNAssetGeneration,
   createVNAssetIdempotencyKey,
@@ -52,6 +53,11 @@ const workflowSteps = [
 
 function plannedAssetLabel(count: number): string {
   return `${count} planned ${count === 1 ? 'asset' : 'assets'}`;
+}
+
+function isMissingGenerationResource(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 404
+    && ['slot_not_found', 'pack_not_found'].includes(error.detail ?? error.message);
 }
 
 function selectedPackStorageKey(ownerUserId: number | undefined): string | null {
@@ -181,6 +187,10 @@ export default function VNAssetsWorkbench() {
         setError(null);
       }
     } catch (recoveryError) {
+      if (isMissingGenerationResource(recoveryError)) {
+        clearPendingVNAssetGeneration(pack.owner_user_id, pack.id, pending.key);
+        generationKeys.current.delete(`${pack.owner_user_id ?? 'unknown'}:${pack.id}:${pending.slotId ?? 'start'}`);
+      }
       if (selectedPackIdRef.current === pack.id) {
         setError(recoveryError instanceof Error ? recoveryError.message : 'Could not reconcile the pending generation request.');
       }
@@ -410,6 +420,10 @@ export default function VNAssetsWorkbench() {
         setActiveWorkflowStep('generation');
       }
     } catch (startError) {
+      if (isMissingGenerationResource(startError)) {
+        clearPendingVNAssetGeneration(selectedPack.owner_user_id, packId, idempotencyKey);
+        generationKeys.current.delete(operation);
+      }
       if (selectedPackIdRef.current === packId) {
         setError(startError instanceof Error ? startError.message : 'Generation could not be started. Retry to check the same request.');
       }

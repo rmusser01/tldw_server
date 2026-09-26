@@ -59,6 +59,17 @@ class BuddyConflictError(ValueError):
     """An optimistic Buddy resource version no longer matches stored state."""
 
 
+class VNAssetGenerationError(ValueError):
+    """A stable VN generation code with internal operation context."""
+
+    def __init__(self, code: str, *, retryable: bool = False, **context: Any) -> None:
+        """Keep the public ValueError string stable and context immutable."""
+        self.code = code
+        self.retryable = retryable
+        self.context = MappingProxyType(dict(context))
+        super().__init__(code)
+
+
 class BuddyPublicationRevokedError(RuntimeError):
     """An accepted Buddy turn no longer has permission to publish messages."""
 

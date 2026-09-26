@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+import sqlite3
+import threading
 from collections.abc import Generator
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -20,9 +24,10 @@ from tldw_Server_API.app.api.v1.schemas.vn_asset_schemas import (
 )
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.exceptions import VNAssetGenerationError
 from tldw_Server_API.app.core.Image_Generation.adapters.base import ImageGenResult
 from tldw_Server_API.app.core.Jobs.manager import JobManager
-from tldw_Server_API.app.core.VN_Assets.concurrency import BackendGenerationLease
+from tldw_Server_API.app.core.VN_Assets.concurrency import BackendGenerationGate, BackendGenerationLease
 from tldw_Server_API.app.core.VN_Assets.constants import ERROR_ITEM_LIMIT_EXCEEDED
 from tldw_Server_API.app.core.VN_Assets.jobs import (
     enqueue_batch_idempotency_key,
@@ -60,6 +65,9 @@ class FakeJobs:
                 continue
             jobs = [job for job in jobs if job.get(key) == value]
         return jobs[: int(filters.get("limit") or len(jobs))]
+
+    def get_job(self, job_id: int, **_kwargs: Any) -> dict[str, Any] | None:
+        return next((job for job in self.created if job["id"] == job_id), None)
 
     def cancel_job(self, job_id: int, *, reason: str | None = None) -> bool:
         self.cancelled_ids.append(job_id)
@@ -146,11 +154,563 @@ class FailingVNSaver:
         raise RuntimeError("storage failed")
 
 
+class StoredVNSaver:
+    """Disk-backed generated-file double for replay integration with the VN DB."""
+
+    def __init__(self, outputs_dir: Path) -> None:
+        self.outputs_dir = outputs_dir
+        self.records: dict[int, dict[str, Any]] = {}
+
+    async def __call__(self, **kwargs: Any) -> dict[str, Any]:
+        item_id = int(kwargs["item_id"])
+        storage_path = f"generated-{item_id}.png"
+        (self.outputs_dir / storage_path).write_bytes(kwargs["image_bytes"])
+        record = {
+            "id": item_id, "user_id": kwargs["user_id"], "source_feature": "vn_assets",
+            "source_ref": f"vn_asset_item:{item_id}", "is_deleted": False,
+            "storage_path": storage_path, "file_size_bytes": len(kwargs["image_bytes"]),
+            "mime_type": "image/png",
+        }
+        self.records[item_id] = record
+        return record
+
+    async def get_file_by_id(self, file_id: int) -> dict[str, Any] | None:
+        return self.records.get(file_id)
+
+
+class EmptyGeneratedFiles:
+    async def get_file_by_source_ref(self, **_kwargs: Any) -> None:
+        return None
+
+
+class BlockingFirstImageAdapter(FakeImageAdapter):
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = threading.Event()
+        self.release = threading.Event()
+        self._calls = 0
+        self._lock = threading.Lock()
+
+    def generate(self, request: Any) -> ImageGenResult:
+        with self._lock:
+            self._calls += 1
+            first = self._calls == 1
+        if first:
+            self.started.set()
+            if not self.release.wait(5):
+                raise TimeoutError("test adapter was not released")
+        return super().generate(request)
+
+
+@pytest.mark.asyncio
+async def test_duplicate_delivery_with_same_lease_does_not_call_adapter_twice(
+    fake_jobs: FakeJobs,
+    service: VNAssetPackService,
+    pack_with_slots: SimpleNamespace,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    slot = pack_with_slots.slots[0]
+    batch = service.start_generation(
+        pack_with_slots.id, user_id=1,
+        request=VNAssetGenerationRequest(slot_ids=[slot.id]),
+    )
+    child = fake_jobs.create_job(job_type="vn_asset_generate_variant", owner_user_id="1")
+    child.update(status="processing", lease_id="lease-1", leased_until="2099-01-01 00:00:00")
+    adapter = BlockingFirstImageAdapter()
+    saver = RecordingVNSaver()
+    worker = VNAssetGenerationWorker(
+        repo=service.repo, jobs_manager=fake_jobs,
+        image_registry=FakeImageRegistry(adapter), backend_gate=FakeGenerationGate(),
+        save_vn_asset_image=saver,
+        generated_files_repo=EmptyGeneratedFiles(),
+    )
+    payload = {
+        "pack_id": pack_with_slots.id, "slot_id": slot.id, "variant_index": 0,
+        "batch_id": batch.batch_id, "user_id": 1,
+    }
+    first = asyncio.create_task(worker.handle_generate_variant(payload, job=dict(child)))
+    assert await asyncio.to_thread(adapter.started.wait, 5)
+    try:
+        with pytest.raises(ValueError, match="vn_asset_variant_in_progress"):
+            await worker.handle_generate_variant(payload, job=dict(child))
+    finally:
+        adapter.release.set()
+    await first
+
+    assert len(adapter.requests) == 1
+    assert len(saver.calls) == 1
+    assert service.repo.count_items_for_generation(pack_with_slots.id) == 1
+
+
+@pytest.mark.asyncio
+async def test_stale_lease_cannot_publish_after_new_lease_takes_claim(
+    fake_jobs: FakeJobs,
+    service: VNAssetPackService,
+    pack_with_slots: SimpleNamespace,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    slot = pack_with_slots.slots[0]
+    batch = service.start_generation(
+        pack_with_slots.id, user_id=1,
+        request=VNAssetGenerationRequest(slot_ids=[slot.id]),
+    )
+    child = fake_jobs.create_job(job_type="vn_asset_generate_variant", owner_user_id="1")
+    child.update(status="processing", lease_id="lease-1", leased_until="2099-01-01 00:00:00")
+    old_job = dict(child)
+    adapter = BlockingFirstImageAdapter()
+    saver = RecordingVNSaver()
+    worker = VNAssetGenerationWorker(
+        repo=service.repo, jobs_manager=fake_jobs,
+        image_registry=FakeImageRegistry(adapter), backend_gate=FakeGenerationGate(),
+        save_vn_asset_image=saver,
+        generated_files_repo=EmptyGeneratedFiles(),
+    )
+    payload = {
+        "pack_id": pack_with_slots.id, "slot_id": slot.id, "variant_index": 0,
+        "batch_id": batch.batch_id, "user_id": 1,
+    }
+    first = asyncio.create_task(worker.handle_generate_variant(payload, job=old_job))
+    assert await asyncio.to_thread(adapter.started.wait, 5)
+    child["lease_id"] = "lease-2"
+    try:
+        result = await worker.handle_generate_variant(payload, job=dict(child))
+    finally:
+        adapter.release.set()
+    with pytest.raises(ValueError, match="vn_asset_job_lease_lost"):
+        await first
+
+    assert result["generated_file_id"] == 77
+    assert len(saver.calls) == 1
+    assert service.repo.get_batch(batch.batch_id)["completed_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_cancellation_during_adapter_does_not_register_asset(
+    fake_jobs: FakeJobs,
+    service: VNAssetPackService,
+    pack_with_slots: SimpleNamespace,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    slot = pack_with_slots.slots[0]
+    batch = service.start_generation(
+        pack_with_slots.id, user_id=1,
+        request=VNAssetGenerationRequest(slot_ids=[slot.id]),
+    )
+    adapter = BlockingFirstImageAdapter()
+    saver = RecordingVNSaver()
+    worker = VNAssetGenerationWorker(
+        repo=service.repo, jobs_manager=fake_jobs,
+        image_registry=FakeImageRegistry(adapter), backend_gate=FakeGenerationGate(),
+        save_vn_asset_image=saver,
+    )
+    pending = asyncio.create_task(worker.handle_generate_variant({
+        "pack_id": pack_with_slots.id, "slot_id": slot.id, "variant_index": 0,
+        "batch_id": batch.batch_id, "user_id": 1,
+    }))
+    assert await asyncio.to_thread(adapter.started.wait, 5)
+    service.cancel_generation(pack_with_slots.id)
+    adapter.release.set()
+    with pytest.raises(ValueError, match="vn_asset_batch_terminal"):
+        await pending
+
+    assert saver.calls == []
+    assert service.repo.get_batch(batch.batch_id)["cancelled_count"] == 1
+    assert service.repo.count_items_for_generation(pack_with_slots.id) == 0
+
+
+@pytest.mark.asyncio
+async def test_takeover_backend_contention_is_retryable_until_stale_adapter_exits(
+    service: VNAssetPackService, pack_with_slots: SimpleNamespace, tmp_path: Path,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    slot = pack_with_slots.slots[0]
+    batch = service.start_generation(
+        pack_with_slots.id, user_id=1,
+        request=VNAssetGenerationRequest(slot_ids=[slot.id]),
+    )
+    jobs = JobManager(db_path=tmp_path / "busy-takeover-jobs.db")
+    jobs.create_job(
+        domain="vn_assets", queue=vn_asset_generation_jobs_queue(),
+        job_type="vn_asset_generate_variant", owner_user_id="1", payload={},
+    )
+    acquisition = {
+        "domain": "vn_assets", "queue": vn_asset_generation_jobs_queue(), "lease_seconds": 120,
+    }
+    old_job = jobs.acquire_next_job(**acquisition, worker_id="old-worker")
+    assert old_job is not None
+    adapter = BlockingFirstImageAdapter()
+    saver = RecordingVNSaver()
+    worker = VNAssetGenerationWorker(
+        repo=service.repo, jobs_manager=jobs,
+        image_registry=FakeImageRegistry(adapter),
+        backend_gate=BackendGenerationGate(default_local_limit=1),
+        save_vn_asset_image=saver, generated_files_repo=EmptyGeneratedFiles(),
+    )
+    payload = {
+        "pack_id": pack_with_slots.id, "slot_id": slot.id, "variant_index": 0,
+        "batch_id": batch.batch_id, "user_id": 1,
+    }
+    pending = asyncio.create_task(worker.handle_generate_variant(payload, job=old_job))
+    assert await asyncio.to_thread(adapter.started.wait, 5)
+    try:
+        assert jobs.release_job(
+            int(old_job["id"]), worker_id="old-worker",
+            lease_id=str(old_job["lease_id"]), enforce=True,
+        )
+        replacement = jobs.acquire_next_job(**acquisition, worker_id="replacement-worker")
+        assert replacement is not None
+        with pytest.raises(VNAssetGenerationError, match="vn_asset_backend_busy") as caught:
+            await worker.handle_generate_variant(payload, job=replacement)
+        assert caught.value.retryable is True
+        assert service.repo.get_variant_outcome(batch.batch_id, slot.id, 0)["outcome_status"] == "planned"
+        assert service.repo.get_batch(batch.batch_id)["failed_count"] == 0
+    finally:
+        adapter.release.set()
+        with pytest.raises(VNAssetGenerationError, match="vn_asset_job_lease_lost"):
+            await pending
+    assert jobs.release_job(
+        int(replacement["id"]), worker_id="replacement-worker",
+        lease_id=str(replacement["lease_id"]), enforce=True,
+    )
+    retry = jobs.acquire_next_job(**acquisition, worker_id="retry-worker")
+    assert retry is not None
+    result = await worker.handle_generate_variant(payload, job=retry)
+    assert result["generated_file_id"] == 77
+    assert len(saver.calls) == 1
+    assert service.repo.get_batch(batch.batch_id)["completed_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_legacy_backend_contention_keeps_failure_behavior(
+    fake_jobs: FakeJobs, service: VNAssetPackService, pack_with_slots: SimpleNamespace,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    slot = pack_with_slots.slots[0]
+    batch = service.repo.create_batch(
+        pack_id=pack_with_slots.id, requested_by_user_id=1, status="enqueued", total_variants=1,
+    )
+    gate = BackendGenerationGate(default_local_limit=1)
+    worker = VNAssetGenerationWorker(
+        repo=service.repo, jobs_manager=fake_jobs, backend_gate=gate,
+        image_registry=FakeImageRegistry(FakeImageAdapter()),
+    )
+    with gate.try_acquire("stable_diffusion_cpp"):
+        with pytest.raises(ValueError, match="vn_asset_backend_busy"):
+            await worker.handle_generate_variant({
+                "pack_id": pack_with_slots.id, "slot_id": slot.id, "variant_index": 0,
+                "batch_id": batch["id"], "user_id": 1,
+            })
+    assert service.repo.get_batch(batch["id"])["status"] == "failed"
+    assert service.repo.get_batch(batch["id"])["failed_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_expired_job_lease_cannot_claim_a_variant(
+    fake_jobs: FakeJobs, service: VNAssetPackService, pack_with_slots: SimpleNamespace,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    slot = pack_with_slots.slots[0]
+    batch = service.start_generation(
+        pack_with_slots.id, user_id=1,
+        request=VNAssetGenerationRequest(slot_ids=[slot.id]),
+    )
+    child = fake_jobs.create_job(job_type="vn_asset_generate_variant", owner_user_id="1")
+    child.update(status="processing", lease_id="expired", leased_until="2000-01-01 00:00:00")
+    adapter = FakeImageAdapter()
+    worker = VNAssetGenerationWorker(
+        repo=service.repo, jobs_manager=fake_jobs,
+        image_registry=FakeImageRegistry(adapter), backend_gate=FakeGenerationGate(),
+        save_vn_asset_image=RecordingVNSaver(),
+    )
+    with pytest.raises(ValueError, match="vn_asset_job_lease_lost"):
+        await worker.handle_generate_variant({
+            "pack_id": pack_with_slots.id, "slot_id": slot.id, "variant_index": 0,
+            "batch_id": batch.batch_id, "user_id": 1,
+        }, job=dict(child))
+    assert adapter.requests == []
+    assert service.repo.count_items_for_generation(pack_with_slots.id) == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("lease_loss", ["cancelled", "replaced", "expired"])
+async def test_lease_loss_after_storage_attachment_blocks_publication(
+    service: VNAssetPackService, pack_with_slots: SimpleNamespace,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lease_loss: str,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    slot = pack_with_slots.slots[0]
+    batch = service.start_generation(
+        pack_with_slots.id, user_id=1,
+        request=VNAssetGenerationRequest(slot_ids=[slot.id]),
+    )
+    jobs_path = tmp_path / "publication-jobs.db"
+    jobs = JobManager(db_path=jobs_path)
+    child = jobs.create_job(
+        domain="vn_assets", queue=vn_asset_generation_jobs_queue(),
+        job_type="vn_asset_generate_variant", owner_user_id="1", payload={},
+    )
+    job = jobs.acquire_next_job(
+        domain="vn_assets", queue=vn_asset_generation_jobs_queue(),
+        worker_id="vn-worker", lease_seconds=120,
+    )
+    assert job is not None
+    assert job["id"] == child["id"]
+    worker = VNAssetGenerationWorker(
+        repo=service.repo, jobs_manager=jobs,
+        image_registry=FakeImageRegistry(FakeImageAdapter()), backend_gate=FakeGenerationGate(),
+        save_vn_asset_image=RecordingVNSaver(),
+    )
+    original_update = service.repo.update_item_storage
+
+    def attach_then_lose_lease(*args: Any, **kwargs: Any) -> dict[str, Any] | None:
+        item = original_update(*args, **kwargs)
+        if lease_loss == "cancelled":
+            jobs.cancel_job(int(job["id"]))
+        elif lease_loss == "replaced":
+            assert jobs.release_job(
+                int(job["id"]), worker_id="vn-worker", lease_id=str(job["lease_id"]), enforce=True,
+            )
+            replacement = jobs.acquire_next_job(
+                domain="vn_assets", queue=vn_asset_generation_jobs_queue(),
+                worker_id="replacement-worker", lease_seconds=120,
+            )
+            assert replacement is not None
+            assert replacement["lease_id"] != job["lease_id"]
+        else:
+            with sqlite3.connect(jobs_path) as conn:
+                conn.execute("UPDATE jobs SET leased_until = '2000-01-01 00:00:00' WHERE id = ?", (job["id"],))
+        return item
+
+    monkeypatch.setattr(service.repo, "update_item_storage", attach_then_lose_lease)
+    with pytest.raises(ValueError, match="vn_asset_job_lease_lost"):
+        await worker.handle_generate_variant({
+            "pack_id": pack_with_slots.id, "slot_id": slot.id, "variant_index": 0,
+            "batch_id": batch.batch_id, "user_id": 1,
+        }, job=job)
+
+    outcome = service.repo.get_variant_outcome(batch.batch_id, slot.id, 0)
+    assert outcome["outcome_status"] == "planned"
+    assert service.repo.get_item(outcome["item_id"])["review_status"] == "hidden"
+    assert service.repo.get_batch(batch.batch_id)["completed_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_delayed_jobs_validation_cannot_replace_new_claim(
+    service: VNAssetPackService, pack_with_slots: SimpleNamespace,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    slot = pack_with_slots.slots[0]
+    batch = service.start_generation(
+        pack_with_slots.id, user_id=1,
+        request=VNAssetGenerationRequest(slot_ids=[slot.id]),
+    )
+    jobs = JobManager(db_path=tmp_path / "delayed-validation-jobs.db")
+    jobs.create_job(
+        domain="vn_assets", queue=vn_asset_generation_jobs_queue(),
+        job_type="vn_asset_generate_variant", owner_user_id="1", payload={},
+    )
+    old_job = jobs.acquire_next_job(
+        domain="vn_assets", queue=vn_asset_generation_jobs_queue(),
+        worker_id="old-worker", lease_seconds=120,
+    )
+    assert old_job is not None
+    adapter = FakeImageAdapter()
+    worker = VNAssetGenerationWorker(
+        repo=service.repo, jobs_manager=jobs,
+        image_registry=FakeImageRegistry(adapter), backend_gate=FakeGenerationGate(),
+        save_vn_asset_image=RecordingVNSaver(),
+    )
+    original_get = jobs.get_job
+    delayed = False
+
+    def delayed_get(*args: Any, **kwargs: Any) -> dict[str, Any] | None:
+        nonlocal delayed
+        snapshot = original_get(*args, **kwargs)
+        if not delayed:
+            delayed = True
+            assert jobs.release_job(
+                int(old_job["id"]), worker_id="old-worker",
+                lease_id=str(old_job["lease_id"]), enforce=True,
+            )
+            new_job = jobs.acquire_next_job(
+                domain="vn_assets", queue=vn_asset_generation_jobs_queue(),
+                worker_id="new-worker", lease_seconds=120,
+            )
+            assert new_job is not None
+            service.repo.claim_variant(
+                batch_id=batch.batch_id, slot_id=slot.id, variant_index=0,
+                lease_id=str(new_job["lease_id"]), attempt_token="new-claim",
+                item_fields={"pack_id": pack_with_slots.id}, allow_takeover=True,
+                expected_claim_token=None,
+                validate_authority=lambda: worker._require_current_job_lease(new_job, user_id=1),
+            )
+        return snapshot
+
+    monkeypatch.setattr(jobs, "get_job", delayed_get)
+    with pytest.raises(VNAssetGenerationError, match="vn_asset_job_lease_lost"):
+        await worker.handle_generate_variant({
+            "pack_id": pack_with_slots.id, "slot_id": slot.id, "variant_index": 0,
+            "batch_id": batch.batch_id, "user_id": 1,
+        }, job=old_job)
+    outcome = service.repo.get_variant_outcome(batch.batch_id, slot.id, 0)
+    assert outcome["claim_token"] == "new-claim"
+    assert outcome["outcome_status"] == "planned"
+    assert service.repo.count_items_for_generation(pack_with_slots.id) == 1
+    assert adapter.requests == []
+
+
+@pytest.mark.parametrize("transition", ["claim", "attach", "complete", "fail"])
+def test_repository_checks_jobs_authority_after_variant_write_lock(
+    service: VNAssetPackService, pack_with_slots: SimpleNamespace,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, transition: str,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management import VNAssetPacks_DB as db_module
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    slot = pack_with_slots.slots[0]
+    batch = service.start_generation(
+        pack_with_slots.id, user_id=1,
+        request=VNAssetGenerationRequest(slot_ids=[slot.id]),
+    )
+    jobs = JobManager(db_path=tmp_path / "lock-validation-jobs.db")
+    jobs.create_job(
+        domain="vn_assets", queue=vn_asset_generation_jobs_queue(),
+        job_type="vn_asset_generate_variant", owner_user_id="1", payload={},
+    )
+    job = jobs.acquire_next_job(
+        domain="vn_assets", queue=vn_asset_generation_jobs_queue(),
+        worker_id="vn-worker", lease_seconds=120,
+    )
+    assert job is not None
+    worker = VNAssetGenerationWorker(repo=service.repo, jobs_manager=jobs)
+    identity = {"batch_id": batch.batch_id, "slot_id": slot.id, "variant_index": 0}
+    item = None
+    if transition != "claim":
+        item = service.repo.claim_variant(
+            **identity, lease_id=str(job["lease_id"]), attempt_token="claim",
+            item_fields={"pack_id": pack_with_slots.id, "generated_file_id": 17},
+        )
+    worker._require_current_job_lease(job, user_id=1)
+    original_lock = db_module._lock_variant
+
+    def lock_then_cancel(*args: Any) -> None:
+        original_lock(*args)
+        assert jobs.cancel_job(int(job["id"]))
+
+    monkeypatch.setattr(db_module, "_lock_variant", lock_then_cancel)
+    authority = {"validate_authority": lambda: worker._require_current_job_lease(job, user_id=1)}
+    with pytest.raises(VNAssetGenerationError, match="vn_asset_job_lease_lost"):
+        if transition == "claim":
+            service.repo.claim_variant(
+                **identity, **authority, lease_id=str(job["lease_id"]), attempt_token="claim",
+                item_fields={"pack_id": pack_with_slots.id},
+            )
+        elif transition == "attach":
+            assert item is not None
+            service.repo.update_item_storage(
+                item["id"], **identity, **authority, attempt_token="claim",
+                generated_file_id=88, storage_ref="stale.png", mime_type="image/png",
+                width=10, height=10, bytes=3,
+            )
+        elif transition == "complete":
+            assert item is not None
+            service.repo.complete_variant(**identity, **authority, item_id=item["id"], attempt_token="claim")
+        else:
+            service.repo.fail_variant(**identity, **authority, error="adapter failed", attempt_token="claim")
+    outcome = service.repo.get_variant_outcome(batch.batch_id, slot.id, 0)
+    assert outcome["outcome_status"] == "planned"
+    if item is None:
+        assert outcome["item_id"] is None
+    else:
+        assert service.repo.get_item(item["id"])["generated_file_id"] == 17
+        assert service.repo.get_item(item["id"])["review_status"] == "hidden"
+
+
 @pytest.fixture
-def chacha_db(tmp_path) -> Generator[CharactersRAGDB, None, None]:
+def chacha_db(tmp_path: Path) -> Generator[CharactersRAGDB, None, None]:
     database = CharactersRAGDB(str(tmp_path / "ChaChaNotes.db"), client_id="vn-assets-jobs-test-client")
     yield database
     database.close_connection()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_legacy_reservation_is_reconciled_on_redelivery(
+    fake_jobs: FakeJobs, service: VNAssetPackService, pack_with_slots: SimpleNamespace,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    slot = pack_with_slots.slots[0]
+    batch = service.start_generation(
+        pack_with_slots.id, user_id=1,
+        request=VNAssetGenerationRequest(slot_ids=[slot.id]),
+    )
+    item = service.repo.reserve_variant_item(
+        batch_id=batch.batch_id, slot_id=slot.id, variant_index=0,
+        item_fields={"pack_id": pack_with_slots.id},
+    )
+    service.repo.update_batch(batch.batch_id, {"status": "cancelled"})
+    worker = VNAssetGenerationWorker(repo=service.repo, jobs_manager=fake_jobs)
+    with pytest.raises(VNAssetGenerationError, match="vn_asset_batch_terminal"):
+        await worker.handle_generate_variant({
+            "pack_id": pack_with_slots.id, "slot_id": slot.id, "variant_index": 0,
+            "batch_id": batch.batch_id, "user_id": 1,
+        })
+    assert service.repo.get_variant_outcome(batch.batch_id, slot.id, 0)["outcome_status"] == "cancelled"
+    assert service.repo.get_batch(batch.batch_id)["cancelled_count"] == 1
+    assert service.repo.get_item(item["id"])["review_status"] == "hidden"
+    assert service.repo.count_items_for_generation(pack_with_slots.id) == 0
+
+
+@pytest.mark.asyncio
+async def test_adapter_failure_after_jobs_cancellation_keeps_variant_planned(
+    service: VNAssetPackService, pack_with_slots: SimpleNamespace, tmp_path: Path,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    slot = pack_with_slots.slots[0]
+    batch = service.start_generation(
+        pack_with_slots.id, user_id=1,
+        request=VNAssetGenerationRequest(slot_ids=[slot.id]),
+    )
+    jobs = JobManager(db_path=tmp_path / "adapter-failure-jobs.db")
+    jobs.create_job(
+        domain="vn_assets", queue=vn_asset_generation_jobs_queue(),
+        job_type="vn_asset_generate_variant", owner_user_id="1", payload={},
+    )
+    job = jobs.acquire_next_job(
+        domain="vn_assets", queue=vn_asset_generation_jobs_queue(),
+        worker_id="vn-worker", lease_seconds=120,
+    )
+    assert job is not None
+
+    class CancelledFailingAdapter(FakeImageAdapter):
+        def generate(self, request: Any) -> ImageGenResult:
+            assert jobs.cancel_job(int(job["id"]))
+            raise RuntimeError("adapter failed after cancellation")
+
+    saver = RecordingVNSaver()
+    worker = VNAssetGenerationWorker(
+        repo=service.repo, jobs_manager=jobs,
+        image_registry=FakeImageRegistry(CancelledFailingAdapter()),
+        backend_gate=FakeGenerationGate(), save_vn_asset_image=saver,
+    )
+    with pytest.raises(VNAssetGenerationError, match="vn_asset_job_lease_lost"):
+        await worker.handle_generate_variant({
+            "pack_id": pack_with_slots.id, "slot_id": slot.id, "variant_index": 0,
+            "batch_id": batch.batch_id, "user_id": 1,
+        }, job=job)
+    assert service.repo.get_variant_outcome(batch.batch_id, slot.id, 0)["outcome_status"] == "planned"
+    assert service.repo.get_batch(batch.batch_id)["failed_count"] == 0
+    assert saver.calls == []
 
 
 @pytest.fixture
@@ -264,21 +824,43 @@ def test_vn_asset_generation_queue_is_allowed_by_default(
     assert vn_asset_generation_jobs_queue() in jobs._get_allowed_queues("vn_assets")
 
 
-def test_generation_marks_batch_failed_when_parent_enqueue_is_rejected(
+def test_generation_retries_original_batch_when_parent_enqueue_is_rejected(
     service: VNAssetPackService,
     pack_with_slots: SimpleNamespace,
 ) -> None:
+    receipt = {
+        "scope": "vn_asset_generate",
+        "resource_id": f"pack:{pack_with_slots.id}",
+        "idempotency_key": "retry-parent-after-quota",
+        "payload_hash": "same-request",
+    }
+    service.repo.claim_idempotency_record(owner_user_id=1, **receipt)
     with pytest.raises(ValueError, match="queued job quota exceeded"):
         service.start_generation(
             pack_with_slots.id,
             user_id=1,
             jobs_manager=RejectingJobs(),
+            idempotency_receipt=receipt,
         )
 
     batches = service.repo.list_batches(pack_with_slots.id)
     assert len(batches) == 1
-    assert batches[0]["status"] == "failed"
+    assert batches[0]["status"] == "queued"
     assert batches[0]["enqueue_error"] == "queued job quota exceeded"
+    record = service.repo.get_idempotency_record(
+        owner_user_id=1, scope=receipt["scope"],
+        resource_id=receipt["resource_id"], idempotency_key=receipt["idempotency_key"],
+    )
+    jobs = FakeJobs()
+    recovered = service.recover_generation_receipt(
+        record, pack_id=pack_with_slots.id, jobs_manager=jobs,
+    )
+    replay = service.recover_generation_receipt(
+        record, pack_id=pack_with_slots.id, jobs_manager=jobs,
+    )
+    assert recovered.batch_id == replay.batch_id == batches[0]["id"]
+    assert len(jobs.created) == 1
+    assert service.repo.get_batch(batches[0]["id"])["enqueue_error"] is None
 
 
 def test_start_generation_enforces_item_limit_against_existing_items(
@@ -595,7 +1177,7 @@ async def test_versioned_batch_with_missing_recipe_fails_closed(
         save_vn_asset_image=RecordingVNSaver(),
     )
 
-    with pytest.raises(ValueError, match="vn_asset_recipe_not_found"):
+    with pytest.raises(ValueError, match="vn_asset_recipe_not_found") as error:
         await worker.handle_generate_variant({
             "pack_id": pack_with_slots.id,
             "slot_id": slot.id,
@@ -603,6 +1185,11 @@ async def test_versioned_batch_with_missing_recipe_fails_closed(
             "batch_id": batch.batch_id,
             "user_id": 1,
         })
+    assert error.value.code == "vn_asset_recipe_not_found"
+    assert error.value.context["batch_id"] == batch.batch_id
+    translated = vn_assets_endpoint._handle_value_error(error.value)
+    assert translated.status_code == 404
+    assert translated.detail == "vn_asset_recipe_not_found"
     assert adapter.requests == []
     assert service.repo.get_batch(batch.batch_id)["status"] == "failed"
 
@@ -648,7 +1235,10 @@ async def test_completed_variant_redelivery_reuses_item_without_generating_again
     fake_jobs: FakeJobs,
     service: VNAssetPackService,
     pack_with_slots: SimpleNamespace,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
     from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
 
     slot = pack_with_slots.slots[0]
@@ -658,12 +1248,16 @@ async def test_completed_variant_redelivery_reuses_item_without_generating_again
         request=VNAssetGenerationRequest(slot_ids=[slot.id]),
     )
     adapter = FakeImageAdapter()
+    monkeypatch.setattr(DatabasePaths, "get_user_outputs_dir", staticmethod(lambda _user_id: tmp_path))
+
+    storage = StoredVNSaver(tmp_path)
     worker = VNAssetGenerationWorker(
         repo=service.repo,
         jobs_manager=fake_jobs,
         image_registry=FakeImageRegistry(adapter),
         backend_gate=FakeGenerationGate(),
-        save_vn_asset_image=RecordingVNSaver(),
+        save_vn_asset_image=storage,
+        generated_files_repo=storage,
     )
     payload = {
         "pack_id": pack_with_slots.id,
@@ -821,12 +1415,14 @@ async def test_late_failure_does_not_regress_completed_variant(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("interruption", [KeyboardInterrupt, RuntimeError])
 async def test_retry_recovers_registered_file_after_worker_interruption(
     fake_jobs: FakeJobs,
     service: VNAssetPackService,
     pack_with_slots: SimpleNamespace,
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path,
+    tmp_path: Path,
+    interruption: type[BaseException],
 ) -> None:
     from tldw_Server_API.app.core.VN_Assets import worker as worker_module
     from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
@@ -873,7 +1469,7 @@ async def test_retry_recovers_registered_file_after_worker_interruption(
     original_update = service.repo.update_item_storage
 
     def interrupted_update(*args: Any, **kwargs: Any) -> None:
-        raise KeyboardInterrupt("worker interrupted after file registration")
+        raise interruption("worker interrupted after file registration")
 
     monkeypatch.setattr(service.repo, "update_item_storage", interrupted_update)
     payload = {
@@ -883,12 +1479,25 @@ async def test_retry_recovers_registered_file_after_worker_interruption(
         "batch_id": batch.batch_id,
         "user_id": 1,
     }
-    with pytest.raises(KeyboardInterrupt):
+    with pytest.raises((KeyboardInterrupt, ValueError)):
         await worker.handle_generate_variant(payload)
+    assert service.repo.get_variant_outcome(batch.batch_id, slot.id, 0)["outcome_status"] == "planned"
     monkeypatch.setattr(service.repo, "update_item_storage", original_update)
+    event_loop_thread = threading.get_ident()
+    file_check_threads: list[int] = []
+    original_is_file = Path.is_file
+
+    def checked_is_file(path: Path) -> bool:
+        if path == saved_file:
+            file_check_threads.append(threading.get_ident())
+        return original_is_file(path)
+
+    monkeypatch.setattr(Path, "is_file", checked_is_file)
 
     result = await worker.handle_generate_variant(payload)
 
+    assert len(file_check_threads) == 1
+    assert file_check_threads[0] != event_loop_thread
     assert result["generated_file_id"] == 77
     assert len(adapter.requests) == 1
     assert service.repo.get_batch(batch.batch_id)["completed_count"] == 1
@@ -933,16 +1542,138 @@ async def test_replay_rejects_registered_file_owned_by_another_user(
         jobs_manager=fake_jobs,
         generated_files_repo=ForeignFiles(),
     )
-    result = await worker._replay_variant(
-        batch_id=batch.batch_id,
-        slot_id=slot.id,
-        variant_index=0,
-        user_id=1,
-        pack_id=pack_with_slots.id,
-    )
-
-    assert result is None
+    with pytest.raises(VNAssetGenerationError) as raised:
+        await worker._replay_variant(
+            batch_id=batch.batch_id, slot_id=slot.id, variant_index=0,
+            user_id=1, pack_id=pack_with_slots.id,
+        )
+    assert raised.value.retryable is True
     assert service.repo.get_item(item["id"])["generated_file_id"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("attached,invalid", [
+    (attached, invalid) for attached in (False, True)
+    for invalid in ("missing", "zero", "truncated", "owner", "deleted", "id", "feature", "source", "outside")
+] + [(True, "attached_id"), (True, "attached_path")])
+async def test_planned_replay_rejects_invalid_storage_without_generation_or_publication(
+    fake_jobs: FakeJobs, service: VNAssetPackService, pack_with_slots: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, attached: bool, invalid: str,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    slot = pack_with_slots.slots[0]
+    batch = service.start_generation(
+        pack_with_slots.id, user_id=1, request=VNAssetGenerationRequest(slot_ids=[slot.id]),
+    )
+    item = service.repo.reserve_variant_item(
+        batch_id=batch.batch_id, slot_id=slot.id, variant_index=0, item_fields={"pack_id": pack_with_slots.id},
+    )
+    outputs = tmp_path / "outputs"
+    outputs.mkdir()
+    monkeypatch.setattr(DatabasePaths, "get_user_outputs_dir", staticmethod(lambda _user_id: outputs))
+    image = outputs / "replay.png"
+    image.write_bytes(b"12345678")
+    record = {
+        "id": 77, "user_id": 1, "source_feature": "vn_assets",
+        "source_ref": f"vn_asset_item:{item['id']}", "is_deleted": False,
+        "storage_path": "replay.png", "file_size_bytes": 8, "mime_type": "image/png",
+    }
+    if attached:
+        service.repo.update_item_storage(
+            item["id"], generated_file_id=77, storage_ref="replay.png", mime_type="image/png",
+            width=512, height=512, bytes=8,
+        )
+    if invalid == "missing":
+        image.unlink()
+    elif invalid in {"zero", "truncated"}:
+        image.write_bytes(b"" if invalid == "zero" else b"1234")
+    elif invalid == "outside":
+        (tmp_path / "outside.png").write_bytes(b"12345678")
+        record["storage_path"] = "../outside.png"
+    else:
+        record.update({
+            "owner": {"user_id": 2}, "deleted": {"is_deleted": True}, "id": {"id": 0},
+            "feature": {"source_feature": "image_generation"}, "source": {"source_ref": "vn_asset_item:999"},
+            "attached_id": {"id": 78}, "attached_path": {"storage_path": "other.png"},
+        }[invalid])
+
+    class Files:
+        async def get_file_by_source_ref(self, **_kwargs: Any) -> dict[str, Any]:
+            return record
+
+        async def get_file_by_id(self, _file_id: int) -> dict[str, Any]:
+            return record
+
+    adapter = FakeImageAdapter()
+    saver = RecordingVNSaver()
+    worker = VNAssetGenerationWorker(
+        repo=service.repo, jobs_manager=fake_jobs, generated_files_repo=Files(),
+        image_registry=FakeImageRegistry(adapter), backend_gate=FakeGenerationGate(), save_vn_asset_image=saver,
+    )
+    with pytest.raises(VNAssetGenerationError) as raised:
+        await worker.handle_generate_variant({
+            "pack_id": pack_with_slots.id, "slot_id": slot.id, "variant_index": 0,
+            "batch_id": batch.batch_id, "user_id": 1,
+        })
+    assert raised.value.retryable is True
+    assert service.repo.get_variant_outcome(batch.batch_id, slot.id, 0)["outcome_status"] == "planned"
+    assert service.repo.get_item(item["id"])["review_status"] == "hidden"
+    assert service.repo.get_batch(batch.batch_id)["completed_count"] == 0
+    assert service.repo.list_items(pack_with_slots.id) == []
+    assert adapter.requests == []
+    assert saver.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("missing", [False, True])
+async def test_completed_replay_validates_bytes_without_changing_approved_review(
+    fake_jobs: FakeJobs, service: VNAssetPackService, pack_with_slots: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, missing: bool,
+) -> None:
+    from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    slot = pack_with_slots.slots[0]
+    batch = service.start_generation(
+        pack_with_slots.id, user_id=1, request=VNAssetGenerationRequest(slot_ids=[slot.id]),
+    )
+    item = service.repo.reserve_variant_item(
+        batch_id=batch.batch_id, slot_id=slot.id, variant_index=0, item_fields={"pack_id": pack_with_slots.id},
+    )
+    image = tmp_path / "completed.png"
+    image.write_bytes(b"12345678")
+    monkeypatch.setattr(DatabasePaths, "get_user_outputs_dir", staticmethod(lambda _user_id: tmp_path))
+    service.repo.update_item_storage(
+        item["id"], generated_file_id=77, storage_ref="completed.png", mime_type="image/png",
+        width=512, height=512, bytes=8,
+    )
+    service.repo.complete_variant(batch_id=batch.batch_id, slot_id=slot.id, variant_index=0, item_id=item["id"])
+    service.repo.update_item_review(item["id"], review_status="approved", preferred=True)
+    before = service.repo.get_item(item["id"])
+    if missing:
+        image.unlink()
+
+    class Files:
+        async def get_file_by_id(self, _file_id: int) -> dict[str, Any]:
+            return {
+                "id": 77, "user_id": 1, "source_feature": "vn_assets",
+                "source_ref": f"vn_asset_item:{item['id']}", "is_deleted": False,
+                "storage_path": "completed.png", "file_size_bytes": 8,
+            }
+
+    worker = VNAssetGenerationWorker(repo=service.repo, jobs_manager=fake_jobs, generated_files_repo=Files())
+    payload = {"pack_id": pack_with_slots.id, "slot_id": slot.id, "variant_index": 0,
+               "batch_id": batch.batch_id, "user_id": 1}
+    if missing:
+        with pytest.raises(VNAssetGenerationError) as raised:
+            await worker.handle_generate_variant(payload)
+        assert raised.value.retryable is True
+    else:
+        assert (await worker.handle_generate_variant(payload))["item_id"] == item["id"]
+    assert service.repo.get_item(item["id"]) == before
+    assert service.repo.get_batch(batch.batch_id)["completed_count"] == 1
 
 
 @pytest.mark.asyncio
@@ -992,7 +1723,10 @@ async def test_versioned_batch_counts_only_committed_variants(
     fake_jobs: FakeJobs,
     service: VNAssetPackService,
     pack_with_slots: SimpleNamespace,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
     from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
 
     slot = pack_with_slots.slots[0]
@@ -1001,12 +1735,15 @@ async def test_versioned_batch_counts_only_committed_variants(
         user_id=1,
         request=VNAssetGenerationRequest(slot_ids=[slot.id], variant_count=2),
     )
+    monkeypatch.setattr(DatabasePaths, "get_user_outputs_dir", staticmethod(lambda _user_id: tmp_path))
+    storage = StoredVNSaver(tmp_path)
     worker = VNAssetGenerationWorker(
         repo=service.repo,
         jobs_manager=fake_jobs,
         image_registry=FakeImageRegistry(FakeImageAdapter()),
         backend_gate=FakeGenerationGate(),
-        save_vn_asset_image=RecordingVNSaver(),
+        save_vn_asset_image=storage,
+        generated_files_repo=storage,
     )
     payload = {
         "pack_id": pack_with_slots.id,
@@ -1412,10 +2149,17 @@ def test_failed_fanout_preserves_full_planned_count(
 
     batch = service.repo.get_batch(batch_with_slots.id)
     assert batch is not None
-    assert batch["status"] == "failed"
+    assert batch["status"] == "queued"
     assert batch["planned_count"] == sum(slot.variant_count for slot in batch_with_slots.slots)
     assert batch["enqueued_count"] == 2
     assert batch["enqueue_error"] == "child job quota exceeded"
+
+    failing_jobs.fail_after_children = 100
+    recovered = worker.handle_enqueue_batch(batch_with_slots.job_payload)
+    assert recovered["enqueued_count"] == batch["planned_count"]
+    assert len(failing_jobs.created) == batch["planned_count"]
+    assert service.repo.get_batch(batch_with_slots.id)["status"] == "enqueued"
+    assert service.repo.get_batch(batch_with_slots.id)["enqueue_error"] is None
 
 
 @pytest.mark.asyncio
