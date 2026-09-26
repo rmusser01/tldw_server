@@ -18,7 +18,7 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import CreateJobCommand
 from tldw_Server_API.app.core.Jobs.operations.postgres import admission as pg_admission
 from tldw_Server_API.app.core.Jobs.operations.sqlite import admission as sqlite_admission
 
-pytest_plugins = ["tldw_Server_API.tests._plugins.authnz_full_fixtures"]
+pytest_plugins = ["tldw_Server_API.tests._plugins.authnz_isolated_fixtures"]
 pytestmark = pytest.mark.integration
 USE_SHARED_JOBS_POSTGRES = True
 

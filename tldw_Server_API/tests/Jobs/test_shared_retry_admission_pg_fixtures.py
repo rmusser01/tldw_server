@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import os
 from contextlib import closing
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, Literal, NoReturn, cast
 
+import asyncpg
 import psycopg
 import pytest
 
+from tldw_Server_API.app.core.Jobs import pg_migrations
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.tests.Jobs import conftest as jobs_fixtures
 
-pytest_plugins = ["tldw_Server_API.tests._plugins.authnz_full_fixtures"]
+pytest_plugins = ["tldw_Server_API.tests._plugins.authnz_isolated_fixtures"]
 USE_SHARED_JOBS_POSTGRES = True
 
 
@@ -29,7 +32,6 @@ def test_shared_explicit_dsn_uses_fixture_owned_database(
     with psycopg.connect(jobs_pg_dsn) as conn:
         assert conn.execute("SELECT current_database()").fetchone() == (isolated_test_environment[1],)
     assert conn.closed
-    print(f"shared explicit native database={isolated_test_environment[1]}; closed={conn.closed}; no pg_temp_db")
 
 
 @pytest.mark.integration
@@ -46,7 +48,6 @@ def test_shared_autouse_url_uses_fixture_owned_database(
         cur.execute("SELECT current_database() AS name")
         assert cur.fetchone()["name"] == isolated_test_environment[1]
     assert conn.closed
-    print(f"shared autouse wrapper database={isolated_test_environment[1]}; closed={conn.closed}; no pg_temp_db")
 
 
 @pytest.mark.integration
@@ -70,29 +71,74 @@ def test_shared_opt_in_without_pg_marker_allocates_no_database(request: pytest.F
     assert "isolated_test_environment" not in request.fixturenames
 
 
-@pytest.mark.integration
-@pytest.mark.jobs
+class _HistoricalRouteRequest:
+    """Resolve only a DSN sentinel, never either PostgreSQL fixture lifecycle."""
+
+    def __init__(self) -> None:
+        """Supply the non-opted-in module and PG marker used by real fixture bodies."""
+        self.module = SimpleNamespace(USE_SHARED_JOBS_POSTGRES=False)
+        self.keywords = {"pg_jobs": True}
+        self.resolved: list[str] = []
+
+    def getfixturevalue(self, name: str) -> dict[str, str]:
+        """Reject unexpected resolution; pg_temp_db is data, not an allocated DB."""
+        self.resolved.append(name)
+        assert name == "pg_temp_db", f"Unexpected fixture lifecycle: {name}"
+        return {"dsn": "postgresql://sentinel.invalid/historical", "database": "historical"}
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize("route", ["explicit", "autouse", "env_override"])
-def test_legacy_jobs_routes_keep_alternate_lifecycle(
-    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch, route: str,
+def test_legacy_jobs_routes_select_dsn_without_database(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch,
+    route: Literal["explicit", "autouse", "env_override"],
 ) -> None:
-    """Non-opted-in Jobs still use pg_temp_db and retain the env bypass."""
-    monkeypatch.setattr(request.module, "USE_SHARED_JOBS_POSTGRES", False)
+    """Exercise historical fixture routing without allocating or connecting a DB.
+
+    Only native schema I/O is replaced. The real fixture bodies choose the
+    dependency and bind the DSN, with distinct sentinels for the environment
+    bypass. The actual test has no pg_jobs/jobs marker, so RUN_JOBS=0 still
+    exercises these unit controls without either DB lifecycle at setup.
+    """
+    selected = _HistoricalRouteRequest()
+    fixture_request = cast(pytest.FixtureRequest, selected)
+    migrations: list[tuple[str, str]] = []
+
+    def ensure_tables(dsn: str) -> None:
+        """Record the selected DSN at the native schema I/O boundary."""
+        migrations.append(("tables", dsn))
+
+    def ensure_counters(dsn: str) -> None:
+        """Record the selected DSN at the native counter I/O boundary."""
+        migrations.append(("counters", dsn))
+
+    def forbid_connection(*args: Any, **kwargs: Any) -> NoReturn:
+        """Fail immediately if a routing unit control attempts real PG I/O."""
+        pytest.fail("Historical route unit control attempted a PostgreSQL connection")
+
+    monkeypatch.setattr(pg_migrations, "ensure_jobs_tables_pg", ensure_tables)
+    monkeypatch.setattr(pg_migrations, "ensure_job_counters_pg", ensure_counters)
+    monkeypatch.setattr(psycopg, "connect", forbid_connection)
+    monkeypatch.setattr(asyncpg, "connect", forbid_connection)
     monkeypatch.delenv("JOBS_PG_USE_ENV_DB", raising=False)
+    monkeypatch.setenv("JOBS_DB_URL", "postgresql://sentinel.invalid/environment")
     if route == "explicit":
-        dsn = request.getfixturevalue("jobs_pg_dsn")
+        dsn = jobs_fixtures.jobs_pg_dsn.__wrapped__(fixture_request, monkeypatch)
+        assert dsn == "postgresql://sentinel.invalid/historical"
     else:
-        request.node.add_marker(pytest.mark.pg_jobs)
         if route == "env_override":
-            dsn = str(request.getfixturevalue("pg_temp_db")["dsn"])
-            monkeypatch.setenv("JOBS_DB_URL", dsn)
             monkeypatch.setenv("JOBS_PG_USE_ENV_DB", "1")
-        jobs_fixtures._pg_jobs_db_url.__wrapped__(request, monkeypatch)
-        dsn = os.environ["JOBS_DB_URL"]
+        jobs_fixtures._pg_jobs_db_url.__wrapped__(fixture_request, monkeypatch)
+    if route == "env_override":
+        assert selected.resolved == []
+        assert os.environ["JOBS_DB_URL"] == "postgresql://sentinel.invalid/environment"
+        assert migrations == []
+    else:
+        assert selected.resolved == ["pg_temp_db"]
+        assert os.environ["JOBS_DB_URL"] == "postgresql://sentinel.invalid/historical"
+        assert migrations == [
+            ("tables", "postgresql://sentinel.invalid/historical"),
+            ("counters", "postgresql://sentinel.invalid/historical"),
+        ]
+    assert "pg_temp_db" not in request.fixturenames
     assert "isolated_test_environment" not in request.fixturenames
-    assert dsn == str(request.getfixturevalue("pg_temp_db")["dsn"])
-    with psycopg.connect(dsn) as conn:
-        assert conn.execute("SELECT current_database()").fetchone() == (
-            request.getfixturevalue("pg_temp_db")["database"],
-        )
-    assert conn.closed
