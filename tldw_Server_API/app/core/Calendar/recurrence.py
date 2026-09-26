@@ -117,6 +117,21 @@ def _validate_timezone_rule(properties: dict[str, str]) -> int:
     to the first/last four, with no intersecting BYMONTHDAY filter. Full provider
     rules remain unchanged when supported, never replaced by approximations.
     The conservative estimate covers every supported query year through 9999.
+
+    Args:
+        properties: Observance properties containing an iCalendar DTSTART and
+            RRULE, collected before any timezone offset resolution.
+
+    Returns:
+        Conservative upper bound on generated RRULE transitions through year
+        9999, restricted by INTERVAL, COUNT and UNTIL. Initial DTSTART and RDATE
+        transitions are counted separately by validate_provider_timezones.
+
+    Raises:
+        CalendarValidationError: The start or rule is malformed, an unsupported
+            rule field/frequency is present, interval/count/month/day values
+            are invalid, or the selected annual pattern is not guaranteed to
+            yield. The caller enforces the cumulative transition budget.
     """
     try:
         value = properties["RRULE"]
