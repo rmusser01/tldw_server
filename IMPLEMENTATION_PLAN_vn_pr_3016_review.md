@@ -1,6 +1,53 @@
 # PR 3016 VN Durability Review Implementation Plan
 
-## Current Review Wave: Task 24
+## Current CI Wave: Task 25
+
+**Base:** 1e7092e1a786e77d687c634fb7941ebe99ec808d. **Tracking:** TASK-13369.
+**Evidence:** Jobs SQLite job108416216572/run36246370628; retained log
+`/tmp/vn3016-jobs-sqlite-ci-108416216572.log`. Real CI: 1243 passed, two failed,
+four skipped, 576 deselected, 4192 warnings in 1294.06s; not a green suite.
+
+### Task 25: Repair Two CI Test Harness Regressions
+
+- [x] Reproduce both named failures with inherited plugin autoload disabled and
+  explicit pytest-asyncio admission. Preserve raw RED logs/XML before edits.
+- [x] Update only the legacy optional-index test's cursor double to implement
+  actual required retry-index query results; preserve optional-error/maintenance
+  assertions and fail closed on unexpected queries rather than bypassing the
+  required migration. No production or native SQL algorithm changes.
+- [x] Make the bridge registration probe deterministic with autoload enabled
+  and disabled without requiring an unregistered plugin option. Preserve the
+  full-plugin bad-bridge two-failure control and good-bridge three-pass result,
+  loop lifetime, forbidden I/O, original fixture identities and test tiers.
+- [x] Run focused RED/GREEN, affected bounded covering modules, scoped static
+  and security checks. Freeze evidence and independent SPEC/QUALITY plus final
+  changed-contract review. No unrelated suite repetitions or config edits.
+- [ ] Controller normal scoped commit/push, accurate PR verification update,
+  ONE new-head full Qodo review and actual CI/current-base/human gates before
+  merge. Previous exact-head review is historical after any new code push.
+
+**Ruling:** Repair the two owned compatibility gaps at their test boundaries,
+not by removing index admission, relaxing assertions or changing workflow plugin
+isolation. This is a bounded correction to approved PR durability; cost if wrong
+is test-only rework. Tasks1-24 remain frozen; no redispatch of completed work.
+
+Task25 LOCAL implementation/review complete; Boole and Mendel CLOSED. Independent
+SPEC/QUALITY/final changed-contract APPROVED, no actionable findings. All103
+frozen hashes verified; two tests only, production/workflows/config/shared
+fixtures unchanged. Actual authoritative RED2failures; final affected covering
+57passed2existing crypto-backend skips7warnings14.02s. Focused enabled5passed
+5warnings13.40s; initial disabled5passed7warnings13.44s predates small final
+cursor adjustment, final disabled covering includes all five cases. Main fresh
+final-source CI-admission5passed0failerrorsskips7warnings13.36s/XML5 in12.714s.
+Nested bad-bridge1pass2intendedassertionfailures and good-bridge3passes remain
+separate, not added to positive outer counts. Local DarwinPython3.11/pytest8.4
+is not native LinuxPython3.12/pytest9.1 CI. MainBandit matches frozen one baseline
+B105 synthetic secret exactly/errors[], no addition; Ruff clean/compile/diff
+passed. Inherited warnings/old pytest garbage cleanup and documented earlier
+runner/preservation failures retained; not a pristine/whole-suite claim.
+Normal scoped hooks/commit/push next; AC5checked/AC6 external gates pending.
+
+## Historical Review Wave: Task 24
 
 Full Qodo review5326031748 completed13:22:00Z on313c0e218f09e68adc8dd23a80ef12d404c7fcd0,
 ack5846612935. Request5846591205 fulfilled; no review pending. Finding4111488916/
@@ -26,7 +73,7 @@ Prior Tasks1-23 are frozen; this replaces only their cited behavioral probes.
   Freeze public collection/tier/docs/type evidence; no permanent policy engine,
   shared fixture rewrite or weakening assertions. Run affected modules once,
   scoped test static/security checks with truthful baseline qualifications.
-- [ ] Independent SPEC/QUALITY/changed-contract review of frozen working delta;
+- [x] Independent SPEC/QUALITY/changed-contract review of frozen working delta;
   controller normal scoped commit after review and applicable hooks.
 - [ ] Push, tested individual evidence reply/resolution, ONE full new-head review,
   and actual required CI/current strict base/human summary gates before merge.
@@ -49,6 +96,34 @@ plugins/no testsrun, correctedsameexistingimportlib/strictmarkerflags, no config
 edit/testdisable. ScopedRuffclean/testBandit18exactbaselineB106/errors[]; Main
 Banditexactsame18/errors[]. Memory/activecaller synchronouslimitation retained.
 Normal five-filehooks/commit/push next; AC5open/AC6pending/no mergeattempt.
+
+Task24 LOCALcomplete: normal5filecommit/FFpush/GitHubverified
+1e7092e1a786e77d687c634fb7941ebe99ec808d/deva2826f unchanged.67hashesmatch
+afterhooks/commit; applicableexplicitchecks passed/no-fileSkippednotpasses;
+normalcommitnohookoutput/no commitstageclaim/no bypass. Individual testedreply
+4111549285 at13:48:35Z/threadverifiedresolved. Freshpaginated41threads0unresolved/
+no remainingpages/28conversationcommentschecked. BodyonlyVerificationupdated/
+freshbodyexact/humanparagraph/allothersections/Cubicfooterpreserved.
+ONEfullrequest5846790100 at13:49:23Z PENDING,busy5846791184 at13:49:34Z;
+no duplicate.55exactheadchecks33queued22completed/noactionablefailure/allseven
+requiredabsent. AC5checked/AC6pending, OPEN/BLOCKED/no mergeattempt. Allagents/
+taskneededtest/shellsessionsCLOSED; only local integration records dirty.
+
+FullnewheadQodo5326099315 completed13:51:17Z on1e7092e1/ack5846803069.
+One allegation4111556229 of in-memory workerfixture verifiedfalse: modulelocal
+chacha_db916-919 creates tmp_path/ChaChaNotes.db/service1015-1016consumesit and
+finallycloses; repositorymodule's memoryfixture is separate. Fresh2citedcases
+passed0failerrorsskips4warnings2.27s with normalfixture setup/teardown and actual
+thread/closure/responsiveness assertions. Reasonedsource/evidencereply and thread
+resolved; no codechange/newreviewrequired onunchangedhead. AC5checked; actualCI
+andmerge gates pending. Do not redispatch Task24 or manufacture a Task25fix.
+
+Latestgate: paginated42threads0unresolved/no remainingpages,28commentsinspected.
+Falsepremise evidence reply4111565477 at13:55:01Z. Fullreviewcomplete/no pending
+request; bot summary still1reportedbug/0rules27omitted as13:51:16Z, qualified
+falsepremise not a fabricatedzero-botcount. Allsevenrequiredcontextsabsent,
+55actualchecks33queued22completed/noactionablefailure; OPEN/BLOCKED/no merge.
+Only CI/actualmerge/finalization remain; AC5checked/AC6pending/currentdeva2826f.
 ## Historical Review Wave: Task 23
 
 Full Qodo review5325946065 completed12:45:31Z on88aefac2ba95c9f743d3e67b34fd55858479315a,
