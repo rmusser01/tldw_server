@@ -7,8 +7,9 @@ import json
 import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Callable, TypeVar
 
+from anyio import CancelScope, to_thread
 from loguru import logger
 
 from tldw_Server_API.app.core.Calendar.errors import CalendarPermissionDenied, CalendarValidationError
@@ -26,10 +27,13 @@ CALENDAR_SYNC_DOMAIN = "calendar"
 CALENDAR_SYNC_QUEUE = "default"
 CALENDAR_SYNC_JOB_TYPE = "calendar_sync"
 _ACTIVE_JOB_STATUSES = ("queued", "processing")
+_Result = TypeVar("_Result")
 
 
 @dataclass(frozen=True)
 class CalendarSyncJobResponse:
+    """Describe a queued binding sync or the active job reused for that binding."""
+
     binding_id: int
     job_id: int
     queued: bool
@@ -44,6 +48,7 @@ def build_calendar_sync_payload(
     window_end: str,
     reason: str,
 ) -> dict[str, Any]:
+    """Build a secret-free payload identifying the binding, time window, and trigger."""
     return {
         "binding_id": int(binding_id),
         "window_start": str(window_start),
@@ -59,6 +64,7 @@ def build_calendar_sync_idempotency_key(
     window_end: str,
     reason: str,
 ) -> str:
+    """Identify equivalent sync requests for the same binding, window, and trigger."""
     return f"calendar:sync:binding:{int(binding_id)}:{window_start}:{window_end}:{reason}"
 
 
@@ -73,6 +79,7 @@ def queue_calendar_binding_sync(
     window_start: str,
     window_end: str,
 ) -> CalendarSyncJobResponse:
+    """Authorize an enabled binding and enqueue its sync unless a job is already active."""
     binding = db.get_external_binding(binding_id)
     account = db.get_external_account(binding.account_id)
     _assert_account_scope(account, actor_user_id=actor_user_id, tenant_id=tenant_id)
@@ -127,12 +134,41 @@ def queue_calendar_binding_sync(
     )
 
 
+async def _run_db_phase(operation: Callable[..., _Result], *args: Any) -> _Result:
+    """Drain off-loop DB work across cancellation, preserving any failure as its cause."""
+    db_task = asyncio.create_task(to_thread.run_sync(operation, *args))
+    cancellation: asyncio.CancelledError | None = None
+    # AnyIO's thread shield does not stop native Task.cancel(); retain and drain the child explicitly.
+    while True:
+        try:
+            if cancellation is None:
+                result = await asyncio.shield(db_task)
+            else:
+                # A cancelled AnyIO scope must not repeatedly interrupt the drain.
+                with CancelScope(shield=True):
+                    result = await asyncio.shield(db_task)
+        except asyncio.CancelledError as exc:
+            if db_task.cancelled():
+                raise
+            if cancellation is None:
+                cancellation = exc
+        except Exception as exc:
+            if cancellation is not None:
+                raise cancellation from exc
+            raise
+        else:
+            if cancellation is not None:
+                raise cancellation
+            return result
+
+
 async def handle_calendar_sync_job(
     job: dict[str, Any] | None,
     *,
     db: CalendarDatabase | None = None,
     provider: Any | None = None,
 ) -> dict[str, Any]:
+    """Fetch scoped CalDAV events with complete DB phases off-loop and atomic batch writes."""
     if job is None:
         raise CalendarValidationError("Calendar sync job is missing")
     if job.get("job_type") != CALENDAR_SYNC_JOB_TYPE:
@@ -143,14 +179,22 @@ async def handle_calendar_sync_job(
     window_start = str(payload["window_start"])
     window_end = str(payload["window_end"])
     reason = str(payload.get("reason") or "scheduled")
-    calendar_db = db or CalendarDatabase()
-    binding = calendar_db.get_external_binding(binding_id)
-    account = calendar_db.get_external_account(binding.account_id)
-    if account.provider.lower() != "caldav":
-        raise CalendarValidationError(f"Unsupported external calendar provider: {account.provider}")
+
+    def _load_sync_context() -> tuple[CalendarDatabase, ExternalCalendarBindingRow, ExternalCalendarAccountRow]:
+        """Construct the repository and load binding/account before the failure-bookkeeping boundary."""
+        calendar_db = db or CalendarDatabase()
+        binding = calendar_db.get_external_binding(binding_id)
+        account = calendar_db.get_external_account(binding.account_id)
+        if account.provider.lower() != "caldav":
+            raise CalendarValidationError(f"Unsupported external calendar provider: {account.provider}")
+        return calendar_db, binding, account
+
+    calendar_db, binding, account = await _run_db_phase(_load_sync_context)
 
     started_at = _utcnow_iso()
-    try:
+
+    def _prepare_credentials() -> dict[str, str]:
+        """Validate sync eligibility and resolve owner-scoped, same-origin provider credentials."""
         if account.status != "active" or account.revoked_at or account.deleted_at:
             raise CalendarValidationError("External calendar account is not active")
         if not binding.sync_enabled or binding.disabled_at:
@@ -163,15 +207,10 @@ async def handle_calendar_sync_job(
             fallback_server_url=binding.remote_calendar_id,
         )
         CalDavProvider.same_origin_url(credentials["server_url"], binding.remote_calendar_id)
-        sync_provider = provider or CalDavProvider()
-        events = await call_provider(
-            sync_provider.fetch_vevents,
-            remote_calendar_url=binding.remote_calendar_id,
-            username=credentials["username"],
-            password=credentials["password"],
-            window_start=window_start,
-            window_end=window_end,
-        )
+        return credentials
+
+    def _import_and_record_success() -> dict[str, int]:
+        """Keep the complete batch transaction on one thread, then persist successful sync state."""
         with calendar_db.transaction():
             result = _upsert_events(calendar_db, binding=binding, events=list(events or []))
         finished_at = _utcnow_iso()
@@ -193,7 +232,9 @@ async def handle_calendar_sync_job(
             metadata_json={"reason": reason, "job_id": job.get("id")},
         )
         return result
-    except Exception as exc:
+
+    def _record_failure(exc: Exception) -> None:
+        """Persist the original failure diagnostics without changing bookkeeping exception behavior."""
         finished_at = _utcnow_iso()
         calendar_db.update_binding_sync_state(binding.id, last_error=str(exc))
         calendar_db.record_sync_event(
@@ -205,10 +246,34 @@ async def handle_calendar_sync_job(
             error_message=str(exc),
             metadata_json={"reason": reason, "job_id": job.get("id")},
         )
+
+    def _with_failure_bookkeeping(operation: Callable[[], _Result]) -> _Result:
+        """Finish a DB phase and its failure audit on one thread before cancellation can propagate."""
+        try:
+            return operation()
+        except Exception as exc:
+            _record_failure(exc)
+            raise
+
+    credentials = await _run_db_phase(_with_failure_bookkeeping, _prepare_credentials)
+    try:
+        sync_provider = provider or CalDavProvider()
+        events = await call_provider(
+            sync_provider.fetch_vevents,
+            remote_calendar_url=binding.remote_calendar_id,
+            username=credentials["username"],
+            password=credentials["password"],
+            window_start=window_start,
+            window_end=window_end,
+        )
+    except Exception as exc:
+        await _run_db_phase(_record_failure, exc)
         raise
+    return await _run_db_phase(_with_failure_bookkeeping, _import_and_record_success)
 
 
 async def run_calendar_sync_worker(stop_event: asyncio.Event | None = None) -> None:
+    """Run the Calendar Jobs consumer with configured leases until stopped."""
     worker_id = (os.getenv("CALENDAR_SYNC_WORKER_ID") or f"calendar-sync-worker-{os.getpid()}").strip()
     cfg = WorkerConfig(
         domain=CALENDAR_SYNC_DOMAIN,
@@ -224,6 +289,7 @@ async def run_calendar_sync_worker(stop_event: asyncio.Event | None = None) -> N
     if stop_event is not None:
 
         async def _watch_stop() -> None:
+            """Stop the Jobs consumer when the caller's shutdown signal is set."""
             await stop_event.wait()
             sdk.stop()
 
@@ -243,6 +309,7 @@ def _active_job_for_binding(
     owner_user_id: str,
     binding_id: int,
 ) -> dict[str, Any] | None:
+    """Find an owner's queued or processing sync for this binding within bounded job scans."""
     for job_status in _ACTIVE_JOB_STATUSES:
         rows = job_manager.list_jobs(
             domain=CALENDAR_SYNC_DOMAIN,
@@ -268,6 +335,7 @@ def _assert_account_scope(
     actor_user_id: int,
     tenant_id: str,
 ) -> None:
+    """Reject external accounts outside the actor's tenant or no longer active."""
     if account.user_id != int(actor_user_id) or account.tenant_id != tenant_id:
         raise CalendarPermissionDenied("External calendar account is outside the current user scope")
     if account.status != "active" or account.revoked_at or account.deleted_at:
@@ -275,6 +343,7 @@ def _assert_account_scope(
 
 
 def _coerce_payload(raw_payload: Any) -> dict[str, Any]:
+    """Accept a mapping or JSON object payload, rejecting malformed or non-object values."""
     if isinstance(raw_payload, dict):
         return raw_payload
     if isinstance(raw_payload, str):
@@ -293,6 +362,7 @@ def _upsert_events(
     binding: ExternalCalendarBindingRow,
     events: list[Any],
 ) -> dict[str, int]:
+    """Upsert provider instances and recurrence without losing local context or inferring deletions."""
     seen_uids: set[str] = set()
     upserted = 0
     for event in events:
@@ -349,12 +419,14 @@ def _upsert_events(
 
 
 def _event_value(event: Any, key: str) -> Any:
+    """Read a provider event field from either a mapping or an event object."""
     if isinstance(event, dict):
         return event.get(key)
     return getattr(event, key, None)
 
 
 def _provider_payload(event: Any) -> dict[str, Any]:
+    """Extract sanitized provider metadata without retaining sensitive provider fields."""
     payload = _event_value(event, "provider_payload")
     if isinstance(payload, dict):
         return sanitize_provider_metadata(payload)
@@ -362,6 +434,7 @@ def _provider_payload(event: Any) -> dict[str, Any]:
 
 
 def _json_dict(raw: str | None) -> dict[str, Any]:
+    """Decode an optional JSON object, returning an empty mapping for other inputs."""
     if not raw:
         return {}
     try:
@@ -372,6 +445,7 @@ def _json_dict(raw: str | None) -> dict[str, Any]:
 
 
 def _none_or_str(value: Any) -> str | None:
+    """Normalize absent or empty provider fields to None and stringify other values."""
     if value is None:
         return None
     text = str(value)
@@ -379,6 +453,7 @@ def _none_or_str(value: Any) -> str | None:
 
 
 def _next_scan_at(binding: ExternalCalendarBindingRow, synced_at: str) -> str | None:
+    """Compute the next UTC scan time when the binding has a polling interval."""
     if not binding.sync_interval_minutes:
         return None
     parsed = datetime.fromisoformat(synced_at.replace("Z", "+00:00"))
@@ -386,6 +461,7 @@ def _next_scan_at(binding: ExternalCalendarBindingRow, synced_at: str) -> str | 
 
 
 def _utcnow_iso() -> str:
+    """Return an aware UTC timestamp for sync lifecycle bookkeeping."""
     return datetime.now(timezone.utc).isoformat()
 
 

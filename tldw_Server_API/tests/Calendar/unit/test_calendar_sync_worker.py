@@ -1,18 +1,22 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
-import asyncio
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import wraps
 from pathlib import Path
+from typing import Any
 
 import pytest
+from anyio import CancelScope
 
 from tldw_Server_API.app.core.Calendar.calendar_service import CalendarService
-from tldw_Server_API.app.core.Calendar.errors import CalendarValidationError
-from tldw_Server_API.app.core.Calendar.errors import CalendarNotFound
+from tldw_Server_API.app.core.Calendar.errors import CalendarNotFound, CalendarValidationError
 from tldw_Server_API.app.core.Calendar.providers.caldav import CalDavEvent
 from tldw_Server_API.app.core.Calendar.secret_store import CalendarSecretStore
 from tldw_Server_API.app.core.DB_Management.Calendar_DB import CalendarDatabase
@@ -143,6 +147,421 @@ async def test_sync_provider_runs_off_event_loop(calendar_db: CalendarDatabase, 
     assert call_threads and call_threads[0] != threading.get_ident()
 
 
+def _trace_db_operation(
+    monkeypatch: pytest.MonkeyPatch, operation: str, *, target: Any = CalendarDatabase
+) -> list[tuple[str, int]]:
+    """Trace synchronous DB work or full context lifetimes without replacing their work."""
+    calls: list[tuple[str, int]] = []
+    original = getattr(target, operation)
+
+    @wraps(original)
+    def traced(*args: Any, **kwargs: Any) -> Any:
+        calls.append(("enter", threading.get_ident()))
+        try:
+            return original(*args, **kwargs)
+        finally:
+            calls.append(("exit", threading.get_ident()))
+
+    @contextmanager
+    def traced_context(*args: Any, **kwargs: Any) -> Iterator[Any]:
+        calls.append(("enter", threading.get_ident()))
+        try:
+            with original(*args, **kwargs) as connection:
+                calls.append(("body", threading.get_ident()))
+                yield connection
+        finally:
+            calls.append(("exit", threading.get_ident()))
+
+    monkeypatch.setattr(
+        target, operation, traced_context if operation in {"connection", "transaction"} else traced
+    )
+    return calls
+
+
+def _sync_job(binding_id: int) -> dict[str, Any]:
+    """Build a secret-free worker input without involving the unrelated Jobs database."""
+    return {
+        "id": 42,
+        "job_type": "calendar_sync",
+        "owner_user_id": "1",
+        "payload": {
+            "binding_id": binding_id,
+            "window_start": "2026-06-01T00:00:00Z",
+            "window_end": "2026-06-08T00:00:00Z",
+            "reason": "manual",
+        },
+    }
+
+
+def _sync_event(uid: str, *, rrule: str | None = None) -> CalDavEvent:
+    """Provide a complete timed provider event for real persistence tests."""
+    return CalDavEvent(
+        uid=uid, title=uid, start_at="2026-06-05T09:00:00Z", end_at="2026-06-05T10:00:00Z",
+        location=None, description=None, rrule=rrule,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "operation",
+    [
+        "__init__",
+        "ensure_schema",
+        "get_external_binding",
+        "get_external_account",
+        "resolve_secret_ref_for_user",
+        "resolve_caldav_credentials",
+        "connection",
+        "transaction",
+        "upsert_provider_item",
+        "upsert_recurrence",
+        "delete_recurrence",
+        "_upsert_events",
+        "update_binding_sync_state",
+        "record_sync_event",
+    ],
+)
+async def test_worker_complete_db_phases_run_off_event_loop(
+    calendar_db: CalendarDatabase, monkeypatch: pytest.MonkeyPatch, operation: str
+) -> None:
+    """Every DB phase, including default schema creation and transaction exits, stays off-loop."""
+    from tldw_Server_API.app.core.Calendar import calendar_sync_worker as worker
+    from tldw_Server_API.app.core.DB_Management import Calendar_DB
+
+    fixture = _create_sync_fixture(calendar_db)
+    loop_thread = threading.get_ident()
+    provider = _FakeProvider(events=[
+        _sync_event("master", rrule="FREQ=DAILY;COUNT=2"),
+        _sync_event("single"),
+    ])
+    with monkeypatch.context() as patch:
+        patch.setattr(Calendar_DB, "_default_calendar_db_path", lambda: calendar_db.db_path)
+        target = worker if operation in {"resolve_caldav_credentials", "_upsert_events"} else CalendarDatabase
+        calls = _trace_db_operation(patch, operation, target=target)
+        result = await worker.handle_calendar_sync_job(
+            _sync_job(fixture.binding_id),
+            db=None if operation in {"__init__", "ensure_schema"} else calendar_db,
+            provider=provider,
+        )
+
+    assert calls, f"The worker did not exercise {operation}"
+    assert all(thread_id != loop_thread for _, thread_id in calls), f"{operation} ran on the event loop: {calls}"
+    assert result == {"items_seen": 2, "items_upserted": 2, "items_tombstoned": 0}
+    rows = calendar_db.list_items_for_expansion(
+        calendar_ids=[fixture.calendar_id], window_start="2026-06-01", window_end="2026-06-08"
+    )
+    assert {row.source_uid for row in rows} == {"master", "single"}
+    assert calendar_db.list_sync_events(binding_id=fixture.binding_id)[0].status == "success"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_phase", ["credentials", "provider", "import", "success_state", "success_audit"])
+async def test_worker_failure_bookkeeping_runs_off_event_loop(
+    calendar_db: CalendarDatabase, monkeypatch: pytest.MonkeyPatch, failure_phase: str
+) -> None:
+    """Failures from each protected phase retain their exception and persist off-loop diagnostics."""
+    from tldw_Server_API.app.core.Calendar import calendar_sync_worker as worker
+
+    fixture = _create_sync_fixture(calendar_db)
+    failure = RuntimeError(f"{failure_phase} unavailable")
+    provider = _FakeProvider(events=[_sync_event("event")])
+    loop_thread = threading.get_ident()
+    with monkeypatch.context() as patch:
+        state_calls = _trace_db_operation(patch, "update_binding_sync_state")
+        audit_calls = _trace_db_operation(patch, "record_sync_event")
+        if failure_phase == "provider":
+            provider.exc = failure
+        else:
+            target: Any = worker if failure_phase == "credentials" else calendar_db
+            operation = {
+                "credentials": "resolve_caldav_credentials",
+                "import": "upsert_provider_item",
+                "success_state": "update_binding_sync_state",
+                "success_audit": "record_sync_event",
+            }[failure_phase]
+            original = getattr(target, operation)
+
+            def fail_phase(*args: Any, **kwargs: Any) -> Any:
+                """Fail only the requested phase, leaving failure bookkeeping real."""
+                if kwargs.get("last_error") is not None or kwargs.get("status") == "failed":
+                    return original(*args, **kwargs)
+                raise failure
+
+            patch.setattr(target, operation, fail_phase)
+
+        with pytest.raises(RuntimeError) as raised:
+            await worker.handle_calendar_sync_job(_sync_job(fixture.binding_id), db=calendar_db, provider=provider)
+
+    assert raised.value is failure
+    assert state_calls and audit_calls
+    assert all(thread_id != loop_thread for _, thread_id in state_calls + audit_calls)
+    binding = calendar_db.get_external_binding(fixture.binding_id)
+    audit = calendar_db.list_sync_events(binding_id=fixture.binding_id)
+    assert binding.last_error == str(failure)
+    assert audit[0].status == "failed"
+    assert audit[0].error_message == str(failure)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fail_import", [False, True], ids=["success", "failure"])
+@pytest.mark.parametrize("cancel_count", [1, 3], ids=["cancel-once", "cancel-repeatedly"])
+async def test_worker_native_cancellation_drains_import_and_records_outcome(
+    calendar_db: CalendarDatabase,
+    monkeypatch: pytest.MonkeyPatch,
+    fail_import: bool,
+    cancel_count: int,
+) -> None:
+    """Native cancellation must wait for real batch commit/rollback and its sync audit."""
+    from tldw_Server_API.app.core.Calendar import calendar_sync_worker as worker
+
+    fixture = _create_sync_fixture(calendar_db)
+    failure = RuntimeError("blocked import failed")
+    loop = asyncio.get_running_loop()
+    loop_thread = threading.get_ident()
+    import_started = asyncio.Event()
+    import_returned = asyncio.Event()
+    release_import = threading.Event()
+    original = worker._upsert_events
+
+    def blocked_import(*args: Any, **kwargs: Any) -> dict[str, int]:
+        """Hold actual writes inside the outer transaction, then succeed or force rollback."""
+        result = original(*args, **kwargs)
+        loop.call_soon_threadsafe(import_started.set)
+        try:
+            if not release_import.wait(timeout=10):
+                raise TimeoutError("Test did not release the blocked import")
+            if fail_import:
+                raise failure
+            return result
+        finally:
+            loop.call_soon_threadsafe(import_returned.set)
+
+    with monkeypatch.context() as patch:
+        transactions = _trace_db_operation(patch, "transaction")
+        state_calls = _trace_db_operation(patch, "update_binding_sync_state")
+        audit_calls = _trace_db_operation(patch, "record_sync_event")
+        patch.setattr(worker, "_upsert_events", blocked_import)
+        task = asyncio.create_task(worker.handle_calendar_sync_job(
+            _sync_job(fixture.binding_id), db=calendar_db,
+            provider=_FakeProvider(events=[_sync_event("first"), _sync_event("second", rrule="FREQ=DAILY;COUNT=2")]),
+        ))
+        exited_while_blocked: list[bool] = []
+        try:
+            await asyncio.wait_for(import_started.wait(), timeout=5)
+            for _ in range(cancel_count):
+                task.cancel("native shutdown")
+                # Deliver cancellation and run any handler continuation without releasing the DB thread.
+                await asyncio.sleep(0)
+                await asyncio.sleep(0)
+                exited_while_blocked.append(task.done())
+        finally:
+            release_import.set()
+            with pytest.raises(asyncio.CancelledError) as cancelled:
+                await task
+            await asyncio.wait_for(import_returned.wait(), timeout=5)
+
+    binding = calendar_db.get_external_binding(fixture.binding_id)
+    audits = calendar_db.list_sync_events(binding_id=fixture.binding_id)
+    rows = calendar_db.list_items_for_expansion(
+        calendar_ids=[fixture.calendar_id], window_start="2026-06-01", window_end="2026-06-08"
+    )
+    assert exited_while_blocked == [False] * cancel_count, "Handler exited before its DB work finished"
+    assert str(cancelled.value) == "native shutdown"
+    assert all(thread_id != loop_thread for _, thread_id in transactions + state_calls + audit_calls)
+    assert len({thread_id for _, thread_id in transactions}) == 1
+    assert len(audits) == 1
+    if fail_import:
+        assert rows == []
+        assert binding.last_error == str(failure)
+        assert audits[0].status == "failed"
+        assert audits[0].error_message == str(failure)
+        assert cancelled.value.__cause__ is failure
+    else:
+        assert {row.source_uid for row in rows} == {"first", "second"}
+        assert binding.last_sync_at is not None
+        assert binding.last_error is None
+        assert audits[0].status == "success"
+        assert audits[0].items_upserted == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_phase", ["provider", "import"])
+async def test_worker_native_cancellation_drains_failure_bookkeeping(
+    calendar_db: CalendarDatabase, monkeypatch: pytest.MonkeyPatch, failure_phase: str
+) -> None:
+    """Repeated native cancellation cannot leave an in-flight failure audit behind."""
+    from tldw_Server_API.app.core.Calendar import calendar_sync_worker as worker
+
+    fixture = _create_sync_fixture(calendar_db)
+    failure = RuntimeError(f"{failure_phase} failed before audit")
+    provider = _FakeProvider(events=[_sync_event("event")], exc=failure if failure_phase == "provider" else None)
+    loop = asyncio.get_running_loop()
+    audit_started = asyncio.Event()
+    audit_finished = asyncio.Event()
+    release_audit = threading.Event()
+    original = calendar_db.record_sync_event
+
+    def blocked_audit(**kwargs: Any) -> Any:
+        """Pause failure bookkeeping before its real audit write."""
+        loop.call_soon_threadsafe(audit_started.set)
+        try:
+            if not release_audit.wait(timeout=10):
+                raise TimeoutError("Test did not release the blocked failure audit")
+            return original(**kwargs)
+        finally:
+            loop.call_soon_threadsafe(audit_finished.set)
+
+    def fail_import(**_kwargs: Any) -> Any:
+        """Trigger the import failure path without replacing its bookkeeping."""
+        raise failure
+
+    with monkeypatch.context() as patch:
+        patch.setattr(calendar_db, "record_sync_event", blocked_audit)
+        if failure_phase == "import":
+            patch.setattr(calendar_db, "upsert_provider_item", fail_import)
+        task = asyncio.create_task(worker.handle_calendar_sync_job(
+            _sync_job(fixture.binding_id), db=calendar_db, provider=provider,
+        ))
+        exited_while_blocked: list[bool] = []
+        try:
+            await asyncio.wait_for(audit_started.wait(), timeout=5)
+            for _ in range(3):
+                task.cancel("native shutdown during audit")
+                await asyncio.sleep(0)
+                await asyncio.sleep(0)
+                exited_while_blocked.append(task.done())
+        finally:
+            release_audit.set()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            await asyncio.wait_for(audit_finished.wait(), timeout=5)
+
+    assert exited_while_blocked == [False, False, False], "Handler exited before failure bookkeeping finished"
+    assert calendar_db.get_external_binding(fixture.binding_id).last_error == str(failure)
+    audits = calendar_db.list_sync_events(binding_id=fixture.binding_id)
+    assert len(audits) == 1
+    assert audits[0].status == "failed"
+    assert audits[0].error_message == str(failure)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fail_import", [False, True], ids=["success", "failure"])
+async def test_worker_scope_cancellation_drains_without_hot_retries(
+    calendar_db: CalendarDatabase, monkeypatch: pytest.MonkeyPatch, fail_import: bool,
+) -> None:
+    """Level-triggered cancellation waits for real DB work without spinning through shield retries."""
+    from tldw_Server_API.app.core.Calendar import calendar_sync_worker as worker
+
+    fixture = _create_sync_fixture(calendar_db)
+    failure = RuntimeError("scope-cancelled import failed")
+    loop = asyncio.get_running_loop()
+    import_started = asyncio.Event()
+    release_import = threading.Event()
+    scopes: list[CancelScope] = []
+    retries: list[None] = []
+    task: asyncio.Task[None] | None = None
+    original_import = worker._upsert_events
+    original_shield = asyncio.shield
+
+    def blocked_import(*args: Any, **kwargs: Any) -> dict[str, int]:
+        """Hold real writes until the event loop has exercised scope cancellation."""
+        result = original_import(*args, **kwargs)
+        loop.call_soon_threadsafe(import_started.set)
+        if not release_import.wait(timeout=10):
+            raise TimeoutError("Test did not release the blocked import")
+        if fail_import:
+            raise failure
+        return result
+
+    def counted_shield(awaitable: Any) -> asyncio.Future[Any]:
+        """Count actual drain attempts only after the import thread is blocked."""
+        if asyncio.current_task() is task and import_started.is_set():
+            retries.append(None)
+        return original_shield(awaitable)
+
+    async def scoped_handler() -> None:
+        """Cancel the real handler inside an AnyIO scope rather than cancelling its native task."""
+        with CancelScope() as scope:
+            scopes.append(scope)
+            await worker.handle_calendar_sync_job(
+                _sync_job(fixture.binding_id), db=calendar_db, provider=_FakeProvider(events=[_sync_event("event")]),
+            )
+
+    with monkeypatch.context() as patch:
+        patch.setattr(worker, "_upsert_events", blocked_import)
+        patch.setattr(asyncio, "shield", counted_shield)
+        task = asyncio.create_task(scoped_handler())
+        try:
+            await asyncio.wait_for(import_started.wait(), timeout=5)
+            scopes[0].cancel()
+            for _ in range(20):
+                await asyncio.sleep(0)
+            finished_early = task.done()
+            retry_count = len(retries)
+        finally:
+            release_import.set()
+            await asyncio.wait_for(task, timeout=5)
+
+    audits = calendar_db.list_sync_events(binding_id=fixture.binding_id)
+    rows = calendar_db.list_items_for_expansion(
+        calendar_ids=[fixture.calendar_id], window_start="2026-06-01", window_end="2026-06-08",
+    )
+    assert not finished_early, "Handler exited before its DB phase finished"
+    assert retry_count <= 3, f"Scope cancellation spun through {retry_count} drain attempts"
+    assert scopes[0].cancelled_caught
+    assert len(audits) == 1
+    assert audits[0].status == ("failed" if fail_import else "success")
+    assert len(rows) == (0 if fail_import else 1)
+
+
+@pytest.mark.asyncio
+async def test_worker_import_rollback_keeps_full_transaction_on_one_worker_thread(
+    calendar_db: CalendarDatabase, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A recurrence failure rolls back the complete event batch on its owning worker thread."""
+    from tldw_Server_API.app.core.Calendar.calendar_sync_worker import handle_calendar_sync_job
+
+    fixture = _create_sync_fixture(calendar_db)
+    failure = RuntimeError("recurrence write failed")
+    write_threads: list[int] = []
+    original = calendar_db.upsert_recurrence
+    loop_thread = threading.get_ident()
+
+    def fail_recurrence(**kwargs: Any) -> Any:
+        """Raise after a real nested write to prove the outer transaction rolls it back."""
+        write_threads.append(threading.get_ident())
+        original(**kwargs)
+        raise failure
+
+    with monkeypatch.context() as patch:
+        transactions = _trace_db_operation(patch, "transaction")
+        patch.setattr(calendar_db, "upsert_recurrence", fail_recurrence)
+        with pytest.raises(RuntimeError) as raised:
+            await handle_calendar_sync_job(
+                _sync_job(fixture.binding_id),
+                db=calendar_db,
+                provider=_FakeProvider(events=[
+                    _sync_event("first"),
+                    _sync_event("second", rrule="FREQ=DAILY;COUNT=2"),
+                ]),
+            )
+
+    assert raised.value is failure
+    assert write_threads and write_threads[0] != loop_thread
+    # The batch includes item writes, nested recurrence work, and outer rollback before bookkeeping.
+    depth = 0
+    for label, thread_id in transactions:
+        assert thread_id == write_threads[0]
+        depth += 1 if label == "enter" else -1 if label == "exit" else 0
+        if depth == 0:
+            break
+    assert depth == 0
+    assert calendar_db.list_items_for_expansion(
+        calendar_ids=[fixture.calendar_id], window_start="2026-06-01", window_end="2026-06-08"
+    ) == []
+    assert calendar_db.list_sync_events(binding_id=fixture.binding_id)[0].status == "failed"
+
+
 @pytest.mark.asyncio
 async def test_scheduler_skips_disappeared_account_and_continues(
     calendar_db: CalendarDatabase, jobs_manager: JobManager, monkeypatch: pytest.MonkeyPatch
@@ -183,8 +602,8 @@ async def test_scheduler_retries_after_scan_failure(monkeypatch: pytest.MonkeyPa
 
 
 def test_shared_credentials_enforce_scope_and_override_precedence(calendar_db: CalendarDatabase) -> None:
-    from tldw_Server_API.app.core.Calendar.provider_operations import resolve_caldav_credentials
     from tldw_Server_API.app.core.Calendar.errors import CalendarPermissionDenied
+    from tldw_Server_API.app.core.Calendar.provider_operations import resolve_caldav_credentials
 
     fixture = _create_sync_fixture(calendar_db)
     with pytest.raises(CalendarPermissionDenied):

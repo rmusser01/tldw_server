@@ -1,3 +1,5 @@
+"""Calendar API payloads, recurrence validation, and credential-free row responses."""
+
 from __future__ import annotations
 
 import json
@@ -33,6 +35,7 @@ CalendarSourceOwner = Literal["tldw", "provider", "linked_projection"]
 
 
 def _json_value(raw: str | None, default: Any) -> Any:
+    """Decode persisted JSON, returning the caller's fallback for null or invalid JSON."""
     if raw is None:
         return default
     try:
@@ -42,6 +45,8 @@ def _json_value(raw: str | None, default: Any) -> Any:
 
 
 class CalendarCreateRequest(BaseModel):
+    """Calendar creation fields with bounded labels and no unknown properties."""
+
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(..., min_length=1, max_length=200)
@@ -55,6 +60,8 @@ class CalendarCreateRequest(BaseModel):
 
 
 class CalendarResponse(BaseModel):
+    """Persisted calendar identity, ownership, display settings, and archive state."""
+
     id: int
     tenant_id: str
     owner_user_id: int
@@ -72,6 +79,7 @@ class CalendarResponse(BaseModel):
 
     @classmethod
     def from_row(cls, row: CalendarRow) -> CalendarResponse:
+        """Build a response, treating absent or malformed reminder-policy JSON as null."""
         return cls(
             id=row.id,
             tenant_id=row.tenant_id,
@@ -91,11 +99,15 @@ class CalendarResponse(BaseModel):
 
 
 class CalendarListResponse(BaseModel):
+    """Calendar collection with a nonnegative total independent of the returned page."""
+
     items: list[CalendarResponse] = Field(default_factory=list)
     total: int = Field(..., ge=0)
 
 
 class CalendarMembershipCreateRequest(BaseModel):
+    """Grant a supported calendar role to a user or organization-role principal."""
+
     model_config = ConfigDict(extra="forbid")
 
     principal_type: CalendarPrincipalType
@@ -104,6 +116,8 @@ class CalendarMembershipCreateRequest(BaseModel):
 
 
 class CalendarMembershipResponse(BaseModel):
+    """Persisted role assignment for one principal within a calendar."""
+
     id: int
     calendar_id: int
     principal_type: str
@@ -114,19 +128,26 @@ class CalendarMembershipResponse(BaseModel):
 
     @classmethod
     def from_row(cls, row: CalendarMembershipRow) -> CalendarMembershipResponse:
+        """Validate and expose the membership row's identity, role, and timestamps."""
         return cls(**row.__dict__)
 
 
 class CalendarMembershipListResponse(BaseModel):
+    """Membership collection with a nonnegative assignment count."""
+
     items: list[CalendarMembershipResponse] = Field(default_factory=list)
     total: int = Field(..., ge=0)
 
 
 class CalendarMembershipDeleteResponse(BaseModel):
+    """Nonnegative count of memberships removed by a delete operation."""
+
     removed: int = Field(..., ge=0)
 
 
 class CalendarRecurrenceRequest(BaseModel):
+    """Local recurrence rule and ISO inclusion/exclusion dates with an optional IANA zone."""
+
     model_config = ConfigDict(extra="forbid")
 
     rrule: str | None = None
@@ -136,6 +157,7 @@ class CalendarRecurrenceRequest(BaseModel):
 
     @model_validator(mode="after")
     def _validate_rrule(self) -> CalendarRecurrenceRequest:
+        """Return this request or raise ValueError for unsupported rules, dates, or zones."""
         if self.rrule:
             try:
                 LocalRecurrenceRule.from_rrule(self.rrule)
@@ -154,6 +176,8 @@ class CalendarRecurrenceRequest(BaseModel):
 
 
 class CalendarRecurrenceResponse(BaseModel):
+    """Persisted recurrence definition with decoded date lists for a calendar item."""
+
     id: int
     calendar_item_id: int
     rrule: str | None = None
@@ -165,6 +189,7 @@ class CalendarRecurrenceResponse(BaseModel):
 
     @classmethod
     def from_row(cls, row: CalendarRecurrenceRow) -> CalendarRecurrenceResponse:
+        """Build recurrence output, mapping missing or malformed date-list JSON to null."""
         return cls(
             id=row.id,
             calendar_item_id=row.calendar_item_id,
@@ -178,6 +203,8 @@ class CalendarRecurrenceResponse(BaseModel):
 
 
 class CalendarItemCreateRequest(BaseModel):
+    """New event or todo fields with kind-specific minimum scheduling requirements."""
+
     model_config = ConfigDict(extra="forbid")
 
     calendar_id: int
@@ -197,6 +224,7 @@ class CalendarItemCreateRequest(BaseModel):
 
     @model_validator(mode="after")
     def _validate_item_time(self) -> CalendarItemCreateRequest:
+        """Return this request; raise ValueError when the item kind lacks a required time."""
         if self.kind == "event" and not self.start_at:
             raise ValueError("Calendar events require start_at")
         if self.kind == "todo" and not (self.start_at or self.due_at):
@@ -205,6 +233,8 @@ class CalendarItemCreateRequest(BaseModel):
 
 
 class CalendarItemUpdateRequest(BaseModel):
+    """Partial item mutation preserving the distinction between omitted and null fields."""
+
     model_config = ConfigDict(extra="forbid")
 
     kind: CalendarItemKind | None = None
@@ -222,6 +252,7 @@ class CalendarItemUpdateRequest(BaseModel):
     recurrence: CalendarRecurrenceRequest | None = None
 
     def service_updates(self) -> dict[str, Any]:
+        """Return supplied scalar updates with JSON storage keys; handle recurrence separately."""
         updates = self.model_dump(exclude_unset=True, exclude={"recurrence"})
         if "local_tags" in updates:
             updates["local_tags_json"] = updates.pop("local_tags")
@@ -231,10 +262,14 @@ class CalendarItemUpdateRequest(BaseModel):
 
 
 class CalendarItemDeleteResponse(BaseModel):
+    """Whether a calendar item was soft-deleted."""
+
     deleted: bool
 
 
 class CalendarItemResponse(BaseModel):
+    """Item content and provenance with decoded local metadata and optional recurrence."""
+
     id: int
     calendar_id: int
     kind: str
@@ -271,6 +306,7 @@ class CalendarItemResponse(BaseModel):
         row: CalendarItemRow,
         recurrence: CalendarRecurrenceRow | None = None,
     ) -> CalendarItemResponse:
+        """Build item output with safe JSON fallbacks and an optional recurrence response."""
         return cls(
             id=row.id,
             calendar_id=row.calendar_id,
@@ -305,6 +341,8 @@ class CalendarItemResponse(BaseModel):
 
 
 class CalendarAnnotationCreateRequest(BaseModel):
+    """Nonempty annotation text and optional local tags; unknown fields are rejected."""
+
     model_config = ConfigDict(extra="forbid")
 
     body: str = Field(..., min_length=1)
@@ -312,12 +350,16 @@ class CalendarAnnotationCreateRequest(BaseModel):
 
 
 class CalendarLocalTagsUpdateRequest(BaseModel):
+    """Replace the actor's local tag overlay, allowing an empty list to clear tags."""
+
     model_config = ConfigDict(extra="forbid")
 
     tags: list[str] = Field(default_factory=list)
 
 
 class CalendarAnnotationResponse(BaseModel):
+    """Authored item annotation with decoded tags and soft-deletion state."""
+
     id: int
     calendar_item_id: int
     author_user_id: int
@@ -329,6 +371,7 @@ class CalendarAnnotationResponse(BaseModel):
 
     @classmethod
     def from_row(cls, row: CalendarAnnotationRow) -> CalendarAnnotationResponse:
+        """Build annotation output, defaulting absent or malformed tags JSON to an empty list."""
         return cls(
             id=row.id,
             calendar_item_id=row.calendar_item_id,
@@ -342,6 +385,8 @@ class CalendarAnnotationResponse(BaseModel):
 
 
 class CalendarLinkCreateRequest(BaseModel):
+    """Bounded target identity and optional display metadata for an item context link."""
+
     model_config = ConfigDict(extra="forbid")
 
     target_type: str = Field(..., min_length=1, max_length=100)
@@ -352,6 +397,8 @@ class CalendarLinkCreateRequest(BaseModel):
 
 
 class CalendarLinkResponse(BaseModel):
+    """Persisted item context link with decoded target metadata."""
+
     id: int
     calendar_item_id: int
     target_type: str
@@ -364,6 +411,7 @@ class CalendarLinkResponse(BaseModel):
 
     @classmethod
     def from_row(cls, row: CalendarLinkRow) -> CalendarLinkResponse:
+        """Build link output, defaulting absent or malformed metadata JSON to an empty mapping."""
         return cls(
             id=row.id,
             calendar_item_id=row.calendar_item_id,
@@ -378,15 +426,21 @@ class CalendarLinkResponse(BaseModel):
 
 
 class CalendarLinkListResponse(BaseModel):
+    """Context-link collection and nonnegative total."""
+
     items: list[CalendarLinkResponse] = Field(default_factory=list)
     total: int = Field(..., ge=0)
 
 
 class CalendarLinkDeleteResponse(BaseModel):
+    """Nonnegative count of context links physically removed."""
+
     removed: int = Field(..., ge=0)
 
 
 class CalendarItemCopyRequest(BaseModel):
+    """Optional destination calendar and bounded replacement title for a local item copy."""
+
     model_config = ConfigDict(extra="forbid")
 
     target_calendar_id: int | None = None
@@ -394,6 +448,8 @@ class CalendarItemCopyRequest(BaseModel):
 
 
 class CalendarViewLinkResponse(BaseModel):
+    """Source-navigation target for a linked calendar projection."""
+
     target_type: str
     target_id: str
     label: str | None = None
@@ -402,6 +458,8 @@ class CalendarViewLinkResponse(BaseModel):
 
 
 class CalendarViewItemResponse(BaseModel):
+    """Expanded occurrence or linked projection with stable identity and read-only context."""
+
     id: str
     title: str
     kind: CalendarItemKind | str
@@ -425,6 +483,8 @@ class CalendarViewItemResponse(BaseModel):
 
 
 class CalendarViewResponse(BaseModel):
+    """Windowed agenda results with partial-result state and expansion warnings."""
+
     start_at: str
     end_at: str
     items: list[CalendarViewItemResponse] = Field(default_factory=list)
@@ -433,10 +493,14 @@ class CalendarViewResponse(BaseModel):
 
 
 class CalendarReminderCreateRequest(ReminderTaskCreateRequest):
+    """Reminder-task creation fields anchored to a persisted calendar item."""
+
     calendar_item_id: int
 
 
 class CalendarReminderProjectionResponse(BaseModel):
+    """Fixed calendar-item linkage and next execution time for a reminder projection."""
+
     source_owner: Literal["linked_projection"] = CALENDAR_SOURCE_OWNER_LINKED_PROJECTION
     link_type: Literal["calendar_item"] = "calendar_item"
     link_id: str
@@ -444,12 +508,16 @@ class CalendarReminderProjectionResponse(BaseModel):
 
 
 class CalendarReminderResponse(BaseModel):
+    """Created scheduled reminder and its calendar projection for the source item."""
+
     calendar_item_id: int
     scheduled_task: ScheduledTask
     projection: CalendarReminderProjectionResponse
 
 
 class ExternalCalendarAccountCreateRequest(BaseModel):
+    """Provider account setup with bounded credentials or an existing opaque secret reference."""
+
     model_config = ConfigDict(extra="forbid")
 
     provider: str = Field(..., min_length=1, max_length=100)
@@ -463,6 +531,8 @@ class ExternalCalendarAccountCreateRequest(BaseModel):
 
 
 class CalDavAccountVerifyRequest(BaseModel):
+    """Optional bounded credential overrides for verifying an existing CalDAV account."""
+
     model_config = ConfigDict(extra="forbid")
 
     server_url: str | None = Field(default=None, max_length=2048)
@@ -472,6 +542,8 @@ class CalDavAccountVerifyRequest(BaseModel):
 
 
 class CalDavAccountVerifyResponse(BaseModel):
+    """Verification outcome and optional provider error for a specific account."""
+
     account_id: int
     verified: bool
     status: str | None = None
@@ -479,11 +551,15 @@ class CalDavAccountVerifyResponse(BaseModel):
 
 
 class CalDavAccountMutationResponse(BaseModel):
+    """Revocation or deletion outcome without returning account credentials."""
+
     revoked: bool | None = None
     deleted: bool | None = None
 
 
 class ExternalCalendarAccountResponse(BaseModel):
+    """Public account state excluding both credential payloads and secret references."""
+
     id: int
     tenant_id: str
     user_id: int
@@ -498,6 +574,7 @@ class ExternalCalendarAccountResponse(BaseModel):
 
     @classmethod
     def from_row(cls, row: ExternalCalendarAccountRow) -> ExternalCalendarAccountResponse:
+        """Build credential-free account output with nullable decoded account metadata."""
         return cls(
             id=row.id,
             tenant_id=row.tenant_id,
@@ -514,21 +591,29 @@ class ExternalCalendarAccountResponse(BaseModel):
 
 
 class ExternalCalendarAccountListResponse(BaseModel):
+    """Credential-free account collection with a nonnegative total."""
+
     items: list[ExternalCalendarAccountResponse] = Field(default_factory=list)
     total: int = Field(..., ge=0)
 
 
 class ExternalCalendarDiscoveryItem(BaseModel):
+    """Discovered remote calendar identity, display name, and provider capabilities."""
+
     remote_calendar_id: str
     remote_display_name: str | None = None
     provider_capabilities: dict[str, Any] | None = None
 
 
 class ExternalCalendarDiscoveryResponse(BaseModel):
+    """Remote calendars discovered for an external account."""
+
     items: list[ExternalCalendarDiscoveryItem] = Field(default_factory=list)
 
 
 class ExternalCalendarBindingCreateRequest(BaseModel):
+    """Bind a remote calendar with a positive sync interval and bounded scan windows."""
+
     model_config = ConfigDict(extra="forbid")
 
     account_id: int
@@ -543,6 +628,8 @@ class ExternalCalendarBindingCreateRequest(BaseModel):
 
 
 class ExternalCalendarBindingUpdateRequest(BaseModel):
+    """Partial sync-policy update with the same interval and scan-window bounds as creation."""
+
     model_config = ConfigDict(extra="forbid")
 
     sync_enabled: bool | None = None
@@ -552,6 +639,7 @@ class ExternalCalendarBindingUpdateRequest(BaseModel):
     provider_capabilities: dict[str, Any] | None = None
 
     def service_updates(self) -> dict[str, Any]:
+        """Return only supplied binding updates, translating capabilities to the JSON storage key."""
         updates = self.model_dump(exclude_unset=True)
         if "provider_capabilities" in updates:
             updates["provider_capabilities_json"] = updates.pop("provider_capabilities")
@@ -559,6 +647,8 @@ class ExternalCalendarBindingUpdateRequest(BaseModel):
 
 
 class ExternalCalendarBindingResponse(BaseModel):
+    """Remote binding identity, sync policy, progress, errors, and lifecycle timestamps."""
+
     id: int
     account_id: int
     calendar_id: int
@@ -580,6 +670,7 @@ class ExternalCalendarBindingResponse(BaseModel):
 
     @classmethod
     def from_row(cls, row: ExternalCalendarBindingRow) -> ExternalCalendarBindingResponse:
+        """Build binding output, mapping absent or malformed capabilities JSON to null."""
         return cls(
             id=row.id,
             account_id=row.account_id,
@@ -603,11 +694,15 @@ class ExternalCalendarBindingResponse(BaseModel):
 
 
 class ExternalCalendarBindingListResponse(BaseModel):
+    """External binding collection with a nonnegative total."""
+
     items: list[ExternalCalendarBindingResponse] = Field(default_factory=list)
     total: int = Field(..., ge=0)
 
 
 class CalendarSyncEventResponse(BaseModel):
+    """Recorded sync outcome, item counters, error details, and decoded diagnostic metadata."""
+
     id: int
     binding_id: int | None = None
     account_id: int | None = None
@@ -624,6 +719,7 @@ class CalendarSyncEventResponse(BaseModel):
 
     @classmethod
     def from_row(cls, row: CalendarSyncEventRow) -> CalendarSyncEventResponse:
+        """Build sync-event output, mapping missing or malformed diagnostic JSON to null."""
         return cls(
             id=row.id,
             binding_id=row.binding_id,
@@ -642,11 +738,15 @@ class CalendarSyncEventResponse(BaseModel):
 
 
 class CalendarSyncEventListResponse(BaseModel):
+    """Sync-event history page with a nonnegative total."""
+
     items: list[CalendarSyncEventResponse] = Field(default_factory=list)
     total: int = Field(..., ge=0)
 
 
 class CalendarSyncTriggerRequest(BaseModel):
+    """Manual sync reason and optional nonempty window-boundary overrides."""
+
     model_config = ConfigDict(extra="forbid")
 
     reason: str = Field(default="manual", min_length=1, max_length=64)
@@ -655,6 +755,8 @@ class CalendarSyncTriggerRequest(BaseModel):
 
 
 class CalendarSyncTriggerResponse(BaseModel):
+    """Binding sync acceptance state with optional queued-job and deduplication identifiers."""
+
     binding_id: int
     queued: bool = False
     status: str

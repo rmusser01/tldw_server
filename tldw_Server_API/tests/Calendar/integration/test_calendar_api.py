@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user
 from tldw_Server_API.app.api.v1.schemas.scheduled_tasks_control_plane_schemas import ScheduledTask
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+from tldw_Server_API.app.core.Calendar.errors import CalendarValidationError
 from tldw_Server_API.app.core.DB_Management.Calendar_DB import CalendarDatabase
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
@@ -339,6 +340,83 @@ def _set_tenant(client: TestClient, tenant_id: str | None) -> None:
     client.current_tenant_id["value"] = tenant_id  # type: ignore[attr-defined]
 
 
+@pytest.mark.parametrize("claimed_orgs, membership", [
+    ([], {"org_id": 42, "role": "member", "status": "active"}),
+    ([42], {"org_id": 42, "role": "member", "status": "inactive"}),
+    ([42], {"org_id": 43, "role": "member", "status": "active"}),
+])
+def test_create_org_calendar_requires_active_authenticated_membership(
+    calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
+    monkeypatch: pytest.MonkeyPatch, claimed_orgs: list[int], membership: dict[str, Any],
+) -> None:
+    """Neither an org claim nor an unrelated/inactive DB membership grants creation."""
+    from tldw_Server_API.app.api.v1.endpoints import calendar as endpoint
+
+    client, db, _reminders = calendar_api_client
+    client.current_org_ids["value"] = claimed_orgs  # type: ignore[attr-defined]
+
+    async def memberships(user_id: int) -> list[dict[str, Any]]:
+        return [membership]
+
+    monkeypatch.setattr(endpoint, "list_org_memberships_for_user", memberships)
+    result = client.post("/api/v1/calendar/calendars", json={"name": "Forged org", "org_id": 42})
+    assert result.status_code == 403, result.text
+    assert db.list_calendars(tenant_id="default") == []
+
+
+def test_create_org_calendar_allows_active_authenticated_member(
+    calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Creation membership is independent of a specific calendar access role."""
+    from tldw_Server_API.app.api.v1.endpoints import calendar as endpoint
+
+    client, _db, _reminders = calendar_api_client
+    client.current_org_ids["value"] = [42]  # type: ignore[attr-defined]
+
+    async def memberships(user_id: int) -> list[dict[str, Any]]:
+        return [{"org_id": 42, "role": "member", "status": "active"}]
+
+    monkeypatch.setattr(endpoint, "list_org_memberships_for_user", memberships)
+    result = client.post("/api/v1/calendar/calendars", json={"name": "Verified org", "org_id": 42})
+    assert result.status_code == 201, result.text
+    assert result.json()["org_id"] == 42
+
+
+@pytest.mark.parametrize("port", ["bad", "65536", "0"])
+@pytest.mark.parametrize("url_field", ["server_url", "account_metadata"])
+def test_create_caldav_account_validates_url_before_persistence(
+    calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub], port: str, url_field: str,
+) -> None:
+    """Bad account metadata cannot be saved and later cause a binding-time 500."""
+    client, db, _reminders = calendar_api_client
+    url = f"https://example.test:{port}/dav/"
+    result = client.post("/api/v1/calendar/external/accounts", json={
+        "provider": "caldav", "display_name": "Bad port",
+        url_field: {"server_url": url} if url_field == "account_metadata" else url,
+    })
+    assert result.status_code == 400, result.text
+    assert db.list_external_accounts_for_user(user_id=1, tenant_id="default") == []
+
+
+@pytest.mark.parametrize("remote_url", ["https://[invalid/cal/", "//[invalid/cal/"])
+def test_create_binding_rejects_malformed_collection_authority(
+    calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub], remote_url: str,
+) -> None:
+    """URL resolution failures return a client error without persisting a binding."""
+    client, db, _reminders = calendar_api_client
+    calendar = _create_calendar(client, name="Collection validation")
+    account = client.post("/api/v1/calendar/external/accounts", json={
+        "provider": "caldav", "display_name": "Valid account", "server_url": "https://example.test/dav/",
+    })
+    assert account.status_code == 201, account.text
+    result = client.post("/api/v1/calendar/external/bindings", json={
+        "account_id": account.json()["id"], "calendar_id": calendar["id"], "remote_calendar_id": remote_url,
+    })
+    assert result.status_code == 400, result.text
+    assert result.json()["detail"]["code"] == "calendar_validation_error"
+    assert db.list_external_bindings_for_account(account.json()["id"]) == []
+
+
 @pytest.mark.parametrize(
     "membership, expected_status",
     [
@@ -354,6 +432,11 @@ def test_api_resolves_only_active_scoped_org_roles(
     from tldw_Server_API.app.api.v1.endpoints import calendar as endpoint
 
     client, _db, _reminders = calendar_api_client
+    async def creator_memberships(user_id: int) -> list[dict[str, Any]]:
+        return [{"org_id": 42, "role": "member", "status": "active"}] if user_id == 1 else []
+
+    monkeypatch.setattr(endpoint, "list_org_memberships_for_user", creator_memberships)
+    client.current_org_ids["value"] = [42]
     calendar = _create_calendar(client, org_id=42, visibility="shared")
     grant = client.post(
         f"/api/v1/calendar/calendars/{calendar['id']}/memberships",
@@ -436,6 +519,7 @@ def test_calendar_exceptions_share_central_exports() -> None:
 
 def test_calendar_api_module_and_handlers_document_contracts() -> None:
     import inspect
+
     from tldw_Server_API.app.api.v1.endpoints import calendar as endpoint
 
     assert endpoint.__doc__
@@ -863,8 +947,16 @@ def test_create_calendar_reminder_calls_existing_reminder_primitive(
 
 def test_personal_provider_imports_are_hidden_from_shared_org_queries_until_copied(
     calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from tldw_Server_API.app.api.v1.endpoints import calendar as endpoint
+
     client, db, _reminder_service = calendar_api_client
+    async def memberships(user_id: int) -> list[dict[str, Any]]:
+        return [{"org_id": 42, "role": "member", "status": "active"}] if user_id == 1 else []
+
+    monkeypatch.setattr(endpoint, "list_org_memberships_for_user", memberships)
+    client.current_org_ids["value"] = [42]
     _personal_calendar, provider_item = _create_provider_item(db, owner_user_id=1)
     org_calendar = _create_calendar(client, name="Org", org_id=42, visibility="shared")
     db.create_membership(
@@ -1020,7 +1112,7 @@ def test_caldav_account_revoke_and_delete_clear_secret_material(
 
     assert response.status_code == 200, response.text
     assert response.json()[response_key] is True
-    with pytest.raises(Exception):
+    with pytest.raises(CalendarValidationError):
         db.resolve_secret_ref(account.secret_ref)
 
 
