@@ -7,10 +7,8 @@ from pathlib import Path
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-
 from Helper_Scripts.build_app_bundle import build_candidate
 from Helper_Scripts.verify_app_bundle import candidate_is_promotable
-
 
 PLATFORMS = ("linux/amd64", "linux/arm64")
 
@@ -544,7 +542,7 @@ def test_candidate_failure_invalidates_qualified_evidence_and_signature(
     docker.write_text(f"#!/bin/bash\nexit {int(cleanup_failed)}\n")
     docker.chmod(0o700)
     evidence = tmp_path / "evidence.json"
-    evidence.write_text(json.dumps({"platforms": {"linux/arm64": {gate: True for gate in ("G2", "G4", "G10", "G12")}}}))
+    evidence.write_text(json.dumps({"platforms": {"linux/arm64": dict.fromkeys(("G2", "G4", "G10", "G12"), True)}}))
     bundle = tmp_path / "bundle"
     bundle.mkdir()
     (bundle / "manifest.json").write_text("public-provisional")
@@ -600,3 +598,104 @@ def test_candidate_refuses_existing_output_without_changing_recovery_state(tmp_p
     assert result.returncode == 2
     assert result.stderr.strip() == "Candidate output must be a new private directory."
     assert sentinel.read_text() == "previous-private-recovery-fixture"
+
+
+def test_built_backend_qualification_supplies_excluded_setup_test_readonly(tmp_path: Path) -> None:
+    """A clean runtime layout needs one test mount without replacing built source."""
+    import json
+    import os
+    import shutil
+    import subprocess
+
+    root = Path(__file__).resolve().parents[3]
+    excluded = "tldw_Server_API/tests/"
+    ignore_rules = (root / ".dockerignore").read_text().splitlines()
+    assert excluded in ignore_rules
+    assert not any(rule.startswith("!" + excluded) for rule in ignore_rules)
+    dockerfile = (root / "Dockerfiles/Dockerfile.prod").read_text()
+    assert "COPY --chown=appuser:appuser tldw_Server_API /app/tldw_Server_API" in dockerfile
+    setup_test = "tldw_Server_API/tests/Setup/test_managed_gateway_setup.py"
+    mcp_test = "tldw_Server_API/app/core/MCP_unified/tests/test_managed_gateway_ingress.py"
+    mcp_support = "tldw_Server_API/app/core/MCP_unified/tests/support.py"
+    production = "tldw_Server_API/app/api/v1/endpoints/setup.py"
+    image = tmp_path / "clean-runtime"
+    # Reproduce exactly the relevant COPY/exclusion distinction, without a build.
+    for relative in (setup_test, mcp_test, mcp_support, production):
+        if relative.startswith(excluded):
+            continue
+        assert not any(
+            relative.startswith(rule.rstrip("/") + "/")
+            for rule in ignore_rules
+            if rule.endswith("/") and not rule.startswith("#")
+        )
+        target = image / "app" / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(root / relative, target)
+    assert not (image / "app" / setup_test).exists()
+    assert (image / "app" / mcp_test).is_file()
+    assert (image / "app" / mcp_support).is_file()
+
+    shell = (root / "Helper_Scripts/qualify_app_bundle_candidate.sh").read_text()
+    block = shell[
+        shell.index("# Exercise focused security tests") : shell.index("export TLDW_CANDIDATE_PYTHON_VERSION")
+    ]
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    capture = tmp_path / "mounts.json"
+    docker = bin_dir / "docker"
+    docker.write_text(
+        f"""#!{os.sys.executable}
+import json, sys
+from pathlib import Path
+args=sys.argv[1:]
+image=Path({str(image)!r})
+root=Path({str(root)!r})
+setup={setup_test!r}
+mcp={mcp_test!r}
+production={production!r}
+if args[0]=='create':
+    mounts=[]
+    for i, arg in enumerate(args):
+        if arg=='--mount':
+            values=args[i+1].split(',')
+            fields=dict(item.split('=',1) for item in values if '=' in item)
+            if 'readonly' not in values: sys.exit(1)
+            mounts.append(fields)
+    expected={{'/app/Dockerfiles/app-bundle': str(root/'Dockerfiles/app-bundle'), '/app/'+setup: str(root/setup)}}
+    if {{item['target']:item['source'] for item in mounts}} != expected: sys.exit(1)
+    def readable(target):
+        for mount in mounts:
+            destination=mount['target']
+            if target==destination or target.startswith(destination+'/'):
+                return (Path(mount['source'])/target.removeprefix(destination).lstrip('/')).is_file()
+        return (image/target.lstrip('/')).is_file()
+    if not all(readable('/app/'+item) for item in (setup,mcp,production)): sys.exit(1)
+    if not readable('/app/Dockerfiles/app-bundle/compose.yaml'): sys.exit(1)
+    if not (image/'app'/production).is_file(): sys.exit(1)
+    command=args[args.index('-c')+1]
+    if setup not in command or mcp not in command: sys.exit(1)
+    Path({str(capture)!r}).write_text(json.dumps(mounts))
+    print({'d' * 64!r})
+elif args[0]=='inspect': print('0')
+elif args[0] not in ('start','rm'): sys.exit(1)
+"""
+    )
+    docker.chmod(0o700)
+    output = tmp_path / "private-output"
+    output.mkdir()
+    harness = tmp_path / "qualification.sh"
+    harness.write_text(
+        f"set -Eeuo pipefail\noutput_dir=$1\nplatform=linux/arm64\nbackend_tag=localhost:15000/tldw/backend:candidate\n{block}"
+    )
+    result = subprocess.run(
+        ["bash", str(harness), str(output)],
+        cwd=root,
+        env={**os.environ, "PATH": str(bin_dir) + ":" + os.environ["PATH"]},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    mounts = json.loads(capture.read_text())
+    assert len(mounts) == 2
+    assert (image / "app" / production).read_bytes() == (root / production).read_bytes()

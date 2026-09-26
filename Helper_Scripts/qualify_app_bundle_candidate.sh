@@ -190,10 +190,12 @@ docker run --rm --platform "$platform" --entrypoint sh "$control_tag" -c \
   'test ! -e /opt/tldw/signing.key && test -s /opt/tldw/trusted-keys/ci-test.pub'
 
 # Exercise focused security tests on the actual built backend dependencies.
-# This one read-only mount supplies the Compose contract omitted from the image.
+# Narrow read-only mounts supply the Compose contract and the excluded setup
+# test only; production source and MCP tests remain from the built image.
 echo 'Focused built-backend qualification started.'
 if ! backend_test_id=$(docker create --platform "$platform" --entrypoint sh \
   --mount "type=bind,source=$(pwd)/Dockerfiles/app-bundle,target=/app/Dockerfiles/app-bundle,readonly" \
+  --mount "type=bind,source=$(pwd)/tldw_Server_API/tests/Setup/test_managed_gateway_setup.py,target=/app/tldw_Server_API/tests/Setup/test_managed_gateway_setup.py,readonly" \
   --env PYTHONPATH=/app --env TEST_MODE=false \
   --env SINGLE_USER_API_KEY=ci-managed-dummy-key-with-at-least-32-characters \
   "$backend_tag" -c '
