@@ -230,3 +230,33 @@ test('proxies WebSocket upgrades through the authenticated backend route', async
   assert.match(chunk.toString(), /^HTTP\/1\.1 101 Switching Protocols/);
   assert.equal(upstreamHeaders['x-tldw-gateway-hop'], undefined);
 });
+
+test('injects the private setup capability only on canonical setup API paths', async (t) => {
+  const { publicOrigin } = await fixture(t);
+  for (const path of ['/api/v1/setup', '/api/v1/setup/first-run/metadata', '/api/v1/setup/config?first=1']) {
+    const response = await fetch(`${publicOrigin}${path}`, {
+      headers: { origin: publicOrigin, 'x-tldw-gateway-hop': 'forged',
+        forwarded: 'for=attacker', 'x-real-ip': '8.8.8.8', 'x-forwarded-for': '8.8.8.8',
+        'x-forwarded-host': 'attacker', 'x-forwarded-prefix': '/evil' },
+    });
+    const record = await response.json();
+    assert.equal(record.headers['x-tldw-gateway-hop'], HOP_SECRET);
+    assert.equal(record.headers['x-forwarded-for'], '127.0.0.1');
+    assert.equal(record.headers['x-forwarded-host'], new URL(publicOrigin).host);
+    assert.equal(record.headers['x-forwarded-port'], new URL(publicOrigin).port);
+    assert.equal(record.headers['x-forwarded-proto'], 'http');
+    assert.equal(record.headers.forwarded, undefined);
+    assert.equal(record.headers['x-real-ip'], undefined);
+    assert.equal(record.headers['x-forwarded-prefix'], undefined);
+  }
+  const duplicate = await rawRequest(`${publicOrigin}/api/v1/setup/first-run/state`, {
+    'x-tldw-gateway-hop': ['forged', 'again'], 'x-forwarded-for': ['8.8.8.8', '9.9.9.9'],
+  });
+  const cleaned = JSON.parse(duplicate.body).headers;
+  assert.equal(cleaned['x-tldw-gateway-hop'], HOP_SECRET);
+  assert.equal(cleaned['x-forwarded-for'], '127.0.0.1');
+  for (const path of ['/api/v1/media', '/api/v1/setup-other', '/api/v1/setup/%2fconfig', '/api/v1/setup//config']) {
+    const response = await rawRequest(`${publicOrigin}${path}`, { 'x-tldw-gateway-hop': 'forged' });
+    assert.equal(JSON.parse(response.body).headers['x-tldw-gateway-hop'], undefined);
+  }
+});

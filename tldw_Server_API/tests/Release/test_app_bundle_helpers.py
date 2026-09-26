@@ -217,3 +217,14 @@ def test_compose_uses_cookies_on_its_http_loopback_gateway() -> None:
     services = yaml.safe_load((BUNDLE / "compose.yaml").read_text())["services"]
 
     assert services["app"]["environment"].get("SESSION_COOKIE_SECURE") == "0"
+
+
+def test_compose_binds_managed_setup_and_cookie_origins_to_persisted_public_port() -> None:
+    services = yaml.safe_load((BUNDLE / "compose.yaml").read_text())["services"]
+    backend = services["app"]["environment"]
+    assert backend.get("TLDW_MANAGED_GATEWAY") == "1"
+    assert backend.get("TLDW_GATEWAY_HOP_SECRET") == services["gateway"]["environment"]["TLDW_GATEWAY_HOP_SECRET"]
+    assert backend.get("TLDW_MANAGED_PUBLIC_ORIGIN") == "http://127.0.0.1:${TLDW_PUBLIC_PORT:?Public port is required}"
+    assert backend.get("ALLOWED_ORIGINS") == backend["TLDW_MANAGED_PUBLIC_ORIGIN"]
+    assert "TLDW_SETUP_ALLOW_REMOTE" not in backend
+    assert "FORWARDED_ALLOW_IPS" not in backend

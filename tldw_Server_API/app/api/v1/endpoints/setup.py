@@ -30,6 +30,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
 from tldw_Server_API.app.api.v1.API_Deps.setup_deps import (
     effective_setup_proxy_client_ip,
     has_setup_proxy_headers,
+    is_managed_gateway_setup_request,
     require_local_setup_access,
     require_shared_audio_installer_access,
     should_trust_setup_proxy_headers,
@@ -805,6 +806,8 @@ def _classify_source_host(host: str | None) -> str:
 
 
 def _classify_browser_access(request: Request) -> str:
+    if is_managed_gateway_setup_request(request):
+        return "local"
     client_host = request.client.host if request.client else None
     client_access = _classify_source_host(client_host)
     if not has_setup_proxy_headers(request) or not should_trust_setup_proxy_headers(request):

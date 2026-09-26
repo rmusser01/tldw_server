@@ -6,6 +6,7 @@ import { createProxyMiddleware } from 'http-proxy-middleware';
 import { routeForPath } from './routes.mjs';
 
 const PHASES = new Set(['starting', 'ready', 'maintenance', 'error']);
+const SETUP_API_PATH = /^\/api\/v1\/setup(?:\/[a-z0-9_-]+)*$/;
 
 const canonicalOrigin = (value, label) => {
   const parsed = new URL(value);
@@ -57,7 +58,7 @@ export const authorizeRequest = (req, { publicHost, publicPort }) => {
   return singleHeader(origin) === `http://${authority}`;
 };
 
-const normalizeHeaders = (req, { host, port, hopSecret, next }) => {
+const normalizeHeaders = (req, { host, port, hopSecret, authenticatedHop }) => {
   for (const name of Object.keys(req.headers)) {
     if (
       name === 'forwarded' || name === 'x-real-ip' ||
@@ -68,7 +69,7 @@ const normalizeHeaders = (req, { host, port, hopSecret, next }) => {
   req.headers['x-forwarded-host'] = host;
   req.headers['x-forwarded-port'] = String(port);
   req.headers['x-forwarded-proto'] = 'http';
-  if (next) req.headers['x-tldw-gateway-hop'] = hopSecret;
+  if (authenticatedHop) req.headers['x-tldw-gateway-hop'] = hopSecret;
 };
 
 const send = (res, status, body, contentType = 'text/plain; charset=utf-8') => {
@@ -158,7 +159,8 @@ export function createGateway({ backendOrigin, nextOrigin, publicHost, publicPor
       send(res, 503, 'Application is starting');
       return;
     }
-    normalizeHeaders(req, { host, port, hopSecret: gatewayHopSecret, next: route === 'next' });
+    normalizeHeaders(req, { host, port, hopSecret: gatewayHopSecret,
+      authenticatedHop: route === 'next' || (route === 'backend' && SETUP_API_PATH.test(pathname)) });
     (route === 'backend' ? backendProxy : nextProxy)(req, res);
   });
 
@@ -175,7 +177,7 @@ export function createGateway({ backendOrigin, nextOrigin, publicHost, publicPor
       socket.destroy();
       return;
     }
-    normalizeHeaders(req, { host, port, hopSecret: gatewayHopSecret, next: route === 'next' });
+    normalizeHeaders(req, { host, port, hopSecret: gatewayHopSecret, authenticatedHop: route === 'next' });
     (route === 'backend' ? backendProxy : nextProxy).upgrade(req, socket, head);
   });
 
