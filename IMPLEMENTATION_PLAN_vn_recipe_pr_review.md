@@ -49,3 +49,10 @@
 - Rebased onto `origin/dev` at `a2826f103f` without conflicts. `git range-diff` confirms all six PR patches unchanged. Only this task's new diagnosis notes were temporarily stashed and restored; unrelated stashes and work remain untouched.
 - Refreshed the fingerprint and regenerated ignored frontend types. Fresh rebased-tree verification: 312 VN backend tests passed using CI-aligned schema libraries; 37 frontend VN tests, frontend typecheck, OpenAPI drift, scoped Ruff with documented exclusions, and diff check passed. Bandit returned zero findings/errors. The temporary shared-UI dependency link was removed after verification.
 - Current-head Qodo/CodeRabbit review and all remote gates remain required after the generated-artifact update. Stage 4 stays In Progress until all ruleset gates pass and the merge is verified.
+
+### Latest Dev Advance (2026-09-26 21:38 UTC)
+
+- Confirmed the clean owned worktree and remote PR head `9bfeb497d849184e3c774ea83f3763ab260d0307` before rebasing onto `origin/dev` at `f5fa1f3a41855aa02871d8b76d0ec0cebbaf9e07`. The new base contains unrelated Sync blob-upload expiry work; no VN ownership overlap was found.
+- Rebase completed without conflicts. `git range-diff` confirms all seven prior PR patches unchanged.
+- Fresh verification: 312 VN backend tests passed using the CI-aligned temporary overlay; 37 frontend VN tests, frontend typecheck, OpenAPI drift, scoped Ruff with the documented BLE001/UP035 exclusions, and diff check passed. Bandit returned zero findings/errors. The temporary shared-UI dependency link was removed after verification.
+- No runtime code, shared dependency installation, or unrelated work changed. The requester-owned Change summary remains verbatim. Current-head Qodo/CodeRabbit review and all required remote gates remain prerequisites to merge; Stage 4 stays In Progress.
