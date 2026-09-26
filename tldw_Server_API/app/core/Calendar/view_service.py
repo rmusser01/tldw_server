@@ -397,7 +397,7 @@ def _view_item_from_row(
         read_only_reason="provider"
         if item.provider_owned or item.source_owner == CALENDAR_SOURCE_OWNER_PROVIDER
         else None,
-        metadata={"timezone": item.timezone},
+        metadata={"timezone": item.timezone, "item_start_at": _view_time(item.start_at, item)},
     )
 
 

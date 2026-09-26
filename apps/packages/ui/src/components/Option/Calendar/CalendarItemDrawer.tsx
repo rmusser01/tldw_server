@@ -97,6 +97,8 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
   const [initialTags, setInitialTags] = React.useState<string[] | null>([])
   const [tagsDirty, setTagsDirty] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
+  const [scheduleError, setScheduleError] = React.useState(false)
+  const scheduleErrorId = React.useId()
 
   const selectedCalendar =
     calendars.find((calendar) => calendar.id === (item?.calendar_id ?? calendarId)) ?? null
@@ -107,6 +109,13 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
   const canEditLocalContext = Boolean(item?.calendar_item_id && !isLinkedProjection)
   const isOccurrence = item?.recurrence_id != null || item?.occurrence_index != null
   const canEditTemporalFields = canEditItemFields && !isOccurrence
+  const projectionUrl = safeExternalUrl(item?.link?.url)
+  // Todo views may synthesize start_at from due_at; only canonical provenance
+  // can prove that clearing Due retains a persisted start.
+  const canonicalStart = item?.metadata?.item_start_at
+  const originalStart = typeof canonicalStart === "string" ? canonicalStart
+    : canonicalStart === null ? null
+    : item?.kind === "todo" && item.due_at === item.start_at ? null : item?.start_at
 
   React.useEffect(() => {
     if (!open) return
@@ -116,7 +125,7 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
     setTitle(item?.title ?? "")
     setDescription(item?.description ?? "")
     setLocation(item?.location ?? "")
-    setStartAt(toInputDateTime(item?.start_at))
+    setStartAt(toInputDateTime(originalStart))
     setEndAt(toInputDateTime(item?.end_at))
     setDueAt(toInputDateTime(item?.due_at))
     const nextTags = itemLocalTags(item)
@@ -126,7 +135,8 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
     setAnnotation("")
     setLinkLabel("")
     setLinkUrl("")
-  }, [calendars, item, open])
+    setScheduleError(false)
+  }, [calendars, item, open, originalStart])
 
   React.useEffect(() => {
     let active = true
@@ -165,6 +175,22 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
 
   const handleSave = async () => {
     if (!calendarId || (!title.trim() && canEditItemFields)) return
+    const kindChanged = Boolean(item && kind !== inferKind(item))
+    const temporalChanged = item && (kind === "event"
+      ? startAt !== toInputDateTime(originalStart) || endAt !== toInputDateTime(item.end_at)
+      : dueAt !== toInputDateTime(item.due_at))
+    // Text/context-only saves leave existing timing untouched. A kind change
+    // discards the old start, so it cannot satisfy a new todo's schedule.
+    if (canEditTemporalFields && (isCreate || kindChanged || temporalChanged)) {
+      const missingSchedule = kind === "event"
+        ? !startAt.trim()
+        : !dueAt.trim() && !(item && !kindChanged && originalStart)
+      if (missingSchedule) {
+        setScheduleError(true)
+        return
+      }
+    }
+    setScheduleError(false)
     setSaving(true)
     try {
       const currentTags = parseTags(tags)
@@ -197,7 +223,6 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
           provider_owned: false
         }
         if (canEditTemporalFields) {
-          const kindChanged = kind !== inferKind(item)
           if (kindChanged) {
             updates.kind = kind
             updates.status = payload.status
@@ -209,9 +234,13 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
             ["end_at", endAt],
             ["due_at", dueAt]
           ] as const) {
-            if (kindChanged || input !== toInputDateTime(item[field])) {
+            // Hidden drafts from a temporary kind switch are not updates to a
+            // todo's saved start/end. Preserve those fields when its kind stays.
+            if (!kindChanged && kind === "todo" && field !== "due_at") continue
+            const original = field === "start_at" ? originalStart : item[field]
+            if (kindChanged || input !== toInputDateTime(original)) {
               const active = field === "due_at" ? kind === "todo" : kind === "event"
-              updates[field] = active ? toUpdatedDateTime(input, item[field], item.all_day, item.metadata?.timezone) : null
+              updates[field] = active ? toUpdatedDateTime(input, original, item.all_day, item.metadata?.timezone) : null
             }
           }
         }
@@ -321,8 +350,8 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
               </Typography.Paragraph>
             ) : null}
           </div>
-          {item.link?.url ? (
-            <Button href={item.link.url}>
+          {projectionUrl ? (
+            <Button href={projectionUrl}>
               {item.link.label || "Open source"}
             </Button>
           ) : null}
@@ -355,7 +384,7 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
                 name="calendar-kind"
                 checked={kind === "event"}
                 disabled={!canEditTemporalFields}
-                onChange={() => setKind("event")}
+                onChange={() => { setKind("event"); setScheduleError(false) }}
               />
               Event
             </label>
@@ -365,7 +394,7 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
                 name="calendar-kind"
                 checked={kind === "todo"}
                 disabled={!canEditTemporalFields}
-                onChange={() => setKind("todo")}
+                onChange={() => { setKind("todo"); setScheduleError(false) }}
               />
               Todo
             </label>
@@ -411,8 +440,16 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
                   value={startAt}
                   disabled={!canEditTemporalFields}
                   placeholder="2026-06-05T09:00"
-                  onChange={(event) => setStartAt(event.target.value)}
+                  status={scheduleError ? "error" : undefined}
+                  aria-invalid={scheduleError || undefined}
+                  aria-describedby={scheduleError ? scheduleErrorId : undefined}
+                  onChange={(event) => { setStartAt(event.target.value); setScheduleError(false) }}
                 />
+                {scheduleError ? (
+                  <Typography.Text type="danger" role="alert" id={scheduleErrorId}>
+                    Start is required for an event.
+                  </Typography.Text>
+                ) : null}
               </label>
               <label className="flex flex-col gap-1">
                 <Typography.Text>End</Typography.Text>
@@ -433,8 +470,16 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
                 value={dueAt}
                 disabled={!canEditTemporalFields}
                 placeholder="2026-06-05T17:00"
-                onChange={(event) => setDueAt(event.target.value)}
+                status={scheduleError ? "error" : undefined}
+                aria-invalid={scheduleError || undefined}
+                aria-describedby={scheduleError ? scheduleErrorId : undefined}
+                onChange={(event) => { setDueAt(event.target.value); setScheduleError(false) }}
               />
+              {scheduleError ? (
+                <Typography.Text type="danger" role="alert" id={scheduleErrorId}>
+                  Due is required for a todo without a start.
+                </Typography.Text>
+              ) : null}
             </label>
           )}
 

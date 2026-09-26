@@ -117,6 +117,138 @@ def test_rdate_duration_preserves_second_fold_instant() -> None:
     assert [value.end_at.isoformat() for value in occurrences] == ["2026-11-01T02:00:00-08:00"]
 
 
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("master_start", "master_end", "window_start", "window_end", "expected_ends"),
+    [
+        (
+            "2026-03-08T01:30:00-08:00", "2026-03-08T04:30:00-07:00",
+            "2026-03-08T00:00:00-08:00", "2026-03-10T00:00:00-07:00",
+            ["2026-03-08T04:30:00-07:00", "2026-03-09T03:30:00-07:00"],
+        ),
+        (
+            "2026-03-07T01:30:00-08:00", "2026-03-07T03:30:00-08:00",
+            "2026-03-07T00:00:00-08:00", "2026-03-09T00:00:00-07:00",
+            ["2026-03-07T03:30:00-08:00", "2026-03-08T04:30:00-07:00"],
+        ),
+        (
+            "2026-11-01T01:45:00-07:00", "2026-11-01T01:15:00-08:00",
+            "2026-11-01T08:50:00Z", "2026-11-03T00:00:00Z",
+            ["2026-11-01T01:15:00-08:00", "2026-11-02T02:15:00-08:00"],
+        ),
+        (
+            "2026-10-31T01:45:00-07:00", "2026-10-31T02:15:00-07:00",
+            "2026-10-31T00:00:00-07:00", "2026-11-02T00:00:00-08:00",
+            ["2026-10-31T02:15:00-07:00", "2026-11-01T01:15:00-08:00"],
+        ),
+    ],
+    ids=["spring-master", "spring-occurrence", "fold-master", "fold-occurrence"],
+)
+def test_direct_and_set_recurrence_share_elapsed_duration(
+    master_start: str, master_end: str, window_start: str, window_end: str,
+    expected_ends: list[str],
+) -> None:
+    """Both APIs retain the same master's elapsed duration across offset changes."""
+    recurrence = _recurrence_module()
+    rule = recurrence.LocalRecurrenceRule(frequency="daily", count=2)
+    arguments = {
+        "master_start": master_start, "master_end": master_end,
+        "window_start": window_start, "window_end": window_end, "timezone_name": "America/Los_Angeles",
+    }
+    direct = recurrence.expand_recurrence(**arguments, recurrence=rule)
+    recurrence_set = recurrence.expand_recurrence_set(
+        **arguments, rrule_text=rule.to_rrule(), rdates=[], exdates=[],
+    )
+    assert {
+        "direct": [value.end_at.isoformat() for value in direct],
+        "set": [value.end_at.isoformat() for value in recurrence_set],
+    } == {"direct": expected_ends, "set": expected_ends}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("master_start", "master_end", "window_start", "window_end", "expected"),
+    [
+        (
+            "2026-03-07T01:30:00-08:00", "2026-03-07T03:30:00-08:00",
+            "2026-03-08T10:45:00Z", "2026-03-08T11:00:00Z",
+            [("2026-03-08T01:30:00-08:00", "2026-03-08T04:30:00-07:00")],
+        ),
+        (
+            "2026-10-31T01:45:00-07:00", "2026-10-31T02:15:00-07:00",
+            "2026-11-01T09:00:00Z", "2026-11-01T09:10:00Z",
+            [("2026-11-01T01:45:00-07:00", "2026-11-01T01:15:00-08:00")],
+        ),
+    ],
+    ids=["spring-overlap", "fold-overlap"],
+)
+def test_direct_and_set_recurrence_filter_dst_overlap_as_instants(
+    master_start: str, master_end: str, window_start: str, window_end: str,
+    expected: list[tuple[str, str]],
+) -> None:
+    """Seeking and overlap filtering cannot omit events in a gap or repeated hour."""
+    recurrence = _recurrence_module()
+    rule = recurrence.LocalRecurrenceRule(frequency="daily", count=2)
+    arguments = {
+        "master_start": master_start, "master_end": master_end,
+        "window_start": window_start, "window_end": window_end, "timezone_name": "America/Los_Angeles",
+    }
+    direct = recurrence.expand_recurrence(**arguments, recurrence=rule)
+    recurrence_set = recurrence.expand_recurrence_set(
+        **arguments, rrule_text=rule.to_rrule(), rdates=[], exdates=[],
+    )
+    assert {
+        "direct": [(value.start_at.isoformat(), value.end_at.isoformat()) for value in direct],
+        "set": [(value.start_at.isoformat(), value.end_at.isoformat()) for value in recurrence_set],
+    } == {"direct": expected, "set": expected}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("start", [date(2026, 3, 7), date(2026, 10, 31)], ids=["spring", "fall"])
+def test_direct_and_set_all_day_recurrence_keep_civil_spans(start: date) -> None:
+    """Timed duration changes must not alter all-day civil-date spans at DST."""
+    recurrence = _recurrence_module()
+    rule = recurrence.LocalRecurrenceRule(frequency="daily", count=3)
+    arguments = {
+        "master_start": start, "master_end": start + timedelta(days=2),
+        "window_start": start, "window_end": start + timedelta(days=5),
+        "timezone_name": "America/Los_Angeles", "all_day": True,
+    }
+    direct = recurrence.expand_recurrence(**arguments, recurrence=rule)
+    recurrence_set = recurrence.expand_recurrence_set(
+        **arguments, rrule_text=rule.to_rrule(), rdates=[], exdates=[],
+    )
+    assert {
+        "direct": [value.end_at - value.start_at for value in direct],
+        "set": [value.end_at - value.start_at for value in recurrence_set],
+    } == {"direct": [timedelta(days=2)] * 3, "set": [timedelta(days=2)] * 3}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("duration", "master_end", "expected_ends"),
+    [
+        ("P1D", "2026-03-08T12:00:00-07:00", ["2026-03-08T12:00:00-07:00", "2026-03-09T12:00:00-07:00"]),
+        ("PT24H", "2026-03-08T13:00:00-07:00", ["2026-03-08T13:00:00-07:00", "2026-03-09T12:00:00-07:00"]),
+    ],
+)
+def test_provider_recurrence_retains_lexical_duration_semantics(
+    duration: str, master_end: str, expected_ends: list[str],
+) -> None:
+    """Provider nominal days and elapsed hours stay distinct without mutating raw inputs."""
+    recurrence = _recurrence_module()
+    rdates = ["2026-03-09T12:00:00-07:00"]
+    exdates = ["2026-03-09T12:00:00-07:00"]
+    occurrences = recurrence.expand_recurrence_set(
+        master_start="2026-03-07T12:00:00-08:00", master_end=master_end,
+        rrule_text="FREQ=DAILY;COUNT=3", rdates=rdates, exdates=exdates,
+        provider_rule=True, timezone_name="America/Los_Angeles", duration_text=duration,
+        window_start="2026-03-07T00:00:00-08:00", window_end="2026-03-10T00:00:00-07:00",
+    )
+    assert [value.end_at.isoformat() for value in occurrences] == expected_ends
+    assert rdates == exdates == ["2026-03-09T12:00:00-07:00"]
+
+
 def test_daily_recurrence_respects_count() -> None:
     recurrence = _recurrence_module()
     rule = recurrence.LocalRecurrenceRule(frequency="daily", count=3)

@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import gc
 import json
 import threading
+import weakref
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -1001,6 +1003,205 @@ def test_queue_binding_sync_reuses_active_binding_job(
     assert second.queued is False
     assert second.status == "already_active"
     assert jobs_manager.count_jobs(domain="calendar", queue="default", job_type="calendar_sync") == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("different_window", [False, True], ids=["same-window", "different-window"])
+async def test_concurrent_manual_and_scheduled_sync_admit_one_binding_job_and_audit(
+    calendar_db: CalendarDatabase, jobs_manager: JobManager, monkeypatch: pytest.MonkeyPatch,
+    different_window: bool,
+) -> None:
+    """A stale scheduler lookup cannot admit another job after concurrent manual admission."""
+    from tldw_Server_API.app.core.Calendar import calendar_sync_worker as worker
+    from tldw_Server_API.app.services.calendar_sync_scheduler import queue_due_calendar_sync_jobs
+
+    fixture = _create_sync_fixture(calendar_db)
+    scheduler_path = calendar_db.db_path.parent / "calendar_alias.db"
+    scheduler_path.symlink_to(calendar_db.db_path)
+    scheduler_db = CalendarDatabase(db_path=scheduler_path)
+    scheduler_jobs = JobManager(jobs_manager.db_path)
+    service = CalendarService(db=calendar_db, job_manager=jobs_manager)
+    loop = asyncio.get_running_loop()
+    empty_lookup = asyncio.Event()
+    manual_finished = threading.Event()
+    original_lookup = worker._active_job_for_binding
+
+    def pause_empty_scheduler_lookup(**kwargs: Any) -> dict[str, Any] | None:
+        """Force the reviewer's stale read without replacing real Jobs queries."""
+        existing = original_lookup(**kwargs)
+        if kwargs["job_manager"] is scheduler_jobs and existing is None:
+            loop.call_soon_threadsafe(empty_lookup.set)
+            # Before the fix manual admission finishes first. With atomic admission
+            # it must wait for this holder, so bound the pause instead of deadlocking.
+            manual_finished.wait(1)
+        return existing
+
+    def submit_manual() -> Any:
+        """Call the real service from a different DB thread and always release the holder."""
+        try:
+            return service.queue_binding_sync(
+                actor_user_id=1, binding_id=fixture.binding_id, reason="manual",
+                window_start="2026-06-01T00:00:00+00:00" if different_window else "2026-05-27T12:00:00+00:00",
+                window_end="2026-06-08T00:00:00+00:00" if different_window else "2026-07-10T12:00:00+00:00",
+            )
+        finally:
+            manual_finished.set()
+
+    monkeypatch.setattr(worker, "_active_job_for_binding", pause_empty_scheduler_lookup)
+    scheduled = asyncio.create_task(queue_due_calendar_sync_jobs(
+        db=scheduler_db, job_manager=scheduler_jobs, now=datetime(2026, 6, 10, 12, tzinfo=timezone.utc),
+    ))
+    manual: asyncio.Task[Any] | None = None
+    try:
+        await asyncio.wait_for(empty_lookup.wait(), timeout=3)
+        manual = asyncio.create_task(asyncio.to_thread(submit_manual))
+        scheduled_responses, manual_response = await asyncio.wait_for(
+            asyncio.gather(scheduled, manual), timeout=5,
+        )
+    finally:
+        manual_finished.set()
+        await asyncio.gather(scheduled, *([manual] if manual is not None else []), return_exceptions=True)
+
+    jobs = jobs_manager.list_jobs(domain="calendar", job_type="calendar_sync")
+    audits = calendar_db.list_sync_events(binding_id=fixture.binding_id)
+    assert (len(jobs), len(audits)) == (1, 1), "Concurrent admission persisted duplicate Jobs/audits"
+    responses = [*scheduled_responses, manual_response]
+    assert len(responses) == 2
+    assert {response.job_id for response in responses} == {jobs[0]["id"]}
+    assert sorted(response.status for response in responses) == ["already_active", "queued"]
+    assert sum(response.queued for response in responses) == 1
+    assert {response.idempotency_key for response in responses} == {jobs[0]["idempotency_key"]}
+    assert audits[0].event_type == "sync_queued"
+    assert json.loads(audits[0].metadata_json) == {
+        "job_id": jobs[0]["id"], "reason": jobs[0]["payload"]["reason"],
+    }
+    assert "app-secret" not in json.dumps(jobs[0]["payload"])
+
+
+@pytest.mark.asyncio
+async def test_unrelated_binding_admission_progresses_while_first_queue_audit_is_blocked(
+    calendar_db: CalendarDatabase, jobs_manager: JobManager, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Per-binding admission must not hold a process-wide lock across Jobs or audit I/O."""
+    first = _create_sync_fixture(calendar_db)
+    second = _create_sync_fixture(calendar_db, remote_calendar_url="https://caldav.example.test/second/")
+    service = CalendarService(db=calendar_db, job_manager=jobs_manager)
+    loop = asyncio.get_running_loop()
+    audit_started = asyncio.Event()
+    release = threading.Event()
+    original_audit = calendar_db.record_sync_event
+
+    def blocked_audit(**kwargs: Any) -> Any:
+        if kwargs["binding_id"] == first.binding_id:
+            loop.call_soon_threadsafe(audit_started.set)
+            if not release.wait(5):
+                raise TimeoutError("First binding audit was not released")
+        return original_audit(**kwargs)
+
+    def queue(binding_id: int) -> Any:
+        return service.queue_binding_sync(
+            actor_user_id=1, binding_id=binding_id, reason="manual",
+            window_start="2026-06-01T00:00:00+00:00", window_end="2026-06-08T00:00:00+00:00",
+        )
+
+    monkeypatch.setattr(calendar_db, "record_sync_event", blocked_audit)
+    first_task = asyncio.create_task(asyncio.to_thread(queue, first.binding_id))
+    second_task: asyncio.Task[Any] | None = None
+    try:
+        await asyncio.wait_for(audit_started.wait(), timeout=3)
+        second_task = asyncio.create_task(asyncio.to_thread(queue, second.binding_id))
+        second_response = await asyncio.wait_for(asyncio.shield(second_task), timeout=2)
+        assert not first_task.done()
+        assert second_response.queued
+        assert len(calendar_db.list_sync_events(binding_id=second.binding_id)) == 1
+    finally:
+        release.set()
+        await asyncio.gather(first_task, *([second_task] if second_task is not None else []), return_exceptions=True)
+
+    assert jobs_manager.count_jobs(domain="calendar", job_type="calendar_sync") == 2
+    assert len(calendar_db.list_sync_events(binding_id=first.binding_id)) == 1
+
+
+@pytest.mark.parametrize("failure_phase", [None, "create", "audit"], ids=["success", "create-failure", "audit-failure"])
+def test_binding_admission_reclaims_idle_locks_and_releases_them_after_failure(
+    calendar_db: CalendarDatabase, jobs_manager: JobManager, monkeypatch: pytest.MonkeyPatch,
+    failure_phase: str | None,
+) -> None:
+    """Completed/failed admissions leave no retained lock and cannot wedge a later caller."""
+    from tldw_Server_API.app.core.Calendar import calendar_sync_worker as worker
+
+    fixture = _create_sync_fixture(calendar_db)
+    service = CalendarService(db=calendar_db, job_manager=jobs_manager)
+    lock_refs: list[weakref.ReferenceType[Any]] = []
+    original_lock = worker._binding_admission_lock
+
+    def observe_lock(*args: Any) -> Any:
+        lock = original_lock(*args)
+        lock_refs.append(weakref.ref(lock))
+        return lock
+
+    monkeypatch.setattr(worker, "_binding_admission_lock", observe_lock)
+
+    def queue() -> Any:
+        return service.queue_binding_sync(
+            actor_user_id=1, binding_id=fixture.binding_id, reason="manual",
+            window_start="2026-06-01T00:00:00+00:00", window_end="2026-06-08T00:00:00+00:00",
+        )
+
+    if failure_phase is not None:
+        repository = jobs_manager if failure_phase == "create" else calendar_db
+        operation_name = "create_job" if failure_phase == "create" else "record_sync_event"
+
+        def fail(**kwargs: Any) -> Any:
+            raise RuntimeError("Admission persistence failed")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(repository, operation_name, fail)
+            with pytest.raises(RuntimeError, match="Admission persistence failed"):
+                queue()
+    else:
+        assert queue().queued
+    gc.collect()
+    assert lock_refs and all(reference() is None for reference in lock_refs)
+
+    response = queue()
+    assert response.status == ("queued" if failure_phase == "create" else "already_active")
+    assert jobs_manager.count_jobs(domain="calendar") == 1
+    assert len(calendar_db.list_sync_events(binding_id=fixture.binding_id)) == (0 if failure_phase == "audit" else 1)
+    gc.collect()
+    assert all(reference() is None for reference in lock_refs)
+
+
+def test_binding_admission_preserves_processing_retry_and_later_window_jobs(
+    calendar_db: CalendarDatabase, jobs_manager: JobManager,
+) -> None:
+    """An active retry still suppresses other windows/reasons; terminal work permits a later window."""
+    fixture = _create_sync_fixture(calendar_db)
+    service = CalendarService(db=calendar_db, job_manager=jobs_manager)
+
+    def queue(reason: str, month: str) -> Any:
+        return service.queue_binding_sync(
+            actor_user_id=1, binding_id=fixture.binding_id, reason=reason,
+            window_start=f"2026-{month}-01T00:00:00+00:00", window_end=f"2026-{month}-08T00:00:00+00:00",
+        )
+
+    first = queue("scheduled", "06")
+    claimed = jobs_manager.acquire_next_job(
+        domain="calendar", queue="default", job_type="calendar_sync", worker_id="calendar-test", lease_seconds=60,
+    )
+    assert claimed is not None and claimed["id"] == first.job_id and claimed["status"] == "processing"
+    processing = queue("manual", "07")
+    assert processing.job_id == first.job_id and processing.status == "already_active"
+    assert jobs_manager.fail_job(first.job_id, error="retry sync", retryable=True, backoff_seconds=60, enforce=False)
+    retried = jobs_manager.get_job(first.job_id)
+    assert retried is not None and retried["status"] == "queued" and retried["retry_count"] == 1
+    retry_response = queue("manual", "07")
+    assert retry_response.job_id == first.job_id and not retry_response.queued
+    assert jobs_manager.cancel_job(first.job_id, reason="terminal retry cancellation")
+    later = queue("manual", "07")
+    assert later.queued and later.job_id != first.job_id
+    assert jobs_manager.count_jobs(domain="calendar") == 2
+    assert len(calendar_db.list_sync_events(binding_id=fixture.binding_id)) == 2
 
 
 @pytest.mark.asyncio

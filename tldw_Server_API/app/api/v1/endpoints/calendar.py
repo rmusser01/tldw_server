@@ -93,7 +93,7 @@ from tldw_Server_API.app.services.scheduled_tasks_control_plane_service import (
     ScheduledTasksControlPlaneService,
 )
 
-router = APIRouter(prefix="/calendar", tags=["calendar"])
+router = APIRouter(prefix="/calendar", tags=["calendar"], dependencies=[Depends(get_request_user)])
 
 
 def get_calendar_database() -> CalendarDatabase:
@@ -351,7 +351,7 @@ def _view_response(result: CalendarViewResult) -> CalendarViewResponse:
     "/calendars",
     response_model=CalendarResponse,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(rbac_rate_limit("calendar.write"))],
+    dependencies=[Depends(rbac_rate_limit("calendar.write", per_user=True))],
 )
 async def create_calendar(
     payload: CalendarCreateRequest,
@@ -386,7 +386,7 @@ async def create_calendar(
 @router.delete(
     "/items/{item_id}",
     response_model=CalendarItemDeleteResponse,
-    dependencies=[Depends(rbac_rate_limit("calendar.write"))],
+    dependencies=[Depends(rbac_rate_limit("calendar.write", per_user=True))],
 )
 async def delete_calendar_item(
     item_id: int = Path(..., ge=1),
@@ -406,7 +406,7 @@ async def delete_calendar_item(
 @router.get(
     "/calendars",
     response_model=CalendarListResponse,
-    dependencies=[Depends(rbac_rate_limit("calendar.read"))],
+    dependencies=[Depends(rbac_rate_limit("calendar.read", per_user=True))],
 )
 async def list_calendars(
     include_archived: bool = Query(default=False),
@@ -436,7 +436,7 @@ async def list_calendars(
     "/calendars/{calendar_id}/memberships",
     response_model=CalendarMembershipResponse,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(rbac_rate_limit("calendar.write"))],
+    dependencies=[Depends(rbac_rate_limit("calendar.write", per_user=True))],
 )
 async def add_calendar_membership(
     payload: CalendarMembershipCreateRequest,
@@ -468,7 +468,7 @@ async def add_calendar_membership(
 @router.get(
     "/calendars/{calendar_id}/memberships",
     response_model=CalendarMembershipListResponse,
-    dependencies=[Depends(rbac_rate_limit("calendar.read"))],
+    dependencies=[Depends(rbac_rate_limit("calendar.read", per_user=True))],
 )
 async def list_calendar_memberships(
     calendar_id: int = Path(..., ge=1),
@@ -494,7 +494,7 @@ async def list_calendar_memberships(
 @router.delete(
     "/calendars/{calendar_id}/memberships/{principal_type}/{principal_id}",
     response_model=CalendarMembershipDeleteResponse,
-    dependencies=[Depends(rbac_rate_limit("calendar.write"))],
+    dependencies=[Depends(rbac_rate_limit("calendar.write", per_user=True))],
 )
 async def remove_calendar_membership(
     calendar_id: int = Path(..., ge=1),
@@ -527,7 +527,7 @@ async def remove_calendar_membership(
     "/items",
     response_model=CalendarItemResponse,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(rbac_rate_limit("calendar.write"))],
+    dependencies=[Depends(rbac_rate_limit("calendar.write", per_user=True))],
 )
 async def create_calendar_item(
     payload: CalendarItemCreateRequest,
@@ -571,7 +571,7 @@ async def create_calendar_item(
 @router.patch(
     "/items/{item_id}",
     response_model=CalendarItemResponse,
-    dependencies=[Depends(rbac_rate_limit("calendar.write"))],
+    dependencies=[Depends(rbac_rate_limit("calendar.write", per_user=True))],
 )
 async def update_calendar_item(
     payload: CalendarItemUpdateRequest,
@@ -605,7 +605,7 @@ async def update_calendar_item(
 @router.get(
     "/views/agenda",
     response_model=CalendarViewResponse,
-    dependencies=[Depends(rbac_rate_limit("calendar.read"))],
+    dependencies=[Depends(rbac_rate_limit("calendar.read", per_user=True))],
 )
 async def get_calendar_agenda(
     start_at: str = Query(..., min_length=1),
@@ -644,7 +644,7 @@ async def get_calendar_agenda(
 @router.get(
     "/views/week",
     response_model=CalendarViewResponse,
-    dependencies=[Depends(rbac_rate_limit("calendar.read"))],
+    dependencies=[Depends(rbac_rate_limit("calendar.read", per_user=True))],
 )
 async def get_calendar_week(
     week_start: str = Query(..., min_length=1),
@@ -684,7 +684,7 @@ async def get_calendar_week(
     "/items/{item_id}/annotations",
     response_model=CalendarAnnotationResponse,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(rbac_rate_limit("calendar.write"))],
+    dependencies=[Depends(rbac_rate_limit("calendar.write", per_user=True))],
 )
 async def create_calendar_annotation(
     payload: CalendarAnnotationCreateRequest,
@@ -715,7 +715,7 @@ async def create_calendar_annotation(
 @router.put(
     "/items/{item_id}/local-tags",
     response_model=CalendarAnnotationResponse,
-    dependencies=[Depends(rbac_rate_limit("calendar.write"))],
+    dependencies=[Depends(rbac_rate_limit("calendar.write", per_user=True))],
 )
 async def update_calendar_local_tags(
     payload: CalendarLocalTagsUpdateRequest,
@@ -746,7 +746,7 @@ async def update_calendar_local_tags(
     "/items/{item_id}/links",
     response_model=CalendarLinkResponse,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(rbac_rate_limit("calendar.write"))],
+    dependencies=[Depends(rbac_rate_limit("calendar.write", per_user=True))],
 )
 async def create_calendar_link(
     payload: CalendarLinkCreateRequest,
@@ -780,7 +780,7 @@ async def create_calendar_link(
 @router.get(
     "/items/{item_id}/links",
     response_model=CalendarLinkListResponse,
-    dependencies=[Depends(rbac_rate_limit("calendar.read"))],
+    dependencies=[Depends(rbac_rate_limit("calendar.read", per_user=True))],
 )
 async def list_calendar_links(
     item_id: int = Path(..., ge=1),
@@ -799,7 +799,7 @@ async def list_calendar_links(
 @router.delete(
     "/items/{item_id}/links/{link_id}",
     response_model=CalendarLinkDeleteResponse,
-    dependencies=[Depends(rbac_rate_limit("calendar.write"))],
+    dependencies=[Depends(rbac_rate_limit("calendar.write", per_user=True))],
 )
 async def delete_calendar_link(
     item_id: int = Path(..., ge=1),
@@ -820,7 +820,7 @@ async def delete_calendar_link(
     "/items/{item_id}/copy",
     response_model=CalendarItemResponse,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(rbac_rate_limit("calendar.write"))],
+    dependencies=[Depends(rbac_rate_limit("calendar.write", per_user=True))],
 )
 async def copy_calendar_item(
     payload: CalendarItemCopyRequest,
@@ -853,7 +853,7 @@ async def copy_calendar_item(
     "/reminders",
     response_model=CalendarReminderResponse,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(rbac_rate_limit("calendar.write"))],
+    dependencies=[Depends(rbac_rate_limit("calendar.write", per_user=True))],
 )
 async def create_calendar_reminder(
     payload: CalendarReminderCreateRequest,
@@ -895,7 +895,7 @@ async def create_calendar_reminder(
 @router.get(
     "/external/accounts",
     response_model=ExternalCalendarAccountListResponse,
-    dependencies=[Depends(rbac_rate_limit("calendar.sync"))],
+    dependencies=[Depends(rbac_rate_limit("calendar.sync", per_user=True))],
 )
 async def list_external_calendar_accounts(
     current_user: User = Depends(get_request_user),
@@ -912,7 +912,7 @@ async def list_external_calendar_accounts(
     "/external/accounts",
     response_model=ExternalCalendarAccountResponse,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(rbac_rate_limit("calendar.sync"))],
+    dependencies=[Depends(rbac_rate_limit("calendar.sync", per_user=True))],
 )
 async def create_external_calendar_account(
     payload: ExternalCalendarAccountCreateRequest,
@@ -969,7 +969,7 @@ async def create_external_calendar_account(
 @router.post(
     "/external/accounts/{account_id}/verify",
     response_model=CalDavAccountVerifyResponse,
-    dependencies=[Depends(rbac_rate_limit("calendar.sync"))],
+    dependencies=[Depends(rbac_rate_limit("calendar.sync", per_user=True))],
 )
 async def verify_external_calendar_account(
     payload: CalDavAccountVerifyRequest | None = Body(default=None),
@@ -1003,7 +1003,7 @@ async def verify_external_calendar_account(
 @router.post(
     "/external/accounts/{account_id}/discover",
     response_model=ExternalCalendarDiscoveryResponse,
-    dependencies=[Depends(rbac_rate_limit("calendar.sync"))],
+    dependencies=[Depends(rbac_rate_limit("calendar.sync", per_user=True))],
 )
 async def discover_external_calendars(
     payload: CalDavAccountVerifyRequest | None = Body(default=None),
@@ -1042,7 +1042,7 @@ async def discover_external_calendars(
 @router.post(
     "/external/accounts/{account_id}/revoke",
     response_model=CalDavAccountMutationResponse,
-    dependencies=[Depends(rbac_rate_limit("calendar.sync"))],
+    dependencies=[Depends(rbac_rate_limit("calendar.sync", per_user=True))],
 )
 async def revoke_external_calendar_account(
     account_id: int = Path(..., ge=1),
@@ -1062,7 +1062,7 @@ async def revoke_external_calendar_account(
 @router.delete(
     "/external/accounts/{account_id}",
     response_model=CalDavAccountMutationResponse,
-    dependencies=[Depends(rbac_rate_limit("calendar.sync"))],
+    dependencies=[Depends(rbac_rate_limit("calendar.sync", per_user=True))],
 )
 async def delete_external_calendar_account(
     account_id: int = Path(..., ge=1),
@@ -1083,7 +1083,7 @@ async def delete_external_calendar_account(
     "/external/bindings",
     response_model=ExternalCalendarBindingResponse,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(rbac_rate_limit("calendar.sync"))],
+    dependencies=[Depends(rbac_rate_limit("calendar.sync", per_user=True))],
 )
 async def create_external_calendar_binding(
     payload: ExternalCalendarBindingCreateRequest,
@@ -1118,7 +1118,7 @@ async def create_external_calendar_binding(
 @router.get(
     "/external/accounts/{account_id}/bindings",
     response_model=ExternalCalendarBindingListResponse,
-    dependencies=[Depends(rbac_rate_limit("calendar.sync"))],
+    dependencies=[Depends(rbac_rate_limit("calendar.sync", per_user=True))],
 )
 async def list_external_calendar_bindings(
     account_id: int = Path(..., ge=1),
@@ -1139,7 +1139,7 @@ async def list_external_calendar_bindings(
 @router.patch(
     "/external/bindings/{binding_id}",
     response_model=ExternalCalendarBindingResponse,
-    dependencies=[Depends(rbac_rate_limit("calendar.sync"))],
+    dependencies=[Depends(rbac_rate_limit("calendar.sync", per_user=True))],
 )
 async def update_external_calendar_binding(
     payload: ExternalCalendarBindingUpdateRequest,
@@ -1160,7 +1160,7 @@ async def update_external_calendar_binding(
 @router.post(
     "/external/bindings/{binding_id}/enable",
     response_model=ExternalCalendarBindingResponse,
-    dependencies=[Depends(rbac_rate_limit("calendar.sync"))],
+    dependencies=[Depends(rbac_rate_limit("calendar.sync", per_user=True))],
 )
 async def enable_external_calendar_binding(
     binding_id: int = Path(..., ge=1),
@@ -1180,7 +1180,7 @@ async def enable_external_calendar_binding(
 @router.post(
     "/external/bindings/{binding_id}/disable",
     response_model=ExternalCalendarBindingResponse,
-    dependencies=[Depends(rbac_rate_limit("calendar.sync"))],
+    dependencies=[Depends(rbac_rate_limit("calendar.sync", per_user=True))],
 )
 async def disable_external_calendar_binding(
     binding_id: int = Path(..., ge=1),
@@ -1200,7 +1200,7 @@ async def disable_external_calendar_binding(
 @router.delete(
     "/external/bindings/{binding_id}",
     response_model=ExternalCalendarBindingResponse,
-    dependencies=[Depends(rbac_rate_limit("calendar.sync"))],
+    dependencies=[Depends(rbac_rate_limit("calendar.sync", per_user=True))],
 )
 async def delete_external_calendar_binding(
     binding_id: int = Path(..., ge=1),
@@ -1220,7 +1220,7 @@ async def delete_external_calendar_binding(
 @router.get(
     "/external/bindings/{binding_id}/sync-status",
     response_model=ExternalCalendarBindingResponse,
-    dependencies=[Depends(rbac_rate_limit("calendar.sync"))],
+    dependencies=[Depends(rbac_rate_limit("calendar.sync", per_user=True))],
 )
 async def get_external_calendar_binding_sync_status(
     binding_id: int = Path(..., ge=1),
@@ -1240,7 +1240,7 @@ async def get_external_calendar_binding_sync_status(
 @router.get(
     "/external/bindings/{binding_id}/sync-events",
     response_model=CalendarSyncEventListResponse,
-    dependencies=[Depends(rbac_rate_limit("calendar.sync"))],
+    dependencies=[Depends(rbac_rate_limit("calendar.sync", per_user=True))],
 )
 def list_external_calendar_binding_sync_events(
     binding_id: int = Path(..., ge=1),
@@ -1262,7 +1262,7 @@ def list_external_calendar_binding_sync_events(
 @router.post(
     "/external/bindings/{binding_id}/sync",
     response_model=CalendarSyncTriggerResponse,
-    dependencies=[Depends(rbac_rate_limit("calendar.sync"))],
+    dependencies=[Depends(rbac_rate_limit("calendar.sync", per_user=True))],
 )
 async def trigger_external_calendar_sync(
     payload: CalendarSyncTriggerRequest | None = Body(default=None),
@@ -1272,12 +1272,15 @@ async def trigger_external_calendar_sync(
     db: CalendarDatabase = Depends(get_calendar_database),
     job_manager: JobManager = Depends(get_calendar_job_manager),
 ) -> CalendarSyncTriggerResponse:
-    """Enqueue or reuse bounded read-only sync work without placing credentials in Jobs."""
-    try:
+    """Enqueue secret-free sync work off-loop, draining admission and audits before cancellation."""
+    from tldw_Server_API.app.core.Calendar.calendar_sync_worker import CalendarSyncJobResponse, _run_db_phase
+
+    def _queue_sync() -> CalendarSyncJobResponse:
+        """Keep ownership reads, window validation, and binding admission on one DB thread."""
         _assert_external_binding_owner(db, binding_id=binding_id, current_user=current_user)
         binding = db.get_external_binding(binding_id)
         window_start, window_end, reason = _sync_window_for_binding(binding, payload)
-        queued = CalendarService(
+        return CalendarService(
             db=db,
             tenant_id=_tenant_id(current_user),
             job_manager=job_manager,
@@ -1288,6 +1291,9 @@ async def trigger_external_calendar_sync(
             window_start=window_start,
             window_end=window_end,
         )
+
+    try:
+        queued = await _run_db_phase(_queue_sync)
     except (CalendarNotFound, CalendarPermissionDenied, CalendarValidationError) as exc:
         raise _map_calendar_error(exc) from exc
     return CalendarSyncTriggerResponse(

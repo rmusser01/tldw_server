@@ -1,16 +1,22 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import importlib
 import json
+import re
 import threading
 from collections.abc import Generator
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
-from fastapi import FastAPI
+from anyio import CancelScope
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user
 from tldw_Server_API.app.api.v1.schemas.scheduled_tasks_control_plane_schemas import ScheduledTask
@@ -21,6 +27,67 @@ from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
 
 pytestmark = pytest.mark.integration
+
+
+@pytest.mark.parametrize("db_quota", [None, (1, 1), (1000, 1000)])
+@pytest.mark.parametrize(("resource", "method", "path", "payload", "expected", "quota"), [
+    ("calendar.read", "GET", "/calendars", None, 200, (120, 240)),
+    ("calendar.write", "POST", "/calendars", {"name": "Limited"}, 201, (60, 120)),
+    ("calendar.sync", "GET", "/external/accounts", None, 200, (60, 120)),
+])
+def test_calendar_catalog_limits_enforce_shared_user_budget(
+    calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
+    monkeypatch: pytest.MonkeyPatch,
+    resource: str, method: str, path: str, payload: dict[str, str] | None,
+    expected: int, quota: tuple[int, int],
+    db_quota: tuple[int, int] | None,
+) -> None:
+    """Real catalog quotas yield HTTP 429 and cannot be reset by switching auth kinds."""
+    from tldw_Server_API.app.api.v1.API_Deps import auth_deps
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
+    from tldw_Server_API.app.core.AuthNZ.privilege_catalog import load_catalog
+
+    client, db, _reminders = calendar_api_client
+    catalog_path = Path(__file__).resolve().parents[3] / "Config_Files" / "privilege_catalog.yaml"
+    monkeypatch.setattr(auth_deps, "load_catalog", lambda: load_catalog(catalog_path))
+    monkeypatch.setattr(auth_deps, "_AUTH_DEPS_FALLBACK_RATE_WINDOWS", {})
+    monkeypatch.setattr(auth_deps, "time", SimpleNamespace(monotonic=lambda: 100.0))
+    identity: dict[str, Any] = {"user_id": 1, "kind": "user"}
+
+    async def authenticated_user(request: Request) -> User:
+        request.state.user_id = identity["user_id"]
+        request.state.auth = AuthContext(principal=AuthPrincipal(
+            kind=identity["kind"], user_id=identity["user_id"], api_key_id=99,
+        ))
+        return User(id=identity["user_id"], username="limited", is_active=True,
+                    is_admin=True, roles=["admin"], permissions=["*"])
+
+    override = dict(zip(("limit_per_min", "burst"), db_quota)) if db_quota else None
+    pool = SimpleNamespace(pool=True, fetchone=AsyncMock(return_value=override), fetchall=AsyncMock(return_value=[]))
+    client.app.dependency_overrides[get_request_user] = authenticated_user
+    client.app.dependency_overrides[auth_deps.get_db_pool] = lambda: pool
+
+    assert auth_deps._catalog_rate_limit_for_resource(resource) == quota
+    budget = min(quota[1], db_quota[1]) if db_quota else quota[1]
+    for index in range(budget):
+        if index == budget // 2:
+            identity["kind"] = "api_key"
+        response = client.request(method, f"/api/v1/calendar{path}", json=payload)
+        assert response.status_code == expected, response.text
+    before = db.list_calendars(tenant_id="default")
+    limited = client.request(method, f"/api/v1/calendar{path}", json=payload)
+    assert limited.status_code == 429, limited.text
+    assert int(limited.headers["Retry-After"]) > 0
+    assert db.list_calendars(tenant_id="default") == before
+    for route in client.app.routes:
+        dependencies = getattr(getattr(route, "dependant", None), "dependencies", [])
+        if any(getattr(dep.call, "_tldw_rate_limit_resource", None) == resource for dep in dependencies):
+            route_path = re.sub(r"\{[^}]+\}", "1", route.path)
+            for route_method in route.methods:
+                blocked = client.request(route_method, route_path, json=payload)
+                assert blocked.status_code == 429, (route_method, route_path, blocked.text)
+    identity["user_id"] = 2
+    assert client.request(method, f"/api/v1/calendar{path}", json=payload).status_code == expected
 
 
 @pytest.mark.parametrize("zone", ["Unknown/Zone", "../etc/passwd"])
@@ -1579,6 +1646,233 @@ def test_trigger_external_calendar_sync_queues_calendar_job(
     }
     assert "password" not in json.dumps(job["payload"])
     assert "secret_ref" not in json.dumps(job["payload"])
+
+
+def test_manual_sync_ownership_and_admission_io_run_on_one_request_worker(
+    calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The async manual trigger must not do ownership, Jobs, or audit I/O on its event loop."""
+    client, db, _reminders = calendar_api_client
+    _calendar, item = _create_provider_item(db)
+    manager = client.jobs_manager  # type: ignore[attr-defined]
+    loop_threads: list[int] = []
+    calls: list[tuple[str, int]] = []
+
+    async def owner() -> User:
+        loop_threads.append(threading.get_ident())
+        return User(id=1, username="owner", is_active=True, is_admin=True, permissions=["*"])
+
+    client.app.dependency_overrides[get_request_user] = owner
+    for repository, names in [
+        (db, ["get_external_binding", "get_external_account", "record_sync_event"]),
+        (manager, ["list_jobs", "create_job"]),
+    ]:
+        for name in names:
+            original = getattr(repository, name)
+
+            def trace(*args: Any, _operation: Any = original, _name: str = name, **kwargs: Any) -> Any:
+                calls.append((_name, threading.get_ident()))
+                return _operation(*args, **kwargs)
+
+            monkeypatch.setattr(repository, name, trace)
+
+    response = client.post(f"/api/v1/calendar/external/bindings/{item.external_binding_id}/sync")
+    assert response.status_code == 200, response.text
+    assert {name for name, _ in calls} == {
+        "get_external_binding", "get_external_account", "list_jobs", "create_job", "record_sync_event",
+    }
+    assert loop_threads and {thread for _, thread in calls}.isdisjoint(loop_threads)
+    assert len({thread for _, thread in calls}) == 1
+    assert manager.count_jobs(domain="calendar") == 1
+    assert len(db.list_sync_events(binding_id=item.external_binding_id)) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancellation_kind", ["native", "anyio"])
+@pytest.mark.parametrize("fail_audit", [False, True], ids=["audit-success", "audit-failure"])
+async def test_manual_sync_cancellation_drains_queue_audit_and_preserves_failure(
+    calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
+    monkeypatch: pytest.MonkeyPatch, cancellation_kind: str, fail_audit: bool,
+) -> None:
+    """Cancelling a real HTTP sync request waits for its queue audit and retains an audit failure."""
+    from tldw_Server_API.app.core.Calendar import calendar_sync_worker as worker
+
+    client, db, _reminders = calendar_api_client
+    _calendar, item = _create_provider_item(db)
+    manager = client.jobs_manager  # type: ignore[attr-defined]
+    loop = asyncio.get_running_loop()
+    audit_started = asyncio.Event()
+    audit_finished = threading.Event()
+    release = threading.Event()
+    failure = RuntimeError("manual sync audit failed")
+    original_audit = db.record_sync_event
+    scopes: list[CancelScope] = []
+    cancellations: list[asyncio.CancelledError] = []
+    audit_threads: list[int] = []
+    drain_attempts = 0
+    original_shield = worker.asyncio.shield
+
+    def count_drain(awaitable: Any) -> Any:
+        nonlocal drain_attempts
+        if audit_started.is_set() and not audit_finished.is_set():
+            drain_attempts += 1
+        return original_shield(awaitable)
+
+    def blocked_audit(*args: Any, **kwargs: Any) -> Any:
+        """Hold the actual audit boundary after the real Jobs insert has committed."""
+        audit_threads.append(threading.get_ident())
+        loop.call_soon_threadsafe(audit_started.set)
+        try:
+            if not release.wait(3):
+                raise TimeoutError("Manual sync audit was not released")
+            if fail_audit:
+                raise failure
+            return original_audit(*args, **kwargs)
+        finally:
+            audit_finished.set()
+
+    monkeypatch.setattr(db, "record_sync_event", blocked_audit)
+    monkeypatch.setattr(worker.asyncio, "shield", count_drain)
+    async with AsyncClient(transport=ASGITransport(app=client.app), base_url="http://test") as api:
+        async def post_sync() -> Any:
+            try:
+                return await api.post(f"/api/v1/calendar/external/bindings/{item.external_binding_id}/sync")
+            except asyncio.CancelledError as exc:
+                cancellations.append(exc)
+                raise
+
+        async def request() -> Any:
+            if cancellation_kind == "anyio":
+                with CancelScope() as scope:
+                    scopes.append(scope)
+                    return await post_sync()
+                return None
+            return await post_sync()
+
+        # The baseline handler blocks the loop. A watchdog bounds that failure so
+        # the test can report it and close every task/thread rather than deadlock.
+        watchdog = threading.Timer(1, release.set)
+        watchdog.start()
+        task = asyncio.create_task(request())
+        exited_while_blocked: list[bool] = []
+        try:
+            await asyncio.wait_for(audit_started.wait(), timeout=3)
+            blocked_at_cancel = not audit_finished.is_set()
+            for _ in range(3 if cancellation_kind == "native" else 1):
+                if cancellation_kind == "native":
+                    task.cancel("manual sync shutdown")
+                else:
+                    scopes[0].cancel()
+                await asyncio.sleep(0)
+                await asyncio.sleep(0)
+                exited_while_blocked.append(task.done())
+        finally:
+            release.set()
+            outcomes = await asyncio.gather(task, return_exceptions=True)
+            watchdog.cancel()
+            watchdog.join()
+
+    assert blocked_at_cancel, "Manual queue/audit I/O blocked cancellation delivery on the request event loop"
+    assert not any(exited_while_blocked), "Cancelled request abandoned its queue audit"
+    assert audit_finished.is_set()
+    assert len(audit_threads) == 1 and audit_threads[0] != threading.get_ident()
+    assert drain_attempts <= (4 if cancellation_kind == "native" else 3), "Cancellation caused hot drain retries"
+    assert len(cancellations) == 1
+    if cancellation_kind == "native":
+        assert isinstance(outcomes[0], asyncio.CancelledError)
+        assert str(cancellations[0]) == "manual sync shutdown"
+    else:
+        assert scopes[0].cancelled_caught
+    assert cancellations[0].__cause__ is (failure if fail_audit else None)
+    assert manager.count_jobs(domain="calendar") == 1
+    audits = db.list_sync_events(binding_id=item.external_binding_id)
+    assert len(audits) == (0 if fail_audit else 1)
+    assert db._transaction_connection.get() is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancellation_kind", ["native", "anyio"])
+async def test_manual_sync_waiting_for_scheduler_admission_is_offloop_and_drained(
+    calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
+    monkeypatch: pytest.MonkeyPatch, cancellation_kind: str,
+) -> None:
+    """An HTTP trigger contending on the scheduler's binding lock stays cancellable until drained."""
+    from tldw_Server_API.app.core.Calendar import calendar_sync_worker as worker
+    from tldw_Server_API.app.services.calendar_sync_scheduler import queue_due_calendar_sync_jobs
+
+    client, db, _reminders = calendar_api_client
+    _calendar, item = _create_provider_item(db)
+    manager = client.jobs_manager  # type: ignore[attr-defined]
+    scheduler_jobs = JobManager(manager.db_path)
+    loop = asyncio.get_running_loop()
+    empty_lookup = asyncio.Event()
+    manual_started = asyncio.Event()
+    release = threading.Event()
+    scopes: list[CancelScope] = []
+    original_lookup = worker._active_job_for_binding
+    original_queue = worker.queue_calendar_binding_sync
+
+    def pause_scheduler(**kwargs: Any) -> dict[str, Any] | None:
+        existing = original_lookup(**kwargs)
+        if kwargs["job_manager"] is scheduler_jobs and existing is None:
+            loop.call_soon_threadsafe(empty_lookup.set)
+            if not release.wait(3):
+                raise TimeoutError("Scheduler admission was not released")
+        return existing
+
+    def trace_manual(**kwargs: Any) -> Any:
+        if kwargs["job_manager"] is manager:
+            loop.call_soon_threadsafe(manual_started.set)
+        return original_queue(**kwargs)
+
+    monkeypatch.setattr(worker, "_active_job_for_binding", pause_scheduler)
+    monkeypatch.setattr(worker, "queue_calendar_binding_sync", trace_manual)
+    scheduled = asyncio.create_task(queue_due_calendar_sync_jobs(db=db, job_manager=scheduler_jobs))
+    watchdog = threading.Timer(1, release.set)
+    task: asyncio.Task[Any] | None = None
+    async with AsyncClient(transport=ASGITransport(app=client.app), base_url="http://test") as api:
+        async def request() -> Any:
+            if cancellation_kind == "anyio":
+                with CancelScope() as scope:
+                    scopes.append(scope)
+                    return await api.post(f"/api/v1/calendar/external/bindings/{item.external_binding_id}/sync")
+                return None
+            return await api.post(f"/api/v1/calendar/external/bindings/{item.external_binding_id}/sync")
+
+        try:
+            await asyncio.wait_for(empty_lookup.wait(), timeout=3)
+            watchdog.start()
+            task = asyncio.create_task(request())
+            await asyncio.wait_for(manual_started.wait(), timeout=3)
+            scheduler_blocked = not release.is_set()
+            if cancellation_kind == "native":
+                task.cancel("manual lock wait shutdown")
+            else:
+                scopes[0].cancel()
+            for _ in range(5):
+                await asyncio.sleep(0)
+            abandoned = task.done()
+        finally:
+            release.set()
+            outcomes = await asyncio.gather(scheduled, *([task] if task is not None else []), return_exceptions=True)
+            watchdog.cancel()
+            if watchdog.ident is not None:
+                watchdog.join()
+
+    assert scheduler_blocked, "Waiting for admission blocked the HTTP event loop"
+    assert not abandoned, "Cancellation abandoned a manual admission waiting on the binding lock"
+    assert len(outcomes[0]) == 1 and outcomes[0][0].queued
+    if cancellation_kind == "native":
+        assert isinstance(outcomes[1], asyncio.CancelledError)
+    else:
+        assert scopes[0].cancelled_caught
+    jobs = manager.list_jobs(domain="calendar")
+    audits = db.list_sync_events(binding_id=item.external_binding_id)
+    assert len(jobs) == len(audits) == 1
+    assert jobs[0]["payload"]["reason"] == "scheduled"
+    assert json.loads(audits[0].metadata_json) == {"job_id": jobs[0]["id"], "reason": "scheduled"}
+    assert db._transaction_connection.get() is None
 
 
 def test_external_binding_list_and_sync_placeholders_enforce_owner_scope(
