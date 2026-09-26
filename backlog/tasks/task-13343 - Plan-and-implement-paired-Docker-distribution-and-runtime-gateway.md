@@ -4,7 +4,7 @@ title: Plan and implement paired Docker distribution and runtime gateway
 status: In Progress
 assignee: []
 created_date: '2026-09-23 06:15'
-updated_date: '2026-09-26 08:18'
+updated_date: '2026-09-26 08:50'
 labels:
   - distribution
   - docker
@@ -115,6 +115,8 @@ Task17 independent review approves spec compliance and quality with no Important
 Exact candidate19f2174383 built control/backend, then was deliberately interrupted during quiet WebUI Bun install because final whole-WP1 review reproduced load-bearing gaps requiring source corrections: inherited Compose environment can override verified image/origin; required bundle-file inventory can be omitted from a signed manifest; shipped helper readiness lacks mandatory temporary authenticated exchange/revocation. Verified owned build process interrupted, helper exit130/failure cleanup, registry removed, no recovery/manifest/signature remains; unrelated PostgreSQL preserved. No build-error or G2/G4 claim. Await complete final review and one combined fix wave before a new clean qualification; no branch push or publication.
 
 Final whole-WP1 review19f2174383 is not ready: I1 inherited Compose environment overrides trusted config, I2 optional required helper inventory, I3 missing authenticated readiness/revocation, I4 first-port conflict prevents retry; M1 falsely states partial services stopped after cleanup failure. Plan one combined final fix wave, then one scoped rereview. Prefer existing pinned control image/std-library readiness on verified Compose network/public Host-Origin envelope, validate running signed identities before requests and revoke temporary session before success; Docker-only first-port preflight before origin persistence. Windows helper runtime remains explicitly unqualified, G12/full publication matrix blocked. No new host dependencies, Docker socket exposure, publication or reset of established state.
+
+Final combined fix wave commits17ce1a3e99/1d0bcb9b28 independently re-reviewed over19f2174383..1d0bcb9b28: I1-I4 and M1 addressed, scoped spec/quality pass, no new code findings. Authoritative sanitized Compose inputs, required8signedfiles, bounded authenticated gateway readiness/exact probe revoke, Docker-owned preflight before origin persistence and truthful cleanup now covered. Focused Release158 passed; after final established-origin test addition, complete amended control15 passed (not full159 rerun). Black/Ruff/shell pass; all amended production Python Bandit0. Real owned Docker port/runtime network/session/revoke/broken-auth proof passes and cleanup confirmed; only2unrelatedPG remain. Docker inspection Driver classifier defect caught by real fixture and red/green fixed within singlewave. Dependency-only Bun diagnostic completed and ownedimage removed, not fullartifact acceptance/rootcause claim. Next exact clean local arm64 and native amd64/arm64 lifecycle13/browser38 checklist/signatures; Windows actualruntime and G12/fullpublication remain unqualified.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

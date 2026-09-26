@@ -592,8 +592,8 @@ required by the new helper contract; no gates/tests are weakened.
 cannot override verified state, and both consumers refuse incomplete bundles.
 **Tests:** Red/green helper-child and actual Compose config regressions; omitted,
 missing, wrong-platform and tampered required files in control and promotion.
-**Status:** Not Started
-- [ ] Add failing tests, implement minimal paired-boundary fixes, run covering
+**Status:** Complete
+- [x] Add failing tests, implement minimal paired-boundary fixes, run covering
   Release/helper suites and preserve generic native manifest compatibility.
 
 #### Stage 2: Authenticated readiness and honest cleanup
@@ -603,8 +603,8 @@ cookie-only auth and exact temporary-session revocation before URL announcement;
 failed readiness/cleanup cannot report success or erase persistent config.
 **Tests:** Real HTTP upstream fixtures including healthy containers/broken auth,
 wrong role/source, failed/stalled body, failed revoke and cleanup failure.
-**Status:** Not Started
-- [ ] Add failing behavior tests, implement bounded existing-control readiness
+**Status:** Complete
+- [x] Add failing behavior tests, implement bounded existing-control readiness
   and mirror host invocation on Unix/PowerShell; run targeted proof and Bandit.
 
 #### Stage 3: Safe first-origin choice
@@ -613,8 +613,8 @@ wrong role/source, failed/stalled body, failed revoke and cleanup failure.
 explicit occupied choice permits alternate retry, established origin never moves.
 **Tests:** Docker-owned port preflight/failure cleanup, unrelated listener
 preserved, explicit retry and existing-state refusal without credential rotation.
-**Status:** Not Started
-- [ ] Add failing first-install regressions, implement owned preflight and
+**Status:** Complete
+- [x] Add failing first-install regressions, implement owned preflight and
   truthful failure messages, run helper tests; label Windows runtime unqualified.
 
 #### Stage 4: Final fix-wave review and actual acceptance
@@ -625,6 +625,8 @@ resolves I1-I4/M1 or records residual rulings; exact candidate local/native proo
 and final acceptance record remain controller-owned Task13.
 **Tests:** Focused amended scopes only, immutable candidate identities and
 full mapped lifecycle/browser checklists after clean source is committed.
-**Status:** Not Started
+**Status:** In Progress
 - [ ] Commit working slices, append fix report with exact tests/results and
   limitations; controller dispatches one scoped rereview and fresh qualification.
+
+Scoped rereview `19f2174383..1d0bcb9b28` approves all I1-I4/M1 and finds no new code defects. Release158 passed, followed by amended control15 after one final regression addition; Black/Ruff/shell pass and all changed production Python Bandit0. Real owned Docker fixtures pass port binding, actual inspection/network, gateway auth/revoke and broken-auth refusal. Exact rebuilt local/native artifacts and Windows runtime remain unqualified; Stage4/Task13 acceptance is still pending.

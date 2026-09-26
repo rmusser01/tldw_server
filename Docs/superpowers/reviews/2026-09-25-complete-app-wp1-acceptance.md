@@ -1,19 +1,68 @@
-# WP1 paired Docker candidate: acceptance record (2026-09-25)
+# WP1 paired Docker candidate: acceptance record
 
-This is a development acceptance record for TASK-13343, not a product-release
-approval. The worktree branch is `codex/complete-app-wp1`. The existing
-frontend publication freeze remains in force; no image, installer, or catalog
-entry has been published.
+This records development qualification for TASK-13343 on `codex/complete-app-wp1`.
+Protected frontend publication remains frozen. No public image, installer,
+catalog entry, PR or merge is approved by this record.
+
+## Current evidence (2026-09-26)
+
+The final code review fix wave through `1d0bcb9b28` passes scoped spec and quality review. Exact corrected local/native artifact qualification remains pending. Historical runs below do not qualify this source.
 
 | Contract | Current evidence | Status |
 | --- | --- | --- |
-| Section 5: one browser gateway, same-origin managed WebUI, private backend/Next ports | Gateway real-socket tests cover routing, Host/Origin rejection, forwarded-header stripping, multipart body forwarding, redirects, cookies, SSE cancellation, and WebSocket upgrade. Run 36210634045 passes real-container setup/docs routing, named session cookies, cookie-only profile authentication, hostile Host rejection, and private-port checks on both native platforms. | One-instance extracted-container proof passes; two-instance browser/network qualification remains open. |
-| Section 10: Docker-only extracted first start, stable identity, stop/status, retained data | Control tests cover signature-before-init, mode-0600 credentials, repeat identity, conflicting release, and tampering. Fake-Docker helper tests cover ordering, unavailable daemon/Compose, occupied port, and stop/status from another directory. Both native jobs in run 36210634045 passed first/repeat/stop/restart and persistence with the corrected configuration. | Container lifecycle proof passes; interactive browser setup and Windows helper runtime qualification remain open. |
-| Section 11: signed manifest and immutable artifacts | Ed25519 exact-byte manifest verification, per-file SHA-256, platform selection, path/symlink checks, fixed control-image/key bootstrap, and candidate-gate tests pass. Both corrected native candidates pass extracted initialization/tampering; independently downloaded signatures and all eight helper hashes verify for each platform. | Per-platform provisional artifacts verified; one qualified multi-platform manifest is not produced. |
-| G2 Docker first install | Both corrected native signed bundles ran outside the checkout, reached healthy services, served managed setup, authenticated the profile with cookies only, and retained credentials/data across stop/start from another directory. | Remains false in provisional evidence until its planned interactive browser setup qualification is implemented. |
-| G4 networking/auth | Focused gateway, backend AuthNZ, Next runtime, and browser-networking tests pass; real standalone Next session exchange through the gateway passed before image work. | Open: exact two-instance browser/auth and real-container upload/stream/WebSocket cases are not yet qualified. |
-| G10 artifact trust | Manifest/control/candidate test suites pass, including altered signature, wrong platform, unsafe path, changed file, and missing image. Both corrected native jobs pass image-content guards, extracted verification, and refusal of a tampered manifest before instance initialization. Downloaded signatures and helper bytes independently verify. | True in both corrected per-platform provisional records; full product qualification is not implied. |
-| G12 release policy | Both native jobs recorded Python 3.12.14 and Node 24.21.0. Their upstream support status was checked on September 25. The candidate code records exact patches and refuses unsupported families/mismatches. | Open: full dependency/security review, download/installed-footprint measurements, joined matrix qualification, and protected publication remain outstanding. |
+| Sections5/10: Docker-only startup, stable identity, gateway readiness and private ports | Reviewed fixes and scoped Docker fixtures cover signed identities, gateway cookie auth/revoke, first-port conflict/retry, authoritative persisted inputs and owned cleanup. | Exact outside-checkout corrected candidate pending; Windows runtime unqualified. |
+| Section11 / G10: required signed artifacts | Both consumers now require all eight signed paths for the selected platform; omitted/missing/wrong-platform/tampered cases pass. | Exact final manifest/signature/helper bytes pending independent verification. |
+| G2: credential-free managed connection and initial wizard | Implementation/probe tests exist; authenticated installer readiness is now required before browser success. | Pending exact full lifecycle and browser candidate evidence. |
+| G4: two-instance networking/auth | Full browser checklist remains strict and uses the same managed WebUI artifact against two private target configurations. | Pending exact local and native amd64/arm64 evidence. |
+| G12: release policy | Python3.12 and Node24 upstream eligibility rechecked September26; exact patches will be recorded from built images. | False/open: full matrix, Windows runtime, dependency/security/footprints and protected publication remain separate. |
+
+PowerShell helpers are provisional. Windows parsing does not prove real Docker startup, ACL/private-state handling, port recovery, readiness, or stop/status. Docker image Size metadata does not measure download or installed footprint. The 93 untouched whole-frontend typecheck diagnostics remain a disclosed failing baseline.
+
+
+## Review fixes and scoped verification
+
+Final whole-WP1 review covered `3c871df717..19f2174383`. Its four Important
+findings and one Minor finding were handled in a single combined fix wave,
+`19f2174383..1d0bcb9b28`, with one scoped rereview. The fixes make persistent
+configuration authoritative over inherited Compose inputs, require all eight
+signed bundle files, perform authenticated gateway readiness and temporary
+session revocation before startup success, preflight the first port before
+persisting an origin, and report failed cleanup accurately.
+
+The final focused Release run passed 158 tests; a final established-origin
+regression was then added and its complete amended control file passed 15 tests.
+This is not a claim of a full 159-test rerun. Black/Ruff/shell syntax passed;
+Bandit on all amended production Python reported 0 findings. A real Docker
+fixture caught and fixed an inspection classifier error: container records
+also carry Driver. The corrected scoped proof passed actual port reservation,
+runtime identity/private network, gateway cookie authentication/revocation,
+and healthy-fixture broken-auth refusal. Owned resources were removed.
+These scoped results support the code review; exact artifact results above
+remain the acceptance evidence.
+
+## Rulings I made
+
+- Ruling: Correct the design route table to put `/setup` in Next and backend docs assets in FastAPI — this records the user-approved routing correction already committed/tested at 9755c7eaaf/e759322854, rather than reverting to the legacy backend page. Cost if wrong: route ownership and novice setup need rework; API setup paths remain available.
+- Ruling: Use a qualification-only Compose override for the second instance's private hostnames/ports after both signed helper starts — the contract requires one WebUI artifact against varying private targets, and this adds no user-facing override API. Cost if wrong: the fixture may need redesign to reflect a supported supervisor configuration; do not advertise it as an installer feature.
+- Ruling: Fix Docker setup locality using a bounded authenticated private gateway hop and exact persisted public origin, rather than blanket proxy trust or remote setup enablement — observed Docker NAT makes loopback-only peer checks reject supported managed ingress; the design requires an explicit trusted-hop contract. Cost if wrong: backend setup security boundary and candidate images require rework, so focused hostile-input tests and independent security review are required before qualification.
+- Ruling: Set existing backend ALLOWED_ORIGINS to the exact persisted managed gateway origin — actual cookie WebSocket upgrade fails and runtime trusted origins omit it; reuse existing policy with no wildcard. Cost if wrong: managed cross-origin integrations may require explicit separate configuration; ordinary developer/hosted defaults remain unchanged.
+- Ruling: Extend the shared authenticated managed-hop contract to MCP local ingress, preserving effective-loopback allow/block checks and configuring exact MCP origins — actual MCP log rejects Docker bridge peer while same-cookie audio WebSocket succeeds; disabling the IP controller or broad private-IP allowlisting would weaken policy. Cost if wrong: MCP proxy/security integration needs rework; independent security review and actual hostile/blocked-input tests gate qualification.
+- Ruling: Ship only existing Docs/Published in the WebUI runtime — actual reader fails without it and works with a read-only mount; nonexistent extension-documentation source already returns an empty list in developer mode. Cost if wrong: additional explicit published sources need packaging, but no unrelated design/private docs are exposed.
+- Ruling: Evaluate G2 against its explicit Docker first-install criteria (credential-free managed connection, matching ready images and durable lifecycle), keeping provider/full native setup separate — designG2 does not require paid provider configuration, which belongs to later G1/product onboarding. Cost if wrong: G2 evidence must be tightened and additional novice setup checks added; evidence must still name its initial-wizard scope and never claim full provider setup complete.
+- Ruling: Refresh obsolete single-builder packaging assertions to validate both actual paired targets and add only the reviewed local profile package to API source allowlist — baseline relativeTask11 does not justify accepting failing wholeWP1 tests. Cost if wrong: semantic guards could hide a lost quickstart/security contract; negative fixtures and independent review are required.
+- Ruling: Allow a validated qualification-only local registry port, default5000 inCI and15000 on this host — macOS ControlCenter alreadyowns5000; changing a user service is unnecessary. Cost if wrong: port/ref validation or testtool cleanup needs rework; no new registryhost/publicpush capability is added.
+- Ruling: Explicitly precreate the root-owned public trust directory0755 before copying readonly0444 key files — actualBuildKit gives an automatically created destination directory0444 aswell, blocking caller traversal; publictrust mustbe readablewithout changing helperUID or exposingprivatekeys. Cost if wrong: control packaging modes need rework and exact nonroot signature qualification must be repeated; no caller-write permissions or privatekey relaxations allowed.
+- Ruling: Validate the existing session cookie at /api and CSRF cookie at / rather than broadening the production session scope to satisfy the probe — real Chromium cookie-only profile succeeds and production setter explicitly scopes session to /api; the probe root lookup and / assertion are wrong. Cost if wrong: browser qualification path/discovery must be reworked and isolation evidence repeated; no production cookie-policy relaxation.
+- Ruling: Run bounded installer readiness in the existing pinned control image on the verified private Compose network, checking running signed identities and the actual gateway listener with the persisted public Host/Origin envelope — fulfills approved authenticated-readiness/revocation contract without host Python/Node or Docker socket mounts. Cost if wrong: probe/network identity design must be reworked and exact readiness qualification repeated; real public host binding remains independently required in lifecycle/browser tests.
+- Ruling: Confirm and select the first origin with Docker-owned port preflight before initialization, offering an available alternative for occupied defaults and preserving established origins — current init-before-check makes the documented alternate-port retry unusable. Cost if wrong: preflight ownership/port handoff needs rework and first-install conflict tests repeated; never reset existing credentials/data or stop unrelated listeners.
+
+
+## Historical evidence through September25 and superseded follow-ups
+
+The following chronological notes describe earlier source revisions and
+failed/superseded candidates. They are retained as history, not current
+qualification or availability claims. The current evidence table above is
+controlling, including later failures and the final corrected artifacts.
 
 Local verification after the cookie follow-up: 49 lean Release tests and three
 focused AuthNZ integration tests pass;
