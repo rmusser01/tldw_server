@@ -18,6 +18,7 @@ from tldw_Server_API.app.core.DB_Management.jobs_failed_requeue import (
     count_recent_job_admissions,
     ensure_retry_admission_index,
 )
+from tldw_Server_API.app.core.exceptions import JobsRetryAdmissionIndexError
 from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
 from tldw_Server_API.app.core.Jobs.pg_migrations import ensure_jobs_tables_pg
 
@@ -345,7 +346,7 @@ def test_retry_index_coordination_respects_configured_timeout(
         with psycopg.connect(jobs_pg_dsn, autocommit=True) as conn, conn.cursor() as cur:
             cur.execute("SELECT set_config('lock_timeout',%s,FALSE)", (f"{lock_ms}ms",))
             cur.execute("SELECT set_config('statement_timeout',%s,FALSE)", (f"{statement_ms}ms",))
-            with pytest.raises(RuntimeError, match="retry.admission.*advisory lock.*timeout"):
+            with pytest.raises(JobsRetryAdmissionIndexError, match="retry.admission.*advisory lock.*timeout"):
                 ensure_retry_admission_index(cur, backend="postgres")
             leader.execute("SELECT pg_advisory_unlock(hashtextextended(%s, 0))", (lock_key,))
             ensure_retry_admission_index(cur, backend="postgres")
@@ -373,7 +374,7 @@ def test_disabled_retry_index_timeouts_use_bounded_thirty_second_fallback(
             with monkeypatch.context() as patch:
                 patch.setattr(retry_db, "monotonic", ticks.__next__)
                 patch.setattr(retry_db, "sleep", sleeps.append)
-                with pytest.raises(RuntimeError, match="retry.admission.*advisory lock.*timeout"):
+                with pytest.raises(JobsRetryAdmissionIndexError, match="retry.admission.*advisory lock.*timeout"):
                     ensure_retry_admission_index(cur, backend="postgres")
             assert sleeps == pytest.approx([0.01])
             leader.execute("SELECT pg_advisory_unlock(hashtextextended(%s, 0))", (lock_key,))
@@ -404,7 +405,7 @@ def test_foreign_same_name_retry_index_collision_fails_closed(
         cur.execute(collision_ddl)
         cur.execute("SELECT 'idx_job_events_retry_admissions'::regclass::oid")
         original_oid = cur.fetchone()[0]
-        with pytest.raises(RuntimeError, match="retry.admission.*(definition|collision)"):
+        with pytest.raises(JobsRetryAdmissionIndexError, match="retry.admission.*(definition|collision)"):
             ensure_retry_admission_index(cur, backend="postgres")
         cur.execute("SELECT 'idx_job_events_retry_admissions'::regclass::oid")
         assert cur.fetchone()[0] == original_oid

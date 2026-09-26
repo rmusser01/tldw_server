@@ -3,16 +3,16 @@ id: TASK-13369
 title: Address PR 3016 Qodo durability findings
 status: In Progress
 assignee: []
-created_date: 2026-09-26 00:52
-updated_date: 2026-09-26 09:45
+created_date: '2026-09-26 00:52'
+updated_date: '2026-09-26 12:38'
 labels:
-- vn-assets
-- review
-- durability
+  - vn-assets
+  - review
+  - durability
 dependencies: []
 references:
-- https://github.com/rmusser01/tldw_server/pull/3016
-- https://github.com/rmusser01/tldw_server/issues/2021
+  - 'https://github.com/rmusser01/tldw_server/pull/3016'
+  - 'https://github.com/rmusser01/tldw_server/issues/2021'
 priority: high
 ---
 
@@ -40,6 +40,7 @@ IMPLEMENTATION_PLAN_vn_pr_3016_review.md
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Resumed after disk capacity was restored. Confirmed PR 3016 remains open and latest dev has four newer commits. Original eight Qodo threads remain outstanding. Independent review exposed missing-byte/quota accounting recovery and stale claim/publication windows; assigned non-overlapping Storage/AuthNZ and VN worker/DB implementers. Added and observed four new fencing regressions fail before implementation. Frontend verification underway; latest dev fetched; requester-provided Change summary preserved.
 
@@ -125,6 +126,28 @@ Task21 freshimplementer Singer01a0dd07-eef8-70f3-a258-bd442e255a2e active, task-
 Task21 Singer frozen DONE_WITH_CONCERNS, closed;203hashes/202archivemembers. ActualpubliccollectionRED14missingtiers->GREEN14exactunit/routingretained; outerunit10passed3deselected5warnings17.32s, nested9pass3expectedfail2expectederrors separately, notadded. Sixdecorators/iniunitregistration/literalwrapping only, executable/runtime/generated/fixture/nativepreservation proven. One ignored ini-newline evidence-check harnessfailure qualified/corrected, no assertion weakening. Inheritedwarning/formatter/import-time temporarySQLite initialization qualified: noPGallocation/I/O, not literalzeroDBfilesystemeffects. Maincovering6passed5warnings17.86s exit0; scopedRuff/Banditresults[]errors[]/compile/diff and frozenboundarydiff0; applicable normal5filehookspassed/no-fileSkippednotpasses; all203hashesmatch afterverification/hooks. Noether01a0dd13-e431-7433-8b1b-7610da1291a8 independent spec/quality/final markerinteraction review active, no duplicates. AllMaintest/shellsessionsclosed; no newpush/evidencereply/resolution/merge yet.
 Task21 Noether independent specPASS/qualityPASS/final markerinteractionPASS, no actionablefindings. Audited203manifest/archive/actualpatch/14tier RED-GREEN collectionrecords and exact old-vs-new normalized wholefiles/AST/imports/generatedbodies; Main6coveringevidence inspected/no duplicate suite. InheritedSQLite shutdown/lazy-init sideeffects/warnings/formatter qualified, no zeroDBfilesystemeffectclaim. Reviewerclosed/alltaskneededagents/tests/shellsessionsclosed; dev59bd unchangedancestor. Localcomplete/frozen, normal5filecommit/push/individualreply/resolution next; AC5externalpending/AC6externalgatespending/no merge.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+Task21 normal five-file commit and FF push succeeded; GitHub verified head2450adb17888b67b1c393581b01b011483e7cbec on unchanged dev59bd584503. All203 frozen hashes verified after commit. Applicable explicit normal five-file pre-commit checks passed; normal commit produced no commit-stage hook output, no bypass used. Individual tested evidence reply4111014500 posted2026-09-26T09:52:38Z; fresh paginated GraphQL33threads0unresolved/no remaining review/thread/comment pages. Latest thread was already auto-resolved after push, not manually dismissed. Prior32 replies/resolutions retained. Updated only PR Verification, human requester paragraph and all other sections/Cubic footer preserved and freshly verified. ONE full /agentic_review5845250951 at2026-09-26T09:53:39Z on2450adb is PENDING, busy acknowledgment5845252770 at09:53:51Z; do not duplicate. Edited summary5836873877 at09:46:09Z0bugs0rules18historicalomitted after push is NOTcompleted full new-head review. All20 conversationcomments inspectednew/edited. Exact-head54checkruns33queued21completed/no actionablefailure/seven requiredcontexts absent; skipped/cancelled are notpasses. OPEN/BLOCKED/no mergeattempt. AC5 checked for individual evidence; AC6/finalizationpending. Task21 localcomplete/frozen/independentlyapproved, all taskneededagents/tests/shellsessionsclosed. Official Backlog CLI fallback used after read-only MCP task_view did not return and its exec cell was terminated. Preserve worktree/evidence/unrelatedmain; no tracking-onlypush invalidating pendingreview.
+
+09:56 heartbeat: full /agentic_review5845250951 on2450adb completed with exact-head Qodo acknowledgment5845262987 at2026-09-26T09:55:07Z; busy5845252770 removed (fresh endpoint404), summary5836873877 updated09:55:04Z with exacthead footer and0bugs0rules, all visible historical findings resolved/dismissed. No new Qodo formal Review object was emitted for this zero-finding run; completion is supported by the request/busy/terminal acknowledgment sequence, not just a push-summary edit. Fresh paginated GraphQL33threads0unresolved/no remaining review/thread/comment pages/no new inline feedback; all20 conversationcomments inspectednew/edited. No review pending; do not request another on unchanged head. Exacthead55checkruns33queued22completed/no actionablefailure/all7requiredcontexts absent. Dev ref freshly59bd584503 unchanged, requester human summary verbatim, PR OPEN/BLOCKED/no mergeattempt. AC5checked/AC6pending; only requiredCI gates remain externally pending, not merge-ready. No source edits, newcommit/push/rebase/agent/test reruns. Preserve local integration records and all evidence.
+
+11:26 heartbeat found dev advanced to a2826f103f02a67f57adb40ed048dbfa2ecfc6e5 via unrelated VZ startup-drill PR3017. Fresh fetch/delta confirmed no VN/Storage/Jobs/AuthNZ/UI/fixtures/globalconfig/CI overlap. Backed up reviewed2450adb in codex/vn3016-before-dev-a2826f-2450adb; scoped stash018ffdd24a9acd92e07499297a084268c7bcd5dc contains only two integration-record files, applied after clean12commit rebase and retained as evidence. Exact pre/post local diff SHA2569448fd08f511b078ed59c00ed634f6ea613a4da93740aa5fb874948e94154207. Range-diff all12patches identical; changed owned source/test/config blobs unchanged; all203 frozen hashes verified exit0. Newhead a3f62da0a29eac3743cd184341d97206e028e238 is descendant of newdev. Bounded post-rebase unit-filter run10passed38deselected0fail/errors/skips5warnings17.85s;35 VN integration cases were deselected by unit filter, then separately executed35passed0fail/errors/skips4warnings25.31s. Three nativePG guards remained deliberately deselected, noPG rerun. /tmp/vn3016-post-rebase-a3f62da.log/xml and -vn.log/xml retained; structured XML verified10+35 respectivecounts, not nested-count totals. Existing cleanup/import-timeSQLite warnings qualified. Normal rebase and exact force-with-lease2450adb push exit0; GitHub exacthead/base verified. No source edits/new implementation commit or repeated broad suite. PRVerification-only update preserved human paragraph/all other sections and Cubic footer freshly verified. Paginated33threads0unresolved/no remaining pages; all22conversationcomments checkednew/edited, CodeRabbit skip nonactionable. Push summary5836873877 at11:31:20Z0bugs0rules18historicalomitted NOTcompleted new-headfullreview. ONE full /agentic_review5845913123 at2026-09-26T11:32:34Z on a3f62da PENDING, busy5845914083 at11:32:44Z; do not duplicate. Exacthead55checks33queued22completed/noactionablefailure/all7requiredcontextsabsent. Earlier2450adb full review remains historical, not exact-newhead gate. AC5checked/AC6pending, PR OPEN/BLOCKED/no mergeattempt. No active taskneeded agents/tests/shellsessions; onlylocalintegrationrecords dirty, preservemain/worktree/evidence/backupref/stash, no tracking-onlypush.
+
+Full exact-head Qodo review 5325783656 completed 2026-09-26T11:35:55Z on a3f62da0a29eac3743cd184341d97206e028e238 (ack 5845933607). Six new findings 4111251955/1958/1961/1962/1964/1966; paginated inventory 39 threads, six unresolved, prior 33 preserved. Reopened AC5. Verifying scoped async DB lookup, integrity-failure capacity, Jobs exception, new-test tier/docs and cancellation receipt behavior before implementation. Required checks still queued/absent; no merge attempt or review request pending.
+
+Task22 implementation in progress with Erdos01a0dd87-7344-7602-8cf1-49069991f841. All six new root causes verified. First scoped RED reproduced blocking outcome lookup, both integrity-failure paths stranding capacity and three generic Jobs errors; native error controls passed. Initial test fixture typo and evidence-checker hook assertion were corrected before production edits and retained as non-green harness evidence. Actual public tier collection RED124 items and helper docs RED34 gaps. Ruling preserves private-memory/active caller transaction compatibility through documented inline fallback, normal file-backed outcome reads offloaded cohesively. Independent source/evidence review required before normal commit; AC5 remains open.
+
+Task22 checkpoint2: first backend GREEN13 covering new read/integrity/typed-error behavior passed (124 deselected); frontend focused RED3 failed/2 controls passed then GREEN5 passed (39 filter-skipped, not passes). Private-memory/active-transaction fallback accepted; normal worker wiring has no outer VN transaction, off-thread reader owns an independent read-only handle and returns detached rows. Public collection/docs metadata checks green. Initial frontend dependency-layout failures and test-fixture/emitter errors retained as qualified harness evidence. Covering modules and independent review pending; no new commit/push/resolve/merge.
+
+Task22 frozen10-file implementation/evidence complete; Erdos closed with qualified DONE_WITH_CONCERNS. Final affected backend305 passed incl17 required officialPG, zero errors/failures/skips,37 summarywarnings251.52s; frontend65 passed zero skipped8.97s. Public collection135 items/101 PR-added cases exactly one tier; helper-doc/signature/AST preservation audits green; scoped TypeScript/ESLint/compile/diff green. ProductionBandit0; scopedRuff one verified baselineBLE001 and testBandit18 identical baselineB106, no new findings. Frozen93-file manifest/package verified; initial harness/fixture/dependency failures qualified. Independent Task22 spec/quality/changed-contract review underway. No commit/push/resolve/merge; AC5 remains open.
+
+Task22 independent Gibbs review SPEC PASS / QUALITY PASS / changed-contract interactions PASS, no actionable finding; reviewer closed. All93 frozen source/evidence hashes remain valid. Main bounded integration15passed zero failures/errors/skips plus fresh scopedTypeScript0diagnostics/ESLintexit0/productionBandit0findings0errors; Ruffonly samebaselineBLE001. Current fetched dev a2826f103f unchanged; no rebase needed. Normal13-file hooks/staging/commit next; all6 external new findings still open pending tested push/evidence replies. Human summary verified verbatim. No merge attempt; AC6 pending.
+
+Correction to preceding Main integration count: fresh structured XML proves16 tests, not15;0failures/errors/skips. The earlier note was a transcription error, not a missing/passing case. Raw /tmp/vn3016-task22-main.log/xml retained. Other verification unchanged.
+
+Normal applicable13-file pre-commit checks passed; YAML/TOML and scopedwizard Ruff/Black had no files and were skipped, not passes. Existing deprecated hook-stage warnings retained. All93 source/evidence hashes matched afterward; no source alteration. Main16passed124deselected0skips4summarywarnings8.63s. Normal reviewed13-file commit/push next; no hook bypass, no related fixture/globalconfig edits.
+<!-- SECTION:NOTES:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed

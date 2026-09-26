@@ -1,6 +1,9 @@
+import asyncio
 import json
 import sqlite3
 from collections.abc import Generator
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -20,6 +23,176 @@ def chacha_db() -> Generator[CharactersRAGDB, None, None]:
     database.close_connection()
 
 
+@pytest.fixture
+def integrity_state(chacha_db: CharactersRAGDB, tmp_path: Path) -> dict[str, Any]:
+    """Create damaged history, approvals, claimed work and a live sibling batch."""
+    repo = VNAssetPacksRepository.initialized(chacha_db)
+    character_id = chacha_db.add_character_card({"name": "VN Primary"})
+    pack = repo.create_pack(owner_user_id=1, primary_character_id=character_id, title="Pack")
+    slots = [repo.create_slot(pack_id=pack["id"], asset_type="sprite", slot_key=name) for name in ("first", "second")]
+    batch = repo.create_batch(
+        pack_id=pack["id"], requested_by_user_id=1, total_variants=6,
+        recipes=[{"slot_id": slots[index == 4]["id"], "variant_index": index, "recipe": {}} for index in range(6)],
+    )
+    approvals = []
+    for index in (0, 5):
+        path = tmp_path / f"approved-{index}.png"
+        path.write_bytes(b"approved")
+        item = repo.reserve_variant_item(
+            batch_id=batch["id"], slot_id=slots[0]["id"], variant_index=index,
+            item_fields={"pack_id": pack["id"], "generated_file_id": 17 + index,
+                         "storage_ref": str(path), "bytes": 8},
+        )
+        repo.complete_variant(batch_id=batch["id"], slot_id=slots[0]["id"], variant_index=index, item_id=item["id"])
+        repo.update_item_review(item["id"], review_status="approved", preferred=False)
+        approvals.append(repo.get_item(item["id"]))
+    repo.fail_variant(batch_id=batch["id"], slot_id=slots[0]["id"], variant_index=1, error="historical")
+    with chacha_db.transaction() as conn:
+        conn.execute("UPDATE vn_asset_generation_recipes SET outcome_status='cancelled' WHERE batch_id=? AND variant_index=2", (batch["id"],))
+        conn.execute("DELETE FROM vn_asset_generation_recipes WHERE batch_id=? AND variant_index=5", (batch["id"],))
+    repo.update_batch(batch["id"], {"cancelled_count": 1, "enqueued_count": 3})
+    old_attempt, sibling_attempt = "old", "sibling"
+    reserved = repo.claim_variant(
+        batch_id=batch["id"], slot_id=slots[0]["id"], variant_index=3,
+        lease_id="old", attempt_token=old_attempt, item_fields={"pack_id": pack["id"]},
+    )
+    repo.reserve_variant_item(
+        batch_id=batch["id"], slot_id=slots[1]["id"], variant_index=4,
+        item_fields={"pack_id": pack["id"]},
+    )
+    sibling = repo.create_batch(
+        pack_id=pack["id"], requested_by_user_id=1, total_variants=1,
+        recipes=[{"slot_id": slots[0]["id"], "variant_index": 0, "recipe": {}}],
+    )
+    repo.claim_variant(
+        batch_id=sibling["id"], slot_id=slots[0]["id"], variant_index=0,
+        lease_id="inline", attempt_token=sibling_attempt, item_fields={"pack_id": pack["id"]},
+    )
+    repo.start_variant_generation(batch_id=sibling["id"], slot_id=slots[0]["id"], variant_index=0, attempt_token=sibling_attempt)
+    return {"repo": repo, "pack": pack, "batch": batch, "slots": slots,
+            "approvals": approvals, "reserved": reserved, "sibling": sibling, "old_attempt": old_attempt}
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("cancelled", [False, True])
+def test_integrity_failure_preserves_history_approvals_cancellation_and_sibling(
+    integrity_state: dict[str, Any], cancelled: bool,
+) -> None:
+    """Fail only surviving unfinished recipes once, without recounting lost history."""
+    state = integrity_state
+    repo, batch_id = state["repo"], state["batch"]["id"]
+    if cancelled:
+        repo.cancel_batch(batch_id)
+    sibling_before = repo.get_batch(state["sibling"]["id"])
+    first = repo.fail_batch_integrity(batch_id, error="vn_asset_recipe_count_mismatch")
+    second = repo.fail_batch_integrity(batch_id, error="vn_asset_recipe_count_mismatch")
+    assert second == first
+    assert (first["completed_count"], first["failed_count"], first["cancelled_count"]) == ((2, 1, 3) if cancelled else (2, 3, 1))
+    assert first["status"] == ("cancelled" if cancelled else "failed")
+    assert first["planned_count"] == 6 and first["enqueued_count"] == 3
+    assert repo.get_variant_outcome(batch_id, state["slots"][0]["id"], 5) is None
+    assert repo.get_batch(state["sibling"]["id"]) == sibling_before
+    assert repo.count_items_for_generation(state["pack"]["id"]) == 3
+    assert repo.get_slot(state["slots"][0]["id"])["status"] == "generating"
+    assert repo.get_slot(state["slots"][1]["id"])["status"] == ("cancelled" if cancelled else "failed")
+    for item in state["approvals"]:
+        assert repo.get_item(item["id"]) == item
+        assert Path(item["storage_ref"]).read_bytes() == b"approved"
+    identity = {"batch_id": batch_id, "slot_id": state["slots"][0]["id"], "variant_index": 3}
+    late_attempt = "late"
+    with pytest.raises(VNAssetGenerationError):
+        repo.claim_variant(**identity, lease_id="late", attempt_token=late_attempt, item_fields={"pack_id": state["pack"]["id"]})
+    with pytest.raises(VNAssetGenerationError):
+        repo.update_item_storage(state["reserved"]["id"], **identity, attempt_token=state["old_attempt"],
+                                 generated_file_id=88, storage_ref="late.png", mime_type="image/png",
+                                 width=10, height=10, bytes=3)
+    with pytest.raises(VNAssetGenerationError):
+        repo.complete_variant(**identity, item_id=state["reserved"]["id"], attempt_token=state["old_attempt"])
+
+
+@pytest.mark.integration
+def test_integrity_failure_rolls_back_recipe_counters_and_every_slot(
+    integrity_state: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A slot reconciliation failure rolls back the complete terminal transition."""
+    state = integrity_state
+    repo, batch_id = state["repo"], state["batch"]["id"]
+    batch_before = repo.get_batch(batch_id)
+    slots_before = [repo.get_slot(slot["id"]) for slot in state["slots"]]
+    outcome_before = repo.get_variant_outcome(batch_id, state["slots"][0]["id"], 3)
+    original = repo._refresh_slot_generation_status
+
+    def fail_second(conn: Any, slot_id: int, **kwargs: Any) -> None:
+        """Fail after the first slot has already been reconciled in the transaction."""
+        if slot_id == state["slots"][1]["id"]:
+            raise RuntimeError("reconciliation failed")
+        original(conn, slot_id, **kwargs)
+
+    monkeypatch.setattr(repo, "_refresh_slot_generation_status", fail_second)
+    with pytest.raises(RuntimeError, match="reconciliation failed"):
+        repo.fail_batch_integrity(batch_id, error="vn_asset_recipe_count_mismatch")
+    assert repo.get_batch(batch_id) == batch_before
+    assert [repo.get_slot(slot["id"]) for slot in state["slots"]] == slots_before
+    assert repo.get_variant_outcome(batch_id, state["slots"][0]["id"], 3) == outcome_before
+    assert repo.count_items_for_generation(state["pack"]["id"]) == 5
+
+
+@pytest.mark.integration
+def test_integrity_failure_reconciles_interrupted_cancellation_without_recounting_history(
+    integrity_state: dict[str, Any],
+) -> None:
+    """Already-cancelled batches cancel leftover reservations rather than fail them."""
+    state = integrity_state
+    repo, batch_id = state["repo"], state["batch"]["id"]
+    repo.update_batch(batch_id, {"status": "cancelled", "cancelled_count": 7})
+    cancelled = repo.fail_batch_integrity(batch_id, error="vn_asset_recipe_count_mismatch")
+    assert (cancelled["status"], cancelled["completed_count"], cancelled["failed_count"], cancelled["cancelled_count"]) == ("cancelled", 2, 1, 9)
+    assert repo.count_items_for_generation(state["pack"]["id"]) == 3
+    assert repo.get_variant_outcome(batch_id, state["slots"][0]["id"], 3)["outcome_status"] == "cancelled"
+    assert repo.get_slot(state["slots"][0]["id"])["status"] == "generating"
+    assert repo.fail_batch_integrity(batch_id, error="vn_asset_recipe_count_mismatch") == cancelled
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["private-memory", "caller-transaction"])
+async def test_async_outcome_read_preserves_owner_connection_fallback(
+    mode: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Private memory and uncommitted caller work retain their original connection."""
+    database = CharactersRAGDB(":memory:" if mode == "private-memory" else str(tmp_path / "owner.db"), client_id="owner-read")
+    repo = VNAssetPacksRepository.initialized(database)
+    character = database.add_character_card({"name": "Owner"})
+    pack = repo.create_pack(owner_user_id=1, primary_character_id=character, title="Owner")
+    slot = repo.create_slot(pack_id=pack["id"], asset_type="sprite", slot_key="owner")
+    batch = repo.create_batch(pack_id=pack["id"], requested_by_user_id=1, total_variants=1,
+                             recipes=[{"slot_id": slot["id"], "variant_index": 0, "recipe": {}}])
+
+    async def forbidden_offload(*_args: Any, **_kwargs: Any) -> None:
+        """Reject transfer of private or transactional work to another thread."""
+        pytest.fail("owner-only read was offloaded")
+
+    monkeypatch.setattr(asyncio, "to_thread", forbidden_offload)
+    owner = database.get_connection()
+    try:
+        if mode == "caller-transaction":
+            owner.execute("BEGIN")
+            owner.execute("UPDATE vn_asset_generation_recipes SET claim_token='uncommitted'")
+        outcome = await repo.get_variant_outcome_async(batch["id"], slot["id"], 0)
+        assert outcome == {"outcome_status": "planned", "item_id": None, "claim_token": "uncommitted" if mode == "caller-transaction" else None, "claim_lease_id": None}
+        assert await repo.get_variant_outcome_async(batch["id"], slot["id"], 99) is None
+        assert database.get_connection() is owner
+        if mode == "caller-transaction":
+            assert owner.in_transaction
+            owner.rollback()
+            assert repo.get_variant_outcome(batch["id"], slot["id"], 0)["claim_token"] is None
+        assert owner.execute("SELECT 1").fetchone()[0] == 1
+    finally:
+        if owner.in_transaction:
+            owner.rollback()
+        database.close_connection()
+
+
 def test_vn_asset_tables_are_created(chacha_db: CharactersRAGDB) -> None:
     ensure_vn_asset_tables(chacha_db)
 
@@ -36,6 +209,7 @@ def test_vn_asset_tables_are_created(chacha_db: CharactersRAGDB) -> None:
     }.issubset(table_names)
 
 
+@pytest.mark.integration
 def test_existing_batch_table_gains_recipe_version(chacha_db: CharactersRAGDB) -> None:
     chacha_db.execute_query(
         "CREATE TABLE vn_asset_batches ("
@@ -51,6 +225,7 @@ def test_existing_batch_table_gains_recipe_version(chacha_db: CharactersRAGDB) -
     assert "recipe_version" in columns
 
 
+@pytest.mark.integration
 def test_existing_recipe_table_gains_outcome_columns(chacha_db: CharactersRAGDB) -> None:
     chacha_db.execute_query(
         "CREATE TABLE vn_asset_generation_recipes ("
@@ -68,6 +243,7 @@ def test_existing_recipe_table_gains_outcome_columns(chacha_db: CharactersRAGDB)
     assert {"outcome_status", "item_id", "claim_token", "claim_lease_id"}.issubset(columns)
 
 
+@pytest.mark.integration
 def test_existing_idempotency_table_gains_batch_link(chacha_db: CharactersRAGDB) -> None:
     chacha_db.execute_query(
         "CREATE TABLE vn_asset_idempotency_records ("
@@ -87,6 +263,7 @@ def test_existing_idempotency_table_gains_batch_link(chacha_db: CharactersRAGDB)
     assert "batch_id" in columns
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("outcome", ["completed", "failed", "cancelled", "planned"])
 def test_delete_item_preserves_terminal_recipe_ledger_on_existing_schema(
     chacha_db: CharactersRAGDB, outcome: str,
@@ -128,6 +305,7 @@ def test_delete_item_preserves_terminal_recipe_ledger_on_existing_schema(
     assert chacha_db.execute_query("PRAGMA foreign_key_check").fetchall() == []
 
 
+@pytest.mark.integration
 def test_delete_item_rejects_active_variant_reservation(chacha_db: CharactersRAGDB) -> None:
     repo = VNAssetPacksRepository.initialized(chacha_db)
     character_id = chacha_db.add_character_card({"name": "VN Primary"})
@@ -147,6 +325,7 @@ def test_delete_item_rejects_active_variant_reservation(chacha_db: CharactersRAG
     assert repo.get_variant_outcome(batch["id"], slot["id"], 0) == before
 
 
+@pytest.mark.integration
 def test_batch_and_recipes_roll_back_without_matching_receipt(
     chacha_db: CharactersRAGDB,
 ) -> None:
@@ -168,6 +347,7 @@ def test_batch_and_recipes_roll_back_without_matching_receipt(
     assert repo.list_batches(pack["id"]) == []
 
 
+@pytest.mark.integration
 def test_stale_unlinked_generation_claim_can_be_reclaimed(
     chacha_db: CharactersRAGDB,
 ) -> None:
@@ -197,6 +377,7 @@ def test_stale_unlinked_generation_claim_can_be_reclaimed(
         repo.claim_idempotency_record(**{**receipt, "payload_hash": "different"})
 
 
+@pytest.mark.integration
 def test_duplicate_recipe_rolls_back_batch(chacha_db: CharactersRAGDB) -> None:
     character_id = chacha_db.add_character_card({"name": "VN Primary"})
     repo = VNAssetPacksRepository.initialized(chacha_db)
@@ -215,6 +396,7 @@ def test_duplicate_recipe_rolls_back_batch(chacha_db: CharactersRAGDB) -> None:
     assert repo.list_batches(pack["id"]) == []
 
 
+@pytest.mark.integration
 def test_failed_variant_cannot_publish_reserved_item(chacha_db: CharactersRAGDB) -> None:
     character_id = chacha_db.add_character_card({"name": "VN Primary"})
     repo = VNAssetPacksRepository.initialized(chacha_db)
@@ -246,6 +428,7 @@ def test_failed_variant_cannot_publish_reserved_item(chacha_db: CharactersRAGDB)
     assert repo.get_batch(batch["id"])["failed_count"] == 1
 
 
+@pytest.mark.integration
 def test_cancel_batch_terminalizes_reserved_variants_and_frees_capacity(
     chacha_db: CharactersRAGDB,
 ) -> None:
@@ -276,6 +459,7 @@ def test_cancel_batch_terminalizes_reserved_variants_and_frees_capacity(
     assert repo.get_batch(batch["id"])["cancelled_count"] == 1
 
 
+@pytest.mark.integration
 def test_variant_claim_requires_a_new_lease_to_replace_active_claim(
     chacha_db: CharactersRAGDB,
 ) -> None:
@@ -311,6 +495,7 @@ def test_variant_claim_requires_a_new_lease_to_replace_active_claim(
         )
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("already_cancelled", [False, True])
 def test_cancel_batch_preserves_completed_and_failed_outcomes(
     chacha_db: CharactersRAGDB, already_cancelled: bool,
@@ -338,6 +523,7 @@ def test_cancel_batch_preserves_completed_and_failed_outcomes(
     assert [repo.get_variant_outcome(batch["id"], slot["id"], index)["outcome_status"] for index in range(3)] == ["completed", "failed", "cancelled"]
 
 
+@pytest.mark.integration
 def test_stale_observation_cannot_replace_newer_variant_claim(chacha_db: CharactersRAGDB) -> None:
     character_id = chacha_db.add_character_card({"name": "VN Primary"})
     repo = VNAssetPacksRepository.initialized(chacha_db)
@@ -359,6 +545,7 @@ def test_stale_observation_cannot_replace_newer_variant_claim(chacha_db: Charact
     assert repo.get_variant_outcome(batch["id"], slot["id"], 0)["claim_token"] == "attempt-2"
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("transition", ["attach", "complete", "fail"])
 def test_missing_token_cannot_mutate_claimed_variant(
     chacha_db: CharactersRAGDB, transition: str,
@@ -391,6 +578,7 @@ def test_missing_token_cannot_mutate_claimed_variant(
     assert repo.get_item(item["id"])["generated_file_id"] == 17
 
 
+@pytest.mark.integration
 def test_released_inline_claim_cannot_complete_with_stale_token(chacha_db: CharactersRAGDB) -> None:
     character_id = chacha_db.add_character_card({"name": "VN Primary"})
     repo = VNAssetPacksRepository.initialized(chacha_db)
@@ -410,6 +598,7 @@ def test_released_inline_claim_cannot_complete_with_stale_token(chacha_db: Chara
         repo.complete_variant(**identity, item_id=item["id"], attempt_token="attempt-1")
 
 
+@pytest.mark.integration
 def test_cancel_legacy_batch_preserves_unconditional_cancellation(chacha_db: CharactersRAGDB) -> None:
     character_id = chacha_db.add_character_card({"name": "VN Primary"})
     repo = VNAssetPacksRepository.initialized(chacha_db)
@@ -418,6 +607,7 @@ def test_cancel_legacy_batch_preserves_unconditional_cancellation(chacha_db: Cha
     assert repo.cancel_batch(batch["id"])["status"] == "cancelled"
 
 
+@pytest.mark.unit
 def test_generation_error_preserves_public_code_and_internal_context() -> None:
     error = VNAssetGenerationError("vn_asset_variant_claim_lost", retryable=True, batch_id=17)
     assert isinstance(error, ValueError)
@@ -428,6 +618,7 @@ def test_generation_error_preserves_public_code_and_internal_context() -> None:
         error.context["batch_id"] = 18
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("code", [
     "vn_asset_recipe_item_mismatch", "vn_asset_variant_failed",
     "vn_asset_batch_terminal", "vn_asset_item_storage_missing",
@@ -458,6 +649,7 @@ def test_completion_guards_use_typed_codes_and_variant_context(
     assert caught.value.context == {**identity, "item_id": item_id, "operation": "complete_variant"}
 
 
+@pytest.mark.integration
 def test_partial_variant_failure_keeps_completed_slot_reviewable(
     chacha_db: CharactersRAGDB,
 ) -> None:

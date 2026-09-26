@@ -99,10 +99,7 @@ class VNAssetGenerationWorker:
             recipes = self.repo.list_batch_recipes(batch_id)
             planned_count = int(batch["planned_count"])
             if len(recipes) != planned_count:
-                self.repo.update_batch(batch_id, {
-                    "status": "failed",
-                    "enqueue_error": "vn_asset_recipe_count_mismatch",
-                })
+                self.repo.fail_batch_integrity(batch_id, error="vn_asset_recipe_count_mismatch")
                 raise VNAssetGenerationError("vn_asset_recipe_count_mismatch", batch_id=batch_id)
             variants = [
                 (int(row["slot_id"]), int(row["variant_index"]))
@@ -191,7 +188,7 @@ class VNAssetGenerationWorker:
             raise VNAssetGenerationError("vn_asset_recipe_version_unsupported", batch_id=batch_id)
         if recipe_version == 1 and batch["status"] == "cancelled":
             batch = self.repo.cancel_batch(batch_id) or batch
-        outcome = self.repo.get_variant_outcome(batch_id, slot_id, variant_index) if recipe_version == 1 else None
+        outcome = await self.repo.get_variant_outcome_async(batch_id, slot_id, variant_index) if recipe_version == 1 else None
         if outcome is not None and outcome["outcome_status"] == "completed":
             replay = await self._replay_variant(
                 batch_id=batch_id, slot_id=slot_id, variant_index=variant_index,
@@ -219,7 +216,7 @@ class VNAssetGenerationWorker:
         if recipe_version == 1:
             recipe = self.repo.get_batch_recipe(batch_id, slot_id, variant_index)
             if recipe is None:
-                self.repo.update_batch(batch_id, {"status": "failed"})
+                self.repo.fail_batch_integrity(batch_id, error="vn_asset_recipe_not_found")
                 raise VNAssetGenerationError(
                     "vn_asset_recipe_not_found", batch_id=batch_id,
                     slot_id=slot_id, variant_index=variant_index,
@@ -385,9 +382,9 @@ class VNAssetGenerationWorker:
         and job fence reconciliation/publication. Raises VNAssetGenerationError
         for invalid persisted state or lost authority; storage/DB errors propagate.
         """
-        outcome = self.repo.get_variant_outcome(batch_id, slot_id, variant_index)
+        outcome = await self.repo.get_variant_outcome_async(batch_id, slot_id, variant_index)
         if outcome is None:
-            self.repo.update_batch(batch_id, {"status": "failed"})
+            self.repo.fail_batch_integrity(batch_id, error="vn_asset_recipe_not_found")
             raise VNAssetGenerationError("vn_asset_recipe_not_found", batch_id=batch_id, slot_id=slot_id)
         if outcome["outcome_status"] == "failed":
             if allow_publication:
@@ -906,7 +903,7 @@ class VNAssetGenerationWorker:
         if attempt_token is not None:
             if job is not None:
                 self._require_current_job_lease(job, user_id=user_id)
-            outcome = self.repo.get_variant_outcome(batch_id, slot_id, variant_index)
+            outcome = await self.repo.get_variant_outcome_async(batch_id, slot_id, variant_index)
             current_batch = self.repo.get_batch(batch_id)
             if current_batch is None or _is_terminal_batch_status(current_batch["status"]):
                 raise VNAssetGenerationError("vn_asset_batch_terminal", retryable=True, batch_id=batch_id)

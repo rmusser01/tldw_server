@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
 from collections.abc import Callable, Mapping
+from contextlib import closing
 from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
@@ -15,6 +17,12 @@ from tldw_Server_API.app.core.VN_Assets.state import derive_slot_status
 LegacyActivityReader = Callable[
     [int, int, int, Mapping[int, str], set[tuple[int, int, str]], tuple[int, str] | None], tuple[bool, bool]
 ]
+
+_VARIANT_OUTCOME_QUERY = """
+    SELECT outcome_status, item_id, claim_token, claim_lease_id
+    FROM vn_asset_generation_recipes
+    WHERE batch_id = ? AND slot_id = ? AND variant_index = ?
+"""
 
 
 VN_ASSET_SCHEMA_SQL = """
@@ -2080,6 +2088,58 @@ class VNAssetPacksRepository:
         )
         return [dict(row) for row in cursor.fetchall()]
 
+    def fail_batch_integrity(self, batch_id: int, *, error: str) -> dict[str, Any] | None:
+        """Atomically fail surviving unfinished V1 recipes and release capacity.
+
+        Increment failed_count only for this transition, preserving historical
+        terminal counts even when ledger rows are missing. Reconcile every
+        surviving slot without changing approved items or bytes. Cancellation
+        takes precedence: leftover recipes become cancelled, adding only new
+        cancellations to historical counts. Completed batches are unchanged;
+        a repeated failure is idempotent.
+        Missing rows do not imply new outcomes or permission to delete assets.
+        Database/reconciliation failures propagate and roll back all changes.
+        """
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            conn.execute("UPDATE vn_asset_batches SET status=status WHERE id=?", (batch_id,))
+            batch = conn.execute(
+                "SELECT status, recipe_version FROM vn_asset_batches WHERE id=?", (batch_id,),
+            ).fetchone()
+            if batch is None:
+                return None
+            if int(batch["recipe_version"] or 0) != 1:
+                raise VNAssetGenerationError("vn_asset_recipe_version_unsupported", batch_id=batch_id)
+            if batch["status"] == "completed":
+                return self.get_batch(batch_id)
+            cancelled = batch["status"] == "cancelled"
+            updated = conn.execute(
+                """
+                UPDATE vn_asset_generation_recipes SET outcome_status=?
+                WHERE batch_id=? AND outcome_status NOT IN ('completed', 'failed', 'cancelled')
+                """,
+                ("cancelled" if cancelled else "failed", batch_id),
+            ).rowcount
+            if updated or batch["status"] not in {"failed", "cancelled"}:
+                conn.execute(
+                    """
+                    UPDATE vn_asset_batches
+                    SET status=CASE WHEN status='cancelled' THEN status ELSE 'failed' END,
+                        enqueue_error=CASE WHEN status='cancelled' THEN enqueue_error ELSE ? END,
+                        failed_count=failed_count+?, cancelled_count=cancelled_count+?,
+                        updated_at=CURRENT_TIMESTAMP
+                    WHERE id=?
+                    """,
+                    (error, 0 if cancelled else updated, updated if cancelled else 0, batch_id),
+                )
+                slots = conn.execute(
+                    "SELECT DISTINCT slot_id FROM vn_asset_generation_recipes WHERE batch_id=? ORDER BY slot_id",
+                    (batch_id,),
+                ).fetchall()
+                for row in slots:
+                    self._refresh_slot_generation_status(conn, int(row["slot_id"]))
+        return self.get_batch(batch_id)
+
     def list_batch_recipes(self, batch_id: int) -> list[dict[str, Any]]:
         """Return decoded recipes for batch_id in slot/variant order.
 
@@ -2128,15 +2188,27 @@ class VNAssetPacksRepository:
         This observation is not authority to mutate; database errors propagate.
         """
         self._ensure_schema_initialized()
-        row = self.db.execute_query(
-            """
-            SELECT outcome_status, item_id, claim_token, claim_lease_id
-            FROM vn_asset_generation_recipes
-            WHERE batch_id = ? AND slot_id = ? AND variant_index = ?
-            """,
-            (batch_id, slot_id, variant_index),
-        ).fetchone()
+        with closing(self.db.execute_query(_VARIANT_OUTCOME_QUERY, (batch_id, slot_id, variant_index))) as cursor:
+            row = cursor.fetchone()
         return dict(row) if row is not None else None
+
+    async def get_variant_outcome_async(
+        self, batch_id: int, slot_id: int, variant_index: int,
+    ) -> dict[str, Any] | None:
+        """Observe normal file-backed outcomes off-thread using an owned reader.
+
+        Only a plain dict/None crosses threads. Private memory and active caller
+        transactions retain owner-thread reads to preserve connection-local
+        state, so this is not a universal nonblocking I/O guarantee. Schema
+        setup remains caller-owned. No cursor/transaction/pooled handle moves
+        between threads or is closed by the reader; read failures propagate.
+        """
+        self._ensure_schema_initialized()
+        if self.db.is_memory_db or self.db.get_connection().in_transaction:
+            return self.get_variant_outcome(batch_id, slot_id, variant_index)
+        return await asyncio.to_thread(
+            _read_variant_outcome_file, self.db.db_path.as_uri(), batch_id, slot_id, variant_index,
+        )
 
     def claim_variant(
         self,
@@ -2525,6 +2597,23 @@ def _json_or_none(value: Mapping[str, Any] | None) -> str | None:
     if value is None:
         return None
     return _json_dump(dict(value))
+
+
+def _read_variant_outcome_file(
+    database_uri: str, batch_id: int, slot_id: int, variant_index: int,
+) -> dict[str, Any] | None:
+    """Open, read and close an independent read-only SQLite handle on this thread.
+
+    This repository rejects non-SQLite backends before reaching this boundary.
+    Match SQLiteBackend's 10-second busy timeout, without changing journal mode.
+    No pool/checkpoint/global lifecycle effects; caller connections stay open.
+    Return only detached row data; missing files and native read errors propagate.
+    """
+    with closing(sqlite3.connect(f"{database_uri}?mode=ro", uri=True, timeout=10.0)) as conn:
+        conn.row_factory = sqlite3.Row
+        with closing(conn.execute(_VARIANT_OUTCOME_QUERY, (batch_id, slot_id, variant_index))) as cursor:
+            row = cursor.fetchone()
+        return dict(row) if row is not None else None
 
 
 def _json_dump(value: Any) -> str:
