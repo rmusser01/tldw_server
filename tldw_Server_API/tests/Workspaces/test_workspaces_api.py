@@ -353,6 +353,265 @@ def _seed_trashed_workspace_chat(db):
     return db.get_conversation_by_id(conversation_id, include_deleted=True)
 
 
+def _update_workspace_chat_metadata(
+    db, conversation_id, *, workspace_scoped=True, expected_version=None, empty_update=False,
+):
+    from tldw_Server_API.app.api.v1.endpoints.character_chat_sessions import update_chat_session
+    from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import ChatSessionUpdate
+
+    return asyncio.run(update_chat_session(
+        update_data=ChatSessionUpdate() if empty_update else ChatSessionUpdate(title="Updated"),
+        chat_id=conversation_id,
+        expected_version=(
+            db.get_conversation_by_id(conversation_id)["version"]
+            if expected_version is None else expected_version
+        ),
+        scope_type="workspace" if workspace_scoped else "global",
+        workspace_id="ws-delete" if workspace_scoped else None,
+        db=db, current_user=SimpleNamespace(id=db.client_id),
+    ))
+
+
+def test_workspace_chat_metadata_rejects_active_projection_under_deleted_parent(deletion_db):
+    db = deletion_db
+    conversation_id, *_ = _seed_deletion_graph(db)
+    assert db.delete_workspace("ws-delete", 1)
+    assert db.upsert_conversation_from_sync(
+        conversation_id=conversation_id, title="Retained chat", sync_client_id=db.client_id,
+        object_revision=5, object_hash="retained", scope_type="workspace", workspace_id="ws-delete",
+    )
+    before = _deletion_snapshot(db)
+    with pytest.raises(HTTPException) as exc:
+        _update_workspace_chat_metadata(db, conversation_id)
+    assert exc.value.status_code == 409
+    assert _deletion_snapshot(db) == before
+
+
+@pytest.mark.parametrize("workspace_scoped", [False, True])
+@pytest.mark.parametrize("empty_update", [False, True])
+def test_chat_metadata_update_preserves_active_parent_and_global_behavior(deletion_db, workspace_scoped, empty_update):
+    db = deletion_db
+    if workspace_scoped:
+        conversation_id, *_ = _seed_deletion_graph(db)
+    else:
+        conversation_id = db.add_conversation({"title": "Global chat"})
+    parent_before = db.get_workspace("ws-delete")
+    version_before = db.get_conversation_by_id(conversation_id)["version"]
+    response = _update_workspace_chat_metadata(
+        db, conversation_id, workspace_scoped=workspace_scoped, empty_update=empty_update,
+    )
+    original_title = "Private chat" if workspace_scoped else "Global chat"
+    assert response.title == (original_title if empty_update else "Updated")
+    assert db.get_conversation_by_id(conversation_id)["version"] == version_before + 1
+    assert db.get_workspace("ws-delete") == parent_before
+
+
+@pytest.mark.parametrize("new_identity", ["global", "other_workspace", "other_owner"])
+def test_chat_metadata_rechecks_identity_after_preflight(deletion_db, monkeypatch, new_identity):
+    db = deletion_db
+    conversation_id, *_ = _seed_deletion_graph(db)
+    db.upsert_workspace("ws-other", "Other workspace")
+    get_conversation = db.get_conversation_by_id
+    after_move = {}
+
+    def move_after_preflight(*args, **kwargs):
+        conversation = get_conversation(*args, **kwargs)
+        monkeypatch.setattr(db, "get_conversation_by_id", get_conversation)
+        assert db.upsert_conversation_from_sync(
+            conversation_id=conversation_id, title="Moved", object_revision=1,
+            object_hash="moved", sync_client_id="other-owner" if new_identity == "other_owner" else db.client_id,
+            scope_type="global" if new_identity == "global" else "workspace",
+            workspace_id=(
+                None if new_identity == "global"
+                else "ws-other" if new_identity == "other_workspace" else "ws-delete"
+            ),
+        )
+        after_move.update(_deletion_snapshot(db))
+        return conversation
+
+    monkeypatch.setattr(db, "get_conversation_by_id", move_after_preflight)
+    with pytest.raises(HTTPException) as exc:
+        _update_workspace_chat_metadata(db, conversation_id, expected_version=1)
+    assert exc.value.status_code == 404
+    assert _deletion_snapshot(db) == after_move
+
+
+def test_chat_metadata_rejects_version_change_after_preflight(deletion_db, monkeypatch):
+    db = deletion_db
+    conversation_id, *_ = _seed_deletion_graph(db)
+    get_conversation = db.get_conversation_by_id
+    after_competing_write = {}
+
+    def update_after_preflight(*args, **kwargs):
+        conversation = get_conversation(*args, **kwargs)
+        monkeypatch.setattr(db, "get_conversation_by_id", get_conversation)
+        assert db.update_conversation(conversation_id, {"title": "Competing writer"}, 1)
+        after_competing_write.update(_deletion_snapshot(db))
+        return conversation
+
+    monkeypatch.setattr(db, "get_conversation_by_id", update_after_preflight)
+    with pytest.raises(HTTPException) as exc:
+        _update_workspace_chat_metadata(db, conversation_id, expected_version=1)
+    assert exc.value.status_code == 409
+    assert _deletion_snapshot(db) == after_competing_write
+
+
+def test_chat_metadata_response_failure_rolls_back_mutation(deletion_db, monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions
+
+    db = deletion_db
+    conversation_id, *_ = _seed_deletion_graph(db)
+    before = _deletion_snapshot(db)
+
+    def fail_response(*args, **kwargs):
+        raise ValueError("injected response failure")
+
+    monkeypatch.setattr(character_chat_sessions, "_convert_db_conversation_to_response", fail_response)
+    with pytest.raises(HTTPException) as exc:
+        _update_workspace_chat_metadata(db, conversation_id)
+    assert exc.value.status_code == 500
+    assert _deletion_snapshot(db) == before
+
+
+@pytest.mark.parametrize("commit_delete", [False, True])
+def test_workspace_chat_metadata_waits_for_deletion_outcome(deletion_db, monkeypatch, commit_delete):
+    db = deletion_db
+    conversation_id, *_ = _seed_deletion_graph(db)
+    preflight, proceed, attempting = threading.Event(), threading.Event(), threading.Event()
+    get_conversation = db.get_conversation_by_id
+
+    def pause_after_preflight(*args, **kwargs):
+        conversation = get_conversation(*args, **kwargs)
+        preflight.set()
+        assert proceed.wait(10)
+        attempting.set()
+        return conversation
+
+    def update():
+        try:
+            return _update_workspace_chat_metadata(db, conversation_id, expected_version=1)
+        finally:
+            db.close_connection()
+
+    class AbortDeletion(Exception):
+        pass
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        with monkeypatch.context() as patch:
+            patch.setattr(db, "get_conversation_by_id", pause_after_preflight)
+            future = executor.submit(update)
+            try:
+                assert preflight.wait(10)
+                patch.undo()
+                try:
+                    with db.transaction():
+                        assert db.delete_workspace("ws-delete", 1)
+                        after_delete = _deletion_snapshot(db)
+                        proceed.set()
+                        assert attempting.wait(10)
+                        with pytest.raises(FutureTimeout):
+                            future.result(timeout=0.2)
+                        if not commit_delete:
+                            raise AbortDeletion
+                except AbortDeletion:
+                    pass
+            finally:
+                proceed.set()
+        if commit_delete:
+            with pytest.raises(HTTPException) as exc:
+                future.result(timeout=10)
+            assert exc.value.status_code == 409
+            assert _deletion_snapshot(db) == after_delete
+        else:
+            assert future.result(timeout=10).title == "Updated"
+            assert db.get_workspace("ws-delete") is not None
+
+
+@pytest.mark.parametrize("commit_update", [False, True])
+def test_workspace_deletion_waits_for_chat_metadata_transaction(deletion_db, commit_update):
+    db = deletion_db
+    conversation_id, *_ = _seed_deletion_graph(db)
+    attempting = threading.Event()
+
+    def delete():
+        try:
+            attempting.set()
+            return db.delete_workspace("ws-delete", 1)
+        finally:
+            db.close_connection()
+
+    class AbortUpdate(Exception):
+        pass
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        try:
+            with db.transaction():
+                assert _update_workspace_chat_metadata(db, conversation_id).title == "Updated"
+                future = executor.submit(delete)
+                assert attempting.wait(10)
+                with pytest.raises(FutureTimeout):
+                    future.result(timeout=0.2)
+                if not commit_update:
+                    raise AbortUpdate
+        except AbortUpdate:
+            pass
+        assert future.result(timeout=10)
+    assert db.get_workspace("ws-delete") is None
+    retained = db.get_conversation_by_id(conversation_id, include_deleted=True)
+    assert retained["title"] == ("Updated" if commit_update else "Private chat")
+
+
+@pytest.mark.parametrize("deletion_db", ["postgresql"], indirect=True)
+def test_workspace_chat_metadata_does_not_lock_child_before_parent(deletion_db, monkeypatch):
+    db = deletion_db
+    conversation_id, *_ = _seed_deletion_graph(db)
+    parent_claimed, finish_delete, update_attempting = (
+        threading.Event(), threading.Event(), threading.Event()
+    )
+    get_messages = db.get_messages_for_conversation
+    lock_parent = db._lock_workspace_for_content_write
+
+    def pause_before_children(*args, **kwargs):
+        parent_claimed.set()
+        assert finish_delete.wait(10)
+        return get_messages(*args, **kwargs)
+
+    def observe_parent_admission(conn, workspace_id):
+        update_attempting.set()
+        return lock_parent(conn, workspace_id)
+
+    def delete():
+        try:
+            return db.delete_workspace("ws-delete", 1)
+        finally:
+            db.close_connection()
+
+    def update():
+        try:
+            return _update_workspace_chat_metadata(db, conversation_id, expected_version=1)
+        finally:
+            db.close_connection()
+
+    monkeypatch.setattr(db, "get_messages_for_conversation", pause_before_children)
+    monkeypatch.setattr(db, "_lock_workspace_for_content_write", observe_parent_admission)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        deleting = executor.submit(delete)
+        try:
+            assert parent_claimed.wait(10)
+            updating = executor.submit(update)
+            assert update_attempting.wait(10)
+            with pytest.raises(FutureTimeout):
+                updating.result(timeout=0.2)
+        finally:
+            finish_delete.set()
+        assert deleting.result(timeout=10)
+        with pytest.raises(HTTPException) as exc:
+            updating.result(timeout=10)
+        assert exc.value.status_code == 409
+    assert db.get_workspace("ws-delete") is None
+    assert db.get_conversation_by_id(conversation_id) is None
+
+
 def _update_workspace_chat_settings(db, conversation_id, *, workspace_scoped=True):
     from tldw_Server_API.app.api.v1.endpoints.character_chat_sessions import update_chat_settings
     from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import ChatSettingsUpdate

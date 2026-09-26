@@ -6,6 +6,7 @@ import asyncio
 import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 from types import SimpleNamespace
 from typing import Any
 
@@ -18,19 +19,18 @@ from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import (
     CharacterChatStreamPersistRequest,
     ChatSessionUpdate,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
 )
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
+from tldw_Server_API.app.core.Chat.prompt_cost_guardrails import PromptCostGuardrailConfig
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDBError,
     ConflictError,
 )
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
-from tldw_Server_API.app.core.Chat.prompt_cost_guardrails import PromptCostGuardrailConfig
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingDecision
-
 
 pytestmark = pytest.mark.unit
 
@@ -81,6 +81,12 @@ class _BrokenChatSessionDb:
 
     def update_conversation(self, *args: Any, **kwargs: Any) -> None:
         raise self.exc
+
+    def transaction(self):
+        return nullcontext(None)
+
+    def get_roleplay_resume_state(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return {"conversation": _conversation(deleted=self.deleted)}
 
     def get_messages_for_conversation(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
         return []

@@ -363,3 +363,42 @@ are also present in checkpoint HEAD; no new lint finding is introduced.
 This does not fence the shared DB settings primitive or other settings callers,
 nor make direct Sync upsert safe. The owned route remains disabled; durable
 sharing cleanup and the other Stage 2 writer families remain outstanding.
+
+## Metadata Endpoint Parent Admission
+
+After rebasing PR #3020 onto dev `59bd5845038`, fenced the primary metadata
+endpoint, not the shared DB update primitive. The endpoint now admits the
+workspace parent before locking/rechecking the conversation's owner and scope.
+Metadata mutation and response construction share that transaction. Global
+non-Sync chats skip the parent check; the existing global Sync path is unchanged.
+No late parent lock is added underneath message-edit callers that already hold
+child locks.
+
+Test-first evidence: two deleted-parent cases failed with DID NOT RAISE
+HTTPException on SQLite/PostgreSQL (`/tmp/workspace-chat-metadata-red.log`).
+The first extended race run passed 18 cases but exposed unmapped NotFoundError
+when ownership changed after preflight. Added explicit 404 mapping and reran.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Reviewed metadata fence/identity/concurrency matrix | 29 passed, no skips, 4 warnings | `/tmp/workspace-chat-metadata-reviewed.log`, `.xml` |
+| Error mapping and authenticated HTTP deletion conflict | 130 passed, no skips, 4 warnings | `/tmp/workspace-chat-metadata-api.log`, `.xml` |
+| Production Bandit | 0 findings/errors | `/tmp/workspace-chat-metadata-bandit.json` |
+| Three touched test files Ruff | Passed after import ordering fix | Scoped Ruff command |
+| Diff whitespace | Passed | `git diff --check` |
+
+Identity races use actual Sync projection writes after the endpoint preflight,
+without advancing its version, to prove owner/scope reread rather than merely
+optimistic-version rejection. Deletion races cover commit and rollback in both
+orderings. A separate PostgreSQL case pauses deletion between parent and child
+locks and requires deletion completion followed by metadata 409.
+
+Independent review found no actionable code defect. Its version-race,
+response-failure rollback, empty-payload and exact identity-error coverage
+recommendations are addressed in the final 29-case matrix. An active global
+Sync-service route test remains a coverage limit; that branch is unchanged and
+this slice does not certify Sync. The wider writer model is still
+unfinished: generic DB updates, messages, direct Sync, other settings writers,
+runtime/root/inventory/membership/study/migration and sharing cleanup are not
+certified by this slice. No owned route enablement or full UI/live acceptance is
+claimed.

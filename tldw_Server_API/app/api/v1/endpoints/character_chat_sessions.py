@@ -7425,8 +7425,27 @@ async def update_chat_session(
             except Exception as sync_exc:
                 raise _chat_sync_http_error(sync_exc) from sync_exc
         else:
-            # db.update_conversation updates metadata and bumps version even if payload is empty
-            db.update_conversation(chat_id, allowed_update, expected_version)
+            with db.transaction() as conn:
+                # Admit the parent before locking the conversation, as deletion
+                # claims the parent before walking scoped children.
+                if scope.scope_type == "workspace":
+                    db._lock_workspace_for_content_write(conn, scope.workspace_id)
+                resume_state = db.get_roleplay_resume_state(
+                    chat_id, conn=conn, lock_for_update=True,
+                    owner_client_id=str(current_user.id),
+                )
+                _verify_chat_ownership(
+                    resume_state.get("conversation"), current_user.id, chat_id, scope,
+                )
+                # Metadata updates advance the version even for an empty payload.
+                db.update_conversation(chat_id, allowed_update, expected_version)
+                updated_conv = db.get_conversation_by_id(chat_id)
+                messages = db.get_messages_for_conversation(chat_id, limit=1000)
+                updated_conv['message_count'] = len(messages) if messages else 0
+                return _convert_db_conversation_to_response(
+                    _attach_conversation_assistant_names(db, updated_conv, str(current_user.id)),
+                    resume_state=db.get_roleplay_resume_state(chat_id, conn=conn),
+                )
 
         # Retrieve updated conversation
         updated_conv = db.get_conversation_by_id(chat_id)
@@ -7447,7 +7466,7 @@ async def update_chat_session(
         # Optimistic locking or state conflicts
         logger.warning(f"Conflict updating chat session {chat_id}: {e}")
         raise map_db_error_to_http(e) from e
-    except CharactersRAGDBError as e:
+    except (CharactersRAGDBError, NotFoundError) as e:
         logger.error(f"DB error updating chat session {chat_id}: {e}", exc_info=True)
         raise map_db_error_to_http(e, default_detail="Failed to update chat session") from e
     except HTTPException:

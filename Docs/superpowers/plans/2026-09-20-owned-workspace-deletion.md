@@ -67,7 +67,7 @@ operations cannot publish after deletion; sharing reads deny tombstones during
 cleanup failure; cleanup retry/state is explicit and cannot resurrect content.
 **Tests**: Real SQLite/PostgreSQL concurrent writers and readers, cleanup failure,
 repeated cleanup, and recipient access/operation completion races.
-**Status**: In Progress (direct content, chat creation/restore and primary settings endpoint verified;
+**Status**: In Progress (direct content, chat creation/restore and primary settings/metadata endpoints verified;
 remaining writers and sharing cleanup pending)
 
 2026-09-25 bounded slice: fence all 13 direct source/note/artifact mutations
@@ -136,6 +136,20 @@ PostgreSQL parent-before-child deadlock regression also passes. Review is clear.
 This certifies only this endpoint, not direct `upsert_conversation_settings`, greeting,
 message-pin, completion or other settings writers.
 
+Metadata endpoint slice: `PUT /api/v1/chats/{chat_id}` now performs parent
+admission before a locked conversation identity reread and metadata publication
+in the same transaction. It checks ownership/scope again, maps a lost owner or
+missing conversation to 404, and constructs the non-Sync response while the
+transaction still holds its locks. The existing global Sync path is unchanged.
+The deleted-parent counterexample failed on both backends before the fix. All
+29 real-backend metadata cases pass, including ownership/scope reassignment,
+both deletion orderings and commit/rollback, global compatibility, and a
+PostgreSQL parent-before-child deadlock test. The error-mapping plus authenticated
+HTTP regression passes 130 cases. Review-driven tests additionally cover version
+races, empty updates, and response-failure rollback. See the fencing report for evidence and
+review disposition. This is not generic `update_conversation` certification:
+message edit/enrichment and direct Sync callers remain outstanding.
+
 Remaining chat implementation inventory (not covered by creation/restore):
 - `ConversationStore.upsert_conversation_from_sync` can insert, resurrect, and
   replace scope/workspace identity. The Sync v2 chat materializer calls it
@@ -148,7 +162,7 @@ Remaining chat implementation inventory (not covered by creation/restore):
   Cover explicit error classification, accepted-envelope apply state, unchanged
   object-state projections, and repair/same-key replay after parent deletion.
   Do not imply atomicity between the Sync store and the product database.
-- Existing conversation update/settings and message content, image and
+- Other conversation update/settings callers and message content, image and
   metadata publication need the same deletion boundary. Preserve deletion's own
   child tombstoning after the parent has been marked deleted.
 - The character-message edit endpoint explicitly locks message, then metadata,

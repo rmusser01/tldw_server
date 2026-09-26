@@ -268,6 +268,30 @@ def test_workspace_chat_settings_reject_deleted_parent_over_http(
 
 
 @pytest.mark.integration
+def test_workspace_chat_metadata_rejects_deleted_parent_over_http(
+    test_client, auth_headers, character_db,
+):
+    character_db.upsert_workspace("deleted-metadata-workspace", "Workspace")
+    conversation_id = character_db.add_conversation({
+        "title": "Workspace chat", "scope_type": "workspace",
+        "workspace_id": "deleted-metadata-workspace",
+    })
+    assert character_db.delete_workspace("deleted-metadata-workspace", 1)
+    assert character_db.upsert_conversation_from_sync(
+        conversation_id=conversation_id, title="Retained chat", sync_client_id=character_db.client_id,
+        object_revision=5, object_hash="retained", scope_type="workspace", workspace_id="deleted-metadata-workspace",
+    )
+    before = character_db.get_conversation_by_id(conversation_id)
+    response = test_client.put(
+        f"/api/v1/chats/{conversation_id}", headers=auth_headers,
+        params={"scope_type": "workspace", "workspace_id": "deleted-metadata-workspace", "expected_version": 5},
+        json={"title": "Must not be stored"},
+    )
+    assert response.status_code == 409, response.text
+    assert character_db.get_conversation_by_id(conversation_id) == before
+
+
+@pytest.mark.integration
 def test_api_creation_captures_all_sources_and_redacts_snapshot_body(
     test_client,
     auth_headers,
