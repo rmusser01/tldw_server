@@ -1,7 +1,9 @@
 # Workspace Latest-Dev Integration
 
 Tracking: TASK-12020.50. Continue the accepted remediation sequence after R1-R6.
-Do not enable owned routes, implement deletion Stage 2, or imply merge readiness.
+This original integration slice did not enable owned routes or implement deletion
+Stage 2. Subsequent authorized writer-fencing work is tracked in the deletion
+plan; neither integration checkpoint implies merge readiness.
 
 ## Stage 1: Preserve And Transfer
 **Goal**: Preserve the existing verified dirty worktree and transfer its complete
@@ -87,3 +89,21 @@ The final backend process exited 0 with 262 passed and no skips. Source snapshot
 checksums still match all 112 entries, temporary dependency links are removed,
 and all task-owned probes/test sessions and reviewers have finished. No commit,
 push, route enablement, or full acceptance claim. Continue deletion Stage 2.
+
+## September 25 PR Rebase
+
+**Goal**: Rebase draft PR #3020 onto current dev without dropping upstream fixes.
+**Status**: Complete locally; push follows verification.
+
+Base: `59bd5845038342013a2d84d0130f6164f14b54fd`. The only textual
+conflict was the generated OpenAPI fingerprint, regenerated from combined source
+to 2098 paths and 3211 schemas. Range review confirms the settings follow-up is
+unchanged and the four AuthNZ fixture changes are already present upstream.
+Upstream character-stream error sanitization, sharing admin role dependencies,
+and PostgreSQL note conflict/search-owner fixes remain intact.
+
+Verification: 45 workspace fence/restore/settings/selection cases and 89 sharing
+endpoint/note-store cases pass with no skips. Type generation and production
+Bandit (three integration-touched modules, zero findings/errors) pass. Logs and
+limits are recorded in the integration evidence report. No full frontend rerun,
+live CDP acceptance, CI completion, or merge readiness is claimed.

@@ -70,6 +70,28 @@ trigger must replace, not supplement, the manual write to avoid duplicate events
 
 ## Verification
 
+### September 25 PR #3020 Rebase
+
+The two implementation commits were rebased onto dev
+`59bd5845038342013a2d84d0130f6164f14b54fd`. Only the OpenAPI fingerprint
+conflicted; it was regenerated rather than choosing either side. Range review
+preserves the workspace changes and upstream stream-error sanitization, sharing
+admin-role authorization and PostgreSQL note-store fixes. Four fixture-plugin
+changes are already present upstream and no longer appear in the PR diff.
+
+| Rebase Check | Result | Evidence |
+| --- | --- | --- |
+| Workspace restore/settings/selection and note endpoint | 45 passed, no skips, 4 warnings | `/tmp/workspace-rebase-fences.log`, `.xml` |
+| Sharing endpoints and note store | 89 passed, no skips, 7 warnings | `/tmp/workspace-rebase-upstream.log`, `.xml` |
+| Canonical schema and TypeScript generation | 2098 paths, 3211 schemas; passed | `/tmp/workspace-rebase-openapi.log`, `/tmp/workspace-rebase-schema.d.ts` |
+| Integration-touched production Bandit | 0 findings/errors | `/tmp/workspace-rebase-bandit.json` |
+| Full feature diff whitespace | Passed | `git diff --check origin/dev` |
+
+The workspace matrix uses the official PostgreSQL fixture on the task-owned
+5434 container and SQLite. This is bounded rebase verification, not a rerun of
+the historical frontend suite, full-project tests, WebUI/CDP acceptance or CI.
+The owned route remains disabled; PR #3020 remains draft.
+
 | Check | Result | Evidence |
 | --- | --- | --- |
 | Workspace and upstream auth regression | 1583 passed, 58 files | `/tmp/workspace-dev-regression.log` |
