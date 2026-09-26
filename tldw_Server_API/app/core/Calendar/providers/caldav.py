@@ -469,7 +469,23 @@ class CalDavProvider:
     def _component_dates(
         component: Any, name: str, resolved_timezones: dict[str, tzinfo] | None = None,
     ) -> list[str]:
-        """Preserve floating wall times and explicitly zoned recurrence-date instants."""
+        """Preserve floating wall times and explicitly zoned recurrence-date instants.
+
+        Args:
+            component: Parsed VEVENT providing recurrence-date properties.
+            name: Property to collect, normally RDATE or EXDATE.
+            resolved_timezones: Optional payload-scoped TZID-to-tzinfo mapping
+                for embedded definitions; it takes precedence over cached zones.
+
+        Returns:
+            ISO date/timestamp strings in property order, or an empty list if
+            the property is absent. Floating timestamps remain offset-free;
+            explicit UTC and named-zone timestamps retain resolved offsets.
+
+        Raises:
+            CalendarValidationError: A recurrence entry is not a date or
+                datetime, including unsupported RDATE period values.
+        """
         properties = component.get(name)
         if properties is None:
             return []
