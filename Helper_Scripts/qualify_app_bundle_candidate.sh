@@ -168,6 +168,7 @@ python -m Helper_Scripts.build_app_bundle \
   --artifacts "$output_dir/inventory.json" --evidence "$output_dir/evidence.json" \
   --signing-key "$output_dir/signing.key" --output "$output_dir/bundle"
 Helper_Scripts/test_app_bundle_docker.sh "$output_dir/bundle"
+Helper_Scripts/test_app_bundle_browser.sh "$output_dir/bundle"
 
 python - "$output_dir/evidence.json" "$platform" <<'PY'
 import json
@@ -176,8 +177,9 @@ from pathlib import Path
 
 path = Path(sys.argv[1])
 evidence = json.loads(path.read_text())
-# This smoke verifies artifact trust. Browser setup, two-instance routing,
-# and upstream runtime-support review still need their own live evidence.
+# Smoke verifies artifact trust; browser-evidence.json records only the
+# initial managed setup path and paired cookie/routing checks. Full G2 setup,
+# broader G4 transport, and G12 policy qualification remain open.
 evidence["platforms"][sys.argv[2]]["G10"] = True
 path.write_text(json.dumps(evidence, sort_keys=True))
 PY

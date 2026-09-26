@@ -12,6 +12,10 @@ on:
       - Dockerfiles/app-bundle/**
       - apps/tldw-frontend/gateway/**
       - Helper_Scripts/test_app_bundle_docker.sh
+      - Helper_Scripts/test_app_bundle_browser.sh
+      - Helper_Scripts/qualify_app_bundle_candidate.sh
+      - apps/tldw-frontend/scripts/qualify-app-bundle-browser.mjs
+      - apps/tldw-frontend/scripts/__tests__/qualify-app-bundle-browser.test.mjs
 
 permissions:
   contents: read
@@ -65,7 +69,8 @@ jobs:
             tldw_Server_API/app/core/Release/manifest.py \
             tldw_Server_API/scripts/app_bundle_control.py
           bash -n Helper_Scripts/qualify_app_bundle_candidate.sh \
-            Helper_Scripts/test_app_bundle_docker.sh
+            Helper_Scripts/test_app_bundle_docker.sh \
+            Helper_Scripts/test_app_bundle_browser.sh
           sh -n Dockerfiles/app-bundle/start.sh Dockerfiles/app-bundle/stop.sh \
             Dockerfiles/app-bundle/status.sh
 
@@ -83,6 +88,10 @@ jobs:
             __tests__/pages/api/runtime-session.test.ts \
             __tests__/pages/api/runtime-config.test.ts \
             __tests__/extension/runtime-bootstrap.test.ts
+          ./node_modules/.bin/playwright install --with-deps chromium
+          node --test scripts/__tests__/qualify-app-bundle-browser.test.mjs
+          bunx eslint scripts/qualify-app-bundle-browser.mjs \
+            scripts/__tests__/qualify-app-bundle-browser.test.mjs
           node --test gateway/__tests__/routes.test.mjs gateway/__tests__/server.test.mjs
           bunx eslint gateway/server.mjs gateway/routes.mjs
 
@@ -116,6 +125,7 @@ jobs:
             ${{ runner.temp }}/app-candidate-${{ matrix.arch }}/bundle
             ${{ runner.temp }}/app-candidate-${{ matrix.arch }}/inventory.json
             ${{ runner.temp }}/app-candidate-${{ matrix.arch }}/evidence.json
+            ${{ runner.temp }}/app-candidate-${{ matrix.arch }}/browser-evidence.json
             ${{ runner.temp }}/app-candidate-${{ matrix.arch }}/images.tsv
             ${{ runner.temp }}/app-candidate-${{ matrix.arch }}/trust/ci-test.pub
 
