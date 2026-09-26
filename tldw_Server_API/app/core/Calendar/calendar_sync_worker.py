@@ -156,24 +156,24 @@ async def handle_calendar_sync_job(
         if not binding.sync_enabled or binding.disabled_at:
             raise CalendarValidationError("External calendar binding is not enabled for sync")
         credentials = resolve_caldav_credentials(
-            calendar_db, account_id=account.id, actor_user_id=int(job["owner_user_id"]),
-            tenant_id=account.tenant_id, fallback_server_url=binding.remote_calendar_id,
+            calendar_db,
+            account_id=account.id,
+            actor_user_id=int(job["owner_user_id"]),
+            tenant_id=account.tenant_id,
+            fallback_server_url=binding.remote_calendar_id,
         )
         CalDavProvider.same_origin_url(credentials["server_url"], binding.remote_calendar_id)
         sync_provider = provider or CalDavProvider()
         events = await call_provider(
             sync_provider.fetch_vevents,
-                remote_calendar_url=binding.remote_calendar_id,
-                username=credentials["username"],
-                password=credentials["password"],
-                window_start=window_start,
-                window_end=window_end,
+            remote_calendar_url=binding.remote_calendar_id,
+            username=credentials["username"],
+            password=credentials["password"],
+            window_start=window_start,
+            window_end=window_end,
         )
-        result = _upsert_events(
-            calendar_db,
-            binding=binding,
-            events=list(events or []),
-        )
+        with calendar_db.transaction():
+            result = _upsert_events(calendar_db, binding=binding, events=list(events or []))
         finished_at = _utcnow_iso()
         calendar_db.update_binding_sync_state(
             binding.id,
@@ -299,12 +299,18 @@ def _upsert_events(
         uid = str(_event_value(event, "uid") or "").strip()
         if not uid:
             continue
-        seen_uids.add(uid)
+        if "\x00" in uid:
+            raise CalendarValidationError("CalDAV UID cannot contain a NUL character")
+        recurrence_id = _none_or_str(_event_value(event, "recurrence_id"))
+        # RFC UID text excludes NUL; preserve legacy master keys without instance collisions.
+        instance_key = f"{uid}\x00{recurrence_id}" if recurrence_id else uid
+        seen_uids.add(instance_key)
         provider_payload = _provider_payload(event)
-        db.upsert_provider_item(
+        provider_payload.update({"uid": uid, "recurrence_id": recurrence_id})
+        item = db.upsert_provider_item(
             calendar_id=binding.calendar_id,
             external_binding_id=binding.id,
-            source_uid=uid,
+            source_uid=instance_key,
             title=str(_event_value(event, "title") or "Untitled event"),
             start_at=_none_or_str(_event_value(event, "start_at")),
             end_at=_none_or_str(_event_value(event, "end_at")),
@@ -320,6 +326,19 @@ def _upsert_events(
             source_ctag=_none_or_str(provider_payload.get("ctag")),
             source_updated_at=_none_or_str(_event_value(event, "source_updated_at")),
         )
+        rule = _event_value(event, "rrule")
+        rdates = _event_value(event, "rdate") or []
+        exdates = _event_value(event, "exdate") or []
+        if not recurrence_id and (rule or rdates or exdates):
+            db.upsert_recurrence(
+                calendar_item_id=item.id,
+                rrule=rule,
+                rdate_json=rdates,
+                exdate_json=exdates,
+                timezone=_none_or_str(_event_value(event, "timezone")),
+            )
+        else:
+            db.delete_recurrence(item.id)
         upserted += 1
 
     return {

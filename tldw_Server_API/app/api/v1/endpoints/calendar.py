@@ -244,7 +244,10 @@ def _upsert_recurrence_if_present(
     item_id: int,
     payload: CalendarItemCreateRequest | CalendarItemUpdateRequest,
 ) -> None:
-    if "recurrence" not in payload.model_fields_set or payload.recurrence is None:
+    if "recurrence" not in payload.model_fields_set:
+        return
+    if payload.recurrence is None:
+        db.delete_recurrence(item_id)
         return
     recurrence = payload.recurrence
     db.upsert_recurrence(
@@ -324,7 +327,13 @@ async def create_calendar(
             default_reminder_policy_json=payload.default_reminder_policy,
             rbac_policy_ref=payload.rbac_policy_ref,
         )
-    except (CalendarReadOnlyError, CalendarNotFound, CalendarItemNotFound, CalendarPermissionDenied, CalendarValidationError) as exc:
+    except (
+        CalendarReadOnlyError,
+        CalendarNotFound,
+        CalendarItemNotFound,
+        CalendarPermissionDenied,
+        CalendarValidationError,
+    ) as exc:
         raise _map_calendar_error(exc) from exc
     return CalendarResponse.from_row(row)
 
@@ -345,7 +354,13 @@ async def list_calendars(
             actor_user_id=_user_id(current_user),
             include_archived=include_archived,
         )
-    except (CalendarReadOnlyError, CalendarNotFound, CalendarItemNotFound, CalendarPermissionDenied, CalendarValidationError) as exc:
+    except (
+        CalendarReadOnlyError,
+        CalendarNotFound,
+        CalendarItemNotFound,
+        CalendarPermissionDenied,
+        CalendarValidationError,
+    ) as exc:
         raise _map_calendar_error(exc) from exc
     items = [CalendarResponse.from_row(row) for row in rows]
     return CalendarListResponse(items=items, total=len(items))
@@ -372,7 +387,13 @@ async def add_calendar_membership(
             principal_id=payload.principal_id,
             role=payload.role,
         )
-    except (CalendarReadOnlyError, CalendarNotFound, CalendarItemNotFound, CalendarPermissionDenied, CalendarValidationError) as exc:
+    except (
+        CalendarReadOnlyError,
+        CalendarNotFound,
+        CalendarItemNotFound,
+        CalendarPermissionDenied,
+        CalendarValidationError,
+    ) as exc:
         raise _map_calendar_error(exc) from exc
     return CalendarMembershipResponse.from_row(row)
 
@@ -390,7 +411,13 @@ async def list_calendar_memberships(
 ) -> CalendarMembershipListResponse:
     try:
         rows = service.list_memberships(actor_user_id=_user_id(current_user), calendar_id=calendar_id)
-    except (CalendarReadOnlyError, CalendarNotFound, CalendarItemNotFound, CalendarPermissionDenied, CalendarValidationError) as exc:
+    except (
+        CalendarReadOnlyError,
+        CalendarNotFound,
+        CalendarItemNotFound,
+        CalendarPermissionDenied,
+        CalendarValidationError,
+    ) as exc:
         raise _map_calendar_error(exc) from exc
     items = [CalendarMembershipResponse.from_row(row) for row in rows]
     return CalendarMembershipListResponse(items=items, total=len(items))
@@ -416,7 +443,13 @@ async def remove_calendar_membership(
             principal_type=principal_type,
             principal_id=principal_id,
         )
-    except (CalendarReadOnlyError, CalendarNotFound, CalendarItemNotFound, CalendarPermissionDenied, CalendarValidationError) as exc:
+    except (
+        CalendarReadOnlyError,
+        CalendarNotFound,
+        CalendarItemNotFound,
+        CalendarPermissionDenied,
+        CalendarValidationError,
+    ) as exc:
         raise _map_calendar_error(exc) from exc
     return CalendarMembershipDeleteResponse(removed=removed)
 
@@ -435,25 +468,32 @@ async def create_calendar_item(
     db: CalendarDatabase = Depends(get_calendar_database),
 ) -> CalendarItemResponse:
     try:
-        item = service.create_item(
-            actor_user_id=_user_id(current_user),
-            calendar_id=payload.calendar_id,
-            kind=payload.kind,
-            title=payload.title,
-            description=payload.description,
-            location=payload.location,
-            start_at=payload.start_at,
-            end_at=payload.end_at,
-            due_at=payload.due_at,
-            timezone=payload.timezone,
-            all_day=payload.all_day,
-            status=payload.status,
-            local_tags_json=payload.local_tags,
-            metadata_json=payload.metadata,
-        )
-        _upsert_recurrence_if_present(db, item_id=item.id, payload=payload)
-        item = db.get_item(item.id)
-    except (CalendarReadOnlyError, CalendarNotFound, CalendarItemNotFound, CalendarPermissionDenied, CalendarValidationError) as exc:
+        with db.transaction():
+            item = service.create_item(
+                actor_user_id=_user_id(current_user),
+                calendar_id=payload.calendar_id,
+                kind=payload.kind,
+                title=payload.title,
+                description=payload.description,
+                location=payload.location,
+                start_at=payload.start_at,
+                end_at=payload.end_at,
+                due_at=payload.due_at,
+                timezone=payload.timezone,
+                all_day=payload.all_day,
+                status=payload.status,
+                local_tags_json=payload.local_tags,
+                metadata_json=payload.metadata,
+            )
+            _upsert_recurrence_if_present(db, item_id=item.id, payload=payload)
+            item = db.get_item(item.id)
+    except (
+        CalendarReadOnlyError,
+        CalendarNotFound,
+        CalendarItemNotFound,
+        CalendarPermissionDenied,
+        CalendarValidationError,
+    ) as exc:
         raise _map_calendar_error(exc) from exc
     return _item_response(db, item)
 
@@ -472,14 +512,21 @@ async def update_calendar_item(
     db: CalendarDatabase = Depends(get_calendar_database),
 ) -> CalendarItemResponse:
     try:
-        item = service.update_item(
-            actor_user_id=_user_id(current_user),
-            item_id=item_id,
-            **payload.service_updates(),
-        )
-        _upsert_recurrence_if_present(db, item_id=item.id, payload=payload)
-        item = db.get_item(item.id)
-    except (CalendarReadOnlyError, CalendarNotFound, CalendarItemNotFound, CalendarPermissionDenied, CalendarValidationError) as exc:
+        with db.transaction():
+            item = service.update_item(
+                actor_user_id=_user_id(current_user),
+                item_id=item_id,
+                **payload.service_updates(),
+            )
+            _upsert_recurrence_if_present(db, item_id=item.id, payload=payload)
+            item = db.get_item(item.id)
+    except (
+        CalendarReadOnlyError,
+        CalendarNotFound,
+        CalendarItemNotFound,
+        CalendarPermissionDenied,
+        CalendarValidationError,
+    ) as exc:
         raise _map_calendar_error(exc) from exc
     return _item_response(db, item)
 
@@ -509,7 +556,13 @@ async def get_calendar_agenda(
                 include_provider_tombstones=False,
             ),
         )
-    except (CalendarReadOnlyError, CalendarNotFound, CalendarItemNotFound, CalendarPermissionDenied, CalendarValidationError) as exc:
+    except (
+        CalendarReadOnlyError,
+        CalendarNotFound,
+        CalendarItemNotFound,
+        CalendarPermissionDenied,
+        CalendarValidationError,
+    ) as exc:
         raise _map_calendar_error(exc) from exc
     except (TypeError, ValueError) as exc:
         raise _map_calendar_error(CalendarValidationError(str(exc))) from exc
@@ -541,7 +594,13 @@ async def get_calendar_week(
                 include_provider_tombstones=False,
             ),
         )
-    except (CalendarReadOnlyError, CalendarNotFound, CalendarItemNotFound, CalendarPermissionDenied, CalendarValidationError) as exc:
+    except (
+        CalendarReadOnlyError,
+        CalendarNotFound,
+        CalendarItemNotFound,
+        CalendarPermissionDenied,
+        CalendarValidationError,
+    ) as exc:
         raise _map_calendar_error(exc) from exc
     except (TypeError, ValueError) as exc:
         raise _map_calendar_error(CalendarValidationError(str(exc))) from exc
@@ -568,7 +627,13 @@ async def create_calendar_annotation(
             body=payload.body,
             tags=payload.tags,
         )
-    except (CalendarReadOnlyError, CalendarNotFound, CalendarItemNotFound, CalendarPermissionDenied, CalendarValidationError) as exc:
+    except (
+        CalendarReadOnlyError,
+        CalendarNotFound,
+        CalendarItemNotFound,
+        CalendarPermissionDenied,
+        CalendarValidationError,
+    ) as exc:
         raise _map_calendar_error(exc) from exc
     return CalendarAnnotationResponse.from_row(row)
 
@@ -591,7 +656,13 @@ async def update_calendar_local_tags(
             item_id=item_id,
             tags=payload.tags,
         )
-    except (CalendarReadOnlyError, CalendarNotFound, CalendarItemNotFound, CalendarPermissionDenied, CalendarValidationError) as exc:
+    except (
+        CalendarReadOnlyError,
+        CalendarNotFound,
+        CalendarItemNotFound,
+        CalendarPermissionDenied,
+        CalendarValidationError,
+    ) as exc:
         raise _map_calendar_error(exc) from exc
     return CalendarAnnotationResponse.from_row(row)
 
@@ -619,7 +690,13 @@ async def create_calendar_link(
             url=payload.url,
             metadata_json=payload.metadata,
         )
-    except (CalendarReadOnlyError, CalendarNotFound, CalendarItemNotFound, CalendarPermissionDenied, CalendarValidationError) as exc:
+    except (
+        CalendarReadOnlyError,
+        CalendarNotFound,
+        CalendarItemNotFound,
+        CalendarPermissionDenied,
+        CalendarValidationError,
+    ) as exc:
         raise _map_calendar_error(exc) from exc
     return CalendarLinkResponse.from_row(row)
 
@@ -645,7 +722,13 @@ async def copy_calendar_item(
             target_calendar_id=payload.target_calendar_id,
             title=payload.title,
         )
-    except (CalendarReadOnlyError, CalendarNotFound, CalendarItemNotFound, CalendarPermissionDenied, CalendarValidationError) as exc:
+    except (
+        CalendarReadOnlyError,
+        CalendarNotFound,
+        CalendarItemNotFound,
+        CalendarPermissionDenied,
+        CalendarValidationError,
+    ) as exc:
         raise _map_calendar_error(exc) from exc
     return _item_response(db, item)
 
@@ -674,7 +757,13 @@ async def create_calendar_reminder(
             }
         )
         task = await scheduled_tasks_service.create_reminder(user_id=user_id, payload=reminder_payload)
-    except (CalendarReadOnlyError, CalendarNotFound, CalendarItemNotFound, CalendarPermissionDenied, CalendarValidationError) as exc:
+    except (
+        CalendarReadOnlyError,
+        CalendarNotFound,
+        CalendarItemNotFound,
+        CalendarPermissionDenied,
+        CalendarValidationError,
+    ) as exc:
         raise _map_calendar_error(exc) from exc
     return CalendarReminderResponse(
         calendar_item_id=payload.calendar_item_id,
@@ -752,7 +841,8 @@ async def verify_external_calendar_account(
         _assert_external_account_owner(db, account_id=account_id, current_user=current_user)
         credentials = resolve_caldav_credentials(
             db=db,
-            actor_user_id=_user_id(current_user), tenant_id=_tenant_id(current_user),
+            actor_user_id=_user_id(current_user),
+            tenant_id=_tenant_id(current_user),
             account_id=account_id,
             overrides=payload.model_dump(exclude_unset=True) if payload else None,
         )
@@ -784,7 +874,8 @@ async def discover_external_calendars(
         _assert_external_account_owner(db, account_id=account_id, current_user=current_user)
         credentials = resolve_caldav_credentials(
             db=db,
-            actor_user_id=_user_id(current_user), tenant_id=_tenant_id(current_user),
+            actor_user_id=_user_id(current_user),
+            tenant_id=_tenant_id(current_user),
             account_id=account_id,
             overrides=payload.model_dump(exclude_unset=True) if payload else None,
         )
