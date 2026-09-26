@@ -925,22 +925,23 @@ async def create_external_calendar_account(
         server_url = (account_metadata or {}).get("server_url")
         if payload.provider.lower() == "caldav" and server_url:
             CalDavProvider._validate_http_url(str(server_url))
-        secret_ref = payload.secret_ref
-        secret_payload = _external_account_secret_payload(payload)
-        if secret_payload is not None:
-            secret_ref = CalendarSecretStore(db=db, tenant_id=_tenant_id(current_user)).create_secret(
-                owner_user_id=_user_id(current_user),
+        with db.transaction():
+            secret_ref = payload.secret_ref
+            secret_payload = _external_account_secret_payload(payload)
+            if secret_payload is not None:
+                secret_ref = CalendarSecretStore(db=db, tenant_id=_tenant_id(current_user)).create_secret(
+                    owner_user_id=_user_id(current_user),
+                    provider=payload.provider,
+                    payload=secret_payload,
+                )
+            row = db.create_external_account(
+                tenant_id=_tenant_id(current_user),
+                user_id=_user_id(current_user),
                 provider=payload.provider,
-                payload=secret_payload,
+                display_name=payload.display_name,
+                secret_ref=secret_ref,
+                account_metadata_json=account_metadata,
             )
-        row = db.create_external_account(
-            tenant_id=_tenant_id(current_user),
-            user_id=_user_id(current_user),
-            provider=payload.provider,
-            display_name=payload.display_name,
-            secret_ref=secret_ref,
-            account_metadata_json=account_metadata,
-        )
     except CalendarValidationError as exc:
         raise _map_calendar_error(exc) from exc
     return ExternalCalendarAccountResponse.from_row(row)

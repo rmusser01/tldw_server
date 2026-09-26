@@ -192,8 +192,9 @@ class CalendarService:
         local_tags_json: str | list[str] | None = None,
         metadata_json: str | dict[str, Any] | None = None,
     ) -> CalendarItemRow:
+        context = self._assert_calendar_access(actor_user_id, calendar_id, "write")
+        timezone = timezone or context.calendar.timezone
         self._validate_item_time(kind=kind, start_at=start_at, due_at=due_at, end_at=end_at, timezone_name=timezone)
-        self._assert_calendar_access(actor_user_id, calendar_id, "write")
         return self.db.create_item(
             calendar_id=calendar_id,
             kind=kind,
