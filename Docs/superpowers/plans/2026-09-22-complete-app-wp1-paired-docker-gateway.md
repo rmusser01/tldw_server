@@ -394,11 +394,11 @@ user; do not run as root, disable audit, broaden filesystem permissions, or
 alter ordinary developer/hosted logging defaults. Qualification logs and test
 containers stay disposable and excluded from public evidence.
 
-- [ ] **Step 1:** Preserve actual clean-image permission failure and add a red
+- [x] **Step 1:** Preserve actual clean-image permission failure and add a red
   regression for the managed persisted audit path and matching test environment.
-- [ ] **Step 2:** Configure the existing path override minimally, with no new
+- [x] **Step 2:** Configure the existing path override minimally, with no new
   dependency or production source behavior. Validate Compose and focused tests.
-- [ ] **Step 3:** Run the exact lean MCP/setup commands on the already-built
+- [x] **Step 3:** Run the exact lean MCP/setup commands on the already-built
   backend as its default non-root user with only the path override and narrow
   read-only test mounts. Keep bounded results, remove owned test resources,
   independently review, commit, then retry the clean full candidate in Task13.
@@ -498,3 +498,11 @@ candidates, independent artifact verification and whole-WP1 review remain the
 next gates. G2/G4 and AC4 remain open until their complete mapped evidence passes;
 G12 publication stays separately blocked. Existing dependency warnings and
 whole-frontend typecheck baseline remain disclosed.
+
+Managed audit-path correction b0e847166e is independently approved. Two existing
+environment overrides retain enabled MCP auditing under the default non-root
+user in /app/Databases/mcp-audit.log. Cached exact087e77 backend audit init/write,
+MCP39 and Setup60 pass; Release81 passes. Owned diagnostic/test resources removed.
+Fresh full candidate proof remains pending; cached-image checks do not close
+G2/G4. Container property tests warn that their example database falls back to
+memory under the read-only /app directory; dependency warnings remain visible.
