@@ -4,7 +4,7 @@ title: Implement Chat Macros v1.1 authoring and output profiles
 status: In Progress
 assignee: []
 created_date: '2026-08-24 04:15'
-updated_date: '2026-09-26 11:30'
+updated_date: '2026-09-26 21:46'
 labels:
   - chat-macros
   - frontend
@@ -81,6 +81,8 @@ Fingerprint correction verification: regenerated OpenAPI JSON+TypeScript using C
 2026-09-26 follow-up rebase: dev advanced to 59bd584503 (PR2996 MCP sanitizer changes, no Chat Macros overlap). Rebased all25 PR commits cleanly; git range-diff confirms every commit patch-equivalent. Fresh CI-matched OpenAPI contract check passes using /tmp/pr2951-openapi-ci-deps. No new application edits or security findings introduced by this rebase. Publishing with an exact lease against2445e67792; required CI and any new review feedback remain merge gates.
 
 2026-09-26 11:30 UTC: dev advanced to a2826f103f via PR3017 (VZ failure-drill tests and tooling). Rebased all 26 commits cleanly; range-diff confirms all patch-equivalent and apps, backend application, and Helper_Scripts trees unchanged. Fresh CI-matched OpenAPI contract check and full PR diff whitespace check pass. Previous head had six required gates successful with frontend-required queued, no failures or new Qodo findings. Publishing rebase with exact lease against 3b49e85220; fresh required CI remains the merge gate.
+
+2026-09-26 21:45 UTC: dev advanced to f5fa1f3a41 via PR3006 (sync blob-upload expiry). Rebased all 27 prior PR commits cleanly; range-diff confirms all patch-equivalent. Chat Macros and frontend unchanged. Fresh CI-matched OpenAPI contract check and full PR diff whitespace check pass. No new Qodo comments/findings. Prior head had only frontend-required running; all other required gates passed. Publish with exact lease against89f54f2893 and await fresh required CI; do not bypass merge policy.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
