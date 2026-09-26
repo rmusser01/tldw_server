@@ -586,6 +586,14 @@ class WorkspaceListResponse(BaseModel):
     total: int
 
 
+class WorkspaceDeletionStatusResponse(BaseModel):
+    """Owner-visible canonical deletion state, without retained resource metadata."""
+
+    workspace_id: str
+    deleted: bool
+    version: int
+
+
 # --- Membership schemas ---
 
 class WorkspaceMembershipCreateRequest(BaseModel):

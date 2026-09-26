@@ -8,10 +8,13 @@ from typing import Any
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
+from fastapi.routing import APIRoute
 from loguru import logger
 from starlette.concurrency import run_in_threadpool
+from starlette.datastructures import MutableHeaders
+from starlette.types import Message, Receive, Scope, Send
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user, require_expected_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import try_get_job_manager
@@ -38,6 +41,7 @@ from tldw_Server_API.app.api.v1.schemas.workspace_schemas import (
     WorkspaceAssistantDefaults,
     WorkspaceCapabilitiesResponse,
     WorkspaceContextResponse,
+    WorkspaceDeletionStatusResponse,
     WorkspaceEffectiveAssistantDefault,
     WorkspaceFileInventoryEntryKind,
     WorkspaceFileInventoryItemsResponse,
@@ -80,6 +84,8 @@ from tldw_Server_API.app.api.v1.schemas.workspace_schemas import (
     WorkspaceUpsertRequest,
 )
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import current_connection_state
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -153,6 +159,20 @@ from tldw_Server_API.app.core.Workspaces.workspace_artifact_exports import (
 )
 
 router = APIRouter()
+
+
+class _WorkspaceDeletionStatusRoute(APIRoute):
+    """Prevent caching of deletion-state responses, including dependency errors."""
+
+    async def handle(self, scope: Scope, receive: Receive, send: Send) -> None:
+        async def no_store_send(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                MutableHeaders(scope=message)["Cache-Control"] = "no-store"
+            await send(message)
+
+        # Let Starlette dispatch registered exception handlers before decorating their responses.
+        await super().handle(scope, receive, no_store_send)
+
 
 WORKSPACE_ACTIVE_JOB_STATUSES = {"queued", "processing", "running", "retrying"}
 JOB_ERROR_CODE_ALLOWED_CHARS = frozenset(
@@ -1139,7 +1159,7 @@ def _enqueue_workspace_source_ingest_job(
 @router.get(
     "/",
     response_model=WorkspaceListResponse,
-    dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT)],
+    dependencies=[Depends(require_expected_user), Depends(WORKSPACES_READ_RATE_LIMIT)],
     summary="List workspaces",
 )
 async def list_workspaces(
@@ -1169,7 +1189,7 @@ async def list_workspaces(
 @router.get(
     "/{workspace_id}",
     response_model=WorkspaceResponse,
-    dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT)],
+    dependencies=[Depends(require_expected_user), Depends(WORKSPACES_READ_RATE_LIMIT)],
     summary="Get workspace",
 )
 async def get_workspace(
@@ -1218,7 +1238,7 @@ async def upsert_workspace(
 @router.patch(
     "/{workspace_id}",
     response_model=WorkspaceResponse,
-    dependencies=[Depends(WORKSPACES_WRITE_RATE_LIMIT)],
+    dependencies=[Depends(require_expected_user), Depends(WORKSPACES_WRITE_RATE_LIMIT)],
     summary="Update workspace",
 )
 async def patch_workspace(
@@ -1253,18 +1273,32 @@ async def patch_workspace(
 @router.delete(
     "/{workspace_id}",
     status_code=204,
-    dependencies=[Depends(WORKSPACES_DELETE_RATE_LIMIT)],
+    dependencies=[Depends(require_expected_user), Depends(WORKSPACES_DELETE_RATE_LIMIT)],
     summary="Delete workspace",
 )
 async def delete_workspace(
     workspace_id: str,
+    expected_version: int | None = Query(
+        default=None, ge=1, le=2_147_483_646,
+        description="Observed version; reserves a signed 32-bit successor for the tombstone.",
+    ),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     current_user: User = Depends(get_request_user),
 ):
     """Soft-delete a workspace and cascade soft-delete its conversations."""
-    ws = _require_workspace(db, workspace_id)
+    def delete_operation() -> None:
+        # Capture ownership before cancellation can close the inherited request scope.
+        request_owned = db.backend_type == BackendType.POSTGRESQL and current_connection_state(db) is not None
+        try:
+            ws = _require_workspace(db, workspace_id)
+            version = ws["version"] if expected_version is None else expected_version
+            db.delete_workspace(workspace_id, version)
+        finally:
+            if not request_owned:
+                db.close_connection()
+
     try:
-        db.delete_workspace(workspace_id, ws["version"])
+        await run_in_threadpool(delete_operation)
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to delete workspace") from exc
     try:
@@ -1276,6 +1310,47 @@ async def delete_workspace(
             workspace_id,
             current_user.id,
         )
+
+
+async def get_workspace_deletion_status(
+    workspace_id: str,
+    response: Response,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+):
+    """Read owner-only canonical state, not attribution of who caused deletion."""
+    response.headers["Cache-Control"] = "no-store"
+
+    def status_operation() -> dict[str, Any] | None:
+        request_owned = db.backend_type == BackendType.POSTGRESQL and current_connection_state(db) is not None
+        try:
+            return db.get_workspace(workspace_id, include_deleted=True)
+        finally:
+            if not request_owned:
+                db.close_connection()
+
+    try:
+        ws = await run_in_threadpool(status_operation)
+    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+        error = map_db_error_to_http(exc, default_detail="Failed to fetch workspace deletion status")
+        error.headers = {**(error.headers or {}), "Cache-Control": "no-store"}
+        raise error from exc
+    if ws is None:
+        raise HTTPException(status_code=404, detail="Workspace not found", headers={"Cache-Control": "no-store"})
+    return WorkspaceDeletionStatusResponse(
+        workspace_id=workspace_id, deleted=ws["deleted"], version=ws["version"],
+    )
+
+
+router.add_api_route(
+    "/{workspace_id}/deletion-status",
+    get_workspace_deletion_status,
+    methods=["GET"],
+    response_model=WorkspaceDeletionStatusResponse,
+    dependencies=[Depends(require_expected_user), Depends(WORKSPACES_READ_RATE_LIMIT)],
+    summary="Get owner workspace deletion state",
+    route_class_override=_WorkspaceDeletionStatusRoute,
+)
 
 
 # ── Memberships ─────────────────────────────────────────────────
@@ -1764,7 +1839,7 @@ def delete_source_saved_view(
 @router.get(
     "/{workspace_id}/sources",
     response_model=list[WorkspaceSourceResponse],
-    dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT)],
+    dependencies=[Depends(require_expected_user), Depends(WORKSPACES_READ_RATE_LIMIT)],
     summary="List workspace sources",
 )
 async def list_sources(
@@ -1856,7 +1931,7 @@ async def get_workspace_capabilities(
 @router.get(
     "/{workspace_id}/context",
     response_model=WorkspaceContextResponse,
-    dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT)],
+    dependencies=[Depends(require_expected_user), Depends(WORKSPACES_READ_RATE_LIMIT)],
     summary="Get workspace page context",
 )
 async def get_workspace_context(
@@ -2559,7 +2634,7 @@ async def get_workspace_output_status(
 @router.get(
     "/{workspace_id}/artifacts",
     response_model=list[WorkspaceArtifactResponse],
-    dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT)],
+    dependencies=[Depends(require_expected_user), Depends(WORKSPACES_READ_RATE_LIMIT)],
     summary="List workspace artifacts",
 )
 async def list_artifacts(
@@ -2697,7 +2772,7 @@ async def delete_artifact(
 @router.get(
     "/{workspace_id}/notes",
     response_model=list[WorkspaceNoteResponse],
-    dependencies=[Depends(WORKSPACES_READ_RATE_LIMIT)],
+    dependencies=[Depends(require_expected_user), Depends(WORKSPACES_READ_RATE_LIMIT)],
     summary="List workspace notes",
 )
 async def list_notes(
@@ -2718,7 +2793,7 @@ async def list_notes(
     "/{workspace_id}/notes",
     response_model=WorkspaceNoteResponse,
     status_code=201,
-    dependencies=[Depends(WORKSPACES_WRITE_RATE_LIMIT)],
+    dependencies=[Depends(require_expected_user), Depends(WORKSPACES_WRITE_RATE_LIMIT)],
     summary="Add note to workspace",
 )
 async def add_note(
@@ -2739,7 +2814,7 @@ async def add_note(
 @router.put(
     "/{workspace_id}/notes/{note_id}",
     response_model=WorkspaceNoteResponse,
-    dependencies=[Depends(WORKSPACES_WRITE_RATE_LIMIT)],
+    dependencies=[Depends(require_expected_user), Depends(WORKSPACES_WRITE_RATE_LIMIT)],
     summary="Update workspace note",
 )
 async def update_note(
@@ -2762,7 +2837,7 @@ async def update_note(
 @router.delete(
     "/{workspace_id}/notes/{note_id}",
     status_code=204,
-    dependencies=[Depends(WORKSPACES_DELETE_RATE_LIMIT)],
+    dependencies=[Depends(require_expected_user), Depends(WORKSPACES_DELETE_RATE_LIMIT)],
     summary="Delete workspace note",
 )
 async def delete_note(

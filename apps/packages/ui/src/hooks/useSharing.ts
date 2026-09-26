@@ -52,9 +52,9 @@ const jsonPatch = async <T>(path: string, body: unknown): Promise<T> => {
   return res.json()
 }
 
-const jsonGet = async <T>(path: string): Promise<T> => {
+const jsonGet = async <T>(path: string, signal?: AbortSignal): Promise<T> => {
   const url = await sharingUrl(path)
-  const res = await fetchWithTldwAuth(url)
+  const res = signal ? await fetchWithTldwAuth(url, { signal }) : await fetchWithTldwAuth(url)
   if (!res.ok) {
     throw await buildTldwApiError(res)
   }
@@ -131,25 +131,13 @@ export function useRevokeShare() {
 // Shared With Me Hooks
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function useSharedWithMe() {
+export function useSharedWithMe(scope: string | null) {
   return useQuery<SharedWithMeResponse>({
-    queryKey: sharingKeys.sharedWithMe(),
-    queryFn: () => jsonGet("/shared-with-me"),
-  })
-}
-
-export function useCloneWorkspace() {
-  const qc = useQueryClient()
-  return useMutation<
-    { job_id: string; status: string; message: string },
-    Error,
-    { shareId: number; new_name?: string }
-  >({
-    mutationFn: ({ shareId, ...body }) =>
-      jsonPost(`/shared-with-me/${shareId}/clone`, body),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: sharingKeys.sharedWithMe() })
-    },
+    queryKey: [...sharingKeys.sharedWithMe(), scope],
+    queryFn: ({ signal }) => jsonGet("/shared-with-me", signal),
+    enabled: Boolean(scope),
+    placeholderData: undefined,
+    gcTime: 0
   })
 }
 

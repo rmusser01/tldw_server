@@ -224,6 +224,10 @@ class CharacterRateLimiter:
         return _check_chat_limit(user_id, current_chat_count, self._limits)
 
     async def check_message_limit(self, chat_id: str, projected_message_count: int) -> bool:
+        return self.check_message_limit_sync(chat_id, projected_message_count)
+
+    def check_message_limit_sync(self, chat_id: str, projected_message_count: int) -> bool:
+        """Validate the configured cap without suspending a publication transaction."""
         return _check_message_limit(chat_id, projected_message_count, self._limits)
 
     async def check_soft_message_limit(self, chat_id: str, current_message_count: int) -> bool:

@@ -4,8 +4,11 @@
  * with rollback on 409 conflicts.
  */
 
+import { z } from "zod"
 import type {
+  WorkspaceApiResponse,
   WorkspaceArtifactApiResponse,
+  WorkspaceNoteApiResponse,
   WorkspaceSourceApiResponse
 } from "../services/tldw/domains/workspace-api"
 import type {
@@ -26,24 +29,339 @@ import type {
   WorkspaceSourceType
 } from "../types/workspace"
 
-export interface ServerWorkspaceState {
-  id: string
-  name: string | null
-  sources?: WorkspaceSourceApiResponse[]
-  artifacts?: WorkspaceArtifactApiResponse[]
-  notes?: any[]
-  version: number
-  [key: string]: unknown
+export type OwnedWorkspaceBundle = {
+  workspace: WorkspaceApiResponse
+  sources: WorkspaceSourceApiResponse[]
+  artifacts: WorkspaceArtifactApiResponse[]
+  notes: WorkspaceNoteApiResponse[]
 }
 
-export interface LocalWorkspaceState {
+/** Readers must be bound to the verified account/server request context. */
+export type OwnedWorkspaceReader = {
+  getWorkspace(id: string): Promise<WorkspaceApiResponse>
+  getWorkspaceSources(id: string): Promise<WorkspaceSourceApiResponse[]>
+  getWorkspaceArtifacts(id: string): Promise<WorkspaceArtifactApiResponse[]>
+  getWorkspaceNotes(id: string): Promise<WorkspaceNoteApiResponse[]>
+}
+
+export class OwnedWorkspaceLoadError extends Error {
+  constructor(
+    public readonly reason: "invalid-response" | "unavailable",
+    public readonly resource: keyof OwnedWorkspaceBundle
+  ) {
+    super(`Workspace ${resource} ${reason}`)
+    this.name = "OwnedWorkspaceLoadError"
+  }
+}
+
+const nonemptyId = z.string().refine((value) => value.trim().length > 0)
+const versionSchema = z.number().int().positive()
+const timestampSchema = z
+  .string()
+  .refine((value) => Number.isFinite(Date.parse(value)))
+const recordSchema = z.record(z.string(), z.unknown())
+const optionalRecord = recordSchema.nullish()
+const memoryModeSchema = z.enum(["read_only", "read_write"])
+const defaultStatusSchema = z.enum(["available", "unavailable", "none"])
+const defaultSourceSchema = z.enum(["workspace", "none"])
+const degradedReasonSchema = z.enum([
+  "persona_deleted",
+  "persona_unavailable",
+  "persona_feature_disabled",
+  "permission_denied",
+  "invalid_default",
+  "unsupported_assistant_kind"
+])
+
+/** Match the backend's effective-default status relationships in either casing. */
+function validEffectiveDefault(value: {
+  status: string
+  assistantKind?: string | null
+  assistantId?: string | null
+  label?: string | null
+  personaMemoryMode?: string | null
+  degradedReason?: string | null
+}): boolean {
+  if (value.status === "available") {
+    return (
+      value.assistantKind != null &&
+      value.assistantId != null &&
+      value.degradedReason == null
+    )
+  }
+  if (value.status === "unavailable") return value.degradedReason != null
+  return [
+    value.assistantKind,
+    value.assistantId,
+    value.label,
+    value.personaMemoryMode,
+    value.degradedReason
+  ].every((field) => field == null)
+}
+
+const workspaceSchema = z
+  .object({
+    id: nonemptyId,
+    name: z.string().nullable(),
+    archived: z.boolean(),
+    deleted: z.boolean(),
+    workspace_profile: z.enum(["research", "project"]),
+    study_materials_policy: z.enum(["general", "workspace"]),
+    banner_title: z.string().nullable(),
+    banner_subtitle: z.string().nullable(),
+    banner_color: z.string().nullable(),
+    audio_provider: z.string().nullable(),
+    audio_model: z.string().nullable(),
+    audio_voice: z.string().nullable(),
+    audio_speed: z.number().finite().nullable(),
+    created_at: timestampSchema,
+    last_modified: timestampSchema,
+    version: versionSchema,
+    assistant_defaults: z
+      .object({
+        assistant_kind: z.literal("persona"),
+        assistant_id: nonemptyId,
+        persona_memory_mode: memoryModeSchema.optional(),
+        voice: z.null().optional(),
+        style: z.null().optional(),
+        tool_policy_profile_id: z.null().optional()
+      })
+      .passthrough()
+      .nullish(),
+    assistantDefaults: z
+      .object({
+        assistantKind: z.literal("persona"),
+        assistantId: nonemptyId,
+        personaMemoryMode: memoryModeSchema,
+        voice: z.null(),
+        style: z.null(),
+        toolPolicyProfileId: z.null()
+      })
+      .passthrough()
+      .nullish(),
+    effective_assistant_default: z
+      .object({
+        status: defaultStatusSchema,
+        source: defaultSourceSchema,
+        assistant_kind: z.literal("persona").nullish(),
+        assistant_id: z.string().nullish(),
+        label: z.string().nullish(),
+        persona_memory_mode: memoryModeSchema.nullish(),
+        degraded_reason: degradedReasonSchema.nullish()
+      })
+      .passthrough()
+      .refine((value) =>
+        validEffectiveDefault({
+          status: value.status,
+          assistantKind: value.assistant_kind,
+          assistantId: value.assistant_id,
+          label: value.label,
+          personaMemoryMode: value.persona_memory_mode,
+          degradedReason: value.degraded_reason
+        })
+      )
+      .nullish(),
+    effectiveAssistantDefault: z
+      .object({
+        status: defaultStatusSchema,
+        source: defaultSourceSchema,
+        assistantKind: z.literal("persona").nullable(),
+        assistantId: z.string().nullable(),
+        label: z.string().nullable(),
+        personaMemoryMode: memoryModeSchema.nullable(),
+        degradedReason: degradedReasonSchema.nullable()
+      })
+      .passthrough()
+      .refine(validEffectiveDefault)
+      .optional()
+  })
+  .passthrough()
+
+const sourceSchema = z
+  .object({
+    id: nonemptyId,
+    workspace_id: nonemptyId,
+    media_id: z.number().int().positive(),
+    title: z.string(),
+    source_type: z.string(),
+    url: z.string().nullable(),
+    position: z.number().int(),
+    selected: z.boolean(),
+    added_at: timestampSchema,
+    version: versionSchema,
+    review_state: z.enum(["unset", "reviewed", "needs_review"]).optional(),
+    review_state_updated_at: timestampSchema.nullish(),
+    reviewed_at: timestampSchema.nullish(),
+    reviewed_by_user_id: z.string().nullish()
+  })
+  .passthrough()
+
+const artifactSchema = z
+  .object({
+    id: nonemptyId,
+    workspace_id: nonemptyId,
+    artifact_type: z.string(),
+    title: z.string(),
+    status: z.string(),
+    content: z.string().nullable(),
+    total_tokens: z.number().finite().nullable(),
+    total_cost_usd: z.number().finite().nullable(),
+    created_at: timestampSchema,
+    completed_at: timestampSchema.nullable(),
+    version: versionSchema,
+    review_state: z.string().nullish(),
+    content_type: z.string().nullish(),
+    preview_text: z.string().nullish(),
+    summary: z.string().nullish(),
+    owner_scope: z.string().nullish(),
+    owner_id: z.string().nullish(),
+    project_id: z.string().nullish(),
+    task_id: z.string().nullish(),
+    source_collection_id: z.string().nullish(),
+    root_artifact_id: z.string().nullish(),
+    artifact_version_id: z.string().nullish(),
+    previous_version_id: z.string().nullish(),
+    schema_version: z.number().int().nullish(),
+    producer_metadata: optionalRecord,
+    review_metadata: optionalRecord,
+    version_metadata: optionalRecord,
+    redaction: optionalRecord,
+    source_lineage: z.union([recordSchema, z.array(recordSchema)]).nullish(),
+    export_refs: z.array(recordSchema).nullish()
+  })
+  .passthrough()
+
+const noteSchema: z.ZodType<WorkspaceNoteApiResponse> = z
+  .object({
+    id: z.number().int().positive(),
+    workspace_id: nonemptyId,
+    title: z.string(),
+    content: z.string(),
+    keywords_json: z.string().refine((value) => {
+      try {
+        const keywords: unknown = JSON.parse(value)
+        return (
+          Array.isArray(keywords) &&
+          keywords.every((keyword) => typeof keyword === "string")
+        )
+      } catch {
+        return false
+      }
+    }),
+    created_at: timestampSchema,
+    last_modified: timestampSchema,
+    version: versionSchema
+  })
+  .passthrough()
+
+function validateOwnedCollection(
+  rows: unknown,
+  schema: z.ZodType<{ id: string | number; workspace_id: string }>,
+  workspaceId: string,
+  resource: "sources" | "artifacts" | "notes"
+): void {
+  const parsed = z.array(schema).safeParse(rows)
+  if (!parsed.success)
+    throw new OwnedWorkspaceLoadError("invalid-response", resource)
+  const identities = new Set<string | number>()
+  for (const row of parsed.data) {
+    if (row.workspace_id !== workspaceId || identities.has(row.id)) {
+      throw new OwnedWorkspaceLoadError("invalid-response", resource)
+    }
+    identities.add(row.id)
+  }
+}
+
+export function validateOwnedWorkspaceNotes(
+  rows: unknown,
+  workspaceId: string
+): asserts rows is WorkspaceNoteApiResponse[] {
+  validateOwnedCollection(rows, noteSchema, workspaceId, "notes")
+}
+
+/** Reject promptly even when the underlying reader cannot abort its transport. */
+function readUntilAborted<T>(
+  signal: AbortSignal,
+  read: () => Promise<T>
+): Promise<T> {
+  signal.throwIfAborted()
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(signal.reason)
+    signal.addEventListener("abort", onAbort, { once: true })
+    const cleanup = () => signal.removeEventListener("abort", onAbort)
+    try {
+      read().then(
+        (value) => {
+          cleanup()
+          if (signal.aborted) reject(signal.reason)
+          else resolve(value)
+        },
+        (error) => {
+          cleanup()
+          reject(error)
+        }
+      )
+    } catch (error) {
+      cleanup()
+      reject(error)
+    }
+  })
+}
+
+/** Validate metadata without masking malformed or unavailable canonical rows. */
+export function validateOwnedWorkspaceRecord(
+  workspace: unknown,
   id: string
-  name: string
-  sources: WorkspaceSource[]
-  selectedSourceIds: string[]
-  artifacts: GeneratedArtifact[]
-  notes: any[]
-  version: number
+): asserts workspace is WorkspaceApiResponse {
+  if (
+    !workspaceSchema.safeParse(workspace).success ||
+    (workspace as WorkspaceApiResponse).id !== id
+  ) {
+    throw new OwnedWorkspaceLoadError("invalid-response", "workspace")
+  }
+  const metadata = workspace as WorkspaceApiResponse
+  if (metadata.deleted) {
+    throw new OwnedWorkspaceLoadError("unavailable", "workspace")
+  }
+}
+
+/** Archived rows are readable for lifecycle review, never editable activations. */
+export function validateOwnedWorkspaceMetadata(
+  workspace: unknown,
+  id: string
+): asserts workspace is WorkspaceApiResponse {
+  validateOwnedWorkspaceRecord(workspace, id)
+  if (workspace.archived)
+    throw new OwnedWorkspaceLoadError("unavailable", "workspace")
+}
+
+/** Load a complete authorized bundle without mutating server or browser state. */
+export async function loadOwnedWorkspace(
+  id: string,
+  reader: OwnedWorkspaceReader,
+  signal: AbortSignal
+): Promise<OwnedWorkspaceBundle> {
+  signal.throwIfAborted()
+  if (!nonemptyId.safeParse(id).success) {
+    throw new OwnedWorkspaceLoadError("invalid-response", "workspace")
+  }
+  const workspace = await readUntilAborted(signal, () =>
+    reader.getWorkspace(id)
+  )
+  validateOwnedWorkspaceMetadata(workspace, id)
+  const [sources, artifacts, notes] = await readUntilAborted(signal, () =>
+    Promise.all([
+      reader.getWorkspaceSources(id),
+      reader.getWorkspaceArtifacts(id),
+      reader.getWorkspaceNotes(id)
+    ])
+  )
+  signal.throwIfAborted()
+  validateOwnedCollection(sources, sourceSchema, id, "sources")
+  validateOwnedCollection(artifacts, artifactSchema, id, "artifacts")
+  validateOwnedWorkspaceNotes(notes, id)
+  // Keep the original typed payload, including optional metadata and effective defaults.
+  return { workspace, sources, artifacts, notes }
 }
 
 const workspaceSourceTypes = new Set<WorkspaceSourceType>([
@@ -105,7 +423,9 @@ const asRecord = (value: unknown): Record<string, unknown> | undefined =>
   isRecord(value) ? value : undefined
 
 const asString = (value: unknown): string | undefined =>
-  typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined
+  typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : undefined
 
 const asNumber = (value: unknown): number | undefined =>
   typeof value === "number" && Number.isFinite(value) ? value : undefined
@@ -260,7 +580,9 @@ const normalizeVersionMetadata = (
   }
 }
 
-const normalizeRedaction = (metadata: unknown): TraceableArtifactRedaction | undefined => {
+const normalizeRedaction = (
+  metadata: unknown
+): TraceableArtifactRedaction | undefined => {
   const record = asRecord(metadata)
   if (!record) return undefined
 
@@ -275,7 +597,9 @@ const normalizeRedaction = (metadata: unknown): TraceableArtifactRedaction | und
         ? (pickValue(record, "redacted") as boolean)
         : undefined,
     retentionClass: pickString(record, "retentionClass", "retention_class"),
-    redactedFields: asStringArray(record.redactedFields ?? record.redacted_fields),
+    redactedFields: asStringArray(
+      record.redactedFields ?? record.redacted_fields
+    ),
     visibility: pickString(record, "visibility")
   }
 }
@@ -361,8 +685,14 @@ const normalizeExportRefs = (
           | string
           | undefined,
         format,
-        fileId: pickValue(record, "fileId", "file_id") as number | string | undefined,
-        jobId: pickValue(record, "jobId", "job_id") as number | string | undefined,
+        fileId: pickValue(record, "fileId", "file_id") as
+          | number
+          | string
+          | undefined,
+        jobId: pickValue(record, "jobId", "job_id") as
+          | number
+          | string
+          | undefined,
         artifactVersionId: pickString(
           record,
           "artifactVersionId",
@@ -402,7 +732,7 @@ export const mapServerSourceReviewFields = (
   reviewedByUserId: source.reviewed_by_user_id || undefined
 })
 
-const mapServerSourceToLocal = (
+export const mapServerSourceToLocal = (
   source: WorkspaceSourceApiResponse
 ): WorkspaceSource => ({
   id: source.id,
@@ -415,7 +745,7 @@ const mapServerSourceToLocal = (
   ...mapServerSourceReviewFields(source)
 })
 
-const mapServerArtifactToLocal = (
+export const mapServerArtifactToLocal = (
   artifact: WorkspaceArtifactApiResponse
 ): GeneratedArtifact => {
   const exportRefs = normalizeExportRefs(artifact.export_refs)
@@ -425,7 +755,9 @@ const mapServerArtifactToLocal = (
     type: normalizeArtifactType(artifact.artifact_type),
     title: artifact.title,
     status: mapServerGenerationStatus(artifact),
-    reviewStatus: mapServerReviewStatus(artifact.review_state || artifact.status),
+    reviewStatus: mapServerReviewStatus(
+      artifact.review_state || artifact.status
+    ),
     serverId: artifact.id,
     content: artifact.content || undefined,
     contentType: artifact.content_type || undefined,
@@ -458,29 +790,6 @@ const mapServerArtifactToLocal = (
 }
 
 /**
- * Hydrate local workspace state from the server.
- * Called on workspace switch to ensure local state reflects server truth.
- */
-export async function hydrateWorkspaceFromServer(
-  workspaceId: string,
-  deps: { fetch: (id: string) => Promise<ServerWorkspaceState> }
-): Promise<LocalWorkspaceState> {
-  const server = await deps.fetch(workspaceId)
-  const serverSources = server.sources ?? []
-  return {
-    id: server.id,
-    name: server.name ?? "",
-    sources: serverSources.map(mapServerSourceToLocal),
-    selectedSourceIds: serverSources
-      .filter((source) => source.selected === true)
-      .map((source) => source.id),
-    artifacts: (server.artifacts ?? []).map(mapServerArtifactToLocal),
-    notes: server.notes ?? [],
-    version: server.version,
-  }
-}
-
-/**
  * Perform an optimistic workspace update.
  * On success, returns the server's updated state.
  * On 409 conflict, returns the server's current state (rollback).
@@ -491,7 +800,10 @@ export async function optimisticWorkspaceUpdate(
   deps: { update: (id: string, body: any) => Promise<any> }
 ): Promise<{ name: string; version: number; [key: string]: unknown }> {
   try {
-    const result = await deps.update(current.id, { ...updates, version: current.version })
+    const result = await deps.update(current.id, {
+      ...updates,
+      version: current.version
+    })
     return result
   } catch (err: any) {
     if (err.status === 409 && err.body) {

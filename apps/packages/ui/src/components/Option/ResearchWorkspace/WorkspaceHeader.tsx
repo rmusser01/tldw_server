@@ -115,6 +115,11 @@ import { WorkspaceSandboxDiagnosticsPanel } from "./WorkspaceSandboxDiagnosticsP
 import { WORKSPACES_PATH } from "@/routes/route-paths"
 import { useActiveWorkspaceContext } from "@/services/workspace-context"
 import { renderWorkspaceMessageActionContent } from "./workspace-message-content"
+import { useOwnedWorkspaceRename } from "./hooks/useOwnedWorkspaceRename"
+import { useOwnedWorkspaceAssistant } from "./hooks/useOwnedWorkspaceAssistant"
+import { useOwnedWorkspaceBanner } from "./hooks/useOwnedWorkspaceBanner"
+import { useOwnedWorkspaceArchive } from "./hooks/useOwnedWorkspaceArchive"
+import { Alert as DsAlert } from "@/components/ui/primitives"
 
 interface WorkspaceHeaderProps {
   leftPaneOpen: boolean
@@ -284,8 +289,9 @@ const getDefaultAssistantDegradedReasonCopy = (
   }
 }
 
-const getPersonaProfileLabel = (profile: PersonaProfileSummary) =>
-  profile.name?.trim() || profile.id
+const getPersonaProfileLabel = (
+  profile: Pick<PersonaProfileSummary, "id" | "name">
+) => profile.name?.trim() || profile.id
 
 export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   leftPaneOpen,
@@ -320,8 +326,14 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
       )
     )
   }, [messageApi, startTutorial, t])
-  const [isEditing, setIsEditing] = React.useState(false)
-  const [editName, setEditName] = React.useState("")
+  const [legacyIsEditing, setIsEditing] = React.useState(false)
+  const [legacyEditName, setEditName] = React.useState("")
+  const ownedRename = useOwnedWorkspaceRename()
+  const ownedArchive = useOwnedWorkspaceArchive()
+  const isEditing = ownedRename.enabled ? !!ownedRename.draft : legacyIsEditing
+  const editName = ownedRename.enabled
+    ? ownedRename.draft?.name ?? ""
+    : legacyEditName
   const [workspaceBrowserOpen, setWorkspaceBrowserOpen] = React.useState(false)
   const [workspaceSwitcherOpen, setWorkspaceSwitcherOpen] = React.useState(false)
   const [workspaceSettingsOpen, setWorkspaceSettingsOpen] = React.useState(false)
@@ -377,24 +389,77 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   }, [])
   const [shareDialogOpen, setShareDialogOpen] = React.useState(false)
   const [importDialogOpen, setImportDialogOpen] = React.useState(false)
-  const [bannerModalOpen, setBannerModalOpen] = React.useState(false)
-  const [bannerTitleDraft, setBannerTitleDraft] = React.useState("")
-  const [bannerSubtitleDraft, setBannerSubtitleDraft] = React.useState("")
-  const [bannerImageDraft, setBannerImageDraft] =
+  const ownedBanner = useOwnedWorkspaceBanner()
+  const bannerOrigin = useWorkspaceStore((s) => s.activeWorkspaceOrigin)
+  const bannerWorkspaceId = useWorkspaceStore((s) => s.workspaceId)
+  const bannerAttempt = useWorkspaceStore((s) => s.ownedWorkspaceAttempt)
+  const legacyBannerLifetime = React.useMemo(
+    () => ({
+      origin: bannerOrigin,
+      workspaceId: bannerWorkspaceId,
+      attempt: bannerAttempt,
+      active: true,
+      editor: 0,
+      upload: 0
+    }),
+    [bannerOrigin, bannerWorkspaceId, bannerAttempt]
+  )
+  const [legacyBannerModalOpen, setBannerModalOpen] = React.useState(false)
+  const [legacyBannerTitleDraft, setBannerTitleDraft] = React.useState("")
+  const [legacyBannerSubtitleDraft, setBannerSubtitleDraft] = React.useState("")
+  const [legacyBannerImageDraft, setBannerImageDraft] =
     React.useState<WorkspaceBannerImage | null>(null)
   const [bannerImageUploading, setBannerImageUploading] = React.useState(false)
-  const [bannerModalError, setBannerModalError] = React.useState<string | null>(
-    null
-  )
-  const [defaultAssistantModalOpen, setDefaultAssistantModalOpen] =
-    React.useState(false)
-  const [defaultAssistantLoading, setDefaultAssistantLoading] =
-    React.useState(false)
-  const [defaultAssistantSaving, setDefaultAssistantSaving] =
-    React.useState(false)
-  const [defaultAssistantError, setDefaultAssistantError] =
+  const [legacyBannerModalError, setBannerModalError] =
     React.useState<string | null>(null)
-  const [defaultAssistantWorkspace, setDefaultAssistantWorkspace] =
+  React.useEffect(() => {
+    legacyBannerLifetime.active = true
+    setBannerModalOpen(false)
+    setBannerImageUploading(false)
+    setBannerModalError(null)
+    return () => {
+      legacyBannerLifetime.active = false
+      legacyBannerLifetime.editor += 1
+      legacyBannerLifetime.upload += 1
+    }
+  }, [legacyBannerLifetime])
+  const legacyBannerCurrent = (editor: number, upload?: number) => {
+    const state = useWorkspaceStore.getState()
+    return (
+      legacyBannerLifetime.active &&
+      legacyBannerLifetime.editor === editor &&
+      (upload === undefined || legacyBannerLifetime.upload === upload) &&
+      state.activeWorkspaceOrigin?.kind !== "server-owned" &&
+      state.activeWorkspaceOrigin === legacyBannerLifetime.origin &&
+      state.workspaceId === legacyBannerLifetime.workspaceId &&
+      state.ownedWorkspaceAttempt === legacyBannerLifetime.attempt
+    )
+  }
+  const bannerModalOpen = ownedBanner.enabled
+    ? ownedBanner.isOpen
+    : legacyBannerModalOpen
+  const bannerTitleDraft = ownedBanner.enabled
+    ? ownedBanner.draft?.title ?? ""
+    : legacyBannerTitleDraft
+  const bannerSubtitleDraft = ownedBanner.enabled
+    ? ownedBanner.draft?.subtitle ?? ""
+    : legacyBannerSubtitleDraft
+  const bannerImageDraft = ownedBanner.enabled ? null : legacyBannerImageDraft
+  const bannerModalError = ownedBanner.enabled
+    ? ownedBanner.error &&
+      t(`playground:workspace.ownedBanner.${ownedBanner.error}`)
+    : legacyBannerModalError
+  const bannerImagesUnavailableId = React.useId()
+  const ownedAssistant = useOwnedWorkspaceAssistant()
+  const [legacyDefaultAssistantModalOpen, setDefaultAssistantModalOpen] =
+    React.useState(false)
+  const [legacyDefaultAssistantLoading, setDefaultAssistantLoading] =
+    React.useState(false)
+  const [legacyDefaultAssistantSaving, setDefaultAssistantSaving] =
+    React.useState(false)
+  const [legacyDefaultAssistantError, setDefaultAssistantError] =
+    React.useState<string | null>(null)
+  const [legacyDefaultAssistantWorkspace, setDefaultAssistantWorkspace] =
     React.useState<WorkspaceApiResponse | null>(null)
 
   React.useEffect(() => {
@@ -404,15 +469,45 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     setAgentTaskModalPrefill(agentTaskPrefill)
     setAgentTaskModalOpen(true)
   }, [agentTaskHandoffOpenSignal, agentTaskPrefill])
-  const [personaProfiles, setPersonaProfiles] = React.useState<
+  const [legacyPersonaProfiles, setPersonaProfiles] = React.useState<
     PersonaProfileSummary[]
   >([])
-  const [defaultAssistantPersonaId, setDefaultAssistantPersonaId] =
+  const [legacyDefaultAssistantPersonaId, setDefaultAssistantPersonaId] =
     React.useState("")
-  const [defaultAssistantMemoryMode, setDefaultAssistantMemoryMode] =
+  const [legacyDefaultAssistantMemoryMode, setDefaultAssistantMemoryMode] =
     React.useState<WorkspacePersonaMemoryMode>("read_only")
-  const [defaultAssistantConfirmReadWrite, setDefaultAssistantConfirmReadWrite] =
-    React.useState(false)
+  const [
+    legacyDefaultAssistantConfirmReadWrite,
+    setDefaultAssistantConfirmReadWrite
+  ] = React.useState(false)
+  const defaultAssistantModalOpen = ownedAssistant.enabled
+    ? ownedAssistant.isOpen
+    : legacyDefaultAssistantModalOpen
+  const defaultAssistantLoading = ownedAssistant.enabled
+    ? ownedAssistant.loading
+    : legacyDefaultAssistantLoading
+  const defaultAssistantSaving = ownedAssistant.enabled
+    ? ownedAssistant.saving
+    : legacyDefaultAssistantSaving
+  const defaultAssistantError = ownedAssistant.enabled
+    ? ownedAssistant.error &&
+      t(`playground:workspace.ownedAssistant.${ownedAssistant.error}`)
+    : legacyDefaultAssistantError
+  const defaultAssistantWorkspace = ownedAssistant.enabled
+    ? ownedAssistant.workspace
+    : legacyDefaultAssistantWorkspace
+  const personaProfiles = ownedAssistant.enabled
+    ? ownedAssistant.personas
+    : legacyPersonaProfiles
+  const defaultAssistantPersonaId = ownedAssistant.enabled
+    ? ownedAssistant.draft?.assistantId ?? ""
+    : legacyDefaultAssistantPersonaId
+  const defaultAssistantMemoryMode = ownedAssistant.enabled
+    ? ownedAssistant.draft?.personaMemoryMode ?? "read_only"
+    : legacyDefaultAssistantMemoryMode
+  const defaultAssistantConfirmReadWrite = ownedAssistant.enabled
+    ? ownedAssistant.confirmed
+    : legacyDefaultAssistantConfirmReadWrite
   const defaultAssistantRequestIdRef = React.useRef(0)
   const lastConnectivityStatusRef = React.useRef<string | null>(null)
   const importFileInputRef = React.useRef<HTMLInputElement | null>(null)
@@ -686,11 +781,19 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   }, [connectionIndicator.telemetryStatus, statusGuardrailsEnabled, workspaceId])
 
   const handleStartEdit = () => {
+    if (ownedRename.enabled) {
+      ownedRename.start()
+      return
+    }
     setEditName(workspaceName || "New Research")
     setIsEditing(true)
   }
 
   const handleSaveEdit = () => {
+    if (ownedRename.enabled) {
+      void ownedRename.save()
+      return
+    }
     if (editName.trim()) {
       setWorkspaceName(editName.trim())
     }
@@ -698,6 +801,10 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   }
 
   const handleCancelEdit = () => {
+    if (ownedRename.enabled) {
+      ownedRename.cancel()
+      return
+    }
     setIsEditing(false)
     setEditName("")
   }
@@ -874,6 +981,10 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   }
 
   const handleOpenDefaultAssistantModal = async () => {
+    if (ownedAssistant.enabled) {
+      await ownedAssistant.open()
+      return
+    }
     if (!workspaceId) return
     const requestId = ++defaultAssistantRequestIdRef.current
 
@@ -906,6 +1017,10 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   }
 
   const handleCloseDefaultAssistantModal = () => {
+    if (ownedAssistant.enabled) {
+      ownedAssistant.cancel()
+      return
+    }
     defaultAssistantRequestIdRef.current += 1
     setDefaultAssistantModalOpen(false)
     setDefaultAssistantLoading(false)
@@ -918,6 +1033,10 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     event: React.ChangeEvent<HTMLSelectElement>
   ) => {
     const nextMode = event.target.value as WorkspacePersonaMemoryMode
+    if (ownedAssistant.enabled) {
+      ownedAssistant.changeMode(nextMode)
+      return
+    }
     setDefaultAssistantMemoryMode(nextMode)
     if (nextMode !== "read_write") {
       setDefaultAssistantConfirmReadWrite(false)
@@ -934,6 +1053,10 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   })
 
   const handleSaveDefaultAssistant = async () => {
+    if (ownedAssistant.enabled) {
+      await ownedAssistant.save()
+      return
+    }
     if (!defaultAssistantWorkspace) return
     const loadedWorkspaceId = defaultAssistantWorkspace.id?.trim()
     if (!loadedWorkspaceId) return
@@ -991,6 +1114,10 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   }
 
   const handleClearDefaultAssistant = async () => {
+    if (ownedAssistant.enabled) {
+      await ownedAssistant.save(true)
+      return
+    }
     if (!defaultAssistantWorkspace) return
     const loadedWorkspaceId = defaultAssistantWorkspace.id?.trim()
     if (!loadedWorkspaceId) return
@@ -1146,6 +1273,14 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   }
 
   const handleOpenCustomizeBannerModal = () => {
+    if (ownedBanner.enabled) {
+      void ownedBanner.open()
+      return
+    }
+    if (!legacyBannerCurrent(legacyBannerLifetime.editor)) return
+    legacyBannerLifetime.editor += 1
+    legacyBannerLifetime.upload += 1
+    setBannerImageUploading(false)
     setBannerTitleDraft(workspaceBanner.title || "")
     setBannerSubtitleDraft(workspaceBanner.subtitle || "")
     setBannerImageDraft(workspaceBanner.image || null)
@@ -1154,12 +1289,24 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   }
 
   const handleCloseCustomizeBannerModal = () => {
+    if (ownedBanner.enabled) {
+      ownedBanner.cancel()
+      return
+    }
+    if (!legacyBannerCurrent(legacyBannerLifetime.editor)) return
+    legacyBannerLifetime.editor += 1
+    legacyBannerLifetime.upload += 1
     setBannerModalOpen(false)
     setBannerModalError(null)
     setBannerImageUploading(false)
   }
 
   const handleSaveCustomizeBanner = () => {
+    if (ownedBanner.enabled) {
+      void ownedBanner.save()
+      return
+    }
+    if (!legacyBannerCurrent(legacyBannerLifetime.editor)) return
     if (workspaceBanner.image && !bannerImageDraft) {
       clearWorkspaceBannerImage()
     }
@@ -1168,6 +1315,8 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
       subtitle: bannerSubtitleDraft,
       image: bannerImageDraft
     })
+    legacyBannerLifetime.editor += 1
+    legacyBannerLifetime.upload += 1
     setBannerModalOpen(false)
     setBannerModalError(null)
     messageApi.success(
@@ -1176,17 +1325,27 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   }
 
   const handleResetCustomizeBanner = () => {
+    if (ownedBanner.enabled && !ownedBanner.canSave) return
+    const editor = legacyBannerLifetime.editor
+    // This closure retains the exact owned modal, not a callback read after confirmation.
+    const resetOwnedBanner = ownedBanner.enabled ? ownedBanner.save : null
     Modal.confirm({
       title: t("playground:workspace.customizeBannerResetTitle", "Reset banner?"),
-      content: t(
-        "playground:workspace.customizeBannerResetMessage",
-        "This clears title, subtitle, and image for this workspace banner."
-      ),
+      content: ownedBanner.enabled
+        ? t("playground:workspace.ownedBanner.resetMessage")
+        : t(
+            "playground:workspace.customizeBannerResetMessage",
+            "This clears title, subtitle, and image for this workspace banner."
+          ),
       okText: t("playground:workspace.customizeBannerReset", "Reset banner"),
       okButtonProps: { danger: true },
       cancelText: t("common:cancel", "Cancel"),
       onOk: () => {
+        if (resetOwnedBanner) return resetOwnedBanner(true)
+        if (!legacyBannerCurrent(editor)) return
         resetWorkspaceBanner()
+        legacyBannerLifetime.editor += 1
+        legacyBannerLifetime.upload += 1
         setBannerTitleDraft("")
         setBannerSubtitleDraft("")
         setBannerImageDraft(null)
@@ -1203,14 +1362,18 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   ) => {
     const file = event.target.files?.[0]
     event.target.value = ""
-    if (!file) return
+    const editor = legacyBannerLifetime.editor
+    if (!file || !legacyBannerModalOpen || !legacyBannerCurrent(editor)) return
+    const upload = ++legacyBannerLifetime.upload
 
     setBannerImageUploading(true)
     setBannerModalError(null)
     try {
       const normalizedImage = await normalizeWorkspaceBannerImage(file)
+      if (!legacyBannerCurrent(editor, upload)) return
       setBannerImageDraft(normalizedImage)
     } catch (error) {
+      if (!legacyBannerCurrent(editor, upload)) return
       if (error instanceof WorkspaceBannerImageNormalizationError) {
         if (error.code === "unsupported_mime_type") {
           setBannerModalError(
@@ -1244,15 +1407,19 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
       }
       return
     } finally {
-      setBannerImageUploading(false)
+      if (legacyBannerCurrent(editor, upload)) setBannerImageUploading(false)
     }
   }
 
   const handlePromptBannerImageUpload = () => {
+    if (!legacyBannerCurrent(legacyBannerLifetime.editor)) return
     bannerFileInputRef.current?.click()
   }
 
   const handleRemoveBannerImage = () => {
+    if (!legacyBannerCurrent(legacyBannerLifetime.editor)) return
+    legacyBannerLifetime.upload += 1
+    setBannerImageUploading(false)
     setBannerImageDraft(null)
     setBannerModalError(null)
   }
@@ -1597,6 +1764,10 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
 
   const handleArchiveCurrentWorkspace = () => {
     if (!workspaceId) return
+    if (ownedArchive.enabled) {
+      ownedArchive.open()
+      return
+    }
 
     Modal.confirm({
       title: t("playground:workspace.archiveTitle", "Archive current workspace?"),
@@ -2024,7 +2195,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
           { type: "divider" as const, key: "divider-1" }
         ]
       : []),
-    ...(archivedWorkspaces.length > 0
+    ...(!ownedArchive.enabled && archivedWorkspaces.length > 0
       ? [
           {
             key: "archived-header",
@@ -2302,6 +2473,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
             "New workspace chats start without a default Persona."
           )
   const defaultAssistantSaveDisabled =
+    (ownedAssistant.enabled && !ownedAssistant.canSave) ||
     defaultAssistantLoading ||
     defaultAssistantSaving ||
     !defaultAssistantWorkspace ||
@@ -2313,9 +2485,80 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   return (
     <header
       data-testid="workspace-header"
+      data-workspace-blocking-recovery={
+        ownedArchive.isOpen && ownedArchive.completionBlocked
+          ? workspaceId
+          : undefined
+      }
       className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b border-border/70 bg-[linear-gradient(90deg,var(--surface)_0%,var(--surface-2)_100%)] px-4 py-3.5"
     >
       {messageContextHolder}
+      <Modal
+        title={t("playground:workspace.archiveTitle", "Archive current workspace?")}
+        open={ownedArchive.isOpen}
+        onCancel={ownedArchive.cancel}
+        closable={!ownedArchive.completionBlocked}
+        maskClosable={!ownedArchive.completionBlocked}
+        keyboard={!ownedArchive.completionBlocked}
+        footer={
+          <div className="flex flex-wrap justify-end gap-2">
+            {!ownedArchive.completionBlocked && (
+              <Button onClick={ownedArchive.cancel}>
+                {t("common:cancel", "Cancel")}
+              </Button>
+            )}
+            {ownedArchive.completionBlocked ? (
+              <Button
+                key="finish"
+                type="primary"
+                onClick={ownedArchive.finish}
+                disabled={ownedArchive.pending}
+              >
+                {t("playground:workspace.ownedArchive.finish")}
+              </Button>
+            ) : ownedArchive.needsReview ? (
+              <Button
+                key="check-status"
+                aria-label={t("playground:workspace.ownedArchive.checkStatus")}
+                onClick={() => void ownedArchive.checkStatus()}
+                loading={ownedArchive.pending}
+              >
+                {t("playground:workspace.ownedArchive.checkStatus")}
+              </Button>
+            ) : (
+              <Button
+                key="archive"
+                aria-label={t("playground:workspace.archive", "Archive")}
+                type="primary"
+                icon={<Archive className="h-4 w-4" />}
+                onClick={() => void ownedArchive.confirm()}
+                disabled={!ownedArchive.canConfirm}
+                loading={ownedArchive.pending}
+              >
+                {t("playground:workspace.archive", "Archive")}
+              </Button>
+            )}
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          <p>{t("playground:workspace.ownedArchive.confirmMessage")}</p>
+          {ownedArchive.remote && (
+            <p role="status" className="break-words">
+              {t("playground:workspace.ownedArchive.reviewed", {
+                name: ownedArchive.remote.name
+              })}
+            </p>
+          )}
+          {ownedArchive.error && (
+            <DsAlert
+              variant="warning"
+              role="alert"
+              title={t(`playground:workspace.ownedArchive.${ownedArchive.error}`)}
+            />
+          )}
+        </div>
+      </Modal>
       {workspaceId ? (
         <BuddyManagementButton target={{ scope_type: "workspace", scope_id: workspaceId }} />
       ) : null}
@@ -2323,20 +2566,24 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
         <span className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-primary/30 bg-primary/10">
           <FlaskConical className="h-4 w-4 text-primary" />
         </span>
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="flex min-w-0 flex-col items-start gap-1">
           {isEditing ? (
-            <div className="flex items-center gap-1">
+            <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1">
               <Input
                 aria-label={t(
                   "playground:workspace.nameInputLabel",
                   "Workspace name"
                 )}
                 value={editName}
-                onChange={(e) => setEditName(e.target.value)}
+                onChange={(e) =>
+                  ownedRename.enabled
+                    ? ownedRename.change(e.target.value)
+                    : setEditName(e.target.value)
+                }
                 onKeyDown={handleKeyDown}
                 autoFocus
                 size="small"
-                className="w-48"
+                className="w-48 max-w-full"
                 placeholder={t(
                   "playground:workspace.namePlaceholder",
                   "Workspace name"
@@ -2345,7 +2592,8 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
               <button
                 type="button"
                 onClick={handleSaveEdit}
-                className="rounded p-1 text-primary hover:bg-primary/10"
+                disabled={ownedRename.enabled && !ownedRename.canSave}
+                className="rounded p-1 text-primary hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-40"
                 aria-label={t("common:save", "Save")}
               >
                 <Check className="h-4 w-4" />
@@ -2374,6 +2622,63 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
                   <Pencil className="h-3.5 w-3.5" />
                 </button>
               </Tooltip>
+            </div>
+          )}
+          {ownedRename.enabled && isEditing && (
+            <div className="max-w-sm space-y-1 break-words text-xs text-text-muted">
+              {ownedRename.pending && (
+                <p role="status">
+                  {t("playground:workspace.ownedRename.pending")}
+                </p>
+              )}
+              {ownedRename.storageUnavailable && (
+                <p role="status">
+                  {t("playground:workspace.ownedRename.storageUnavailable")}
+                </p>
+              )}
+              {ownedRename.error && (
+                <p role="alert">
+                  {t(`playground:workspace.ownedRename.${ownedRename.error}`)}
+                </p>
+              )}
+              {ownedRename.remote ? (
+                <>
+                  <p>
+                    {t("playground:workspace.ownedRename.latestName", {
+                      name: ownedRename.remote.name
+                    })}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={ownedRename.pending}
+                      onClick={ownedRename.useServer}
+                      className="text-primary underline disabled:opacity-40"
+                    >
+                      {t("playground:workspace.ownedRename.useServer")}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={ownedRename.pending}
+                      onClick={ownedRename.keepMine}
+                      className="text-primary underline disabled:opacity-40"
+                    >
+                      {t("playground:workspace.ownedRename.keepMine")}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                ownedRename.error && ownedRename.error !== "accountChanged" && (
+                  <button
+                    type="button"
+                    disabled={ownedRename.pending}
+                    onClick={() => void ownedRename.review()}
+                    className="text-primary underline disabled:opacity-40"
+                  >
+                    {t("playground:workspace.ownedRename.review")}
+                  </button>
+                )
+              )}
             </div>
           )}
         </div>
@@ -2622,6 +2927,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
             disabled={
               defaultAssistantLoading ||
               defaultAssistantSaving ||
+              (ownedAssistant.enabled && !ownedAssistant.canClear) ||
               !defaultAssistantWorkspace ||
               !storedDefaultAssistant
             }
@@ -2680,9 +2986,18 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
             <select
               data-testid="workspace-default-assistant-select"
               value={defaultAssistantPersonaId}
-              disabled={defaultAssistantLoading || defaultAssistantSaving}
+              disabled={
+                defaultAssistantLoading ||
+                defaultAssistantSaving ||
+                (ownedAssistant.enabled &&
+                  (ownedAssistant.catalogError ||
+                    !ownedAssistant.workspace ||
+                    ownedAssistant.error === "accountChanged"))
+              }
               onChange={(event) =>
-                setDefaultAssistantPersonaId(event.target.value)
+                ownedAssistant.enabled
+                  ? ownedAssistant.changePersona(event.target.value)
+                  : setDefaultAssistantPersonaId(event.target.value)
               }
               className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text"
             >
@@ -2743,9 +3058,18 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
                 data-testid="workspace-default-assistant-read-write-confirm"
                 type="checkbox"
                 checked={defaultAssistantConfirmReadWrite}
-                disabled={defaultAssistantSaving}
+                disabled={
+                  defaultAssistantSaving ||
+                  (ownedAssistant.enabled &&
+                    (ownedAssistant.loading ||
+                      !!ownedAssistant.remote ||
+                      !!ownedAssistant.error ||
+                      ownedAssistant.catalogError))
+                }
                 onChange={(event) =>
-                  setDefaultAssistantConfirmReadWrite(event.target.checked)
+                  ownedAssistant.enabled
+                    ? ownedAssistant.confirm(event.target.checked)
+                    : setDefaultAssistantConfirmReadWrite(event.target.checked)
                 }
                 className="mt-0.5"
               />
@@ -2759,9 +3083,86 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
           )}
 
           {defaultAssistantError && (
-            <p className="rounded border border-error/40 bg-error/10 px-3 py-2 text-sm text-error">
+            <p
+              role="alert"
+              className="rounded border border-error/40 bg-error/10 px-3 py-2 text-sm text-error"
+            >
               {defaultAssistantError}
             </p>
+          )}
+          {ownedAssistant.enabled && (
+            <div className="space-y-2 text-sm" aria-live="polite">
+              {ownedAssistant.catalogError && (
+                <p role="alert" className="text-error">
+                  {t("playground:workspace.ownedAssistant.catalogFailed")}
+                </p>
+              )}
+              {ownedAssistant.storageUnavailable && (
+                <p role="status">
+                  {t("playground:workspace.ownedAssistant.storageUnavailable")}
+                </p>
+              )}
+              {ownedAssistant.remote ? (
+                <div
+                  data-testid="owned-assistant-review"
+                  className="space-y-2 break-words border-t border-border pt-3"
+                >
+                  <p className="font-medium">
+                    {t("playground:workspace.ownedAssistant.latestDefault")}
+                  </p>
+                  <p>
+                    {!ownedAssistant.remote.assistantDefaults
+                      ? t(
+                          "playground:workspace.defaultAssistantNone",
+                          "No default assistant"
+                        )
+                      : ownedAssistant.remote.effectiveAssistantDefault?.status === "unavailable"
+                        ? t(
+                            "playground:workspace.defaultAssistantUnavailablePersona",
+                            "Unavailable Persona"
+                          )
+                        : ownedAssistant.personas.find(
+                            (persona) => persona.id === ownedAssistant.remote?.assistantDefaults?.assistantId
+                          )?.name ||
+                          t(
+                            "playground:workspace.defaultAssistantUnavailablePersona",
+                            "Unavailable Persona"
+                          )}
+                  </p>
+                  {ownedAssistant.remote.assistantDefaults && (
+                    <p>
+                      {ownedAssistant.remote.assistantDefaults.personaMemoryMode === "read_write"
+                        ? t("playground:workspace.defaultAssistantReadWrite", "Read and write")
+                        : t("playground:workspace.defaultAssistantReadOnly", "Read only")}
+                    </p>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      disabled={ownedAssistant.pending}
+                      onClick={ownedAssistant.useServer}
+                    >
+                      {t("playground:workspace.ownedAssistant.useServer")}
+                    </Button>
+                    <Button
+                      disabled={ownedAssistant.pending}
+                      onClick={ownedAssistant.keepMine}
+                    >
+                      {t("playground:workspace.ownedAssistant.keepMine")}
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                (ownedAssistant.error || ownedAssistant.catalogError) &&
+                ownedAssistant.error !== "accountChanged" && (
+                  <Button
+                    disabled={ownedAssistant.pending}
+                    onClick={() => void ownedAssistant.review()}
+                  >
+                    {t("playground:workspace.ownedAssistant.review")}
+                  </Button>
+                )
+              )}
+            </div>
           )}
         </div>
       </Modal>
@@ -2822,6 +3223,8 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
         accept="image/jpeg,image/png,image/webp"
         className="hidden"
         data-testid="workspace-banner-upload-input"
+        disabled={ownedBanner.enabled}
+        aria-label={t("playground:workspace.customizeBannerUpload", "Upload image")}
         onChange={(event) => {
           void handleBannerImageFileChange(event)
         }}
@@ -2842,13 +3245,20 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
             danger
             type="default"
             onClick={handleResetCustomizeBanner}
+            disabled={ownedBanner.enabled && !ownedBanner.canSave}
           >
             {t("playground:workspace.customizeBannerReset", "Reset banner")}
           </Button>,
           <Button key="cancel-banner" onClick={handleCloseCustomizeBannerModal}>
             {t("common:cancel", "Cancel")}
           </Button>,
-          <Button key="save-banner" type="primary" onClick={handleSaveCustomizeBanner}>
+          <Button
+            key="save-banner"
+            type="primary"
+            onClick={handleSaveCustomizeBanner}
+            disabled={ownedBanner.enabled && !ownedBanner.canSave}
+            loading={ownedBanner.enabled && ownedBanner.saving}
+          >
             {t("common:save", "Save")}
           </Button>
         ]}
@@ -2860,7 +3270,15 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
               "Banner title"
             )}
             value={bannerTitleDraft}
-            onChange={(event) => setBannerTitleDraft(event.target.value)}
+            onChange={(event) =>
+              ownedBanner.enabled
+                ? ownedBanner.changeTitle(event.target.value)
+                : setBannerTitleDraft(event.target.value)
+            }
+            disabled={
+              ownedBanner.enabled &&
+              (!ownedBanner.draft || ownedBanner.error === "accountChanged")
+            }
             placeholder={t(
               "playground:workspace.customizeBannerTitlePlaceholder",
               "Banner title"
@@ -2874,7 +3292,15 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
               "Banner subtitle"
             )}
             value={bannerSubtitleDraft}
-            onChange={(event) => setBannerSubtitleDraft(event.target.value)}
+            onChange={(event) =>
+              ownedBanner.enabled
+                ? ownedBanner.changeSubtitle(event.target.value)
+                : setBannerSubtitleDraft(event.target.value)
+            }
+            disabled={
+              ownedBanner.enabled &&
+              (!ownedBanner.draft || ownedBanner.error === "accountChanged")
+            }
             placeholder={t(
               "playground:workspace.customizeBannerSubtitlePlaceholder",
               "Banner subtitle"
@@ -2909,23 +3335,93 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
             <Button
               onClick={handlePromptBannerImageUpload}
               loading={bannerImageUploading}
+              disabled={ownedBanner.enabled}
+              aria-describedby={
+                ownedBanner.enabled ? bannerImagesUnavailableId : undefined
+              }
               data-testid="workspace-banner-upload-trigger"
             >
               {t("playground:workspace.customizeBannerUpload", "Upload image")}
             </Button>
-            {bannerImageDraft && (
+            {(ownedBanner.enabled || bannerImageDraft) && (
               <Button
                 danger
                 onClick={handleRemoveBannerImage}
+                disabled={ownedBanner.enabled}
+                aria-describedby={
+                  ownedBanner.enabled ? bannerImagesUnavailableId : undefined
+                }
                 data-testid="workspace-banner-remove-image"
               >
                 {t("playground:workspace.customizeBannerRemoveImage", "Remove image")}
               </Button>
             )}
           </div>
+          {ownedBanner.enabled && (
+            <div className="space-y-3 text-sm">
+              <p id={bannerImagesUnavailableId} className="text-text-muted">
+                {t("playground:workspace.ownedBanner.imagesUnavailable")}
+              </p>
+              {ownedBanner.loading && (
+                <p role="status">{t("playground:workspace.ownedBanner.loading")}</p>
+              )}
+              {ownedBanner.storageUnavailable && (
+                <p role="status">
+                  {t("playground:workspace.ownedBanner.storageUnavailable")}
+                </p>
+              )}
+              {ownedBanner.remote ? (
+                <div data-testid="owned-banner-review" className="space-y-2">
+                  <p className="font-medium">
+                    {t("playground:workspace.ownedBanner.latestText")}
+                  </p>
+                  <dl className="space-y-1 break-words">
+                    <dt className="text-text-muted">
+                      {t("playground:workspace.bannerTitleLabel", "Banner title")}
+                    </dt>
+                    <dd className="whitespace-pre-wrap">
+                      {ownedBanner.remote.banner_title ||
+                        t("playground:workspace.ownedBanner.emptyText")}
+                    </dd>
+                    <dt className="text-text-muted">
+                      {t("playground:workspace.bannerSubtitleLabel", "Banner subtitle")}
+                    </dt>
+                    <dd className="whitespace-pre-wrap">
+                      {ownedBanner.remote.banner_subtitle ||
+                        t("playground:workspace.ownedBanner.emptyText")}
+                    </dd>
+                  </dl>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      disabled={ownedBanner.pending}
+                      onClick={ownedBanner.useServer}
+                    >
+                      {t("playground:workspace.ownedBanner.useServer")}
+                    </Button>
+                    <Button
+                      disabled={ownedBanner.pending}
+                      onClick={ownedBanner.keepMine}
+                    >
+                      {t("playground:workspace.ownedBanner.keepMine")}
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                ownedBanner.error && ownedBanner.error !== "accountChanged" && (
+                  <Button
+                    disabled={ownedBanner.pending}
+                    onClick={() => void ownedBanner.review()}
+                  >
+                    {t("playground:workspace.ownedBanner.review")}
+                  </Button>
+                )
+              )}
+            </div>
+          )}
           {bannerModalError && (
             <p
               data-testid="workspace-banner-modal-error"
+              role="alert"
               className="rounded border border-error/40 bg-error/10 px-3 py-2 text-sm text-error"
             >
               {bannerModalError}

@@ -482,6 +482,8 @@ class ConversationStore:
         try:
             transaction = nullcontext(conn) if conn is not None else self._db.transaction()
             with transaction as transaction_conn:
+                if scope_type == "workspace":
+                    self._db._lock_workspace_for_content_write(transaction_conn, workspace_id)
                 transaction_conn.execute(query, params)
             logger.info(f"Added conversation ID: {conv_id}.")
             return conv_id
@@ -1331,7 +1333,7 @@ class ConversationStore:
         try:
             with self._db.transaction() as conn:
                 record_status = conn.execute(
-                    "SELECT deleted, version FROM conversations WHERE id = ?",
+                    "SELECT deleted, version, scope_type, workspace_id FROM conversations WHERE id = ?",
                     (conversation_id,),
                 ).fetchone()
                 if not record_status:
@@ -1340,6 +1342,24 @@ class ConversationStore:
                         entity="conversations",
                         entity_id=conversation_id,
                     )
+                if record_status["scope_type"] == "workspace":
+                    self._db._lock_workspace_for_content_write(conn, record_status["workspace_id"])
+                if self._db.backend_type == BackendType.POSTGRESQL:
+                    # Parent first, then stabilize identity against Sync scope changes.
+                    locked_status = conn.execute(
+                        "SELECT deleted, version, scope_type, workspace_id FROM conversations "
+                        "WHERE id = ? FOR UPDATE",
+                        (conversation_id,),
+                    ).fetchone()
+                    if locked_status is None or (
+                        locked_status["scope_type"], locked_status["workspace_id"]
+                    ) != (record_status["scope_type"], record_status["workspace_id"]):
+                        raise ConflictError(
+                            f"Conversation ID {conversation_id} disappeared or scope changed during restore.",
+                            entity="conversations",
+                            entity_id=conversation_id,
+                        )
+                    record_status = locked_status
                 if not record_status["deleted"]:
                     logger.info(
                         f"Conversation ID {conversation_id} already active. Restore successful (idempotent)."

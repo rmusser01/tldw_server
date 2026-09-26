@@ -1,6 +1,23 @@
 import { buildTldwApiError, TldwApiError } from "@/services/tldw/api-error"
 import { fetchWithTldwAuth } from "@/services/tldw/auth-fetch"
 import { getTldwServerURL } from "@/services/tldw-server"
+import { createSafeStorage } from "@/utils/safe-storage"
+import { resolveDirectBrowserConfig } from "@/services/tldw/direct-browser-config"
+import { isCookieSessionBrowserTransport } from "@/services/tldw/browser-networking"
+import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
+import { readBrowserCookie } from "@/services/tldw/request-core"
+import {
+  resolveBrowserRequestTransport,
+  resolveRecipeRequestSnapshot
+} from "@/services/tldw/recipe-request-snapshot"
+import {
+  cloneIdSchema,
+  cloneKeySchema,
+  cloneRequestSchema,
+  sharedCloneOperationSchema,
+  type SharedCloneOperation,
+  type SharedCloneRequest
+} from "@/types/shared-workspace-clone"
 import type {
   SharedAllowedAction,
   SharedAllowedActions,
@@ -371,7 +388,9 @@ const parsePreview = (value: unknown): SharedSourcePreview => {
     content_available: boolean(item.content_available),
     preview_mode: string(item.preview_mode, 64),
     unavailable_reason: nullableString(item.unavailable_reason, 128),
-    text_preview: nullableString(item.text_preview, 12_000, { allowEmpty: true }),
+    text_preview: nullableString(item.text_preview, 12_000, {
+      allowEmpty: true
+    }),
     text_total_chars: nullableInteger(item.text_total_chars),
     text_truncated: boolean(item.text_truncated),
     snippets: array(item.snippets, 10, parseSnippet),
@@ -441,6 +460,233 @@ const requestJson = async <T>(
       INVALID_RESPONSE_DETAIL.message,
       502,
       INVALID_RESPONSE_DETAIL
+    )
+  }
+}
+
+// Bound streamed success bodies too: Content-Length may be absent or inaccurate.
+const readCloneResponse = async (response: Response): Promise<unknown> => {
+  const limit = 32 * 1024
+  if (Number(response.headers.get("Content-Length")) > limit) {
+    await response.body?.cancel()
+    throw new Error("Clone response exceeds limit")
+  }
+  const reader = response.body?.getReader()
+  if (!reader) throw new Error("Missing clone response")
+  const decoder = new TextDecoder()
+  let bytes = 0
+  let text = ""
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      bytes += value.byteLength
+      if (bytes > limit) {
+        await reader.cancel()
+        throw new Error("Clone response exceeds limit")
+      }
+      text += decoder.decode(value, { stream: true })
+    }
+    return JSON.parse(text + decoder.decode())
+  } finally {
+    reader.releaseLock()
+  }
+}
+
+const requestClone = async (
+  request: (path: string, init: RequestInit) => Promise<Response>,
+  shareId: number,
+  init: RequestInit,
+  operationId?: string
+): Promise<SharedCloneOperation> => {
+  integer(shareId, { min: 1 })
+  const suffix = operationId ? `/${cloneIdSchema.parse(operationId)}` : ""
+  const response = await request(
+    `/sharing/shared-with-me/${shareId}/clone${suffix}`,
+    init
+  )
+  if (!response.ok) {
+    const error = await buildTldwApiError(response)
+    const header = response.headers.get("Retry-After")
+    if (header) {
+      const milliseconds = /^\d+$/.test(header)
+        ? Number(header) * 1000
+        : Date.parse(header) - Date.now()
+      if (Number.isFinite(milliseconds) && milliseconds >= 0) {
+        const detail = isRecord(error.detail) ? error.detail : {}
+        error.detail = {
+          ...detail,
+          retry_after_ms: Math.max(
+            Math.min(milliseconds, 1_800_000),
+            typeof detail.retry_after_ms === "number"
+              ? detail.retry_after_ms
+              : 0
+          )
+        }
+      }
+    }
+    throw error
+  }
+  try {
+    const operation = sharedCloneOperationSchema.parse(
+      await readCloneResponse(response)
+    )
+    if (
+      operation.share_id !== shareId ||
+      (operationId && operation.operation_id !== operationId)
+    ) {
+      throw new Error("Clone operation correlation mismatch")
+    }
+    return operation
+  } catch {
+    const detail = {
+      code: "shared_clone_response_unconfirmed",
+      message:
+        "Copy status could not be confirmed. Check again to recover this operation.",
+      retryable: true,
+      recovery_action: "retry"
+    } as const
+    if (!operationId) throw new SharedWorkspacePostCommitResponseError(detail)
+    throw new TldwApiError(detail.message, 502, detail)
+  }
+}
+
+const cloneApi = (
+  transport: (path: string, init: RequestInit) => Promise<Response>
+) => ({
+  async clone(
+    shareId: number,
+    request: SharedCloneRequest,
+    idempotencyKey: string,
+    signal?: AbortSignal
+  ): Promise<SharedCloneOperation> {
+    const body = cloneRequestSchema.parse(request)
+    const key = cloneKeySchema.parse(idempotencyKey)
+    return requestClone(transport, shareId, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": key },
+      body: JSON.stringify(body),
+      signal
+    })
+  },
+
+  async cloneStatus(
+    shareId: number,
+    operationId: string,
+    signal?: AbortSignal
+  ): Promise<SharedCloneOperation> {
+    return requestClone(transport, shareId, { signal }, operationId)
+  }
+})
+
+export type SharedWorkspaceCloneApi = ReturnType<typeof cloneApi>
+
+/** Verify one transport; dispatch never resolves mutable credentials. */
+export async function createSharedWorkspaceCloneContext(signal: AbortSignal) {
+  signal.throwIfAborted()
+  const config = Object.freeze({
+    ...(await resolveDirectBrowserConfig(createSafeStorage()))
+  })
+  signal.throwIfAborted()
+  const principalPath = "/api/v1/users/me/profile?sections=identity"
+  const transport = resolveBrowserRequestTransport({
+    config,
+    path: principalPath
+  })
+  const hosted = transport.mode === "hosted"
+  const cookieSession =
+    hosted ||
+    isCookieSessionBrowserTransport({
+      authMode: config.authMode,
+      authSource: config.authSource,
+      transportMode: transport.mode,
+      transportKind: transport.kind,
+      pageOrigin: window.location.origin
+    })
+  const server = new URL(
+    transport.kind === "same-origin"
+      ? window.location.origin
+      : config.serverUrl || ""
+  )
+  if (
+    !/^https?:$/.test(server.protocol) ||
+    server.username ||
+    server.password ||
+    server.search ||
+    server.hash ||
+    (config.orgId != null &&
+      (!Number.isSafeInteger(config.orgId) || config.orgId < 1))
+  )
+    throw new Error("Invalid clone server context")
+  const serverBase = server.toString().replace(/\/+$/, "")
+  // Preserve configured deployment subpaths, which the browser origin resolver drops.
+  const principalUrl =
+    transport.kind === "absolute"
+      ? `${serverBase}${principalPath}`
+      : transport.url
+  const apiBase = principalUrl.slice(
+    0,
+    -"/users/me/profile?sections=identity".length
+  )
+  const { snapshot, authenticationError } = resolveRecipeRequestSnapshot({
+    config,
+    path: principalUrl,
+    method: "POST",
+    absoluteAuthAllowed: true,
+    cookieSessionTransport: cookieSession,
+    runtimeApiKey: cookieSession ? null : getRuntimeSingleUserApiKeyOverride(),
+    csrfToken: readBrowserCookie("csrf_token")
+  })
+  if (authenticationError)
+    throw new TldwApiError(
+      authenticationError.error,
+      authenticationError.status,
+      null
+    )
+  const fetchAtVerification = fetch
+  const request = async (
+    url: string,
+    init: RequestInit,
+    principalId?: string
+  ) => {
+    init.signal?.throwIfAborted()
+    const headers = new Headers(init.headers)
+    for (const [key, value] of Object.entries(snapshot.headers))
+      headers.set(key, value)
+    if (principalId) headers.set("X-TLDW-Expected-User-ID", principalId)
+    const response = await fetchAtVerification(url, {
+      ...init,
+      headers,
+      credentials: cookieSession ? "same-origin" : "omit",
+      redirect: "error",
+      cache: "no-store"
+    })
+    init.signal?.throwIfAborted()
+    if (
+      response.redirected ||
+      (response.status >= 300 && response.status < 400)
+    )
+      throw new Error("Clone redirects are not allowed")
+    return response
+  }
+  const response = await request(principalUrl, { signal })
+  if (!response.ok) throw await buildTldwApiError(response)
+  const profile = record(await readCloneResponse(response))
+  const user = record(profile.user)
+  if (isRecord(profile.section_errors) && profile.section_errors.identity)
+    throw new Error("Missing authenticated principal")
+  const principalId = String(integer(user.id, { min: 1 }))
+  signal.throwIfAborted()
+  const scope = JSON.stringify([
+    server.origin,
+    server.pathname.replace(/\/+$/, ""),
+    principalId,
+    ...(!cookieSession && config.orgId != null ? [String(config.orgId)] : [])
+  ])
+  return {
+    scope,
+    api: cloneApi((path, init) =>
+      request(`${apiBase}${path}`, init, principalId)
     )
   }
 }

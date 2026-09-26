@@ -26,6 +26,7 @@ import {
   isWorkspaceChatSessionKeyForWorkspace
 } from '@/store/workspace-chat-session-key'
 import { applyWorkspaceSourceTransfer } from '../workspace-source-transfer'
+import { assertLegacyWorkspace, initialOwnedWorkspaceState } from './owned-workspace-slice'
 
 // TODO: These helpers need to be exported from workspace.ts
 import {
@@ -194,6 +195,7 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
 
   setWorkspaceName: (name) => {
     set((state) => {
+      if (state.activeWorkspaceOrigin.kind === 'server-owned') return { workspaceName: name }
       const fallbackId = state.workspaceId || ""
       const slug = createSlug(name) || fallbackId.slice(0, 8)
       const nextTag = `workspace:${slug}`
@@ -375,6 +377,11 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
 
   saveCurrentWorkspace: () => {
     const state = get()
+    if (state.activeWorkspaceOrigin.kind === 'server-owned') {
+      // The store action boundary persists the scoped editor draft, not a legacy copy.
+      set({})
+      return
+    }
     // Don't save if workspace has no ID (uninitialized)
     if (!state.workspaceId) return
 
@@ -408,6 +415,7 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
 
   exportWorkspaceBundle: (id) => {
     const state = get()
+    assertLegacyWorkspace(state)
     const targetWorkspaceId = id || state.workspaceId
     if (!targetWorkspaceId) return null
 
@@ -474,7 +482,7 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
 
     const state = get()
     const now = new Date()
-    const currentSnapshot = state.workspaceId
+    const currentSnapshot = state.workspaceId && state.activeWorkspaceOrigin.kind === 'legacy-local'
       ? buildWorkspaceSnapshot(state)
       : null
 
@@ -566,7 +574,7 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
     if (!targetWorkspace && !targetSnapshotFromState) return
 
     const now = new Date()
-    const currentSnapshot = state.workspaceId
+    const currentSnapshot = state.workspaceId && state.activeWorkspaceOrigin.kind === 'legacy-local'
       ? buildWorkspaceSnapshot(state)
       : null
     const targetSnapshot =
@@ -636,7 +644,7 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
       tag,
       createdAt
     })
-    const currentSnapshot = state.workspaceId
+    const currentSnapshot = state.workspaceId && state.activeWorkspaceOrigin.kind === 'legacy-local'
       ? buildWorkspaceSnapshot(state)
       : null
 
@@ -681,6 +689,7 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
 
   duplicateWorkspace: (id) => {
     const state = get()
+    assertLegacyWorkspace(state)
     const sourceWorkspaceId = id || state.workspaceId
     if (!sourceWorkspaceId) return null
 
@@ -746,6 +755,7 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
     request
   ): WorkspaceSourceTransferExecutionResult | null => {
     const state = get()
+    assertLegacyWorkspace(state)
     if (!state.workspaceId) {
       return null
     }
@@ -877,6 +887,7 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
   },
 
   archiveWorkspace: (id) => {
+    assertLegacyWorkspace(get())
     set((state) => {
       const now = new Date()
       const currentSnapshot = state.workspaceId
@@ -1016,6 +1027,7 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
   },
 
   deleteWorkspace: (id) => {
+    assertLegacyWorkspace(get())
     set((state) => {
       const nextSavedWorkspaces = state.savedWorkspaces.filter(
         (workspace) => workspace.id !== id
@@ -1096,6 +1108,7 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
   },
 
   saveWorkspaceChatSession: (workspaceSessionKey, session) => {
+    assertLegacyWorkspace(get())
     const normalizedSessionKey = workspaceSessionKey.trim()
     if (!normalizedSessionKey) return
     set((state) => ({
@@ -1108,6 +1121,7 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
 
   getWorkspaceChatSession: (workspaceSessionKey) => {
     const state = get()
+    if (state.activeWorkspaceOrigin.kind === 'server-owned') return null
     const normalizedSessionKey = workspaceSessionKey.trim()
     if (!normalizedSessionKey) return null
     const session =
@@ -1119,6 +1133,7 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
   },
 
   clearWorkspaceChatSession: (workspaceSessionKey) => {
+    assertLegacyWorkspace(get())
     const normalizedSessionKey = workspaceSessionKey.trim()
     if (!normalizedSessionKey) return
     set((state) => {
@@ -1132,10 +1147,12 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
 
   captureUndoSnapshot: () => {
     const state = get()
+    assertLegacyWorkspace(state)
     return buildWorkspaceUndoSnapshot(state)
   },
 
   restoreUndoSnapshot: (snapshot) => {
+    assertLegacyWorkspace(get())
     const clonedSnapshot = cloneWorkspaceValue(snapshot)
     const restoredSources = reviveSources(clonedSnapshot.sources || [])
     const restoredSourceIdSet = new Set(
@@ -1149,6 +1166,7 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
       restoredSourceFolders.map((folder) => folder.id)
     )
     set({
+      ...initialOwnedWorkspaceState,
       workspaceId: clonedSnapshot.workspaceId,
       workspaceName: clonedSnapshot.workspaceName,
       workspaceTag: clonedSnapshot.workspaceTag,

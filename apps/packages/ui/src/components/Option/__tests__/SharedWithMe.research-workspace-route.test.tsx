@@ -30,13 +30,15 @@ const canonicalResponse = {
 
 const sharingMocks = vi.hoisted(() => ({
   useSharedWithMe: vi.fn<() => SharedWithMeHookState>(),
-  useCloneWorkspace: vi.fn(),
   navigate: vi.fn()
 }))
 
 vi.mock("@/hooks/useSharing", () => ({
-  useSharedWithMe: () => sharingMocks.useSharedWithMe(),
-  useCloneWorkspace: () => sharingMocks.useCloneWorkspace()
+  useSharedWithMe: () => sharingMocks.useSharedWithMe()
+}))
+
+vi.mock("@/hooks/useSharedWorkspaceClones", () => ({
+  useSharedWorkspaceClones: () => ({ rows: [], scope: "scope", status: "ready", begin: vi.fn(), refresh: vi.fn() })
 }))
 
 vi.mock("react-router-dom", () => ({
@@ -51,11 +53,6 @@ describe("SharedWithMe Research Workspace route", () => {
       isLoading: false,
       error: null
     })
-    sharingMocks.useCloneWorkspace.mockReturnValue({
-      isPending: false,
-      variables: null,
-      mutate: vi.fn()
-    })
   })
 
   it("opens shared workspaces through client-side Research Workspace navigation", () => {
@@ -65,4 +62,17 @@ describe("SharedWithMe Research Workspace route", () => {
 
     expect(sharingMocks.navigate).toHaveBeenCalledWith("/research-workspace?shared=7")
   })
+
+  it("has one component owned by the canonical route", () => {
+    const here = dirname(fileURLToPath(import.meta.url))
+    expect(existsSync(resolve(here, "../SharedWithMe/index.tsx"))).toBe(false)
+    expect(readFileSync(resolve(here, "../../../routes/option-shared-with-me.tsx"), "utf8"))
+      .toContain('from "@/components/Option/SharedWithMe"')
+    expect(readFileSync(resolve(here, "../../../../scripts/design-system-product-state-baseline.json"), "utf8"))
+      .not.toContain("src/components/Option/SharedWithMe/index.tsx")
+  })
 })
+import "./shared-with-me-i18n"
+import { existsSync, readFileSync } from "node:fs"
+import { dirname, resolve } from "node:path"
+import { fileURLToPath } from "node:url"

@@ -65,9 +65,12 @@ vi.mock("react-i18next", () => ({
 }))
 
 vi.mock("@/store/workspace", () => ({
-  useWorkspaceStore: (
+  useWorkspaceStore: Object.assign((
     selector: (state: typeof workspaceStoreState) => unknown
-  ) => selector(workspaceStoreState)
+  ) => selector(workspaceStoreState), {
+    getState: () => workspaceStoreState,
+    subscribe: () => () => {}
+  })
 }))
 
 vi.mock("@/services/background-proxy", () => ({

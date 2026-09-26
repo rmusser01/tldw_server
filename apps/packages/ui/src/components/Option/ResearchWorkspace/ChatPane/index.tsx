@@ -1190,6 +1190,7 @@ const SimpleChatInput: React.FC<{
   sendBlockedAriaLabel?: string | null
   placeholder?: string
   seededValue?: string | null
+  draftValue?: string
   onSeedConsumed?: () => void
   onDraftChange?: (value: string) => void
   slashCommands?: Array<{ name: string; description: string }>
@@ -1206,16 +1207,21 @@ const SimpleChatInput: React.FC<{
   sendBlockedAriaLabel,
   placeholder,
   seededValue,
+  draftValue,
   onSeedConsumed,
   onDraftChange,
   slashCommands = []
 }) => {
   const { t } = useTranslation(["playground", "common"])
-  const [value, setValue] = React.useState("")
+  const [localValue, setValue] = React.useState("")
+  const value = draftValue ?? localValue
   const [showSlashMenu, setShowSlashMenu] = React.useState(false)
   const [slashMenuIndex, setSlashMenuIndex] = React.useState(0)
   const inputRef = React.useRef<InputRef>(null)
   const valueRef = React.useRef("")
+  const submissionInFlightRef = React.useRef(false)
+  const [submitting, setSubmitting] = React.useState(false)
+  valueRef.current = value
   const updateValue = React.useCallback(
     (nextValue: string) => {
       valueRef.current = nextValue
@@ -1267,6 +1273,7 @@ const SimpleChatInput: React.FC<{
     const trimmed = submittedValue.trim()
     if (
       !trimmed ||
+      submissionInFlightRef.current ||
       isLoading ||
       isPreparingContext ||
       isChatUnavailable ||
@@ -1274,18 +1281,28 @@ const SimpleChatInput: React.FC<{
     ) {
       return
     }
-    updateValue("")
+    submissionInFlightRef.current = true
+    setSubmitting(true)
+    const isOwnedDraft = draftValue !== undefined
+    if (!isOwnedDraft) updateValue("")
     setShowSlashMenu(false)
     try {
       const result = await onSubmit(trimmed)
-      if (!shouldClearSubmittedDraft(result) && valueRef.current === "") {
+      if (isOwnedDraft) {
+        if (shouldClearSubmittedDraft(result) && valueRef.current === submittedValue) {
+          updateValue("")
+        }
+      } else if (!shouldClearSubmittedDraft(result) && valueRef.current === "") {
         updateValue(submittedValue)
       }
     } catch (error) {
-      if (valueRef.current === "") {
+      if (!isOwnedDraft && valueRef.current === "") {
         updateValue(submittedValue)
       }
       throw error
+    } finally {
+      submissionInFlightRef.current = false
+      setSubmitting(false)
     }
   }
 
@@ -1413,10 +1430,12 @@ const SimpleChatInput: React.FC<{
             type="submit"
             disabled={
               !value.trim() ||
+              submitting ||
               isPreparingContext ||
               isChatUnavailable ||
               isSendBlocked
             }
+            aria-busy={submitting}
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-white transition hover:bg-primaryStrong disabled:cursor-not-allowed disabled:opacity-50"
             aria-label={
               isChatUnavailable
@@ -1433,7 +1452,7 @@ const SimpleChatInput: React.FC<{
                 : t("common:send", "Send")
             }
           >
-            {isPreparingContext ? (
+            {submitting || isPreparingContext ? (
               <Loader2 className="h-5 w-5 animate-spin" />
             ) : (
               <Send className="h-5 w-5" />
@@ -1498,7 +1517,57 @@ interface ChatPaneProps {
   onStartWorkspaceTask?: (prefill: WorkspaceAgentTaskPrefill) => void
 }
 
-export const ChatPane: React.FC<ChatPaneProps> = ({
+const chatPaneScopeKey = (
+  state: Pick<
+    ReturnType<typeof useWorkspaceStore.getState>,
+    "activeWorkspaceOrigin" | "workspaceId" | "workspaceChatReferenceId"
+  >
+): string => {
+  const origin = state.activeWorkspaceOrigin
+  if (origin?.kind !== "server-owned") return "legacy-local"
+  return JSON.stringify([
+    origin.scope.serverBase,
+    origin.scope.principalId,
+    origin.scope.organizationId,
+    state.workspaceId,
+    state.workspaceChatReferenceId
+  ])
+}
+
+const clearChatPaneHistory = () => {
+  const chat = useStoreMessageOption.getState()
+  chat.setMessages([])
+  chat.setHistory([])
+  chat.setHistoryId(null, { preserveServerChatId: true })
+  chat.setServerChatId(null)
+  chat.setStreaming(false)
+  chat.setIsProcessing(false)
+}
+
+export const ChatPane: React.FC<ChatPaneProps> = (props) => {
+  const scopeKey = useWorkspaceStore(chatPaneScopeKey)
+  const [preparedScopeKey, setPreparedScopeKey] = React.useState<string | null>(
+    scopeKey === "legacy-local" ? scopeKey : null
+  )
+
+  React.useLayoutEffect(() => {
+    if (preparedScopeKey === scopeKey) return
+    // The message hook uses a global store. Clear it before mounting the next
+    // scope's hook, so its initial render/effects cannot consume old history.
+    clearChatPaneHistory()
+    setPreparedScopeKey(scopeKey)
+  }, [preparedScopeKey, scopeKey])
+
+  React.useLayoutEffect(() => {
+    if (scopeKey === "legacy-local") return
+    return clearChatPaneHistory
+  }, [scopeKey])
+
+  if (preparedScopeKey !== scopeKey) return null
+  return <ChatPaneContent key={scopeKey} {...props} />
+}
+
+const ChatPaneContent: React.FC<ChatPaneProps> = ({
   provenanceEnabled = true,
   statusGuardrailsEnabled = true,
   contentWidthMode = "comfortable",
@@ -1536,6 +1605,27 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const focusSourceByMediaId = useWorkspaceStore((s) => s.focusSourceByMediaId)
   const captureToCurrentNote = useWorkspaceStore((s) => s.captureToCurrentNote)
   const workspaceId = useWorkspaceStore((s) => s.workspaceId)
+  const activeWorkspaceOrigin = useWorkspaceStore((s) => s.activeWorkspaceOrigin)
+  const isOwnedWorkspace = activeWorkspaceOrigin?.kind === "server-owned"
+  const ownedWorkspaceComposer = useWorkspaceStore((s) => s.ownedWorkspaceComposer)
+  const setOwnedWorkspaceComposer = useWorkspaceStore(
+    (s) => s.setOwnedWorkspaceComposer
+  )
+  const scopeKey = useWorkspaceStore(chatPaneScopeKey)
+  const mountedRef = React.useRef(false)
+  React.useLayoutEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
+  const isCurrentComposerScope = React.useCallback(
+    () =>
+      mountedRef.current &&
+      (!isOwnedWorkspace ||
+        chatPaneScopeKey(useWorkspaceStore.getState()) === scopeKey),
+    [isOwnedWorkspace, scopeKey]
+  )
   const workspaceChatReferenceId = useWorkspaceStore(
     (s) => s.workspaceChatReferenceId
   )
@@ -1623,7 +1713,18 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     React.useState<ChatResponseLength>("standard")
   const [dropZoneActive, setDropZoneActive] = React.useState(false)
   const [seededPrompt, setSeededPrompt] = React.useState<string | null>(null)
-  const [composerDraft, setComposerDraft] = React.useState("")
+  const [localComposerDraft, setComposerDraft] = React.useState("")
+  const composerDraft = isOwnedWorkspace
+    ? ownedWorkspaceComposer
+    : localComposerDraft
+  const handleDraftChange = React.useCallback(
+    (value: string) => {
+      if (!isCurrentComposerScope()) return
+      if (isOwnedWorkspace) setOwnedWorkspaceComposer(value)
+      else setComposerDraft(value)
+    },
+    [isCurrentComposerScope, isOwnedWorkspace, setOwnedWorkspaceComposer]
+  )
   const [highlightedChatMessageId, setHighlightedChatMessageId] = React.useState<
     string | null
   >(null)
@@ -2129,6 +2230,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   ])
 
   React.useEffect(() => {
+    if (isOwnedWorkspace) return
     if (!workspaceSessionId) return
     if (workspaceSessionRef.current !== workspaceSessionId) return
 
@@ -2139,6 +2241,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       serverChatId
     })
   }, [
+    isOwnedWorkspace,
     workspaceSessionId,
     messages,
     history,
@@ -2148,6 +2251,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   ])
 
   React.useEffect(() => {
+    if (isOwnedWorkspace) return
     if (!workspaceSessionId) return
 
     const previousWorkspaceSessionId = workspaceSessionRef.current
@@ -2180,6 +2284,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     setSubmitError(null)
     workspaceSessionRef.current = workspaceSessionId
   }, [
+    isOwnedWorkspace,
     workspaceSessionId,
     getWorkspaceChatSession,
     history,
@@ -2252,6 +2357,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             }
           })
         )
+        if (!isCurrentComposerScope()) return messageWithResponsePreset
 
         const resolvedSourceContexts: Array<{
           source: WorkspaceSource
@@ -2319,6 +2425,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           `${t("playground:chat.fullSourceContextQuestionLabel", "User question")}: ${message}`
         ].join("\n")
       } catch {
+        if (!isCurrentComposerScope()) return messageWithResponsePreset
         messageApi.warning(
           t(
             "playground:chat.fullSourceContextFailed",
@@ -2327,10 +2434,16 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         )
         return messageWithResponsePreset
       } finally {
-        setPreparingSourceContext(false)
+        if (isCurrentComposerScope()) setPreparingSourceContext(false)
       }
     },
-    [includeFullSourceContents, messageApi, queryableSelectedSources, t]
+    [
+      includeFullSourceContents,
+      isCurrentComposerScope,
+      messageApi,
+      queryableSelectedSources,
+      t
+    ]
   )
 
   const buildResponsePresetInstruction = React.useCallback(() => {
@@ -2346,6 +2459,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   }, [responseLength, responseStyle])
 
   const handleSubmit = async (message: string): Promise<boolean> => {
+    if (!isCurrentComposerScope()) return false
     if (preparingSourceContext) return false
     if (
       typeof selectedModel !== "string" ||
@@ -2376,6 +2490,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       }
     }
 
+    if (!isCurrentComposerScope()) return false
     if (statusGuardrailsEnabled && actionChatCapability?.mode === "block") {
       const capabilityMessage = getCapabilityCopy(actionChatCapability, "Chat")
       if (capabilityMessage) {
@@ -2427,7 +2542,9 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         message,
         responsePresetInstruction
       )
+      if (!isCurrentComposerScope()) return false
       const submitResult = await onSubmit({ message: preparedMessage, image: "" })
+      if (!isCurrentComposerScope()) return false
       if (
         submitResult &&
         typeof submitResult === "object" &&
@@ -2447,6 +2564,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       }
       return true
     } catch {
+      if (!isCurrentComposerScope()) return false
       setSubmitError(
         t(
           "playground:chat.connectionError",
@@ -3796,7 +3914,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             }
             seededValue={seededPrompt}
             onSeedConsumed={() => setSeededPrompt(null)}
-            onDraftChange={setComposerDraft}
+            draftValue={isOwnedWorkspace ? ownedWorkspaceComposer : undefined}
+            onDraftChange={handleDraftChange}
             slashCommands={slashCommands}
             placeholder={
               hasQueryableSelectedSources

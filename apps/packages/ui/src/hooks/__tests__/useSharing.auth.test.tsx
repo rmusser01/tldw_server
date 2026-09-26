@@ -15,7 +15,6 @@ vi.mock("@/services/tldw-server", () => ({
 }))
 
 import {
-  useCloneWorkspace,
   usePrototypePrivateLinkExchange,
   useSharedWithMe
 } from "@/hooks/useSharing"
@@ -47,7 +46,7 @@ describe("useSharing auth wiring", () => {
       })
     )
 
-    const { result } = renderHook(() => useSharedWithMe(), {
+    const { result } = renderHook(() => useSharedWithMe("server:one|user:42"), {
       wrapper: buildWrapper()
     })
 
@@ -56,42 +55,27 @@ describe("useSharing auth wiring", () => {
     })
 
     expect(fetchWithTldwAuthMock).toHaveBeenCalledWith(
-      "http://127.0.0.1:8000/api/v1/sharing/shared-with-me"
+      "http://127.0.0.1:8000/api/v1/sharing/shared-with-me",
+      { signal: expect.any(AbortSignal) }
     )
   })
 
-  it("clones shared workspaces through the authenticated tldw fetch helper", async () => {
-    fetchWithTldwAuthMock.mockResolvedValue(
-      new Response(
-        JSON.stringify({ job_id: "job-1", status: "queued", message: "ok" }),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json" }
-        }
-      )
-    )
+  it("does not fetch recipient data without a verified scope", () => {
+    renderHook(() => useSharedWithMe(null), { wrapper: buildWrapper() })
+    expect(fetchWithTldwAuthMock).not.toHaveBeenCalled()
+  })
 
-    const { result } = renderHook(() => useCloneWorkspace(), {
-      wrapper: buildWrapper()
+  it("does not reuse cached recipient data across scopes", async () => {
+    fetchWithTldwAuthMock.mockImplementation(async () => new Response(JSON.stringify({ items: [{ workspace_name: "Private" }], total: 1 })))
+    const { result, rerender } = renderHook(({ scope }: { scope: string | null }) => useSharedWithMe(scope), {
+      wrapper: buildWrapper(), initialProps: { scope: "server:one|user:42" as string | null }
     })
-
-    await act(async () => {
-      await result.current.mutateAsync({
-        shareId: 9,
-        new_name: "My Clone"
-      })
-    })
-
-    expect(fetchWithTldwAuthMock).toHaveBeenCalledWith(
-      "http://127.0.0.1:8000/api/v1/sharing/shared-with-me/9/clone",
-      expect.objectContaining({
-        method: "POST",
-        headers: expect.objectContaining({
-          "Content-Type": "application/json"
-        }),
-        body: JSON.stringify({ new_name: "My Clone" })
-      })
-    )
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    rerender({ scope: null })
+    expect(result.current.data).toBeUndefined()
+    fetchWithTldwAuthMock.mockImplementation(() => new Promise(() => undefined))
+    rerender({ scope: "server:one|user:99" })
+    expect(result.current.data).toBeUndefined()
   })
 
   it("exchanges a prototype share token for a collaborator session through the authenticated tldw fetch helper", async () => {

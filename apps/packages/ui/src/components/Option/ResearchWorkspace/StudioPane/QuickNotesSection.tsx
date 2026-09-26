@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect } from "react"
+import React, { useState, useCallback, useRef, useEffect, useMemo } from "react"
 import { useTranslation } from "react-i18next"
 import { Input, Button, Modal, AutoComplete, message, Tag, Empty, Spin } from "antd"
 import type { InputRef } from "antd"
@@ -14,7 +14,8 @@ import {
   ChevronUp,
   Eye,
   PencilLine,
-  Download
+  Download,
+  RefreshCw
 } from "lucide-react"
 import { useWorkspaceStore } from "@/store/workspace"
 import { bgRequest } from "@/services/background-proxy"
@@ -27,6 +28,7 @@ import {
   undoWorkspaceAction
 } from "../undo-manager"
 import { renderWorkspaceMessageActionContent } from "../workspace-message-content"
+import { ownedNoteForEditor, useOwnedQuickNotes } from "./hooks/useOwnedQuickNotes"
 
 const { TextArea } = Input
 
@@ -271,12 +273,31 @@ interface QuickNotesSectionProps {
   onCollapse?: () => void
 }
 
+const editorMounts = new WeakMap<object, number>()
+let nextEditorMount = 0
+
 /**
  * QuickNotesSection - Enhanced notes editor with load/save functionality
  */
-export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse }) => {
+export const QuickNotesSection: React.FC<QuickNotesSectionProps> = (props) => {
+  const origin = useWorkspaceStore((s) => s.activeWorkspaceOrigin)
+  const workspaceId = useWorkspaceStore((s) => s.workspaceId)
+  if (origin && !editorMounts.has(origin)) {
+    editorMounts.set(origin, ++nextEditorMount)
+  }
+  const key = JSON.stringify([
+    origin?.kind === "server-owned" ? origin.scope : "legacy",
+    workspaceId,
+    origin ? editorMounts.get(origin) : null
+  ])
+  return <QuickNotesEditor key={key} {...props} />
+}
+
+const QuickNotesEditor: React.FC<QuickNotesSectionProps> = ({ onCollapse }) => {
   const { t } = useTranslation(["playground", "common"])
   const [messageApi, contextHolder] = message.useMessage()
+  const owned = useOwnedQuickNotes()
+  const isEditorCurrent = owned.isCurrent
 
   // Store state
   const currentNote = useWorkspaceStore((s) => s.currentNote)
@@ -299,15 +320,23 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
   const [isLoadModalOpen, setIsLoadModalOpen] = useState(false)
   const [isSearching, setIsSearching] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
-  const [notesList, setNotesList] = useState<NoteListItem[]>([])
-  const [workspaceNotes, setWorkspaceNotes] = useState<NoteListItem[]>([])
+  const [legacyNotesList, setNotesList] = useState<NoteListItem[]>([])
+  const [legacyWorkspaceNotes, setWorkspaceNotes] = useState<NoteListItem[]>([])
   const [isLoadingWorkspaceNotes, setIsLoadingWorkspaceNotes] = useState(false)
   const [editorMode, setEditorMode] = useState<"edit" | "preview">("edit")
   const [keywordsInput, setKeywordsInput] = useState("")
-  const [keywordCatalog, setKeywordCatalog] = useState<string[]>([])
+  const [legacyKeywordCatalog, setKeywordCatalog] = useState<string[]>([])
   const [keywordSuggestions, setKeywordSuggestions] = useState<string[]>([])
   const titleInputRef = useRef<InputRef | null>(null)
   const contentInputRef = useRef<TextAreaRef | null>(null)
+  const canonicalNotes = useMemo(() => (owned.bundle?.notes || []).map(ownedNoteForEditor), [owned.bundle])
+  const workspaceNotes = owned.enabled ? canonicalNotes : legacyWorkspaceNotes
+  const notesList = owned.enabled
+    ? canonicalNotes.filter((note) => [note.title, note.content, ...note.keywords].join(" ").toLowerCase().includes(searchQuery.trim().toLowerCase()))
+    : legacyNotesList
+  const keywordCatalog = useMemo(() => owned.enabled
+    ? normalizeKeywords(canonicalNotes.flatMap((note) => note.keywords))
+    : legacyKeywordCatalog, [owned.enabled, canonicalNotes, legacyKeywordCatalog])
 
   const clearSavedIndicatorTimer = useCallback(() => {
     if (savedIndicatorTimerRef.current) {
@@ -355,12 +384,12 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
       }
 
       const ranked = rankKeywordSuggestions(fragment, keywordCatalog)
-      const filtered = workspaceTag.trim()
+      const filtered = !owned.enabled && workspaceTag.trim()
         ? ranked.filter((keyword) => !isKeywordMatch(keyword, workspaceTag))
         : ranked
       setKeywordSuggestions(filtered.slice(0, 8))
     },
-    [keywordCatalog, workspaceTag]
+    [keywordCatalog, workspaceTag, owned.enabled]
   )
 
   // Handle keywords input change
@@ -388,12 +417,14 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
 
   // Track if keywords were just loaded from a note (to avoid sync loops)
   const lastLoadedNoteId = useRef<number | undefined>(undefined)
+  const lastEditorSession = useRef<number | undefined>(undefined)
 
   // Sync keywords input when note is loaded or cleared
   useEffect(() => {
     // Only sync when the note ID changes (load or clear)
-    if (currentNote.id !== lastLoadedNoteId.current) {
+    if (currentNote.id !== lastLoadedNoteId.current || (owned.enabled && owned.editorSession !== lastEditorSession.current)) {
       lastLoadedNoteId.current = currentNote.id
+      lastEditorSession.current = owned.editorSession
       if (currentNote.keywords.length > 0) {
         setKeywordsInput(currentNote.keywords.join(", "))
       } else {
@@ -402,7 +433,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
       setKeywordSuggestions([])
       hideSavedIndicator()
     }
-  }, [currentNote.id, currentNote.keywords, hideSavedIndicator])
+  }, [currentNote.id, currentNote.keywords, hideSavedIndicator, owned.enabled, owned.editorSession])
 
   useEffect(() => {
     if (!noteFocusTarget) return
@@ -442,6 +473,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
 
   // Search/list notes
   const searchNotes = useCallback(async (query?: string) => {
+    if (owned.enabled || !isEditorCurrent()) return
     setIsSearching(true)
     try {
       const normalizedQuery = query?.trim() || ""
@@ -453,6 +485,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         path: fallbackPath,
         method: "GET"
       })
+      if (!isEditorCurrent()) return
       const fallbackNotes = pickNotesArray(fallbackResponse)
 
       let mergedNotes = fallbackNotes
@@ -466,6 +499,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
             }),
             method: "GET"
           })
+          if (!isEditorCurrent()) return
           const workspaceMatches = pickNotesArray(workspaceResponse)
           mergedNotes = mergeUniqueNotes(workspaceMatches, fallbackNotes)
         } catch {
@@ -474,18 +508,21 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
       }
 
       const prioritized = prioritizeWorkspaceNotes(mergedNotes, workspaceTag)
+      if (!isEditorCurrent()) return
       setNotesList(normalizeNotesForDisplay(prioritized, workspaceTag))
     } catch (error) {
+      if (!isEditorCurrent()) return
       messageApi.error(
         t("playground:studio.loadNotesError", "Failed to load notes")
       )
       setNotesList([])
     } finally {
-      setIsSearching(false)
+      if (isEditorCurrent()) setIsSearching(false)
     }
-  }, [messageApi, t, workspaceTag])
+  }, [messageApi, t, workspaceTag, owned.enabled, isEditorCurrent])
 
   const loadWorkspaceNotes = useCallback(async () => {
+    if (owned.enabled || !isEditorCurrent()) return
     if (!workspaceTag.trim()) {
       setWorkspaceNotes([])
       return
@@ -500,15 +537,17 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         }),
         method: "GET"
       })
+      if (!isEditorCurrent()) return
       const notes = pickNotesArray(response)
       const prioritized = prioritizeWorkspaceNotes(notes, workspaceTag)
       setWorkspaceNotes(normalizeNotesForDisplay(prioritized, workspaceTag))
     } catch (error) {
+      if (!isEditorCurrent()) return
       setWorkspaceNotes([])
     } finally {
-      setIsLoadingWorkspaceNotes(false)
+      if (isEditorCurrent()) setIsLoadingWorkspaceNotes(false)
     }
-  }, [workspaceTag])
+  }, [workspaceTag, owned.enabled, isEditorCurrent])
 
   // Debounced search for typing
   const debouncedSearch = useCallback((query: string) => {
@@ -534,6 +573,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
   }, [loadWorkspaceNotes])
 
   useEffect(() => {
+    if (owned.enabled) return
     let isMounted = true
 
     const loadKeywordCatalog = async () => {
@@ -556,7 +596,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
     return () => {
       isMounted = false
     }
-  }, [workspaceTag])
+  }, [workspaceTag, owned.enabled])
 
   // Open load modal and fetch notes
   const handleOpenLoadModal = () => {
@@ -567,12 +607,26 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
 
   // Handle note selection
   const handleSelectNote = useCallback(async (note: NoteListItem) => {
+    if (!isEditorCurrent()) return
+    if (owned.enabled) {
+      if (!owned.isCurrent()) return
+      const canonical = useWorkspaceStore.getState().ownedWorkspaceBundle?.notes.find((row) => row.id === note.id)
+      if (!canonical) {
+        messageApi.error(t("playground:studio.ownedNotes.noteMissing"))
+        return
+      }
+      hideSavedIndicator()
+      loadNote(ownedNoteForEditor(canonical))
+      setIsLoadModalOpen(false)
+      return
+    }
     try {
       // Fetch full note details
       const fullNote = await bgRequest<NoteListItem>({
         path: `/api/v1/notes/${note.id}` as AllowedPath,
         method: "GET"
       })
+      if (!isEditorCurrent()) return
       hideSavedIndicator()
       loadNote(serializeNoteForEditor(fullNote))
       setIsLoadModalOpen(false)
@@ -580,14 +634,15 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         t("playground:studio.noteLoaded", "Note loaded")
       )
     } catch (error) {
+      if (!isEditorCurrent()) return
       messageApi.error(
         t("playground:studio.loadNoteError", "Failed to load note")
       )
     }
-  }, [hideSavedIndicator, loadNote, messageApi, serializeNoteForEditor, t])
+  }, [hideSavedIndicator, loadNote, messageApi, serializeNoteForEditor, t, owned, isEditorCurrent])
 
   const handleReloadLatestAfterConflict = useCallback(async () => {
-    if (!currentNote.id) return
+    if (!currentNote.id || !isEditorCurrent()) return
 
     const localDraft = {
       title: currentNote.title.trim(),
@@ -600,6 +655,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         path: `/api/v1/notes/${currentNote.id}` as AllowedPath,
         method: "GET"
       })
+      if (!isEditorCurrent()) return
 
       const latestForEditor = serializeNoteForEditor(latest)
       const latestKeywords = normalizeKeywords(latestForEditor.keywords || [])
@@ -642,6 +698,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         )
       )
     } catch (error) {
+      if (!isEditorCurrent()) return
       messageApi.error(
         t(
           "playground:studio.reloadLatestFailed",
@@ -649,14 +706,83 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         )
       )
     }
-  }, [currentNote, hideSavedIndicator, messageApi, serializeNoteForEditor, setCurrentNote, t])
+  }, [currentNote, hideSavedIndicator, messageApi, serializeNoteForEditor, setCurrentNote, t, isEditorCurrent])
+
+  const refreshOwnedNotes = async () => {
+    if (!owned.isCurrent()) return
+    setIsSearching(true)
+    try {
+      const notes = await owned.refresh()
+      if (notes && owned.isCurrent()) setIsLoadModalOpen(true)
+    } catch (error) {
+      if (owned.isCurrent()) messageApi.error(error instanceof Error ? error.message : t("playground:studio.ownedNotes.refreshFailed"))
+    } finally {
+      if (owned.isCurrent()) setIsSearching(false)
+    }
+  }
+
+  const showUncertainCreate = () => messageApi.open({
+    type: "error",
+    duration: 0,
+    key: "owned-note-create-uncertain",
+    content: renderWorkspaceMessageActionContent(
+      t("playground:studio.ownedNotes.createUncertain"),
+      <Button size="small" type="link" onClick={() => void refreshOwnedNotes()}>{t("playground:studio.ownedNotes.refresh")}</Button>
+    )
+  })
+
+  const saveOwnedNote = async () => {
+    if (!owned.isCurrent()) return
+    const { currentNote: submitted, ownedNoteEditorSession: session } = useWorkspaceStore.getState()
+    try {
+      const result = await owned.save()
+      if (!owned.isCurrent()) return
+      if (result === "saved") {
+        showSavedIndicatorTemporarily()
+        messageApi.success(t("playground:studio.noteSaved", "Note saved"))
+      } else if (result === "uncertain" && useWorkspaceStore.getState().ownedNoteEditorSession === session) {
+        showUncertainCreate()
+      }
+    } catch (error) {
+      if (!owned.isCurrent() || useWorkspaceStore.getState().ownedNoteEditorSession !== session) return
+      const status = (error as { status?: number })?.status
+      if (submitted.id && status === 409) {
+        messageApi.open({
+          type: "error", duration: 8, key: "owned-note-version-conflict",
+          content: renderWorkspaceMessageActionContent(
+            t("playground:studio.ownedNotes.versionConflict"),
+            <Button size="small" type="link" onClick={async () => {
+              try {
+                if (await owned.recover(submitted.id!, session)) {
+                  hideSavedIndicator()
+                  messageApi.destroy("owned-note-version-conflict")
+                }
+              } catch (recoveryError) {
+                if (owned.isCurrent()) messageApi.error(recoveryError instanceof Error ? recoveryError.message : t("playground:studio.ownedNotes.reloadFailed"))
+              }
+            }}>{t("playground:studio.ownedNotes.reloadLatest")}</Button>
+          )
+        })
+      } else {
+        messageApi.error(status === 412
+          ? t("playground:studio.ownedNotes.accountChanged")
+          : error instanceof Error ? error.message : t("playground:studio.ownedNotes.saveFailed"))
+      }
+    }
+  }
 
   // Save note (create or update)
   const handleSave = async () => {
+    if (!isEditorCurrent()) return
     if (!currentNote.content.trim() && !currentNote.title.trim()) {
       messageApi.warning(
         t("playground:studio.emptyNoteWarning", "Please add some content or a title")
       )
+      return
+    }
+
+    if (owned.enabled) {
+      await saveOwnedNote()
       return
     }
 
@@ -690,6 +816,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
           headers: { "Content-Type": "application/json" },
           body: payload
         })
+        if (!isEditorCurrent()) return
 
         loadNote(
           serializeNoteForEditor({
@@ -710,6 +837,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
           headers: { "Content-Type": "application/json" },
           body: payload
         })
+        if (!isEditorCurrent()) return
 
         loadNote(
           serializeNoteForEditor({
@@ -724,6 +852,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         showSavedIndicatorTemporarily()
       }
     } catch (error: any) {
+      if (!isEditorCurrent()) return
       // Handle version conflict
       if (error?.message?.includes("version") || error?.status === 409) {
         messageApi.open({
@@ -759,12 +888,33 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         )
       }
     } finally {
-      setIsSaving(false)
+      if (isEditorCurrent()) setIsSaving(false)
     }
   }
 
   // Handle clear
   const clearNoteWithUndo = () => {
+    if (!isEditorCurrent()) return
+    if (owned.enabled) {
+      // A confirmation can outlive the draft it was opened for.
+      if (!owned.isCurrent() || useWorkspaceStore.getState().currentNote !== currentNote) return
+      const undo = owned.clear()
+      if (!undo) return
+      hideSavedIndicator()
+      setKeywordsInput("")
+      const key = `owned-note-clear-${owned.editorSession}`
+      messageApi.open({
+        key, type: "warning", duration: WORKSPACE_UNDO_WINDOW_MS / 1000,
+        content: renderWorkspaceMessageActionContent(
+          t("playground:studio.noteCleared", "Note cleared."),
+          <Button size="small" type="link" onClick={() => {
+            if (undo()) messageApi.success(t("playground:studio.noteRestored", "Note restored"))
+            messageApi.destroy(key)
+          }}>{t("common:undo", "Undo")}</Button>
+        )
+      })
+      return
+    }
     const previousNote = {
       ...currentNote,
       keywords: [...currentNote.keywords]
@@ -777,6 +927,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         setKeywordsInput("")
       },
       undo: () => {
+        if (!isEditorCurrent()) return
         setCurrentNote(previousNote)
         setKeywordsInput(previousKeywordsInput)
       }
@@ -798,6 +949,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
           size="small"
           type="link"
           onClick={() => {
+            if (!isEditorCurrent()) return
             if (undoWorkspaceAction(undoHandle.id)) {
               messageApi.success(
                 t("playground:studio.noteRestored", "Note restored")
@@ -925,7 +1077,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         </div>
       </div>
 
-      {workspaceTag && (
+      {(owned.enabled || workspaceTag) && (
         <div className="mb-3 shrink-0 rounded-md border border-border/80 bg-surface2/40 p-2">
           <div className="mb-2 flex items-center justify-between">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-text-muted">
@@ -1117,7 +1269,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
             type="primary"
             icon={<Save className="h-3.5 w-3.5" />}
             onClick={handleSave}
-            loading={isSaving}
+            loading={owned.enabled ? owned.saving : isSaving}
           >
             {currentNote.id
               ? t("playground:studio.updateNote", "Update")
@@ -1139,6 +1291,11 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         footer={null}
         width={500}
       >
+        {owned.enabled && (
+          <Button type="text" size="small" icon={<RefreshCw className="h-3.5 w-3.5" />}
+            aria-label={t("playground:studio.ownedNotes.refresh")} title={t("playground:studio.ownedNotes.refresh")} loading={isSearching}
+            onClick={() => void refreshOwnedNotes()} />
+        )}
         {/* Search input */}
         <Input
           prefix={<Search className="h-4 w-4 text-text-muted" />}
@@ -1183,7 +1340,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
             <div className="space-y-2">
               {notesList.map((note) => {
                 const noteKeywords = extractNoteKeywords(note)
-                const workspaceScoped = isWorkspaceTaggedNote(note, workspaceTag)
+                const workspaceScoped = owned.enabled || isWorkspaceTaggedNote(note, workspaceTag)
                 return (
                   <button
                     key={note.id}

@@ -5,11 +5,61 @@ import {
   getResearchWorkspaceSearchFromLocation,
   getResearchWorkspaceTabFromSearch,
   parseResearchWorkspaceTab,
+  parseResearchWorkspaceRoute,
   readResearchWorkspaceLastMobileTab,
   writeResearchWorkspaceLastMobileTab
 } from "../research-workspace-route-state"
 
 describe("Research Workspace route state", () => {
+  it.each([
+    "",
+    "?tab=studio",
+    "?source_workspace_id=server-1&research_run_id=run-2"
+  ])(
+    "does not reinterpret local/return context as an owned target: %s",
+    (search) => {
+      expect(parseResearchWorkspaceRoute(search)).toEqual({ kind: "local" })
+    }
+  )
+
+  it.each(["server-1", "47fd3ca9-a34b-5e36-be11-ebc15ce38fe6"])(
+    "selects the exact owned target %s without redirecting",
+    (workspaceId) => {
+      expect(
+        parseResearchWorkspaceRoute(`?workspace=${workspaceId}&tab=studio`)
+      ).toEqual({ kind: "owned-valid", workspaceId })
+    }
+  )
+
+  it.each([
+    "?workspace",
+    "?workspace=",
+    "?workspace=a&workspace=a",
+    "?workspace=a&workspace=b",
+    "?workspace=%20a",
+    "?workspace=a%20",
+    "?workspace=..",
+    "?workspace=a%2Fb",
+    "?workspace=a%5Cb",
+    "?workspace=%252e%252e",
+    "?workspace=a%00",
+    `?workspace=${"a".repeat(129)}`,
+    "?workspace=a&shared=1",
+    "?shared=&workspace=a",
+    "?shared=1&workspace="
+  ])("fails closed on malformed or conflicting targets: %s", (search) => {
+    expect(parseResearchWorkspaceRoute(search)).toEqual({
+      kind: "owned-invalid"
+    })
+  })
+
+  it.each([
+    ["?shared=7", { kind: "shared-valid", shareId: 7 }],
+    ["?shared=01", { kind: "shared-invalid" }],
+    ["?shared=7&shared=8", { kind: "shared-invalid" }]
+  ])("preserves the shared selector boundary: %s", (search, expected) => {
+    expect(parseResearchWorkspaceRoute(search as string)).toEqual(expected)
+  })
   it("accepts only canonical Research Workspace tab values", () => {
     expect(parseResearchWorkspaceTab("sources")).toBe("sources")
     expect(parseResearchWorkspaceTab("chat")).toBe("chat")
@@ -34,7 +84,9 @@ describe("Research Workspace route state", () => {
     expect(getResearchWorkspaceTabFromSearch("?tab=sources&tab=studio")).toBe(
       "sources"
     )
-    expect(getResearchWorkspaceTabFromSearch("?tab=banana&tab=studio")).toBeNull()
+    expect(
+      getResearchWorkspaceTabFromSearch("?tab=banana&tab=studio")
+    ).toBeNull()
   })
 
   it("reads query params from normal and hash-router locations", () => {
@@ -67,7 +119,9 @@ describe("Research Workspace route state", () => {
   it("reads only valid persisted mobile tabs", () => {
     const storage = {
       getItem: (key: string) =>
-        key === RESEARCH_WORKSPACE_LAST_MOBILE_TAB_STORAGE_KEY ? "studio" : null,
+        key === RESEARCH_WORKSPACE_LAST_MOBILE_TAB_STORAGE_KEY
+          ? "studio"
+          : null,
       setItem: () => undefined
     }
 

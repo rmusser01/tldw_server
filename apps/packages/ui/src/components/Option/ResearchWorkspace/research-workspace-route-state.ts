@@ -1,3 +1,29 @@
+import { isWorkspaceTargetId } from "@/utils/workspace-target"
+import {
+  parseSharedWorkspaceRoute,
+  type SharedWorkspaceRouteMode
+} from "./shared-workspace-route-state"
+
+export type ResearchWorkspaceRouteMode =
+  | SharedWorkspaceRouteMode
+  | { kind: "owned-invalid" }
+  | { kind: "owned-valid"; workspaceId: string }
+
+export const parseResearchWorkspaceRoute = (
+  search: string
+): ResearchWorkspaceRouteMode => {
+  const params = new URLSearchParams(search)
+  const values = params.getAll("workspace")
+  if (values.length === 0) return parseSharedWorkspaceRoute(search)
+  if (
+    params.has("shared") ||
+    values.length !== 1 ||
+    !isWorkspaceTargetId(values[0])
+  )
+    return { kind: "owned-invalid" }
+  return { kind: "owned-valid", workspaceId: values[0] }
+}
+
 export type ResearchWorkspaceTab = "sources" | "chat" | "studio"
 
 export const RESEARCH_WORKSPACE_DEFAULT_TAB: ResearchWorkspaceTab = "chat"
@@ -121,7 +147,9 @@ export const isResearchWorkspaceDeepResearchReturnForWorkspace = (
   context: ResearchWorkspaceDeepResearchReturnContext | null,
   workspaceId: string | null | undefined
 ): context is ResearchWorkspaceDeepResearchReturnContext => {
-  return Boolean(context && workspaceId && context.sourceWorkspaceId === workspaceId)
+  return Boolean(
+    context && workspaceId && context.sourceWorkspaceId === workspaceId
+  )
 }
 
 export const readResearchWorkspaceLastMobileTab = (

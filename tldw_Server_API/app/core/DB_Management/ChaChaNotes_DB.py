@@ -8500,6 +8500,48 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise CharactersRAGDBError(f"Execute Many failed: {exc}") from exc  # noqa: TRY003
 
     # --- Transaction Context ---
+    @property
+    def in_transaction(self) -> bool:
+        """Whether the current operation already has a transaction.
+
+        Endpoint publication owners use this before acquiring process locks to
+        avoid borrowing an outer transaction with a reversed lock order.
+        PostgreSQL cannot distinguish raw BEGIN from an implicit transaction by
+        driver status. Publication owners must check before their own reads and
+        treat any pre-existing transaction as borrowed, never settle it.
+        """
+        if self.backend_type == BackendType.SQLITE:
+            return bool(self.get_connection().in_transaction)
+        backend = self._get_pinned_backend() or self.backend
+        raw = self._get_thread_connection()
+        driver_status = getattr(getattr(raw, "info", None), "transaction_status", None)
+        return bool(
+            getattr(self._connection_state(), "tx_depth", 0)
+            or backend._tx_depth(raw)
+            or getattr(driver_status, "name", None) not in {None, "IDLE"}
+        )
+
+    def require_managed_transaction_connection(self, conn: Any) -> None:
+        """Require the current operation's ChaCha transaction before publication.
+
+        Native PostgreSQL backend transactions cannot safely use ambient ChaCha
+        metadata methods, which otherwise may commit the caller's transaction.
+        Foreign, idle, or native-only connections reject before any insertion.
+        """
+        current = self.get_connection()
+        if self.backend_type == BackendType.SQLITE:
+            valid = conn is current and current.in_transaction
+        else:
+            valid = (
+                isinstance(conn, BackendConnectionWrapper)
+                and conn._db is self
+                and conn._connection is current._connection
+                and getattr(self._connection_state(), "tx_depth", 0) > 0
+                and conn._backend._tx_depth(conn._connection) == 0
+            )
+        if not valid:
+            raise InputError("Publication requires a connection from the current ChaCha transaction.")
+
     def transaction(self) -> TransactionContextManager | BackendManagedTransaction:
         """Return a context manager for database transactions."""
         if self.backend_type == BackendType.SQLITE:
@@ -27834,84 +27876,66 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         workspace_id: str,
         expected_version: int,
     ) -> bool:
-        """Soft-delete a workspace and cascade soft-delete its scoped conversations.
+        """Atomically tombstone a workspace, delete scoped chats and detach study materials.
 
         Returns:
             True on success.
 
         Raises:
-            ConflictError: If not found or version mismatch.
+            ConflictError: If not active, not found or version mismatch.
+            CharactersRAGDBError: If a cascade helper or backend operation fails.
         """
-        existing = self.get_workspace(workspace_id)
-        if existing is None:
-            raise ConflictError(  # noqa: TRY003
-                f"Workspace '{workspace_id}' not found.",
-                entity="workspaces",
-                entity_id=workspace_id,
-            )
-        if existing["version"] != expected_version:
-            raise ConflictError(  # noqa: TRY003
-                f"Workspace '{workspace_id}' version mismatch.",
-                entity="workspaces",
-                entity_id=workspace_id,
-            )
-
-        conversations = self.execute_query(
-            "SELECT id, version FROM conversations WHERE workspace_id = ? AND scope_type = ? AND deleted = 0",
-            (workspace_id, "workspace"),
-        ).fetchall()
-        for conversation in conversations:
-            conversation_id = conversation["id"] if isinstance(conversation, dict) else conversation[0]
-            conversation_version = conversation["version"] if isinstance(conversation, dict) else conversation[1]
-            failed_message_ids: set[str] = set()
-            while True:
-                batch = self.get_messages_for_conversation(conversation_id, limit=100, offset=0)
-                batch = [m for m in batch if m.get("id") not in failed_message_ids]
-                if not batch:
-                    break
-                deleted_this_batch = 0
-                for message in batch:
-                    message_id = message.get("id")
-                    if not message_id:
-                        continue
-                    try:
-                        self.soft_delete_message(message_id, message.get("version", 1))
-                        deleted_this_batch += 1
-                    except _CHACHA_NONCRITICAL_EXCEPTIONS:
-                        logger.warning(
-                            "Failed to soft-delete message {} during workspace delete {}.",
-                            message_id,
-                            workspace_id,
-                        )
-                        failed_message_ids.add(str(message_id))
-                if deleted_this_batch == 0:
-                    break
-            self.soft_delete_conversation(conversation_id, int(conversation_version))
-
         now = self._get_current_utc_timestamp_iso()
-        with self.transaction() as conn:
-            conn.execute(
-                "UPDATE quizzes "
-                "SET workspace_id = NULL, last_modified = ?, version = version + 1, client_id = ? "
-                "WHERE workspace_id = ? AND deleted = 0",
-                (now, self.client_id, workspace_id),
-            )
-            conn.execute(
-                "UPDATE decks "
-                "SET workspace_id = NULL, last_modified = ?, version = version + 1, client_id = ? "
-                "WHERE workspace_id = ? AND deleted = 0",
-                (now, self.client_id, workspace_id),
-            )
-            cursor = conn.execute(
-                "UPDATE workspaces SET deleted = 1, last_modified = ?, version = ? WHERE id = ? AND version = ?",
-                (now, expected_version + 1, workspace_id, expected_version),
-            )
-            if cursor.rowcount == 0:
-                raise ConflictError(  # noqa: TRY003
-                    f"Workspace '{workspace_id}' concurrent delete detected.",
-                    entity="workspaces",
-                    entity_id=workspace_id,
+        try:
+            with self.transaction() as conn:
+                # Claim the parent before touching children; every helper joins this transaction.
+                cursor = conn.execute(
+                    "UPDATE workspaces SET deleted = TRUE, last_modified = ?, version = ? "
+                    "WHERE id = ? AND version = ? AND deleted = FALSE AND system_operation_state IS NULL",
+                    (now, expected_version + 1, workspace_id, expected_version),
                 )
+                if cursor.rowcount != 1:
+                    raise ConflictError(  # noqa: TRY003
+                        f"Workspace '{workspace_id}' not active or version mismatch.",
+                        entity="workspaces",
+                        entity_id=workspace_id,
+                    )
+
+                conversations = conn.execute(
+                    "SELECT id, version FROM conversations "
+                    "WHERE workspace_id = ? AND scope_type = ? AND deleted = FALSE",
+                    (workspace_id, "workspace"),
+                ).fetchall()
+                for conversation in conversations:
+                    conversation_id = conversation["id"]
+                    while True:
+                        batch = self.get_messages_for_conversation(conversation_id, limit=100, offset=0)
+                        if not batch:
+                            break
+                        for message in batch:
+                            if self.soft_delete_message(message["id"], message["version"], conn=conn) is not True:
+                                raise CharactersRAGDBError(  # noqa: TRY003
+                                    f"Message '{message['id']}' could not be deleted during workspace deletion."
+                                )
+                    if self.soft_delete_conversation(conversation_id, int(conversation["version"])) is not True:
+                        raise CharactersRAGDBError(  # noqa: TRY003
+                            f"Conversation '{conversation_id}' could not be deleted during workspace deletion."
+                        )
+
+                conn.execute(
+                    "UPDATE quizzes "
+                    "SET workspace_id = NULL, last_modified = ?, version = version + 1, client_id = ? "
+                    "WHERE workspace_id = ? AND deleted = 0",
+                    (now, self.client_id, workspace_id),
+                )
+                conn.execute(
+                    "UPDATE decks "
+                    "SET workspace_id = NULL, last_modified = ?, version = version + 1, client_id = ? "
+                    "WHERE workspace_id = ? AND deleted = 0",
+                    (now, self.client_id, workspace_id),
+                )
+        except (sqlite3.Error, BackendDatabaseError) as exc:
+            raise CharactersRAGDBError("Workspace deletion failed.") from exc  # noqa: TRY003
         return True
 
     def hard_delete_workspace(self, workspace_id: str) -> None:
@@ -30364,6 +30388,29 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "reviewed_by_user_id": actor if state == "reviewed" else None,
         }
 
+    def _lock_workspace_for_content_write(
+        self,
+        conn: sqlite3.Connection | BackendConnectionWrapper,
+        workspace_id: str,
+    ) -> None:
+        """Fence child publication against deletion within the caller's write transaction.
+
+        SQLite's transaction manager already holds BEGIN IMMEDIATE. PostgreSQL
+        needs a shared row lock held through commit to block the deletion UPDATE.
+        Internal clone writers may populate staged targets; public visibility and
+        authorization remain the caller's responsibility.
+        """
+        if self.backend_type == BackendType.POSTGRESQL:
+            query = "SELECT id FROM workspaces WHERE id = ? AND deleted = FALSE FOR SHARE"
+        else:
+            query = "SELECT id FROM workspaces WHERE id = ? AND deleted = 0"
+        if conn.execute(query, (workspace_id,)).fetchone() is None:
+            raise ConflictError(  # noqa: TRY003
+                f"Workspace '{workspace_id}' not found or deleted.",
+                entity="workspaces",
+                entity_id=workspace_id,
+            )
+
     def add_workspace_source(self, workspace_id: str, data: dict[str, Any]) -> dict[str, Any]:
         """Add a source to a workspace."""
         source_id = data.get("id")
@@ -30388,7 +30435,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             data.get("source_type", ""),
             data.get("url"),
             data.get("position", 0),
-            1 if data.get("selected", True) else 0,
+            bool(data.get("selected", True)),
             now,
             review_transition["review_state"],
             review_transition["review_state_updated_at"],
@@ -30396,6 +30443,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             review_transition["reviewed_by_user_id"],
         )
         with self.transaction() as conn:
+            self._lock_workspace_for_content_write(conn, workspace_id)
             try:
                 conn.execute(query, params)
             except sqlite3.IntegrityError as exc:
@@ -30709,6 +30757,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         query = f"UPDATE workspace_sources SET {', '.join(set_clauses)} WHERE workspace_id = ? AND id = ? AND version = ?"  # nosec B608
         params.extend([workspace_id, source_id, expected_version])
         with self.transaction() as conn:
+            self._lock_workspace_for_content_write(conn, workspace_id)
             cursor = conn.execute(query, tuple(params))
             if cursor.rowcount == 0:
                 raise ConflictError(  # noqa: TRY003
@@ -30743,6 +30792,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         placeholders = ", ".join("?" for _ in normalized_ids)
         with self.transaction() as conn:
+            self._lock_workspace_for_content_write(conn, workspace_id)
             rows = conn.execute(
                 f"SELECT id FROM workspace_sources WHERE workspace_id = ? AND id IN ({placeholders})",  # nosec B608  # Placeholders are generated "?" tokens; IDs remain bound parameters.
                 (workspace_id, *normalized_ids),
@@ -30787,6 +30837,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def delete_workspace_source(self, workspace_id: str, source_id: str) -> None:
         """Hard-delete a workspace source."""
         with self.transaction() as conn:
+            self._lock_workspace_for_content_write(conn, workspace_id)
             conn.execute(
                 "DELETE FROM workspace_sources WHERE workspace_id = ? AND id = ?",
                 (workspace_id, source_id),
@@ -30799,14 +30850,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         will see a conflict on their next individual update.
         """
         with self.transaction() as conn:
+            self._lock_workspace_for_content_write(conn, workspace_id)
             conn.execute(
-                "UPDATE workspace_sources SET selected = 0, version = version + 1 WHERE workspace_id = ?",
+                "UPDATE workspace_sources SET selected = FALSE, version = version + 1 WHERE workspace_id = ?",
                 (workspace_id,),
             )
             if selected_ids:
                 placeholders = ", ".join("?" for _ in selected_ids)
                 conn.execute(
-                    f"UPDATE workspace_sources SET selected = 1, version = version + 1 WHERE workspace_id = ? AND id IN ({placeholders})",  # nosec B608
+                    f"UPDATE workspace_sources SET selected = TRUE, version = version + 1 WHERE workspace_id = ? AND id IN ({placeholders})",  # nosec B608
                     (workspace_id, *selected_ids),
                 )
 
@@ -30816,6 +30868,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         Bumps the version of every reordered row for conflict detection.
         """
         with self.transaction() as conn:
+            self._lock_workspace_for_content_write(conn, workspace_id)
             for idx, source_id in enumerate(ordered_ids):
                 conn.execute(
                     "UPDATE workspace_sources SET position = ?, version = version + 1 WHERE workspace_id = ? AND id = ?",
@@ -32160,6 +32213,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             schema_version,
         )
         with self.transaction() as conn:
+            self._lock_workspace_for_content_write(conn, workspace_id)
             conn.execute(query, params)
             self._insert_workspace_artifact_version(
                 conn,
@@ -32276,6 +32330,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """Append an export reference without creating a new artifact content version."""
         for _attempt in range(3):
             with self.transaction() as conn:
+                self._lock_workspace_for_content_write(conn, workspace_id)
                 artifact_row = conn.execute(
                     "SELECT artifact_version_id, export_refs_json FROM workspace_artifacts "
                     "WHERE workspace_id = ? AND id = ?",
@@ -32441,6 +32496,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         query = f"UPDATE workspace_artifacts SET {', '.join(set_clauses)} WHERE workspace_id = ? AND id = ? AND version = ?"  # nosec B608
         params.extend([workspace_id, artifact_id, expected_version])
         with self.transaction() as conn:
+            self._lock_workspace_for_content_write(conn, workspace_id)
             cursor = conn.execute(query, tuple(params))
             if cursor.rowcount == 0:
                 raise ConflictError(  # noqa: TRY003
@@ -32472,6 +32528,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def delete_workspace_artifact(self, workspace_id: str, artifact_id: str) -> None:
         """Hard-delete a workspace artifact."""
         with self.transaction() as conn:
+            self._lock_workspace_for_content_write(conn, workspace_id)
             conn.execute(
                 "DELETE FROM workspace_artifact_versions WHERE workspace_id = ? AND artifact_id = ?",
                 (workspace_id, artifact_id),
@@ -32501,6 +32558,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             now,
         )
         with self.transaction() as conn:
+            self._lock_workspace_for_content_write(conn, workspace_id)
             if self.backend_type == BackendType.POSTGRESQL:
                 cursor = conn.execute(query + " RETURNING id", params)
                 inserted = cursor.fetchone()
@@ -32584,6 +32642,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         query = f"UPDATE workspace_notes SET {', '.join(set_clauses)} WHERE workspace_id = ? AND id = ? AND version = ?"  # nosec B608
         params.extend([workspace_id, note_id, expected_version])
         with self.transaction() as conn:
+            self._lock_workspace_for_content_write(conn, workspace_id)
             cursor = conn.execute(query, tuple(params))
             if cursor.rowcount == 0:
                 raise ConflictError(  # noqa: TRY003
@@ -32597,6 +32656,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """Soft-delete a workspace note."""
         now = self._get_current_utc_timestamp_iso()
         with self.transaction() as conn:
+            self._lock_workspace_for_content_write(conn, workspace_id)
             conn.execute(
                 "UPDATE workspace_notes SET deleted = 1, last_modified = ? WHERE workspace_id = ? AND id = ?",
                 (now, workspace_id, note_id),

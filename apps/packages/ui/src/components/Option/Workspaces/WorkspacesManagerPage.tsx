@@ -5,6 +5,16 @@ import { Button } from "@/components/Common/Button"
 import { Alert, Badge } from "@/components/ui/primitives"
 import { useTldwApiClient } from "@/hooks/useTldwApiClient"
 import { buildResearchWorkspaceReturnPath } from "@/routes/route-paths"
+import {
+  createOwnedWorkspaceDirectoryContext,
+  createOwnedWorkspaceLifecycleContext
+} from "@/services/owned-workspace-opening"
+import { COOKIE_SESSION_CONFIG_KEY } from "@/services/tldw/browser-networking"
+import {
+  MANUAL_SESSION_KEY,
+  REFRESH_ROTATION_KEY
+} from "@/services/tldw/single-user-credential"
+import type { OwnedWorkspaceScope } from "@/store/owned-workspace-state"
 import type {
   WorkspaceApiResponse,
   WorkspaceProfile
@@ -23,6 +33,21 @@ import {
 type ProfileFilter = "all" | WorkspaceProfile
 type AttentionFilter = "all" | "needs_attention"
 type DialogProfile = WorkspaceProfile | null
+type Directory = { scope: OwnedWorkspaceScope; request: AbortController }
+const sameScope = (left: OwnedWorkspaceScope, right: OwnedWorkspaceScope) =>
+  left.serverBase === right.serverBase &&
+  left.principalId === right.principalId &&
+  left.organizationId === right.organizationId
+const LIFECYCLE_REVIEW_MESSAGE =
+  "Workspace change could not be confirmed. Refresh and review before trying again."
+
+const isAccountError = (error: unknown): boolean => {
+  if (!error || typeof error !== "object") return false
+  return (
+    ("status" in error && [401, 403, 412].includes(Number(error.status))) ||
+    ("reason" in error && error.reason === "denied")
+  )
+}
 
 const createWorkspaceId = (): string => {
   const cryptoApi = globalThis.crypto
@@ -61,7 +86,9 @@ const mergeWorkspaceItem = (
   const normalized = normalizeWorkspaceManagerItem(workspace)
   const existingIndex = items.findIndex((item) => item.id === workspace.id)
   if (existingIndex === -1) {
-    return options.prependIfMissing ? [normalized, ...items] : [...items, normalized]
+    return options.prependIfMissing
+      ? [normalized, ...items]
+      : [...items, normalized]
   }
   return items.map((item, index) =>
     index === existingIndex
@@ -91,58 +118,215 @@ export const WorkspacesManagerPage = () => {
     React.useState<AttentionFilter>("all")
   const [showArchived, setShowArchived] = React.useState(false)
   const [createProfile, setCreateProfile] = React.useState<DialogProfile>(null)
-  const [editingItem, setEditingItem] = React.useState<WorkspaceManagerItem | null>(
+  const [editingItem, setEditingItem] =
+    React.useState<WorkspaceManagerItem | null>(null)
+  const [selectedItemId, setSelectedItemId] = React.useState<string | null>(
     null
   )
-  const [selectedItemId, setSelectedItemId] = React.useState<string | null>(null)
   const [mutationError, setMutationError] = React.useState<string | null>(null)
   const [mutating, setMutating] = React.useState(false)
+  const [directory, setDirectory] = React.useState<Directory | null>(null)
+  const viewScope = React.useRef<OwnedWorkspaceScope | null>(null)
+  const requestRef = React.useRef<AbortController | null>(null)
+  const mutationPending = React.useRef(false)
+  const lifecyclePending = React.useRef<OwnedWorkspaceScope | null>(null)
+  const reviewRequired = React.useRef<OwnedWorkspaceScope | null>(null)
+  const [needsReview, setNeedsReview] = React.useState(false)
 
-  const loadWorkspaces = React.useCallback(async () => {
+  const stopRequests = React.useCallback(() => {
+    if (lifecyclePending.current)
+      reviewRequired.current = lifecyclePending.current
+    lifecyclePending.current = null
+    requestRef.current?.abort()
+    requestRef.current = null
+    mutationPending.current = false
+  }, [])
+
+  const discardDirectory = React.useCallback(() => {
+    viewScope.current = null
+    setDirectory(null)
+    setItems([])
+    setSelectedItemId(null)
+    setCreateProfile(null)
+    setEditingItem(null)
+    setMutationError(null)
+    setMutating(false)
+    setNeedsReview(false)
+  }, [])
+
+  const clearDirectory = React.useCallback(() => {
+    stopRequests()
+    discardDirectory()
+  }, [discardDirectory, stopRequests])
+
+  const suspendDirectory = React.useCallback(() => {
+    stopRequests()
     setLoading(true)
-    setError(null)
-    setPartialError(null)
-    try {
-      const response = await api.listWorkspaces()
-      const workspaces = Array.isArray(response.items) ? response.items : []
-      const normalizedResults = await Promise.allSettled(
-        workspaces.map(async (workspace) => {
-          const context = await api.getWorkspaceContext(workspace.id)
-          return normalizeWorkspaceManagerItem(workspace, context)
-        })
-      )
-      const normalized = normalizedResults.map((result, index) =>
-        result.status === "fulfilled"
-          ? result.value
-          : normalizeWorkspaceManagerItem(workspaces[index])
-      )
-      if (normalizedResults.some((result) => result.status === "rejected")) {
-        setPartialError("Some Workspace details could not load.")
+    setMutating(false)
+  }, [stopRequests])
+
+  const loadWorkspaces = React.useCallback(
+    async (explicitReview = true) => {
+      suspendDirectory()
+      const request = new AbortController()
+      requestRef.current = request
+      const current = () =>
+        requestRef.current === request && !request.signal.aborted
+      setLoading(true)
+      setError(null)
+      setPartialError(null)
+      try {
+        const context = await createOwnedWorkspaceDirectoryContext(
+          request.signal
+        )
+        if (!current()) return
+        if (viewScope.current && !sameScope(viewScope.current, context.scope))
+          discardDirectory()
+        const response = await context.list()
+        if (!current()) return
+        const workspaces = Array.isArray(response.items) ? response.items : []
+        const normalizedResults = await Promise.allSettled(
+          workspaces.map(async (workspace) => {
+            const details = await context.getContext(workspace.id)
+            return normalizeWorkspaceManagerItem(workspace, details)
+          })
+        )
+        if (!current()) return
+        const accountFailure = normalizedResults.find(
+          (result) =>
+            result.status === "rejected" && isAccountError(result.reason)
+        )
+        if (accountFailure?.status === "rejected") throw accountFailure.reason
+        const normalized = normalizedResults.map((result, index) =>
+          result.status === "fulfilled"
+            ? result.value
+            : normalizeWorkspaceManagerItem(workspaces[index])
+        )
+        if (normalizedResults.some((result) => result.status === "rejected")) {
+          setPartialError("Some Workspace details could not load.")
+        }
+        setItems(normalized)
+        viewScope.current = context.scope
+        setDirectory({ scope: context.scope, request })
+        const previousFailure = reviewRequired.current
+        const stillNeedsReview =
+          !explicitReview &&
+          previousFailure != null &&
+          sameScope(previousFailure, context.scope)
+        if (!stillNeedsReview) reviewRequired.current = null
+        setNeedsReview(stillNeedsReview)
+        setMutationError(stillNeedsReview ? LIFECYCLE_REVIEW_MESSAGE : null)
+        setSelectedItemId((current) =>
+          current && normalized.some((item) => item.id === current)
+            ? current
+            : (normalized[0]?.id ?? null)
+        )
+      } catch (caught) {
+        if (!current()) return
+        if (isAccountError(caught)) discardDirectory()
+        setError(errorText(caught))
+        request.abort()
+      } finally {
+        if (requestRef.current === request) setLoading(false)
       }
-      setItems(normalized)
-      setSelectedItemId((current) =>
-        current && normalized.some((item) => item.id === current)
-          ? current
-          : normalized[0]?.id ?? null
-      )
-    } catch (caught) {
-      setError(errorText(caught))
-      setItems([])
-      setSelectedItemId(null)
-    } finally {
-      setLoading(false)
-    }
-  }, [api])
+    },
+    [discardDirectory, suspendDirectory]
+  )
 
   React.useEffect(() => {
-    void loadWorkspaces()
-  }, [loadWorkspaces])
+    const start = () => void loadWorkspaces(false)
+    const suspend = suspendDirectory
+    const auth = (event: Event) => {
+      if ((event as CustomEvent<{ kind?: string }>).detail?.kind === "logout") {
+        clearDirectory()
+        setError("Workspace access ended.")
+        setLoading(false)
+      } else start()
+    }
+    const visibility = () => {
+      if (document.visibilityState === "hidden") suspend()
+      else start()
+    }
+    const storage = (event: StorageEvent) => {
+      if (
+        event.key === null ||
+        [
+          "tldwConfig",
+          MANUAL_SESSION_KEY,
+          REFRESH_ROTATION_KEY,
+          COOKIE_SESSION_CONFIG_KEY
+        ].includes(event.key)
+      )
+        start()
+    }
+    window.addEventListener("tldw:config-updated", start)
+    window.addEventListener("tldw:auth-principal-changed", auth)
+    window.addEventListener("focus", start)
+    window.addEventListener("pageshow", start)
+    window.addEventListener("pagehide", suspend)
+    window.addEventListener("storage", storage)
+    document.addEventListener("visibilitychange", visibility)
+    start()
+    return () => {
+      stopRequests()
+      window.removeEventListener("tldw:config-updated", start)
+      window.removeEventListener("tldw:auth-principal-changed", auth)
+      window.removeEventListener("focus", start)
+      window.removeEventListener("pageshow", start)
+      window.removeEventListener("pagehide", suspend)
+      window.removeEventListener("storage", storage)
+      document.removeEventListener("visibilitychange", visibility)
+    }
+  }, [clearDirectory, loadWorkspaces, stopRequests, suspendDirectory])
+
+  // Each render's callbacks retain their directory ticket, including child callbacks.
+  const isCurrentDirectory = () =>
+    directory != null &&
+    requestRef.current === directory.request &&
+    !directory.request.signal.aborted
+
+  const guardDirectoryEvent = (event: React.SyntheticEvent) => {
+    if (isCurrentDirectory()) return
+    event.preventDefault()
+    event.stopPropagation()
+  }
+  const viewKey = directory ? JSON.stringify(directory.scope) : "unverified"
+
+  const beginMutation = () => {
+    if (
+      !isCurrentDirectory() ||
+      mutationPending.current ||
+      reviewRequired.current
+    )
+      return false
+    mutationPending.current = true
+    setMutating(true)
+    setMutationError(null)
+    return true
+  }
+
+  const finishMutation = () => {
+    if (!isCurrentDirectory()) return
+    mutationPending.current = false
+    lifecyclePending.current = null
+    setMutating(false)
+  }
+
+  const openCreateDialog = (profile: WorkspaceProfile) => {
+    if (
+      isCurrentDirectory() &&
+      !mutationPending.current &&
+      !reviewRequired.current
+    )
+      setCreateProfile(profile)
+  }
 
   const filteredItems = React.useMemo(() => {
     const query = searchQuery.trim().toLowerCase()
     return items.filter((item) => {
       if (!showArchived && item.archived) return false
-      if (profileFilter !== "all" && item.profile !== profileFilter) return false
+      if (profileFilter !== "all" && item.profile !== profileFilter)
+        return false
       if (!filterMatchesAttention(item.attentionState, attentionFilter)) {
         return false
       }
@@ -157,7 +341,8 @@ export const WorkspacesManagerPage = () => {
   const selectedItem = React.useMemo(() => {
     if (filteredItems.length === 0) return null
     return (
-      filteredItems.find((item) => item.id === selectedItemId) ?? filteredItems[0]
+      filteredItems.find((item) => item.id === selectedItemId) ??
+      filteredItems[0]
     )
   }, [filteredItems, selectedItemId])
 
@@ -165,23 +350,23 @@ export const WorkspacesManagerPage = () => {
     name: string,
     profile: WorkspaceProfile
   ): Promise<void> => {
-    setMutating(true)
-    setMutationError(null)
+    if (!beginMutation()) return
     try {
       const workspace = await api.upsertWorkspace(createWorkspaceId(), {
         name,
         study_materials_policy: "workspace",
         workspace_profile: profile
       })
+      if (!isCurrentDirectory()) return
       setItems((current) =>
         mergeWorkspaceItem(current, workspace, { prependIfMissing: true })
       )
       setSelectedItemId(workspace.id)
       setCreateProfile(null)
     } catch (caught) {
-      setMutationError(errorText(caught))
+      if (isCurrentDirectory()) setMutationError(errorText(caught))
     } finally {
-      setMutating(false)
+      finishMutation()
     }
   }
 
@@ -189,20 +374,20 @@ export const WorkspacesManagerPage = () => {
     item: WorkspaceManagerItem,
     name: string
   ): Promise<void> => {
-    setMutating(true)
-    setMutationError(null)
+    if (!beginMutation()) return
     try {
       const workspace = await api.patchWorkspace(item.id, {
         name,
         version: item.version
       })
+      if (!isCurrentDirectory()) return
       setItems((current) => mergeWorkspaceItem(current, workspace))
       setSelectedItemId(workspace.id)
       setEditingItem(null)
     } catch (caught) {
-      setMutationError(errorText(caught))
+      if (isCurrentDirectory()) setMutationError(errorText(caught))
     } finally {
-      setMutating(false)
+      finishMutation()
     }
   }
 
@@ -210,23 +395,39 @@ export const WorkspacesManagerPage = () => {
     item: WorkspaceManagerItem,
     archived: boolean
   ): Promise<void> => {
-    setMutating(true)
-    setMutationError(null)
+    if (!directory || !beginMutation()) return
     try {
-      const workspace = await api.patchWorkspace(item.id, {
-        archived,
-        version: item.version
-      })
+      const context = await createOwnedWorkspaceLifecycleContext(
+        item.id,
+        directory.scope,
+        directory.request.signal
+      )
+      if (!isCurrentDirectory()) return
+      lifecyclePending.current = directory.scope
+      const workspace = await context.setArchived(archived, item.version)
+      if (!isCurrentDirectory()) return
       setItems((current) => mergeWorkspaceItem(current, workspace))
       setSelectedItemId(workspace.id)
     } catch (caught) {
-      setMutationError(errorText(caught))
+      if (!isCurrentDirectory()) return
+      if (isAccountError(caught)) {
+        clearDirectory()
+        setError("Workspace access changed.")
+        return
+      }
+      // A failed write may have committed. Never replay its version or intent.
+      reviewRequired.current = directory.scope
+      setNeedsReview(true)
+      setMutationError(LIFECYCLE_REVIEW_MESSAGE)
     } finally {
-      setMutating(false)
+      finishMutation()
     }
   }
 
-  const handleServerWorkspaceCreated = (workspace: WorkspaceApiResponse): void => {
+  const handleServerWorkspaceCreated = (
+    workspace: WorkspaceApiResponse
+  ): void => {
+    if (!isCurrentDirectory()) return
     setItems((current) =>
       mergeWorkspaceItem(current, workspace, { prependIfMissing: true })
     )
@@ -247,14 +448,16 @@ export const WorkspacesManagerPage = () => {
             <Button
               variant="secondary"
               icon={<Plus className="h-4 w-4" />}
-              onClick={() => setCreateProfile("research")}
+              disabled={loading || !!error || mutating || needsReview}
+              onClick={() => openCreateDialog("research")}
             >
               New Research Workspace
             </Button>
             <Button
               variant="primary"
               icon={<Plus className="h-4 w-4" />}
-              onClick={() => setCreateProfile("project")}
+              disabled={loading || !!error || mutating || needsReview}
+              onClick={() => openCreateDialog("project")}
             >
               New Project Workspace
             </Button>
@@ -304,7 +507,9 @@ export const WorkspacesManagerPage = () => {
           </Button>
           <Button
             size="sm"
-            variant={attentionFilter === "needs_attention" ? "danger" : "outline"}
+            variant={
+              attentionFilter === "needs_attention" ? "danger" : "outline"
+            }
             onClick={() =>
               setAttentionFilter((current) =>
                 current === "needs_attention" ? "all" : "needs_attention"
@@ -346,116 +551,169 @@ export const WorkspacesManagerPage = () => {
               Reconnect to your tldw server to manage Workspaces.
             </Alert>
           </div>
-        ) : items.length === 0 ? (
-          <>
-            <WorkspaceReconciliationPanel
-              serverWorkspaces={items}
-              onServerWorkspaceCreated={handleServerWorkspaceCreated}
-            />
-            <div className="p-6">
-              <div className="max-w-xl rounded-lg border border-border bg-surface p-5">
-                <h2 className="text-base font-semibold text-text">
-                  No server-backed Workspaces yet
-                </h2>
-                <p className="mt-2 text-sm text-text-muted">
-                  Create a Workspace here when you want a durable server record for
-                  research sources, notes, project files, and future agent sessions.
-                </p>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <Button onClick={() => setCreateProfile("research")}>
-                    Create Research Workspace
-                  </Button>
-                  <Button
-                    variant="primary"
-                    onClick={() => setCreateProfile("project")}
-                  >
-                    Create Project Workspace
-                  </Button>
+        ) : null}
+        <div
+          key={viewKey}
+          hidden={loading || !!error}
+          className="h-full min-h-0"
+          onClickCapture={guardDirectoryEvent}
+          onSubmitCapture={guardDirectoryEvent}
+        >
+          {!directory ? null : items.length === 0 ? (
+            <>
+              <WorkspaceReconciliationPanel
+                serverWorkspaces={items}
+                onServerWorkspaceCreated={handleServerWorkspaceCreated}
+              />
+              <div className="p-6">
+                <div className="max-w-xl rounded-lg border border-border bg-surface p-5">
+                  <h2 className="text-base font-semibold text-text">
+                    No server-backed Workspaces yet
+                  </h2>
+                  <p className="mt-2 text-sm text-text-muted">
+                    Create a Workspace here when you want a durable server
+                    record for research sources, notes, project files, and
+                    future agent sessions.
+                  </p>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <Button onClick={() => openCreateDialog("research")}>
+                      Create Research Workspace
+                    </Button>
+                    <Button
+                      variant="primary"
+                      onClick={() => openCreateDialog("project")}
+                    >
+                      Create Project Workspace
+                    </Button>
+                  </div>
                 </div>
               </div>
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="flex items-center justify-between gap-3 px-4 py-2 text-sm text-text-muted">
-              <span>
-                Showing {filteredItems.length} of {items.length} Workspaces
-              </span>
-              {partialError && (
-                <Badge variant="warning" outline>
-                  {partialError}
-                </Badge>
-              )}
-            </div>
-            <WorkspaceReconciliationPanel
-              serverWorkspaces={items}
-              onServerWorkspaceCreated={handleServerWorkspaceCreated}
-            />
-            {filteredItems.length === 0 ? (
-              <div className="p-6 text-sm text-text-muted">
-                No Workspaces match the current filters.
-              </div>
-            ) : (
-              <div className="grid h-full min-h-0 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(320px,380px)]">
-                <WorkspaceList
-                  items={filteredItems}
-                  selectedId={selectedItem?.id ?? null}
-                  onSelect={(item) => setSelectedItemId(item.id)}
-                  onOpen={(item) =>
-                    navigate(
-                      buildResearchWorkspaceReturnPath({
-                        sourceWorkspaceId: item.id
-                      })
-                    )
-                  }
-                  onEdit={setEditingItem}
-                  onArchive={(item) => void updateArchived(item, true)}
-                  onUnarchive={(item) => void updateArchived(item, false)}
-                />
-                {selectedItem && (
-                  <WorkspaceProjectRootPanel
-                    item={selectedItem}
-                    onWorkspaceUpdated={(workspace) => {
-                      setItems((current) => mergeWorkspaceItem(current, workspace))
-                      setSelectedItemId(workspace.id)
-                    }}
-                    onRootsUpdated={() => void loadWorkspaces()}
-                    onRefreshContext={() => void loadWorkspaces()}
-                  />
+            </>
+          ) : (
+            <>
+              <div className="flex items-center justify-between gap-3 px-4 py-2 text-sm text-text-muted">
+                <span>
+                  Showing {filteredItems.length} of {items.length} Workspaces
+                </span>
+                {partialError && (
+                  <Badge variant="warning" outline>
+                    {partialError}
+                  </Badge>
                 )}
               </div>
-            )}
-          </>
-        )}
+              <WorkspaceReconciliationPanel
+                serverWorkspaces={items}
+                onServerWorkspaceCreated={handleServerWorkspaceCreated}
+              />
+              {filteredItems.length === 0 ? (
+                <div className="p-6 text-sm text-text-muted">
+                  No Workspaces match the current filters.
+                </div>
+              ) : (
+                <div className="grid h-full min-h-0 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(320px,380px)]">
+                  <WorkspaceList
+                    items={filteredItems}
+                    selectedId={selectedItem?.id ?? null}
+                    onSelect={(item) => {
+                      if (isCurrentDirectory()) setSelectedItemId(item.id)
+                    }}
+                    onOpen={(item) => {
+                      if (!isCurrentDirectory()) return
+                      navigate(
+                        buildResearchWorkspaceReturnPath({
+                          sourceWorkspaceId: item.id
+                        })
+                      )
+                    }}
+                    onEdit={(item) => {
+                      if (
+                        isCurrentDirectory() &&
+                        !mutationPending.current &&
+                        !reviewRequired.current
+                      )
+                        setEditingItem(item)
+                    }}
+                    onArchive={(item) => void updateArchived(item, true)}
+                    onUnarchive={(item) => void updateArchived(item, false)}
+                  />
+                  {selectedItem && (
+                    <WorkspaceProjectRootPanel
+                      item={selectedItem}
+                      active={!loading && !error && isCurrentDirectory()}
+                      signal={directory.request.signal}
+                      onWorkspaceUpdated={(workspace) => {
+                        if (!isCurrentDirectory()) return
+                        setItems((current) =>
+                          mergeWorkspaceItem(current, workspace)
+                        )
+                        setSelectedItemId(workspace.id)
+                      }}
+                      onRootsUpdated={() => {
+                        if (isCurrentDirectory()) void loadWorkspaces(false)
+                      }}
+                      onRefreshContext={() => {
+                        if (isCurrentDirectory()) void loadWorkspaces()
+                      }}
+                    />
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
       </div>
 
-      {mutationError && !createProfile && !editingItem && (
-        <div className="border-t border-border p-3">
-          <Alert variant="error" title={mutationError} />
-        </div>
-      )}
+      {!loading &&
+        !error &&
+        mutationError &&
+        !createProfile &&
+        !editingItem && (
+          <div className="border-t border-border p-3">
+            <Alert
+              variant="error"
+              title={mutationError}
+              action={
+                needsReview
+                  ? {
+                      label: "Refresh and review",
+                      onClick: () => void loadWorkspaces()
+                    }
+                  : undefined
+              }
+            />
+          </div>
+        )}
 
-      <WorkspaceCreateDialog
-        open={createProfile != null}
-        profile={createProfile ?? "research"}
-        submitting={mutating}
-        error={mutationError}
-        onClose={() => {
-          setCreateProfile(null)
-          setMutationError(null)
-        }}
-        onSubmit={createWorkspace}
-      />
-      <WorkspaceMetadataDialog
-        item={editingItem}
-        submitting={mutating}
-        error={mutationError}
-        onClose={() => {
-          setEditingItem(null)
-          setMutationError(null)
-        }}
-        onSubmit={updateWorkspaceName}
-      />
+      <div
+        key={viewKey}
+        hidden={loading || !!error}
+        onClickCapture={guardDirectoryEvent}
+        onSubmitCapture={guardDirectoryEvent}
+      >
+        <WorkspaceCreateDialog
+          open={createProfile != null}
+          profile={createProfile ?? "research"}
+          submitting={mutating}
+          error={mutationError}
+          onClose={() => {
+            if (!isCurrentDirectory()) return
+            setCreateProfile(null)
+            setMutationError(null)
+          }}
+          onSubmit={createWorkspace}
+        />
+        <WorkspaceMetadataDialog
+          item={editingItem}
+          submitting={mutating}
+          error={mutationError}
+          onClose={() => {
+            if (!isCurrentDirectory()) return
+            setEditingItem(null)
+            setMutationError(null)
+          }}
+          onSubmit={updateWorkspaceName}
+        />
+      </div>
     </section>
   )
 }

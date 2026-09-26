@@ -134,7 +134,10 @@ export const createStudioSlice: WorkspaceSlice<StudioActions> = (set, get) => ({
 
   // Note management actions
   setCurrentNote: (note) =>
-    set({ currentNote: note || { ...DEFAULT_WORKSPACE_NOTE } }),
+    set((state) => ({
+      currentNote: note || { ...DEFAULT_WORKSPACE_NOTE },
+      ownedNoteEditorSession: state.ownedNoteEditorSession + 1
+    })),
 
   updateNoteContent: (content) =>
     set((state) => ({
@@ -152,7 +155,10 @@ export const createStudioSlice: WorkspaceSlice<StudioActions> = (set, get) => ({
     })),
 
   clearCurrentNote: () =>
-    set({ currentNote: { ...DEFAULT_WORKSPACE_NOTE } }),
+    set((state) => ({
+      currentNote: { ...DEFAULT_WORKSPACE_NOTE },
+      ownedNoteEditorSession: state.ownedNoteEditorSession + 1
+    })),
 
   captureToCurrentNote: ({ title, content, mode = "append" }) =>
     set((state) => {
@@ -184,7 +190,8 @@ export const createStudioSlice: WorkspaceSlice<StudioActions> = (set, get) => ({
     }),
 
   loadNote: (note) =>
-    set({
+    set((state) => ({
+      ownedNoteEditorSession: state.ownedNoteEditorSession + 1,
       currentNote: {
         id: note.id,
         title: note.title,
@@ -193,5 +200,5 @@ export const createStudioSlice: WorkspaceSlice<StudioActions> = (set, get) => ({
         version: note.version,
         isDirty: false
       }
-    })
+    }))
 })

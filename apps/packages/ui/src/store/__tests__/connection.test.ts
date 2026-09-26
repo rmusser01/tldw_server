@@ -386,6 +386,39 @@ describe("connection store stability", () => {
     )
   })
 
+  it.each([200, 401, 403])(
+    "checks authenticated JWT sessions with legacy endpoints disabled (status %s)",
+    async (status) => {
+      mockedClient.getConfig.mockResolvedValue({
+        serverUrl: "http://127.0.0.1:8000",
+        authMode: "multi-user",
+        accessToken: "recipient-test-token"
+      })
+      mockedApiSend.mockImplementation(async ({ path }) =>
+        path === "/api/v1/auth/sessions"
+          ? { ok: status === 200, status, data: { sessions: [] }, error: "Session denied" }
+          : path === "/api/v1/users/me"
+            ? { ok: false, status: 410, error: "Legacy endpoint disabled" }
+            : { ok: true, status: 200, data: { status: "alive" } }
+      )
+
+      await useConnectionStore.getState().checkOnce()
+
+      expect(mockedApiSend).toHaveBeenCalledWith(
+        expect.objectContaining({ path: "/api/v1/auth/sessions", noAuth: false }),
+        expect.objectContaining({
+          readiness: { config: expect.any(Object), isCurrent: expect.any(Function) }
+        })
+      )
+      expect(mockedApiSend).toHaveBeenCalledTimes(1)
+      expect(useConnectionStore.getState().state.isConnected).toBe(status === 200)
+      if (status !== 200) {
+        expect(useConnectionStore.getState().state.errorKind).toBe("auth")
+        expect(mockedClient.ragHealth).not.toHaveBeenCalled()
+      }
+    }
+  )
+
   it.each([
     ["active", true], ["invalidated", false], ["foreign-origin", false]
   ])("uses %s cookie-session readiness without an API key", async (kind, expected) => {
@@ -402,7 +435,7 @@ describe("connection store stability", () => {
     else expect(useConnectionStore.getState().state.configStep).toBe("auth")
   })
 
-  it.each(["absent", "expired", "revoked"])(
+  it.each(["absent", "expired", "revoked", "forbidden"])(
     "rejects %s cookies even when persisted transport metadata and public liveness are valid",
     async (reason) => {
       process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
@@ -413,8 +446,10 @@ describe("connection store stability", () => {
       })
       mockedApiSend.mockImplementation(async ({ path }) =>
         path === "/api/v1/auth/sessions"
-          ? { ok: false, status: 401, error: `Session ${reason}` }
-          : { ok: true, status: 200, data: { status: "alive" } }
+          ? { ok: false, status: reason === "forbidden" ? 403 : 401, error: `Session ${reason}` }
+          : path === "/api/v1/users/me"
+            ? { ok: false, status: 410, error: "Legacy endpoint disabled" }
+            : { ok: true, status: 200, data: { status: "alive" } }
       )
 
       await useConnectionStore.getState().checkOnce()
@@ -423,8 +458,9 @@ describe("connection store stability", () => {
         phase: ConnectionPhase.ERROR,
         isConnected: false,
         errorKind: "auth",
-        lastStatusCode: 401
+        lastStatusCode: reason === "forbidden" ? 403 : 401
       })
+      expect(mockedApiSend).toHaveBeenCalledTimes(1)
       expect(mockedClient.ragHealth).not.toHaveBeenCalled()
     }
   )

@@ -19,8 +19,8 @@ from typing import Any, Optional, Union
 from loguru import logger
 from PIL import Image
 
-from tldw_Server_API.app.core.Character_Chat.constants import MAX_PERSIST_CONTENT_LENGTH
 from tldw_Server_API.app.core.Character_Chat.character_limits import check_message_limit
+from tldw_Server_API.app.core.Character_Chat.constants import MAX_PERSIST_CONTENT_LENGTH
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
@@ -47,8 +47,12 @@ _MESSAGE_LIMIT_LOCKS: dict[str, threading.Lock] = {}
 _MESSAGE_LIMIT_LOCKS_GUARD = threading.Lock()
 
 
-def _get_message_limit_lock(conversation_id: str) -> threading.Lock:
-    """Serialize per-conversation message-limit preflight and insert in this process."""
+def get_message_publication_lock(conversation_id: str) -> threading.Lock:
+    """Acquire before a publication transaction; retain through commit or rollback.
+
+    This nonreentrant process lock supplements, but does not replace, database
+    conversation locking and a transactional message-cap check.
+    """
     with _MESSAGE_LIMIT_LOCKS_GUARD:
         return _MESSAGE_LIMIT_LOCKS.setdefault(str(conversation_id), threading.Lock())
 
@@ -1148,8 +1152,17 @@ def post_message_to_conversation(
     image_mime_type: Optional[str] = None,
     sender_override: Optional[str] = None,
     owner_user_id: int | str | None = None,
+    *,
+    conn: Any | None = None,
 ) -> Optional[str]:
-    """Post a new message to a specified conversation."""
+    """Post a new message to a specified conversation.
+
+    With ``conn`` from the current ``db.transaction()``, the caller owns publication locks, admission, cap validation,
+    commit/rollback, and postcommit enrichment. This mode propagates metadata
+    failures and never takes the process lock or schedules side effects.
+    Exceptions must reach the transaction owner; nested transactions are not
+    savepoints and must not be caught followed by a partial commit.
+    """
 
     if not conversation_id:
         logger.error("Cannot post message: conversation_id is required.")
@@ -1204,7 +1217,19 @@ def post_message_to_conversation(
         "image_mime_type": image_mime_type,
     }
 
-    limit_context = _get_message_limit_lock(conversation_id) if is_user_message else nullcontext()
+    if conn is not None:
+        db.require_managed_transaction_connection(conn)
+        created_id = db.add_message(msg_payload, conn=conn)
+        if not created_id:
+            raise CharactersRAGDBError("Message publication returned no message ID")
+        conversation = db.get_conversation_by_id(conversation_id)
+        if not conversation or not isinstance(conversation.get("version"), int):
+            raise CharactersRAGDBError("Message publication lost its conversation version")
+        if not db.update_conversation(conversation_id, {}, conversation["version"]):
+            raise CharactersRAGDBError("Message publication failed to update conversation metadata")
+        return created_id
+
+    limit_context = get_message_publication_lock(conversation_id) if is_user_message else nullcontext()
     try:
         with limit_context:
             if is_user_message:

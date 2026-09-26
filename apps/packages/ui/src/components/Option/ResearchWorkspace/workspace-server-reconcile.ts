@@ -11,7 +11,9 @@ export interface ResearchWorkspaceServerClient {
     workspaceId: string,
     data: WorkspaceUpsertRequest
   ) => Promise<WorkspaceApiResponse>
-  getWorkspaceSources: (workspaceId: string) => Promise<WorkspaceSourceApiResponse[]>
+  getWorkspaceSources: (
+    workspaceId: string
+  ) => Promise<WorkspaceSourceApiResponse[]>
   addWorkspaceSource: (
     workspaceId: string,
     data: WorkspaceSourceCreateRequest
@@ -37,11 +39,13 @@ export interface ResearchWorkspaceServerReconcileInput {
   sources: WorkspaceSource[]
   selectedSourceIds?: string[]
   onWorkspaceReady?: () => void
+  isCurrent?: () => boolean
 }
 
 const DEFAULT_RESEARCH_WORKSPACE_NAME = "Research Workspace"
 const MAX_RECONCILE_ERROR_MESSAGES = 5
-const OMITTED_RECONCILE_ERRORS_MESSAGE = "Additional workspace sync errors omitted."
+const OMITTED_RECONCILE_ERRORS_MESSAGE =
+  "Additional workspace sync errors omitted."
 
 const describeReconcileError = (error: unknown): string => {
   if (error instanceof Error && error.message.trim()) {
@@ -121,7 +125,8 @@ export const reconcileResearchWorkspaceServerState = async ({
   workspaceName,
   sources,
   selectedSourceIds,
-  onWorkspaceReady
+  onWorkspaceReady,
+  isCurrent = () => true
 }: ResearchWorkspaceServerReconcileInput): Promise<ResearchWorkspaceServerReconcileResult> => {
   const result: ResearchWorkspaceServerReconcileResult = {
     workspaceReady: false,
@@ -131,11 +136,13 @@ export const reconcileResearchWorkspaceServerState = async ({
     errors: []
   }
 
+  if (!isCurrent()) return result
   try {
     await client.upsertWorkspace(workspaceId, {
       name: normalizeWorkspaceName(workspaceName),
       study_materials_policy: "workspace"
     })
+    if (!isCurrent()) return result
     result.workspaceReady = true
     onWorkspaceReady?.()
   } catch (error) {
@@ -147,8 +154,10 @@ export const reconcileResearchWorkspaceServerState = async ({
   }
 
   let existingSources: WorkspaceSourceApiResponse[] = []
+  if (!isCurrent()) return result
   try {
     existingSources = await client.getWorkspaceSources(workspaceId)
+    if (!isCurrent()) return result
     result.sourceRowsChecked = true
   } catch (error) {
     appendReconcileError(
@@ -169,6 +178,7 @@ export const reconcileResearchWorkspaceServerState = async ({
     : undefined
 
   for (const [position, source] of sources.entries()) {
+    if (!isCurrent()) return result
     const sourceRequest = buildSourceCreateRequest(
       source,
       position,
@@ -196,9 +206,16 @@ export const reconcileResearchWorkspaceServerState = async ({
     }
   }
 
-  if (Array.isArray(selectedSourceIds) && client.updateWorkspaceSourceSelection) {
+  if (
+    isCurrent() &&
+    Array.isArray(selectedSourceIds) &&
+    client.updateWorkspaceSourceSelection
+  ) {
     try {
-      await client.updateWorkspaceSourceSelection(workspaceId, selectedSourceIds)
+      await client.updateWorkspaceSourceSelection(
+        workspaceId,
+        selectedSourceIds
+      )
     } catch (error) {
       appendReconcileError(
         result,

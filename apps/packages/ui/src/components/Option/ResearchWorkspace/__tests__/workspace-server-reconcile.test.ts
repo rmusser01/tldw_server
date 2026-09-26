@@ -23,18 +23,65 @@ const makeClient = (existingSources: Array<Record<string, unknown>> = []) => ({
     study_materials_policy: "workspace"
   }),
   getWorkspaceSources: vi.fn().mockResolvedValue(existingSources),
-  addWorkspaceSource: vi.fn().mockImplementation(
-    async (_workspaceId: string, source: Record<string, unknown>) => ({
-      ...source,
-      workspace_id: "workspace-1",
-      added_at: "2026-05-23T12:00:00Z",
-      version: 1
-    })
-  ),
+  addWorkspaceSource: vi
+    .fn()
+    .mockImplementation(
+      async (_workspaceId: string, source: Record<string, unknown>) => ({
+        ...source,
+        workspace_id: "workspace-1",
+        added_at: "2026-05-23T12:00:00Z",
+        version: 1
+      })
+    ),
   updateWorkspaceSourceSelection: vi.fn().mockResolvedValue(undefined)
 })
 
 describe("research workspace server reconciliation", () => {
+  it.each(["before", "upsert", "read", "add"])(
+    "stops dispatch after its view expires at %s",
+    async (boundary) => {
+      const client = makeClient()
+      let current = boundary !== "before"
+      const ready = vi.fn()
+      if (boundary === "upsert")
+        client.upsertWorkspace.mockImplementationOnce(async () => {
+          current = false
+          return { id: "workspace-1" }
+        })
+      if (boundary === "read")
+        client.getWorkspaceSources.mockImplementationOnce(async () => {
+          current = false
+          return []
+        })
+      if (boundary === "add")
+        client.addWorkspaceSource.mockImplementationOnce(async () => {
+          current = false
+          return { id: "source-1" }
+        })
+      await reconcileResearchWorkspaceServerState({
+        client,
+        workspaceId: "workspace-1",
+        sources: [makeSource(), makeSource({ id: "source-2", mediaId: 102 })],
+        selectedSourceIds: ["source-1"],
+        onWorkspaceReady: ready,
+        isCurrent: () => current
+      })
+      expect(client.upsertWorkspace).toHaveBeenCalledTimes(
+        boundary === "before" ? 0 : 1
+      )
+      expect(ready).toHaveBeenCalledTimes(
+        ["before", "upsert"].includes(boundary) ? 0 : 1
+      )
+      expect(client.getWorkspaceSources).toHaveBeenCalledTimes(
+        ["before", "upsert"].includes(boundary) ? 0 : 1
+      )
+      expect(client.addWorkspaceSource).toHaveBeenCalledTimes(
+        boundary === "add" ? 1 : 0
+      )
+      expect(client.updateWorkspaceSourceSelection).not.toHaveBeenCalled()
+    }
+  )
+
   it("upserts the workspace and adds missing local sources with valid media ids", async () => {
     const client = makeClient()
     const sources = [
@@ -67,24 +114,32 @@ describe("research workspace server reconciliation", () => {
       study_materials_policy: "workspace"
     })
     expect(client.getWorkspaceSources).toHaveBeenCalledWith("workspace-1")
-    expect(client.addWorkspaceSource).toHaveBeenNthCalledWith(1, "workspace-1", {
-      id: "source-ready",
-      media_id: 101,
-      title: "Ready Source",
-      source_type: "pdf",
-      url: "https://example.test/ready.pdf",
-      position: 0,
-      selected: false
-    })
-    expect(client.addWorkspaceSource).toHaveBeenNthCalledWith(2, "workspace-1", {
-      id: "source-web",
-      media_id: 102,
-      title: "Web Source",
-      source_type: "website",
-      url: "https://example.test/web",
-      position: 1,
-      selected: true
-    })
+    expect(client.addWorkspaceSource).toHaveBeenNthCalledWith(
+      1,
+      "workspace-1",
+      {
+        id: "source-ready",
+        media_id: 101,
+        title: "Ready Source",
+        source_type: "pdf",
+        url: "https://example.test/ready.pdf",
+        position: 0,
+        selected: false
+      }
+    )
+    expect(client.addWorkspaceSource).toHaveBeenNthCalledWith(
+      2,
+      "workspace-1",
+      {
+        id: "source-web",
+        media_id: 102,
+        title: "Web Source",
+        source_type: "website",
+        url: "https://example.test/web",
+        position: 1,
+        selected: true
+      }
+    )
     expect(client.updateWorkspaceSourceSelection).toHaveBeenCalledWith(
       "workspace-1",
       ["source-web"]
@@ -237,7 +292,9 @@ describe("research workspace server reconciliation", () => {
 
   it("bounds repeated source add errors while continuing later source attempts", async () => {
     const client = makeClient()
-    client.addWorkspaceSource.mockRejectedValue(new Error("source add unavailable"))
+    client.addWorkspaceSource.mockRejectedValue(
+      new Error("source add unavailable")
+    )
     const sources = Array.from({ length: 8 }, (_, index) =>
       makeSource({ id: `source-${index}`, mediaId: 400 + index })
     )
@@ -254,7 +311,9 @@ describe("research workspace server reconciliation", () => {
     expect(result.errors[0]).toBe(
       "Failed to add source source-0: source add unavailable"
     )
-    expect(result.errors.at(-1)).toBe("Additional workspace sync errors omitted.")
+    expect(result.errors.at(-1)).toBe(
+      "Additional workspace sync errors omitted."
+    )
   })
 
   it("builds a stable signature from source identity fields only", () => {

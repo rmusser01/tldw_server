@@ -31,6 +31,9 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     BackendType,
     InputError,
 )
+from tldw_Server_API.tests.AuthNZ.integration.test_single_user_login_api_key import (
+    single_user_client as single_user_client,
+)
 
 
 def _create_behavior_sources(db):
@@ -174,6 +177,294 @@ def _create_writer_identity_race_chat(db, *, with_message: bool = False):
         "persona_memory_mode": None,
     }
     return conversation_id, stale, current
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("assistant_kind", ["persona", "character"])
+def test_workspace_chat_creation_conflicts_after_workspace_preflight(
+    test_client, auth_headers, character_db, monkeypatch, assistant_kind,
+):
+    from tldw_Server_API.app.core.Workspaces import assistant_defaults
+
+    character_db.upsert_workspace("deleting-workspace", "Workspace")
+    request = {
+        "title": "Late chat",
+        "scope_type": "workspace",
+        "workspace_id": "deleting-workspace",
+        "assistant_kind": assistant_kind,
+    }
+    if assistant_kind == "character":
+        request["character_id"] = character_db.add_character_card({
+            "name": "Research assistant", "first_message": "Ready to research.",
+        })
+    else:
+        character_db.create_persona_profile({
+            "id": "research-assistant", "user_id": "1", "name": "Research assistant",
+        })
+        request["assistant_id"] = "research-assistant"
+    resolve = assistant_defaults.resolve_new_conversation_assistant
+
+    def delete_after_preflight(db, **kwargs):
+        resolved = resolve(db, **kwargs)
+        assert db.delete_workspace("deleting-workspace", 1)
+        return resolved
+
+    monkeypatch.setattr(assistant_defaults, "resolve_new_conversation_assistant", delete_after_preflight)
+    response = test_client.post(
+        "/api/v1/chats/?seed_first_message=true", headers=auth_headers, json=request,
+    )
+    assert response.status_code == 409, response.text
+    assert character_db.execute_query("SELECT COUNT(*) FROM conversations").fetchone()[0] == 0
+    assert character_db.execute_query("SELECT COUNT(*) FROM messages").fetchone()[0] == 0
+    assert character_db.execute_query("SELECT COUNT(*) FROM conversation_settings").fetchone()[0] == 0
+
+
+@pytest.mark.integration
+def test_workspace_chat_restore_conflicts_after_workspace_deletion(
+    test_client, auth_headers, character_db,
+):
+    character_db.upsert_workspace("deleted-restore-workspace", "Workspace")
+    conversation_id = character_db.add_conversation({
+        "title": "Deleted workspace chat", "scope_type": "workspace",
+        "workspace_id": "deleted-restore-workspace",
+    })
+    assert character_db.delete_workspace("deleted-restore-workspace", 1)
+    before = character_db.get_conversation_by_id(conversation_id, include_deleted=True)
+    response = test_client.post(
+        f"/api/v1/chats/{conversation_id}/restore",
+        params={
+            "scope_type": "workspace", "workspace_id": "deleted-restore-workspace",
+            "expected_version": before["version"],
+        },
+        headers=auth_headers,
+    )
+    assert response.status_code == 409, response.text
+    assert character_db.get_conversation_by_id(conversation_id, include_deleted=True) == before
+
+
+@pytest.mark.integration
+def test_workspace_chat_settings_reject_deleted_parent_over_http(
+    test_client, auth_headers, character_db,
+):
+    character_db.upsert_workspace("deleted-settings-workspace", "Workspace")
+    conversation_id = character_db.add_conversation({
+        "title": "Workspace chat", "scope_type": "workspace",
+        "workspace_id": "deleted-settings-workspace",
+    })
+    assert character_db.upsert_conversation_settings(conversation_id, {"authorNote": "Original"})
+    assert character_db.delete_workspace("deleted-settings-workspace", 1)
+    assert character_db.upsert_conversation_from_sync(
+        conversation_id=conversation_id, title="Retained chat", sync_client_id=character_db.client_id,
+        object_revision=5, object_hash="retained", scope_type="workspace", workspace_id="deleted-settings-workspace",
+    )
+    before = character_db.get_conversation_by_id(conversation_id)
+    settings_before = character_db.get_conversation_settings(conversation_id)
+    response = test_client.put(
+        f"/api/v1/chats/{conversation_id}/settings",
+        params={"scope_type": "workspace", "workspace_id": "deleted-settings-workspace"},
+        headers=auth_headers,
+        json={"settings": {"authorNote": "Must not be stored"}},
+    )
+    assert response.status_code == 409, response.text
+    assert character_db.get_conversation_by_id(conversation_id) == before
+    assert character_db.get_conversation_settings(conversation_id) == settings_before
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("identity_loss", ["owner_change", "trashed"])
+def test_chat_settings_identity_loss_returns_404_over_http(
+    single_user_client, character_db, monkeypatch, identity_loss,
+):
+    from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+    from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+
+    test_client, _, api_key = single_user_client
+    auth_headers = {"X-API-KEY": api_key}
+    monkeypatch.setattr(character_db, "client_id", str(get_settings().SINGLE_USER_FIXED_ID))
+    # Use the isolated AuthNZ bootstrap fixture and override only the product DB.
+    monkeypatch.setitem(test_client.app.dependency_overrides, get_chacha_db_for_user, lambda: character_db)
+    character_db.upsert_workspace("settings-identity-workspace", "Workspace")
+    conversation_id = character_db.add_conversation({
+        "title": "Workspace chat", "scope_type": "workspace",
+        "workspace_id": "settings-identity-workspace",
+    })
+    assert character_db.upsert_conversation_settings(conversation_id, {"authorNote": "Original"})
+    get_conversation = character_db.get_conversation_by_id
+    after_change = {}
+
+    def snapshot():
+        return {
+            table: [dict(row) for row in character_db.execute_query(f"SELECT * FROM {table}").fetchall()]
+            for table in ("conversations", "conversation_settings")
+        }
+
+    def change_after_preflight(*args, **kwargs):
+        conversation = get_conversation(*args, **kwargs)
+        monkeypatch.setattr(character_db, "get_conversation_by_id", get_conversation)
+        if identity_loss == "trashed":
+            assert character_db.soft_delete_conversation(conversation_id, conversation["version"])
+        else:
+            assert character_db.upsert_conversation_from_sync(
+                conversation_id=conversation_id, title="Other owner's chat", sync_client_id="other-owner",
+                object_revision=1, object_hash="moved", scope_type="workspace", workspace_id="settings-identity-workspace",
+            )
+        after_change.update(snapshot())
+        return conversation
+
+    before_unauthenticated = snapshot()
+    unauthenticated = test_client.put(
+        f"/api/v1/chats/{conversation_id}/settings",
+        params={"scope_type": "workspace", "workspace_id": "settings-identity-workspace"},
+        json={"settings": {"authorNote": "Must not be stored"}},
+    )
+    assert unauthenticated.status_code == 401, unauthenticated.text
+    assert snapshot() == before_unauthenticated
+
+    monkeypatch.setattr(character_db, "get_conversation_by_id", change_after_preflight)
+    response = test_client.put(
+        f"/api/v1/chats/{conversation_id}/settings", headers=auth_headers,
+        params={"scope_type": "workspace", "workspace_id": "settings-identity-workspace"},
+        json={"settings": {"authorNote": "Must not be stored"}},
+    )
+    assert response.status_code == 404, response.text
+    assert response.json()["detail"] == "Conversation not found."
+    assert snapshot() == after_change
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("role", ["user", "assistant", "system"])
+def test_workspace_message_send_rejects_deleted_parent_with_real_auth(
+    single_user_client, character_db, monkeypatch, role,
+):
+    from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+    from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+
+    client, _, api_key = single_user_client
+    monkeypatch.setattr(character_db, "client_id", str(get_settings().SINGLE_USER_FIXED_ID))
+    monkeypatch.setitem(client.app.dependency_overrides, get_chacha_db_for_user, lambda: character_db)
+    character_db.upsert_workspace("deleted-send-workspace", "Workspace")
+    conversation_id = character_db.add_conversation({
+        "title": "Chat", "scope_type": "workspace", "workspace_id": "deleted-send-workspace",
+    })
+    assert character_db.delete_workspace("deleted-send-workspace", 1)
+    assert character_db.upsert_conversation_from_sync(
+        conversation_id=conversation_id, title="Retained", sync_client_id=character_db.client_id,
+        object_revision=5, object_hash="retained", scope_type="workspace", workspace_id="deleted-send-workspace",
+    )
+
+    def snapshot():
+        return {
+            table: [dict(row) for row in character_db.execute_query(f"SELECT * FROM {table}").fetchall()]
+            for table in ("workspaces", "conversations", "messages", "message_metadata", "conversation_settings", "sync_log")
+        }
+
+    before = snapshot()
+    params = {"scope_type": "workspace", "workspace_id": "deleted-send-workspace"}
+    payload = {"content": "Must not persist", "role": role}
+    unauthenticated = client.post(f"/api/v1/chats/{conversation_id}/messages", params=params, json=payload)
+    assert unauthenticated.status_code == 401, unauthenticated.text
+    assert snapshot() == before
+    response = client.post(
+        f"/api/v1/chats/{conversation_id}/messages", params=params, json=payload, headers={"X-API-KEY": api_key},
+    )
+    assert response.status_code == 409, response.text
+    assert snapshot() == before
+
+
+@pytest.mark.integration
+def test_workspace_message_send_commits_with_real_auth(single_user_client, character_db, monkeypatch):
+    from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+    from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+    from tldw_Server_API.app.core.Chat import conversation_enrichment
+
+    client, _, api_key = single_user_client
+    monkeypatch.setattr(character_db, "client_id", str(get_settings().SINGLE_USER_FIXED_ID))
+    monkeypatch.setitem(client.app.dependency_overrides, get_chacha_db_for_user, lambda: character_db)
+    character_db.upsert_workspace("send-workspace", "Workspace")
+    conversation_id = character_db.add_conversation({
+        "title": "Chat", "scope_type": "workspace", "workspace_id": "send-workspace",
+    })
+    before_parent = character_db.get_workspace("send-workspace")
+    before_chat = character_db.get_conversation_by_id(conversation_id)
+    scheduled = []
+    monkeypatch.setattr(conversation_enrichment, "schedule_auto_tagging", lambda *args, **kwargs: scheduled.append(character_db.in_transaction))
+    response = client.post(
+        f"/api/v1/chats/{conversation_id}/messages", headers={"X-API-KEY": api_key},
+        params={"scope_type": "workspace", "workspace_id": "send-workspace"},
+        json={"role": "user", "content": "Hello {{user}}"},
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["content"] == "Hello User"
+    stored = character_db.get_message_by_id(response.json()["id"])
+    assert stored["content"] == "Hello {{user}}"
+    assert character_db.get_workspace("send-workspace") == before_parent
+    after_chat = character_db.get_conversation_by_id(conversation_id)
+    assert after_chat["version"] == before_chat["version"] + 1
+    assert after_chat["history_version"] == before_chat["history_version"] + 1
+    assert scheduled == [False]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("pinned", [None, True])
+def test_workspace_message_edit_rejects_deleted_parent_with_real_auth(
+    single_user_client, character_db, monkeypatch, pinned,
+):
+    from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+    from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+
+    client, _, api_key = single_user_client
+    monkeypatch.setattr(character_db, "client_id", str(get_settings().SINGLE_USER_FIXED_ID))
+    monkeypatch.setitem(client.app.dependency_overrides, get_chacha_db_for_user, lambda: character_db)
+    character_db.upsert_workspace("deleted-edit-workspace", "Workspace")
+    conversation_id = character_db.add_conversation({
+        "title": "Chat", "scope_type": "workspace", "workspace_id": "deleted-edit-workspace",
+    })
+    assert character_db.delete_workspace("deleted-edit-workspace", 1)
+    assert character_db.upsert_conversation_from_sync(
+        conversation_id=conversation_id, title="Retained", sync_client_id=character_db.client_id,
+        object_revision=5, object_hash="retained", scope_type="workspace", workspace_id="deleted-edit-workspace",
+    )
+    message_id = character_db.add_message({"conversation_id": conversation_id, "sender": "user", "content": "Original"})
+
+    def snapshot():
+        return {
+            table: [dict(row) for row in character_db.execute_query(f"SELECT * FROM {table}").fetchall()]
+            for table in ("workspaces", "conversations", "messages", "message_metadata", "conversation_settings", "sync_log")
+        }
+
+    before = snapshot()
+    params = {"expected_version": 1, "scope_type": "workspace", "workspace_id": "deleted-edit-workspace"}
+    payload = {"content": "Must not persist", "pinned": pinned}
+    unauthenticated = client.put(f"/api/v1/messages/{message_id}", params=params, json=payload)
+    assert unauthenticated.status_code == 401, unauthenticated.text
+    assert snapshot() == before
+    response = client.put(f"/api/v1/messages/{message_id}", params=params, json=payload, headers={"X-API-KEY": api_key})
+    assert response.status_code == 409, response.text
+    assert snapshot() == before
+
+
+@pytest.mark.integration
+def test_workspace_chat_metadata_rejects_deleted_parent_over_http(
+    test_client, auth_headers, character_db,
+):
+    character_db.upsert_workspace("deleted-metadata-workspace", "Workspace")
+    conversation_id = character_db.add_conversation({
+        "title": "Workspace chat", "scope_type": "workspace",
+        "workspace_id": "deleted-metadata-workspace",
+    })
+    assert character_db.delete_workspace("deleted-metadata-workspace", 1)
+    assert character_db.upsert_conversation_from_sync(
+        conversation_id=conversation_id, title="Retained chat", sync_client_id=character_db.client_id,
+        object_revision=5, object_hash="retained", scope_type="workspace", workspace_id="deleted-metadata-workspace",
+    )
+    before = character_db.get_conversation_by_id(conversation_id)
+    response = test_client.put(
+        f"/api/v1/chats/{conversation_id}", headers=auth_headers,
+        params={"scope_type": "workspace", "workspace_id": "deleted-metadata-workspace", "expected_version": 5},
+        json={"title": "Must not be stored"},
+    )
+    assert response.status_code == 409, response.text
+    assert character_db.get_conversation_by_id(conversation_id) == before
 
 
 @pytest.mark.integration

@@ -1445,7 +1445,8 @@ class MessageStore:
         Succeeds if `expected_version` matches the current DB version and the record is active.
         If already soft-deleted, returns True (idempotent).
 
-        FTS updates (removal from `messages_fts`) and `sync_log` entries are handled by SQL triggers.
+        SQLite FTS and sync logging use SQL triggers. PostgreSQL deletion sync
+        events are written in this transaction because its schema has no message sync trigger.
 
         Args:
             message_id: The UUID of the message to soft-delete.
@@ -1519,6 +1520,31 @@ class MessageStore:
                     transaction_conn,
                     str(self._row_value(conversation_row, "conversation_id")),
                 )
+                if self._db.backend_type == BackendType.POSTGRESQL:
+                    columns = {
+                        column["name"]
+                        for column in self._db.backend.get_table_info("sync_log", connection=transaction_conn)
+                    }
+                    if "entity_id" in columns:
+                        sync_query = (
+                            "INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload) "
+                            "VALUES (?, ?, ?, ?, ?, ?, ?)"
+                        )
+                    elif "entity_uuid" in columns:
+                        sync_query = (
+                            "INSERT INTO sync_log(entity, entity_uuid, operation, timestamp, client_id, version, payload) "
+                            "VALUES (?, ?, ?, ?, ?, ?, ?)"
+                        )
+                    else:
+                        raise CharactersRAGDBError("Message sync log has no supported entity identifier column.")
+                    payload = {
+                        "id": message_id, "deleted": 1, "last_modified": now,
+                        "version": next_version_val, "client_id": self._db.client_id,
+                    }
+                    transaction_conn.execute(
+                        sync_query,
+                        ("messages", message_id, "delete", now, self._db.client_id, next_version_val, json.dumps(payload)),
+                    )
                 logger.info(
                     f"Soft-deleted message ID {message_id} (was v{expected_version}), new version {next_version_val}.")
                 return True
@@ -1717,9 +1743,10 @@ class MessageStore:
         *,
         conn: Any | None = None,
     ) -> dict[str, Any] | None:
-        """Fetch metadata for a message if present."""
+        """Fetch metadata; caller-owned transactions must not hide read failures."""
         try:
-            self._db._ensure_message_metadata_table()
+            if conn is None:
+                self._db._ensure_message_metadata_table()
             if conn is not None:
                 cursor = conn.execute(
                     "SELECT tool_calls_json, extra_json, last_modified "
@@ -1743,7 +1770,9 @@ class MessageStore:
                 "extra": self._metadata_json_value(ex) if ex is not None else None,
                 "last_modified": lm,
             }
-        except _CHACHA_NONCRITICAL_EXCEPTIONS:
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
+            if conn is not None:
+                raise CharactersRAGDBError("Failed to read transactional message metadata") from exc
             return None
 
     def get_message_metadata_map(self, message_ids: list[str]) -> dict[str, dict[str, Any]]:

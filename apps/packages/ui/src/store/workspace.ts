@@ -78,6 +78,14 @@ import { createSourcesSlice } from "./workspace-slices/sources-slice"
 import { createStudioSlice } from "./workspace-slices/studio-slice"
 import { createUISlice } from "./workspace-slices/ui-slice"
 import { createWorkspaceListSlice } from "./workspace-slices/workspace-list-slice"
+import { createOwnedWorkspaceDraftStore } from "./owned-workspace-state"
+import {
+  createOwnedWorkspaceSlice,
+  initialOwnedWorkspaceState,
+  preserveOwnedWorkspaceDrafts,
+  type OwnedWorkspaceState,
+  type OwnedWorkspaceActions
+} from "./workspace-slices/owned-workspace-slice"
 import { isWorkspaceSourceSelectable } from "./workspace-source-status"
 
 export {
@@ -1874,6 +1882,7 @@ const createMemoryStorage = (): StateStorage => ({
  */
 type WorkspaceStorageOptions = {
   indexedDbAdapter?: WorkspaceIndexedDbAdapter
+  canWrite?: () => boolean
 }
 
 export const createWorkspaceStorage = (
@@ -1901,6 +1910,8 @@ export const createWorkspaceStorage = (
       return localStorage.getItem(name)
     },
     setItem: async (name: string, value: string): Promise<void> => {
+      // An initial state snapshot must never replace an unread persisted index.
+      if (options.canWrite && !options.canWrite()) return
       try {
         if (shouldSuppressInitialEmptyWorkspaceWrite(name, value)) return
 
@@ -2385,6 +2396,8 @@ interface ResetActions {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type WorkspaceState = WorkspaceIdentityState &
+  OwnedWorkspaceState &
+  OwnedWorkspaceActions &
   SourcesState &
   StudioState &
   UIState &
@@ -2477,6 +2490,7 @@ const initialWorkspaceChatSessionsState: WorkspaceChatSessionsState = {
 }
 
 export const initialState = {
+  ...initialOwnedWorkspaceState,
   ...initialIdentityState,
   ...initialSourcesState,
   ...initialStudioState,
@@ -3484,7 +3498,8 @@ export const applyWorkspaceSnapshot = (
   | "leftPaneCollapsed"
   | "rightPaneCollapsed"
   | "audioSettings"
-> => ({
+> & OwnedWorkspaceState => ({
+  ...initialOwnedWorkspaceState,
   workspaceId: snapshot.workspaceId,
   workspaceName: snapshot.workspaceName,
   workspaceTag: snapshot.workspaceTag,
@@ -3884,30 +3899,74 @@ export const duplicateWorkspaceSnapshot = (
 // avoids a temporal-dead-zone reference to `useWorkspaceStore` when the backing
 // storage is synchronous and hydration happens during store construction).
 let publishWorkspaceHydration: ((next: WorkspaceState) => void) | null = null
+let readWorkspaceHydrationState: (() => WorkspaceState) | null = null
 
 export const useWorkspaceStore = createWithEqualityFn<WorkspaceState>()(
   persist<WorkspaceState, [], [], PersistedWorkspaceState>(
     (set, get) => {
-      publishWorkspaceHydration = (next) => set(next, true)
+      const drafts = createOwnedWorkspaceDraftStore(() => localStorage)
+      publishWorkspaceHydration = (next) => set({
+        ...next,
+        ownedWorkspaceDraftStatus: drafts.hasPendingWrites()
+          ? "unavailable"
+          : next.ownedWorkspaceDraftStatus
+      }, true)
+      readWorkspaceHydrationState = get
+      const setWorkspace: Parameters<typeof createWorkspaceListSlice>[0] = (
+        partial
+      ) => {
+        set((before) => {
+          const patch = typeof partial === "function" ? partial(before) : partial
+          if (patch === before) return before
+          return preserveOwnedWorkspaceDrafts(
+            before,
+            { ...before, ...patch },
+            drafts
+          )
+        })
+      }
       return {
         ...initialState,
-        ...createSourcesSlice(set, get),
-        ...createStudioSlice(set, get),
-        ...createUISlice(set, get),
-        ...createWorkspaceListSlice(set, get),
+        ...createSourcesSlice(setWorkspace, get),
+        ...createStudioSlice(setWorkspace, get),
+        ...createUISlice(setWorkspace, get),
+        ...createWorkspaceListSlice(setWorkspace, get),
+        ...createOwnedWorkspaceSlice(setWorkspace, get, drafts),
       }
     },
     {
       name: WORKSPACE_STORAGE_KEY,
-      storage: createJSONStorage(() => createWorkspaceStorage()),
+      storage: createJSONStorage(() => createWorkspaceStorage({
+        canWrite: () => readWorkspaceHydrationState?.()?.storeHydrated === true
+      })),
       version: 1,
       migrate: (persistedState) => migratePersistedWorkspaceState(persistedState),
+      merge: (persisted, current) => {
+        // A later disk read is not authorization to replace an active server view.
+        if (
+          current.activeWorkspaceOrigin.kind === "server-owned" ||
+          current.ownedWorkspaceAttempt
+        ) return current
+        const restored = persisted as PersistedWorkspaceState | undefined
+        return {
+          ...current,
+          ...restored,
+          workspaceChatSessions: normalizeWorkspaceChatSessionsForRehydrate(
+            restored?.workspaceChatSessions ?? current.workspaceChatSessions
+          ),
+          ...initialOwnedWorkspaceState,
+          ownedWorkspaceDraftStatus: current.ownedWorkspaceDraftStatus
+        }
+      },
       // NOTE: The rest of persist config follows below (was already here)
 
       // Only persist essential state, not transient UI state
       partialize: (state): PersistedWorkspaceState => {
         const nextSnapshots = { ...state.workspaceSnapshots }
-        if (state.workspaceId) {
+        if (
+          state.workspaceId &&
+          state.activeWorkspaceOrigin.kind === "legacy-local"
+        ) {
           nextSnapshots[state.workspaceId] = buildWorkspaceSnapshot(state)
         }
 
@@ -3923,7 +3982,10 @@ export const useWorkspaceStore = createWithEqualityFn<WorkspaceState>()(
 
         const persistedState: PersistedWorkspaceState = {
           // Active workspace identity
-          workspaceId: state.workspaceId,
+          workspaceId:
+            state.activeWorkspaceOrigin.kind === "legacy-local"
+              ? state.workspaceId
+              : "",
 
           // Workspace lists
           savedWorkspaces: state.savedWorkspaces,
@@ -3949,6 +4011,19 @@ export const useWorkspaceStore = createWithEqualityFn<WorkspaceState>()(
       // Rehydrate dates properly and handle migration
       onRehydrateStorage: () => (state) => {
         if (state) {
+          const current = readWorkspaceHydrationState?.()
+          if (current && current !== state) {
+            // Edits or account invalidation can occur after merge but before this callback.
+            publishWorkspaceHydration?.({ ...current, storeHydrated: true })
+            return
+          }
+          if (
+            state.activeWorkspaceOrigin.kind === "server-owned" ||
+            state.ownedWorkspaceAttempt
+          ) {
+            publishWorkspaceHydration?.({ ...state, storeHydrated: true })
+            return
+          }
           // Ensure dates are Date objects after rehydration
           state.workspaceCreatedAt = reviveDateOrNull(state.workspaceCreatedAt)
           state.sources = reviveSources(

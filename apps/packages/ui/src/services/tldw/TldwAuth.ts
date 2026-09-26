@@ -8,6 +8,7 @@ import { clearFlashcardsGenerateHandoffs } from "@/services/tldw/flashcards-gene
 import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 import { clearStandaloneHtmlSessionRecords } from "@/services/tldw/standalone-html-session-records"
 import { deriveScopedUserId, deriveTokenOrgId } from "@/utils/media-navigation-scope"
+import { clearCloneRecovery } from "@/services/shared-clone-recovery"
 
 export interface LoginCredentials {
   username: string
@@ -38,6 +39,7 @@ const API_KEY_VALIDATION_TIMEOUT_MS = 30000
 
 const emitLogoutPrincipalBoundary = (): void => {
   void clearFlashcardsGenerateHandoffs().catch(() => console.warn("Could not clear private Flashcards transfers during sign-out."))
+  clearCloneRecovery()
   if (typeof window === "undefined") return
   window.dispatchEvent(
     new CustomEvent("tldw:auth-principal-changed", {

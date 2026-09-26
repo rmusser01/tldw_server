@@ -202,6 +202,35 @@ def test_target_workspace_identity_is_stable_uuid_and_operation_specific() -> No
     assert target != target_workspace_id("de305d54-75b4-431b-adb2-eb6b9e546015")
 
 
+@pytest.mark.parametrize(
+    "value",
+    [
+        "2026-09-13 20:14:02",
+        "2026-09-13T20:14:02Z",
+        "2026-09-13T13:14:02-07:00",
+        datetime(2026, 9, 13, 20, 14, 2),
+        datetime(2026, 9, 13, 20, 14, 2, tzinfo=timezone.utc),
+    ],
+)
+def test_projection_normalizes_jobs_timestamps_to_utc_iso(value) -> None:
+    response = project_clone_operation(
+        _job(created_at=value, updated_at=value), share_id=42, recipient_user_id=9
+    )
+
+    assert (response.started_at, response.updated_at) == (
+        "2026-09-13T20:14:02+00:00",
+        "2026-09-13T20:14:02+00:00",
+    )
+
+
+@pytest.mark.parametrize("value", ["not-a-date", "2026-99-13 20:14:02", None])
+def test_projection_rejects_invalid_jobs_timestamps(value) -> None:
+    with pytest.raises(CloneOperationUnavailable):
+        project_clone_operation(
+            _job(created_at=value), share_id=42, recipient_user_id=9
+        )
+
+
 def test_queued_projection_contains_only_canonical_workspace_fields() -> None:
     job = _job(
         diagnostics={"raw_path": "/owner/private.db"},

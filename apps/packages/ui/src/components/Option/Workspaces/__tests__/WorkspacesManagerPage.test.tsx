@@ -1,11 +1,19 @@
 import React from "react"
-import { render, screen, waitFor, within } from "@testing-library/react"
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within
+} from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type {
   WorkspaceApiResponse,
-  WorkspaceContextResponse
+  WorkspaceContextResponse,
+  WorkspaceRootsResponse
 } from "@/services/tldw/domains/workspace-api"
 import { WORKSPACE_STORAGE_KEY } from "@/store/research-workspace-legacy-storage-inventory"
 
@@ -13,11 +21,24 @@ const apiMocks = vi.hoisted(() => ({
   listWorkspaces: vi.fn(),
   getWorkspaceContext: vi.fn(),
   upsertWorkspace: vi.fn(),
-  patchWorkspace: vi.fn()
+  patchWorkspace: vi.fn(),
+  attachWorkspacePrimaryRoot: vi.fn(),
+  getWorkspaceOperation: vi.fn()
 }))
 
 const routerMocks = vi.hoisted(() => ({
   navigate: vi.fn()
+}))
+
+const ownedMocks = vi.hoisted(() => ({
+  directory: vi.fn(),
+  lifecycle: vi.fn(),
+  setArchived: vi.fn()
+}))
+
+vi.mock("@/services/owned-workspace-opening", () => ({
+  createOwnedWorkspaceDirectoryContext: ownedMocks.directory,
+  createOwnedWorkspaceLifecycleContext: ownedMocks.lifecycle
 }))
 
 vi.mock("@/hooks/useTldwApiClient", () => ({
@@ -25,9 +46,8 @@ vi.mock("@/hooks/useTldwApiClient", () => ({
 }))
 
 vi.mock("react-router-dom", async () => {
-  const actual = await vi.importActual<typeof import("react-router-dom")>(
-    "react-router-dom"
-  )
+  const actual =
+    await vi.importActual<typeof import("react-router-dom")>("react-router-dom")
   return {
     ...actual,
     useNavigate: () => routerMocks.navigate
@@ -115,14 +135,30 @@ const contextFor = (
 
 const renderManager = () =>
   render(
-    <MemoryRouter initialEntries={["/workspaces"]}>
+    <MemoryRouter>
       <WorkspacesManagerPage />
     </MemoryRouter>
   )
 
+const scope = {
+  serverBase: "https://server.example",
+  principalId: "17",
+  organizationId: "3"
+}
+
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void
+  let reject!: (reason: unknown) => void
+  const promise = new Promise<T>((yes, no) => {
+    resolve = yes
+    reject = no
+  })
+  return { promise, resolve, reject }
+}
+
 describe("WorkspacesManagerPage", () => {
   beforeEach(() => {
-    vi.clearAllMocks()
+    vi.resetAllMocks()
     window.localStorage.clear()
     vi.stubGlobal("crypto", {
       randomUUID: () => "test-workspace-id"
@@ -143,12 +179,30 @@ describe("WorkspacesManagerPage", () => {
       async (_id: string, payload: Partial<WorkspaceApiResponse>) =>
         workspace(payload)
     )
+    ownedMocks.directory.mockImplementation(async () => ({
+      scope,
+      list: apiMocks.listWorkspaces,
+      getContext: apiMocks.getWorkspaceContext
+    }))
+    ownedMocks.lifecycle.mockImplementation(async (id: string) => ({
+      scope,
+      get: async () => workspace({ id }),
+      setArchived: (archived: boolean, version: number) =>
+        ownedMocks.setArchived(id, archived, version)
+    }))
+    ownedMocks.setArchived.mockImplementation(
+      async (id: string, archived: boolean, version: number) =>
+        workspace({ id, archived, version: version + 1 })
+    )
   })
 
   it("shows loading, unavailable, and server-backed empty states", async () => {
     apiMocks.listWorkspaces.mockReturnValueOnce(new Promise(() => undefined))
     const { unmount } = renderManager()
     expect(screen.getByText("Loading Workspaces")).toBeInTheDocument()
+    await waitFor(() =>
+      expect(apiMocks.listWorkspaces).toHaveBeenCalledTimes(1)
+    )
     unmount()
 
     apiMocks.listWorkspaces.mockRejectedValueOnce(new Error("offline"))
@@ -161,7 +215,9 @@ describe("WorkspacesManagerPage", () => {
 
     apiMocks.listWorkspaces.mockResolvedValueOnce({ items: [], total: 0 })
     renderManager()
-    expect(await screen.findByText("No server-backed Workspaces yet")).toBeVisible()
+    expect(
+      await screen.findByText("No server-backed Workspaces yet")
+    ).toBeVisible()
     expect(
       screen.queryByText(/local-only Research Workspace/i)
     ).not.toBeInTheDocument()
@@ -233,11 +289,16 @@ describe("WorkspacesManagerPage", () => {
     expect(screen.getByText("needs attention")).toBeVisible()
     expect(apiMocks.getWorkspaceContext).toHaveBeenCalledWith("ws-project")
 
-    await user.type(screen.getByRole("searchbox", { name: "Search Workspaces" }), "policy")
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search Workspaces" }),
+      "policy"
+    )
     expect(screen.queryByText("Climate Review")).not.toBeInTheDocument()
     expect(screen.getByText("Policy Website")).toBeVisible()
 
-    await user.clear(screen.getByRole("searchbox", { name: "Search Workspaces" }))
+    await user.clear(
+      screen.getByRole("searchbox", { name: "Search Workspaces" })
+    )
     await user.click(screen.getByRole("button", { name: "Project" }))
     expect(screen.queryByText("Climate Review")).not.toBeInTheDocument()
     expect(screen.getByText("Policy Website")).toBeVisible()
@@ -263,14 +324,19 @@ describe("WorkspacesManagerPage", () => {
     await user.click(screen.getByRole("button", { name: "Create Workspace" }))
 
     await waitFor(() => {
-      expect(apiMocks.upsertWorkspace).toHaveBeenCalledWith("test-workspace-id", {
-        name: "Migration Notes",
-        study_materials_policy: "workspace",
-        workspace_profile: "research"
-      })
+      expect(apiMocks.upsertWorkspace).toHaveBeenCalledWith(
+        "test-workspace-id",
+        {
+          name: "Migration Notes",
+          study_materials_policy: "workspace",
+          workspace_profile: "research"
+        }
+      )
     })
 
-    await user.click(screen.getByRole("button", { name: "New Project Workspace" }))
+    await user.click(
+      screen.getByRole("button", { name: "New Project Workspace" })
+    )
     await user.type(screen.getByLabelText("Workspace name"), "Build Site")
     await user.click(screen.getByRole("button", { name: "Create Workspace" }))
 
@@ -410,7 +476,9 @@ describe("WorkspacesManagerPage", () => {
     expect(screen.queryByText(/ACP launch/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/root setup/i)).not.toBeInTheDocument()
 
-    await user.click(within(row).getByRole("button", { name: "Edit Climate Review" }))
+    await user.click(
+      within(row).getByRole("button", { name: "Edit Climate Review" })
+    )
     await user.clear(screen.getByLabelText("Workspace name"))
     await user.type(screen.getByLabelText("Workspace name"), "Climate Evidence")
     await user.click(screen.getByRole("button", { name: "Save metadata" }))
@@ -422,30 +490,809 @@ describe("WorkspacesManagerPage", () => {
       })
     })
 
-    await user.click(within(row).getByRole("button", { name: "Open Climate Evidence" }))
+    await user.click(
+      within(row).getByRole("button", { name: "Open Climate Evidence" })
+    )
     expect(routerMocks.navigate).toHaveBeenCalledWith(
       "/research-workspace?source_workspace_id=ws-research"
     )
 
-    await user.click(within(row).getByRole("button", { name: "Archive Climate Evidence" }))
+    await user.click(
+      within(row).getByRole("button", { name: "Archive Climate Evidence" })
+    )
     await waitFor(() => {
-      expect(apiMocks.patchWorkspace).toHaveBeenCalledWith("ws-research", {
-        archived: true,
-        version: 4
-      })
+      expect(ownedMocks.setArchived).toHaveBeenCalledWith(
+        "ws-research",
+        true,
+        4
+      )
     })
 
     await user.click(screen.getByRole("checkbox", { name: "Show archived" }))
     const archivedRow = screen.getByRole("row", { name: /Archived Notes/i })
     await user.click(
-      within(archivedRow).getByRole("button", { name: "Unarchive Archived Notes" })
+      within(archivedRow).getByRole("button", {
+        name: "Unarchive Archived Notes"
+      })
     )
 
     await waitFor(() => {
-      expect(apiMocks.patchWorkspace).toHaveBeenCalledWith("ws-archive", {
-        archived: false,
-        version: 2
-      })
+      expect(ownedMocks.setArchived).toHaveBeenCalledWith(
+        "ws-archive",
+        false,
+        2
+      )
     })
+  })
+
+  it("reads the directory and details only through the captured account context", async () => {
+    apiMocks.listWorkspaces.mockRejectedValue(
+      new Error("mutable directory used")
+    )
+    apiMocks.getWorkspaceContext.mockRejectedValue(
+      new Error("mutable context used")
+    )
+    ownedMocks.directory.mockResolvedValue({
+      scope,
+      list: async () => ({ items: [workspace()] }),
+      getContext: async () => contextFor(workspace())
+    })
+    renderManager()
+    expect(await screen.findByText("Climate Review")).toBeVisible()
+    expect(apiMocks.listWorkspaces).not.toHaveBeenCalled()
+    expect(apiMocks.getWorkspaceContext).not.toHaveBeenCalled()
+    await userEvent.click(
+      screen.getByRole("button", { name: "Archive Climate Review" })
+    )
+    expect(ownedMocks.lifecycle).toHaveBeenCalledWith(
+      "ws-research",
+      scope,
+      expect.any(AbortSignal)
+    )
+    await waitFor(() =>
+      expect(screen.queryByText("Climate Review")).not.toBeInTheDocument()
+    )
+    expect(apiMocks.patchWorkspace).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    "tldw:config-updated",
+    "tldw:auth-principal-changed",
+    "focus",
+    "pageshow"
+  ])(
+    "hides account rows and open edits on %s, clearing them for a different verified account",
+    async (eventName) => {
+      apiMocks.listWorkspaces.mockResolvedValue({ items: [workspace()] })
+      renderManager()
+      await screen.findByText("Climate Review")
+      await userEvent.click(
+        screen.getByRole("button", { name: "Edit Climate Review" })
+      )
+      expect(ownedMocks.directory).toHaveBeenCalledTimes(1)
+      const oldSignal = ownedMocks.directory.mock.calls[0][0] as AbortSignal
+      const next = deferred<{ items: WorkspaceApiResponse[] }>()
+      apiMocks.listWorkspaces.mockReturnValueOnce(next.promise)
+      ownedMocks.directory.mockResolvedValueOnce({
+        scope: { ...scope, principalId: "18" },
+        list: apiMocks.listWorkspaces,
+        getContext: apiMocks.getWorkspaceContext
+      })
+      act(() => window.dispatchEvent(new Event(eventName)))
+      expect(oldSignal.aborted).toBe(true)
+      expect(
+        screen.queryByRole("row", { name: /Climate Review/ })
+      ).not.toBeInTheDocument()
+      expect(
+        screen.queryByRole("textbox", { name: "Workspace name" })
+      ).not.toBeInTheDocument()
+      expect(
+        screen.getByRole("button", { name: "New Research Workspace" })
+      ).toBeDisabled()
+      await act(async () =>
+        next.resolve({ items: [workspace({ name: "Other account" })] })
+      )
+      expect(await screen.findByText("Other account")).toBeVisible()
+      expect(screen.queryByLabelText("Workspace name")).not.toBeInTheDocument()
+    }
+  )
+
+  it.each(["list", "context"])(
+    "discards a late %s response after a new directory load",
+    async (stage) => {
+      const pending = deferred<
+        { items: WorkspaceApiResponse[] } | WorkspaceContextResponse
+      >()
+      apiMocks.listWorkspaces.mockResolvedValue({ items: [workspace()] })
+      if (stage === "list")
+        apiMocks.listWorkspaces.mockReturnValueOnce(pending.promise)
+      else apiMocks.getWorkspaceContext.mockReturnValueOnce(pending.promise)
+      renderManager()
+      await waitFor(() =>
+        expect(
+          stage === "list"
+            ? apiMocks.listWorkspaces
+            : apiMocks.getWorkspaceContext
+        ).toHaveBeenCalled()
+      )
+      apiMocks.listWorkspaces.mockResolvedValue({
+        items: [workspace({ name: "New account" })]
+      })
+      act(() => window.dispatchEvent(new Event("tldw:config-updated")))
+      expect(await screen.findByText("New account")).toBeVisible()
+      await act(async () =>
+        pending.resolve(
+          stage === "list" ? { items: [workspace()] } : contextFor(workspace())
+        )
+      )
+      expect(screen.queryByText("Climate Review")).not.toBeInTheDocument()
+      expect(screen.getByText("New account")).toBeVisible()
+    }
+  )
+
+  it("denies logout without starting an unauthenticated directory fallback", async () => {
+    apiMocks.listWorkspaces.mockResolvedValue({ items: [workspace()] })
+    renderManager()
+    await screen.findByText("Climate Review")
+    act(() =>
+      window.dispatchEvent(
+        new CustomEvent("tldw:auth-principal-changed", {
+          detail: { kind: "logout" }
+        })
+      )
+    )
+    expect(screen.queryByText("Climate Review")).not.toBeInTheDocument()
+    expect(screen.getByRole("alert")).toBeVisible()
+    expect(ownedMocks.directory).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([401, 403, 412])(
+    "does not expose fallback rows when context rejects the account with %s",
+    async (status) => {
+      apiMocks.listWorkspaces.mockResolvedValue({ items: [workspace()] })
+      apiMocks.getWorkspaceContext.mockRejectedValue({ status })
+      renderManager()
+      expect(
+        await screen.findByText("Workspaces are unavailable")
+      ).toBeVisible()
+      expect(screen.queryByText("Climate Review")).not.toBeInTheDocument()
+    }
+  )
+
+  it("prevents synchronous duplicate archive requests and retains the canonical row while pending", async () => {
+    apiMocks.listWorkspaces.mockResolvedValue({ items: [workspace()] })
+    const pending = deferred<WorkspaceApiResponse>()
+    ownedMocks.setArchived.mockReturnValueOnce(pending.promise)
+    renderManager()
+    const archive = await screen.findByRole("button", {
+      name: "Archive Climate Review"
+    })
+    act(() => {
+      fireEvent.click(archive)
+      fireEvent.click(archive)
+    })
+    await waitFor(() => expect(ownedMocks.setArchived).toHaveBeenCalledTimes(1))
+    expect(screen.getByText("Climate Review")).toBeVisible()
+    await act(async () =>
+      pending.resolve(workspace({ archived: true, version: 5 }))
+    )
+    expect(screen.queryByText("Climate Review")).not.toBeInTheDocument()
+  })
+
+  it.each([409, 500])(
+    "requires explicit refresh and a fresh restore action after status %s",
+    async (status) => {
+      apiMocks.listWorkspaces.mockResolvedValue({
+        items: [workspace({ archived: true })]
+      })
+      ownedMocks.setArchived.mockRejectedValueOnce(
+        Object.assign(new Error("write failed"), { status })
+      )
+      renderManager()
+      await screen.findByText(/Showing/)
+      await userEvent.click(
+        screen.getByRole("checkbox", { name: "Show archived" })
+      )
+      await userEvent.click(
+        screen.getByRole("button", { name: "Unarchive Climate Review" })
+      )
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        /refresh.*review/i
+      )
+      expect(
+        screen.getByRole("button", { name: "Unarchive Climate Review" })
+      ).toBeVisible()
+      await userEvent.click(
+        screen.getByRole("button", { name: "Unarchive Climate Review" })
+      )
+      expect(ownedMocks.setArchived).toHaveBeenCalledTimes(1)
+      apiMocks.listWorkspaces.mockResolvedValue({
+        items: [workspace({ archived: true, version: 9 })]
+      })
+      await userEvent.click(
+        screen.getByRole("button", { name: "Refresh and review" })
+      )
+      await screen.findByRole("button", { name: "Unarchive Climate Review" })
+      expect(ownedMocks.setArchived).toHaveBeenCalledTimes(1)
+      await userEvent.click(
+        screen.getByRole("button", { name: "Unarchive Climate Review" })
+      )
+      await waitFor(() =>
+        expect(ownedMocks.setArchived).toHaveBeenLastCalledWith(
+          "ws-research",
+          false,
+          9
+        )
+      )
+      expect(
+        await screen.findByRole("button", { name: "Archive Climate Review" })
+      ).toBeVisible()
+    }
+  )
+
+  it.each(["success", "failure"])(
+    "discards a late lifecycle %s after switching accounts",
+    async (result) => {
+      apiMocks.listWorkspaces.mockResolvedValue({ items: [workspace()] })
+      const pending = deferred<WorkspaceApiResponse>()
+      ownedMocks.setArchived.mockReturnValueOnce(pending.promise)
+      renderManager()
+      await userEvent.click(
+        await screen.findByRole("button", { name: "Archive Climate Review" })
+      )
+      expect(ownedMocks.lifecycle).toHaveBeenCalledTimes(1)
+      const signal = ownedMocks.lifecycle.mock.calls[0][2] as AbortSignal
+      apiMocks.listWorkspaces.mockResolvedValue({
+        items: [workspace({ name: "New account" })]
+      })
+      ownedMocks.directory.mockResolvedValueOnce({
+        scope: { ...scope, principalId: "18" },
+        list: apiMocks.listWorkspaces,
+        getContext: apiMocks.getWorkspaceContext
+      })
+      act(() => window.dispatchEvent(new Event("tldw:auth-principal-changed")))
+      expect(signal.aborted).toBe(true)
+      await screen.findByText("New account")
+      await act(async () =>
+        result === "success"
+          ? pending.resolve(workspace({ archived: true, version: 5 }))
+          : pending.reject(new Error("old account failed"))
+      )
+      expect(screen.getByText("New account")).toBeVisible()
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+    }
+  )
+
+  it("aborts directory and lifecycle requests on unmount", async () => {
+    apiMocks.listWorkspaces.mockResolvedValue({ items: [workspace()] })
+    ownedMocks.setArchived.mockReturnValue(new Promise(() => undefined))
+    const { unmount } = renderManager()
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Archive Climate Review" })
+    )
+    expect(ownedMocks.lifecycle).toHaveBeenCalledTimes(1)
+    const directorySignal = ownedMocks.directory.mock.calls[0][0] as AbortSignal
+    const lifecycleSignal = ownedMocks.lifecycle.mock.calls[0][2] as AbortSignal
+    unmount()
+    expect(directorySignal.aborted).toBe(true)
+    expect(lifecycleSignal.aborted).toBe(true)
+  })
+
+  it.each([
+    "Archive Climate Review",
+    "Edit Climate Review",
+    "Open Climate Review",
+    "New Research Workspace"
+  ])(
+    "makes the old %s action inert before the invalidated render commits",
+    async (name) => {
+      apiMocks.listWorkspaces.mockResolvedValue({ items: [workspace()] })
+      renderManager()
+      await screen.findByText("Climate Review")
+      const button = screen.getByRole("button", { name })
+      apiMocks.listWorkspaces.mockResolvedValue({
+        items: [workspace({ name: "New account" })]
+      })
+      act(() => {
+        window.dispatchEvent(new Event("tldw:config-updated"))
+        fireEvent.click(button)
+      })
+      await screen.findByText("New account")
+      expect(ownedMocks.lifecycle).not.toHaveBeenCalled()
+      expect(routerMocks.navigate).not.toHaveBeenCalled()
+      expect(screen.queryByLabelText("Workspace name")).not.toBeInTheDocument()
+    }
+  )
+
+  it.each(["create", "rename"])(
+    "rejects stale %s dialog submission before starting a request",
+    async (kind) => {
+      apiMocks.listWorkspaces.mockResolvedValue({ items: [workspace()] })
+      renderManager()
+      await screen.findByText("Climate Review")
+      await userEvent.click(
+        screen.getByRole("button", {
+          name:
+            kind === "create" ? "New Research Workspace" : "Edit Climate Review"
+        })
+      )
+      await userEvent.clear(screen.getByLabelText("Workspace name"))
+      await userEvent.type(screen.getByLabelText("Workspace name"), "Old draft")
+      const submit = screen.getByRole("button", {
+        name: kind === "create" ? "Create Workspace" : "Save metadata"
+      })
+      ownedMocks.directory.mockResolvedValueOnce({
+        scope: { ...scope, principalId: "18" },
+        list: apiMocks.listWorkspaces,
+        getContext: apiMocks.getWorkspaceContext
+      })
+      act(() => {
+        window.dispatchEvent(new Event("tldw:config-updated"))
+        fireEvent.click(submit)
+      })
+      await screen.findByText("Climate Review")
+      expect(apiMocks.upsertWorkspace).not.toHaveBeenCalled()
+      expect(apiMocks.patchWorkspace).not.toHaveBeenCalled()
+      expect(screen.queryByLabelText("Workspace name")).not.toBeInTheDocument()
+    }
+  )
+
+  it.each(["create", "rename", "project"])(
+    "ignores a stale %s completion in the next directory",
+    async (kind) => {
+      apiMocks.listWorkspaces.mockResolvedValue({ items: [workspace()] })
+      const pending = deferred<WorkspaceApiResponse>()
+      if (kind === "create")
+        apiMocks.upsertWorkspace.mockReturnValueOnce(pending.promise)
+      else apiMocks.patchWorkspace.mockReturnValueOnce(pending.promise)
+      renderManager()
+      await screen.findByText("Climate Review")
+      if (kind === "project") {
+        await userEvent.click(
+          screen.getByRole("button", { name: "Upgrade to Project Workspace" })
+        )
+      } else {
+        await userEvent.click(
+          screen.getByRole("button", {
+            name:
+              kind === "create"
+                ? "New Research Workspace"
+                : "Edit Climate Review"
+          })
+        )
+        await userEvent.type(
+          screen.getByLabelText("Workspace name"),
+          "Old draft"
+        )
+        await userEvent.click(
+          screen.getByRole("button", {
+            name: kind === "create" ? "Create Workspace" : "Save metadata"
+          })
+        )
+      }
+      apiMocks.listWorkspaces.mockResolvedValue({
+        items: [workspace({ name: "New account" })]
+      })
+      act(() => window.dispatchEvent(new Event("tldw:config-updated")))
+      await screen.findByText("New account")
+      await act(async () =>
+        pending.resolve(workspace({ name: "Old response", version: 5 }))
+      )
+      expect(screen.getByText("New account")).toBeVisible()
+      expect(screen.queryByText("Old response")).not.toBeInTheDocument()
+    }
+  )
+
+  it("does not send an archive after lifecycle capture outlives its directory", async () => {
+    apiMocks.listWorkspaces.mockResolvedValue({ items: [workspace()] })
+    const capture = deferred<{
+      scope: typeof scope
+      get: () => Promise<WorkspaceApiResponse>
+      setArchived: typeof ownedMocks.setArchived
+    }>()
+    ownedMocks.lifecycle.mockReturnValueOnce(capture.promise)
+    renderManager()
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Archive Climate Review" })
+    )
+    act(() => window.dispatchEvent(new Event("tldw:config-updated")))
+    await screen.findByText("Climate Review")
+    await act(async () =>
+      capture.resolve({
+        scope,
+        get: async () => workspace(),
+        setArchived: ownedMocks.setArchived
+      })
+    )
+    expect(ownedMocks.setArchived).not.toHaveBeenCalled()
+  })
+
+  it.each(["pagehide", "visibilitychange"])(
+    "suspends account access on %s and reloads on restore",
+    async (eventName) => {
+      apiMocks.listWorkspaces.mockResolvedValue({ items: [workspace()] })
+      renderManager()
+      await screen.findByText("Climate Review")
+      const signal = ownedMocks.directory.mock.calls[0][0] as AbortSignal
+      const visibility = vi.spyOn(document, "visibilityState", "get")
+      visibility.mockReturnValue("hidden")
+      act(() =>
+        (eventName === "pagehide" ? window : document).dispatchEvent(
+          new Event(eventName)
+        )
+      )
+      expect(signal.aborted).toBe(true)
+      expect(
+        screen.queryByRole("row", { name: /Climate Review/ })
+      ).not.toBeInTheDocument()
+      visibility.mockReturnValue("visible")
+      act(() => window.dispatchEvent(new Event("pageshow")))
+      expect(await screen.findByText("Climate Review")).toBeVisible()
+    }
+  )
+
+  it("invalidates account access on cross-tab configuration changes", async () => {
+    apiMocks.listWorkspaces.mockResolvedValue({ items: [workspace()] })
+    renderManager()
+    await screen.findByText("Climate Review")
+    act(() =>
+      window.dispatchEvent(new StorageEvent("storage", { key: "tldwConfig" }))
+    )
+    expect(
+      screen.queryByRole("row", { name: /Climate Review/ })
+    ).not.toBeInTheDocument()
+    await screen.findByText("Climate Review")
+    expect(ownedMocks.directory).toHaveBeenCalledTimes(2)
+  })
+
+  it("does not let automatic focus refresh bypass explicit conflict review", async () => {
+    apiMocks.listWorkspaces.mockResolvedValue({ items: [workspace()] })
+    ownedMocks.setArchived.mockRejectedValueOnce({ status: 409 })
+    renderManager()
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Archive Climate Review" })
+    )
+    await screen.findByRole("alert")
+    apiMocks.listWorkspaces.mockResolvedValue({
+      items: [workspace({ version: 8 })]
+    })
+    act(() => window.dispatchEvent(new Event("focus")))
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Archive Climate Review" })
+    )
+    expect(ownedMocks.setArchived).toHaveBeenCalledTimes(1)
+    expect(
+      screen.getByRole("button", { name: "Refresh and review" })
+    ).toBeVisible()
+  })
+
+  it("requires explicit review after an in-flight write is aborted by browser suspension", async () => {
+    apiMocks.listWorkspaces.mockResolvedValue({ items: [workspace()] })
+    const pending = deferred<WorkspaceApiResponse>()
+    ownedMocks.setArchived.mockReturnValueOnce(pending.promise)
+    renderManager()
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Archive Climate Review" })
+    )
+    act(() => window.dispatchEvent(new Event("pagehide")))
+    act(() => window.dispatchEvent(new Event("pageshow")))
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Archive Climate Review" })
+    )
+    expect(ownedMocks.setArchived).toHaveBeenCalledTimes(1)
+    expect(
+      screen.getByRole("button", { name: "Refresh and review" })
+    ).toBeVisible()
+    await act(async () =>
+      pending.resolve(workspace({ archived: true, version: 5 }))
+    )
+    expect(
+      screen.getByRole("button", { name: "Archive Climate Review" })
+    ).toBeVisible()
+  })
+
+  it("keeps archive blocked after a failed explicit refresh and retries reads only", async () => {
+    apiMocks.listWorkspaces.mockResolvedValue({ items: [workspace()] })
+    ownedMocks.setArchived.mockRejectedValueOnce(
+      new Error("network disconnected")
+    )
+    renderManager()
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Archive Climate Review" })
+    )
+    await screen.findByRole("alert")
+    apiMocks.listWorkspaces.mockRejectedValueOnce(new Error("still offline"))
+    await userEvent.click(
+      screen.getByRole("button", { name: "Refresh and review" })
+    )
+    expect(await screen.findByText("Workspaces are unavailable")).toBeVisible()
+    expect(
+      screen.queryByRole("button", { name: "Archive Climate Review" })
+    ).not.toBeInTheDocument()
+    expect(ownedMocks.setArchived).toHaveBeenCalledTimes(1)
+    apiMocks.listWorkspaces.mockResolvedValue({
+      items: [workspace({ version: 7 })]
+    })
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }))
+    await screen.findByRole("button", { name: "Archive Climate Review" })
+    expect(ownedMocks.setArchived).toHaveBeenCalledTimes(1)
+    await userEvent.click(
+      screen.getByRole("button", { name: "Archive Climate Review" })
+    )
+    await waitFor(() =>
+      expect(ownedMocks.setArchived).toHaveBeenLastCalledWith(
+        "ws-research",
+        true,
+        7
+      )
+    )
+  })
+
+  it("keeps ordinary detail failures partial without falling back to mutable reads", async () => {
+    apiMocks.listWorkspaces.mockResolvedValue({ items: [workspace()] })
+    apiMocks.getWorkspaceContext.mockRejectedValueOnce(
+      new Error("details unavailable")
+    )
+    renderManager()
+    expect(await screen.findByText("Climate Review")).toBeVisible()
+    expect(
+      screen.getByText("Some Workspace details could not load.")
+    ).toBeVisible()
+  })
+
+  it("rejects directory identity failure without listing or creating through mutable APIs", async () => {
+    ownedMocks.directory.mockRejectedValueOnce({ reason: "denied" })
+    renderManager()
+    expect(await screen.findByText("Workspaces are unavailable")).toBeVisible()
+    expect(
+      screen.getByRole("button", { name: "New Research Workspace" })
+    ).toBeDisabled()
+    expect(apiMocks.listWorkspaces).not.toHaveBeenCalled()
+    expect(apiMocks.upsertWorkspace).not.toHaveBeenCalled()
+  })
+
+  it("clears account rows when lifecycle capture reports an account mismatch", async () => {
+    apiMocks.listWorkspaces.mockResolvedValue({ items: [workspace()] })
+    ownedMocks.lifecycle.mockRejectedValueOnce({ status: 412 })
+    renderManager()
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Archive Climate Review" })
+    )
+    expect(await screen.findByText("Workspaces are unavailable")).toBeVisible()
+    expect(screen.queryByText("Climate Review")).not.toBeInTheDocument()
+    expect(ownedMocks.setArchived).not.toHaveBeenCalled()
+  })
+
+  it("does not treat automatic project-root completion as explicit lifecycle review", async () => {
+    const project = workspace({ workspace_profile: "project" })
+    apiMocks.listWorkspaces.mockResolvedValue({ items: [project] })
+    apiMocks.getWorkspaceContext.mockResolvedValue(contextFor(project))
+    const pending = deferred<WorkspaceRootsResponse>()
+    apiMocks.attachWorkspacePrimaryRoot.mockReturnValueOnce(pending.promise)
+    ownedMocks.setArchived.mockRejectedValueOnce({ status: 409 })
+    renderManager()
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Host-local root" })
+    )
+    await userEvent.type(screen.getByLabelText("Root path"), "/tmp/project")
+    await userEvent.click(
+      screen.getByRole("button", { name: "Attach host-local root" })
+    )
+    await userEvent.click(
+      screen.getByRole("button", { name: "Archive Climate Review" })
+    )
+    await screen.findByRole("button", { name: "Refresh and review" })
+    await act(async () =>
+      pending.resolve({
+        workspace_id: project.id,
+        workspace_profile: "project",
+        primary_root: null,
+        roots: []
+      })
+    )
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Archive Climate Review" })
+    )
+    expect(ownedMocks.setArchived).toHaveBeenCalledTimes(1)
+    expect(
+      screen.getByRole("button", { name: "Refresh and review" })
+    ).toBeVisible()
+  })
+
+  it.each([
+    ["create", "focus"],
+    ["rename", "focus"],
+    ["root", "focus"],
+    ["create", "visibility"],
+    ["rename", "visibility"],
+    ["root", "visibility"]
+  ])(
+    "preserves the %s draft through same-account %s revalidation",
+    async (kind, trigger) => {
+      const project = workspace({ workspace_profile: "project" })
+      apiMocks.listWorkspaces.mockResolvedValue({ items: [project] })
+      apiMocks.getWorkspaceContext.mockResolvedValue(contextFor(project))
+      renderManager()
+      await screen.findByText("Climate Review")
+      await userEvent.click(
+        screen.getByRole("button", {
+          name:
+            kind === "create"
+              ? "New Research Workspace"
+              : kind === "rename"
+                ? "Edit Climate Review"
+                : "Host-local root"
+        })
+      )
+      const label = kind === "root" ? "Root path" : "Workspace name"
+      const draft =
+        kind === "root" ? "/tmp/unsaved-project" : "Unfinished research draft"
+      await userEvent.clear(screen.getByLabelText(label))
+      await userEvent.type(screen.getByLabelText(label), draft)
+      const pending = deferred<{ items: WorkspaceApiResponse[] }>()
+      apiMocks.listWorkspaces.mockReturnValueOnce(pending.promise)
+      if (trigger === "visibility") {
+        const visibility = vi.spyOn(document, "visibilityState", "get")
+        visibility.mockReturnValue("hidden")
+        act(() => document.dispatchEvent(new Event("visibilitychange")))
+        expect(
+          screen.queryByRole("textbox", { name: label })
+        ).not.toBeInTheDocument()
+        visibility.mockReturnValue("visible")
+        act(() => document.dispatchEvent(new Event("visibilitychange")))
+      } else {
+        act(() => window.dispatchEvent(new Event("focus")))
+      }
+      expect(
+        screen.queryByRole("textbox", { name: label })
+      ).not.toBeInTheDocument()
+      await act(async () => pending.resolve({ items: [project] }))
+      expect(await screen.findByRole("textbox", { name: label })).toHaveValue(
+        draft
+      )
+      expect(apiMocks.upsertWorkspace).not.toHaveBeenCalled()
+      expect(apiMocks.patchWorkspace).not.toHaveBeenCalled()
+      expect(apiMocks.attachWorkspacePrimaryRoot).not.toHaveBeenCalled()
+    }
+  )
+
+  it("preserves the selected second project after attaching its root", async () => {
+    const first = workspace({
+      id: "first-project",
+      name: "First project",
+      workspace_profile: "project"
+    })
+    const second = workspace({
+      id: "second-project",
+      name: "Second project",
+      workspace_profile: "project"
+    })
+    let attached = false
+    apiMocks.listWorkspaces.mockResolvedValue({ items: [first, second] })
+    apiMocks.getWorkspaceContext.mockImplementation(async (id: string) => {
+      const context = contextFor(id === second.id ? second : first)
+      if (id === second.id && attached) {
+        context.project_root.display_name = "Second project root"
+        context.project_root.state = "attached"
+      }
+      return context
+    })
+    apiMocks.attachWorkspacePrimaryRoot.mockImplementation(async () => {
+      attached = true
+      return {
+        workspace_id: second.id,
+        workspace_profile: "project",
+        primary_root: null,
+        roots: []
+      }
+    })
+    renderManager()
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Manage Second project" })
+    )
+    await userEvent.click(
+      screen.getByRole("button", { name: "Host-local root" })
+    )
+    await userEvent.type(
+      screen.getByLabelText("Root path"),
+      "/tmp/second-project"
+    )
+    await userEvent.click(
+      screen.getByRole("button", { name: "Attach host-local root" })
+    )
+    expect(apiMocks.attachWorkspacePrimaryRoot).toHaveBeenCalledWith(
+      "second-project",
+      expect.objectContaining({
+        absolute_root: "/tmp/second-project"
+      })
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId("workspace-root-summary")).toHaveTextContent(
+        "Second project root"
+      )
+    )
+  })
+
+  it.each([
+    ["create", { ...scope, principalId: "18" }],
+    ["rename", { ...scope, serverBase: "https://other.example" }],
+    ["root", { ...scope, organizationId: "9" }]
+  ])(
+    "discards the retained %s draft at a verified account boundary",
+    async (kind, nextScope) => {
+      const project = workspace({ workspace_profile: "project" })
+      apiMocks.listWorkspaces.mockResolvedValue({ items: [project] })
+      apiMocks.getWorkspaceContext.mockResolvedValue(contextFor(project))
+      renderManager()
+      await screen.findByText("Climate Review")
+      await userEvent.click(
+        screen.getByRole("button", {
+          name:
+            kind === "create"
+              ? "New Research Workspace"
+              : kind === "rename"
+                ? "Edit Climate Review"
+                : "Host-local root"
+        })
+      )
+      const label = kind === "root" ? "Root path" : "Workspace name"
+      await userEvent.type(screen.getByLabelText(label), "private draft")
+      ownedMocks.directory.mockResolvedValueOnce({
+        scope: nextScope,
+        list: apiMocks.listWorkspaces,
+        getContext: apiMocks.getWorkspaceContext
+      })
+      act(() => window.dispatchEvent(new Event("focus")))
+      await screen.findByRole("button", { name: "Manage Climate Review" })
+      expect(screen.queryByLabelText(label)).not.toBeInTheDocument()
+      await userEvent.click(
+        screen.getByRole("button", {
+          name:
+            kind === "create"
+              ? "New Research Workspace"
+              : kind === "rename"
+                ? "Edit Climate Review"
+                : "Host-local root"
+        })
+      )
+      expect(screen.getByLabelText(label)).toHaveValue(
+        kind === "rename" ? "Climate Review" : ""
+      )
+    }
+  )
+
+  it("does not poll a retained root panel while account revalidation is pending", async () => {
+    const project = workspace({ workspace_profile: "project" })
+    const operation = {
+      operation_id: "op-1",
+      workspace_id: project.id,
+      command: "provision_sandbox_root",
+      status: "running" as const,
+      started_at: "2026-06-04T09:00:00Z",
+      updated_at: "2026-06-04T09:00:01Z",
+      retryable: false,
+      diagnostics: {},
+      poll_href: "/api/v1/workspaces/ws-research/operations/op-1"
+    }
+    apiMocks.listWorkspaces.mockResolvedValue({ items: [project] })
+    apiMocks.getWorkspaceContext.mockResolvedValue(
+      contextFor(project, { active_operations: [operation] })
+    )
+    apiMocks.getWorkspaceOperation.mockResolvedValue(operation)
+    vi.useFakeTimers()
+    try {
+      await act(async () => {
+        renderManager()
+      })
+      expect(
+        screen.getByRole("button", { name: "Manage Climate Review" })
+      ).toBeVisible()
+      ownedMocks.directory.mockReturnValueOnce(new Promise(() => undefined))
+      act(() => window.dispatchEvent(new Event("focus")))
+      await act(async () => vi.advanceTimersByTimeAsync(800))
+      expect(apiMocks.getWorkspaceOperation).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

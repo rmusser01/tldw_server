@@ -29,6 +29,7 @@ from tldw_Server_API.app.core.DB_Management.backends.sqlite_backend import SQLit
 from tldw_Server_API.app.core.DB_Management.media_db import api as media_db_api
 from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     ConflictError,
+    DatabaseError,
     InputError,
     SchemaError,
 )
@@ -955,6 +956,52 @@ def test_operation_owned_clone_cleanup_removes_pending_values_not_canonical_keyw
         "SELECT COUNT(*) AS count FROM MediaKeywords WHERE media_id = ?",
         (ordinary_id,),
     ).fetchone()["count"] == 1
+
+
+@pytest.mark.unit
+def test_operation_owned_clone_confirmation_publishes_searchable_content(
+    media_db: MediaDatabase,
+) -> None:
+    snapshot = _operation_snapshot(content="uniquelysearchablewalkway evidence")
+    identity = {
+        "operation_id": "clone-operation-search-publication",
+        "source_identity": "workspace-source-search-publication",
+        "expected_content_hash": media_db_api.hash_media_clone_snapshot(snapshot),
+    }
+    created = media_db.insert_operation_owned_clone_media(snapshot=snapshot, **identity)
+    before, _ = media_db.search_media_db("uniquelysearchablewalkway")
+    assert created.media_id not in {int(row["id"]) for row in before}
+
+    assert media_db.confirm_operation_owned_clone_media(**identity) == 1
+
+    after, _ = media_db.search_media_db("uniquelysearchablewalkway")
+    assert created.media_id in {int(row["id"]) for row in after}
+
+
+@pytest.mark.unit
+def test_operation_owned_clone_index_failure_rolls_back_publication(
+    media_db: MediaDatabase, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    snapshot = _operation_snapshot()
+    identity = {
+        "operation_id": "clone-operation-index-failure",
+        "source_identity": "workspace-source-index-failure",
+        "expected_content_hash": media_db_api.hash_media_clone_snapshot(snapshot),
+    }
+    created = media_db.insert_operation_owned_clone_media(snapshot=snapshot, **identity)
+
+    def fail_index(*args, **kwargs):
+        raise DatabaseError("simulated index failure")
+
+    monkeypatch.setattr(media_db, "_update_fts_media", fail_index)
+    with pytest.raises(DatabaseError, match="simulated index failure"):
+        media_db.confirm_operation_owned_clone_media(**identity)
+    row = media_db.execute_query(
+        "SELECT is_trash, system_operation_id FROM Media WHERE id = ?",
+        (created.media_id,),
+    ).fetchone()
+    assert bool(row["is_trash"])
+    assert row["system_operation_id"] == identity["operation_id"]
 
 
 @pytest.mark.unit

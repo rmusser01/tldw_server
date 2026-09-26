@@ -1,7 +1,6 @@
 import type {
   WorkspaceApiResponse,
   WorkspaceAttentionState,
-  WorkspaceContextResponse,
   WorkspaceFileInventory,
   WorkspaceOperationResponse,
   WorkspaceProfile,
@@ -9,6 +8,7 @@ import type {
   WorkspaceProjectRootBackend,
   WorkspaceProjectRootState
 } from "@/services/tldw/domains/workspace-api"
+import type { OwnedWorkspaceDirectoryDetails } from "@/services/owned-workspace-opening"
 
 export type WorkspaceManagerProfile = WorkspaceProfile | "unknown"
 export type WorkspaceManagerAttention = WorkspaceAttentionState
@@ -85,7 +85,7 @@ const DEFAULT_PROJECT_ROOT: WorkspaceManagerProjectRoot = {
 
 export const normalizeWorkspaceManagerItem = (
   workspace: WorkspaceApiResponse,
-  context?: WorkspaceContextResponse | null
+  context?: OwnedWorkspaceDirectoryDetails | null
 ): WorkspaceManagerItem => {
   const profile = normalizeWorkspaceProfile(workspace.workspace_profile)
   const projectRoot = normalizeProjectRoot(context?.project_root)
@@ -120,7 +120,7 @@ const normalizeWorkspaceProfile = (
 
 const normalizeAttentionState = (
   workspace: WorkspaceApiResponse,
-  context: WorkspaceContextResponse | null | undefined,
+  context: OwnedWorkspaceDirectoryDetails | null | undefined,
   profile: WorkspaceManagerProfile
 ): WorkspaceManagerAttention => {
   if (

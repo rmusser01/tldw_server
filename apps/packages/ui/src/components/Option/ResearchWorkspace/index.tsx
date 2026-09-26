@@ -382,6 +382,7 @@ type WorkspaceNoteSearchItem = {
   content?: string
   version?: number
   keywords?: WorkspaceNoteKeywordLike[]
+  keywords_json?: string
   metadata?: {
     keywords?: WorkspaceNoteKeywordLike[]
   }
@@ -481,11 +482,21 @@ const extractNoteKeywords = (
   note: WorkspaceNoteSearchItem | null | undefined
 ): string[] => {
   if (!note) return []
+  let canonicalKeywords: unknown = []
+  if (typeof note.keywords_json === "string") {
+    try {
+      canonicalKeywords = JSON.parse(note.keywords_json)
+    } catch {
+      // Invalid keyword metadata must not prevent opening the note content.
+    }
+  }
   const raw = Array.isArray(note.metadata?.keywords)
     ? note.metadata?.keywords
     : Array.isArray(note.keywords)
       ? note.keywords
-      : []
+      : Array.isArray(canonicalKeywords)
+        ? canonicalKeywords
+        : []
 
   return normalizeNoteKeywords(
     raw
@@ -1283,6 +1294,24 @@ const ResearchWorkspaceBody: React.FC = () => {
 
   // Workspace store
   const workspaceId = useWorkspaceStore((s) => s.workspaceId)
+  const activeWorkspaceOrigin = useWorkspaceStore((s) => s.activeWorkspaceOrigin)
+  const ownedWorkspaceBundle = useWorkspaceStore((s) => s.ownedWorkspaceBundle)
+  const ownedWorkspaceAttempt = useWorkspaceStore((s) => s.ownedWorkspaceAttempt)
+  const isOwnedWorkspace = activeWorkspaceOrigin?.kind === "server-owned"
+  const workspaceViewKey = JSON.stringify([
+    workspaceId,
+    activeWorkspaceOrigin?.kind || "legacy-local",
+    isOwnedWorkspace ? activeWorkspaceOrigin.scope.serverBase : null,
+    isOwnedWorkspace ? activeWorkspaceOrigin.scope.principalId : null,
+    isOwnedWorkspace ? activeWorkspaceOrigin.scope.organizationId : null
+  ])
+  // Distinguish same-ID account changes and A -> B -> A transitions.
+  const workspaceView = React.useMemo(
+    () => ({ key: workspaceViewKey, attempt: ownedWorkspaceAttempt }),
+    [workspaceViewKey, ownedWorkspaceAttempt]
+  )
+  const currentWorkspaceViewRef = React.useRef(workspaceView)
+  currentWorkspaceViewRef.current = workspaceView
   const workspaceName = useWorkspaceStore((s) => s.workspaceName) || ""
   const activeDeepResearchReturnContext =
     isResearchWorkspaceDeepResearchReturnForWorkspace(
@@ -1343,6 +1372,14 @@ const ResearchWorkspaceBody: React.FC = () => {
   const workspaceServerReconcileSignatureRef = React.useRef<string | null>(null)
   const [serverWorkspaceIdentity, setServerWorkspaceIdentity] =
     React.useState<string | null>(null)
+  const ownedWorkspaceReady =
+    isOwnedWorkspace &&
+    storeHydrated === true &&
+    ownedWorkspaceBundle?.workspace.id === workspaceId &&
+    !ownedWorkspaceAttempt
+  const workspaceServerReady = isOwnedWorkspace
+    ? ownedWorkspaceReady
+    : workspaceId != null && serverWorkspaceIdentity === workspaceId
   const isMountedRef = React.useRef(false)
   const deepResearchBundleImportRequestSeqRef = React.useRef(0)
   const [deepResearchBundleImportState, setDeepResearchBundleImportState] =
@@ -1372,9 +1409,10 @@ const ResearchWorkspaceBody: React.FC = () => {
   } = useSourceListViewState()
   const sourceSavedViewsController = useSourceSavedViews(
     workspaceId,
-    workspaceId !== null && serverWorkspaceIdentity === workspaceId,
+    workspaceServerReady,
     sourceListViewState,
-    applySourceListViewState
+    applySourceListViewState,
+    workspaceView
   )
   const [sourceViewOverlayRequest, setSourceViewOverlayRequest] =
     React.useState<SourceViewOverlayRequest | null>(null)
@@ -1411,11 +1449,12 @@ const ResearchWorkspaceBody: React.FC = () => {
   React.useLayoutEffect(() => {
     workspaceServerReconcileRequestSeqRef.current += 1
     workspaceServerReconcileSignatureRef.current = null
+    sourceStatusFailureRef.current = {}
     setServerWorkspaceIdentity(null)
-  }, [workspaceId])
+  }, [workspaceView])
 
   React.useEffect(() => {
-    if (!isStoreHydrated || !workspaceId) return
+    if (isOwnedWorkspace || !isStoreHydrated || !workspaceId) return
 
     const canReconcileWorkspaceServer =
       typeof tldwClient.upsertWorkspace === "function" &&
@@ -1454,6 +1493,8 @@ const ResearchWorkspaceBody: React.FC = () => {
       workspaceName,
       sources: workspaceServerSourcesRef.current,
       selectedSourceIds,
+      isCurrent: () =>
+        !cancelled && currentWorkspaceViewRef.current === workspaceView,
       onWorkspaceReady: () => {
         if (
           !cancelled &&
@@ -1497,6 +1538,8 @@ const ResearchWorkspaceBody: React.FC = () => {
       workspaceServerReconcileRequestSeqRef.current += 1
     }
   }, [
+    isOwnedWorkspace,
+    workspaceView,
     isStoreHydrated,
     selectedSourceIds,
     statusGuardrailsEnabled,
@@ -1595,8 +1638,31 @@ const ResearchWorkspaceBody: React.FC = () => {
         : "full"
 
   const workspaceChatMessages = React.useMemo(
-    () => (workspaceId ? workspaceChatSessions[workspaceId]?.messages || [] : []),
-    [workspaceChatSessions, workspaceId]
+    () =>
+      !isOwnedWorkspace && workspaceId
+        ? workspaceChatSessions[workspaceId]?.messages || []
+        : [],
+    [isOwnedWorkspace, workspaceChatSessions, workspaceId]
+  )
+  const activeWorkspaceSearchNotes = React.useMemo(
+    () =>
+      isOwnedWorkspace
+        ? (ownedWorkspaceReady ? ownedWorkspaceBundle?.notes || [] : []).map(
+            (note) => ({
+              id: note.id,
+              title: note.title,
+              content: note.content,
+              keywords: extractNoteKeywords(note),
+              isDraft: false
+            })
+          )
+        : workspaceSearchNotes,
+    [
+      isOwnedWorkspace,
+      ownedWorkspaceReady,
+      ownedWorkspaceBundle,
+      workspaceSearchNotes
+    ]
   )
 
   const globalSearchResults = React.useMemo(
@@ -1606,14 +1672,14 @@ const ResearchWorkspaceBody: React.FC = () => {
         sources,
         chatMessages: workspaceChatMessages,
         currentNote,
-        workspaceNotes: workspaceSearchNotes
+        workspaceNotes: activeWorkspaceSearchNotes
       }),
     [
       currentNote,
       globalSearchQuery,
       sources,
       workspaceChatMessages,
-      workspaceSearchNotes
+      activeWorkspaceSearchNotes
     ]
   )
 
@@ -1752,7 +1818,7 @@ const ResearchWorkspaceBody: React.FC = () => {
   }, [activeWorkspaceOperations, statusGuardrailsEnabled, workspaceId])
 
   useEffect(() => {
-    if (!statusGuardrailsEnabled) {
+    if (isOwnedWorkspace || !statusGuardrailsEnabled) {
       workspaceMigrationSignatureRef.current = null
       workspaceMigrationInFlightRef.current = null
       setWorkspaceMigrationLoading(false)
@@ -1813,6 +1879,20 @@ const ResearchWorkspaceBody: React.FC = () => {
     let cancelled = false
     setWorkspaceMigrationLoading(true)
 
+    // StrictMode can reuse this promise; invalidate by view, not effect replay.
+    const guardMigrationOperation = <Args extends unknown[], Result,>(
+      operation: (...args: Args) => Result
+    ) =>
+      (...args: Args): Result => {
+        if (
+          !isMountedRef.current ||
+          currentWorkspaceViewRef.current !== workspaceView
+        ) {
+          throw new DOMException("Workspace changed during migration", "AbortError")
+        }
+        return operation(...args)
+      }
+
     const migrationPromise =
       canReuseInFlightMigration && inFlightMigration
         ? inFlightMigration.promise
@@ -1821,18 +1901,32 @@ const ResearchWorkspaceBody: React.FC = () => {
             targetWorkspaceName: workspaceName || "Research Workspace",
             discoveredLocalStorageKeys,
             discoveredIndexedDbStores,
-            readLocalStorageValue: async (key) => window.localStorage.getItem(key),
+            readLocalStorageValue: guardMigrationOperation(async (key: string) =>
+              window.localStorage.getItem(key)
+            ),
             api: {
-              createWorkspaceMigration: tldwClient.createWorkspaceMigration,
-              putWorkspaceMigrationChunk: tldwClient.putWorkspaceMigrationChunk,
-              finalizeWorkspaceMigration: tldwClient.finalizeWorkspaceMigration,
-              getWorkspaceMigration: tldwClient.getWorkspaceMigration,
-              ackWorkspaceMigrationClientDelete:
+              createWorkspaceMigration: guardMigrationOperation(
+                tldwClient.createWorkspaceMigration
+              ),
+              putWorkspaceMigrationChunk: guardMigrationOperation(
+                tldwClient.putWorkspaceMigrationChunk
+              ),
+              finalizeWorkspaceMigration: guardMigrationOperation(
+                tldwClient.finalizeWorkspaceMigration
+              ),
+              getWorkspaceMigration: guardMigrationOperation(
+                tldwClient.getWorkspaceMigration
+              ),
+              ackWorkspaceMigrationClientDelete: guardMigrationOperation(
                 tldwClient.ackWorkspaceMigrationClientDelete
+              )
             },
-            deleteLocalStorageValue: (key) => window.localStorage.removeItem(key),
-            writeLocalStorageValue: (key, value) =>
-              window.localStorage.setItem(key, value),
+            deleteLocalStorageValue: guardMigrationOperation((key: string) =>
+              window.localStorage.removeItem(key)
+            ),
+            writeLocalStorageValue: guardMigrationOperation(
+              (key: string, value: string) => window.localStorage.setItem(key, value)
+            ),
             now: () => new Date().toISOString()
           })
 
@@ -1874,6 +1968,8 @@ const ResearchWorkspaceBody: React.FC = () => {
       cancelled = true
     }
   }, [
+    isOwnedWorkspace,
+    workspaceView,
     isStoreHydrated,
     statusGuardrailsEnabled,
     workspaceId,
@@ -1899,7 +1995,7 @@ const ResearchWorkspaceBody: React.FC = () => {
     if (
       !isStoreHydrated ||
       !workspaceId ||
-      serverWorkspaceIdentity !== workspaceId
+      !workspaceServerReady
     ) {
       workspaceStatusRequestSeqRef.current += 1
       workspaceStatusInFlightRef.current = false
@@ -1993,6 +2089,7 @@ const ResearchWorkspaceBody: React.FC = () => {
     }
 
     const refreshWorkspaceStatusProjection = async () => {
+      if (currentWorkspaceViewRef.current !== workspaceView) return
       if (workspaceStatusInFlightRef.current) return
       workspaceStatusInFlightRef.current = true
       const requestSeq = ++workspaceStatusRequestSeqRef.current
@@ -2003,7 +2100,11 @@ const ResearchWorkspaceBody: React.FC = () => {
           const workspaceContext = await tldwClient.getWorkspaceContext(
             activeWorkspaceId
           )
-          if (cancelled || requestSeq !== workspaceStatusRequestSeqRef.current) {
+          if (
+            cancelled ||
+            currentWorkspaceViewRef.current !== workspaceView ||
+            requestSeq !== workspaceStatusRequestSeqRef.current
+          ) {
             return
           }
           if (workspaceContext.workspace_id === activeWorkspaceId) {
@@ -2049,7 +2150,11 @@ const ResearchWorkspaceBody: React.FC = () => {
           tldwClient.getWorkspaceSourcesStatus(activeWorkspaceId),
           tldwClient.getWorkspaceCapabilities(activeWorkspaceId)
         ])
-        if (cancelled || requestSeq !== workspaceStatusRequestSeqRef.current) {
+        if (
+          cancelled ||
+          currentWorkspaceViewRef.current !== workspaceView ||
+          requestSeq !== workspaceStatusRequestSeqRef.current
+        ) {
           return
         }
 
@@ -2085,12 +2190,20 @@ const ResearchWorkspaceBody: React.FC = () => {
           statusProjectionErrors.length > 0 ? statusProjectionErrors.join("; ") : null
         )
       } catch (error) {
-        if (cancelled || requestSeq !== workspaceStatusRequestSeqRef.current) {
+        if (
+          cancelled ||
+          currentWorkspaceViewRef.current !== workspaceView ||
+          requestSeq !== workspaceStatusRequestSeqRef.current
+        ) {
           return
         }
         setWorkspaceStatusProjectionError(describeWorkspaceStatusProjectionError(error))
       } finally {
-        if (!cancelled && requestSeq === workspaceStatusRequestSeqRef.current) {
+        if (
+          !cancelled &&
+          currentWorkspaceViewRef.current === workspaceView &&
+          requestSeq === workspaceStatusRequestSeqRef.current
+        ) {
           setWorkspaceStatusProjectionLoading(false)
           workspaceStatusInFlightRef.current = false
         }
@@ -2110,7 +2223,8 @@ const ResearchWorkspaceBody: React.FC = () => {
     }
   }, [
     isStoreHydrated,
-    serverWorkspaceIdentity,
+    workspaceServerReady,
+    workspaceView,
     setSourceStatusByMediaId,
     statusGuardrailsEnabled,
     selectedSourceIds,
@@ -2276,6 +2390,7 @@ const ResearchWorkspaceBody: React.FC = () => {
   }, [dismissOnboardingOverlay, messageApi, startTutorial, t])
 
   useEffect(() => {
+    if (isOwnedWorkspace) return
     const normalizedWorkspaceTag =
       typeof workspaceTag === "string" ? workspaceTag.trim() : ""
 
@@ -2292,7 +2407,7 @@ const ResearchWorkspaceBody: React.FC = () => {
           path: buildWorkspaceNotesSearchPath(normalizedWorkspaceTag),
           method: "GET"
         })
-        if (cancelled) return
+        if (cancelled || currentWorkspaceViewRef.current !== workspaceView) return
 
         const noteById = new Map<number, WorkspaceGlobalSearchNoteDocument>()
         for (const note of pickNotesArray(response)) {
@@ -2321,10 +2436,32 @@ const ResearchWorkspaceBody: React.FC = () => {
     return () => {
       cancelled = true
     }
-  }, [workspaceId, workspaceTag])
+  }, [isOwnedWorkspace, workspaceView, workspaceId, workspaceTag])
 
   const hydrateAndFocusNote = React.useCallback(
     async (result: WorkspaceGlobalSearchResult) => {
+      if (
+        !isMountedRef.current ||
+        currentWorkspaceViewRef.current !== workspaceView
+      ) return
+      if (isOwnedWorkspace) {
+        if (!ownedWorkspaceReady) return
+        if (result.noteId != null && currentNote?.id !== result.noteId) {
+          const note = ownedWorkspaceBundle?.notes.find(
+            (entry) => entry.id === result.noteId
+          )
+          if (!note) return
+          loadNote({
+            id: note.id,
+            title: note.title,
+            content: note.content,
+            keywords: extractNoteKeywords(note),
+            version: note.version
+          })
+        }
+        focusWorkspaceNote(result.noteField || "content")
+        return
+      }
       if (
         result.noteId != null &&
         Number.isFinite(result.noteId) &&
@@ -2335,6 +2472,10 @@ const ResearchWorkspaceBody: React.FC = () => {
             path: buildWorkspaceNotePath(result.noteId),
             method: "GET"
           })
+          if (
+            !isMountedRef.current ||
+            currentWorkspaceViewRef.current !== workspaceView
+          ) return
           loadNote({
             id: result.noteId,
             title: note.title || "",
@@ -2350,9 +2491,22 @@ const ResearchWorkspaceBody: React.FC = () => {
         }
       }
 
-      focusWorkspaceNote(result.noteField || "content")
+      if (
+        isMountedRef.current &&
+        currentWorkspaceViewRef.current === workspaceView
+      ) {
+        focusWorkspaceNote(result.noteField || "content")
+      }
     },
-    [currentNote?.id, focusWorkspaceNote, loadNote]
+    [
+      currentNote?.id,
+      focusWorkspaceNote,
+      loadNote,
+      isOwnedWorkspace,
+      ownedWorkspaceReady,
+      ownedWorkspaceBundle,
+      workspaceView
+    ]
   )
 
   const focusWorkspacePane = React.useCallback(
@@ -2753,12 +2907,16 @@ const ResearchWorkspaceBody: React.FC = () => {
   const currentWorkspaceIdRef = React.useRef(workspaceId)
   currentWorkspaceIdRef.current = workspaceId
   useEffect(() => {
-    if (!isStoreHydrated) return
+    if (isOwnedWorkspace || !isStoreHydrated) return
     if (workspaceId) return
 
     let cancelled = false
     void Promise.resolve().then(() => {
-      if (!cancelled && !currentWorkspaceIdRef.current) {
+      if (
+        !cancelled &&
+        currentWorkspaceViewRef.current === workspaceView &&
+        !currentWorkspaceIdRef.current
+      ) {
         const initialStorageKeys =
           initialWorkspaceMigrationLocalStorageKeysRef.current ?? []
         const hadWorkspaceContentBeforeInitialization = initialStorageKeys.some(
@@ -2778,7 +2936,7 @@ const ResearchWorkspaceBody: React.FC = () => {
     return () => {
       cancelled = true
     }
-  }, [isStoreHydrated, workspaceId])
+  }, [isOwnedWorkspace, workspaceView, isStoreHydrated, workspaceId])
 
   useEffect(() => {
     if (!statusGuardrailsEnabled) return
@@ -2842,13 +3000,17 @@ const ResearchWorkspaceBody: React.FC = () => {
   ])
 
   useEffect(() => {
-    if (!workspaceId) return
+    if (isOwnedWorkspace || !workspaceId) return
 
     let isActive = true
 
     const applyPrefill = async () => {
       const payload = await consumeResearchWorkspacePrefill()
-      if (!payload || !isActive) return
+      if (
+        !payload ||
+        !isActive ||
+        currentWorkspaceViewRef.current !== workspaceView
+      ) return
       if (payload.kind !== "knowledge_qa_thread") return
 
       const sourceCandidates = payload.sources
@@ -2894,7 +3056,14 @@ const ResearchWorkspaceBody: React.FC = () => {
     return () => {
       isActive = false
     }
-  }, [addSources, captureToCurrentNote, setSelectedSourceIds, workspaceId])
+  }, [
+    addSources,
+    captureToCurrentNote,
+    setSelectedSourceIds,
+    workspaceId,
+    isOwnedWorkspace,
+    workspaceView
+  ])
 
   useEffect(() => {
     if (!isStoreHydrated) return
@@ -2929,6 +3098,19 @@ const ResearchWorkspaceBody: React.FC = () => {
     if (typeof window === "undefined") return
 
     const handleKeyboardShortcut = (event: KeyboardEvent) => {
+      // The recovery modal must retain focus and the unsaved owned activation.
+      if (
+        isOwnedWorkspace &&
+        Array.from(
+          document.querySelectorAll<HTMLElement>(
+            "[data-workspace-blocking-recovery]"
+          )
+        ).some(
+          (element) => element.dataset.workspaceBlockingRecovery === workspaceId
+        )
+      )
+        return
+
       const key = event.key.toLowerCase()
       const hasPrimaryModifier = event.metaKey || event.ctrlKey
       const editableTarget = isEditableKeyboardTarget(event.target)
@@ -3044,6 +3226,8 @@ const ResearchWorkspaceBody: React.FC = () => {
     focusNewNoteTitle,
     focusWorkspaceNote,
     focusWorkspacePane,
+    isOwnedWorkspace,
+    workspaceId,
     openGlobalSearch,
     startNewNoteWithUndo,
     t
@@ -3176,6 +3360,8 @@ const ResearchWorkspaceBody: React.FC = () => {
   }, [workspaceId])
 
   useEffect(() => {
+    // Owned workspaces use the canonical status projection, even when degraded.
+    if (isOwnedWorkspace) return
     if (!statusGuardrailsEnabled) return
     if (!isStoreHydrated) return
     if (processingMediaIds.length === 0) return
@@ -3183,6 +3369,7 @@ const ResearchWorkspaceBody: React.FC = () => {
     let cancelled = false
 
     const pollStatuses = async () => {
+      if (currentWorkspaceViewRef.current !== workspaceView) return
       void trackResearchWorkspaceTelemetry({
         type: "source_status_polled",
         workspace_id: workspaceId || null,
@@ -3206,7 +3393,7 @@ const ResearchWorkspaceBody: React.FC = () => {
               include_version_content: false,
               suppressBackendUnavailableEvent: true
             })
-            if (cancelled) return
+            if (cancelled || currentWorkspaceViewRef.current !== workspaceView) return
 
             if (isMediaLikelyReadyForRag(detail)) {
               const projectedSourceSnapshot =
@@ -3233,7 +3420,7 @@ const ResearchWorkspaceBody: React.FC = () => {
               })
             }
           } catch (error) {
-            if (cancelled) return
+            if (cancelled || currentWorkspaceViewRef.current !== workspaceView) return
 
             const nextFailureCount =
               (sourceStatusFailureRef.current[mediaId] || 0) + 1
@@ -3259,6 +3446,8 @@ const ResearchWorkspaceBody: React.FC = () => {
       window.clearInterval(timer)
     }
   }, [
+    isOwnedWorkspace,
+    workspaceView,
     isStoreHydrated,
     processingMediaIds,
     setSourceStatusByMediaId,

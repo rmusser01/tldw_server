@@ -108,6 +108,431 @@ describe("useSourceSavedViews", () => {
     api.listWorkspaceSourceViews.mockResolvedValue({ items: [] });
   });
 
+  const scopeA = {
+    server: "https://one.test",
+    principal: "A",
+    organization: "one",
+  };
+  const transitions = [
+    {
+      name: "principal",
+      operationScope: { ...scopeA, principal: "B" },
+      workspaceExists: true,
+    },
+    {
+      name: "server",
+      operationScope: { ...scopeA, server: "https://two.test" },
+      workspaceExists: true,
+    },
+    {
+      name: "organization",
+      operationScope: { ...scopeA, organization: "two" },
+      workspaceExists: true,
+    },
+    { name: "availability", operationScope: scopeA, workspaceExists: false },
+  ];
+  type ScopedProps = { operationScope: unknown; workspaceExists: boolean };
+  const setupScoped = (onApply = vi.fn()) =>
+    renderHook(
+      ({ operationScope, workspaceExists }: ScopedProps) =>
+        useSourceSavedViews(
+          "ws-a",
+          workspaceExists,
+          localState(),
+          onApply,
+          operationScope,
+        ),
+      {
+        initialProps: {
+          operationScope: scopeA,
+          workspaceExists: true,
+        } as ScopedProps,
+      },
+    );
+
+  it.each(transitions)(
+    "hides settled state and invalidates old handlers on $name change",
+    async (next) => {
+      api.listWorkspaceSourceViews.mockResolvedValueOnce({
+        items: [validView()],
+      });
+      const onApply = vi.fn();
+      const { result, rerender } = setupScoped(onApply);
+      await waitFor(() => expect(result.current.views).toHaveLength(1));
+      act(() => result.current.applyView(validView()));
+      const previous = result.current;
+      onApply.mockClear();
+      rerender(next);
+      await act(async () => {});
+      expect(result.current.views).toEqual([]);
+      expect(result.current.activeViewId).toBeNull();
+      expect(result.current.activeSnapshot).toBeNull();
+      expect(result.current.generation).toBe(1);
+      const listCount = api.listWorkspaceSourceViews.mock.calls.length;
+      await act(async () => {
+        previous.applyView(validView());
+        await previous.createView("Old create");
+        await previous.replaceView(validView());
+        await previous.resetView(validView());
+        await previous.deleteView(validView());
+        await previous.retry();
+      });
+      expect(onApply).not.toHaveBeenCalled();
+      expect(api.createWorkspaceSourceView).not.toHaveBeenCalled();
+      expect(api.updateWorkspaceSourceView).not.toHaveBeenCalled();
+      expect(api.deleteWorkspaceSourceView).not.toHaveBeenCalled();
+      expect(api.listWorkspaceSourceViews).toHaveBeenCalledTimes(listCount);
+      expect(
+        api.listWorkspaceSourceViews.mock.calls.every(([id]) => id === "ws-a"),
+      ).toBe(true);
+    },
+  );
+
+  it.each(transitions)(
+    "rejects a pending list across $name change",
+    async (next) => {
+      const oldList = deferred<{ items: ReturnType<typeof validView>[] }>();
+      api.listWorkspaceSourceViews.mockReturnValueOnce(oldList.promise);
+      const { result, rerender } = setupScoped();
+      rerender(next);
+      await act(async () =>
+        oldList.resolve({ items: [validView({ name: "Old private view" })] }),
+      );
+      expect(result.current.views).toEqual([]);
+      expect(result.current.listError).toBeNull();
+      expect(result.current.available).toBe(next.workspaceExists);
+    },
+  );
+
+  it.each(["create", "replace", "reset", "delete"] as const)(
+    "rejects late %s completion on scope and availability changes",
+    async (kind) => {
+      for (const next of [transitions[0], transitions[3]]) {
+        const pending = deferred<ReturnType<typeof validView>>();
+        api.createWorkspaceSourceView.mockReturnValue(pending.promise);
+        api.updateWorkspaceSourceView.mockReturnValue(pending.promise);
+        api.deleteWorkspaceSourceView.mockReturnValue(pending.promise);
+        api.listWorkspaceSourceViews.mockResolvedValue({ items: [] });
+        const onApply = vi.fn();
+        const { result, rerender, unmount } = setupScoped(onApply);
+        await act(async () => {});
+        let request!: Promise<void>;
+        act(() => {
+          if (kind === "create")
+            request = result.current.createView("Old private view");
+          else if (kind === "replace")
+            request = result.current.replaceView(validView());
+          else if (kind === "reset")
+            request = result.current.resetView(validView());
+          else request = result.current.deleteView(validView());
+        });
+        rerender(next);
+        await act(async () => {
+          pending.resolve(validView({ name: "Old private view" }));
+          await request;
+        });
+        expect(result.current.views).toEqual([]);
+        expect(result.current.activeViewId).toBeNull();
+        expect(result.current.mutation).toBeNull();
+        expect(result.current.announcement).toBeNull();
+        expect(onApply).not.toHaveBeenCalled();
+        unmount();
+      }
+    },
+  );
+
+  it.each(transitions)(
+    "invalidates pending retries and their handlers on $name change",
+    async (next) => {
+      api.listWorkspaceSourceViews.mockResolvedValue({ items: [validView()] });
+      api.updateWorkspaceSourceView.mockRejectedValue(new Error("Old failure"));
+      const { result, rerender } = setupScoped();
+      await waitFor(() => expect(result.current.views).toHaveLength(1));
+      await act(async () => result.current.replaceView(validView()));
+      expect(result.current.canRetryMutation).toBe(true);
+      const previous = result.current;
+      const pending = deferred<ReturnType<typeof validView>>();
+      api.updateWorkspaceSourceView.mockReturnValue(pending.promise);
+      let retry!: Promise<void>;
+      act(() => {
+        retry = result.current.retryMutation();
+      });
+      api.listWorkspaceSourceViews.mockResolvedValue({ items: [] });
+      rerender(next);
+      await act(async () => {
+        pending.reject(new Error("Late private failure"));
+        await retry;
+        await previous.retryMutation();
+        await previous.retryVersionConflict();
+        await previous.confirmReplace();
+        previous.dismissMutationFailure();
+        previous.dismissDuplicateConflict();
+      });
+      expect(api.updateWorkspaceSourceView).toHaveBeenCalledTimes(2);
+      expect(result.current.mutationError).toBeNull();
+      expect(result.current.versionConflict).toBeNull();
+      expect(result.current.canRetryMutation).toBe(false);
+    },
+  );
+
+  it("old retry handlers cannot operate on a new scope's retry records", async () => {
+    api.updateWorkspaceSourceView.mockRejectedValue({
+      status: 409,
+      details: {
+        detail: {
+          code: "source_view_version_conflict",
+          view_id: "view-1",
+          current_version: 5,
+        },
+      },
+    });
+    api.createWorkspaceSourceView.mockRejectedValue(new Error("Failed create"));
+    const { result, rerender } = setupScoped();
+    await act(async () => {});
+    const previous = result.current;
+    rerender(transitions[0]);
+    await act(async () => result.current.replaceView(validView()));
+    expect(result.current.canRetryVersion).toBe(true);
+    await act(async () => previous.retryVersionConflict());
+    expect(api.updateWorkspaceSourceView).toHaveBeenCalledTimes(1);
+    await act(async () => result.current.createView("New scope draft"));
+    expect(result.current.canRetryMutation).toBe(true);
+    await act(async () => {
+      await previous.retryMutation();
+      previous.dismissMutationFailure();
+    });
+    expect(api.createWorkspaceSourceView).toHaveBeenCalledTimes(1);
+    expect(result.current.canRetryMutation).toBe(true);
+  });
+
+  it.each(["scope", "availability"])(
+    "rejects old results after %s returns to its original value",
+    async (kind) => {
+      const pending = deferred<{ items: ReturnType<typeof validView>[] }>();
+      api.listWorkspaceSourceViews.mockReturnValueOnce(pending.promise);
+      const { result, rerender } = setupScoped();
+      const previous = result.current;
+      rerender(kind === "scope" ? transitions[0] : transitions[3]);
+      api.listWorkspaceSourceViews.mockResolvedValue({
+        items: [validView({ id: "fresh" })],
+      });
+      rerender({ operationScope: scopeA, workspaceExists: true });
+      await waitFor(() => expect(result.current.views[0]?.id).toBe("fresh"));
+      const calls = api.listWorkspaceSourceViews.mock.calls.length;
+      await act(async () => {
+        pending.resolve({ items: [validView({ id: "old" })] });
+        await previous.retry();
+      });
+      expect(result.current.views[0]?.id).toBe("fresh");
+      expect(result.current.generation).toBe(2);
+      expect(api.listWorkspaceSourceViews).toHaveBeenCalledTimes(calls);
+    },
+  );
+
+  it.each(["scope", "availability"])(
+    "blocks incoming and retained handlers before parent layout commits %s",
+    async (kind) => {
+      type Controller = ReturnType<typeof useSourceSavedViews>;
+      let latest!: Controller;
+      let previous!: Controller;
+      const pendingSnapshots: Controller[] = [];
+      const onApply = vi.fn();
+      const Probe = ({
+        controller,
+        changed,
+      }: {
+        controller: Controller;
+        changed: boolean;
+      }) => {
+        const probed = React.useRef(false);
+        React.useLayoutEffect(() => {
+          if (!changed || probed.current) return;
+          probed.current = true;
+          pendingSnapshots.push(controller);
+          for (const candidate of [controller, previous]) {
+            candidate.applyView(validView());
+            void candidate.createView("Before layout");
+            void candidate.retryMutation();
+            void candidate.retryVersionConflict();
+          }
+        }, [changed, controller]);
+        return null;
+      };
+      const Harness = ({ changed }: { changed: boolean }) => {
+        const controller = useSourceSavedViews(
+          "ws-a",
+          !(changed && kind === "availability"),
+          localState(),
+          onApply,
+          changed && kind === "scope" ? transitions[0].operationScope : scopeA,
+        );
+        React.useLayoutEffect(() => {
+          latest = controller;
+        }, [controller]);
+        return <Probe controller={controller} changed={changed} />;
+      };
+      api.createWorkspaceSourceView.mockRejectedValue(
+        new Error("Initial failure"),
+      );
+      const view = render(<Harness changed={false} />);
+      await act(async () => latest.createView("Prepare retry"));
+      previous = latest;
+      api.createWorkspaceSourceView.mockClear();
+      view.rerender(<Harness changed />);
+      await act(async () => {});
+      expect(pendingSnapshots[0].views).toEqual([]);
+      expect(pendingSnapshots[0].available).toBe(false);
+      expect(api.createWorkspaceSourceView).not.toHaveBeenCalled();
+      expect(onApply).not.toHaveBeenCalled();
+    },
+  );
+
+  it("preserves state and avoids reloading when the opaque scope identity is stable", async () => {
+    api.listWorkspaceSourceViews.mockResolvedValue({ items: [validView()] });
+    const { result, rerender } = setupScoped();
+    await waitFor(() => expect(result.current.views).toHaveLength(1));
+    act(() => result.current.applyView(validView()));
+    rerender({ operationScope: scopeA, workspaceExists: true });
+    expect(result.current.activeViewId).toBe("view-1");
+    expect(result.current.generation).toBe(0);
+    expect(api.listWorkspaceSourceViews).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([false, true])(
+    "keeps API target IDs independent of opaque operation scope (StrictMode=%s)",
+    async (strict) => {
+      api.listWorkspaceSourceViews.mockResolvedValue({ items: [] });
+      api.createWorkspaceSourceView.mockResolvedValue(validView());
+      api.updateWorkspaceSourceView.mockResolvedValue(validView());
+      api.deleteWorkspaceSourceView.mockResolvedValue(undefined);
+      const { result, rerender } = renderHook(
+        ({
+          workspaceId,
+          operationScope,
+        }: {
+          workspaceId: string;
+          operationScope: unknown;
+        }) =>
+          useSourceSavedViews(
+            workspaceId,
+            true,
+            localState(),
+            vi.fn(),
+            operationScope,
+          ),
+        {
+          initialProps: { workspaceId: "ws-a", operationScope: scopeA } as {
+            workspaceId: string;
+            operationScope: unknown;
+          },
+          wrapper: strict ? React.StrictMode : undefined,
+        },
+      );
+      await act(async () => {});
+      rerender({
+        workspaceId: "ws-a",
+        operationScope: transitions[0].operationScope,
+      });
+      await act(async () => {
+        await result.current.createView("Scoped create");
+        await result.current.replaceView(validView());
+        await result.current.deleteView(validView());
+      });
+      expect(api.createWorkspaceSourceView).toHaveBeenCalledWith(
+        "ws-a",
+        expect.any(Object),
+      );
+      expect(api.updateWorkspaceSourceView).toHaveBeenCalledWith(
+        "ws-a",
+        "view-1",
+        expect.any(Object),
+      );
+      expect(api.deleteWorkspaceSourceView).toHaveBeenCalledWith(
+        "ws-a",
+        "view-1",
+      );
+      expect(result.current.generation).toBe(1);
+      rerender({
+        workspaceId: "ws-b",
+        operationScope: transitions[0].operationScope,
+      });
+      await waitFor(() =>
+        expect(api.listWorkspaceSourceViews).toHaveBeenLastCalledWith("ws-b"),
+      );
+      expect(result.current.generation).toBe(2);
+    },
+  );
+
+  it.each(["scope", "availability"])(
+    "does not launch conflict recovery from a late PATCH after %s changes",
+    async (kind) => {
+      const patch = deferred<ReturnType<typeof validView>>();
+      api.updateWorkspaceSourceView.mockReturnValue(patch.promise);
+      const { result, rerender } = setupScoped();
+      await act(async () => {});
+      let request!: Promise<void>;
+      act(() => {
+        request = result.current.replaceView(validView());
+      });
+      rerender(kind === "scope" ? transitions[0] : transitions[3]);
+      await act(async () => {});
+      const lists = api.listWorkspaceSourceViews.mock.calls.length;
+      await act(async () => {
+        patch.reject({
+          status: 409,
+          details: {
+            detail: {
+              code: "source_view_version_conflict",
+              view_id: "view-1",
+              current_version: 5,
+            },
+          },
+        });
+        await request;
+      });
+      expect(api.listWorkspaceSourceViews).toHaveBeenCalledTimes(lists);
+      expect(result.current.versionConflict).toBeNull();
+      expect(result.current.canRetryVersion).toBe(false);
+    },
+  );
+
+  it("does not retain version retry state from a late conflict refresh", async () => {
+    const refresh = deferred<{ items: ReturnType<typeof validView>[] }>();
+    api.listWorkspaceSourceViews
+      .mockResolvedValueOnce({ items: [] })
+      .mockReturnValueOnce(refresh.promise);
+    api.updateWorkspaceSourceView.mockRejectedValue({
+      status: 409,
+      details: {
+        detail: {
+          code: "source_view_version_conflict",
+          view_id: "view-1",
+          current_version: 5,
+        },
+      },
+    });
+    const { result, rerender } = setupScoped();
+    await act(async () => {});
+    let request!: Promise<void>;
+    act(() => {
+      request = result.current.replaceView(validView());
+    });
+    await waitFor(() =>
+      expect(api.listWorkspaceSourceViews).toHaveBeenCalledTimes(2),
+    );
+    const retryVersion = result.current.retryVersionConflict;
+    rerender(transitions[0]);
+    await act(async () => {
+      refresh.resolve({ items: [validView({ name: "Old refreshed view" })] });
+      await request;
+      await retryVersion();
+    });
+    expect(result.current.views).toEqual([]);
+    expect(result.current.versionConflict).toBeNull();
+    expect(result.current.canRetryVersion).toBe(false);
+    expect(api.updateWorkspaceSourceView).toHaveBeenCalledTimes(1);
+  });
+
   it("is unavailable for null workspaces and never requests", () => {
     const { result } = setup(null);
 
@@ -165,7 +590,7 @@ describe("useSourceSavedViews", () => {
     expect(api.deleteWorkspaceSourceView).not.toHaveBeenCalled();
   });
 
-  it("does not let an abandoned workspace render invalidate committed requests", async () => {
+  it.each(["workspace", "scope", "availability"])("does not let an abandoned %s render invalidate committed requests", async (kind) => {
     const listA = deferred<{ items: ReturnType<typeof validView>[] }>();
     const never = new Promise<void>(() => undefined);
     const suspensionSpy = vi.spyOn(never, "then");
@@ -173,10 +598,11 @@ describe("useSourceSavedViews", () => {
 
     const Harness = ({ workspaceId, suspend }: { workspaceId: string; suspend: boolean }) => {
       const controller = useSourceSavedViews(
-        workspaceId,
-        true,
+        kind === "workspace" ? workspaceId : "ws-a",
+        !(kind === "availability" && suspend),
         localState(),
         vi.fn(),
+        kind === "scope" ? workspaceId : scopeA,
       );
       if (workspaceId === "ws-b" && suspend) {
         throw never;
