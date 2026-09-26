@@ -5,6 +5,7 @@ const CHAT_MACROS_BASE = "/api/v1/chat/macros"
 const encodePathPart = (value: string): string => encodeURIComponent(value)
 
 export type ChatMacroSource = "builtin" | "user"
+export type ChatMacroValidationStatus = "valid" | "invalid"
 
 export interface ChatMacroSummary {
   name: string
@@ -16,6 +17,8 @@ export interface ChatMacroSummary {
   digest: string
   builtin_version?: number | null
   schema_version: number
+  validation_status?: ChatMacroValidationStatus
+  validation_error?: string | null
 }
 
 export interface ChatMacroListResponse {
@@ -23,9 +26,46 @@ export interface ChatMacroListResponse {
   count: number
 }
 
+export interface ChatMacroStep {
+  id: string
+  type: "prompt" | "branch_prompt" | "merge" | "post_result"
+  label?: string | null
+  output?: string | null
+  consumes?: string[]
+  prompt?: string | null
+  branch_strategy?: "auto" | "chat_native" | "acp_fork" | null
+}
+
+export interface ChatMacroDefinition {
+  schema_version: 1
+  name: string
+  command: string
+  description?: string | null
+  enabled: boolean
+  args: Record<string, unknown>
+  context: Record<string, unknown>
+  execution: Record<string, unknown>
+  steps: ChatMacroStep[]
+  output_profile: string
+  permissions: { tool_calls: string[]; skills: string[] }
+}
+
+export interface ChatMacroOutputProfile {
+  format: "structured_sections" | "single_response"
+  sections: string[]
+  section_titles: Record<string, string>
+  include_branch_outputs: boolean
+}
+
+export interface ChatMacroSettings extends Record<string, unknown> {
+  disabled_builtins: string[]
+  user_macro_enabled: Record<string, boolean>
+  output_profiles: Record<string, ChatMacroOutputProfile>
+}
+
 export interface ChatMacroDetail {
   summary: ChatMacroSummary
-  definition: Record<string, unknown>
+  definition: ChatMacroDefinition
   raw: string
   supporting_files: Record<string, string>
 }
@@ -48,7 +88,7 @@ export interface ChatMacroCloneRequest {
 }
 
 export interface ChatMacroSettingsResponse {
-  settings: Record<string, unknown>
+  settings: ChatMacroSettings
 }
 
 export interface ChatMacroValidateResponse {
@@ -202,6 +242,15 @@ export const updateChatMacroSettings = (
     path: `${CHAT_MACROS_BASE}/settings`,
     method: "PUT",
     body: { settings }
+  })
+
+export const updateChatMacroOutputProfiles = (
+  profiles: Record<string, ChatMacroOutputProfile>
+): Promise<ApiSendResponse<ChatMacroSettingsResponse>> =>
+  apiSend<ChatMacroSettingsResponse>({
+    path: `${CHAT_MACROS_BASE}/settings/output-profiles`,
+    method: "PUT",
+    body: { output_profiles: profiles }
   })
 
 export const cloneChatMacro = (
