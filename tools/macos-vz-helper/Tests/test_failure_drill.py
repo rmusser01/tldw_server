@@ -333,3 +333,52 @@ def test_workspace_negative_control_requires_supported_metadata_and_execution(
         data["cleanup_errors"] = ["VM remains"]
     (packet / "guest-workspace.json").write_text(json.dumps(data))
     assert drill.negative_execution(tmp_path, "workspace")["ok"] is (fault is None)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "message,exit_code,accepted",
+    [
+        ("Failed: Missing-agent startup did not fail: completed", 1, True),
+        ("Failed: Wrong failure: boot failed", 1, False),
+        ("Failed: Missing-agent startup did not fail: completed", 2, False),
+    ],
+)
+def test_missing_agent_negative_control_requires_intended_failure(
+    drill: ModuleType, tmp_path: Path, message: str, exit_code: int, accepted: bool
+) -> None:
+    """A real successful fault run must fail exactly the rejection assertion."""
+    xml = tmp_path / "host.xml"
+    write_junit(xml, "test_vz_linux_missing_agent_then_healthy_session_reuse", "failure", message)
+    assert drill.test_result(xml, exit_code, "missing_agent", True)["ok"] is accepted
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("fault", [None, "missing", "stdout", "dispatch", "mode", "vm_id", "cleanup"])
+def test_missing_agent_negative_control_requires_actual_original_agent_execution(
+    drill: ModuleType, tmp_path: Path, fault: str | None
+) -> None:
+    """A red control requires a real completed command in its own fault VM."""
+    packet = tmp_path / "pytest/test_case0"
+    packet.mkdir(parents=True)
+    data = {
+        "runs": [{"phase": "completed", "exit_code": 0, "stdout": "missing_agent-drill-first\n"}],
+        "created_vms": [{"vm_id": "fault-vm"}],
+        "exec_vm_ids": ["fault-vm"],
+        "startup_proof": {"nonce": "fresh", "vm_id": "fault-vm", "mode": "start-original"},
+        "cleanup_errors": [],
+        "remaining_owned_vms": [],
+    }
+    if fault == "stdout":
+        data["runs"][0]["stdout"] = ""
+    elif fault == "dispatch":
+        data["exec_vm_ids"] = ["other-vm"]
+    elif fault == "mode":
+        data["startup_proof"]["mode"] = "no-agent"
+    elif fault == "vm_id":
+        data["startup_proof"]["vm_id"] = "other-vm"
+    elif fault == "cleanup":
+        data["cleanup_errors"] = ["VM remains"]
+    if fault != "missing":
+        (packet / "guest-missing-agent.json").write_text(json.dumps(data))
+    assert drill.negative_execution(tmp_path, "missing_agent")["ok"] is (fault is None)

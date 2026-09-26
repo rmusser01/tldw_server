@@ -28,6 +28,94 @@ tracker. Host reboot and launchd validation are explicit manual/operator-gated
 drills; this tracker records whether those drills were run or intentionally
 skipped for a prepared-host evidence packet.
 
+## 2026-09-25: Missing-Agent Startup Drill (Accepted)
+
+- Local operator run on Apple Silicon `Mac17,6` (arm64), macOS 26.5.2, branch
+  `codex/vz-postmerge-cleanup` at `122519feb236a196d169a62123c67f565deb9954`.
+  The working tree was clean when the live workflow began.
+- Rebuilt Debian bookworm arm64 source with the repository rootfs, packer,
+  kernel/initrd extractor, and bundle scripts inside the existing Debian 13.4
+  arm64 Fusion VM. The VM was shut down after the build. Builder logs, read-only
+  `e2fsck -fn` output (exit 0), source hashes, and the new bundle are under
+  `~/Library/Logs/tldw/vz-bundle-rebuild/20260925-1138/`. The original
+  incomplete bundle was not modified.
+- Source bundle: `~/Library/Logs/tldw/vz-bundle-rebuild/20260925-1138/bundle`.
+  SHA-256: rootfs `b7722641cc1e706fb3c544784c053cd67607f495c310db945605241594d7315a`,
+  kernel `84b9c190bb4589c4a9527e3191fec051f9f115e88f0a3e8afae96ba0dfb4dfef`,
+  initrd `326f0ef8851ac61e1c837cf833bb116cacd12b9e85f56d9e0ff255c4cb92882d`.
+  Builder and host hashes matched; the workflow's before/after source hashes
+  also matched for all five fingerprinted source files.
+- The signed helper at
+  `~/Library/Logs/tldw/vz-workspace-workflow-20260914-r1/helper-used` passed
+  strict codesign verification and preflight entitlement checks; SHA-256
+  `049ab407cf4e0cb9b858f1b877d9f1df5bdb2c90c048230c2ff16eee9f486638`.
+  The manual `vz-failure-drill.py --allow-fault-injection` run used that helper,
+  the rebuilt source, and a fresh private evidence directory.
+- Invocation from the worktree root, after activating the repository virtual
+  environment (with `PYTHONPATH="$PWD"`):
+
+  ```bash
+  python tools/macos-vz-helper/scripts/vz-failure-drill.py \
+    --allow-fault-injection \
+    --source-bundle "$HOME/Library/Logs/tldw/vz-bundle-rebuild/20260925-1138/bundle" \
+    --helper "$HOME/Library/Logs/tldw/vz-workspace-workflow-20260914-r1/helper-used" \
+    --evidence-dir "$HOME/Library/Logs/tldw/vz-failure-missing-agent-20260925-1140"
+  ```
+
+- Full receipt: `~/Library/Logs/tldw/vz-failure-missing-agent-20260925-1140/receipt.json`.
+  All ten cases passed: five positive real-VM tests and five exact-failure
+  negative controls, each with no skips or errors. The missing-agent positive
+  case recorded a fresh guest nonce and the requested fault VM ID, then
+  `guest_transport_timeout` after 15.07 seconds with no fault-VM exec. It
+  observed zero persisted sessions/live VMs after failure. Healthy recovery
+  executed two commands in one different VM; the negative control executed
+  the preserved original agent in its fault VM. Each case had empty VM inventory
+  and closed disk handles. Final helper stop, runtime removal, unchanged fault
+  sources, and unchanged canonical source hashes all passed.
+- Portable verification before the live run: 168 passed, five real-host tests
+  deselected; Ruff, Black, shell syntax, and Bandit on touched Python code
+  passed. No production fault flag or default CI trigger was added.
+- Residual limits: this proves a guest whose agent service starts but never
+  connects to VSock. It does not prove kernel boot-hang recovery, actual
+  workspace mount/path-escape isolation, or host reboot recovery. Retained
+  evidence includes disposable disks and logs; review before deleting them.
+
+## 2026-09-25: Missing-Agent PR Review Rerun (Accepted)
+
+- On `codex/vz-missing-agent-startup-drill`, Qodo review found that the portable
+  orchestration mock still modeled four profiles. The mock and expectations
+  now cover the fifth `missing_agent` profile; the subprocess fixture is an
+  integration test with a less brittle startup deadline. No production runtime
+  behavior changed in this review pass.
+- Reused the rebuilt Debian arm64 source bundle and signed isolated helper
+  documented above. The fresh real-VM workflow exited 0 with ten accepted
+  cases, no skips or errors, empty VM inventory, closed disposable disks,
+  helper stop, removed private runtime, and unchanged canonical/fault-source
+  hashes. Its `input_sha256` for the reviewed missing-agent host test is
+  `fdc36061bf104274aa37034c58f7f7c3df3a986d19377600cd4a08881f596fd8`.
+  Receipt: `~/Library/Logs/tldw/vz-failure-missing-agent-20260925-pr-review-r1/receipt.json`.
+- Portable review suite: 219 passed, 11 host-gated skipped. Ruff and Black
+  passed. Bandit found no medium/high issues; low findings were pytest asserts
+  in test code. GitHub CI was still queued at the time of this local rerun.
+
+## 2026-09-25: Missing-Agent Startup Drill Preflight (Not Accepted)
+
+- TASK-13243.9 adds a test-only guest launcher and a fifth case to the manual
+  failure workflow. Focused portable checks: 167 passed, five live tests
+  deselected; Black, Ruff, shell syntax, and Bandit passed.
+- The previously accepted source bundle at
+  `~/Library/Logs/tldw/vz-launchd-recovery/20260913-1905/source-bundle-final`
+  currently lacks `rootfs.img`, although its manifest requires that file.
+  The signed helper still verifies, but this host cannot boot a VM from the
+  incomplete bundle. The earlier accepted workspace evidence remains historical
+  evidence and does not establish acceptance for this new drill.
+- No real VM run, guest proof, negative control, recovery, cleanup, or source
+  integrity result is claimed for TASK-13243.9. Restore or build and validate a
+  bootable Debian arm64 bundle, then run the opt-in workflow into a new private
+  evidence directory. Record its exact input and helper hashes, ten case results,
+  resource cleanup, and canonical source hashes here before calling the task
+  complete.
+
 ## Evidence Packet
 
 Each prepared-host evidence packet should include these fields.
@@ -1319,8 +1407,8 @@ triage issue.
 | Failure-drill evidence | Recorded locally on 2026-06-16 with drill-owned stale VM replacement and smoke-owned helper restart drill passing. | Repeat when runtime/helper recovery behavior changes; keep manual opt-in only. |
 | Launchd-drill evidence | Recorded real VM smoke on 2026-09-13 (3 tests, no skips), plus a separate live-session restart test (1 passed, no skips/errors) proving changed helper generation, stale-VM replacement, replacement reuse, and cleanup. The latter exposed and fixed guest capped-output loss before acceptance. Durable artifacts and failed attempts are recorded above. | Repeat both bounded drills when helper lifecycle, signing, guest transport, or image preparation changes. Keep launchd validation explicitly operator-requested; host reboot remains separate. |
 | Host reboot recovery | Manual `host-reboot-drill pre/post` procedure only and out of scheduled CI. | Record results when a maintainer explicitly runs the reboot drill on a prepared host that can tolerate disruptive reboot testing and preserve logs. |
-| Stuck boot/readiness | Host-independent helper and runner coverage verifies boot-driver and guest-readiness failure cleanup. Manual real acknowledged-handshake readiness withholding, timeout cleanup, and healthy session reuse passed twice on 2026-09-13 with a normal-ready negative control. The default smoke still does not inject faults. | Repeat the opt-in readiness drill when the handshake or lifecycle changes. Kernel boot hangs and missing-agent live injection remain separate; preserve stable reasons and artifact pointers rather than exposing raw serial logs. |
-| Guest-agent mismatch | The checked-in eight-case workflow on 2026-09-14 proved missing-`exec`, guest wire protocol and advertised workspace mismatch rejection, cleanup, healthy recovery and session reuse. Protocol/workspace negative controls retained real admission and changed only the injected field. Not part of default smoke. | Repeat the opted-in workflow when handshake or admission changes. Missing-agent live injection and actual mount/path-escape isolation remain separate evidence cases under the lifecycle-drill contract. |
+| Stuck boot/readiness | Host-independent helper and runner coverage verifies boot-driver and guest-readiness failure cleanup. Manual real acknowledged-handshake readiness withholding, timeout cleanup, and healthy session reuse passed twice on 2026-09-13 with a normal-ready negative control. A separate no-agent-connection startup timeout and recovery drill passed on 2026-09-25. The default smoke still does not inject faults. | Repeat the opt-in drills when the handshake or lifecycle changes. Kernel boot hangs remain separate; preserve stable reasons and artifact pointers rather than exposing raw serial logs. |
+| Guest-agent mismatch | The checked-in eight-case workflow on 2026-09-14 proved missing-`exec`, guest wire protocol and advertised workspace mismatch rejection, cleanup, healthy recovery and session reuse. The ten-case workflow on 2026-09-25 added real missing-agent startup absence with a normal-agent negative control. Not part of default smoke. | Repeat the opted-in workflow when handshake or admission changes. Actual mount/path-escape isolation remains a separate evidence case under the lifecycle-drill contract. |
 | Stale socket handling | Manual stale-socket prepared-host evidence was recorded locally on 2026-07-03 with controlled inactive socket recovery, helper start/status verification, and explicit stop cleanup passing. | Repeat when helper socket-safety behavior or the operator drill command changes; keep it manual-only and out of PR/push/scheduled destructive triggers. |
 | Direct-bundle smoke mutability | Closed for the default smoke path by the 2026-06-16 disposable-clone evidence and repeated on 2026-06-20 after host reboot: source bundle hashes stayed identical before/after while the disposable run bundle rootfs hash changed after execution. | Repeat periodically when the smoke wrapper, image-store materializer, or helper VM write path changes. |
 
