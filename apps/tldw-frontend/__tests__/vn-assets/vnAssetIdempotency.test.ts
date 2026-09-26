@@ -26,6 +26,45 @@ describe('VN asset pending generation storage', () => {
   beforeEach(() => window.sessionStorage.clear());
   afterEach(() => vi.restoreAllMocks());
 
+  describe.each(['start', 'retry'] as const)('persisted %s key length', (kind) => {
+    it.each([
+      { label: 'empty', key: '' },
+      { label: '161-character ASCII', key: 'k'.repeat(161) },
+      { label: '161-code-point non-BMP', key: '\u{1F600}'.repeat(161) },
+    ])('rejects and removes a $label key only for its owner and pack', ({ key }) => {
+      const pending = { kind, ...(kind === 'retry' ? { slotId: 12 } : {}), key };
+      const otherOwnerKey = 'vn-assets:pending-generation:v1:2:7';
+      const otherPackKey = 'vn-assets:pending-generation:v1:1:8';
+      const otherOwner = JSON.stringify({ kind: 'start', key: 'other-owner-key' });
+      const otherPack = JSON.stringify({ kind: 'retry', slotId: 13, key: 'other-pack-key' });
+      window.sessionStorage.setItem(storageKey, JSON.stringify(pending));
+      window.sessionStorage.setItem(otherOwnerKey, otherOwner);
+      window.sessionStorage.setItem(otherPackKey, otherPack);
+
+      expect(readPendingVNAssetGeneration(1, 7)).toBeNull();
+      expect(window.sessionStorage.getItem(storageKey)).toBeNull();
+      expect(window.sessionStorage.getItem(otherOwnerKey)).toBe(otherOwner);
+      expect(window.sessionStorage.getItem(otherPackKey)).toBe(otherPack);
+    });
+
+    it.each([
+      { label: 'one-character ASCII', key: 'k' },
+      { label: '160-character ASCII', key: 'k'.repeat(160) },
+      { label: 'one-code-point non-BMP', key: '\u{1F600}' },
+      { label: '160-code-point non-BMP', key: '\u{1F600}'.repeat(160) },
+      { label: '160-code-point mixed', key: `${'k'.repeat(159)}\u{1F600}` },
+    ])('preserves a $label key and its owner/pack-scoped receipt', ({ key }) => {
+      const pending = { kind, ...(kind === 'retry' ? { slotId: 12 } : {}), key };
+      const raw = JSON.stringify(pending);
+      window.sessionStorage.setItem(storageKey, raw);
+
+      expect(readPendingVNAssetGeneration(2, 7)).toBeNull();
+      expect(readPendingVNAssetGeneration(1, 8)).toBeNull();
+      expect(readPendingVNAssetGeneration(1, 7)).toEqual(pending);
+      expect(window.sessionStorage.getItem(storageKey)).toBe(raw);
+    });
+  });
+
   it.each([
     { label: 'zero', slotId: 0 },
     { label: 'negative', slotId: -1 },
