@@ -6,6 +6,7 @@ import { createProxyMiddleware } from 'http-proxy-middleware';
 import { routeForPath } from './routes.mjs';
 
 const PHASES = new Set(['starting', 'ready', 'maintenance', 'error']);
+const MCP_API_PATH = /^\/api\/v1\/mcp(?:\/[a-z0-9_-]+)*$/;
 const SETUP_API_PATH = /^\/api\/v1\/setup(?:\/[a-z0-9_-]+)*$/;
 
 const canonicalOrigin = (value, label) => {
@@ -160,7 +161,7 @@ export function createGateway({ backendOrigin, nextOrigin, publicHost, publicPor
       return;
     }
     normalizeHeaders(req, { host, port, hopSecret: gatewayHopSecret,
-      authenticatedHop: route === 'next' || (route === 'backend' && SETUP_API_PATH.test(pathname)) });
+      authenticatedHop: route === 'next' || (route === 'backend' && (SETUP_API_PATH.test(pathname) || MCP_API_PATH.test(pathname))) });
     (route === 'backend' ? backendProxy : nextProxy)(req, res);
   });
 
@@ -177,7 +178,7 @@ export function createGateway({ backendOrigin, nextOrigin, publicHost, publicPor
       socket.destroy();
       return;
     }
-    normalizeHeaders(req, { host, port, hopSecret: gatewayHopSecret, authenticatedHop: route === 'next' });
+    normalizeHeaders(req, { host, port, hopSecret: gatewayHopSecret, authenticatedHop: route === 'next' || pathname === '/api/v1/mcp/ws' });
     (route === 'backend' ? backendProxy : nextProxy).upgrade(req, socket, head);
   });
 

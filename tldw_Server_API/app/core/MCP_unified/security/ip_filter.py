@@ -7,14 +7,31 @@ Provides a shared controller for both HTTP routes and WebSocket connections.
 from __future__ import annotations
 
 import ipaddress
+import re
 from collections.abc import Iterable
 from functools import lru_cache
 
 from fastapi import HTTPException, Request
 from loguru import logger
+from starlette.requests import HTTPConnection
+
+from tldw_Server_API.app.core.Security.managed_gateway import is_managed_gateway_request
 
 from ..config import get_config
 from ..environment import is_explicit_pytest_runtime, is_test_mode
+
+_MANAGED_MCP_PATH = re.compile(r"/api/v1/mcp(?:/[a-z0-9_-]+)*")
+
+
+def is_managed_gateway_mcp_request(connection: HTTPConnection) -> bool:
+    """Recognize the managed hop only on the bounded MCP HTTP/WS surface."""
+    scope = getattr(connection, "scope", {})
+    path = scope.get("path", "")
+    if scope.get("type") == "websocket":
+        eligible = path == "/api/v1/mcp/ws"
+    else:
+        eligible = scope.get("type") == "http" and bool(_MANAGED_MCP_PATH.fullmatch(path))
+    return eligible and is_managed_gateway_request(connection)
 
 
 class IPAccessController:
@@ -143,7 +160,11 @@ async def enforce_ip_allowlist(request: Request) -> None:
     remote_ip = client.host if client else None
     forwarded_for = request.headers.get("x-forwarded-for") or request.headers.get("X-Forwarded-For")
     real_ip = request.headers.get("x-real-ip") or request.headers.get("X-Real-IP")
-    resolved_ip = controller.resolve_client_ip(remote_ip, forwarded_for, real_ip)
+    resolved_ip = (
+        "127.0.0.1"
+        if is_managed_gateway_mcp_request(request)
+        else controller.resolve_client_ip(remote_ip, forwarded_for, real_ip)
+    )
 
     # Test harnesses (FastAPI TestClient / pytest) often use the synthetic host
     # name "testclient" which is not a valid IP address. Treat it as loopback so

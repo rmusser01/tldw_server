@@ -7,6 +7,8 @@ services:
       TLDW_MANAGED_GATEWAY: "1"
       TLDW_MANAGED_PUBLIC_ORIGIN: http://127.0.0.1:${TLDW_PUBLIC_PORT:?Public port is required}
       TLDW_GATEWAY_HOP_SECRET: ${TLDW_GATEWAY_HOP_SECRET:?Gateway hop secret is required}
+      MCP_WS_ALLOWED_ORIGINS: http://127.0.0.1:${TLDW_PUBLIC_PORT:?Public port is required}
+      MCP_CORS_ORIGINS: http://127.0.0.1:${TLDW_PUBLIC_PORT:?Public port is required}
       ALLOWED_ORIGINS: http://127.0.0.1:${TLDW_PUBLIC_PORT:?Public port is required}
       SINGLE_USER_API_KEY: ${SINGLE_USER_API_KEY:?Instance API key is required}
       SINGLE_USER_SESSION_COOKIE_NAME: ${SINGLE_USER_SESSION_COOKIE_NAME:?Instance session cookie is required}

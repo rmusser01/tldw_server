@@ -40,7 +40,7 @@ from .jsonrpc_transport import (
 )
 from .module_surface import describe_module_surface
 from .protocol import MCPError, MCPProtocol, MCPRequest, MCPResponse, RequestContext, _trusted_compat_claims_metadata
-from .security.ip_filter import get_ip_access_controller
+from .security.ip_filter import get_ip_access_controller, is_managed_gateway_mcp_request
 from .security.request_guards import enforce_client_certificate_headers
 from .transport.guarded_slides_websocket import guarded_slides_websocket_metadata
 
@@ -1495,7 +1495,11 @@ class MCPServer:
         except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
             raw_remote_ip = None
 
-        resolved_ip = controller.resolve_client_ip(raw_remote_ip, forwarded_for, real_ip)
+        resolved_ip = (
+            "127.0.0.1"
+            if is_managed_gateway_mcp_request(websocket)
+            else controller.resolve_client_ip(raw_remote_ip, forwarded_for, real_ip)
+        )
         # Test harness mapping and bypass: allow WS in pytest/TEST_MODE and map 'testclient' to loopback
         try:
             _is_test_env = bool(self._is_explicit_pytest_runtime() or self._is_test_mode())

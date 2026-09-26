@@ -260,3 +260,32 @@ test('injects the private setup capability only on canonical setup API paths', a
     assert.equal(JSON.parse(response.body).headers['x-tldw-gateway-hop'], undefined);
   }
 });
+
+test('injects the managed hop only for canonical MCP HTTP and WebSocket paths', async (t) => {
+  const { publicOrigin, backend } = await fixture(t);
+  for (const path of ['/api/v1/mcp/status', '/api/v1/mcp/tools/execute?foo=bar']) {
+    const response = await fetch(`${publicOrigin}${path}`, {
+      headers: { origin: publicOrigin, 'x-tldw-gateway-hop': 'forged' },
+    });
+    assert.equal((await response.json()).headers['x-tldw-gateway-hop'], HOP_SECRET);
+  }
+  for (const path of ['/api/v1/mcp-other', '/api/v1/mcp//ws', '/api/v1/mcp/%77s']) {
+    const response = await rawRequest(`${publicOrigin}${path}`, { 'x-tldw-gateway-hop': 'forged' });
+    assert.equal(JSON.parse(response.body).headers['x-tldw-gateway-hop'], undefined);
+  }
+  let upstreamHeaders;
+  backend.on('upgrade', (req, socket) => {
+    upstreamHeaders = req.headers;
+    socket.end('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n');
+  });
+  const parsed = new URL(publicOrigin);
+  const socket = connect(Number(parsed.port), parsed.hostname);
+  t.after(() => socket.destroy());
+  await once(socket, 'connect');
+  socket.write(`GET /api/v1/mcp/ws HTTP/1.1\r\nHost: ${parsed.host}\r\nOrigin: ${publicOrigin}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nX-Tldw-Gateway-Hop: forged\r\nX-Forwarded-For: 8.8.8.8\r\n\r\n`);
+  const [chunk] = await once(socket, 'data');
+  assert.match(chunk.toString(), /^HTTP\/1\.1 101 Switching Protocols/);
+  assert.equal(upstreamHeaders['x-tldw-gateway-hop'], HOP_SECRET);
+  assert.equal(upstreamHeaders['x-forwarded-for'], '127.0.0.1');
+  assert.equal(chunk.toString().includes(HOP_SECRET), false);
+});
