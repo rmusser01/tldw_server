@@ -199,6 +199,7 @@ export interface CalendarViewItemResponse {
   recurrence_id?: number | null
   occurrence_index?: number | null
   link?: CalendarViewLinkResponse | null
+  links?: CalendarLinkResponse[]
   metadata: Record<string, unknown>
 }
 
@@ -550,6 +551,25 @@ export async function createCalendarLink(
     path: toAllowedPath(`${CALENDAR_BASE}/items/${encodePathId(itemId)}/links`),
     method: "POST",
     body: payload
+  })
+}
+
+export async function listCalendarLinks(
+  itemId: string | number
+): Promise<{ items: CalendarLinkResponse[]; total: number }> {
+  return await bgRequest({
+    path: toAllowedPath(`${CALENDAR_BASE}/items/${encodePathId(itemId)}/links`),
+    method: "GET"
+  })
+}
+
+export async function deleteCalendarLink(
+  itemId: string | number,
+  linkId: string | number
+): Promise<{ removed: number }> {
+  return await bgRequest({
+    path: toAllowedPath(`${CALENDAR_BASE}/items/${encodePathId(itemId)}/links/${encodePathId(linkId)}`),
+    method: "DELETE"
   })
 }
 

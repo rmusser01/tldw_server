@@ -192,6 +192,7 @@ def calendar_api_client(
     caldav_provider = _CalDavProviderStub()
     current_user_id = {"value": 1}
     current_tenant_id: dict[str, str | None] = {"value": None}
+    current_org_ids: dict[str, list[int]] = {"value": []}
 
     async def override_user() -> User:
         user_id = current_user_id["value"]
@@ -204,6 +205,7 @@ def calendar_api_client(
             roles=["admin"],
             permissions=["*"],
             tenant_id=current_tenant_id["value"],
+            org_ids=current_org_ids["value"],
         )
 
     calendar_endpoint = importlib.import_module("tldw_Server_API.app.api.v1.endpoints.calendar")
@@ -222,6 +224,7 @@ def calendar_api_client(
         with TestClient(app, raise_server_exceptions=False) as client:
             client.current_user_id = current_user_id  # type: ignore[attr-defined]
             client.current_tenant_id = current_tenant_id  # type: ignore[attr-defined]
+            client.current_org_ids = current_org_ids  # type: ignore[attr-defined]
             client.caldav_provider = caldav_provider  # type: ignore[attr-defined]
             client.jobs_manager = jobs_manager  # type: ignore[attr-defined]
             yield client, db, reminder_service
@@ -235,6 +238,114 @@ def _set_user(client: TestClient, user_id: int) -> None:
 
 def _set_tenant(client: TestClient, tenant_id: str | None) -> None:
     client.current_tenant_id["value"] = tenant_id  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize(
+    "membership, expected_status",
+    [
+        ({"org_id": 42, "role": "researcher", "status": "active"}, 201),
+        ({"org_id": 43, "role": "researcher", "status": "active"}, 403),
+        ({"org_id": 42, "role": "researcher", "status": "inactive"}, 403),
+        ({"org_id": 42, "role": "member", "status": "active"}, 403),
+    ],
+)
+def test_api_resolves_only_active_scoped_org_roles(
+    calendar_api_client, monkeypatch, membership, expected_status
+) -> None:
+    from tldw_Server_API.app.api.v1.endpoints import calendar as endpoint
+
+    client, _db, _reminders = calendar_api_client
+    calendar = _create_calendar(client, org_id=42, visibility="shared")
+    grant = client.post(
+        f"/api/v1/calendar/calendars/{calendar['id']}/memberships",
+        json={
+            "principal_type": "org_role",
+            "principal_id": "researcher",
+            "role": "editor",
+        },
+    )
+    assert grant.status_code == 201
+
+    async def memberships(user_id: int) -> list[dict[str, Any]]:
+        assert user_id == 2
+        return [membership]
+
+    monkeypatch.setattr(endpoint, "list_org_memberships_for_user", memberships, raising=False)
+    _set_user(client, 2)
+    client.current_org_ids["value"] = [42]
+    result = client.post(
+        "/api/v1/calendar/items",
+        json={
+            "calendar_id": calendar["id"],
+            "kind": "event",
+            "title": "Role member",
+            "start_at": "2026-06-05T09:00:00Z",
+        },
+    )
+    assert result.status_code == expected_status, result.text
+
+
+def test_links_survive_agenda_refresh_and_authorized_removal(calendar_api_client) -> None:
+    client, _db, _reminders = calendar_api_client
+    calendar = _create_calendar(client)
+    item = _create_event(client, calendar["id"])
+    link = client.post(
+        f"/api/v1/calendar/items/{item['id']}/links",
+        json={
+            "target_type": "url",
+            "target_id": "https://example.test/notes",
+            "label": "Notes",
+            "url": "https://example.test/notes",
+        },
+    ).json()
+    listing = client.get(f"/api/v1/calendar/items/{item['id']}/links")
+    assert listing.status_code == 200, listing.text
+    assert listing.json()["items"] == [link]
+    agenda = client.get(
+        "/api/v1/calendar/views/agenda",
+        params={
+            "start_at": "2026-06-01T00:00:00Z",
+            "end_at": "2026-06-08T00:00:00Z",
+            "include_scheduled_tasks": False,
+        },
+    )
+    assert agenda.json()["items"][0]["links"] == [link]
+    _set_user(client, 2)
+    assert client.get(f"/api/v1/calendar/items/{item['id']}/links").status_code == 403
+    assert client.delete(f"/api/v1/calendar/items/{item['id']}/links/{link['id']}").status_code == 403
+    _set_user(client, 1)
+    removed = client.delete(f"/api/v1/calendar/items/{item['id']}/links/{link['id']}")
+    assert removed.status_code == 200, removed.text
+    assert client.get(f"/api/v1/calendar/items/{item['id']}/links").json()["items"] == []
+
+
+def test_calendar_exceptions_share_central_exports() -> None:
+    from tldw_Server_API.app.core import exceptions
+    from tldw_Server_API.app.core.Calendar import errors
+
+    for name in [
+        "CalendarError",
+        "CalendarNotFound",
+        "CalendarValidationError",
+        "CalendarPermissionDenied",
+        "CalendarItemNotFound",
+        "CalendarReadOnlyError",
+        "CalendarSyncError",
+    ]:
+        assert getattr(exceptions, name, None) is getattr(errors, name)
+
+
+def test_calendar_api_module_and_handlers_document_contracts() -> None:
+    import inspect
+    from tldw_Server_API.app.api.v1.endpoints import calendar as endpoint
+
+    assert endpoint.__doc__
+    functions = [
+        function
+        for _, function in inspect.getmembers(endpoint, inspect.isfunction)
+        if function.__module__ == endpoint.__name__
+    ]
+    assert all(function.__doc__ for function in functions)
 
 
 def _create_calendar(client: TestClient, **overrides: Any) -> dict[str, Any]:

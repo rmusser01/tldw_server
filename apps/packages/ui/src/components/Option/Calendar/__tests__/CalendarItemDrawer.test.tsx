@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   deleteCalendarItem: vi.fn(),
   createCalendarAnnotation: vi.fn(),
   createCalendarLink: vi.fn(),
+  listCalendarLinks: vi.fn(),
+  deleteCalendarLink: vi.fn(),
   updateCalendarLocalTags: vi.fn(),
   copyCalendarItemIntoTldw: vi.fn()
 }))
@@ -19,6 +21,8 @@ vi.mock("@/services/calendar", () => ({
   deleteCalendarItem: (...args: unknown[]) => mocks.deleteCalendarItem(...args),
   createCalendarAnnotation: (...args: unknown[]) => mocks.createCalendarAnnotation(...args),
   createCalendarLink: (...args: unknown[]) => mocks.createCalendarLink(...args),
+  listCalendarLinks: (...args: unknown[]) => mocks.listCalendarLinks(...args),
+  deleteCalendarLink: (...args: unknown[]) => mocks.deleteCalendarLink(...args),
   updateCalendarLocalTags: (...args: unknown[]) => mocks.updateCalendarLocalTags(...args),
   copyCalendarItemIntoTldw: (...args: unknown[]) => mocks.copyCalendarItemIntoTldw(...args)
 }))
@@ -130,6 +134,34 @@ describe("CalendarItemDrawer", () => {
     for (const mock of Object.values(mocks)) {
       mock.mockReset()
     }
+    mocks.listCalendarLinks.mockResolvedValue({ items: [], total: 0 })
+  })
+
+  it("disables calendar moves for existing items but permits selection for new items", () => {
+    const { unmount } = renderDrawer(localItem)
+    expect(screen.getByRole("combobox", { name: "Calendar" })).toHaveProperty("disabled", true)
+    unmount()
+    renderDrawer(null)
+    expect(screen.getByRole("combobox", { name: "Calendar" })).toHaveProperty("disabled", false)
+  })
+
+  it("loads persisted links after refresh and removes one with confirmation", async () => {
+    const user = userEvent.setup()
+    mocks.listCalendarLinks.mockResolvedValue({ items: [{
+      id: 11, calendar_item_id: 7, target_type: "url", target_id: "https://example.test/notes",
+      label: "Saved notes", url: "https://example.test/notes", metadata: {},
+      created_at: "2026-06-05T00:00:00Z", updated_at: "2026-06-05T00:00:00Z"
+    }], total: 1 })
+    mocks.deleteCalendarLink.mockResolvedValue({ removed: 1 })
+    renderDrawer(localItem)
+    const link = await screen.findByRole("link", { name: "Saved notes" })
+    expect(link.getAttribute("href")).toBe("https://example.test/notes")
+    expect(mocks.listCalendarLinks).toHaveBeenCalledWith(7)
+    await user.click(screen.getByRole("button", { name: "Remove Saved notes" }))
+    expect(mocks.deleteCalendarLink).not.toHaveBeenCalled()
+    await user.click(screen.getByRole("button", { name: "Remove link" }))
+    await waitFor(() => expect(mocks.deleteCalendarLink).toHaveBeenCalledWith(7, 11))
+    await waitFor(() => expect(screen.queryByRole("link", { name: "Saved notes" })).toBeNull())
   })
 
   it("requires confirmation before deleting a local item", async () => {

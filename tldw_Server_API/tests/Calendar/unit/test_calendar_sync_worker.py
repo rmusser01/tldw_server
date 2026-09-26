@@ -98,6 +98,29 @@ END:VCALENDAR""")
 
 
 @pytest.mark.asyncio
+async def test_imported_all_day_until_dates_expand_with_exclusions(calendar_db: CalendarDatabase) -> None:
+    from tldw_Server_API.app.core.Calendar.calendar_sync_worker import _upsert_events
+    from tldw_Server_API.app.core.Calendar.providers.caldav import CalDavProvider
+    from tldw_Server_API.app.core.Calendar.view_service import CalendarViewService
+
+    fixture = _create_sync_fixture(calendar_db)
+    events = CalDavProvider().parse_vevents("""BEGIN:VCALENDAR
+BEGIN:VEVENT
+UID:holiday-series
+DTSTART;VALUE=DATE:20260605
+RRULE:FREQ=DAILY;UNTIL=20260608
+EXDATE;VALUE=DATE:20260606
+END:VEVENT
+END:VCALENDAR""")
+    _upsert_events(calendar_db, binding=calendar_db.get_external_binding(fixture.binding_id), events=events)
+    result = await CalendarViewService(calendar_service=CalendarService(db=calendar_db)).agenda(
+        actor_user_id=1, start_at="2026-06-05T12:00:00Z", end_at="2026-06-09T00:00:00Z"
+    )
+    assert [item.start_at for item in result.items] == ["2026-06-05", "2026-06-07", "2026-06-08"]
+    assert result.partial is False
+
+
+@pytest.mark.asyncio
 async def test_sync_provider_runs_off_event_loop(calendar_db: CalendarDatabase, jobs_manager: JobManager) -> None:
     from tldw_Server_API.app.core.Calendar.calendar_sync_worker import handle_calendar_sync_job
 

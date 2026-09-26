@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import contextlib
-from contextvars import ContextVar
 import json
 import sqlite3
 from collections.abc import Generator, Iterable
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -224,7 +224,7 @@ class CalendarSyncEventRow:
 class CalendarSecretStore:
     """Stores encrypted external account secrets behind opaque references."""
 
-    def __init__(self, database: "CalendarDatabase"):
+    def __init__(self, database: CalendarDatabase):
         self._database = database
 
     def create_secret_ref(
@@ -1477,6 +1477,21 @@ class CalendarDatabase:
     def get_link(self, link_id: int) -> CalendarLinkRow:
         with self.connection() as conn:
             return self._get_link_row(conn, link_id)
+
+    def list_links_for_items(self, calendar_item_ids: Iterable[int]) -> dict[int, list[CalendarLinkRow]]:
+        """Load persisted context links in one query for already authorized view items."""
+        ids = list(calendar_item_ids)
+        if not ids:
+            return {}
+        placeholders = ", ".join("?" for _ in ids)
+        sql = f"SELECT * FROM calendar_links WHERE calendar_item_id IN ({placeholders}) ORDER BY id"  # nosec B608
+        with self.connection() as conn:
+            rows = conn.execute(sql, tuple(ids)).fetchall()
+        links: dict[int, list[CalendarLinkRow]] = {}
+        for row in rows:
+            link = self._link_from_row(row)
+            links.setdefault(link.calendar_item_id, []).append(link)
+        return links
 
     def list_links(self, calendar_item_id: int) -> list[CalendarLinkRow]:
         with self.connection() as conn:
