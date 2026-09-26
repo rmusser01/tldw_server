@@ -26,6 +26,19 @@ Windows execution and exact corrected local/native artifacts remain unqualified.
 Measurements distinguish actual registry payload bytes from filesystem allocation;
 first/repeat startup uses fresh/retained application state with images prefetched.
 
+Actual local `d88309a2b3` built all four roles and passed built-backend MCP/setup
+tests, then measurement refused its OCI image indexes without emitting success.
+The corrected reader verifies/counts the root index and the unique selected
+platform manifest before its config/layers; unselected attestation payload is
+excluded. Six red regressions cover OCI/Docker indexes and invalid selections or
+schema; complete Release verification now passes 237 tests. Scoped Black/Ruff
+and Bandit (zero findings) pass. This amendment still needs bounded review and
+fresh exact-source qualification. Windows job in CI 36257592285 executed both
+parser and daemon-selection checks successfully for `d88309a2b3`.
+The first local attempt stalled in Docker credential retrieval; an isolated,
+anonymous task configuration accesses public metadata/builds successfully without
+changing saved credentials. The underlying credential-helper cause is unresolved.
+
 ## Historical candidate evidence (2026-09-26)
 
 Historical Linux Docker development qualification passed for exact built source `ba12489e0d7b7219140394784d1556cd0bfc0fe5`. Fresh local arm64 and native amd64/arm64 [CI 36244097597](https://github.com/rmusser01/tldw_server/actions/runs/36244097597) each built four roles and passed the built-backend MCP and setup tests, all 13 lifecycle checks, all 38 browser checks, and owned cleanup. All three candidate raw Ed25519 signatures, production verification, source/platform identities and eight helper hashes independently verify. Both native jobs, required-both job, and Windows helper parser pass. The final review fix wave and Tasks19–23 have scoped independent approval. G2/G4/G10 are true for managed connection and initial wizard progression only; planned_setup_complete remains false, G12 false and promotion refused. Superseded failed/cancelled candidates supply no current acceptance. The two corrected local installs complete without a stall; prior intermittent dependency waiting has no established cause/fix. A later documentation-only branch commit is not the built revision; artifact evidence always names `ba12489e0d`.

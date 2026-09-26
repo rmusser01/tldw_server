@@ -19,6 +19,8 @@ from urllib.parse import urlsplit
 IMAGE = re.compile(
     r"(localhost|127\.0\.0\.1):([1-9][0-9]{0,4})/(tldw/(backend|webui|gateway|control))@sha256:([0-9a-f]{64})"
 )
+MANIFEST_TYPES = {"application/vnd.docker.distribution.manifest.v2+json", "application/vnd.oci.image.manifest.v1+json"}
+INDEX_TYPES = {"application/vnd.docker.distribution.manifest.list.v2+json", "application/vnd.oci.image.index.v1+json"}
 
 
 def download(url: str, digest: str, size: int | None, *, capture: bool = False) -> tuple[int, bytes]:
@@ -41,7 +43,7 @@ def download(url: str, digest: str, size: int | None, *, capture: bool = False) 
     started = time.monotonic()
     count, checksum, chunks = 0, hashlib.sha256(), []
     headers = {
-        "Accept": "application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json",
+        "Accept": ", ".join(sorted(MANIFEST_TYPES | INDEX_TYPES)),
         "Accept-Encoding": "identity",
     }
     connection = HTTPConnection(parsed.hostname, parsed.port, timeout=10)
@@ -156,6 +158,29 @@ def measure_images(images: Path, platform: str, commit: str) -> dict[str, object
         base = f"http://{match[1]}:{match[2]}/v2/{match[3]}"
         manifest_bytes, raw = download(f"{base}/manifests/sha256:{match[5]}", match[5], None, capture=True)
         manifest = json.loads(raw)
+        if manifest.get("schemaVersion") != 2:
+            raise ValueError("unsupported image index/manifest schema")
+        if manifest.get("mediaType") in INDEX_TYPES:
+            selected = [
+                item
+                for item in manifest["manifests"]
+                if item.get("platform", {}).get("os") == "linux"
+                and item.get("platform", {}).get("architecture") == platform.split("/")[1]
+                and item.get("mediaType") in MANIFEST_TYPES
+            ]
+            if len(selected) != 1:
+                raise ValueError("index must identify exactly one supported platform manifest")
+            descriptor = selected[0]
+            selected_bytes, raw = download(
+                f"{base}/manifests/{descriptor['digest']}",
+                descriptor["digest"].removeprefix("sha256:"),
+                descriptor["size"],
+                capture=True,
+            )
+            manifest_bytes += selected_bytes
+            manifest = json.loads(raw)
+        if manifest.get("schemaVersion") != 2 or manifest.get("mediaType") not in MANIFEST_TYPES:
+            raise ValueError("unsupported platform image manifest")
         config = manifest["config"]
         config_hash = config["digest"].removeprefix("sha256:")
         count, config_raw = download(f"{base}/blobs/{config['digest']}", config_hash, config["size"], capture=True)
@@ -187,7 +212,7 @@ def measure_images(images: Path, platform: str, commit: str) -> dict[str, object
         "schema_version": 1,
         "source_commit": commit,
         "platform": platform,
-        "method": "SHA256-verified registry response bytes; filesystem du -sx -B1 in read-only images",
+        "method": "SHA256-verified index (when present), selected platform manifest, config and layer response bytes; filesystem du -sx -B1 in read-only images",
         "download_unique_image_payload_bytes": manifest_total + sum(blobs.values()),
         "roles": roles,
         "storage_note": "Per-image merged-filesystem allocation; shared layers may reduce total engine storage. Build cache and Docker VM overhead are excluded.",

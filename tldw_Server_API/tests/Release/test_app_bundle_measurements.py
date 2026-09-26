@@ -105,7 +105,7 @@ def test_failed_owned_measurement_cleanup_prevents_success(
 
 
 @pytest.fixture
-def image_registry(tmp_path: Path) -> Iterator[RegistryFixture]:
+def image_registry(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[RegistryFixture]:
     commit = "c" * 40
     payloads = {}
     layer = gzip.compress(b"shared public layer fixture", mtime=0)
@@ -140,12 +140,46 @@ def image_registry(tmp_path: Path) -> Iterator[RegistryFixture]:
         payloads[config_digest] = config
         manifest = json.dumps(
             {
+                "schemaVersion": 2,
+                "mediaType": "application/vnd.oci.image.manifest.v1+json",
                 "config": {"digest": "sha256:" + config_digest, "size": len(config)},
                 "layers": [{"digest": "sha256:" + layer_digest, "size": len(layer)}],
             }
         ).encode()
         digest = hashlib.sha256(manifest).hexdigest()
         payloads[digest] = manifest
+        mode = getattr(request, "param", "manifest")
+        if mode != "manifest":
+            descriptor = {
+                "mediaType": "application/vnd.oci.image.manifest.v1+json",
+                "digest": "sha256:" + digest,
+                "size": len(manifest),
+                "platform": {"os": "linux", "architecture": "amd64"},
+            }
+            if mode == "missing-platform":
+                descriptor["platform"]["architecture"] = "arm64"
+            if mode == "corrupt-selected":
+                descriptor["digest"] = "sha256:" + "e" * 64
+                payloads["e" * 64] = manifest
+            entries = [
+                descriptor,
+                {"digest": "sha256:" + "f" * 64, "platform": {"os": "unknown", "architecture": "unknown"}},
+            ]
+            if mode == "ambiguous-platform":
+                entries.append(descriptor)
+            index = json.dumps(
+                {
+                    "schemaVersion": 1 if mode == "invalid-index-schema" else 2,
+                    "mediaType": (
+                        "application/vnd.docker.distribution.manifest.list.v2+json"
+                        if mode == "docker-index"
+                        else "application/vnd.oci.image.index.v1+json"
+                    ),
+                    "manifests": entries,
+                }
+            ).encode()
+            digest = hashlib.sha256(index).hexdigest()
+            payloads[digest] = index
         lines.append(f"{role}\t127.0.0.1:{server.server_port}/tldw/{role}@sha256:{digest}\t999999999")
     images = tmp_path / "images.tsv"
     images.write_text("\n".join(lines))
@@ -160,7 +194,7 @@ def image_registry(tmp_path: Path) -> Iterator[RegistryFixture]:
 
 
 def test_all_image_measurements_deduplicate_real_downloads_and_ignore_size_metadata(
-    image_registry, measuring_docker: None
+    image_registry: RegistryFixture, measuring_docker: None
 ) -> None:
     from Helper_Scripts.measure_app_bundle import measure_images
 
@@ -177,13 +211,39 @@ def test_all_image_measurements_deduplicate_real_downloads_and_ignore_size_metad
 
 
 def test_downloaded_image_source_cannot_be_borrowed_from_another_revision(
-    image_registry, measuring_docker: None
+    image_registry: RegistryFixture, measuring_docker: None
 ) -> None:
     from Helper_Scripts.measure_app_bundle import measure_images
 
     images, _commit, _requests, _received, _digest = image_registry
     with pytest.raises(ValueError, match="source/platform"):
         measure_images(images, "linux/amd64", "d" * 40)
+
+
+@pytest.mark.parametrize("image_registry", ["oci-index", "docker-index"], indirect=True)
+def test_index_download_counts_root_and_selected_manifest_without_attestation_payload(
+    image_registry: RegistryFixture, measuring_docker: None
+) -> None:
+    from Helper_Scripts.measure_app_bundle import measure_images
+
+    images, commit, requests, received, _digest = image_registry
+    report = measure_images(images, "linux/amd64", commit)
+    assert report["download_unique_image_payload_bytes"] == sum(received)
+    assert len([path for path in requests if "/manifests/" in path]) == 8
+    assert not any("f" * 64 in path for path in requests)
+
+
+@pytest.mark.parametrize(
+    "image_registry",
+    ["missing-platform", "ambiguous-platform", "corrupt-selected", "invalid-index-schema"],
+    indirect=True,
+)
+def test_invalid_index_or_selected_manifest_is_refused(image_registry: RegistryFixture, measuring_docker: None) -> None:
+    from Helper_Scripts.measure_app_bundle import measure_images
+
+    images, commit, _requests, _received, _digest = image_registry
+    with pytest.raises(ValueError):
+        measure_images(images, "linux/amd64", commit)
 
 
 def test_download_deadline_is_checked_while_response_body_is_still_open(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -4,7 +4,7 @@ title: Plan and implement paired Docker distribution and runtime gateway
 status: In Progress
 assignee: []
 created_date: '2026-09-23 06:15'
-updated_date: '2026-09-26 17:02'
+updated_date: '2026-09-26 17:20'
 labels:
   - distribution
   - docker
@@ -155,6 +155,10 @@ User-approved corrections restored Task8 measurements and reopened acceptance. R
 Scoped independent review found an additional real build-input trigger gap for Docs outside Published, README, LICENSE/LICENSES and THIRD_PARTY_NOTICES. Confirmed against Dockerfile.prod COPY directives. Added five regression paths: expected red 5 failures /24 passes; expanded workflow to Docs/** and these root inputs; green29/29, Ruff/Black/diff clean. Awaiting final bounded review assessment before committing this follow-up and rebuilding exact-source candidates.
 
 Bounded independent review of bff2bb5..091145b plus the trigger follow-up now has no remaining code findings and approves fresh qualification after commit/source freeze. Reviewer independently passed measurement15, workflow29, and all5 actual browser transport variants (slow response rejected ~10.15s). Stages A complete/B and C In Progress. Fresh local arm64/native both targets and Windows execution remain mandatory; no task closure/publication.
+
+Exact d88309a2b3 local arm64 qualification built all4 images and passed built-backend MCP/setup tests, then failed closed in measurement before emitting a report. Docker Desktop descriptor inspection confirms all4 pinned image digests identify OCI image indexes (each856bytes), while the measurement helper expects a direct manifest/config. Add bounded OCI index platform selection and count index plus selected manifest/config/layers; preserve hash/source/platform checks and ambiguous/missing-platform refusal. Existing native run36257592285 stays historical/in progress; no cancellation or acceptance waiver. Local original attempt stalled in Docker credential helper; task-private anonymous configuration resolves public metadata/build access without changing saved credentials or unrelated databases.
+
+OCI-index correction TDD: five actual-registry fixtures reproduced KeyError(config) for OCI/Docker indexes, missing/ambiguous platform and corrupt selected manifest; all pass after bounded platform selection. A separate schema regression showed invalid index schema1 was accepted; schema validation restores refusal. Count SHA256-verified root index plus exactly one supported platform manifest/config/layers, exclude unselected attestation payload, retain architecture/source checks and owned filesystem du. Black/Ruff/diff and measurement Bandit0 pass; complete Release rerun underway. Fresh exact-source rebuild and bounded independent follow-up review remain required.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
