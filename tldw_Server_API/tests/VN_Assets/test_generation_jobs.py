@@ -710,6 +710,87 @@ async def test_expired_job_lease_cannot_claim_a_variant(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.parametrize("cancellation_phase", ["before", "during"])
+async def test_cancellation_requested_live_job_cannot_publish(
+    service: VNAssetPackService, pack_with_slots: SimpleNamespace,
+    tmp_path: Path, cancellation_phase: str,
+) -> None:
+    """Reject requested cancellation without changing the processing lease."""
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    slot = pack_with_slots.slots[0]
+    batch = service.start_generation(
+        pack_with_slots.id, user_id=1,
+        request=VNAssetGenerationRequest(slot_ids=[slot.id]),
+    )
+    jobs_path = tmp_path / "cancellation-request-jobs.db"
+    jobs = JobManager(db_path=jobs_path)
+    jobs.create_job(
+        domain="vn_assets", queue=vn_asset_generation_jobs_queue(),
+        job_type="vn_asset_generate_variant", owner_user_id="1", payload={},
+    )
+    job = jobs.acquire_next_job(
+        domain="vn_assets", queue=vn_asset_generation_jobs_queue(),
+        worker_id="vn-worker", lease_seconds=120,
+    )
+    assert job is not None
+    adapter = BlockingFirstImageAdapter()
+    saver = RecordingVNSaver()
+    worker = VNAssetGenerationWorker(
+        repo=service.repo, jobs_manager=jobs,
+        image_registry=FakeImageRegistry(adapter), backend_gate=FakeGenerationGate(),
+        save_vn_asset_image=saver, generated_files_repo=EmptyGeneratedFiles(),
+    )
+
+    def request_cancellation() -> None:
+        """Persist a cancellation request while retaining the live lease."""
+        with sqlite3.connect(jobs_path) as conn:
+            conn.execute(
+                "UPDATE jobs SET cancel_requested_at=CURRENT_TIMESTAMP WHERE id=?",
+                (job["id"],),
+            )
+        current = jobs.get_job(int(job["id"]), owner_user_id="1")
+        assert current is not None
+        assert current["status"] == "processing"
+        assert current["lease_id"] == job["lease_id"]
+        assert current["leased_until"] == job["leased_until"]
+        assert current["cancel_requested_at"] is not None
+        assert jobs.has_live_processing_lease(int(job["id"]), owner_user_id="1") is False
+
+    if cancellation_phase == "before":
+        request_cancellation()
+        adapter.release.set()
+    pending = asyncio.create_task(worker.handle_generate_variant({
+        "pack_id": pack_with_slots.id, "slot_id": slot.id, "variant_index": 0,
+        "batch_id": batch.batch_id, "user_id": 1,
+    }, job=job))
+    try:
+        if cancellation_phase == "during":
+            assert await asyncio.to_thread(adapter.started.wait, 5)
+            request_cancellation()
+    finally:
+        adapter.release.set()
+        with pytest.raises(VNAssetGenerationError, match="vn_asset_job_lease_lost") as caught:
+            await pending
+
+    assert caught.value.retryable is True
+    assert len(adapter.requests) == (0 if cancellation_phase == "before" else 1)
+    assert saver.calls == []
+    outcome = service.repo.get_variant_outcome(batch.batch_id, slot.id, 0)
+    assert outcome["outcome_status"] == "planned"
+    if cancellation_phase == "before":
+        assert outcome["item_id"] is None
+    else:
+        item = service.repo.get_item(outcome["item_id"])
+        assert item["review_status"] == "hidden"
+        assert item["generated_file_id"] is None
+    current_batch = service.repo.get_batch(batch.batch_id)
+    assert current_batch["completed_count"] == 0
+    assert current_batch["failed_count"] == 0
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 @pytest.mark.parametrize("lease_loss", ["cancelled", "replaced", "expired"])
 async def test_lease_loss_after_storage_attachment_blocks_publication(
     service: VNAssetPackService, pack_with_slots: SimpleNamespace,
@@ -845,10 +926,13 @@ async def test_delayed_jobs_validation_cannot_replace_new_claim(
 
 @pytest.mark.integration
 @pytest.mark.parametrize("transition", ["claim", "attach", "complete", "fail"])
+@pytest.mark.parametrize("cancellation_requested", [False, True])
 def test_repository_checks_jobs_authority_after_variant_write_lock(
     service: VNAssetPackService, pack_with_slots: SimpleNamespace,
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, transition: str,
+    cancellation_requested: bool,
 ) -> None:
+    """Reject terminal and requested cancellation at mutation admission."""
     from tldw_Server_API.app.core.DB_Management import VNAssetPacks_DB as db_module
     from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
 
@@ -881,7 +965,19 @@ def test_repository_checks_jobs_authority_after_variant_write_lock(
     def lock_then_cancel(*args: Any) -> None:
         """Cancel Jobs only after the VN transition acquires write admission."""
         original_lock(*args)
-        assert jobs.cancel_job(int(job["id"]))
+        if cancellation_requested:
+            with sqlite3.connect(tmp_path / "lock-validation-jobs.db") as conn:
+                conn.execute(
+                    "UPDATE jobs SET cancel_requested_at=CURRENT_TIMESTAMP WHERE id=?",
+                    (job["id"],),
+                )
+            current = jobs.get_job(int(job["id"]), owner_user_id="1")
+            assert current is not None
+            assert current["status"] == "processing"
+            assert current["lease_id"] == job["lease_id"]
+            assert current["leased_until"] == job["leased_until"]
+        else:
+            assert jobs.cancel_job(int(job["id"]))
 
     monkeypatch.setattr(db_module, "_lock_variant", lock_then_cancel)
     authority = {"validate_authority": lambda: worker._require_current_job_lease(job, user_id=1)}

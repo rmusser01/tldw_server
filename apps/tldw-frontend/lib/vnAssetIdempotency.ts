@@ -25,7 +25,8 @@ export function readPendingVNAssetGeneration(
     const value: unknown = JSON.parse(raw);
     if (typeof value === 'object' && value !== null && 'kind' in value && 'key' in value) {
       const pending = value as Record<string, unknown>;
-      if (typeof pending.key === 'string' && pending.key.length > 0 && (
+      // API string limits count Unicode code points, not UTF-16 code units.
+      if (typeof pending.key === 'string' && pending.key.length > 0 && Array.from(pending.key).length <= 160 && (
         pending.kind === 'start' || (
           pending.kind === 'retry' && typeof pending.slotId === 'number' &&
           Number.isSafeInteger(pending.slotId) && pending.slotId > 0

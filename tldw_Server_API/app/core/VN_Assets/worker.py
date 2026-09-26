@@ -341,8 +341,9 @@ class VNAssetGenerationWorker:
     def _require_current_job_lease(self, job: Mapping[str, Any], *, user_id: int) -> None:
         """Validate job's live lease for user_id, returning None on admission.
 
-        Raises retryable VNAssetGenerationError for missing, cancelled, replaced,
-        malformed, or expired leases; Jobs read failures propagate. Admission is
+        Raises retryable VNAssetGenerationError for missing, cancelled,
+        cancellation-requested, replaced, malformed, or expired leases; Jobs
+        read failures propagate. Admission is
         a snapshot, so each VN mutation calls this again under its write lock.
         """
         lease_id = str(job.get("lease_id") or "")
@@ -352,6 +353,7 @@ class VNAssetGenerationWorker:
         current = self.jobs_manager.get_job(job_id, owner_user_id=str(user_id))
         if (
             current is None or current.get("status") != "processing"
+            or current.get("cancel_requested_at") is not None
             or str(current.get("lease_id") or "") != lease_id
         ):
             raise VNAssetGenerationError("vn_asset_job_lease_lost", retryable=True, job_id=job_id)

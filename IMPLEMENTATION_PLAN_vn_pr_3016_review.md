@@ -1,5 +1,102 @@
 # PR 3016 VN Durability Review Implementation Plan
 
+## Current Review Wave: Tasks 26 And 27
+
+**Exact base:** e7e76cbedda150ff54c88cf3e030b19faa9d804f.
+**Spec:** Docs/Design/2026-09-25-vn-pr-3016-review.md. **Tracking:** TASK-13369.
+Full Qodo review5327638418/terminal5850282359 completed22:03:01/04Z on this
+head; request5850151676 fulfilled, busy removed. Two new findings verified;
+44threads2unresolved, AC5 reopened. No duplicate review on unchanged head.
+
+### Task 26: Reject Cancellation-Requested Mutation Authority
+
+**Files:** VN_Assets/worker.py, tests/VN_Assets/test_generation_jobs.py.
+**Owner:** controller, critical path inline TDD.
+- [x] Add behavioral regressions for a matching live processing lease whose
+  cancel_requested_at becomes non-null before generation and after generation,
+  including under existing mutation admission. Prove RED on current bytes.
+- [x] Minimal cancellation-request predicate in the existing VN lease fence;
+  retain retryable lease-lost disposition, exact lease/owner/deadline validation,
+  public mutation fences and terminal/approved history. Do not edit Jobs manager.
+- [x] Focused GREEN and bounded affected module once; scoped Ruff, compile,
+  project-venv Bandit with exact baseline comparison. Preserve raw logs/XML.
+
+### Task 27: Validate Persisted Retry Key Length
+
+**Files:** lib/vnAssetIdempotency.ts, its existing frontend test module.
+**Owner:** fresh frontend sidecar implementer, disjoint write set.
+- [x] RED oversized start/retry stored receipts, empty/boundary-valid lengths,
+  owner/pack retention and removal behavior under actual sessionStorage.
+- [x] Reject lengths over160 at existing persisted receipt read boundary;
+  remove invalid receipt. Preserve API, storage-disabled behavior and valid keys.
+- [x] Focused GREEN/affected receipt plus Workbench modules, TypeScript/scoped
+  ESLint; no layout/browser/E2E rerun or production API/config edit.
+
+### Integration Gate
+Local evidence frozen: Task26 manifest24 entries, Task27 manifest42 entries.
+Task26 actual RED6failed4passed; focused14passed and affected97passed, zero
+errors/skips. Task27 actual RED4failed33passed; focused16passed21filter-skips,
+affected receipt/Workbench81passed zero skips. Overlapping counts not summed.
+Task26 Ruff one unchanged BLE001 and Bandit six unchanged test B106 findings,
+errors[], only B101 excluded, zero production findings; not blanket clean.
+Frontend package and owned TS/scoped ESLint passed; Node warnings retained.
+Kant and Cicero CLOSED. Independent SPEC/QUALITY/final changed-contract PASS,
+no actionable findings; reviewer audited source and evidence, no fresh tests.
+Controller final narrow6 backend passed4deselected6warnings5.16s and16frontend
+passed21filter-skips758ms; no broad covering repetition or summed count.
+
+- [x] Independent SPEC/QUALITY and final changed-contract review of both tasks;
+  preserve frozen Tasks1-25 evidence, all backups/already-applied stashes.
+- [ ] Controller scoped normal hooks/commit/push; individual tested replies and
+  resolve only verified findings; ONE full new-head Qodo review after push.
+- [ ] All seven actual required CI contexts, current strict base and requester
+  human summary gate before normal merge; verify MERGED before finalization.
+
+Ruling: these are bounded repairs of the already-authorized cancellation and
+API-valid receipt contracts, not new feature design. Use the existing predicate
+and parser, not shared Jobs or schema changes; cost if wrong is scoped rework.
+No source/frozen evidence redispatch outside these new findings.
+
+## Current Integration: Rebased Onto Advanced Dev
+
+**Head:** e7e76cbedda150ff54c88cf3e030b19faa9d804f.
+**Live dev:** f5fa1f3a41855aa02871d8b76d0ec0cebbaf9e07. **Tracking:** TASK-13369.
+
+- [x] Inspect Sync upload-expiry PR3006 base advancement: 12 paths, zero overlap
+  with the 53 owned paths. Preserve old head, local records and all evidence.
+- [x] Normal conflict-free 16-commit rebase; all range-diff patches equal and
+  owned full raw diffs identical. All103 frozen hashes match after rebase/tests.
+  Exact-lease push against a059e4c8 and GitHub e7e76c head verified.
+- [x] Bounded post-rebase evidence: initial seven-case command returned5passed,
+  two VN setup errors,7warnings/17.43s, XML7/errors2/time16.720; NOT green.
+  Controller /tmp basetemp was outside approved macOS roots. Exact two VN cases
+  then passed under the approved root, zero failures/errors/skips,6warnings/
+  2.61s, XML2/time2.076. Nested bad bridge1pass2intended assertion failures/good
+  bridge3passes separate; no summed seven-pass or nativeCI/whole-suite claim.
+- [x] ONE full new-head Qodo request5850151676 at2026-09-26T21:44:18Z; busy
+  5850152756 at21:44:28Z. Old a059e4c8 full review is historical after push.
+  Verification-only body update21:45:57Z exact-response verified; human summary
+  and all other sections/latest Cubic footer preserved.
+- [ ] Complete full exact-head Qodo/no actionable findings; all seven required
+  checks/statuses pass, current strict base/human gate, normal merge verified.
+  Only then AC6, task finalization and heartbeat pause.
+
+New backup codex/vn3016-before-dev-f5fa1f-a059e4c8 and retained scoped stash
+b7c63957f2b06e46931c0a9eec7d5261b40d2cf6 preserved; stash ALREADY APPLIED, do
+not reapply/drop. Previous backup/stash018ffdd also retained/applied. Pre/post
+local record diff SHA256850c7cbba2688fadb35dc2a2b311ad6d68563831b41f1ab37e559293af9dbc78
+identical. Fresh evidence /tmp/vn3016-post-rebase-e7e76c*, probe directory
+/tmp/vn3016-rebase-e7e76c-probes and rebase-f5fa1f range/raw logs. No source
+edits or broad suite/closed-agent redispatch. Task25 static/Bandit evidence
+applies to unchanged owned bytes, not a fresh scan claim. All needed sessions
+CLOSED. Fresh paginated42threads0unresolved/all pages exhausted/no new inline
+or formal review; actual30conversationcomments before request, edited notices
+checked. Push-summary0bugs0rules27historicalomissions/exactfooter is not full
+completion. New-head54checks33queued21completed/no actionable failure; seven
+required contexts absent and CodeRabbit status success only. OPEN/BLOCKED/
+mergedAtnull/no merge attempt, AC5 checked/AC6 pending. Only local integration
+records dirty, no tracking-only push while external review/CI gates pending.
+
 ## Current CI Wave: Task 25
 
 **Base:** 1e7092e1a786e77d687c634fb7941ebe99ec808d. **Tracking:** TASK-13369.
@@ -46,6 +143,32 @@ B105 synthetic secret exactly/errors[], no addition; Ruff clean/compile/diff
 passed. Inherited warnings/old pytest garbage cleanup and documented earlier
 runner/preservation failures retained; not a pristine/whole-suite claim.
 Normal scoped hooks/commit/push next; AC5checked/AC6 external gates pending.
+
+Task25 integration: normal five-file commit/FFpush/GitHubverified
+a059e4c8fe80fa2811fa6477bf60bae00660a982, dev a2826f unchanged.103hashesmatch
+afterhooks/commit; applicable explicitchecks passed/no-fileSkippednotpasses;
+normalcommitnohookoutput/no commitstageclaim/no bypass. Existing gc warning
+retained, no unrelated cleanup. Verification-onlybody updated15:59:05Z and
+exactresponse verified humanparagraph/allothersections/Cubicfooter unchanged.
+Freshpaginated42threads0unresolved/no remainingpages/30commentsinspected; no
+newinline/review. ONEfullrequest5847682388 at15:58:26Z PENDING/busy5847683532
+15:58:36Z; pushsummary15:58:16Z0bugs0rules27omitted NOT completedfullreview.
+55newheadchecks33queued22completed/no actionablefailure/sevenrequiredabsent;
+onlyCodeRabbitcommitstatussuccess, old-headlicense successhistorical. OPEN/
+BLOCKED/no mergeattempt; AC5checked/AC6pending. Alltaskneededagents/tests/shell
+sessionsCLOSED. Heartbeat updatedtruthfully; onlylocalintegrationrecordsdirty,
+no tracking-onlypush whilepending. Fullnewheadreview/CI/actualmerge still open.
+
+Full a059e4c8 Qodo request5847682388 COMPLETED: terminal exact-head acknowledgment
+5847693942 at16:00:10Z, summary5836873877 updated16:00:07Z0bugs0rules27historical
+omissions/exactfooter. Busy5847683532 removed/fresh404. No formal Review object
+for this zero-finding run; completion established by request/busy/terminal/head
+sequence, not summary edit alone. Freshpaginated42threads0unresolved/allpages
+exhausted/no newinline/formalreview;31conversationcomments metadata inspected,
+new summary/terminal bodies checked. No review pending/no duplicate request.
+55checks33queued22completed/sevenrequiredcontextsabsent, CodeRabbitstatus only;
+skips not passes. AC5checked/AC6pending/OPENBLOCKED/no mergeattempt. Only actual
+CI/currentstrictbase/merge/finalization remain, no codechange or repeated suites.
 
 ## Historical Review Wave: Task 24
 
