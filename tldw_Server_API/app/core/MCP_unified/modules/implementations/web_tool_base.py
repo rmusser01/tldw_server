@@ -1,26 +1,29 @@
 """Shared base for the read-only web MCP tools (web.fetch / web.search / web.research).
 
-Centralizes the behavior these tools had duplicated: a permissive
-``sanitize_input`` override (the MCP protocol sanitizes every tool call before
-execution, and the base SQL denylist wrongly rejects legitimate URLs/queries
-containing ``--``/``/*``/punycode), execution eval metadata, the structured
-error-result shape, the profile-id context reader, and the domain-list
+Centralizes the behavior these tools had duplicated: execution eval metadata, the
+structured error-result shape, the profile-id context reader, and the domain-list
 validator.
+
+These tools also carried a permissive ``sanitize_input`` override, because the
+base sanitizer used to reject any string containing ``--``/``/*``/``*/`` -- which
+is most real URLs, search queries and punycode domains. That denylist is gone
+(TASK-13294) and the base now does exactly what this override did, so the
+override has been removed rather than kept in sync.
 """
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
-from ..base import BaseModule, create_tool_definition  # re-exported for module convenience
+# ``CONTROL_CHARS_RE`` is re-exported: the base owns the one definition, and
+# web_fetch_module imports it from this path to reject control chars in URLs.
+from ..base import (  # re-exported for module convenience
+    CONTROL_CHARS_RE,
+    BaseModule,
+    create_tool_definition,
+)
 
 __all__ = ["CONTROL_CHARS_RE", "WebToolBase", "WebToolError", "create_tool_definition"]
-
-# Shared across the web tools: stripped from sanitized inputs, and rejected
-# outright in URL validation.
-CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
-_MAX_SANITIZE_DEPTH = 20
 
 
 class WebToolError(Exception):
@@ -47,27 +50,6 @@ class WebToolBase(BaseModule):
     _ACTION_FAMILY: str = "web"
     _RESULT_KIND: str = "web_result"
     _TOOL_PROMPT_VERSION: str = "2026.06.14"
-
-    def sanitize_input(self, input_data: Any, _depth: int = 0) -> Any:
-        """Permissive sanitizer that strips only NUL/control characters.
-
-        The base ``sanitize_input`` rejects strings containing SQL-injection
-        substrings (``--``, ``/*``, ``*/``), but those appear constantly in
-        legitimate URLs, search queries (``pip install --no-cache-dir``), and
-        punycode domains (``xn--...``). The MCP protocol runs this on every tool
-        call before execution, so without the override such inputs would be
-        rejected with a protocol ``InvalidParams`` error. We keep only the NUL/
-        control-char stripping and a depth guard.
-        """
-        if _depth > _MAX_SANITIZE_DEPTH:
-            raise ValueError("Input too deeply nested")
-        if isinstance(input_data, str):
-            return CONTROL_CHARS_RE.sub("", input_data)
-        if isinstance(input_data, dict):
-            return {key: self.sanitize_input(value, _depth + 1) for key, value in input_data.items()}
-        if isinstance(input_data, list):
-            return [self.sanitize_input(value, _depth + 1) for value in input_data]
-        return input_data
 
     def _structured_error(
         self,
