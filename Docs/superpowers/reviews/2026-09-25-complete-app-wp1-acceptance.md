@@ -6,13 +6,13 @@ catalog entry, PR or merge is approved by this record.
 
 ## Current evidence (2026-09-26)
 
-The final code review fix wave and Tasks19/20 pass scoped spec/quality review. Exact clean candidate `69e60575c8bf1c7db9139c8fb7e8bb0e245fd8d3` retry1 built all four arm64 images, passed built-backend MCP/setup and all13 signed lifecycle checks. Browser setup API access passes, confirming the CSRF correction, but wizard progression fails because the probe skips the required privacy acknowledgement checkbox. Unchanged compiled diagnosis proves normal acknowledgement and Continue reach provider setup with successful setup writes and clean strict trackers. Task21 is planned as a probe/fixture correction. Cleanup passed; signatures are invalidated and all candidate gates remain false. Full local/native artifact qualification is pending; historical runs do not qualify this source.
+The final code review fix wave and Tasks19/20/21 pass scoped spec/quality review. Exact clean candidate `69e60575c8bf1c7db9139c8fb7e8bb0e245fd8d3` retry1 built all four arm64 images, passed built-backend MCP/setup and all13 signed lifecycle checks. Browser setup API access passes, confirming the CSRF correction, but wizard progression fails because the probe skips the required privacy acknowledgement checkbox. Unchanged compiled diagnosis proves normal acknowledgement and Continue reach provider setup with successful setup writes and clean strict trackers. Task21 correction `a7e246c38c` now follows the normal required acknowledgement; its realistic async cookie/CSRF fixture passes58 tests and scoped review has no findings. Cleanup passed; signatures are invalidated and all candidate gates remain false. Full local/native artifact qualification is pending; historical runs do not qualify this source.
 
 | Contract | Current evidence | Status |
 | --- | --- | --- |
 | Sections5/10: Docker-only startup, stable identity, gateway readiness and private ports | Reviewed fixes and scoped Docker fixtures cover signed identities, gateway cookie auth/revoke, first-port conflict/retry, authoritative persisted inputs and owned cleanup. | Exact69e605 retry1 signed lifecycle13 passes; browser progression still fails. Windows runtime unqualified. |
 | Section11 / G10: required signed artifacts | Both consumers now require all eight signed paths for the selected platform; omitted/missing/wrong-platform/tampered cases pass. | Exact final manifest/signature/helper bytes pending independent verification. |
-| G2: credential-free managed connection and initial wizard | Implementation/probe tests exist; authenticated installer readiness is now required before browser success. | Exact69e605 setup API access passes; probe omits privacy acknowledgement. Task21 correction pending. |
+| G2: credential-free managed connection and initial wizard | Implementation/probe tests exist; authenticated installer readiness is now required before browser success. | Exact69e605 setup API access passes; probe omits privacy acknowledgement. Task21 correction reviewed; fresh exact artifact evidence pending. |
 | G4: two-instance networking/auth | Full browser checklist remains strict and uses the same managed WebUI artifact against two private target configurations. | Pending exact local and native amd64/arm64 evidence. |
 | G12: release policy | Python3.12 and Node24 upstream eligibility rechecked September26; exact patches will be recorded from built images. | False/open: full matrix, Windows runtime, dependency/security/footprints and protected publication remain separate. |
 
@@ -60,6 +60,8 @@ has0errors/86identical baseline warnings; whole-file Prettier reproduces baselin
 baseline limits remain disclosed Minor findings. Bandit is inapplicable to this
 TypeScript-only change. Fresh exact compiled/browser artifact evidence is still
 mandatory; no backend guard or qualification latch was changed.
+
+Task21 changes only two MJS probe/test files. Expected red reproduces disabled Continue; focused6/6 and complete maintained file58/58 pass. Scoped ESLint/diff clean; Bandit inapplicable. Independent review approves spec compliance and quality without findings. Fixtures require acknowledgement and successful ordered setup POSTs, and retain sticky API/network failure after later GET success. Full fresh local/native artifact proof remains mandatory.
 
 The first69e605 dependency install stayed quiet beyond30minutes. Only its verified
 owned build was interrupted; cleanup passed and no manifest/signature remained.

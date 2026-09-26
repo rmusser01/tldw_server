@@ -757,8 +757,8 @@ cannot substitute for successful mutation.
 before Continue and setup_path then privacy writes. Include missing/disabled
 acknowledgement or refused save as a failed qualification with sticky API/network
 latches, rather than skipping or accepting later success.
-**Status:** Not Started
-- [ ] Strengthen the actual browser fixture and add focused failing behavior test.
+**Status:** Complete
+- [x] Strengthen the actual browser fixture and add focused failing behavior test.
 
 #### Stage 2: Follow normal user wizard progression
 **Goal:** Align the maintained probe with the current real UI flow.
@@ -769,8 +769,8 @@ JavaScript state injection, UI modification, acknowledgement bypass or weakened
 tracker/timeout success condition. Partial setup scope remains unchanged.
 **Tests:** Focused behavior red/green, then complete maintained browser-probe test
 file once and scoped ESLint/diff checks. Bandit is inapplicable to MJS-only edits.
-**Status:** Not Started
-- [ ] Make the minimal probe correction, self-review and commit scoped files.
+**Status:** Complete
+- [x] Make the minimal probe correction, self-review and commit scoped files.
 
 #### Stage 3: Review and exact artifact proof
 **Goal:** Qualify the corrected probe and preserve the product security contract.
@@ -781,5 +781,7 @@ remains unqualified, G12 false, publication frozen. A cleared-cookie profile401
 from diagnosis is not claimed as stale-token replay; parent checklist must prove
 its own actual revocation contract.
 **Tests:** Parent-owned full exact candidate and independent evidence verifier.
-**Status:** Not Started
+**Status:** In Progress
 - [ ] Report scoped tests/limits; controller reviews and resumes Task13 acceptance.
+
+Task21 `a7e246c38c` scoped review approves spec/quality with no findings. Expected red reproduces disabled Continue; focused6/6 and complete maintained browser-probe file58/58 pass, scoped ESLint/diff clean. Only two MJS files changed; Bandit inapplicable. Stage3 exact compiled local/native proof remains pending.

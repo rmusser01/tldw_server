@@ -4,7 +4,7 @@ title: Plan and implement paired Docker distribution and runtime gateway
 status: In Progress
 assignee: []
 created_date: '2026-09-23 06:15'
-updated_date: '2026-09-26 11:10'
+updated_date: '2026-09-26 11:24'
 labels:
   - distribution
   - docker
@@ -127,6 +127,10 @@ Exact clean candidate284010040c878d6b749f9d5b1aa7db52024bc269 built4armroles and
 Task20 e34d3151da scoped spec/quality review approved, no Critical/Important findings. Single request-core cookieSession condition correction attaches runtime CSRF for unsafe noAuth requests without changing auth/origin/policy/latches;18behavioralcases incl actualsetupOnboardingMethods→bgRequest→realrequestcore chain. Expectedred6fail8pass→focused14pass; after runtimecookieName integrationcleanup finalaffected291pass10fail across11suites,10passing suites; unchangedbaseline persistence harness reproduces10fail6pass missingmockexport. Overallrunnotpassing. ESLint0errors/86identicalbaselinewarnings; wholefilePrettierbaseline/currentsame2warnings+printercrash, ownaddedsnippetscheckpassed. TSonlyBanditnotapplicable. ReviewMinorbaselinenoise disclosed; freshcompiled13lifecycle38browser/signatureproof remainsparentTask13mandatory, no cachedsourcequalification/push/native/publicationyet.
 
 Exact69e60575c8bf1c7db9139c8fb7e8bb0e245fd8d3 retry1 builtall4/builtMCPSetup/all13signedlifecyclepass, browser setup_api_access_1 TRUE (actualCSRFfixproved) but setup_interaction_1 false. Allgatesfalse/signaturesinvalidated/owncleanup/no recovery/only2PGpreserved. EarlierquietBuninstall>30min intentionallyownedbuildSIGINT/cleanup; boundedverbose currentdependencyproof85sec, unchangedretryquiet86.5sec/compilepass, no Bunrootcause/dependencychange. Currentcachedcompiled diagnosis proves privacyackunchecked/Continue disabled; normalcheckbox.check()+Continue.click reachesprovider66ms with setup_pathPOST200/privacyPOST200/catalog200, metadata localtrue/remotefalse and stricttrackersclean. No productguardbug. DELETE200 then anonymousprofile401 usedclearedcookies (not stale-token replay); allownresources/backendvolumesremoved. Add narrowTask21 before edits: normalprivacyackaction in probe and realistic required-ack/setup-saveHTTP fixture, focusedTDD/review, freshactual13lifecycle38browser/native/signatures. No product/UI/policy/latch/dependencychanges or forceclick/skip; G12/Windowsruntime/publicationremainopen.
+
+Task21 probe correction a7e246c38c changes only two MJS files: normal required privacy heading/checkbox action, async cookie-CSRF setup saves in fixture, refusal gates stay sticky. Expected red disabled Continue; focused6/6 and full maintained file58/58 pass, scoped ESLint/diff clean. Bandit inapplicable MJS-only. Independent scoped review pending; exact compiled local/native13lifecycle38browser signatures still mandatory, Windowsruntime/G12/publication remainopen.
+
+Task21 independent Sol-high review approves spec compliance and quality; no Critical/Important/Minor findings. Sourcea7e246c38c scoped two-file correction; parent will freeze clean tracking HEAD and run full exact arm64 candidate, then same tested revision native CI. Reviewer cannot verify cross-task actual contracts; parent retains13lifecycle/38browser/signature/8files/ownedcleanup and stale-token checks. No publication or Windowsruntime claim.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
