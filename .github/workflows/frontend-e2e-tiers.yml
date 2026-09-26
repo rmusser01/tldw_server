@@ -7,9 +7,6 @@ on:
       - 'apps/packages/ui/src/**'
       - 'apps/tldw-frontend/**'
       - 'tldw_Server_API/**'
-  workflow_run:
-    workflows: [Frontend License Gate Audit]
-    types: [completed]
   workflow_dispatch:
     inputs:
       tier:
@@ -50,9 +47,19 @@ jobs:
       statuses: read
 
   # ── Tier 1 + Journeys (critical path — always runs on PR) ─────────────
+  # The pull_request path reports to the PR, so it is the one branch protection
+  # sees -- but it used to start every gate immediately, in parallel with the
+  # license audit it is supposed to follow. This makes it wait for the verdict.
+  await_license:
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/license-first-await.yml
+    permissions:
+      contents: read
+      statuses: read
+
   critical:
     name: E2E Critical (Tier 1 + Journeys)
-    needs: admission
+    needs: [admission, await_license]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     if: >-
@@ -63,7 +70,13 @@ jobs:
           needs.admission.result == 'success' &&
           needs.admission.outputs.should_run == 'true'
         ) ||
-        github.event_name != 'workflow_run'
+        (
+          github.event_name != 'workflow_run' &&
+          (
+            needs.await_license.result == 'skipped' ||
+            needs.await_license.outputs.license_passed == 'true'
+          )
+        )
       ) &&
       (
         (github.event_name == 'pull_request' ||
@@ -163,7 +176,7 @@ jobs:
   # ── Tier 2 + 3 (features — on dispatch or full suite) ─────────────────
   features:
     name: E2E Features (Tier 2 + 3)
-    needs: admission
+    needs: [admission, await_license]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     if: >-
@@ -174,7 +187,13 @@ jobs:
           needs.admission.result == 'success' &&
           needs.admission.outputs.should_run == 'true'
         ) ||
-        github.event_name != 'workflow_run'
+        (
+          github.event_name != 'workflow_run' &&
+          (
+            needs.await_license.result == 'skipped' ||
+            needs.await_license.outputs.license_passed == 'true'
+          )
+        )
       ) &&
       (
         github.event_name == 'workflow_dispatch' &&
@@ -264,7 +283,7 @@ jobs:
   # ── Tier 4 + 5 (admin/specialized — on dispatch or full suite) ────────
   admin:
     name: E2E Admin (Tier 4 + 5)
-    needs: admission
+    needs: [admission, await_license]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     if: >-
@@ -275,7 +294,13 @@ jobs:
           needs.admission.result == 'success' &&
           needs.admission.outputs.should_run == 'true'
         ) ||
-        github.event_name != 'workflow_run'
+        (
+          github.event_name != 'workflow_run' &&
+          (
+            needs.await_license.result == 'skipped' ||
+            needs.await_license.outputs.license_passed == 'true'
+          )
+        )
       ) &&
       (
         github.event_name == 'workflow_dispatch' &&

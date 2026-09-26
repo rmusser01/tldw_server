@@ -1,0 +1,89 @@
+name: License First Await
+
+# The license gate must pass before any other gate runs. The `workflow_run`
+# path enforces that via license-first-admission.yml, but its check runs attach
+# to the default branch's SHA and so cannot satisfy a required status check on
+# a pull request. The `pull_request` path is the one that reports to the PR, and
+# it had no ordering at all -- every gate started immediately, in parallel with
+# the audit it was supposed to wait for.
+#
+# This waits for the audit's commit status on the PR head and reports whether it
+# passed, so the pull_request path can honour the same ordering while keeping the
+# reporting that branch protection depends on.
+
+on:
+  workflow_call:
+    outputs:
+      license_passed:
+        description: Whether the license audit succeeded for this PR head.
+        value: ${{ jobs.await.outputs.license_passed }}
+
+permissions:
+  contents: read
+  statuses: read
+
+jobs:
+  await:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      license_passed: ${{ steps.wait.outputs.license_passed }}
+    steps:
+      - id: wait
+        name: Wait for the license audit on this PR head
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          CONTEXT: frontend-license-policy/trusted/${{ github.base_ref }}
+          ENABLED: ${{ vars.LICENSE_FIRST_CI_ENABLED }}
+        run: |
+          set -euo pipefail
+
+          # Ordering is only enforced when license-first is switched on. With it
+          # off, behave exactly as before rather than blocking every gate.
+          if [[ "${ENABLED}" != "true" ]]; then
+            echo "license-first disabled; not gating on the audit"
+            echo "license_passed=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          if [[ -z "${HEAD_SHA}" ]]; then
+            echo "::error::No pull_request head SHA; refusing to admit the gates."
+            echo "license_passed=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          # The audit posts its verdict as a commit status on the PR head. Poll
+          # until it is decided; a missing or pending status is not a pass.
+          #
+          # Read with real jq rather than `gh api --jq`: gh's built-in filter
+          # has no --arg, so passing one makes the call fail. Errors are NOT
+          # suppressed here -- swallowing them once already turned a working
+          # status into a permanent "missing" and skipped every gate.
+          for attempt in $(seq 1 60); do
+            if ! payload="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}/status")"; then
+              echo "::error::Could not read commit status for ${HEAD_SHA}."
+              echo "license_passed=false" >> "${GITHUB_OUTPUT}"
+              exit 0
+            fi
+            state="$(printf '%s' "${payload}" | jq -r --arg c "${CONTEXT}" \
+                      'first(.statuses[] | select(.context == $c) | .state) // "missing"')"
+            case "${state}" in
+              success)
+                echo "license audit passed for ${HEAD_SHA}"
+                echo "license_passed=true" >> "${GITHUB_OUTPUT}"
+                exit 0
+                ;;
+              failure|error)
+                echo "::error::License audit ${state} for ${HEAD_SHA}; gates will not run."
+                echo "license_passed=false" >> "${GITHUB_OUTPUT}"
+                exit 0
+                ;;
+            esac
+            echo "attempt ${attempt}: license status is '${state}', waiting"
+            sleep 15
+          done
+
+          echo "::error::License audit did not report within 15 minutes."
+          echo "license_passed=false" >> "${GITHUB_OUTPUT}"
