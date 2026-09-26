@@ -265,16 +265,16 @@ runtime routing without editing the signed bundle or advertising a new user
 configuration interface. Check actual container environment/image identity
 without exposing credentials.
 
-- [ ] **Step 1: Write the behavioral checks first.** Require two distinct public
+- [x] **Step 1: Write the behavioral checks first.** Require two distinct public
   loopback origins and cookie-name pairs; fail invalid/remote/duplicate inputs
   before browser launch. In a fresh real Chromium context, render managed setup
   without manually entering the master API key or seeding browser storage;
   inspect the actual visible setup flow and interact through accessible controls.
   Do not mock application API responses in live qualification.
-- [ ] **Step 2: Verify red evidence** before implementing the new probe. Preserve
+- [x] **Step 2: Verify red evidence** before implementing the new probe. Preserve
   meaningful failure output in the task report. Existing Playwright tooling may
   be used for inspection; new qualification uses the repository's script style.
-- [ ] **Step 3: Implement the smallest probe.** Check anonymous profile refusal,
+- [x] **Step 3: Implement the smallest probe.** Check anonymous profile refusal,
   browser-managed session bootstrap, HttpOnly session/readable CSRF attributes,
   cookie-only profile access, both instances in the same browser context,
   missing and foreign CSRF rejection, foreign-session rejection, logout of one
@@ -316,13 +316,13 @@ Real fresh cookie WebSocket inspection fails its upgrade while the origin is
 absent from `trusted_webui_origins`; ordinary notification SSE succeeds. This
 uses the existing origin policy and adds no wildcard or global auth relaxation.
 
-- [ ] **Step 1:** Capture actual backend HTTP failure and write red behavioral
+- [x] **Step 1:** Capture actual backend HTTP failure and write red behavioral
   tests for the measured Docker scope, metadata and Compose contract.
-- [ ] **Step 2:** Implement the bounded managed-hop predicate and gateway/header
+- [x] **Step 2:** Implement the bounded managed-hop predicate and gateway/header
   configuration. Reject missing/wrong/duplicate hop, public peer, mismatched
   origin/Host, malformed forwarding and disabled/unconfigured managed mode.
   Verify the managed persisted origin is the sole cookie WebSocket origin.
-- [ ] **Step 3:** Run focused positive/negative setup and gateway tests, scoped
+- [x] **Step 3:** Run focused positive/negative setup and gateway tests, scoped
   formatting/lint and Bandit. Review before live qualification.
 - [ ] **Step 4:** Rebuild from a clean committed source and run the actual fresh
   browser/two-instance candidate. Keep broader gates false until their complete
@@ -340,9 +340,9 @@ Mounting only that directory read-only makes both API requests return 200.
 in `Helper_Scripts/qualify_app_bundle_candidate.sh`. Reuse the existing reader;
 ship only its existing published source directory. No dependency or API change.
 
-- [ ] **Step 1:** Add real image/API checks that fail on the inspection image;
+- [x] **Step 1:** Add real image/API checks that fail on the inspection image;
   record the existing 500/404 versus read-only-source-mount 200/200 evidence.
-- [ ] **Step 2:** Include the published documentation in the runtime image with
+- [x] **Step 2:** Include the published documentation in the runtime image with
   correct ownership and its expected directory. Preserve managed/quickstart
   packaging and avoid shipping unrelated design/private content.
 - [ ] **Step 3:** Check manifest entries and actual published content from the
@@ -369,9 +369,9 @@ injection only to the bounded MCP surface; never expose it in browser responses,
 stored transport metadata or unrelated backend endpoints. Reuse the existing
 predicate instead of inventing a second forwarding policy or disabling IP rules.
 
-- [ ] **Step 1:** Write red HTTP/WebSocket behavior for measured bridge peers,
+- [x] **Step 1:** Write red HTTP/WebSocket behavior for measured bridge peers,
   existing block rules and hostile direct/forwarded inputs.
-- [ ] **Step 2:** Implement the smallest shared contract and exact MCP origin
+- [x] **Step 2:** Implement the smallest shared contract and exact MCP origin
   configuration. Preserve ordinary hosted/developer policies.
 - [ ] **Step 3:** Run focused positive/negative tests, scoped lint/format/Bandit,
   independent security review and actual cookie-only MCP WebSocket roundtrip.
@@ -388,11 +388,11 @@ remove only its own created container/storage. All fixture cleanup, including
 browser shutdown and the older lifecycle smoke, must fail closed and preserve
 recovery state on failure.
 
-- [ ] **Step 1:** Add real published documentation, redirect, multipart document
+- [x] **Step 1:** Add real published documentation, redirect, multipart document
   processing, cancellable notification SSE, cookie WebSocket roundtrip and
   hostile forwarding/Origin checks to both varying private-target instances.
   Use harmless public fixtures and no paid provider/model download.
-- [ ] **Step 2:** Keep raw response bodies, cookies, tokens, traces and error
+- [x] **Step 2:** Keep raw response bodies, cookies, tokens, traces and error
   messages out of outputs. Prove every required result fails closed and owned
   cleanup completes before reporting success.
 - [ ] **Step 3:** Run the exact clean signed local candidate, then both native CI
@@ -412,15 +412,15 @@ Task 11 regressions, but must be resolved before whole-WP1 acceptance.
 `test_makefile_quickstart_same_origin.py`; lean candidate workflow test wiring.
 Execute this bounded task after Task 12 review and before Task 13 qualification.
 
-- [ ] **Step 1:** Preserve the current red evidence and replace obsolete exact
+- [x] **Step 1:** Preserve the current red evidence and replace obsolete exact
   builder/argument spellings with checks of both targets' actual inherited
   configuration, scoped source copies and ownership. Keep default quickstart
   same-origin behavior and managed artifact secret/origin independence guarded.
-- [ ] **Step 2:** Extend the API COPY allowlist only for the reviewed local
+- [x] **Step 2:** Extend the API COPY allowlist only for the reviewed local
   profile package; retain protected-frontend exclusion and legal-file checks.
   Add meaningful negative fixtures proving the guards still reject unsafe
   packaging. Do not remove or disable tests or broaden the allowlist.
-- [ ] **Step 3:** Run the focused suite, wire it into lean CI, lint/format and
+- [x] **Step 3:** Run the focused suite, wire it into lean CI, lint/format and
   review. Keep real artifact qualification in Task 13.
 
 ## Plan self-review checklist
@@ -460,3 +460,14 @@ multi-platform candidate is still required.
 - Sections 5/10/11 and gates G2/G4/G10/G12 map to Tasks 1–8. Backend dependency slimming and complete storage inventory are WP2; native lifecycle and the single-source verifier packaging check are WP3; automatic update/backup/restore is WP4; guided heavy components and final public promotion are WP5.
 - Verify exact code symbols in the interface blocks when implementing each task; preserve existing quickstart/hosted paths and test both managed and legacy modes.
 - Do not claim G2/G4/G10/G12 complete until candidate artifacts pass the corresponding tests. This plan is executable work, not evidence that they already pass.
+
+Qualification tooling review (September 25): Tasks9-12 scoped implementation
+and Task14 packaging guards are approved. Task13 commits9dfce026da and558fdb814a
+pass focused review after adding the exact excluded setup test as a read-only
+qualification mount. Browser50, candidate38/helper14, MCP39 and Setup60 checks
+pass; production security Bandit reports zero findings. These are tooling/unit
+results, not real-image acceptance. Exact clean local arm64 and both native CI
+candidates, independent artifact verification and whole-WP1 review remain the
+next gates. G2/G4 and AC4 remain open until their complete mapped evidence passes;
+G12 publication stays separately blocked. Existing dependency warnings and
+whole-frontend typecheck baseline remain disclosed.
