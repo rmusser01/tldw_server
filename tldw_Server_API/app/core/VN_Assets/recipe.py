@@ -81,7 +81,8 @@ def load_recipe(value: Any, *, pack_id: int, owner_user_id: int) -> dict[str, An
         raise ValueError("vn_asset_recipe_invalid") from exc
     if (
         not isinstance(recipe, dict)
-        or recipe.get("version") != RECIPE_VERSION
+        or type(recipe.get("version")) is not int
+        or recipe["version"] != RECIPE_VERSION
         or recipe.get("pack_id") != pack_id
         or recipe.get("owner_user_id") != owner_user_id
         or type(recipe.get("primary_character_id")) is not int
@@ -117,7 +118,8 @@ def load_execution_recipe(value: Any) -> dict[str, Any]:
         raise ValueError("vn_asset_execution_recipe_invalid") from exc
     if (
         not isinstance(recipe, dict)
-        or recipe.get("version") != RECIPE_VERSION
+        or type(recipe.get("version")) is not int
+        or recipe["version"] != RECIPE_VERSION
         or not isinstance(recipe.get("slots"), list)
     ):
         raise ValueError("vn_asset_execution_recipe_invalid")

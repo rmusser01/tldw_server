@@ -57,3 +57,17 @@ def test_load_recipe_reports_legacy_absence_as_unavailable() -> None:
     """Retain the existing legacy-batch recovery error."""
     with pytest.raises(ValueError, match="^vn_asset_recipe_unavailable$"):
         load_recipe(None, pack_id=1, owner_user_id=1)
+
+
+@pytest.mark.parametrize("version", [True, 1.0], ids=["boolean", "float"])
+@pytest.mark.parametrize("execution", [False, True], ids=["authored", "execution"])
+def test_recipe_loaders_reject_non_integer_versions(version: bool | float, execution: bool) -> None:
+    """Reject version values that compare equal to one without being integers."""
+    snapshot = {"version": version, "pack_id": 1, "owner_user_id": 1, "primary_character_id": 1, "slots": []}
+    code = "vn_asset_execution_recipe_invalid" if execution else "vn_asset_recipe_invalid"
+
+    with pytest.raises(ValueError, match=f"^{code}$"):
+        if execution:
+            load_execution_recipe(json.dumps(snapshot))
+        else:
+            load_recipe(json.dumps(snapshot), pack_id=1, owner_user_id=1)

@@ -2030,6 +2030,8 @@ def test_retry_slot_api_reports_legacy_recipe_recovery(
     ("field", "corruption"),
     [
         ("recipe_json", "invalid_json"),
+        ("recipe_json", "bool_version"),
+        ("recipe_json", "float_version"),
         ("recipe_json", "missing_variant_count"),
         ("recipe_json", "string_variant_count"),
         ("recipe_json", "bool_variant_count"),
@@ -2040,6 +2042,8 @@ def test_retry_slot_api_reports_legacy_recipe_recovery(
         ("recipe_json", "short_seeds"),
         ("recipe_json", "null_slot"),
         ("execution_recipe_json", "invalid_json"),
+        ("execution_recipe_json", "bool_version"),
+        ("execution_recipe_json", "float_version"),
         ("execution_recipe_json", "missing_slots"),
         ("execution_recipe_json", "null_slots"),
         ("execution_recipe_json", "null_slot"),
@@ -2068,7 +2072,11 @@ def test_retry_slot_api_rejects_malformed_stored_snapshots_without_enqueue(
     if field == "execution_recipe_json":
         snapshot = {"version": 1, "slots": [{"slot_id": slot_id, "backend": "test", "model": None}]}
     entry = snapshot["slots"][0]
-    if corruption.startswith("missing_") and corruption not in {"missing_prompt", "missing_target"}:
+    if corruption == "bool_version":
+        snapshot["version"] = True
+    elif corruption == "float_version":
+        snapshot["version"] = 1.0
+    elif corruption.startswith("missing_") and corruption not in {"missing_prompt", "missing_target"}:
         target = snapshot if corruption == "missing_slots" else entry
         target.pop(corruption.removeprefix("missing_"))
     elif corruption == "missing_prompt":
