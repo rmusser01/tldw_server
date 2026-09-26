@@ -6,14 +6,14 @@ catalog entry, PR or merge is approved by this record.
 
 ## Current evidence (2026-09-26)
 
-The final code review fix wave and Tasks19/20/21/22 pass scoped spec/quality review. Exact clean candidate `13d9a0d29cffffc282647ac9b72585af1c15eb8a` native CI [36239373229](https://github.com/rmusser01/tldw_server/actions/runs/36239373229) built all four images on both Linux architectures, passed built-backend MCP/setup and all13 signed lifecycle checks. Both candidates pass25 browser checks including normal wizard/privacy progression on both instances, then fail only hostile_inputs_1. Actual same-product cached diagnosis isolates a foreign-Origin cookie WebSocket upgrade reset instead of the required HTTP refusal; Task22 correction9722148d6f and peer-reset safety fixd0afab1daf are implemented; scoped fix review approves with no remaining findings. Owned cleanup passed; signatures are invalidated and all candidate gates remain false. Local dependency installation stalled twice; bounded diagnostics establish intermittent waiting but no cause/fix, and native builds completed. Full corrected local/native qualification remains pending.
+The final code review fix wave and Tasks19/20/21/22 pass scoped spec/quality review. Exact clean source `ff3becc70a387768a129dd66b8dd297aa396eee9` local arm64 builds all four images and passes builtMCPSetup/all13 lifecycle checks. It passes35 browser checks, including both hostile upgrades, then fails onlylogout_isolated. Actual exact-image two-instance diagnosis proves the forged foreign-session probe installs a replacement CSRF cookie through Playwright's shared request context; captured-token logout403 versus current-token logout200 and profiles401/200 establish probe contamination. Task23 is planned. Cleanup passed, signatures are invalidated and all gates remain false. Same-source native CI [36242386644](https://github.com/rmusser01/tldw_server/actions/runs/36242386644) remains in progress. The earlier failed13d9 native run is historical. Local dependency installation completed this time; prior intermittent waiting still has no established cause/fix. Fresh corrected local/native qualification remains pending.
 
 | Contract | Current evidence | Status |
 | --- | --- | --- |
-| Sections5/10: Docker-only startup, stable identity, gateway readiness and private ports | Reviewed fixes and scoped Docker fixtures cover signed identities, gateway cookie auth/revoke, first-port conflict/retry, authoritative persisted inputs and owned cleanup. | Exact13d9 both native signed lifecycle13 passes; hostile upgrade check fails. Windows runtime unqualified. |
-| Section11 / G10: required signed artifacts | Both consumers now require all eight signed paths for the selected platform; omitted/missing/wrong-platform/tampered cases pass. | Failed13d9 signatures invalidated; corrected exact signed bytes pending. |
-| G2: credential-free managed connection and initial wizard | Implementation/probe tests exist; authenticated installer readiness is now required before browser success. | Exact13d9 both native managed setup/privacy progression passes; full browser gate remains failed. |
-| G4: two-instance networking/auth | Full browser checklist remains strict and uses the same managed WebUI artifact against two private target configurations. | Exact13d9 both native stops at hostile_inputs_1; corrected full evidence pending. |
+| Sections5/10: Docker-only startup, stable identity, gateway readiness and private ports | Reviewed fixes and scoped Docker fixtures cover signed identities, gateway cookie auth/revoke, first-port conflict/retry, authoritative persisted inputs and owned cleanup. | Exactff3 local signed lifecycle13 passes; browser logout probe fails. Windows runtime unqualified. |
+| Section11 / G10: required signed artifacts | Both consumers now require all eight signed paths for the selected platform; omitted/missing/wrong-platform/tampered cases pass. | Failedff3 signatures invalidated; corrected exact signed bytes pending. |
+| G2: credential-free managed connection and initial wizard | Implementation/probe tests exist; authenticated installer readiness is now required before browser success. | Exactff3 local both managed setup/privacy progression passes; full browser gate remains failed. |
+| G4: two-instance networking/auth | Full browser checklist remains strict and uses the same managed WebUI artifact against two private target configurations. | Exactff3 local both hostile inputs pass; logout_isolated fails from probe cookie contamination; corrected full evidence pending. |
 | G12: release policy | Python3.12 and Node24 upstream eligibility rechecked September26; exact patches will be recorded from built images. | False/open: full matrix, Windows runtime, dependency/security/footprints and protected publication remain separate. |
 
 PowerShell helpers are provisional. Windows parsing does not prove real Docker startup, ACL/private-state handling, port recovery, readiness, or stop/status. Docker image Size metadata does not measure download or installed footprint. The 93 untouched whole-frontend typecheck diagnostics remain a disclosed failing baseline.
@@ -105,6 +105,16 @@ remains pending;
 Bandit is inapplicable to MJS-only edits. Git housekeeping warnings remain
 baseline and no manual GC/prune occurred.
 
+Exactff3 actual two-instance diagnosis confirms both transport suites and all
+missing/foreign CSRF refusals pass without cookie changes. Each foreign-session
+shared request returns401 and changes only its target CSRF cookie; captured-token
+logout403 leaves both profiles200. Same-session current-token logout200 yields
+401/200 profiles, and both explicitly captured stale-session replays return401
+after valid revocation. Chromium and all owned resources close; unrelated PG
+identities/states stay unchanged. Initialization was unsigned source/inventory
+metadata, supplying no signed-helper or Docker-only qualification. Task23 will
+isolate the hostile GET and strengthen its response fixture.
+
 ## Rulings I made
 
 - Ruling: Correct the design route table to put `/setup` in Next and backend docs assets in FastAPI — this records the user-approved routing correction already committed/tested at 9755c7eaaf/e759322854, rather than reverting to the legacy backend page. Cost if wrong: route ownership and novice setup need rework; API setup paths remain available.
@@ -134,6 +144,9 @@ baseline and no manual GC/prune occurred.
 - Ruling: Diagnose the hostile-input runtime failure using verified cached69 backend/WebUI/gateway and unchanged control source to initialize fresh private diagnostic state when the unused cached69 control image is missing — native13 already independently passed all signed-control/lifecycle checks, and69..13 product runtime source is unchanged. Cost if wrong: the runtime reproduction must be repeated with exact current artifacts; local Python initialization supplies no Docker-only/signed-helper qualification, and no mixed runtime image/source acceptance or image pull/build is authorized.
 
 - Ruling: Return a small bounded constant HTTP403 for gateway Host/Origin-denied upgrades, preserving exact authorization and strict probe, rather than accepting arbitrary connection errors as a security pass — actual foreign-Origin rejection resets while ordinary refusal and synthetic fixture express403. Cost if wrong: upgrade refusal framing/cleanup must be reworked and exact local/native security checks repeated; no auth/private-hop/Origin relaxation or reflected credential material is authorized.
+
+- Ruling: Initialize fresh unsigned private diagnostic state with the existing initializer source and exactff inventory-derived in-memory release metadata, after verifying all cached role digests/platform/revision — failed-candidate signatures are deliberately absent and must not be restored, while the logout subrequest needs two actual fresh instances to trace cookie state. Cost if wrong: diagnostic initialization and reproduction must repeat using independently eligible artifacts; no signature, Docker-only helper or candidate qualification follows from metadata-class names, and no failed gates or public artifacts may be repaired.
+- Ruling: Send forged foreign-session probes through the existing bounded native request helper, preserving captured-token logout assertions and browser state — actual shared Playwright requests install401 CSRF cookies and contaminate the legitimate session test. Cost if wrong: probe isolation/fixture response behavior must be reworked and fresh exact local/native13lifecycle38browser signatures repeated; no backend CSRF/logout policy, token refresh workaround or failure-latch weakening is authorized.
 
 ## Historical evidence through September25 and superseded follow-ups
 

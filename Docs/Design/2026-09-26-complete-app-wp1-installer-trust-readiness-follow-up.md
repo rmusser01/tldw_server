@@ -109,3 +109,17 @@ proxy dispatch for unauthorized upgrades, then end the socket with an absolute
 phase and managed-route refusals retain existing behavior. Real-gateway negative
 and successful-upgrade regressions plus exact local/native artifacts are required.
 This does not imply an accepted hostile connection or authorize publication.
+
+## Actual foreign-session probe isolation (Task23)
+
+Exactff3 local browser qualification passes both hostile upgrades and fails at
+logout because its forged-session GET uses Playwright's shared request context.
+Actual401 responses issue a replacement CSRF cookie when the explicit foreign
+Cookie omits CSRF; the live browser jar changes and the captured logout token
+becomes stale. Current-token logout200 with profiles401/200 confirms product
+isolation. Use the existing bounded native hostileRequest for this hostile GET,
+retain the foreign Cookie and strict401/403 plus captured-token logout assertions,
+and add the missing backend-shaped Set-Cookie fixture regression. Do not alter
+product cookies/CSRF/auth, refresh away the contamination, or weaken latches.
+Fresh exact local/native13lifecycle38browser/signature/eight-file proof remains
+mandatory; unsigned diagnostic initialization supplies no qualification.

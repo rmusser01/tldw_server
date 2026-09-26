@@ -4,7 +4,7 @@ title: Plan and implement paired Docker distribution and runtime gateway
 status: In Progress
 assignee: []
 created_date: '2026-09-23 06:15'
-updated_date: '2026-09-26 12:34'
+updated_date: '2026-09-26 12:59'
 labels:
   - distribution
   - docker
@@ -137,6 +137,8 @@ Exact13d9native run36239373229 completedfailure BOTH linuxamd64/arm64: all4roles
 Task22 source9722148d6f and fixd0afab1daf implement constant403 absolute1000ms unref/close-canceled cleanup for authorization-denied upgrades. Scoped review found rawsocket peer-reset processcrash; actual createGateway redECONNRESET/exit1 reproduced, one pre-end destroy-onerror listener green proves actualreset/errorclose/destroyed/status200/process0. Finalgateway/routes20pass once, scopedESLint/diff warningfree; BanditN/A MJS. Independent scoped fix review pending, exact local/native13lifecycle38browser/eightfiles/signatures/cleanup mandatory before acceptance. No policy/probe/dependencychanges, Windows runtime unqualified/G12false/publicationfrozen; git housekeeping warnings disclosed/no manualGC.
 
 Task22 scoped Astra fixround1 rereview972..d0af approves: peer-reset finding addressed, actual gateway regression addressed, no new breakage/out-of-scope findings. Root read fullreport; implementation complete, exact qualification pending. Freeze clean trackingHEAD and build fresh corrected localarm candidate plus same exact ownbranch native CI under existing authorization/Ruling19; no publication/PR/merge or Windows/G12 qualification.
+
+Exactff3 local builtall4/MCPSetup/all13lifecyclepass and35browserchecks; ONLYlogout_isolatedfalse, bothhostileinputsnowpass. Actualexactff diagnostic proves sharedcontext foreignsessionGET401 installsreplacementCSRFcookie -> capturedlogout403, samecurrenttokenlogout200/profile401200; sessionsunchanged/explicitbothstaleCookie401/cleanup/PGpreserved. Unsigneddiagnosticinitializer suppliesno qualification. PlanTask23 beforeedits: existingnativehostileRequest forforgedGET, sameforeigncookie/strict401403/capturedlogout/latches unchanged, fixturemiddlewareSetCookie regression TDD/scopedreview/freshexactlocalnative13/38/signatures/eightfiles. Native36242386644 stillinprogress; failedcandidategatesfalse/signaturesinvalidated. Windows/G12/publicationremainopen.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

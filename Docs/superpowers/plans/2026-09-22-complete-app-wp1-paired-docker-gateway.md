@@ -851,3 +851,54 @@ Bandit inapplicable to MJS-only scope. Independent scoped fix review approves: t
 no new breakage or out-of-scope findings. Fresh exact local/native qualification
 remains pending. Existing Git housekeeping warnings
 are disclosed without manual GC/prune.
+
+### Task 23: Keep forged foreign-session probes outside browser cookie storage
+
+**Authority:** Exactff3 local candidate built all four roles, passed builtMCPSetup
+and all13 lifecycle checks, then passed35 browser checks with onlylogout_isolated
+false. Both hostile-upgrade checks now pass. One actual exactff two-instance
+runtime diagnosis proves shared Playwright context.request installs a replacement
+CSRF cookie from each foreign-session401, making the previously captured logout
+token stale. Current-token logout200 and profiles401/200 prove product isolation.
+This is a bounded probe repair within the approved strict qualification design.
+
+**Files:** Only `apps/tldw-frontend/scripts/qualify-app-bundle-browser.mjs` and
+`scripts/__tests__/qualify-app-bundle-browser.test.mjs`. Use the existing native
+hostileRequest for the deliberately forged foreign-session GET, with the same
+explicit foreign Cookie and strict401/403 assertion. Native response Set-Cookie
+must not enter the browser jar. Keep the captured-CSRF logout assertion, same
+browser context/two instances, rebootstrap, security latches, bounds, evidence
+schema and product policies unchanged. Do not refresh tokens to hide contamination,
+preseed/mutate storage, alter backend CSRF/logout/auth, or broaden the helper API.
+
+#### Stage 1: Reproduce cookie-jar contamination
+**Goal:** Model the actual backend response in the existing paired fixture.
+**Success Criteria:** A foreign-session profile401 emits a replacement target CSRF
+Set-Cookie when its explicit Cookie omits CSRF. Regression proves shared request
+context poisons the live token and fails the strict logout sequence before repair.
+The fixture confirms each hostile request reached the target and the real browser
+session/CSRF state survives after the isolated native request. Keep401/403 strict.
+**Tests:** Focused behavioral expected red against unchanged probe; no product bypass.
+**Status:** Not Started
+- [ ] Add the real-shaped response fixture and witness strict logout failure.
+
+#### Stage 2: Isolate the hostile request
+**Goal:** Forge only the request rather than browser storage.
+**Success Criteria:** Minimal native-request replacement preserves authentication
+refusal, original legitimate browser state, captured-token logout200, revoked
+profile refusal and other instanceprofile200, rebootstrap and all latches.
+**Tests:** Focused green, full maintained probe test file once after final code,
+scoped ESLint/diff, Bandit inapplicable to MJS-only edits; disclose all warnings.
+**Status:** Not Started
+- [ ] Implement, self-review and commit the two-file correction for TASK-13343.
+
+#### Stage 3: Independent review and fresh exact proof
+**Goal:** Complete the actual matrix without weakening its requirements.
+**Success Criteria:** Scoped independent spec/quality approval; fresh exact local
+and native Linux candidates passall13lifecycle/all38browser checks, signatures,
+eight signed helper files and owned cleanup. Failedff3 artifacts remain invalid;
+diagnostic unsigned setup cannot qualify them. Windowsruntime unqualified/G12false,
+frontend publication frozen; no second broad branch review or public release.
+**Tests:** Parent-owned exact candidate and independent artifact verification.
+**Status:** Not Started
+- [ ] Report results and limits; controller reviews and resumes Task13 acceptance.
