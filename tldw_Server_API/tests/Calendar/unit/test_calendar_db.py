@@ -65,6 +65,85 @@ def _create_binding(
     return db.create_external_binding(account_id=account.id, calendar_id=calendar.id, remote_calendar_id="remote")
 
 
+@pytest.mark.parametrize("revive", [False, True])
+def test_polling_cadence_defaults_omitted_interval_to_hourly(
+    calendar_db: CalendarDatabase, revive: bool,
+) -> None:
+    """New and revived bindings persist an hourly interval when it is omitted."""
+    binding = _create_binding(calendar_db)
+    if revive:
+        calendar_db.delete_external_binding(binding.id)
+        binding = calendar_db.create_external_binding(
+            account_id=binding.account_id, calendar_id=binding.calendar_id, remote_calendar_id="remote",
+        )
+
+    reopened = CalendarDatabase(db_path=calendar_db.db_path)
+    assert reopened.get_external_binding(binding.id).sync_interval_minutes == 60
+
+
+@pytest.mark.parametrize("next_scan_at", [None, "2026-06-05T17:00:00+00:00", "2026-06-05T19:00:00+00:00"])
+def test_polling_cadence_explicit_null_is_manual_only(
+    calendar_db: CalendarDatabase, next_scan_at: str | None,
+) -> None:
+    """An explicit null interval is never periodically due, even with a stale scan time."""
+    existing = _create_binding(calendar_db)
+    binding = calendar_db.create_external_binding(
+        account_id=existing.account_id, calendar_id=existing.calendar_id, remote_calendar_id="manual",
+        sync_interval_minutes=None, next_scan_at=next_scan_at,
+    )
+
+    assert binding.sync_interval_minutes is None
+    due = calendar_db.list_sync_enabled_bindings_due_for_scan(now_iso="2026-06-05T18:00:00+00:00")
+    assert binding.id not in {row.id for row in due}
+
+
+def test_polling_cadence_legacy_null_remains_manual_after_reopen(calendar_db: CalendarDatabase) -> None:
+    """Opening an existing null-interval row must not turn it into a hot poller."""
+    binding = _create_binding(calendar_db)
+    calendar_db.update_external_binding(binding.id, sync_interval_minutes=None, next_scan_at=None)
+    reopened = CalendarDatabase(db_path=calendar_db.db_path)
+    reopened.ensure_schema()
+
+    assert reopened.get_external_binding(binding.id).sync_interval_minutes is None
+    for now in ["2026-06-05T18:00:00+00:00", "2026-06-05T18:01:00+00:00"]:
+        assert reopened.list_sync_enabled_bindings_due_for_scan(now_iso=now) == []
+
+
+@pytest.mark.parametrize("interval", [15, 120])
+@pytest.mark.parametrize(("next_scan_at", "is_due"), [
+    (None, True),
+    ("2026-06-05T17:00:00+00:00", True),
+    ("2026-06-05T18:00:00+00:00", True),
+    ("2026-06-05T18:00:01+00:00", False),
+])
+def test_polling_cadence_positive_intervals_respect_due_boundary(
+    calendar_db: CalendarDatabase, interval: int, next_scan_at: str | None, is_due: bool,
+) -> None:
+    """Positive intervals allow the first scan and retain the inclusive due-time boundary."""
+    binding = _create_binding(calendar_db)
+    calendar_db.update_external_binding(binding.id, sync_interval_minutes=interval, next_scan_at=next_scan_at)
+
+    due = calendar_db.list_sync_enabled_bindings_due_for_scan(now_iso="2026-06-05T18:00:00+00:00")
+    assert (binding.id in {row.id for row in due}) is is_due
+
+
+@pytest.mark.parametrize("binding_state", ["sync_disabled", "disabled", "deleted"])
+def test_polling_cadence_excludes_disabled_bindings(
+    calendar_db: CalendarDatabase, binding_state: str,
+) -> None:
+    """A positive cadence cannot bypass any existing binding-disable boundary."""
+    binding = _create_binding(calendar_db)
+    calendar_db.update_external_binding(binding.id, sync_interval_minutes=60)
+    if binding_state == "sync_disabled":
+        calendar_db.update_external_binding(binding.id, sync_enabled=False)
+    elif binding_state == "disabled":
+        calendar_db.disable_external_binding(binding.id)
+    else:
+        calendar_db.delete_external_binding(binding.id)
+
+    assert calendar_db.list_sync_enabled_bindings_due_for_scan(now_iso="2026-06-05T18:00:00+00:00") == []
+
+
 def test_provider_binding_owners_filters_tenant_and_omits_missing_ids(calendar_db: CalendarDatabase) -> None:
     first = _create_binding(calendar_db)
     second = _create_binding(calendar_db, user_id=2)

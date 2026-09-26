@@ -25,6 +25,23 @@ from tldw_Server_API.app.core.DB_Management.Calendar_DB import CalendarDatabase,
 pytestmark = pytest.mark.unit
 
 
+@pytest.mark.parametrize("zone", ["Unknown/Zone", "../etc/passwd", "/etc/passwd", "", "UTC\x00"])
+def test_calendar_creation_rejects_invalid_zone_without_writes(
+    calendar_db: CalendarDatabase, zone: str,
+) -> None:
+    """Non-HTTP creation must reject unusable zone keys before persistence."""
+    with pytest.raises(CalendarValidationError):
+        CalendarService(db=calendar_db).create_calendar(actor_user_id=1, name="Invalid", timezone=zone)
+    assert calendar_db.list_calendars(tenant_id="default") == []
+
+
+@pytest.mark.parametrize("zone", ["UTC", "Europe/Paris", "America/Los_Angeles"])
+def test_calendar_creation_preserves_valid_iana_zone(calendar_db: CalendarDatabase, zone: str) -> None:
+    """The creation boundary retains valid zone names verbatim."""
+    created = CalendarService(db=calendar_db).create_calendar(actor_user_id=1, name="Valid", timezone=zone)
+    assert created.timezone == zone
+
+
 def test_org_calendar_creation_denies_unverified_membership(calendar_db: CalendarDatabase) -> None:
     """Non-HTTP callers cannot attach calendars to an unverified organization."""
     service = CalendarService(db=calendar_db)

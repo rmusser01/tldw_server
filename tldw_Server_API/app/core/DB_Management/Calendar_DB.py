@@ -17,6 +17,7 @@ from tldw_Server_API.app.core.Calendar.constants import (
     CALENDAR_ROLE_OWNER,
     CALENDAR_SOURCE_OWNER_PROVIDER,
     CALENDAR_SOURCE_OWNER_TLDW,
+    DEFAULT_SYNC_INTERVAL_MINUTES,
     DEFAULT_SYNC_LOOKAHEAD_DAYS,
     DEFAULT_SYNC_LOOKBACK_DAYS,
 )
@@ -1912,7 +1913,7 @@ class CalendarDatabase:
         remote_calendar_id: str,
         remote_display_name: str | None = None,
         sync_enabled: bool = True,
-        sync_interval_minutes: int | None = None,
+        sync_interval_minutes: int | None = DEFAULT_SYNC_INTERVAL_MINUTES,
         lookback_days: int = DEFAULT_SYNC_LOOKBACK_DAYS,
         lookahead_days: int = DEFAULT_SYNC_LOOKAHEAD_DAYS,
         provider_capabilities_json: str | dict[str, Any] | None = None,
@@ -1922,6 +1923,7 @@ class CalendarDatabase:
         """Bind an active account to its owner's personal same-tenant calendar.
 
         Return a new binding or revive a deleted binding with reset sync state.
+        An omitted interval defaults to hourly polling; explicit None is manual-only.
         Missing resources raise CalendarNotFound; invalid ownership/account state
         or a duplicate live remote calendar raises CalendarValidationError.
         """
@@ -2061,7 +2063,11 @@ class CalendarDatabase:
         now_iso: str | None = None,
         limit: int = 100,
     ) -> list[ExternalCalendarBindingRow]:
-        """Return up to limit due enabled bindings for live active accounts, ordered by scan time/ID."""
+        """Return due enabled bindings with positive intervals for live active accounts.
+
+        Null intervals (including legacy rows) are manual-only even with no next
+        scan time. Order by scan time/ID and return at most limit bindings.
+        """
         now = now_iso or _utcnow_iso()
         with self.connection() as conn:
             rows = conn.execute(
@@ -2069,6 +2075,7 @@ class CalendarDatabase:
                 SELECT b.* FROM external_calendar_bindings b
                 JOIN external_calendar_accounts a ON a.id = b.account_id
                 WHERE b.sync_enabled = 1
+                  AND b.sync_interval_minutes > 0
                   AND b.disabled_at IS NULL
                   AND b.deleted_at IS NULL
                   AND a.status = 'active'

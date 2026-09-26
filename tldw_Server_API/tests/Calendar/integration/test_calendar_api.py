@@ -23,6 +23,164 @@ from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
 pytestmark = pytest.mark.integration
 
 
+@pytest.mark.parametrize("zone", ["Unknown/Zone", "../etc/passwd"])
+def test_calendar_creation_invalid_zone_is_rejected_before_persistence(
+    calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub], zone: str,
+) -> None:
+    """Unknown and invalid IANA keys never leave unusable calendars in storage."""
+    client, db, _reminders = calendar_api_client
+    result = client.post("/api/v1/calendar/calendars", json={"name": "Invalid", "timezone": zone})
+    assert result.status_code in {400, 422}, result.text
+    assert db.list_calendars(tenant_id="default") == []
+
+
+@pytest.mark.parametrize("window", [
+    {"window_start": "not-a-date"},
+    {"window_end": "2026-02-30T00:00:00Z"},
+    {"window_start": "2026-06-05"},
+    {"window_start": "2026-06-05T00:00:00"},
+    {"window_start": "2026-06-05T00:00:00Z", "window_end": "2026-06-05T00:00:00Z"},
+    {"window_start": "2026-06-06T00:00:00Z", "window_end": "2026-06-05T00:00:00Z"},
+    {"window_start": "2026-06-05T00:00:00Z", "window_end": "2026-06-05T01:00:00+02:00"},
+    {"window_start": "1900-01-01T00:00:00Z", "window_end": "2100-01-01T00:00:00Z"},
+    {"window_start": "x" * 1000},
+])
+def test_manual_sync_invalid_window_creates_no_job_or_audit(
+    calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
+    monkeypatch: pytest.MonkeyPatch, window: dict[str, str],
+) -> None:
+    """Bad overrides are rejected before idempotency keys, Jobs or queued audit writes."""
+    client, db, _reminders = calendar_api_client
+    _calendar, item = _create_provider_item(db)
+    manager = client.jobs_manager  # type: ignore[attr-defined]
+    original = manager.create_job
+    calls: list[dict[str, Any]] = []
+
+    def create_job(**kwargs: Any) -> Any:
+        calls.append(kwargs)
+        return original(**kwargs)
+
+    monkeypatch.setattr(manager, "create_job", create_job)
+    result = client.post(f"/api/v1/calendar/external/bindings/{item.external_binding_id}/sync", json=window)
+    assert result.status_code in {400, 422}, result.text
+    assert calls == []
+    assert db.list_sync_events(binding_id=item.external_binding_id) == []
+
+
+def test_manual_sync_valid_offsets_are_normalized_in_job_payload(
+    calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
+) -> None:
+    """UTC normalization makes equivalent offset windows safe and stable for Jobs."""
+    client, db, _reminders = calendar_api_client
+    _calendar, item = _create_provider_item(db)
+    result = client.post(f"/api/v1/calendar/external/bindings/{item.external_binding_id}/sync", json={
+        "window_start": "2026-06-05T02:00:00+02:00", "window_end": "2026-06-06T02:00:00+02:00",
+    })
+    assert result.status_code == 200, result.text
+    job = client.jobs_manager.get_job(result.json()["job_id"])  # type: ignore[attr-defined]
+    assert job["payload"]["window_start"] == "2026-06-05T00:00:00+00:00"
+    assert job["payload"]["window_end"] == "2026-06-06T00:00:00+00:00"
+
+
+def test_sync_history_database_io_uses_request_worker(
+    calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ownership reads and bounded history queries all leave the request event loop."""
+    client, db, _reminders = calendar_api_client
+    _calendar, item = _create_provider_item(db)
+    loop_threads: list[int] = []
+    db_threads: list[int] = []
+
+    async def user() -> User:
+        loop_threads.append(threading.get_ident())
+        return User(id=1, username="owner", is_active=True, is_admin=True, permissions=["*"])
+
+    client.app.dependency_overrides[get_request_user] = user
+    for name in ["get_external_binding", "get_external_account", "list_sync_events"]:
+        original = getattr(db, name)
+
+        def record(*args: Any, _operation: Any = original, **kwargs: Any) -> Any:
+            db_threads.append(threading.get_ident())
+            return _operation(*args, **kwargs)
+
+        monkeypatch.setattr(db, name, record)
+    result = client.get(f"/api/v1/calendar/external/bindings/{item.external_binding_id}/sync-events")
+    assert result.status_code == 200, result.text
+    assert len(db_threads) == 3 and loop_threads
+    assert set(db_threads).isdisjoint(loop_threads)
+
+
+@pytest.mark.parametrize("outcome", ["false", "error", "success"])
+def test_verified_account_setup_has_no_persistence_before_provider_success(
+    calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
+    monkeypatch: pytest.MonkeyPatch, outcome: str,
+) -> None:
+    """Atomic UI setup verifies supplied secrets off-loop before creating an account."""
+    client, db, _reminders = calendar_api_client
+    monkeypatch.setenv("CALENDAR_SECRET_ENCRYPTION_KEY", _calendar_secret_key())
+    provider = client.caldav_provider  # type: ignore[attr-defined]
+    verification_threads: list[int] = []
+    loop_threads: list[int] = []
+    secret_refs: list[str] = []
+    original_create_secret = db.create_secret_ref
+
+    async def user() -> User:
+        loop_threads.append(threading.get_ident())
+        return User(id=1, username="owner", is_active=True, is_admin=True, permissions=["*"])
+
+    def create_secret(**kwargs: Any) -> str:
+        reference = original_create_secret(**kwargs)
+        secret_refs.append(reference)
+        return reference
+
+    client.app.dependency_overrides[get_request_user] = user
+    monkeypatch.setattr(db, "create_secret_ref", create_secret)
+
+    def verify(**credentials: str) -> dict[str, Any]:
+        verification_threads.append(threading.get_ident())
+        assert db.list_external_accounts_for_user(user_id=1, tenant_id="default") == []
+        assert secret_refs == []
+        assert credentials == {
+            "server_url": "https://calendar.example.test/", "username": "reader", "password": "app-secret",
+        }
+        if outcome == "error":
+            raise CalendarValidationError("sensitive-provider-error")
+        return {"verified": outcome == "success", "error": "sensitive-provider-error"}
+
+    monkeypatch.setattr(provider, "verify_account", verify)
+    result = client.post("/api/v1/calendar/external/accounts", json={
+        "provider": "caldav", "display_name": "Verified", "server_url": "https://calendar.example.test/",
+        "username": "reader", "password": "app-secret", "verify_before_create": True,
+    })
+    assert result.status_code == (201 if outcome == "success" else 400), result.text
+    assert verification_threads
+    assert loop_threads and set(verification_threads).isdisjoint(loop_threads)
+    assert "sensitive-provider-error" not in result.text
+    rows = db.list_external_accounts_for_user(user_id=1, tenant_id="default")
+    assert len(rows) == (1 if outcome == "success" else 0)
+    assert len(secret_refs) == (1 if outcome == "success" else 0)
+
+
+@pytest.mark.parametrize("missing", ["server_url", "username", "password"])
+def test_verified_account_setup_rejects_incomplete_credentials_without_writes(
+    calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
+    monkeypatch: pytest.MonkeyPatch, missing: str,
+) -> None:
+    """Opt-in atomic setup cannot create an active account without complete credentials."""
+    client, db, _reminders = calendar_api_client
+    monkeypatch.setenv("CALENDAR_SECRET_ENCRYPTION_KEY", _calendar_secret_key())
+    payload: dict[str, Any] = {
+        "provider": "caldav", "display_name": "Incomplete", "server_url": "https://calendar.example.test/",
+        "username": "reader", "password": "app-secret", "verify_before_create": True,
+    }
+    payload.pop(missing)
+    result = client.post("/api/v1/calendar/external/accounts", json=payload)
+    assert result.status_code == 400, result.text
+    assert db.list_external_accounts_for_user(user_id=1, tenant_id="default") == []
+    assert client.caldav_provider.verify_requests == []  # type: ignore[attr-defined]
+
+
 @pytest.mark.parametrize("kind", ["event", "todo"])
 def test_native_item_delete_soft_deletes_and_hides_from_views(
     calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub], kind: str,

@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
+  messageError: vi.fn(),
   listCalDavAccounts: vi.fn(),
   createCalDavAccount: vi.fn(),
   verifyCalDavAccount: vi.fn(),
@@ -15,6 +16,14 @@ const mocks = vi.hoisted(() => ({
   revokeCalDavAccount: vi.fn(),
   deleteCalDavAccount: vi.fn()
 }))
+
+vi.mock("antd", async () => {
+  const actual = await vi.importActual<typeof import("antd")>("antd")
+  return {
+    ...actual,
+    message: { ...actual.message, error: mocks.messageError }
+  }
+})
 
 vi.mock("@/services/calendar", () => ({
   listCalDavAccounts: (...args: unknown[]) => mocks.listCalDavAccounts(...args),
@@ -78,15 +87,32 @@ const binding = {
   updated_at: "2026-06-01T00:00:00Z"
 }
 
-const renderSettings = () => {
+const renderSettings = (onChanged = vi.fn()) => {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } }
   })
   return render(
     <QueryClientProvider client={queryClient}>
-      <CalendarSyncSettings calendars={calendars} onChanged={vi.fn()} />
+      <CalendarSyncSettings calendars={calendars} onChanged={onChanged} />
     </QueryClientProvider>
   )
+}
+
+const setupDraft = {
+  "Account name": "Personal Fastmail",
+  "Server URL": "https://caldav.fastmail.com/dav/calendars",
+  Username: "reader@example.test",
+  Password: " app-password "
+}
+
+const fillAccountDraft = async (
+  user: ReturnType<typeof userEvent.setup>,
+  draft = setupDraft
+) => {
+  await user.click(await screen.findByRole("button", { name: "Add CalDAV account" }))
+  for (const [label, value] of Object.entries(draft)) {
+    fireEvent.change(screen.getByLabelText(label), { target: { value } })
+  }
 }
 
 describe("CalendarSyncSettings", () => {
@@ -116,7 +142,7 @@ describe("CalendarSyncSettings", () => {
     mocks.deleteCalDavAccount.mockResolvedValue({ deleted: true })
   })
 
-  it("adds a CalDAV account and sends the password only to create and verify calls", async () => {
+  it("adds a CalDAV account with atomic verification in the create request", async () => {
     const user = userEvent.setup()
     renderSettings()
 
@@ -133,18 +159,98 @@ describe("CalendarSyncSettings", () => {
           display_name: "Personal Fastmail",
           server_url: "https://caldav.fastmail.com/dav/calendars",
           username: "reader@example.test",
-          password: "app-password"
+          password: "app-password",
+          verify_before_create: true
         })
       )
-      expect(mocks.verifyCalDavAccount).toHaveBeenCalledWith(4, {
-        password: "app-password"
-      })
     })
+    await waitFor(() => expect(screen.queryByLabelText("Password")).not.toBeInTheDocument())
     expect(mocks.discoverExternalCalendars).not.toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ password: expect.any(String) })
     )
   })
+
+  it("does not call post-create verification or resend setup credentials", async () => {
+    const user = userEvent.setup()
+    const onChanged = vi.fn()
+    renderSettings(onChanged)
+    await fillAccountDraft(user)
+    await user.click(screen.getByRole("button", { name: "Save and verify account" }))
+
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1))
+    expect(mocks.createCalDavAccount).toHaveBeenCalledTimes(1)
+    expect(mocks.verifyCalDavAccount).not.toHaveBeenCalled()
+    expect(mocks.createCalDavAccount).toHaveBeenCalledWith({
+      display_name: setupDraft["Account name"],
+      server_url: setupDraft["Server URL"],
+      username: setupDraft.Username,
+      password: setupDraft.Password,
+      verify_before_create: true
+    })
+  })
+
+  it.each([
+    ["Account name", ""],
+    ["Account name", "   "],
+    ["Server URL", ""],
+    ["Server URL", "   "],
+    ["Username", ""],
+    ["Username", "   "],
+    ["Password", ""],
+    ["Password", "   "]
+  ])("rejects incomplete setup when %s is '%s' without creating an account", async (label, value) => {
+    const user = userEvent.setup()
+    const onChanged = vi.fn()
+    renderSettings(onChanged)
+    const draft = { ...setupDraft, [label]: value }
+    await fillAccountDraft(user, draft)
+    await user.click(screen.getByRole("button", { name: "Save and verify account" }))
+
+    await waitFor(() => expect(mocks.messageError).toHaveBeenCalledWith(
+      "Account name, server URL, username, and password are required"
+    ))
+    expect(mocks.createCalDavAccount).not.toHaveBeenCalled()
+    expect(mocks.verifyCalDavAccount).not.toHaveBeenCalled()
+    expect(onChanged).not.toHaveBeenCalled()
+    for (const [field, fieldValue] of Object.entries(draft)) {
+      expect(screen.getByLabelText(field)).toHaveValue(fieldValue)
+    }
+  })
+
+  it.each(["Unable to verify CalDAV account", "Unable to connect to CalDAV server"])(
+    "retains the draft and drawer after failed creation: %s",
+    async (errorMessage) => {
+      const user = userEvent.setup()
+      const onChanged = vi.fn()
+      mocks.listCalDavAccounts.mockResolvedValue({ items: [], total: 0 })
+      mocks.createCalDavAccount.mockRejectedValueOnce(new Error(errorMessage))
+      renderSettings(onChanged)
+      await fillAccountDraft(user)
+      await user.click(screen.getByRole("button", { name: "Save and verify account" }))
+
+      await waitFor(() => expect(mocks.messageError).toHaveBeenCalledWith(errorMessage))
+      for (const [label, value] of Object.entries(setupDraft)) {
+        expect(screen.getByLabelText(label)).toHaveValue(value)
+      }
+      expect(screen.queryByRole("region", { name: "Personal Fastmail" })).not.toBeInTheDocument()
+      expect(mocks.listCalDavAccounts).toHaveBeenCalledTimes(1)
+      expect(onChanged).not.toHaveBeenCalled()
+      expect(mocks.verifyCalDavAccount).not.toHaveBeenCalled()
+      expect(mocks.createCalDavAccount).toHaveBeenCalledWith({
+        display_name: setupDraft["Account name"],
+        server_url: setupDraft["Server URL"],
+        username: setupDraft.Username,
+        password: setupDraft.Password,
+        verify_before_create: true
+      })
+
+      await user.click(screen.getByRole("button", { name: "Save and verify account" }))
+      await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1))
+      expect(mocks.createCalDavAccount).toHaveBeenCalledTimes(2)
+      expect(mocks.verifyCalDavAccount).not.toHaveBeenCalled()
+    }
+  )
 
   it.each([true, false])("submits integer sync days after decimal input (blur=%s)", async (blur) => {
     const user = userEvent.setup()
@@ -199,6 +305,7 @@ describe("CalendarSyncSettings", () => {
           account_id: 3,
           calendar_id: 7,
           remote_calendar_id: "https://caldav.fastmail.com/calendars/user/work/",
+          sync_interval_minutes: 60,
           lookback_days: 30,
           lookahead_days: 120
         })

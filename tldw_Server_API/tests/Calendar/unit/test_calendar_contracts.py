@@ -23,6 +23,30 @@ def _parse_module(path: Path) -> ast.Module:
     return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
 
+def test_binding_request_defaults_to_hourly_but_preserves_manual_only_null() -> None:
+    """Omitted cadence is hourly; explicit null opts out of periodic polling."""
+    from tldw_Server_API.app.api.v1.schemas.calendar_schemas import ExternalCalendarBindingCreateRequest
+
+    payload = {"account_id": 1, "calendar_id": 1, "remote_calendar_id": "https://calendar.example/events"}
+    assert ExternalCalendarBindingCreateRequest(**payload).sync_interval_minutes == 60
+    assert ExternalCalendarBindingCreateRequest(**payload, sync_interval_minutes=None).sync_interval_minutes is None
+
+
+def test_calendar_permission_dependency_parameters_use_auth_principal() -> None:
+    """Every injected permission result must carry its actual principal contract."""
+    module = _parse_module(API_ROOT / "app/api/v1/endpoints/calendar.py")
+    parameters = [
+        argument for node in ast.walk(module)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        for argument in [*node.args.args, *node.args.kwonlyargs]
+        if argument.arg == "_principal"
+    ]
+    assert parameters and all(
+        argument.annotation is not None and ast.unparse(argument.annotation) == "AuthPrincipal"
+        for argument in parameters
+    )
+
+
 @pytest.mark.parametrize("path", DOCUMENTED_PATHS, ids=lambda path: path.name)
 def test_calendar_owned_modules_have_docstrings(path: Path) -> None:
     """Require each owned production module to explain its domain purpose."""
