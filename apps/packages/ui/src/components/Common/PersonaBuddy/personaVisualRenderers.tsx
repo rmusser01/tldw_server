@@ -8,14 +8,22 @@ import type {
 
 import { getAssetsById, normalizeFrames } from "./personaVisualAssets"
 import { SpriteFrameRenderer } from "./SpriteFrameRenderer"
-import type { PersonaVisualRenderErrorHandler } from "./personaVisualTypes"
+import type {
+  PersonaVisualRenderError,
+  PersonaVisualRenderErrorHandler
+} from "./personaVisualTypes"
 
 export type PersonaVisualRendererComponentProps = {
   pack: PersonaVisualPack
-  state: PersonaVisualStateId
+  requestedState: PersonaVisualStateId
+  generation: number
+  reducedMotion: boolean
   fallbackLabel: string
   className?: string
   onRenderError?: PersonaVisualRenderErrorHandler
+  onReady?: () => void
+  onFailure?: (error: PersonaVisualRenderError) => void
+  onComplete?: () => void
 }
 
 export type PersonaVisualRendererRegistration = {
@@ -26,18 +34,28 @@ export type PersonaVisualRendererRegistration = {
 
 const SpriteFrameRendererHost: React.FC<PersonaVisualRendererComponentProps> = ({
   pack,
-  state,
+  requestedState,
+  generation,
+  reducedMotion,
   fallbackLabel,
   className,
-  onRenderError
+  onRenderError,
+  onReady,
+  onFailure,
+  onComplete
 }) => (
   <SpriteFrameRenderer
     manifest={pack.manifest}
     assets={getAssetsById(pack)}
-    state={state}
+    requestedState={requestedState}
+    generation={generation}
+    reducedMotion={reducedMotion}
     fallbackLabel={fallbackLabel}
     className={className}
     onRenderError={onRenderError}
+    onReady={onReady}
+    onFailure={onFailure}
+    onComplete={onComplete}
   />
 )
 
