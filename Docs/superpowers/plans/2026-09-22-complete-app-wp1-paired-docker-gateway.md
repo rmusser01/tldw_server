@@ -630,3 +630,45 @@ full mapped lifecycle/browser checklists after clean source is committed.
   limitations; controller dispatches one scoped rereview and fresh qualification.
 
 Scoped rereview `19f2174383..1d0bcb9b28` approves all I1-I4/M1 and finds no new code defects. Release158 passed, followed by amended control15 after one final regression addition; Black/Ruff/shell pass and all changed production Python Bandit0. Real owned Docker fixtures pass port binding, actual inspection/network, gateway auth/revoke and broken-auth refusal. Exact rebuilt local/native artifacts and Windows runtime remain unqualified; Stage4/Task13 acceptance is still pending.
+
+### Task 19: Correct the actual installer readiness route
+
+**Authority:** Approved design section5; actual bd0de933 first-start failure and
+read-only cached-artifact diagnosis. This repairs Task13 qualification rather
+than dispatching another whole-branch review fix wave. The sole final fix-wave
+rereview found no residual code findings; this integration defect was discovered
+by the mandatory actual artifact run afterward.
+
+**Files:** `tldw_Server_API/scripts/app_bundle_readiness.py`, its focused Release
+tests, and existing control tests only if their fixture contract needs alignment.
+Do not change backend readiness/permission guards, gateway routes, host helpers,
+image policy, signed inventory, public evidence or qualification gates.
+
+#### Stage 1: Reproduce the actual route contract
+**Goal:** Capture the private-bridge internal404 and authenticated operator route.
+**Success Criteria:** A real HTTP fixture rejects /internal/ready, requires the
+probe session for /api/v1/health/ready, and reproduces current installer failure.
+**Tests:** Expected red; absent/foreign/operator-forbidden cookie,503/not_ready,
+malformed/truncated/oversized or stalled readiness and exact cleanup on failure.
+**Status:** Not Started
+- [ ] Add focused failing behavior cases matching the existing backend policy.
+
+#### Stage 2: Use the existing authenticated readiness projection
+**Goal:** Complete the readiness components before opening the browser.
+**Success Criteria:** After bootstrap/profile, cookie-only GET
+/api/v1/health/ready returns200 plus JSON status ready; finally revoke the exact
+session and refuse replay. Preserve request/body/overall/cleanup bounds.
+**Tests:** Focused Release/readiness and affected control coverage; Black/Ruff,
+Bandit on changed production Python, and bounded actual cached gateway proof.
+**Status:** Not Started
+- [ ] Implement the minimal probe ordering/path/result change; do not substitute
+  public liveness, inject a master key, or exempt internal loopback restrictions.
+
+#### Stage 3: Review and retry actual qualification
+**Goal:** Verify the correction and exact final artifact, with no public release.
+**Success Criteria:** Scoped task review passes; fresh clean local and both native
+Linux container architecture bundles pass13lifecycle/38browser checks and signatures.
+Windows runtime remains explicitly unqualified and G12 false.
+**Tests:** Parent-owned full candidate and independent artifact verification.
+**Status:** Not Started
+- [ ] Commit scoped code/tests/report; review amended code, then retry Task13.

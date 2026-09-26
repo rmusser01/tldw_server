@@ -4,7 +4,7 @@ title: Plan and implement paired Docker distribution and runtime gateway
 status: In Progress
 assignee: []
 created_date: '2026-09-23 06:15'
-updated_date: '2026-09-26 08:50'
+updated_date: '2026-09-26 09:16'
 labels:
   - distribution
   - docker
@@ -117,6 +117,8 @@ Exact candidate19f2174383 built control/backend, then was deliberately interrupt
 Final whole-WP1 review19f2174383 is not ready: I1 inherited Compose environment overrides trusted config, I2 optional required helper inventory, I3 missing authenticated readiness/revocation, I4 first-port conflict prevents retry; M1 falsely states partial services stopped after cleanup failure. Plan one combined final fix wave, then one scoped rereview. Prefer existing pinned control image/std-library readiness on verified Compose network/public Host-Origin envelope, validate running signed identities before requests and revoke temporary session before success; Docker-only first-port preflight before origin persistence. Windows helper runtime remains explicitly unqualified, G12/full publication matrix blocked. No new host dependencies, Docker socket exposure, publication or reset of established state.
 
 Final combined fix wave commits17ce1a3e99/1d0bcb9b28 independently re-reviewed over19f2174383..1d0bcb9b28: I1-I4 and M1 addressed, scoped spec/quality pass, no new code findings. Authoritative sanitized Compose inputs, required8signedfiles, bounded authenticated gateway readiness/exact probe revoke, Docker-owned preflight before origin persistence and truthful cleanup now covered. Focused Release158 passed; after final established-origin test addition, complete amended control15 passed (not full159 rerun). Black/Ruff/shell pass; all amended production Python Bandit0. Real owned Docker port/runtime network/session/revoke/broken-auth proof passes and cleanup confirmed; only2unrelatedPG remain. Docker inspection Driver classifier defect caught by real fixture and red/green fixed within singlewave. Dependency-only Bun diagnostic completed and ownedimage removed, not fullartifact acceptance/rootcause claim. Next exact clean local arm64 and native amd64/arm64 lifecycle13/browser38 checklist/signatures; Windows actualruntime and G12/fullpublication remain unqualified.
+
+Exact clean candidatebd0de93363 built all4armimages and passed builtMCP39/Setup60, then extracted first-start failed at lifecycle104. Ownedcleanuptrue, signaturesinvalidated/allgatesfalse; no browser/native qualification or push. Read-only cached reproduction proves verify/init/pull/all3healthy and actualruntime identity pass; gateway /internal/ready correctly404 because backend allowsloopbackonly. Existing authenticated /api/v1/health/ready requiresSYSTEM_LOGS and livecookie proof returns200/statusready (anon401); exactsessionDELETE200 then oldcookieprofile/readiness401. All owneddiagnostic containers/networks/volumes/registryremoved, sourceunchanged. Add narrowTask19 actualqualification correction: move backendreadiness to existingoperatorroute after ephemeralcookie profile, require200/statusready, retainfinallyrevoke and internalguard; no generalhop/keyinjection/newroute. FinalreviewI1-I4M1codefixes remain approved, this newactualintegration failure gets scopedTDD/review before newexactlocal/native acceptance.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

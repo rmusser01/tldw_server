@@ -67,3 +67,16 @@ and require full lifecycle/two-instance browser checklists and owned cleanup.
 Windows helper syntax is separate from Windows Docker runtime; mark runtime
 unqualified until tested on a supported Windows host. G12 stays false and the
 frontend freeze remains in force. No PR, merge or public artifact is authorized.
+
+## Actual backend route correction (Task19)
+
+The exact bd0de933 candidate proved that /internal/ready correctly rejects the
+private gateway peer. Keep that endpoint and its loopback Docker healthcheck
+unchanged. Use the existing permission-protected /api/v1/health/ready projection
+through the gateway with the fresh probe cookie after bootstrap/profile; require
+HTTP200 and JSON status ready, then retain exact-session revocation and replay
+refusal. Actual cached artifacts prove anonymous401, cookie200/ready and revoked
+cookie401. Section5 requires all readiness components before opening the browser
+and imposes no ordering that would require weakening the internal route.
+The operator payload is consumed privately under the existing time/body limits;
+its sanitized details are not logged or turned into a new public endpoint.

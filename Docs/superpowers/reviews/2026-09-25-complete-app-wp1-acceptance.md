@@ -6,7 +6,7 @@ catalog entry, PR or merge is approved by this record.
 
 ## Current evidence (2026-09-26)
 
-The final code review fix wave through `1d0bcb9b28` passes scoped spec and quality review. Exact corrected local/native artifact qualification remains pending. Historical runs below do not qualify this source.
+The final code review fix wave through `1d0bcb9b28` passes scoped spec and quality review. Exact candidate `bd0de93363` built all four images and passed built-backend MCP39/Setup60, then failed first signed startup because the probe used loopback-only /internal/ready through the gateway. Cleanup succeeded and signatures/gates were invalidated. Task19 will use the existing authenticated operator readiness route without changing backend guards. Full local/native artifact qualification remains pending; historical runs below do not qualify this source.
 
 | Contract | Current evidence | Status |
 | --- | --- | --- |
