@@ -132,6 +132,20 @@ test('routes Next APIs and assets through one private authenticated hop', async 
   }
 });
 
+test('keeps WebUI setup on Next and backend documentation assets on FastAPI', async (t) => {
+  const { publicOrigin } = await fixture(t);
+  for (const [path, role] of [
+    ['/setup', 'next'],
+    ['/setup?first=1', 'next'],
+    ['/api/v1/setup/readiness/status', 'backend'],
+    ['/docs-static/AuthNZ/AUTHNZ_USAGE_EXAMPLES.md', 'backend'],
+    ['/static/favicon.ico', 'backend'],
+  ]) {
+    const response = await fetch(`${publicOrigin}${path}`);
+    assert.equal((await response.json()).role, role, path);
+  }
+});
+
 test('rejects unknown Host and Origin before either upstream', async (t) => {
   const { publicOrigin, seen } = await fixture(t);
   const wrongHost = await rawRequest(`${publicOrigin}/api/v1/health`, { host: 'attacker.test' });

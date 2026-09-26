@@ -4,7 +4,7 @@ title: Plan and implement paired Docker distribution and runtime gateway
 status: In Progress
 assignee: []
 created_date: '2026-09-23 06:15'
-updated_date: '2026-09-26 01:23'
+updated_date: '2026-09-26 01:40'
 labels:
   - distribution
   - docker
@@ -65,6 +65,8 @@ WP1 review follow-up: 46 lean Release tests pass, Black/shell syntax/Compose con
 Docker Desktop recovered for a local linux/arm64 run. Four images built and a signed extracted bundle passed control verify/init; Compose failed because backend became unhealthy. Isolated reproduction showed ModuleNotFoundError for tldw_profile_core. Added that local package to the backend builder and an early image-import guard. Corrected image imports the package, includes 2 schemas/45 fixtures, and became healthy on fresh volumes in 30.29 seconds. Full corrected signed-bundle smoke, two-instance browser checks, amd64 CI, Windows runtime, and download/installed size measurements remain open. Local disk headroom is about 15 GiB after repeated builds; no protected publication occurred.
 
 User authorized branch push and native CI. Branch-only workflow trigger bootstraps the new lane; pinned Black 25.1.0 fixes the first CI formatter drift. Run 36206663211 at 754c9dd521 passed focused release/browser/gateway checks and Windows syntax, built all four native amd64/arm64 images, verified/init extracted signed bundles, and reached healthy backend/WebUI/gateway services. Both then exited 22 on a silent HTTP request. Found missing WebUI AUTH_MODE in Compose: regression red, real standalone Next/gateway returns 503 omitted versus 204/two cookies with single_user. Fixed configuration; 47 release tests, shell/Compose checks, production Bandit zero findings pass. Added HTTP error line/status and failure-evidence upload excluding private key. Corrected CI smoke pending; G2/G4/G10/G12 remain open. Local Docker content-store I/O error and 4.5 GiB host free prevent further local builds.
+
+Further G4 review found /setup routed to legacy FastAPI setup rather than the Next wizard, and backend docs-static/favicon routed to Next. Real-socket regression red; corrected route ownership passes 13 gateway tests and lint; actual standalone Next /setup returns 200 with Next assets through gateway. Added container smoke checks for setup and concrete docs assets; exact follow-up candidate run still required. Official upstream checks confirm Python 3.12 security support through October 2028 and current patch 3.12.14; Node 24 LTS through April 2028/current patch 24.21.0 with GNU/Linux x64/arm64 Tier 1. Sources are linked in the acceptance record; full G12 stays open.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

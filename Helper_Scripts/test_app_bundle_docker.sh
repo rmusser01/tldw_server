@@ -41,6 +41,13 @@ fi
 curl --fail --silent --show-error "$public_url/_tldw/status" | grep -q '"ready":true'
 curl --fail --silent --show-error "$public_url/favicon.ico" >/dev/null
 curl --fail --silent --show-error "$public_url/docs" >/dev/null
+curl --fail --silent --show-error "$public_url/docs-static/Documentation.md" >/dev/null
+curl --fail --silent --show-error "$public_url/static/favicon.ico" >/dev/null
+setup_page=$(curl --fail --silent --show-error --location "$public_url/setup")
+case "$setup_page" in
+  *'/_next/static/'*) ;;
+  *) echo 'Setup did not serve the managed WebUI page.' >&2; exit 1 ;;
+esac
 page=$(curl --fail --silent --show-error --location "$public_url/")
 static_path=$(printf '%s' "$page" | grep -oE '/_next/static/[^" ]+' | head -n 1)
 if [[ -z "$static_path" ]]; then

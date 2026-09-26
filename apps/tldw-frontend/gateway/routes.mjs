@@ -15,8 +15,9 @@ export function routeForPath(pathname) {
     pathname === '/internal/ready' ||
     pathname === '/openapi.json' ||
     prefix(pathname, '/docs') ||
-    pathname === '/redoc' ||
-    prefix(pathname, '/setup')
+    prefix(pathname, '/docs-static') ||
+    pathname === '/static/favicon.ico' ||
+    pathname === '/redoc'
   ) return 'backend';
 
   return 'next';

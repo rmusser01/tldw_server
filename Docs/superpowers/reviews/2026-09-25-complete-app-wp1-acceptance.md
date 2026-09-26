@@ -72,6 +72,29 @@ builds, so the standard runner disk concern did not block this attempt. Local
 Docker image inspection now reports a content-store I/O error and the host has
 about 4.5 GiB free; further local container builds are held.
 
+Further routing review found that `/setup` was sent to the backend's legacy
+credential setup page instead of Next's application wizard, while backend
+`/docs-static` and `/static/favicon.ico` were sent to Next. A real-socket
+regression failed on the setup collision. The corrected route table passes 13
+gateway tests and lint; the existing standalone Next build serves `/setup`
+through the gateway with HTTP 200 and Next static-asset references. The smoke
+now checks that setup response and real backend documentation assets. This
+follow-up still needs its own exact container candidate run.
+
+Upstream runtime support was checked on September 25. Python's
+[version status](https://devguide.python.org/versions/) keeps 3.12 in security
+support until October 2028, and
+[3.12.14](https://www.python.org/downloads/release/python-31214/) is the current
+3.12 security release. Node's
+[release schedule](https://github.com/nodejs/Release) keeps 24 in LTS until
+April 2028; [24.21.0](https://nodejs.org/en/blog/release/v24.21.0) is its current
+LTS patch, newer than the 24.18.1 fixes in the latest listed
+[security release](https://nodejs.org/en/blog/vulnerability/july-2026-security-releases).
+The [24.21.0 platform table](https://github.com/nodejs/node/blob/v24.21.0/BUILDING.md)
+lists GNU/Linux x64 and arm64 as Tier 1 with kernel >=4.18 and glibc >=2.28.
+This establishes upstream eligibility of the observed runtime families/patches;
+it does not replace image dependency/security review or the complete G12 gate.
+
 The manual `verify-app-bundle.yml` lane builds separate job-local candidates
 for linux/amd64 and linux/arm64 and leaves G2/G4/G12 false. Its required-both
 status job confirms both provisional runs were exercised; it does not

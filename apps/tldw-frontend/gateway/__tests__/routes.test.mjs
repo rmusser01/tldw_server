@@ -18,6 +18,9 @@ test('keeps existing Next API endpoints and assets on Next', () => {
     '/api/hello',
     '/_next/static/app.js',
     '/settings',
+    '/setup',
+    '/setup/step-1',
+    '/static/ui.png',
     '/api/v1x',
   ]) {
     assert.equal(routeForPath(path), 'next', path);
@@ -33,13 +36,14 @@ test('routes only declared backend prefixes and exact paths to FastAPI', () => {
     '/openapi.json',
     '/docs',
     '/docs/oauth2-redirect',
+    '/docs-static',
+    '/docs-static/AuthNZ/AUTHNZ_USAGE_EXAMPLES.md',
+    '/static/favicon.ico',
     '/redoc',
-    '/setup',
-    '/setup/step-1',
   ]) {
     assert.equal(routeForPath(path), 'backend', path);
   }
-  for (const path of ['/healthy', '/internal/readiness', '/docs-static', '/setup-extra']) {
+  for (const path of ['/healthy', '/internal/readiness', '/docs-static-extra', '/setup-extra']) {
     assert.equal(routeForPath(path), 'next', path);
   }
 });
