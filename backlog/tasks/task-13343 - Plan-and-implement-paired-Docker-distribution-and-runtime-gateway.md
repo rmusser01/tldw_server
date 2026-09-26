@@ -4,7 +4,7 @@ title: Plan and implement paired Docker distribution and runtime gateway
 status: In Progress
 assignee: []
 created_date: '2026-09-23 06:15'
-updated_date: '2026-09-26 06:58'
+updated_date: '2026-09-26 07:04'
 labels:
   - distribution
   - docker
@@ -97,6 +97,8 @@ Task13 fix558fdb814a supplies only the excluded focused setup test through a rea
 Exact local candidate at087e77ce4a built and captured all four arm64 image digests, then correctly stopped in built-backend security tests: 38 MCP tests failed on PermissionError /app/audit.log. Owned test container and registry removed; only unrelated PostgreSQL containers remain. Read-only diagnosis confirms actual managed runtime also lacks a writable MCP audit path (appuser, /app cwd, audit enabled). Add scoped Task15 to preserve auditing in existing writable persisted database volume and align qualification env before retry. G2/G4 remain unqualified; no native push or publication.
 
 Task15 b0e847166e approved: enabled MCP audit logging uses /app/Databases/mcp-audit.log in managed Compose and matching built-image test env. Actual cached image UID10001 audit init/write passes, MCP39/Setup60 and Release81 pass; owned diagnostic/test storage removed. Default production logging and dependencies unchanged. Fresh full candidate retry next. Known container Hypothesis example database falls back to memory under read-only /app; dependency warnings are disclosed, not counted as clean output. G2/G4 and AC4 still await actual full qualification.
+
+Clean retry d081a4dd43 built all four arm64 images and passed built-image MCP39/Setup60 with owned cleanup. Extracted helper verification then refused PermissionError /opt/tldw/trusted-keys/ci-test.pub: strict candidate umask077 created public key mode0600, embedded COPY preserves root-only permissions while start helper runs as caller UID. G2/G4 correctly remain false and failed manifest/signature invalidated; owned registry/test removed, no cleanup recovery markers. Add scoped Task16 explicit read-only public-key image mode and non-root image-content guard before next retry; private key permissions stay restricted.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

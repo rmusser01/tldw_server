@@ -403,6 +403,34 @@ containers stay disposable and excluded from public evidence.
   read-only test mounts. Keep bounded results, remove owned test resources,
   independently review, commit, then retry the clean full candidate in Task13.
 
+### Task 16: Make embedded public trust readable to the control caller
+
+**Problem:** Exact d081a4dd43 candidate passes all image builds and built MCP/setup
+security tests, then its signed helper verification raises PermissionError at
+/opt/tldw/trusted-keys/ci-test.pub. Candidate umask077 creates the public source
+key as0600, COPY preserves root ownership/mode, and helpers intentionally run
+control under the host caller UID. Private signing key restriction is correct.
+
+**Files:** Dockerfiles/Dockerfile.control; existing candidate image-content guard
+and focused Release packaging/tool tests. No verifier/key/trust-policy changes.
+Execute before resuming Task13 actual local/native qualification.
+
+**Contract:** Explicitly copy embedded public keys read-only as0444 independently
+of source umask. Keep private signing keys0600/outsideimage, trust fixed in the
+control digest, and helper caller UID/no-new-privileges/read-only isolation.
+Check actual public-key readability under the helper caller UID in candidate
+content guards rather than only checking size as image-default root.
+
+- [ ] **Step 1:** Preserve actual PermissionError and write red packaging/guard
+  behavior for restrictive public source key mode and non-root caller access.
+- [ ] **Step 2:** Add COPY --chmod=0444 for the existing public-key copy and
+  strengthen only the bounded control-content guard; preserve trust boundaries.
+- [ ] **Step 3:** Build only a scoped control image from a restrictive public-key
+  source and verify non-root key read/signature behavior with bounded output.
+  Run focused tests/lint/syntax/Bandit where applicable, remove owned test
+  containers/state, independently review and commit. Fullcandidate retry belongs
+  to Task13 and remains separate from this scoped proof.
+
 ### Task 13: Qualify remaining real-container transport paths
 
 **Files:** Extend the existing bounded browser probe/tests and paired shell
