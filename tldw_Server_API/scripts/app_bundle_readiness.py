@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import http.client
 import ipaddress
+import json
 import re
 import socket
 import threading
@@ -203,8 +204,6 @@ def probe_gateway(config: InstanceConfig, address: str, *, port: int = 8080, bud
     probe = _GatewayProbe(config, address, port, time.monotonic() + budget)
     try:
         try:
-            if probe.request("GET", "/internal/ready")[0] != 200:
-                raise ReadinessError("backend readiness failed")
             status, page = probe.request("GET", "/")
             asset = re.search(rb'["\'](/_next/static/[a-zA-Z0-9_./%~-]+)["\']', page)
             if status != 200 or asset is None or probe.request("GET", asset[1].decode("ascii"))[0] != 200:
@@ -216,6 +215,12 @@ def probe_gateway(config: InstanceConfig, address: str, *, port: int = 8080, bud
                 raise ReadinessError("gateway session bootstrap failed")
             if probe.request("GET", "/api/v1/users/me/profile", authenticated=True)[0] != 200:
                 raise ReadinessError("gateway cookie authentication failed")
+            status, body = probe.request("GET", "/api/v1/health/ready", authenticated=True)
+            if status != 200:
+                raise ReadinessError("backend readiness failed")
+            payload = json.loads(body)
+            if not isinstance(payload, dict) or payload.get("status") != "ready":
+                raise ReadinessError("backend readiness failed")
         finally:
             if config.session_cookie_name in probe.cookies:
                 # Reserve a separate bounded cleanup window even after probe timeout.

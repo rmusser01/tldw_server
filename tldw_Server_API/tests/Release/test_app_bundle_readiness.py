@@ -176,6 +176,27 @@ def gateway(config):
             assert self.headers["Origin"] == "http://127.0.0.1:18080"
             assert not self.headers.get("X-API-KEY") and not self.headers.get("Authorization")
             status, body, cookies = 200, b"ok", []
+            if self.path == "/internal/ready":
+                # A gateway bridge peer is not admitted by the loopback-only route.
+                status = 404
+            if self.path == "/api/v1/health/ready":
+                body = b'{"status":"ready"}'
+                if self.headers.get("Cookie") != state.cookie or state.revoked or state.mode == "operator-unauthorized":
+                    status = 401
+                elif state.mode == "operator-forbidden":
+                    status = 403
+                elif state.mode == "operator-unavailable":
+                    status, body = 503, b'{"status":"not_ready"}'
+                elif state.mode == "operator-not-ready":
+                    body = b'{"status":"not_ready"}'
+                elif state.mode == "operator-malformed":
+                    body = b"not json"
+                elif state.mode == "operator-wrong-shape":
+                    body = b'["ready"]'
+                elif state.mode == "operator-missing-status":
+                    body = b"{}"
+                elif state.mode == "operator-oversize":
+                    body = b"x" * (2 * 1024 * 1024 + 1)
             if self.path == "/" and state.mode == "headers":
                 try:
                     self.wfile.write(b"HTTP/1.1 200 OK\r\nX-Slow: ")
@@ -212,10 +233,21 @@ def gateway(config):
             if state.mode == "oversize" and self.path.endswith("session") and self.command == "POST":
                 body = b"x" * (2 * 1024 * 1024 + 1)
             self.send_header(
-                "Content-Length", str(len(body) + (10 if state.mode == "truncated" and self.command == "POST" else 0))
+                "Content-Length",
+                str(
+                    len(body)
+                    + (
+                        10
+                        if (state.mode == "truncated" and self.command == "POST")
+                        or (state.mode == "operator-truncated" and self.path == "/api/v1/health/ready")
+                        else 0
+                    )
+                ),
             )
             self.end_headers()
             if state.mode == "stall" and self.path.endswith("session") and self.command == "POST":
+                time.sleep(0.3)
+            if state.mode == "operator-stall" and self.path == "/api/v1/health/ready":
                 time.sleep(0.3)
             try:
                 self.wfile.write(body)
@@ -238,16 +270,17 @@ def test_gateway_probe_uses_fresh_cookie_then_proves_exact_revocation(config, ga
     readiness.probe_gateway(config, "127.0.0.1", port=port)
     assert state.revoked
     assert [r[:2] for r in state.requests] == [
-        ("GET", "/internal/ready"),
         ("GET", "/"),
         ("GET", "/_next/static/chunk.js"),
         ("GET", "/api/v1/users/me/profile"),
         ("POST", "/api/_tldw-webui/session"),
         ("GET", "/api/v1/users/me/profile"),
+        ("GET", "/api/v1/health/ready"),
         ("DELETE", "/api/v1/auth/single-user/session"),
         ("GET", "/api/v1/users/me/profile"),
     ]
-    assert "Cookie" not in state.requests[4][2]
+    assert "Cookie" not in state.requests[3][2]
+    assert state.requests[5][2]["Cookie"] == state.cookie
     assert state.requests[-1][2]["Cookie"] == state.cookie
 
 
@@ -270,3 +303,45 @@ def test_slow_trickling_headers_cannot_extend_total_probe_deadline(config, gatew
     with pytest.raises(readiness.ReadinessError):
         readiness.probe_gateway(config, "127.0.0.1", port=port, budget=0.15)
     assert time.monotonic() - started < 0.4
+
+
+@pytest.mark.parametrize("cookie", [None, "session_fixture=foreign; csrf_fixture=csrf-probe"])
+def test_operator_ready_fixture_refuses_absent_or_foreign_session(config, gateway, cookie):
+    _, port = gateway
+    probe = readiness._GatewayProbe(config, "127.0.0.1", port, time.monotonic() + 3)
+    if cookie is not None:
+        probe.cookies = {"session_fixture": "foreign", "csrf_fixture": "csrf-probe"}
+    assert probe.request("GET", "/internal/ready")[0] == 404
+    assert probe.request("GET", "/api/v1/health/ready", authenticated=cookie is not None)[0] == 401
+
+
+@pytest.mark.parametrize(
+    "mode",
+    [
+        "operator-unauthorized",
+        "operator-forbidden",
+        "operator-unavailable",
+        "operator-not-ready",
+        "operator-malformed",
+        "operator-wrong-shape",
+        "operator-missing-status",
+        "operator-oversize",
+        "operator-truncated",
+        "operator-stall",
+    ],
+)
+def test_operator_readiness_failure_still_revokes_exact_session(config, gateway, mode):
+    state, port = gateway
+    state.mode = mode
+    started = time.monotonic()
+    with pytest.raises(readiness.ReadinessError):
+        readiness.probe_gateway(config, "127.0.0.1", port=port, budget=0.15 if mode == "operator-stall" else 3)
+    assert state.revoked
+    assert [r[:2] for r in state.requests][-2:] == [
+        ("DELETE", "/api/v1/auth/single-user/session"),
+        ("GET", "/api/v1/users/me/profile"),
+    ]
+    assert state.requests[-2][2]["Cookie"] == state.cookie
+    assert state.requests[-2][2]["X-CSRF-Token"] == "csrf-probe"
+    if mode == "operator-stall":
+        assert time.monotonic() - started < 0.4
