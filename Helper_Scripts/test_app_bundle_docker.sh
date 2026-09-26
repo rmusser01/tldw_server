@@ -16,6 +16,7 @@ project_id=""
 source_commit=""
 platform=""
 lifecycle_passed=0
+port_fixture_id=""
 evidence_path="$(dirname "$bundle_dir")/lifecycle-evidence.json"
 export TLDW_APP_PUBLIC_PORT="${TLDW_APP_PUBLIC_PORT:-18080}"
 public_url="http://127.0.0.1:$TLDW_APP_PUBLIC_PORT"
@@ -24,6 +25,9 @@ cleanup() {
   local original_exit=$?
   local cleanup_failed=0
   trap - EXIT
+  if [[ -n "$port_fixture_id" ]]; then
+    docker rm -f "$port_fixture_id" >/dev/null 2>&1 || cleanup_failed=1
+  fi
   if [[ -f "$env_file" ]]; then
     project_id=$(sed -n 's/^TLDW_PROJECT_ID=//p' "$env_file" 2>/dev/null) || cleanup_failed=1
     if [[ "$project_id" =~ ^[a-zA-Z0-9_.-]+$ ]]; then
@@ -53,7 +57,9 @@ try:
         "passed": passed, "owned_resources_removed": removed,
         "checks": {name: {"passed": passed} for name in (
             "signed_start", "ready", "public_assets", "published_documentation",
-            "cookie_auth", "private_isolation", "restart_persistence", "tamper_refused")},
+            "cookie_auth", "private_isolation", "restart_persistence", "tamper_refused",
+            "installer_authenticated_readiness", "probe_session_revoked", "occupied_default_offer",
+            "occupied_explicit_retry", "established_origin_refused")},
     }, indent=2) + "\n")
 except Exception:
     sys.exit("Lifecycle evidence update failed (private details suppressed).")
@@ -70,7 +76,33 @@ PY_CLEANUP
 trap cleanup EXIT
 
 cd "$test_root"
-"$bundle_dir/start.sh"
+control_image=$(python - "$bundle_dir/manifest.json" <<'PY_CONTROL'
+import json, sys
+from pathlib import Path
+print(next(a["location"] for a in json.loads(Path(sys.argv[1]).read_bytes())["artifacts"] if a["kind"] == "oci" and a["role"] == "control"))
+PY_CONTROL
+)
+# Only this captured ID is owned; keep the blocker running through both failures.
+port_fixture_id=$(docker create --read-only --cap-drop ALL --security-opt no-new-privileges \
+  -p 127.0.0.1:8080:8080 --entrypoint python "$control_image" -c 'import time; time.sleep(180)')
+[[ "$port_fixture_id" =~ ^[a-f0-9]{64}$ ]]
+docker start "$port_fixture_id" >/dev/null
+if TLDW_APP_PUBLIC_PORT= "$bundle_dir/start.sh" >"$test_root/default-port.log" 2>&1; then
+  echo 'Occupied default port unexpectedly initialized.' >&2; exit 1
+fi
+[[ ! -e "$TLDW_APP_STATE_DIR/instance" ]]
+grep -q 'Available choice: set TLDW_APP_PUBLIC_PORT=' "$test_root/default-port.log"
+[[ $(docker inspect --format '{{.State.Running}}' "$port_fixture_id") == true ]]
+if TLDW_APP_PUBLIC_PORT=8080 "$bundle_dir/start.sh" >"$test_root/explicit-port.log" 2>&1; then
+  echo 'Occupied explicit port unexpectedly initialized.' >&2; exit 1
+fi
+[[ ! -e "$TLDW_APP_STATE_DIR/instance" ]]
+[[ $(docker inspect --format '{{.State.Running}}' "$port_fixture_id") == true ]]
+docker rm -f "$port_fixture_id" >/dev/null
+port_fixture_id=""
+# The explicit alternate retry must complete authenticated readiness and revocation.
+"$bundle_dir/start.sh" >"$test_root/first-start.log" 2>&1
+grep -q '^ready complete for ' "$test_root/first-start.log"
 source_commit=$(python - "$bundle_dir/manifest.json" <<'PY_COMMIT'
 import json
 import sys
@@ -86,6 +118,11 @@ print(json.loads(Path(sys.argv[1]).read_text())["platforms"][0])
 PY_PLATFORM
 )}
 first_config_hash=$(sha256sum "$env_file" | awk '{print $1}')
+if TLDW_APP_PUBLIC_PORT=8080 "$bundle_dir/start.sh" >"$test_root/established-port.log" 2>&1; then
+  echo 'Established origin unexpectedly changed.' >&2; exit 1
+fi
+[[ "$first_config_hash" == "$(sha256sum "$env_file" | awk '{print $1}')" ]]
+
 project_id=$(sed -n 's/^TLDW_PROJECT_ID=//p' "$env_file")
 session_cookie_name=$(sed -n 's/^SINGLE_USER_SESSION_COOKIE_NAME=//p' "$env_file")
 csrf_cookie_name=$(sed -n 's/^CSRF_COOKIE_NAME=//p' "$env_file")

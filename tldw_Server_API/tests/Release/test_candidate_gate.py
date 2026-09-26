@@ -278,6 +278,7 @@ test_root=$1
 bundle_dir=$2
 env_file=$3
 project_id=owned-project
+port_fixture_id=""
 evidence_path=$4
 lifecycle_passed=1
 source_commit={'a' * 40}
@@ -353,7 +354,9 @@ exit "$2"
     assert (tmp_path / ".registry-cleanup-recovery").exists() is failed
 
 
-@pytest.mark.parametrize("change", ["", "missing", "false", "source", "platform", "schema", "lifecycle", "cleanup"])
+@pytest.mark.parametrize(
+    "change", ["", "missing", "false", "source", "platform", "schema", "lifecycle", "cleanup", "readiness", "port"]
+)
 def test_candidate_gate_requires_complete_matching_cleaned_fixture_evidence(
     tmp_path: Path,
     change: str,
@@ -408,6 +411,11 @@ def test_candidate_gate_requires_complete_matching_cleaned_fixture_evidence(
                 "private_isolation",
                 "restart_persistence",
                 "tamper_refused",
+                "installer_authenticated_readiness",
+                "probe_session_revoked",
+                "occupied_default_offer",
+                "occupied_explicit_retry",
+                "established_origin_refused",
             )
         },
     }
@@ -423,6 +431,10 @@ def test_candidate_gate_requires_complete_matching_cleaned_fixture_evidence(
         browser["schema_version"] = 2
     if change == "lifecycle":
         del lifecycle["checks"]["restart_persistence"]
+    if change == "readiness":
+        del lifecycle["checks"]["probe_session_revoked"]
+    if change == "port":
+        del lifecycle["checks"]["occupied_explicit_retry"]
     if change == "cleanup":
         lifecycle["owned_resources_removed"] = False
     (tmp_path / "browser-evidence.json").write_text(json.dumps(browser))

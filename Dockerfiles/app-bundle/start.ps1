@@ -31,7 +31,7 @@ if ($env:TLDW_APP_STATE_DIR) {
 New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
 
 $portArgs = @()
-if ($env:TLDW_APP_PUBLIC_PORT) {
+if (-not $VerifyOnly -and $env:TLDW_APP_PUBLIC_PORT) {
     if ($env:TLDW_APP_PUBLIC_PORT -notmatch '^\d{1,5}$' -or
         [int]$env:TLDW_APP_PUBLIC_PORT -lt 1 -or [int]$env:TLDW_APP_PUBLIC_PORT -gt 65535) {
         throw 'TLDW_APP_PUBLIC_PORT must be a valid decimal port.'
@@ -54,6 +54,40 @@ $controlArgs = @(
 & docker @runArgs 'verify' @controlArgs
 if ($LASTEXITCODE -ne 0) { throw 'Bundle verification failed; no application containers were started.' }
 if ($VerifyOnly) { return }
+function Test-FirstPort([string]$RequestedPort) {
+    $preflightId = ''
+    try {
+        $preflightId = (& docker create --network bridge --read-only --cap-drop ALL `
+            --security-opt no-new-privileges -p "127.0.0.1:${RequestedPort}:8080" `
+            --entrypoint python $controlImage -c 'import time; time.sleep(120)' 2>$null | Out-String).Trim()
+        if ($LASTEXITCODE -ne 0) { $preflightId = ''; throw 'Unable to create Docker port preflight; no origin was saved.' }
+        if ($preflightId -notmatch '^[a-f0-9]{64}$') {
+            $preflightId = ''; throw 'Invalid preflight resource identity.'
+        }
+        & docker start $preflightId *> $null
+        if ($LASTEXITCODE -ne 0) { return $null }
+        if ($RequestedPort) { return $RequestedPort }
+        $selectedPort = (& docker inspect --format '{{(index (index .NetworkSettings.Ports "8080/tcp") 0).HostPort}}' $preflightId | Out-String).Trim()
+        if ($LASTEXITCODE -ne 0 -or $selectedPort -notmatch '^\d{1,5}$') { throw 'No available port could be confirmed.' }
+        return $selectedPort
+    } finally {
+        if ($preflightId) {
+            & docker rm -f $preflightId *> $null
+            if ($LASTEXITCODE -ne 0) { throw "Port preflight cleanup failed. Recovery container: $preflightId; state: $stateRoot." }
+        }
+    }
+}
+if (-not (Test-Path (Join-Path $stateRoot 'instance'))) {
+    $requestedPort = if ($env:TLDW_APP_PUBLIC_PORT) { $env:TLDW_APP_PUBLIC_PORT } else { '8080' }
+    if (-not (Test-FirstPort $requestedPort)) {
+        if ($env:TLDW_APP_PUBLIC_PORT) {
+            throw "Public port $requestedPort is unavailable. Choose another TLDW_APP_PUBLIC_PORT and retry; no origin was saved."
+        }
+        $alternative = Test-FirstPort ''
+        if ($alternative) { throw "Default port 8080 is unavailable. Available choice: set TLDW_APP_PUBLIC_PORT=$alternative and run start.ps1 again; no origin was saved." }
+        throw 'No available Docker port choice could be confirmed; no origin was saved.'
+    }
+}
 & docker @runArgs 'init' @controlArgs
 if ($LASTEXITCODE -ne 0) { throw 'Instance initialization failed; no application containers were started.' }
 
@@ -76,20 +110,32 @@ $composeArgs = @(
     'compose', '--project-name', $projectId,
     '--env-file', $envFile, '-f', (Join-Path $bundleDir 'compose.yaml')
 )
-$occupied = Get-NetTCPConnection -LocalPort ([int]$publicPort) -State Listen -ErrorAction SilentlyContinue
-if ($occupied) {
-    $ownGateway = (& docker @composeArgs 'ps' '-q' 'gateway' | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0 -or -not $ownGateway) {
-        throw "Public port $publicPort is already occupied."
-    }
-}
 & docker @composeArgs 'pull'
 if ($LASTEXITCODE -ne 0) { throw 'Failed to pull the signed image references.' }
-& docker @composeArgs 'up' '-d' '--no-build' '--wait' '--wait-timeout' '600'
-if ($LASTEXITCODE -ne 0) {
+function Stop-FailedStart {
     & docker @composeArgs 'down' *> $null
-    throw 'Application failed readiness; partial services were stopped and data was retained.'
+    if ($LASTEXITCODE -ne 0) {
+        throw "Application failed readiness and cleanup failed; services may still be running. Recovery state: $stateRoot. Retry stop.ps1."
+    }
+    throw "Application failed readiness; partial services were stopped. Data retained at $stateRoot."
 }
+& docker @composeArgs 'up' '-d' '--no-build' '--wait' '--wait-timeout' '600'
+if ($LASTEXITCODE -ne 0) { Stop-FailedStart }
+$containerIds = @(& docker @composeArgs 'ps' '-q' 'app' 'webui' 'gateway')
+if ($LASTEXITCODE -ne 0 -or $containerIds.Count -ne 3) { Stop-FailedStart }
+# Keep secret-bearing inspection in process memory and feed it only to control stdin.
+$inspection = & docker inspect @containerIds "${projectId}_private"
+if ($LASTEXITCODE -ne 0) { Stop-FailedStart }
+$readyArgs = @(
+    'run', '--rm', '-i', '--network', "${projectId}_private", '--read-only', '--cap-drop', 'ALL',
+    '--security-opt', 'no-new-privileges',
+    '--mount', "type=bind,source=$bundleDir,target=/bundle,readonly",
+    '--mount', "type=bind,source=$stateRoot,target=/state,readonly", $controlImage
+)
+$inspection | & docker @readyArgs 'ready' @controlArgs
+$readyExit = $LASTEXITCODE
+$inspection = $null
+if ($readyExit -ne 0) { Stop-FailedStart }
 $browserUrl = "http://127.0.0.1:$publicPort/"
 Write-Output "Open $browserUrl"
 if ($env:TLDW_APP_NO_BROWSER -ne '1') {

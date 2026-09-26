@@ -6,7 +6,7 @@ LABEL org.opencontainers.image.revision=${TLDW_SOURCE_COMMIT}
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PYTHONPATH=/opt/tldw
 RUN pip install --no-cache-dir --only-binary=:all: cryptography==45.0.6
 WORKDIR /opt/tldw
-COPY tldw_Server_API/scripts/app_bundle_control.py /opt/tldw/tldw_Server_API/scripts/app_bundle_control.py
+COPY tldw_Server_API/scripts/app_bundle_control.py tldw_Server_API/scripts/app_bundle_readiness.py /opt/tldw/tldw_Server_API/scripts/
 COPY tldw_Server_API/app/core/Release /opt/tldw/tldw_Server_API/app/core/Release
 COPY tldw_Server_API/app/core/AuthNZ/api_key_crypto.py /opt/tldw/tldw_Server_API/app/core/AuthNZ/api_key_crypto.py
 RUN mkdir -m 0755 /opt/tldw/trusted-keys

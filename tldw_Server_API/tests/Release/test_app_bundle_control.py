@@ -336,3 +336,56 @@ def test_signed_image_location_cannot_inject_instance_env(
 
     with pytest.raises(BundleControlError, match="image location"):
         verify_bundle(manifest_path, signature_path, keys, platform="linux/amd64", bundle_root=bundle)
+
+
+@pytest.mark.parametrize("inspection", [b"[]", b"not-json-private-sentinel", b"x" * (1024 * 1024 + 1)])
+def test_ready_cli_refuses_bad_private_inspection_without_leaking_or_changing_state(
+    tmp_path, release, monkeypatch, capsys, inspection
+):
+    import io
+    import sys
+    from types import SimpleNamespace
+
+    bundle, manifest, signature, keys = release
+    trusted = tmp_path / "trusted"
+    trusted.mkdir()
+    (trusted / "test-key.pub").write_bytes(keys["test-key"])
+    state = tmp_path / "instance"
+    config = initialize_bundle(state, _verified(release))
+    before = (state / "config.env").read_bytes()
+    monkeypatch.setattr(sys, "stdin", SimpleNamespace(buffer=io.BytesIO(inspection)))
+    result = main(
+        [
+            "ready",
+            "--state",
+            str(state),
+            "--manifest",
+            str(manifest),
+            "--signature",
+            str(signature),
+            "--bundle-root",
+            str(bundle),
+            "--platform",
+            "linux/amd64",
+            "--trusted-keys",
+            str(trusted),
+        ]
+    )
+    assert result == 1
+    output = capsys.readouterr()
+    assert "private-sentinel" not in output.err + output.out
+    assert config.api_key not in output.err + output.out
+    assert (state / "config.env").read_bytes() == before
+
+
+def test_established_origin_cannot_change_credentials_or_data(tmp_path, release):
+    state = tmp_path / "instance"
+    first = initialize_bundle(state, _verified(release), public_port=18080)
+    before = (state / "config.env").read_bytes()
+    sentinel = state / "browser-data-sentinel"
+    sentinel.write_bytes(b"retain-me")
+    with pytest.raises(BundleControlError, match="conflicts"):
+        initialize_bundle(state, _verified(release), public_port=18081)
+    assert (state / "config.env").read_bytes() == before
+    assert sentinel.read_bytes() == b"retain-me"
+    assert initialize_bundle(state, _verified(release)) == first

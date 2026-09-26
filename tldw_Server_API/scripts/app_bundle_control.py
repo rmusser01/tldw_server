@@ -306,7 +306,7 @@ def _trusted_keys(directory: Path) -> dict[str, bytes]:
 def main(argv: list[str] | None = None) -> int:
     """Run `verify` or `init` without printing credentials."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("verify", "init"))
+    parser.add_argument("command", choices=("verify", "init", "ready"))
     parser.add_argument("--state", type=Path, required=True)
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--signature", type=Path, required=True)
@@ -326,7 +326,19 @@ def main(argv: list[str] | None = None) -> int:
         )
         if args.expected_signer is not None and verified.manifest.signer_id != args.expected_signer:
             raise BundleControlError("manifest signer differs from pinned helper key identity")
-        if args.command == "init":
+        if args.command == "ready":
+            from tldw_Server_API.scripts.app_bundle_readiness import probe_gateway, validate_runtime
+
+            config = _existing(args.state, verified, args.public_port)
+            raw = sys.stdin.buffer.read(1024 * 1024 + 1)
+            if len(raw) > 1024 * 1024:
+                raise BundleControlError("runtime inspection exceeds limit")
+            try:
+                address = validate_runtime(json.loads(raw), config, verified.manifest.source_commit)
+                probe_gateway(config, address)
+            except (ValueError, TypeError) as exc:
+                raise BundleControlError("authenticated gateway readiness or session cleanup failed") from exc
+        elif args.command == "init":
             initialize_bundle(args.state, verified, public_port=args.public_port)
         elif args.state.exists() or args.state.is_symlink():
             _existing(args.state, verified, args.public_port)

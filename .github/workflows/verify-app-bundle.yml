@@ -16,7 +16,13 @@ on:
       - tldw_Server_API/app/core/MCP_unified/server.py
       - tldw_Server_API/app/core/MCP_unified/tests/test_managed_gateway_ingress.py
       - tldw_Server_API/tests/Setup/test_managed_gateway_setup.py
-      - tldw_Server_API/tests/Release/test_candidate_gate.py
+      - tldw_Server_API/tests/Release/**
+      - tldw_Server_API/scripts/app_bundle_control.py
+      - tldw_Server_API/scripts/app_bundle_readiness.py
+      - tldw_Server_API/app/core/Release/**
+      - Helper_Scripts/build_app_bundle.py
+      - Helper_Scripts/verify_app_bundle.py
+      - Dockerfiles/Dockerfile.control
       - Dockerfiles/Dockerfile.prod
       - Dockerfiles/Dockerfile.webui
       - Dockerfiles/app-bundle/**
@@ -70,15 +76,20 @@ jobs:
             --confcutdir=tldw_Server_API/tests/Release \
             tldw_Server_API/tests/Release/test_manifest.py \
             tldw_Server_API/tests/Release/test_app_bundle_control.py \
+            tldw_Server_API/tests/Release/test_app_bundle_readiness.py \
             tldw_Server_API/tests/Release/test_app_bundle_helpers.py \
             tldw_Server_API/tests/Release/test_candidate_gate.py -q
           python -m black --check Helper_Scripts/build_app_bundle.py \
             Helper_Scripts/verify_app_bundle.py \
             tldw_Server_API/app/core/Release/manifest.py \
+            tldw_Server_API/app/core/Release/__init__.py \
+            tldw_Server_API/scripts/app_bundle_readiness.py \
             tldw_Server_API/scripts/app_bundle_control.py
           python -m bandit -r Helper_Scripts/build_app_bundle.py \
             Helper_Scripts/verify_app_bundle.py \
             tldw_Server_API/app/core/Release/manifest.py \
+            tldw_Server_API/app/core/Release/__init__.py \
+            tldw_Server_API/scripts/app_bundle_readiness.py \
             tldw_Server_API/scripts/app_bundle_control.py
           python -m bandit -r tldw_Server_API/app/api/v1/endpoints/setup.py \
             tldw_Server_API/app/core/Security/managed_gateway.py \

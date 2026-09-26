@@ -20,12 +20,15 @@ detached `manifest.sig`.
 
 On macOS or Linux, run `./start.sh` from the extracted directory, then open
 the printed loopback URL. On a desktop, the helper also tries to open the
-browser after Compose reports healthy services. Set `TLDW_APP_NO_BROWSER=1`
+browser after the control probe verifies running identities, gateway paths,
+a fresh cookie-only session, and its revocation. Set `TLDW_APP_NO_BROWSER=1`
 to suppress that. Use `./status.sh` to inspect the services and
 `./stop.sh` to stop them while retaining data. On Windows PowerShell, use
 `./start.ps1`, `./status.ps1`, and `./stop.ps1`. Each script finds its bundle
 relative to its own location, so the current working directory does not
-matter.
+matter. Windows helpers remain provisional: syntax checks do not qualify real
+Windows Docker operation, private-state ACLs, or lifecycle/readiness behavior.
+Do not treat the Linux container architecture matrix as Windows host validation.
 
 The first start creates private, persistent instance identity and credentials
 under `~/Library/Application Support/tldw/app` on macOS,
@@ -33,13 +36,23 @@ under `~/Library/Application Support/tldw/app` on macOS,
 `%LOCALAPPDATA%\tldw\app` on Windows. Set `TLDW_APP_STATE_DIR` before the first
 start to choose another location. Set `TLDW_APP_PUBLIC_PORT` before the first
 start to use a free port other than 8080; later runs must keep that choice.
+Before saving a first origin, a disposable Docker container checks the binding.
+If 8080 is occupied, the helper offers an available alternative to set explicitly
+and retry. An occupied explicit choice leaves no instance configuration, so a
+retry with another port works. Port availability can change before startup;
+established installations never silently change their saved origin.
 The host publishes only the gateway at `127.0.0.1:<port>`. Backend and WebUI
 ports stay on the private Compose network.
 
 The pinned control image verifies the manifest signature, platform, local
-artifact hashes, required image references, and existing state before any
+artifact hashes (including Compose, README, and all six helpers), required image
+references, and existing state before any
 application container starts. The helper then pulls the image references by
-their signed OCI digests. `stop` leaves both named data volumes intact. Keep
+their signed OCI digests. Inherited managed Compose values are cleared, so
+images, credentials, cookie names, and the origin resolve from verified state.
+Readiness uses only the pinned control runtime on the private network and sends
+no master key in its HTTP requests. Failed readiness triggers stack cleanup;
+failed cleanup reports the retained state/resource needed for recovery. `stop` leaves both named data volumes intact. Keep
 the private state directory and Docker volumes together when backing up or
 moving an installation; the directory includes the instance API key.
 

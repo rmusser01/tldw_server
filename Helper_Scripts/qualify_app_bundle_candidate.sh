@@ -317,7 +317,7 @@ try {
       browser.checks.owned_resources_removed?.passed !== true || browser.checks.paired_signed_start_and_runtime_identity?.passed !== true ||
       lifecycle.owned_resources_removed !== true) throw new Error('fixture_evidence')
   completeEvidence(browser)
-  const lifecycleChecks = ['signed_start', 'ready', 'public_assets', 'published_documentation', 'cookie_auth', 'private_isolation', 'restart_persistence', 'tamper_refused']
+  const lifecycleChecks = ['signed_start', 'ready', 'public_assets', 'published_documentation', 'cookie_auth', 'private_isolation', 'restart_persistence', 'tamper_refused', 'installer_authenticated_readiness', 'probe_session_revoked', 'occupied_default_offer', 'occupied_explicit_retry', 'established_origin_refused']
   if (lifecycleChecks.some(name => lifecycle.checks[name]?.passed !== true) || Object.values(lifecycle.checks).some(check => check.passed !== true)) throw new Error('fixture_evidence')
   const evidence = JSON.parse(readFileSync(path, 'utf8'))
   if (evidence.source_commit !== commit || !evidence.platforms?.[platform]) throw new Error('fixture_evidence')

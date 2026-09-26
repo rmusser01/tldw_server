@@ -44,7 +44,7 @@ chmod 700 "$state_root"
 verify_only=0
 if [ "${1:-}" = --verify-only ]; then verify_only=1; fi
 set --
-if [ -n "${TLDW_APP_PUBLIC_PORT:-}" ]; then
+if [ "$verify_only" != 1 ] && [ -n "${TLDW_APP_PUBLIC_PORT:-}" ]; then
   case "$TLDW_APP_PUBLIC_PORT" in
     *[!0-9]*|'') echo 'TLDW_APP_PUBLIC_PORT must be a decimal port.' >&2; exit 1 ;;
   esac
@@ -68,6 +68,58 @@ control verify "$@" || {
   exit 1
 }
 if [ "${verify_only:-0}" = 1 ]; then exit 0; fi
+# Reserve host bindings with Docker before first origin/credentials are committed.
+# A failed create owns nothing; only the returned immutable container ID is removed.
+preflight_id=''
+cleanup_preflight() {
+  if [ -n "$preflight_id" ]; then
+    if ! docker rm -f "$preflight_id" >/dev/null 2>&1; then
+      echo "Port preflight cleanup failed. Recovery container: $preflight_id; state: $state_root." >&2
+      return 1
+    fi
+    preflight_id=''
+  fi
+}
+trap 'cleanup_preflight || exit 1' 0
+trap 'exit 1' HUP INT TERM
+check_port() {
+  requested=$1
+  preflight_id=$(docker create --network bridge --read-only --cap-drop ALL \
+    --security-opt no-new-privileges -p "127.0.0.1:${requested}:8080" \
+    --entrypoint python "$control_image" -c 'import time; time.sleep(120)' 2>/dev/null) || {
+    echo 'Unable to create Docker port preflight; no origin was saved.' >&2
+    return 2
+  }
+  case "$preflight_id" in ''|*[!0-9a-f]*) echo 'Invalid preflight resource identity.' >&2; preflight_id=''; return 2 ;; esac
+  if [ "${#preflight_id}" -ne 64 ]; then preflight_id=''; return 2; fi
+  port_started=0
+  if docker start "$preflight_id" >/dev/null 2>&1; then port_started=1; fi
+  selected_port=''
+  if [ "$port_started" = 1 ] && [ -z "$requested" ]; then
+    selected_port=$(docker inspect --format '{{(index (index .NetworkSettings.Ports "8080/tcp") 0).HostPort}}' "$preflight_id") || {
+      cleanup_preflight || return 2
+      return 2
+    }
+    case "$selected_port" in ''|*[!0-9]*) cleanup_preflight || return 2; return 2 ;; esac
+  fi
+  cleanup_preflight || return 2
+  [ "$port_started" = 1 ]
+}
+if [ ! -e "$state_root/instance" ]; then
+  port_result=0
+  check_port "${TLDW_APP_PUBLIC_PORT:-8080}" || port_result=$?
+  if [ "$port_result" -ne 0 ]; then
+    if [ "$port_result" = 2 ]; then exit 1; fi
+    if [ -n "${TLDW_APP_PUBLIC_PORT:-}" ]; then
+      echo "Public port $TLDW_APP_PUBLIC_PORT is unavailable. Choose another TLDW_APP_PUBLIC_PORT and retry; no origin was saved." >&2
+    elif check_port ''; then
+      echo "Default port 8080 is unavailable. Available choice: set TLDW_APP_PUBLIC_PORT=$selected_port and run start.sh again; no origin was saved." >&2
+    else
+      echo 'No available Docker port choice could be confirmed; no origin was saved.' >&2
+    fi
+    exit 1
+  fi
+fi
 control init "$@" || {
   echo 'Instance initialization failed; no application containers were started.' >&2
   exit 1
@@ -93,20 +145,29 @@ compose() {
     -f "$bundle_dir/compose.yaml" "$@"
 }
 
-if command -v lsof >/dev/null 2>&1 && \
-   lsof -nP -iTCP:"$public_port" -sTCP:LISTEN >/dev/null 2>&1; then
-  own_gateway=$(compose ps -q gateway)
-  if [ -z "$own_gateway" ]; then
-    echo "Public port $public_port is already occupied." >&2
-    exit 1
-  fi
-fi
-
 compose pull
-if ! compose up -d --no-build --wait --wait-timeout 600; then
-  compose down >/dev/null 2>&1 || true
-  echo 'Application failed readiness; partial services were stopped and data was retained.' >&2
+failed_start() {
+  if compose down >/dev/null 2>&1; then
+    echo "Application failed readiness; partial services were stopped. Data retained at $state_root." >&2
+  else
+    echo "Application failed readiness and cleanup failed; services may still be running. Recovery state: $state_root. Retry stop.sh." >&2
+  fi
   exit 1
+}
+if ! compose up -d --no-build --wait --wait-timeout 600; then
+  failed_start
+fi
+# Inspection stays in the pipe: its Env contains credentials and must never be logged.
+container_ids=$(compose ps -q app webui gateway) || failed_start
+if [ -z "$container_ids" ]; then failed_start; fi
+if ! docker inspect $container_ids "${project_id}_private" | \
+  docker run --rm -i --network "${project_id}_private" --read-only --cap-drop ALL \
+    --security-opt no-new-privileges --user "$(id -u):$(id -g)" \
+    -v "$bundle_dir:/bundle:ro" -v "$state_root:/state:ro" \
+    "$control_image" ready --state /state/instance --manifest /bundle/manifest.json \
+    --signature /bundle/manifest.sig --bundle-root /bundle --platform "$platform" \
+    --expected-signer "$trusted_key_id"; then
+  failed_start
 fi
 browser_url="http://127.0.0.1:$public_port/"
 echo "Open $browser_url"
