@@ -105,27 +105,45 @@ jobs:
     name: backend-required
     runs-on: ubuntu-latest
     needs: [changes, admission, await_license]
+    # This job's name is the required status check, so it must REPORT rather
+    # than skip. A skipped job leaves the check unreported, and a run whose
+    # jobs all skip concludes "success" -- so a failed licence audit used to
+    # show green while running nothing. The last arm exists purely so a
+    # negative verdict reaches the assertion step below and goes red.
     if: >-
       always() && !cancelled() &&
       (
         (
           github.event_name == 'workflow_run' &&
           needs.admission.result == 'success' &&
-          needs.admission.outputs.should_run == 'true'
+          needs.admission.outputs.should_run == 'true' &&
+          needs.changes.result == 'success'
         ) ||
         (
           github.event_name != 'workflow_run' &&
           (
             needs.await_license.result == 'skipped' ||
             needs.await_license.outputs.license_passed == 'true'
-          )
+          ) &&
+          needs.changes.result == 'success'
+        ) ||
+        (
+          github.event_name != 'workflow_run' &&
+          needs.await_license.result != 'skipped' &&
+          needs.await_license.outputs.license_passed != 'true'
         )
-      ) &&
-      (
-        needs.changes.result == 'success'
       )
     timeout-minutes: 30
     steps:
+      - name: Require the license audit to have passed
+        if: >-
+          github.event_name != 'workflow_run' &&
+          needs.await_license.result != 'skipped' &&
+          needs.await_license.outputs.license_passed != 'true'
+        run: |
+          echo "::error::License audit did not pass for this PR head, so the gates were not run. Fix the licence policy failure and re-run."
+          exit 1
+
       - name: No-op pass (backend unchanged)
         if: needs.changes.outputs.backend_changed != 'true'
         run: echo "No backend paths changed; backend-required passed by policy."
