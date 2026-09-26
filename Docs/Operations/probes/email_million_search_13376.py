@@ -208,6 +208,7 @@ def _load_postgres_provenance(path: Path, manifest: dict[str, Any], messages: in
     required_files = measured_files - {
         "tldw_Server_API/app/core/DB_Management/media_db/schema/features/postgres_rls.py",
         "tldw_Server_API/app/core/DB_Management/media_db/runtime/email_graph_persistence_ops.py",
+        "tldw_Server_API/app/core/DB_Management/backends/query_utils.py",
     }
     for source in (identity, origin):
         hashes = source.get("sha256") if isinstance(source, dict) else None
@@ -299,6 +300,7 @@ def _source_identity() -> dict[str, Any]:
         "Helper_Scripts/benchmarks/email_search_bench.py",
         "tldw_Server_API/app/core/DB_Management/backends/postgresql_backend.py",
         "tldw_Server_API/app/core/DB_Management/backends/sqlite_backend.py",
+        "tldw_Server_API/app/core/DB_Management/backends/query_utils.py",
         "tldw_Server_API/app/core/DB_Management/media_db/media_database_impl.py",
         "tldw_Server_API/app/core/DB_Management/media_db/runtime/execution_ops.py",
         "tldw_Server_API/app/core/DB_Management/media_db/runtime/email_query_ops.py",

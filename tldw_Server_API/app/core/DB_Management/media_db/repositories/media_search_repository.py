@@ -211,7 +211,6 @@ class MediaSearchRepository:
         fts_relevance_added = False
 
         fts_select_params: list[Any] = []
-        fts_condition_params: list[Any] = []
         postgres_tsquery: str | None = None
 
         def _is_sqlite_fts_query_error(err: Exception) -> bool:
@@ -374,13 +373,18 @@ class MediaSearchRepository:
                     fts_condition_index = len(conditions) - 1
                     fts_param_index = len(params) - 1
                 elif backend_type == BackendType.POSTGRESQL:
-                    postgres_tsquery = FTSQueryTranslator.normalize_query(
-                        combined_fts_query,
-                        "postgresql",
-                    )
+                    if search_query.startswith('"') and search_query.endswith('"'):
+                        # A wholly quoted phrase otherwise follows the simple
+                        # word normalizer and loses ordered-position matching.
+                        postgres_tsquery = FTSQueryTranslator.sqlite_to_postgres(combined_fts_query)
+                    else:
+                        postgres_tsquery = FTSQueryTranslator.normalize_query(
+                            combined_fts_query,
+                            "postgresql",
+                        )
                     if postgres_tsquery:
                         conditions.append("m.media_fts_tsv @@ to_tsquery('english', ?)")
-                        fts_condition_params.append(postgres_tsquery)
+                        params.append(postgres_tsquery)
                         fts_condition_index = len(conditions) - 1
                     else:
                         logger.debug(
@@ -462,13 +466,21 @@ class MediaSearchRepository:
             elif backend_type == BackendType.POSTGRESQL and postgres_tsquery:
                 if not any("relevance_score" in part for part in base_select_parts):
                     if boost_fields_supplied:
+                        # PostgreSQL requires each weight <= 1. Scale every
+                        # category equally to retain requested boost ratios.
+                        weight_scale = max(1.0, title_boost, content_boost)
                         postgres_weights_literal = (
-                            f"{content_boost:.6f},1.000000,{content_boost:.6f},{title_boost:.6f}"
+                            f"{1.0 / weight_scale:.6f},{content_boost / weight_scale:.6f},"
+                            f"{1.0 / weight_scale:.6f},{title_boost / weight_scale:.6f}"
                         )
                         base_select_parts.append(
                             "ts_rank("
                             f"ARRAY[{postgres_weights_literal}]::float4[], "
-                            "m.media_fts_tsv, to_tsquery('english', ?)"
+                            # The generic trigger stores an unweighted vector;
+                            # explicit boosts rank fixed title A/content C fields.
+                            "setweight(to_tsvector('english', COALESCE(m.title, '')), 'A') || "
+                            "setweight(to_tsvector('english', COALESCE(m.content, '')), 'C'), "
+                            "to_tsquery('english', ?)"
                             ") AS relevance_score"
                         )
                     else:
@@ -519,10 +531,7 @@ class MediaSearchRepository:
             count_sql = f"SELECT {count_select} {base_from} {join_clause} {where_clause}"
             logger.debug(f"Search Count SQL ({db.db_path_str}): {count_sql}")
             count_params_seq: Sequence[Any]
-            if backend_type == BackendType.POSTGRESQL:
-                count_params_seq = list(fts_condition_params) + list(params)
-            else:
-                count_params_seq = list(params)
+            count_params_seq = list(params)
             logger.debug(f"Search Count Params: {count_params_seq}")
 
             try:
@@ -583,7 +592,6 @@ class MediaSearchRepository:
                 if backend_type == BackendType.POSTGRESQL:
                     paginated_params = tuple(
                         list(fts_select_params)
-                        + list(fts_condition_params)
                         + list(params)
                         + [results_per_page, offset]
                     )

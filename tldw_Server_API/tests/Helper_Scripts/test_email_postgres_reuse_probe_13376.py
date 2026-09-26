@@ -66,6 +66,23 @@ def test_postgres_reuse_accepts_matching_failed_latency_report_and_preserves_set
     assert loaded["source_report_sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def test_measured_source_identity_detects_sql_rewrite_changes(runner, tmp_path, monkeypatch):
+    identity = runner['_source_identity']
+    original_root = runner['REPOSITORY']
+    utility = 'tldw_Server_API/app/core/DB_Management/backends/query_utils.py'
+    for name in set(identity()['sha256']) | {utility}:
+        destination = tmp_path / name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes((original_root / name).read_bytes())
+    monkeypatch.setitem(identity.__globals__, 'REPOSITORY', tmp_path)
+    monkeypatch.setattr(runner['shutil'], 'which', lambda _name: None)
+    before = identity()['sha256']
+    with (tmp_path / utility).open('a') as output:
+        output.write('\n# synthetic rewrite change\n')
+    after = identity()['sha256']
+    assert before != after
+
+
 @pytest.mark.parametrize("invalid", ["resource", "scope", "shape", "guard", "privileged", "index", "setup", "source"])
 def test_postgres_reuse_rejects_inconsistent_provenance(runner, provenance, invalid):
     path, manifest, report = provenance

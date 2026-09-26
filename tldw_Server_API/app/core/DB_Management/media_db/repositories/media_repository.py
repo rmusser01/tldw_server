@@ -299,37 +299,71 @@ class MediaRepository:
                 def _fetch_existing_by_url(select_columns: str):
                     if email_metadata is not None:
                         selected = ", ".join(f"m.{column.strip()}" for column in select_columns.split(","))
-                        row = _fetchone(
-                            f"SELECT {selected} FROM Media m WHERE m.url = ? "  # nosec B608
-                            "AND m.type = 'email' AND m.deleted = 0 AND m.system_operation_id IS NULL "
-                            "AND COALESCE(CAST(m.owner_user_id AS TEXT), m.client_id) = ? LIMIT 1",
-                            (url, email_owner_lookup),
-                        )
-                        if row:
-                            return row
                         email = email_metadata.get("email")
                         email = email if isinstance(email, dict) else {}
                         # Reuse normalized identities created before identity URLs,
                         # including the RFC secondary collision key for providers.
-                        for field, value in (
+                        identity_fields = (
                             ("source_message_id", email.get("source_message_id") or email.get("id") or email_metadata.get("source_message_id")),
                             ("message_id", email.get("message_id") or email_metadata.get("message_id")),
-                        ):
-                            if not value:
-                                continue
+                        )
+                        if db.backend_type == BackendType.POSTGRESQL:
+                            # Fixed column/identity branches preserve URL, provider
+                            # and RFC precedence in one bound database round trip.
+                            branches = [
+                                f"(SELECT {selected}, 0 AS identity_priority FROM Media m WHERE m.url = ? "  # nosec B608
+                                "AND m.type = 'email' AND m.deleted = 0 AND m.system_operation_id IS NULL "
+                                "AND COALESCE(CAST(m.owner_user_id AS TEXT), m.client_id) = ? LIMIT 1)"
+                            ]
+                            identity_params = [url, email_owner_lookup]
+                            for priority, (field, value) in enumerate(identity_fields, start=1):
+                                if not value:
+                                    continue
+                                branches.append(
+                                    f"(SELECT {selected}, {priority} AS identity_priority FROM Media m "  # nosec B608
+                                    "JOIN email_messages e ON e.media_id = m.id "
+                                    "JOIN email_sources s ON s.id = e.source_id AND s.tenant_id = e.tenant_id "
+                                    "WHERE e.tenant_id = ? AND s.provider = ? AND s.source_key = ? "
+                                    f"AND e.{field} = ? AND m.type = 'email' AND m.deleted = 0 "
+                                    "AND m.system_operation_id IS NULL "
+                                    "AND COALESCE(CAST(m.owner_user_id AS TEXT), m.client_id) = ? LIMIT 1)"
+                                )
+                                identity_params.extend(
+                                    (email_tenant, email_metadata["email_source_provider"], email_metadata["source_key"],
+                                     str(value).strip(), email_owner_lookup)
+                                )
                             row = _fetchone(
-                                f"SELECT {selected} FROM Media m "  # nosec B608
-                                "JOIN email_messages e ON e.media_id = m.id "
-                                "JOIN email_sources s ON s.id = e.source_id AND s.tenant_id = e.tenant_id "
-                                "WHERE e.tenant_id = ? AND s.provider = ? AND s.source_key = ? "
-                                f"AND e.{field} = ? AND m.type = 'email' AND m.deleted = 0 "
-                                "AND m.system_operation_id IS NULL "
-                                "AND COALESCE(CAST(m.owner_user_id AS TEXT), m.client_id) = ? LIMIT 1",
-                                (email_tenant, email_metadata["email_source_provider"], email_metadata["source_key"],
-                                 str(value).strip(), email_owner_lookup),
+                                f"SELECT {select_columns} FROM (" + " UNION ALL ".join(branches)  # nosec B608
+                                + ") AS identity_candidates ORDER BY identity_priority LIMIT 1",
+                                tuple(identity_params),
                             )
                             if row:
                                 return row
+                        else:
+                            row = _fetchone(
+                                f"SELECT {selected} FROM Media m WHERE m.url = ? "  # nosec B608
+                                "AND m.type = 'email' AND m.deleted = 0 AND m.system_operation_id IS NULL "
+                                "AND COALESCE(CAST(m.owner_user_id AS TEXT), m.client_id) = ? LIMIT 1",
+                                (url, email_owner_lookup),
+                            )
+                            if row:
+                                return row
+                            for field, value in identity_fields:
+                                if not value:
+                                    continue
+                                row = _fetchone(
+                                    f"SELECT {selected} FROM Media m "  # nosec B608
+                                    "JOIN email_messages e ON e.media_id = m.id "
+                                    "JOIN email_sources s ON s.id = e.source_id AND s.tenant_id = e.tenant_id "
+                                    "WHERE e.tenant_id = ? AND s.provider = ? AND s.source_key = ? "
+                                    f"AND e.{field} = ? AND m.type = 'email' AND m.deleted = 0 "
+                                    "AND m.system_operation_id IS NULL "
+                                    "AND COALESCE(CAST(m.owner_user_id AS TEXT), m.client_id) = ? LIMIT 1",
+                                    (email_tenant, email_metadata["email_source_provider"], email_metadata["source_key"],
+                                     str(value).strip(), email_owner_lookup),
+                                )
+                                if row:
+                                    return row
                         # Legacy-only imports may have no normalized row. Inspect
                         # only the original URL's candidates, never a mailbox scan.
                         for old_url in original_dedupe_candidates:
@@ -751,7 +785,10 @@ class MediaRepository:
 
                 db._log_sync_event(conn, "Media", media_uuid, "create", 1, payload)
                 db._update_fts_media(conn, media_id, payload["title"], payload["content"])
-                db.update_keywords_for_media(media_id, keywords_norm, conn=conn)
+                # A newly inserted row cannot have keyword links yet. Keep
+                # replacements and nonempty creation on the existing path.
+                if db.backend_type != BackendType.POSTGRESQL or keywords_norm:
+                    db.update_keywords_for_media(media_id, keywords_norm, conn=conn)
                 db.create_document_version(
                     media_id=media_id,
                     content=content,
