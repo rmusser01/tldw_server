@@ -328,6 +328,72 @@ uses the existing origin policy and adds no wildcard or global auth relaxation.
   browser/two-instance candidate. Keep broader gates false until their complete
   requirements pass. Record exact evidence and TASK-13343 notes.
 
+### Task 11: Ship the documentation read by the WebUI API
+
+**Problem:** Actual extracted-image inspection returns 500 for the Next
+documentation manifest and 404 for published content. The image omits the
+`Docs/Published` files that the existing documentation reader requires.
+Mounting only that directory read-only makes both API requests return 200.
+
+**Files:** `Dockerfiles/Dockerfile.webui`,
+`Helper_Scripts/test_app_bundle_docker.sh`, and candidate image-content checks
+in `Helper_Scripts/qualify_app_bundle_candidate.sh`. Reuse the existing reader;
+ship only its existing published source directory. No dependency or API change.
+
+- [ ] **Step 1:** Add real image/API checks that fail on the inspection image;
+  record the existing 500/404 versus read-only-source-mount 200/200 evidence.
+- [ ] **Step 2:** Include the published documentation in the runtime image with
+  correct ownership and its expected directory. Preserve managed/quickstart
+  packaging and avoid shipping unrelated design/private content.
+- [ ] **Step 3:** Check manifest entries and actual published content from the
+  signed extracted bundle outside a checkout; verify unsafe path refusal.
+  Review and commit with TASK-13343.
+
+### Task 12: Preserve MCP local policy through managed ingress
+
+**Problem:** With cookie authentication and exact public origin working, actual
+MCP WebSocket upgrade still returns 403. The backend logs its IP-policy rejection
+of the Docker bridge peer. Audio WebSockets work through the same gateway.
+MCP also has a separate exact-origin configuration with port-8000 defaults.
+
+**Files:** Shared bounded hop validation under `app/core/Security/` if needed;
+reuse it from setup access/metadata and MCP HTTP/WebSocket IP resolution. Scoped
+MCP guards/server, gateway and managed Compose, with focused adversarial tests.
+
+**Contract:** Recognize authenticated managed ingress as the persisted loopback
+client before applying the existing MCP allow/block policy. Keep explicit block
+rules and normal authentication/permissions active. Configure MCP origins to the
+exact persisted gateway origin. Missing/forged hop, direct private peers,
+unconfigured mode and hostile origins retain their current refusals. Extend hop
+injection only to the bounded MCP surface; never expose it in browser responses,
+stored transport metadata or unrelated backend endpoints. Reuse the existing
+predicate instead of inventing a second forwarding policy or disabling IP rules.
+
+- [ ] **Step 1:** Write red HTTP/WebSocket behavior for measured bridge peers,
+  existing block rules and hostile direct/forwarded inputs.
+- [ ] **Step 2:** Implement the smallest shared contract and exact MCP origin
+  configuration. Preserve ordinary hosted/developer policies.
+- [ ] **Step 3:** Run focused positive/negative tests, scoped lint/format/Bandit,
+  independent security review and actual cookie-only MCP WebSocket roundtrip.
+
+### Task 13: Qualify remaining real-container transport paths
+
+**Files:** Extend the existing bounded browser probe/tests and paired shell
+fixture; wire any exact required evidence into the candidate workflow.
+
+- [ ] **Step 1:** Add real published documentation, redirect, multipart document
+  processing, cancellable notification SSE, cookie WebSocket roundtrip and
+  hostile forwarding/Origin checks to both varying private-target instances.
+  Use harmless public fixtures and no paid provider/model download.
+- [ ] **Step 2:** Keep raw response bodies, cookies, tokens, traces and error
+  messages out of outputs. Prove every required result fails closed and owned
+  cleanup completes before reporting success.
+- [ ] **Step 3:** Run the exact clean signed local candidate, then both native CI
+  candidates. Record immutable identities and actual bounded evidence. G2/G4
+  become true only when their complete mapped checks pass; G12 publication
+  policy remains separately gated. Review the whole WP1 branch and update final
+  acceptance/Backlog records without publishing protected artifacts.
+
 ## Plan self-review checklist
 
 CI follow-up (September 25): user-authorized branch push bootstrapped the new

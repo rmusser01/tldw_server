@@ -4,7 +4,7 @@ title: Plan and implement paired Docker distribution and runtime gateway
 status: In Progress
 assignee: []
 created_date: '2026-09-23 06:15'
-updated_date: '2026-09-26 04:53'
+updated_date: '2026-09-26 05:05'
 labels:
   - distribution
   - docker
@@ -81,6 +81,8 @@ Live qualification follow-up: Task 9 browser/two-instance probe is being impleme
 Actual fresh Docker/Chromium regression confirmed at clean inspection commit 0790f7e385: first-run/state=403, first-run/metadata=403, manual_master_key_required=true. Public bounded evidence /tmp/task13343-setup-inspection-red.json. This is inspection proof, not signed-candidate acceptance. Task9 probe committed 9d8d3108ee; independent scoped review in progress. Task10 must correct access and metadata together using bounded authenticated managed hop; no global remote-setup bypass.
 
 Additional actual transport inspection at0790: browser-managed session bootstrap200, notification SSE200 with first chunk and browser cancellation; cookie MCP WebSocket fails upgrade (opened=false close1006). Backend trusted_webui_origins does not include configured public127.0.0.1:18090; wildcard=false. Task10 additionally configures existing ALLOWED_ORIGINS to the exact persisted gateway origin and tests refusal of other origins. No wildcard/global policy change.
+
+Further bounded actual-image inspection: Next documentation manifest500/content404; read-only mount of existing Docs/Published gives200/200, confirming missing runtime content. Added scoped Task11 packaging/API regression checks. Exact ALLOWED_ORIGINS enables cookie audio WebSocket upgrade; MCP still403, and bounded log inspection confirms IP-policy rejection of bridge peer. Task12 will reuse bounded managed hop for MCP local policy and exact MCP origins without disabling allow/block/auth rules. Task13 qualifies remaining actual docs/redirect/upload/SSE/WS/hostile forwarding paths before native CI and final review.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
