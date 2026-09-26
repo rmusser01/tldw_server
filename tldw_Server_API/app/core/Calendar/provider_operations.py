@@ -46,7 +46,10 @@ def resolve_caldav_credentials(
         )
     request = overrides or {}
     values = {
-        "server_url": request.get("server_url") or stored.get("server_url") or metadata.get("server_url") or fallback_server_url,
+        "server_url": request.get("server_url")
+        or stored.get("server_url")
+        or metadata.get("server_url")
+        or fallback_server_url,
         "username": request.get("username") or stored.get("username") or metadata.get("username"),
         "password": request.get("password") or request.get("token") or stored.get("password") or stored.get("token"),
     }

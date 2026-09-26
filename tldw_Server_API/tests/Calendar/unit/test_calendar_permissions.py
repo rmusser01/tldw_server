@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -16,17 +17,20 @@ from tldw_Server_API.app.core.Calendar.permissions import (
 from tldw_Server_API.app.core.DB_Management.Calendar_DB import (
     CalendarDatabase,
     CalendarMembershipRow,
+    CalendarRow,
 )
+
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
-def calendar_db(tmp_path):
+def calendar_db(tmp_path: Path) -> CalendarDatabase:
     db = CalendarDatabase(db_path=tmp_path / "calendar.db")
     db.ensure_schema()
     return db
 
 
-def _create_calendar(db: CalendarDatabase, *, owner_user_id: int = 1, org_id: int | None = None):
+def _create_calendar(db: CalendarDatabase, *, owner_user_id: int = 1, org_id: int | None = None) -> CalendarRow:
     return db.create_calendar(
         tenant_id="default",
         owner_user_id=owner_user_id,
@@ -50,7 +54,11 @@ def _membership_with_role(membership: CalendarMembershipRow, role: str) -> Calen
         ("viewer", (True, False, False, False)),
     ],
 )
-def test_role_helpers_map_calendar_membership_to_capabilities(calendar_db, role, expected):
+def test_role_helpers_map_calendar_membership_to_capabilities(
+    calendar_db: CalendarDatabase,
+    role: str,
+    expected: tuple[bool, bool, bool, bool],
+) -> None:
     calendar = _create_calendar(calendar_db, owner_user_id=99)
     membership = calendar_db.create_membership(
         calendar_id=calendar.id,
@@ -72,7 +80,7 @@ def test_role_helpers_map_calendar_membership_to_capabilities(calendar_db, role,
     ) == expected
 
 
-def test_assert_calendar_access_raises_for_missing_capability(calendar_db):
+def test_assert_calendar_access_raises_for_missing_capability(calendar_db: CalendarDatabase) -> None:
     calendar = _create_calendar(calendar_db)
     calendar_db.create_membership(
         calendar_id=calendar.id,
@@ -90,7 +98,7 @@ def test_assert_calendar_access_raises_for_missing_capability(calendar_db):
         assert_calendar_access(context, "write")
 
 
-def test_org_role_membership_requires_injected_resolver(calendar_db):
+def test_org_role_membership_requires_injected_resolver(calendar_db: CalendarDatabase) -> None:
     calendar = _create_calendar(calendar_db, org_id=42)
     calendar_db.create_membership(
         calendar_id=calendar.id,
@@ -115,9 +123,7 @@ def test_org_role_membership_requires_injected_resolver(calendar_db):
         actor_user_id=2,
         calendar=calendar,
         memberships=memberships,
-        org_role_resolver=lambda user_id, org_id, role: (
-            user_id == 2 and org_id == 42 and role == "researcher"
-        ),
+        org_role_resolver=lambda user_id, org_id, role: user_id == 2 and org_id == 42 and role == "researcher",
     )
 
     assert can_read_calendar(unresolved_context) is False

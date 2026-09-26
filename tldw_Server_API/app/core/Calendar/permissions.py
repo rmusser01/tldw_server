@@ -77,9 +77,7 @@ def assert_calendar_access(
         "manage": can_manage_calendar,
     }[action](context)
     if not allowed:
-        raise CalendarPermissionDenied(
-            f"User {context.actor_user_id} lacks calendar {action} access"
-        )
+        raise CalendarPermissionDenied(f"User {context.actor_user_id} lacks calendar {action} access")
 
 
 def _best_role_rank(context: CalendarAccessContext) -> int:
