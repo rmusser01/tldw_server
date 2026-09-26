@@ -6,13 +6,13 @@ catalog entry, PR or merge is approved by this record.
 
 ## Current evidence (2026-09-26)
 
-The final code review fix wave through `1d0bcb9b28` and Task19 readiness correction `9e4f8fc620` pass scoped spec and quality review. Exact clean candidate `284010040c878d6b749f9d5b1aa7db52024bc269` built all four arm64 images, passed built-backend MCP39/Setup60 and all13 signed lifecycle checks, then failed browser setup API access and wizard progression. Cleanup passed, signatures were invalidated and all candidate gates remain false. Unchanged cached Chromium diagnosis proves the first-run POST lacks its CSRF header and returns403; the same observed body with the instance token returns200. Task20 correction `e34d3151da` passes scoped spec and quality review with no Critical/Important findings; fresh exact artifacts remain pending. Full local/native artifact qualification remains pending; historical runs do not qualify this source.
+The final code review fix wave and Tasks19/20 pass scoped spec/quality review. Exact clean candidate `69e60575c8bf1c7db9139c8fb7e8bb0e245fd8d3` retry1 built all four arm64 images, passed built-backend MCP/setup and all13 signed lifecycle checks. Browser setup API access passes, confirming the CSRF correction, but wizard progression fails because the probe skips the required privacy acknowledgement checkbox. Unchanged compiled diagnosis proves normal acknowledgement and Continue reach provider setup with successful setup writes and clean strict trackers. Task21 is planned as a probe/fixture correction. Cleanup passed; signatures are invalidated and all candidate gates remain false. Full local/native artifact qualification is pending; historical runs do not qualify this source.
 
 | Contract | Current evidence | Status |
 | --- | --- | --- |
-| Sections5/10: Docker-only startup, stable identity, gateway readiness and private ports | Reviewed fixes and scoped Docker fixtures cover signed identities, gateway cookie auth/revoke, first-port conflict/retry, authoritative persisted inputs and owned cleanup. | Exact2840100 signed lifecycle13 passes; browser still fails. Windows runtime unqualified. |
+| Sections5/10: Docker-only startup, stable identity, gateway readiness and private ports | Reviewed fixes and scoped Docker fixtures cover signed identities, gateway cookie auth/revoke, first-port conflict/retry, authoritative persisted inputs and owned cleanup. | Exact69e605 retry1 signed lifecycle13 passes; browser progression still fails. Windows runtime unqualified. |
 | Section11 / G10: required signed artifacts | Both consumers now require all eight signed paths for the selected platform; omitted/missing/wrong-platform/tampered cases pass. | Exact final manifest/signature/helper bytes pending independent verification. |
-| G2: credential-free managed connection and initial wizard | Implementation/probe tests exist; authenticated installer readiness is now required before browser success. | Exact2840100 lifecycle13 passes; browser first-run POST403 blocks wizard. Task20 correction reviewed; fresh exact browser proof pending. |
+| G2: credential-free managed connection and initial wizard | Implementation/probe tests exist; authenticated installer readiness is now required before browser success. | Exact69e605 setup API access passes; probe omits privacy acknowledgement. Task21 correction pending. |
 | G4: two-instance networking/auth | Full browser checklist remains strict and uses the same managed WebUI artifact against two private target configurations. | Pending exact local and native amd64/arm64 evidence. |
 | G12: release policy | Python3.12 and Node24 upstream eligibility rechecked September26; exact patches will be recorded from built images. | False/open: full matrix, Windows runtime, dependency/security/footprints and protected publication remain separate. |
 
@@ -61,6 +61,21 @@ baseline limits remain disclosed Minor findings. Bandit is inapplicable to this
 TypeScript-only change. Fresh exact compiled/browser artifact evidence is still
 mandatory; no backend guard or qualification latch was changed.
 
+The first69e605 dependency install stayed quiet beyond30minutes. Only its verified
+owned build was interrupted; cleanup passed and no manifest/signature remained.
+A bounded current-source verbose dependency diagnostic passed uncached in85seconds
+and its owned image was removed. The unchanged exact retry's ordinary install
+passed in86.5seconds, then compiled successfully. No Bun root cause, version or
+verbosity fix is claimed; no production dependency/Dockerfile change was made.
+
+Current compiled wizard diagnosis proves the checkbox starts unchecked and
+Continue disabled; normal acknowledgement/click reaches provider in66ms with
+setup_path/privacy POST200 and catalog200. Metadata remains local with remote
+setup disabled, and strict trackers stay clean. DELETE200 then profile401 used
+cleared browser cookies, so it is anonymous refusal, not explicit stale-token
+replay. All owned containers/network/backend volumes were removed and unrelated
+PostgreSQL preserved. Parent lifecycle/browser revocation evidence remains required.
+
 ## Rulings I made
 
 - Ruling: Correct the design route table to put `/setup` in Next and backend docs assets in FastAPI — this records the user-approved routing correction already committed/tested at 9755c7eaaf/e759322854, rather than reverting to the legacy backend page. Cost if wrong: route ownership and novice setup need rework; API setup paths remain available.
@@ -80,6 +95,9 @@ mandatory; no backend guard or qualification latch was changed.
 - Ruling: Repair the newly reproduced actual-candidate integration defect as narrow Task19 within Task13 qualification, with its own focused TDD/review and fresh artifact proof — the sole whole-branch fix-wave rereview has no residual findings, while mandatory actual qualification exposed a different cross-component contract mismatch. Cost if wrong: task/review scope must be reorganized and qualification repeated; this does not authorize a second broad review, deferred load-bearing acceptance, or publication.
 
 - Ruling: Keep noAuth as explicit key/bearer omission while adding runtime-instance CSRF for unsafe same-origin cookie transport — real unchanged images prove missing-token first-run POST403 and identical expected-token POST200; cookie-bound mutations remain protected even on local setup routes. Cost if wrong: request transport semantics and security boundary tests need rework and exact local/native browser qualification must repeat; no backend CSRF exemption, cross-origin token leakage or qualification latch relaxation is authorized.
+
+- Ruling: Bound recovery from the unusually quiet dependency install by stopping only the verified owned build after more than30 minutes and retrying the unchanged exact candidate once, after current-source verbose dependency proof85seconds — this preserves the production lockfile/Bun/Dockerfile and avoids claiming an unproven workaround fixes the installer. Cost if wrong: a legitimate long install is interrupted and exact artifact qualification must be repeated; never substitute diagnostic image layers, prune unknown resources or weaken acceptance.
+- Ruling: Make the browser probe follow the product's normal required privacy acknowledgement before Continue and model that gate plus real setup writes in its fixture — unchanged compiled UI proves the existing product correctly disables Continue until acknowledgement, then reaches provider setup with200 writes. Cost if wrong: probe flow/scope and fixture semantics must be reworked and exact local/native evidence repeated; no forced click, user acknowledgement bypass, product guard change or success-latch relaxation is authorized.
 
 ## Historical evidence through September25 and superseded follow-ups
 

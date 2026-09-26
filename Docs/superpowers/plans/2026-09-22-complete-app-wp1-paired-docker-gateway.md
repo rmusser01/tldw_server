@@ -728,3 +728,58 @@ then controller-owned exact full candidate and independent signatures.
 - [ ] Report focused evidence/limitations; controller reviews and retries Task13.
 
 Task20 codee34d3151da scoped spec/quality approved, no Critical/Important findings. One production condition plus18behavioral tests, including actualsetupmethod→bgRequest→realrequestcore. Expectedred6fail8pass→focused14pass; finalaffected291pass10baselinepersistencefail across11suites (10pass), baseline10fail6pass unchangedproduction. Overallrunnotpassing. ESLint0errors86identicalbaselinewarnings; baseline/current wholefileformat2warnings+printercrash, addedblocksformatpass. BanditN/AallTS. Actualcompiledlocal/native13lifecycle38browser/signature qualification remainsTask13pending.
+
+
+### Task 21: Exercise the required privacy acknowledgement in browser qualification
+
+**Authority:** Actual69e605 retry1 signedlifecycle13 passes and setup API access
+passes after Task20, but the maintained browser probe omits the product's required
+privacy checkbox and times out on disabled Continue. One unchanged cached compiled
+stack proves unchecked/disabled state, then normal check/click reaches provider
+setup with setup_path POST200, privacy POST200 and catalog200. Strict API/network
+trackers stay clean. This is a qualification fixture defect, not a product defect.
+
+**Files:** `apps/tldw-frontend/scripts/qualify-app-bundle-browser.mjs` and
+`scripts/__tests__/qualify-app-bundle-browser.test.mjs` only. Do not change product
+UI/backend/gateway, cookie/CSRF/remote policy, qualification scope or refusal latches,
+image/dependency policy, helpers, public evidence schema, or unrelated test harnesses.
+
+#### Stage 1: Model and reproduce the real required action
+**Goal:** Prevent synthetic success that skips the real wizard acknowledgement.
+**Success Criteria:** The paired fixture renders Privacy and security and the
+checkbox labelled exactly "I understand local or remote setup access and provider
+secret storage." after normal Solo Docker selection. Continue starts disabled and
+becomes enabled only through normal acknowledgement. Model the two actual setup
+saves as asynchronous HTTP POSTs, with the fixture's existing cookie/CSRF contract;
+provider view appears only after successful privacy save. Existing GET access
+cannot substitute for successful mutation.
+**Tests:** Expected red against unchanged probe; behavior verifies acknowledgement
+before Continue and setup_path then privacy writes. Include missing/disabled
+acknowledgement or refused save as a failed qualification with sticky API/network
+latches, rather than skipping or accepting later success.
+**Status:** Not Started
+- [ ] Strengthen the actual browser fixture and add focused failing behavior test.
+
+#### Stage 2: Follow normal user wizard progression
+**Goal:** Align the maintained probe with the current real UI flow.
+**Success Criteria:** After Solo Docker, wait for the Privacy and security heading,
+check the exact acknowledgement using the normal locator action, then normally
+click Continue and require the existing provider heading. No force option,
+JavaScript state injection, UI modification, acknowledgement bypass or weakened
+tracker/timeout success condition. Partial setup scope remains unchanged.
+**Tests:** Focused behavior red/green, then complete maintained browser-probe test
+file once and scoped ESLint/diff checks. Bandit is inapplicable to MJS-only edits.
+**Status:** Not Started
+- [ ] Make the minimal probe correction, self-review and commit scoped files.
+
+#### Stage 3: Review and exact artifact proof
+**Goal:** Qualify the corrected probe and preserve the product security contract.
+**Success Criteria:** Scoped spec/quality review approves; controller rebuilds a
+clean exact local and both native Linux candidates requiring all13lifecycle and
+all38browser checks, independent signatures and owned cleanup. Windows runtime
+remains unqualified, G12 false, publication frozen. A cleared-cookie profile401
+from diagnosis is not claimed as stale-token replay; parent checklist must prove
+its own actual revocation contract.
+**Tests:** Parent-owned full exact candidate and independent evidence verifier.
+**Status:** Not Started
+- [ ] Report scoped tests/limits; controller reviews and resumes Task13 acceptance.

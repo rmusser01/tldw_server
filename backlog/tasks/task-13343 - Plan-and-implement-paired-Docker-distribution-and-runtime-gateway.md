@@ -4,7 +4,7 @@ title: Plan and implement paired Docker distribution and runtime gateway
 status: In Progress
 assignee: []
 created_date: '2026-09-23 06:15'
-updated_date: '2026-09-26 10:18'
+updated_date: '2026-09-26 11:10'
 labels:
   - distribution
   - docker
@@ -125,6 +125,8 @@ Task19 correction9e4f8fc620 (reportc63cb74bf4) scoped spec/quality approved; no 
 Exact clean candidate284010040c878d6b749f9d5b1aa7db52024bc269 built4armroles and passed builtMCP39/Setup60 plus all13signed lifecyclechecks/ownedcleanup, then failed browser setup_api_access_1 and setup_interaction_1; allgatesfalse/signaturesinvalidated/no recovery, unrelatedPG preserved. Read-only unchanged cached Chromium diagnosis proves bootstrap200, setup GET state/metadata200 and cookieprofile200 before wizard POST /api/v1/setup/first-run/state403 with missing X-CSRF-Token; wizard save alert/provider heading absent. Exact observed POST body with browser expected CSRF returns200, exact DELETE200 then profile401, allownedcleanup. Root will plan narrowTask20 before source edits: preserve noAuth key/bearer omission while attaching runtime-instance CSRF for unsafe same-origin cookie transport, retaining cross-origin exclusions/strict browser latches/backend guards. Focused redgreen/security-boundary tests, scopedreview and fresh exactlocal/native proof required; G12/publication/Windowsruntime remainopen.
 
 Task20 e34d3151da scoped spec/quality review approved, no Critical/Important findings. Single request-core cookieSession condition correction attaches runtime CSRF for unsafe noAuth requests without changing auth/origin/policy/latches;18behavioralcases incl actualsetupOnboardingMethods→bgRequest→realrequestcore chain. Expectedred6fail8pass→focused14pass; after runtimecookieName integrationcleanup finalaffected291pass10fail across11suites,10passing suites; unchangedbaseline persistence harness reproduces10fail6pass missingmockexport. Overallrunnotpassing. ESLint0errors/86identicalbaselinewarnings; wholefilePrettierbaseline/currentsame2warnings+printercrash, ownaddedsnippetscheckpassed. TSonlyBanditnotapplicable. ReviewMinorbaselinenoise disclosed; freshcompiled13lifecycle38browser/signatureproof remainsparentTask13mandatory, no cachedsourcequalification/push/native/publicationyet.
+
+Exact69e60575c8bf1c7db9139c8fb7e8bb0e245fd8d3 retry1 builtall4/builtMCPSetup/all13signedlifecyclepass, browser setup_api_access_1 TRUE (actualCSRFfixproved) but setup_interaction_1 false. Allgatesfalse/signaturesinvalidated/owncleanup/no recovery/only2PGpreserved. EarlierquietBuninstall>30min intentionallyownedbuildSIGINT/cleanup; boundedverbose currentdependencyproof85sec, unchangedretryquiet86.5sec/compilepass, no Bunrootcause/dependencychange. Currentcachedcompiled diagnosis proves privacyackunchecked/Continue disabled; normalcheckbox.check()+Continue.click reachesprovider66ms with setup_pathPOST200/privacyPOST200/catalog200, metadata localtrue/remotefalse and stricttrackersclean. No productguardbug. DELETE200 then anonymousprofile401 usedclearedcookies (not stale-token replay); allownresources/backendvolumesremoved. Add narrowTask21 before edits: normalprivacyackaction in probe and realistic required-ack/setup-saveHTTP fixture, focusedTDD/review, freshactual13lifecycle38browser/native/signatures. No product/UI/policy/latch/dependencychanges or forceclick/skip; G12/Windowsruntime/publicationremainopen.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
