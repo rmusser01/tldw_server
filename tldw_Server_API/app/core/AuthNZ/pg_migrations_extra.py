@@ -21,6 +21,9 @@ from tldw_Server_API.app.core.DB_Management.backends.pg_sharing_schema import (
     apply_postgres_sharing_schema,
     postgres_sharing_schema_issues,
 )
+from tldw_Server_API.app.core.DB_Management.calendar_permission_schema import (
+    postgres_calendar_rbac_tables_exist,
+)
 
 from .database import DatabasePool, get_db_pool
 from .exceptions import DatabaseError as AuthNZDatabaseError
@@ -3458,6 +3461,25 @@ async def ensure_mcp_prompt_read_permission_pg(pool: DatabasePool | None = None)
             "Failed to ensure PostgreSQL MCP prompts.read permission"
         )
         return False
+
+
+async def ensure_calendar_permissions_pg(pool: DatabasePool | None = None) -> bool:
+    """Backfill Calendar grants in one PostgreSQL transaction.
+
+    Return False for non-PostgreSQL pools or incomplete RBAC schemas, and True
+    after the baseline seed succeeds. Lookup and seed failures propagate.
+    """
+    db_pool = pool or await get_db_pool()
+    if getattr(db_pool, "pool", None) is None:
+        return False
+
+    async with db_pool.transaction() as conn:
+        if not await postgres_calendar_rbac_tables_exist(conn):
+            return False
+        from tldw_Server_API.app.core.AuthNZ.rbac_seed import ensure_baseline_rbac_seed
+
+        await ensure_baseline_rbac_seed(conn, include_mcp_permissions=True, is_postgres=True)
+    return True
 
 
 async def ensure_notification_permissions_pg(pool: DatabasePool | None = None) -> bool:
