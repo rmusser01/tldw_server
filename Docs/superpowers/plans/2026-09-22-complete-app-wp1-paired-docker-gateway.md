@@ -381,6 +381,13 @@ predicate instead of inventing a second forwarding policy or disabling IP rules.
 **Files:** Extend the existing bounded browser probe/tests and paired shell
 fixture; wire any exact required evidence into the candidate workflow.
 
+Qualification tooling may select a validated local registry port through
+`TLDW_CANDIDATE_REGISTRY_PORT` (default `5000` in CI; `15000` on this host, where
+macOS ControlCenter owns port 5000). Keep the registry host loopback-only and
+remove only its own created container/storage. All fixture cleanup, including
+browser shutdown and the older lifecycle smoke, must fail closed and preserve
+recovery state on failure.
+
 - [ ] **Step 1:** Add real published documentation, redirect, multipart document
   processing, cancellable notification SSE, cookie WebSocket roundtrip and
   hostile forwarding/Origin checks to both varying private-target instances.

@@ -4,7 +4,7 @@ title: Plan and implement paired Docker distribution and runtime gateway
 status: In Progress
 assignee: []
 created_date: '2026-09-23 06:15'
-updated_date: '2026-09-26 05:35'
+updated_date: '2026-09-26 05:46'
 labels:
   - distribution
   - docker
@@ -87,6 +87,8 @@ Further bounded actual-image inspection: Next documentation manifest500/content4
 Managed Docker setup fix6e983653e5 passes focused security review,93Python/10metadata/gateway14 checks and productionBandit0. Published documentation fix65fe64ec83 passes scoped review; actual absent-image guard is red, readonlyPublished mount returns manifest/content200 and traversal400. Harmless actual multipartMarkdown process returns200/results1/accepted status/content fidelity, no analysis/chunking or paidcalls. Inspection stack and its owned volumes removed; unrelated PostgreSQL services remain. Task12 shared bounded MCP ingress correction active; Task14 will repair five obsolete whole-WP1 packaging guards before Task13 exact local/native transport qualification. G2/G4/G12 and AC4 remain open; no protected publication.
 
 Task12 committed e5a77d0f83: one shared bounded managed-hop validator, setup reuse, MCP effective-loopback resolution before unchanged allow/block/auth/permissions, raw-peer certificate policy preserved, exact MCP origins.128focusedPython/15realSocketGateway pass,39leanMCP plus60leanSetup pass with productionbypassfalse; Bandit before/after0. Independent security review active; actual clean candidate still required.
+
+Task12 independent security review approves scoped implementation with no important/critical finding; clean-image MCP roundtrip still pending. Task14 commits1e331073dc with37passing packaging guard/mutation tests, cleanBlack/Ruff/Bandit0 and executed leanCI step; task review active. Task13 local registry port will be configurable loopback-only because macOS ControlCenter owns5000 (use15000), and qualification cleanup must fail closed for browser/lifecycle/ownedregistry storage. Do not change user services or remove unknown containers.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
