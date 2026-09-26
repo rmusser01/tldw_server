@@ -153,6 +153,170 @@ describe("CalendarItemDrawer", () => {
     mocks.listCalendarLinks.mockResolvedValue({ items: [], total: 0 })
   })
 
+  it.each([
+    ["HTTPS", "https://example.test/digest", "https://example.test/digest"],
+    ["relative", "/watchlists?tab=jobs", "/watchlists?tab=jobs"],
+    ["normalized HTTPS", " \thttps://example.test/digest\n", "https://example.test/digest"]
+  ])("keeps safe %s projection navigation", (_case, url, expected) => {
+    renderDrawer({ ...linkedProjection, link: { ...linkedProjection.link, url } })
+    expect(screen.getByRole("link", { name: "Manage in Watchlists" }).getAttribute("href")).toBe(expected)
+  })
+
+  it.each([
+    "javascript:alert(1)",
+    "java\tscript:alert(1)",
+    "java\nscript:alert(1)",
+    "java\rscript:alert(1)",
+    " \u0000JaVa\u007fScRiPt:alert(1)"
+  ])("does not expose unsafe projection URL %j as a navigation target", (url) => {
+    renderDrawer({ ...linkedProjection, link: { ...linkedProjection.link, url } })
+    expect(screen.queryByRole("link", { name: "Manage in Watchlists" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Manage in Watchlists" })).toBeNull()
+  })
+
+  it.each([
+    { kind: "event", field: "Start", blank: "" },
+    { kind: "event", field: "Start", blank: "   " },
+    { kind: "todo", field: "Due", blank: "" },
+    { kind: "todo", field: "Due", blank: "   " }
+  ])("retains a new $kind draft and rejects blank $field (%j) before any mutation", async ({ kind, field, blank }) => {
+    const user = userEvent.setup()
+    const onSaved = vi.fn()
+    const onClose = vi.fn()
+    renderDrawer(null, { onSaved, onClose })
+    if (kind === "todo") await user.click(screen.getByRole("radio", { name: "Todo" }))
+    await user.type(screen.getByRole("textbox", { name: "Title" }), "Unscheduled draft")
+    await user.type(screen.getByRole("textbox", { name: "Description" }), "Keep these notes")
+    await user.type(screen.getByRole("textbox", { name: "Tags" }), "research, draft")
+    if (kind === "event") await user.type(screen.getByRole("textbox", { name: "End" }), "2026-06-05T10:00")
+    const control = screen.getByRole("textbox", { name: field })
+    if (blank) await user.type(control, blank)
+    await user.click(screen.getByRole("button", { name: "Save item" }))
+
+    for (const name of ["createCalendarItem", "updateCalendarItem", "updateCalendarLocalTags", "createCalendarAnnotation", "createCalendarLink"] as const) {
+      expect(mocks[name]).not.toHaveBeenCalled()
+    }
+    expect(control.getAttribute("aria-invalid")).toBe("true")
+    expect(control.getAttribute("aria-describedby")).toBe(screen.getByRole("alert").id)
+    expect(screen.getByRole("textbox", { name: "Title" })).toHaveProperty("value", "Unscheduled draft")
+    expect(screen.getByRole("textbox", { name: "Description" })).toHaveProperty("value", "Keep these notes")
+    expect(screen.getByRole("textbox", { name: "Tags" })).toHaveProperty("value", "research, draft")
+    expect(onSaved).not.toHaveBeenCalled()
+    expect(onClose).not.toHaveBeenCalled()
+
+    await user.clear(control)
+    await user.type(control, "2026-06-05T09:00")
+    expect(control.getAttribute("aria-invalid")).not.toBe("true")
+    await user.click(screen.getByRole("button", { name: "Save item" }))
+    await waitFor(() => expect(mocks.createCalendarItem).toHaveBeenCalledTimes(1))
+    expect(mocks.createCalendarItem).toHaveBeenCalledWith(expect.objectContaining({
+      kind, title: "Unscheduled draft", description: "Keep these notes", local_tags: ["research", "draft"],
+      start_at: kind === "event" ? "2026-06-05T09:00" : null,
+      due_at: kind === "todo" ? "2026-06-05T09:00" : null
+    }))
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1))
+  })
+
+  it.each(["event", "todo"])("rejects clearing the only schedule of an existing %s without losing local context", async (kind) => {
+    const user = userEvent.setup()
+    const onSaved = vi.fn()
+    const onClose = vi.fn()
+    renderDrawer({ ...localItem, kind,
+      start_at: kind === "event" ? localItem.start_at : null,
+      due_at: kind === "todo" ? localItem.start_at : null,
+      end_at: kind === "event" ? localItem.end_at : null
+    }, { onSaved, onClose })
+    const control = screen.getByRole("textbox", { name: kind === "event" ? "Start" : "Due" })
+    await user.clear(control)
+    await user.type(screen.getByRole("textbox", { name: "Title" }), " revised")
+    await user.type(screen.getByRole("textbox", { name: "Annotation" }), "Keep this annotation")
+    await user.click(screen.getByRole("button", { name: "Save item" }))
+    expect(mocks.updateCalendarItem).not.toHaveBeenCalled()
+    expect(mocks.createCalendarAnnotation).not.toHaveBeenCalled()
+    expect(control.getAttribute("aria-invalid")).toBe("true")
+    expect(screen.getByRole("textbox", { name: "Annotation" })).toHaveProperty("value", "Keep this annotation")
+    expect(onSaved).not.toHaveBeenCalled()
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it.each([{}, { item_start_at: null }])("does not mistake a due-only view's synthesized start for a persisted start (%j)", async (metadata) => {
+    const user = userEvent.setup()
+    renderDrawer({ ...localItem, kind: "todo", start_at: localItem.start_at,
+      due_at: localItem.start_at, end_at: null, metadata })
+    await user.clear(screen.getByRole("textbox", { name: "Due" }))
+    await user.click(screen.getByRole("button", { name: "Save item" }))
+    expect(mocks.updateCalendarItem).not.toHaveBeenCalled()
+    expect(screen.getByRole("textbox", { name: "Due" }).getAttribute("aria-invalid")).toBe("true")
+  })
+
+  it("preserves the persisted todo start after a temporary event start edit", async () => {
+    const user = userEvent.setup()
+    renderDrawer({ ...localItem, kind: "todo", end_at: null,
+      metadata: { item_start_at: localItem.start_at } })
+    await user.click(screen.getByRole("radio", { name: "Event" }))
+    const start = screen.getByRole("textbox", { name: "Start" })
+    await user.clear(start)
+    await user.type(start, "2026-06-06T12:00")
+    await user.click(screen.getByRole("radio", { name: "Todo" }))
+    await user.click(screen.getByRole("button", { name: "Save item" }))
+    await waitFor(() => expect(mocks.updateCalendarItem).toHaveBeenCalledTimes(1))
+    expect(mocks.updateCalendarItem.mock.calls[0][1]).not.toHaveProperty("start_at")
+    expect(mocks.updateCalendarItem.mock.calls[0][1]).not.toHaveProperty("kind")
+  })
+
+  it("can clear a todo due time when canonical metadata proves an equal persisted start", async () => {
+    const user = userEvent.setup()
+    renderDrawer({ ...localItem, kind: "todo", due_at: localItem.start_at, end_at: null,
+      metadata: { item_start_at: localItem.start_at } })
+    await user.clear(screen.getByRole("textbox", { name: "Due" }))
+    await user.click(screen.getByRole("button", { name: "Save item" }))
+    await waitFor(() => expect(mocks.updateCalendarItem).toHaveBeenCalledWith(7, expect.objectContaining({ due_at: null })))
+    expect(mocks.updateCalendarItem.mock.calls[0][1]).not.toHaveProperty("start_at")
+  })
+
+  it("does not count an event's discarded start as a schedule when converting it to a todo", async () => {
+    const user = userEvent.setup()
+    renderDrawer(localItem)
+    await user.click(screen.getByRole("radio", { name: "Todo" }))
+    await user.click(screen.getByRole("button", { name: "Save item" }))
+    expect(mocks.updateCalendarItem).not.toHaveBeenCalled()
+    expect(screen.getByRole("textbox", { name: "Due" }).getAttribute("aria-invalid")).toBe("true")
+    await user.click(screen.getByRole("radio", { name: "Event" }))
+    expect(screen.queryByRole("alert")).toBeNull()
+    await user.click(screen.getByRole("button", { name: "Save item" }))
+    await waitFor(() => expect(mocks.updateCalendarItem).toHaveBeenCalledTimes(1))
+    expect(mocks.updateCalendarItem.mock.calls[0][1]).not.toHaveProperty("start_at")
+  })
+
+  it.each([
+    { kind: "event", recurrence_id: 3, occurrence_index: 0 },
+    { kind: "todo", recurrence_id: 3, occurrence_index: 2 },
+    { kind: "todo" }
+  ])("keeps text-only edits working with an unchanged missing schedule (%j)", async (extra) => {
+    const user = userEvent.setup()
+    renderDrawer({ ...localItem, ...extra, start_at: null, end_at: null, due_at: null })
+    await user.type(screen.getByRole("textbox", { name: "Title" }), " revised")
+    await user.click(screen.getByRole("button", { name: "Save item" }))
+    await waitFor(() => expect(mocks.updateCalendarItem).toHaveBeenCalledWith(
+      7, expect.objectContaining({ title: "Draft notes revised" })
+    ))
+    for (const field of ["kind", "start_at", "end_at", "due_at", "recurrence"]) {
+      expect(mocks.updateCalendarItem.mock.calls[0][1]).not.toHaveProperty(field)
+    }
+    expect(screen.queryByRole("alert")).toBeNull()
+  })
+
+  it.each(["provider", "tldw"])("does not require a schedule for readonly %s local-context edits", async (source_owner) => {
+    const user = userEvent.setup()
+    renderDrawer({ ...providerItem, source_owner, start_at: null, end_at: null, due_at: null })
+    expect(screen.getByRole("textbox", { name: "Start" })).toHaveProperty("disabled", true)
+    await user.type(screen.getByRole("textbox", { name: "Annotation" }), "Local notes")
+    await user.click(screen.getByRole("button", { name: "Save context" }))
+    await waitFor(() => expect(mocks.createCalendarAnnotation).toHaveBeenCalledWith(42, { body: "Local notes", tags: [] }))
+    expect(mocks.updateCalendarItem).not.toHaveBeenCalled()
+    expect(screen.queryByRole("alert")).toBeNull()
+  })
+
   it("disables calendar moves for existing items but permits selection for new items", () => {
     const { unmount } = renderDrawer(localItem)
     expect(screen.getByRole("combobox", { name: "Calendar" })).toHaveProperty("disabled", true)

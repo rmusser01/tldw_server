@@ -5,9 +5,13 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from _thread import LockType
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from threading import Lock
 from typing import Any, Callable, TypeVar
+from weakref import WeakValueDictionary
 
 from anyio import CancelScope, to_thread
 from loguru import logger
@@ -28,6 +32,10 @@ CALENDAR_SYNC_QUEUE = "default"
 CALENDAR_SYNC_JOB_TYPE = "calendar_sync"
 _ACTIVE_JOB_STATUSES = ("queued", "processing")
 _Result = TypeVar("_Result")
+# Holders and waiters retain their binding lock; idle entries disappear instead of
+# accumulating in a long-lived process. The registry guard never covers DB I/O.
+_BINDING_ADMISSION_LOCKS: WeakValueDictionary[tuple[Path, int], LockType] = WeakValueDictionary()
+_BINDING_ADMISSION_REGISTRY_LOCK = Lock()
 
 
 @dataclass(frozen=True)
@@ -68,6 +76,22 @@ def build_calendar_sync_idempotency_key(
     return f"calendar:sync:binding:{int(binding_id)}:{window_start}:{window_end}:{reason}"
 
 
+def _binding_admission_lock(db: CalendarDatabase, binding_id: int) -> LockType:
+    """Return the process-local admission lock shared by callers of this persisted binding.
+
+    Repository instances and relative/symlink paths to the same Calendar DB share
+    a lock. Entries live only while a holder or waiter retains a strong reference;
+    different bindings do not serialize their Jobs or Calendar audit I/O.
+    """
+    key = (db.db_path.resolve(), binding_id)
+    with _BINDING_ADMISSION_REGISTRY_LOCK:
+        lock = _BINDING_ADMISSION_LOCKS.get(key)
+        if lock is None:
+            lock = Lock()
+            _BINDING_ADMISSION_LOCKS[key] = lock
+        return lock
+
+
 def queue_calendar_binding_sync(
     *,
     db: CalendarDatabase,
@@ -79,7 +103,12 @@ def queue_calendar_binding_sync(
     window_start: str,
     window_end: str,
 ) -> CalendarSyncJobResponse:
-    """Authorize an enabled binding and enqueue its sync unless a job is already active."""
+    """Authorize an enabled binding and atomically admit its sync within this process.
+
+    Manual and scheduled callers share the active-check/create/audit lock across
+    reasons and windows. This is not a cross-process admission lock or a single
+    transaction across the separate Calendar and Jobs repositories.
+    """
     binding = db.get_external_binding(binding_id)
     account = db.get_external_account(binding.account_id)
     _assert_account_scope(account, actor_user_id=actor_user_id, tenant_id=tenant_id)
@@ -92,46 +121,47 @@ def queue_calendar_binding_sync(
         window_end=window_end,
         reason=reason,
     )
-    existing = _active_job_for_binding(
-        job_manager=job_manager,
-        owner_user_id=str(actor_user_id),
-        binding_id=binding.id,
-    )
-    if existing is not None:
+    with _binding_admission_lock(db, binding.id):
+        existing = _active_job_for_binding(
+            job_manager=job_manager,
+            owner_user_id=str(actor_user_id),
+            binding_id=binding.id,
+        )
+        if existing is not None:
+            return CalendarSyncJobResponse(
+                binding_id=binding.id,
+                job_id=int(existing["id"]),
+                queued=False,
+                status="already_active",
+                idempotency_key=str(existing.get("idempotency_key") or idempotency_key),
+            )
+
+        job = job_manager.create_job(
+            domain=CALENDAR_SYNC_DOMAIN,
+            queue=CALENDAR_SYNC_QUEUE,
+            job_type=CALENDAR_SYNC_JOB_TYPE,
+            owner_user_id=str(actor_user_id),
+            payload=build_calendar_sync_payload(
+                binding_id=binding.id,
+                window_start=window_start,
+                window_end=window_end,
+                reason=reason,
+            ),
+            idempotency_key=idempotency_key,
+        )
+        db.record_sync_event(
+            binding_id=binding.id,
+            event_type="sync_queued",
+            status=str(job.get("status") or "queued"),
+            metadata_json={"job_id": int(job["id"]), "reason": reason},
+        )
         return CalendarSyncJobResponse(
             binding_id=binding.id,
-            job_id=int(existing["id"]),
-            queued=False,
-            status="already_active",
-            idempotency_key=str(existing.get("idempotency_key") or idempotency_key),
+            job_id=int(job["id"]),
+            queued=str(job.get("status") or "queued") == "queued",
+            status=str(job.get("status") or "queued"),
+            idempotency_key=idempotency_key,
         )
-
-    job = job_manager.create_job(
-        domain=CALENDAR_SYNC_DOMAIN,
-        queue=CALENDAR_SYNC_QUEUE,
-        job_type=CALENDAR_SYNC_JOB_TYPE,
-        owner_user_id=str(actor_user_id),
-        payload=build_calendar_sync_payload(
-            binding_id=binding.id,
-            window_start=window_start,
-            window_end=window_end,
-            reason=reason,
-        ),
-        idempotency_key=idempotency_key,
-    )
-    db.record_sync_event(
-        binding_id=binding.id,
-        event_type="sync_queued",
-        status=str(job.get("status") or "queued"),
-        metadata_json={"job_id": int(job["id"]), "reason": reason},
-    )
-    return CalendarSyncJobResponse(
-        binding_id=binding.id,
-        job_id=int(job["id"]),
-        queued=str(job.get("status") or "queued") == "queued",
-        status=str(job.get("status") or "queued"),
-        idempotency_key=idempotency_key,
-    )
 
 
 async def _run_db_phase(operation: Callable[..., _Result], *args: Any) -> _Result:
