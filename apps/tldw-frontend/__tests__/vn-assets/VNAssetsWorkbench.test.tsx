@@ -1,6 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+
+vi.hoisted(() => {
+  vi.stubEnv('NEXT_PUBLIC_API_URL', 'http://127.0.0.1:8000');
+});
 
 const mocks = vi.hoisted(() => ({
   bulkReviewVNAssetItems: vi.fn(),
@@ -43,10 +47,15 @@ vi.mock('@web/lib/api/vnAssets', () => ({
 }));
 
 import VNAssetsWorkbench from '@web/components/vn-assets/VNAssetsWorkbench';
+import { ApiError } from '@web/lib/api';
+import { readPendingVNAssetGeneration, writePendingVNAssetGeneration } from '@web/lib/vnAssetIdempotency';
 
 describe('VNAssetsWorkbench', () => {
+  afterEach(() => vi.restoreAllMocks());
+
   beforeEach(() => {
     vi.resetAllMocks();
+    window.sessionStorage.clear();
     mocks.getVNAssetGenerationPreflight.mockResolvedValue({
       scope: 'api_process_configuration', worker_health: 'unknown',
       local_workers_enabled: true, warnings: [], slots: [],
@@ -94,6 +103,220 @@ describe('VNAssetsWorkbench', () => {
     mocks.getVNAssetGeneration.mockResolvedValue({ status: 'failed', failed_count: 1 });
   }
 
+  /** Keep an ambiguous operation pending while authoritative status permits cancellation. */
+  async function ambiguousCancelableStart(): Promise<{
+    user: ReturnType<typeof userEvent.setup>;
+    view: ReturnType<typeof render>;
+    key: string;
+  }> {
+    existingFailedPack();
+    mocks.listVNAssetPacks.mockResolvedValue([
+      { id: 7, owner_user_id: 1, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
+      { id: 8, owner_user_id: 2, title: 'Moon Archive', primary_character_id: 43, status: 'draft' },
+    ]);
+    mocks.startVNAssetGeneration.mockRejectedValueOnce(new Error('Ambiguous start'))
+      .mockRejectedValueOnce(new Error('Reconciliation offline'));
+    const user = userEvent.setup();
+    const view = render(<VNAssetsWorkbench />);
+    await user.click(await screen.findByRole('button', { name: 'Start generation' }));
+    await screen.findByText('Ambiguous start');
+    const key = readPendingVNAssetGeneration(1, 7)!.key;
+    mocks.getVNAssetGeneration.mockResolvedValue({ status: 'queued' });
+    await user.click(screen.getByRole('button', { name: 'Refresh generation status' }));
+    await screen.findByText('Reconciliation offline');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Cancel' })).toBeEnabled());
+    return { user, view, key };
+  }
+
+  it.each([false, true])('successful cancellation abandons ambiguous key before next start (reload=%s)', async (reload) => {
+    const { user, view, key } = await ambiguousCancelableStart();
+    mocks.cancelVNAssetGeneration.mockResolvedValue({ status: 'cancelled' });
+    mocks.getVNAssetGeneration.mockResolvedValue({ status: 'cancelled' });
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('cancelled'));
+    expect(readPendingVNAssetGeneration(1, 7)).toBeNull();
+    if (reload) {
+      view.unmount();
+      render(<VNAssetsWorkbench />);
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
+      expect(mocks.startVNAssetGeneration).toHaveBeenCalledTimes(2);
+    }
+    await user.click(screen.getByRole('button', { name: 'Start generation' }));
+    await waitFor(() => expect(mocks.startVNAssetGeneration).toHaveBeenCalledTimes(3));
+    expect(mocks.startVNAssetGeneration.mock.calls[2][1].idempotency_key).not.toBe(key);
+  });
+
+  it('failed cancellation retains the ambiguous key for reload reconciliation', async () => {
+    const { user, view, key } = await ambiguousCancelableStart();
+    mocks.cancelVNAssetGeneration.mockRejectedValue(new Error('Cancel offline'));
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await screen.findByText('Cancel offline');
+    expect(readPendingVNAssetGeneration(1, 7)?.key).toBe(key);
+    view.unmount();
+    render(<VNAssetsWorkbench />);
+    await waitFor(() => expect(mocks.startVNAssetGeneration).toHaveBeenCalledTimes(3));
+    expect(mocks.startVNAssetGeneration.mock.calls[2]).toEqual([7, { idempotency_key: key }]);
+  });
+
+  it('delayed cancellation cannot erase a newer receipt or another owner/pack operation', async () => {
+    const { user } = await ambiguousCancelableStart();
+    let finishCancel!: (value: unknown) => void;
+    mocks.cancelVNAssetGeneration.mockImplementation(() => new Promise((resolve) => { finishCancel = resolve; }));
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    writePendingVNAssetGeneration(1, 7, { kind: 'retry', slotId: 12, key: 'newer-receipt' });
+    writePendingVNAssetGeneration(2, 7, { kind: 'start', key: 'other-owner' });
+    mocks.getVNAssetGeneration.mockResolvedValue({ status: 'failed' });
+    await user.click(screen.getByText('Moon Archive'));
+    mocks.startVNAssetGeneration.mockRejectedValueOnce(new Error('New pack offline'));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Start generation' }));
+    await screen.findByText('New pack offline');
+    const otherPack = readPendingVNAssetGeneration(2, 8);
+    await act(async () => { finishCancel({ status: 'cancelled' }); });
+    expect(readPendingVNAssetGeneration(1, 7)?.key).toBe('newer-receipt');
+    expect(readPendingVNAssetGeneration(2, 7)?.key).toBe('other-owner');
+    expect(readPendingVNAssetGeneration(2, 8)).toEqual(otherPack);
+    expect(screen.getByRole('status')).toHaveTextContent('failed');
+    await user.click(screen.getByRole('button', { name: 'Start generation' }));
+    await waitFor(() => expect(mocks.startVNAssetGeneration).toHaveBeenCalledTimes(4));
+    expect(mocks.startVNAssetGeneration.mock.calls[3]).toEqual([8, { idempotency_key: otherPack!.key }]);
+  });
+
+  it('cancellation clears the matching memory key even when session storage is unavailable', async () => {
+    existingFailedPack();
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('Storage disabled'); });
+    mocks.startVNAssetGeneration.mockRejectedValueOnce(new Error('Memory-only start'));
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    await user.click(await screen.findByRole('button', { name: 'Start generation' }));
+    await screen.findByText('Memory-only start');
+    const key = mocks.startVNAssetGeneration.mock.calls[0][1].idempotency_key;
+    mocks.getVNAssetGeneration.mockResolvedValue({ status: 'queued' });
+    await user.click(screen.getByRole('button', { name: 'Refresh generation status' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Cancel' })).toBeEnabled());
+    mocks.cancelVNAssetGeneration.mockResolvedValue({ status: 'cancelled' });
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Start generation' }));
+    await waitFor(() => expect(mocks.startVNAssetGeneration).toHaveBeenCalledTimes(2));
+    expect(mocks.startVNAssetGeneration.mock.calls[1][1].idempotency_key).not.toBe(key);
+  });
+
+  it.each([
+    { label: 'zero', slotId: 0 },
+    { label: 'negative', slotId: -1 },
+    { label: 'negative slot', slotId: -12 },
+    { label: 'unsafe positive', slotId: Number.MAX_SAFE_INTEGER + 1 },
+    { label: 'unsafe negative', slotId: Number.MIN_SAFE_INTEGER - 1 },
+    { label: 'fractional', slotId: 1.5 },
+    { label: 'numeric string', slotId: '12' },
+    { label: 'null', slotId: null },
+    { label: 'missing', slotId: undefined },
+    { label: 'boolean', slotId: true },
+    { label: 'object', slotId: {} },
+    { label: 'array', slotId: [] },
+  ])('does not call the retry API on reload for a persisted $label slot ID', async ({ slotId }) => {
+    existingFailedPack();
+    mocks.listVNAssetPacks.mockResolvedValue([
+      { id: 7, owner_user_id: 1, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
+    ]);
+    const storageKey = 'vn-assets:pending-generation:v1:1:7';
+    window.sessionStorage.setItem(storageKey, JSON.stringify({ kind: 'retry', slotId, key: 'invalid-retry-key' }));
+
+    const first = render(<VNAssetsWorkbench />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
+    expect(mocks.retryVNAssetSlot).not.toHaveBeenCalled();
+    expect(mocks.startVNAssetGeneration).not.toHaveBeenCalled();
+    expect(window.sessionStorage.getItem(storageKey)).toBeNull();
+    first.unmount();
+
+    render(<VNAssetsWorkbench />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
+    expect(mocks.retryVNAssetSlot).not.toHaveBeenCalled();
+  });
+
+  it('keeps the retry key in memory after connection loss when storage is disabled', async () => {
+    existingFailedPack();
+    mocks.listVNAssetPacks.mockResolvedValue([
+      { id: 7, owner_user_id: 1, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
+    ]);
+    vi.spyOn(window, 'sessionStorage', 'get').mockImplementation(() => {
+      throw new DOMException('Storage disabled', 'SecurityError');
+    });
+    mocks.retryVNAssetSlot.mockRejectedValueOnce(new Error('Connection lost'));
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    await user.click(await screen.findByRole('button', { name: 'Retry sprite_neutral' }));
+    await screen.findByText('Connection lost');
+    const originalRequest = mocks.retryVNAssetSlot.mock.calls[0][2];
+
+    await user.click(screen.getByRole('button', { name: 'Retry sprite_neutral' }));
+    await waitFor(() => expect(mocks.retryVNAssetSlot).toHaveBeenCalledTimes(2));
+    expect(originalRequest.idempotency_key).toEqual(expect.any(String));
+    expect(mocks.retryVNAssetSlot.mock.calls[1]).toEqual([7, 12, originalRequest]);
+  });
+
+  it.each(['Start', 'other Retry'])('abandons a missing-slot retry so %s works and reload does not replay it', async (nextAction) => {
+    existingFailedPack();
+    mocks.listVNAssetPacks.mockResolvedValue([
+      { id: 7, owner_user_id: 1, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
+    ]);
+    mocks.listVNAssetSlots.mockResolvedValue([
+      { id: 12, pack_id: 7, asset_type: 'sprite', slot_key: 'sprite_neutral', variant_count: 1, status: 'failed' },
+      { id: 13, pack_id: 7, asset_type: 'sprite', slot_key: 'sprite_happy', variant_count: 1, status: 'failed' },
+    ]);
+    mocks.retryVNAssetSlot.mockRejectedValueOnce(new ApiError('slot_not_found', { status: 404, detail: 'slot_not_found' }));
+    const user = userEvent.setup();
+    const first = render(<VNAssetsWorkbench />);
+    await user.click(await screen.findByRole('button', { name: 'Retry sprite_neutral' }));
+    await screen.findByText('slot_not_found');
+    expect(readPendingVNAssetGeneration(1, 7)).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Refresh generation status' }));
+    expect(mocks.retryVNAssetSlot).toHaveBeenCalledTimes(1);
+    first.unmount();
+
+    render(<VNAssetsWorkbench />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
+    expect(mocks.retryVNAssetSlot).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole('button', { name: nextAction === 'Start' ? 'Start generation' : 'Retry sprite_happy' }));
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('queued'));
+    if (nextAction === 'Start') expect(mocks.startVNAssetGeneration).toHaveBeenCalledTimes(1);
+    else expect(mocks.retryVNAssetSlot).toHaveBeenLastCalledWith(7, 13, expect.objectContaining({ idempotency_key: expect.any(String) }));
+  });
+
+  it('abandons a restored missing-slot receipt after one reload reconciliation', async () => {
+    existingFailedPack();
+    mocks.listVNAssetPacks.mockResolvedValue([
+      { id: 7, owner_user_id: 1, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
+    ]);
+    writePendingVNAssetGeneration(1, 7, { kind: 'retry', slotId: 12, key: 'missing-slot-receipt' });
+    mocks.retryVNAssetSlot.mockRejectedValue(new ApiError('slot_not_found', { status: 404, detail: 'slot_not_found' }));
+    const first = render(<VNAssetsWorkbench />);
+    await screen.findByText('slot_not_found');
+    await waitFor(() => expect(readPendingVNAssetGeneration(1, 7)).toBeNull());
+    first.unmount();
+    render(<VNAssetsWorkbench />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
+    expect(mocks.retryVNAssetSlot).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([408, 429, 500, 503])('preserves a retry receipt after ambiguous HTTP %s', async (status) => {
+    existingFailedPack();
+    mocks.listVNAssetPacks.mockResolvedValue([
+      { id: 7, owner_user_id: 1, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
+    ]);
+    mocks.retryVNAssetSlot.mockRejectedValueOnce(new ApiError('Try again', { status }));
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    await user.click(await screen.findByRole('button', { name: 'Retry sprite_neutral' }));
+    await screen.findByText('Try again');
+    const pending = readPendingVNAssetGeneration(1, 7);
+    expect(pending).not.toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Refresh generation status' }));
+    await waitFor(() => expect(readPendingVNAssetGeneration(1, 7)).toBeNull());
+    expect(mocks.retryVNAssetSlot).toHaveBeenLastCalledWith(7, 12, { idempotency_key: pending!.key });
+  });
+
   it('reuses the required start key after an ambiguous transport failure', async () => {
     existingFailedPack();
     mocks.startVNAssetGeneration.mockRejectedValueOnce(new Error('Connection lost'));
@@ -108,6 +331,93 @@ describe('VNAssetsWorkbench', () => {
     expect(request.idempotency_key).toEqual(expect.any(String));
     expect(request.idempotency_key.length).toBeGreaterThan(0);
     expect(mocks.startVNAssetGeneration.mock.calls[1]).toEqual([7, request]);
+  });
+
+  it('replays an ambiguous start with the same key after reload', async () => {
+    existingFailedPack();
+    mocks.listVNAssetPacks.mockResolvedValue([
+      { id: 7, owner_user_id: 1, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
+    ]);
+    mocks.getVNAssetGeneration.mockImplementation(async () => ({
+      status: mocks.startVNAssetGeneration.mock.calls.length > 1 ? 'queued' : 'failed',
+    }));
+    mocks.startVNAssetGeneration.mockRejectedValueOnce(new Error('Connection lost'));
+    const user = userEvent.setup();
+    const first = render(<VNAssetsWorkbench />);
+    await user.click(await screen.findByRole('button', { name: 'Start generation' }));
+    await screen.findByText('Connection lost');
+    const originalRequest = mocks.startVNAssetGeneration.mock.calls[0][1];
+    first.unmount();
+
+    render(<VNAssetsWorkbench />);
+    await waitFor(() => expect(mocks.startVNAssetGeneration).toHaveBeenCalledTimes(2));
+    expect(mocks.startVNAssetGeneration.mock.calls[1]).toEqual([7, originalRequest]);
+    await waitFor(() => expect(readPendingVNAssetGeneration(1, 7)).toBeNull());
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('queued'));
+  });
+
+  it('replays an ambiguous slot retry after reload', async () => {
+    existingFailedPack();
+    mocks.listVNAssetPacks.mockResolvedValue([
+      { id: 7, owner_user_id: 1, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
+    ]);
+    mocks.retryVNAssetSlot.mockRejectedValueOnce(new Error('Connection lost'));
+    const user = userEvent.setup();
+    const first = render(<VNAssetsWorkbench />);
+    await user.click(await screen.findByRole('button', { name: 'Retry sprite_neutral' }));
+    await screen.findByText('Connection lost');
+    const originalRequest = mocks.retryVNAssetSlot.mock.calls[0][2];
+    first.unmount();
+
+    render(<VNAssetsWorkbench />);
+    await waitFor(() => expect(mocks.retryVNAssetSlot).toHaveBeenCalledTimes(2));
+    expect(mocks.retryVNAssetSlot.mock.calls[1]).toEqual([7, 12, originalRequest]);
+    await waitFor(() => expect(readPendingVNAssetGeneration(1, 7)).toBeNull());
+  });
+
+  it("does not replay another owner's pending generation after reload", async () => {
+    existingFailedPack();
+    mocks.listVNAssetPacks.mockResolvedValue([
+      { id: 7, owner_user_id: 1, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
+    ]);
+    mocks.startVNAssetGeneration.mockRejectedValueOnce(new Error('Connection lost'));
+    const user = userEvent.setup();
+    const first = render(<VNAssetsWorkbench />);
+    await user.click(await screen.findByRole('button', { name: 'Start generation' }));
+    await screen.findByText('Connection lost');
+    first.unmount();
+    mocks.listVNAssetPacks.mockResolvedValue([
+      { id: 7, owner_user_id: 2, title: 'Other Library', primary_character_id: 42, status: 'draft' },
+    ]);
+
+    render(<VNAssetsWorkbench />);
+    await screen.findByText('Other Library');
+    expect(mocks.startVNAssetGeneration).toHaveBeenCalledTimes(1);
+  });
+
+  it('restores the selected pack and replays its pending generation after reload', async () => {
+    mocks.listVNAssetPacks.mockResolvedValue([
+      { id: 7, owner_user_id: 1, title: 'First Pack', primary_character_id: 42, status: 'draft' },
+      { id: 8, owner_user_id: 1, title: 'Second Pack', primary_character_id: 43, status: 'draft' },
+    ]);
+    mocks.listVNAssetSlots.mockImplementation(async (packId: number) => packId === 8
+      ? [{ id: 12, pack_id: 8, asset_type: 'sprite', slot_key: 'sprite_neutral', variant_count: 1, status: 'failed' }]
+      : []);
+    mocks.getVNAssetGeneration.mockResolvedValue({ status: 'failed' });
+    mocks.startVNAssetGeneration.mockRejectedValueOnce(new Error('Connection lost'));
+    const user = userEvent.setup();
+    const first = render(<VNAssetsWorkbench />);
+    await user.click(await screen.findByText('Second Pack'));
+    const start = await screen.findByRole('button', { name: 'Start generation' });
+    await waitFor(() => expect(start).toBeEnabled());
+    await user.click(start);
+    await screen.findByText('Connection lost');
+    const originalRequest = mocks.startVNAssetGeneration.mock.calls[0][1];
+    first.unmount();
+
+    render(<VNAssetsWorkbench />);
+    await waitFor(() => expect(mocks.startVNAssetGeneration).toHaveBeenCalledTimes(2));
+    expect(mocks.startVNAssetGeneration.mock.calls[1]).toEqual([8, originalRequest]);
   });
 
   it('retries only the failed slot and reuses its key after connection loss', async () => {

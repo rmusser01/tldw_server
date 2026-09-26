@@ -50,6 +50,7 @@ from tldw_Server_API.app.api.v1.schemas.vn_asset_schemas import (
 from tldw_Server_API.app.core.AuthNZ.repos.generated_files_repo import AuthnzGeneratedFilesRepo
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.exceptions import VNAssetGenerationError
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Utils.path_utils import safe_join
 from tldw_Server_API.app.core.VN_Assets.cleanup_blockers import VNAssetCleanupBlockerProvider
@@ -85,6 +86,7 @@ router = APIRouter(prefix="/vn-assets", tags=["vn-assets"])
 CONFLICT_ERROR_CODES = {
     "slot_already_exists",
     "slot_has_dependents",
+    "slot_has_active_generation",
 }
 TERMINAL_JOB_STATUSES = {"completed", "failed", "cancelled", "quarantined"}
 UPLOAD_CHUNK_SIZE_BYTES = 1024 * 1024
@@ -182,33 +184,36 @@ def _claim_or_replay_idempotency(
     idempotency_key: str | None,
     payload_hash: str,
     response_model: type[BaseModel],
+    generation_pack_id: int | None = None,
+    jobs_manager: JobManager | None = None,
 ) -> BaseModel | None:
-    if not idempotency_key:
-        return None
+    """Validate a core receipt response and map domain failures to HTTP."""
     try:
-        record, claimed = service.repo.claim_idempotency_record(
+        response = service.claim_or_replay_idempotency(
             owner_user_id=owner_user_id,
             scope=scope,
             resource_id=resource_id,
             idempotency_key=idempotency_key,
             payload_hash=payload_hash,
+            generation_pack_id=generation_pack_id,
+            jobs_manager=jobs_manager,
         )
     except ValueError as exc:
         if str(exc) == "idempotency_key_conflict":
             raise _idempotency_conflict(scope=scope, resource_id=resource_id) from exc
+        if str(exc) == "idempotency_key_in_progress":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=vn_error_detail(
+                    "idempotency_key_in_progress",
+                    "An identical VN operation is already in progress.",
+                    retryable=True,
+                ),
+            ) from exc
+        if isinstance(exc, VNAssetGenerationError):
+            raise _handle_value_error(exc) from exc
         raise
-    if claimed:
-        return None
-    if str(record.get("status") or "completed") != "completed":
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=vn_error_detail(
-                "idempotency_key_in_progress",
-                "An identical VN operation is already in progress.",
-                retryable=True,
-            ),
-        )
-    return response_model.model_validate(json.loads(str(record["response_json"])))
+    return response_model.model_validate(response) if response is not None else None
 
 
 def _record_idempotency_response(
@@ -221,9 +226,8 @@ def _record_idempotency_response(
     payload_hash: str,
     response: BaseModel,
 ) -> None:
-    if not idempotency_key:
-        return
-    service.repo.complete_idempotency_record(
+    """Serialize the validated HTTP response for core receipt persistence."""
+    service.complete_idempotency_response(
         owner_user_id=owner_user_id,
         scope=scope,
         resource_id=resource_id,
@@ -1857,14 +1861,19 @@ async def start_generation(
             "request": generation_request.model_dump(mode="json", exclude={"idempotency_key"}),
         }
     )
+    receipt = {
+        "scope": "vn_asset_generate",
+        "resource_id": f"pack:{pack_id}",
+        "idempotency_key": idempotency_key,
+        "payload_hash": payload_hash,
+    }
     replay = _claim_or_replay_idempotency(
         service,
         owner_user_id=owner_user_id,
-        scope="vn_asset_generate",
-        resource_id=f"pack:{pack_id}",
-        idempotency_key=idempotency_key,
-        payload_hash=payload_hash,
+        **receipt,
         response_model=VNAssetGenerationStatusResponse,
+        generation_pack_id=pack_id,
+        jobs_manager=jobs_manager,
     )
     if replay is not None:
         return replay
@@ -1874,6 +1883,7 @@ async def start_generation(
             generation_request,
             user_id=owner_user_id,
             jobs_manager=jobs_manager,
+            idempotency_receipt=receipt,
         )
     except ValueError as exc:
         _release_idempotency_claim(
@@ -1951,14 +1961,19 @@ async def retry_slot_generation(
             "request": generation_request.model_dump(mode="json", exclude={"idempotency_key"}),
         }
     )
+    receipt = {
+        "scope": "vn_asset_slot_retry",
+        "resource_id": f"pack:{pack_id}:slot:{slot_id}",
+        "idempotency_key": idempotency_key,
+        "payload_hash": payload_hash,
+    }
     replay = _claim_or_replay_idempotency(
         service,
         owner_user_id=owner_user_id,
-        scope="vn_asset_slot_retry",
-        resource_id=f"pack:{pack_id}:slot:{slot_id}",
-        idempotency_key=idempotency_key,
-        payload_hash=payload_hash,
+        **receipt,
         response_model=VNAssetGenerationStatusResponse,
+        generation_pack_id=pack_id,
+        jobs_manager=jobs_manager,
     )
     if replay is not None:
         return replay
@@ -1969,6 +1984,7 @@ async def retry_slot_generation(
             generation_request,
             user_id=owner_user_id,
             jobs_manager=jobs_manager,
+            idempotency_receipt=receipt,
         )
     except ValueError as exc:
         _release_idempotency_claim(
@@ -2023,14 +2039,19 @@ async def regenerate_item(
             "request": generation_request.model_dump(mode="json", exclude={"idempotency_key"}),
         }
     )
+    receipt = {
+        "scope": "vn_asset_item_regenerate",
+        "resource_id": f"pack:{pack_id}:item:{item_id}",
+        "idempotency_key": idempotency_key,
+        "payload_hash": payload_hash,
+    }
     replay = _claim_or_replay_idempotency(
         service,
         owner_user_id=owner_user_id,
-        scope="vn_asset_item_regenerate",
-        resource_id=f"pack:{pack_id}:item:{item_id}",
-        idempotency_key=idempotency_key,
-        payload_hash=payload_hash,
+        **receipt,
         response_model=VNAssetGenerationStatusResponse,
+        generation_pack_id=pack_id,
+        jobs_manager=jobs_manager,
     )
     if replay is not None:
         return replay
@@ -2041,6 +2062,7 @@ async def regenerate_item(
             generation_request,
             user_id=owner_user_id,
             jobs_manager=jobs_manager,
+            idempotency_receipt=receipt,
         )
     except ValueError as exc:
         _release_idempotency_claim(

@@ -1,6 +1,12 @@
 import React, { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Archive, ClipboardList, Images, LayoutGrid, Settings } from 'lucide-react';
-import { createVNAssetIdempotencyKey } from '@web/lib/vnAssetIdempotency';
+import { ApiError } from '@web/lib/api';
+import {
+  clearPendingVNAssetGeneration,
+  createVNAssetIdempotencyKey,
+  readPendingVNAssetGeneration,
+  writePendingVNAssetGeneration,
+} from '@web/lib/vnAssetIdempotency';
 import { Badge } from '@web/components/ui/Badge';
 import { Button } from '@web/components/ui/Button';
 import GenerationMonitor from '@web/components/vn-assets/GenerationMonitor';
@@ -49,6 +55,26 @@ function plannedAssetLabel(count: number): string {
   return `${count} planned ${count === 1 ? 'asset' : 'assets'}`;
 }
 
+function isMissingGenerationResource(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 404
+    && ['slot_not_found', 'pack_not_found'].includes(error.detail ?? error.message);
+}
+
+function selectedPackStorageKey(ownerUserId: number | undefined): string | null {
+  return Number.isSafeInteger(ownerUserId) ? `vn-assets:selected-pack:v1:${ownerUserId}` : null;
+}
+
+function readSelectedPackId(ownerUserId: number | undefined): number | null {
+  const key = selectedPackStorageKey(ownerUserId);
+  if (!key || typeof window === 'undefined') return null;
+  try {
+    const id = Number(window.sessionStorage.getItem(key));
+    return Number.isSafeInteger(id) && id > 0 ? id : null;
+  } catch {
+    return null;
+  }
+}
+
 export default function VNAssetsWorkbench() {
   const [packs, setPacks] = useState<VNAssetPack[]>([]);
   const [selectedPack, setSelectedPack] = useState<VNAssetPack | null>(null);
@@ -63,6 +89,7 @@ export default function VNAssetsWorkbench() {
   const generationCommandPending = useRef(new Set<number>());
   const [pendingCommands, setPendingCommands] = useState<Record<number, { kind: 'start' | 'retry' | 'cancel'; slotId?: number }>>({});
   const generationKeys = useRef(new Map<string, string>());
+  const autoReconciledKeys = useRef(new Set<string>());
   const selectedPackIdRef = useRef<number | null>(null);
   const refreshRevision = useRef(0);
   const refreshInFlight = useRef<{ packId: number; revision: number; promise: Promise<void> } | null>(null);
@@ -139,6 +166,39 @@ export default function VNAssetsWorkbench() {
     return promise;
   }, []);
 
+  const reconcilePendingGeneration = useCallback(async (pack: VNAssetPack): Promise<void> => {
+    const pending = readPendingVNAssetGeneration(pack.owner_user_id, pack.id);
+    if (!pending || generationCommandPending.current.has(pack.id)) return;
+    generationCommandPending.current.add(pack.id);
+    ++refreshRevision.current;
+    setPendingCommands((previous) => ({
+      ...previous,
+      [pack.id]: { kind: pending.kind, slotId: pending.slotId },
+    }));
+    try {
+      const request = { idempotency_key: pending.key };
+      const recovered = pending.kind === 'start'
+        ? await startVNAssetGeneration(pack.id, request)
+        : await retryVNAssetSlot(pack.id, pending.slotId!, request);
+      clearPendingVNAssetGeneration(pack.owner_user_id, pack.id, pending.key);
+      generationKeys.current.delete(`${pack.owner_user_id ?? 'unknown'}:${pack.id}:${pending.slotId ?? 'start'}`);
+      if (selectedPackIdRef.current === pack.id) {
+        setGeneration(recovered);
+        setError(null);
+      }
+    } catch (recoveryError) {
+      if (isMissingGenerationResource(recoveryError)) {
+        clearPendingVNAssetGeneration(pack.owner_user_id, pack.id, pending.key);
+        generationKeys.current.delete(`${pack.owner_user_id ?? 'unknown'}:${pack.id}:${pending.slotId ?? 'start'}`);
+      }
+      if (selectedPackIdRef.current === pack.id) {
+        setError(recoveryError instanceof Error ? recoveryError.message : 'Could not reconcile the pending generation request.');
+      }
+    } finally {
+      finishGenerationCommand(pack.id);
+    }
+  }, [finishGenerationCommand]);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -153,7 +213,9 @@ export default function VNAssetsWorkbench() {
         if (cancelled) return;
         setPacks(nextPacks);
         setStarterMatrices(matrices.matrices ?? []);
-        setSelectedPack(nextPacks[0] ?? null);
+        const ownerUserId = nextPacks[0]?.owner_user_id;
+        const selectedId = readSelectedPackId(ownerUserId);
+        setSelectedPack(nextPacks.find((pack) => pack.id === selectedId && pack.owner_user_id === ownerUserId) ?? nextPacks[0] ?? null);
       } catch (loadError) {
         if (!cancelled) {
           setError(loadError instanceof Error ? loadError.message : 'Failed to load VN asset packs');
@@ -170,6 +232,16 @@ export default function VNAssetsWorkbench() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    const key = selectedPackStorageKey(selectedPack?.owner_user_id);
+    if (!key || !selectedPack) return;
+    try {
+      window.sessionStorage.setItem(key, String(selectedPack.id));
+    } catch {
+      // Pack selection still works when tab storage is unavailable.
+    }
+  }, [selectedPack]);
 
   useEffect(() => {
     setLoadedPackId(null);
@@ -199,6 +271,25 @@ export default function VNAssetsWorkbench() {
       cancelled = true;
     };
   }, [selectedPack, refreshPackDetails]);
+
+  useEffect(() => {
+    if (!selectedPack || loadedPackId !== selectedPack.id) return;
+    const pending = readPendingVNAssetGeneration(selectedPack.owner_user_id, selectedPack.id);
+    if (!pending) return;
+    const attempt = `${selectedPack.owner_user_id}:${selectedPack.id}:${pending.key}`;
+    if (autoReconciledKeys.current.has(attempt)) return;
+    autoReconciledKeys.current.add(attempt);
+    void (async () => {
+      await reconcilePendingGeneration(selectedPack);
+      if (selectedPackIdRef.current === selectedPack.id) {
+        try {
+          await refreshPackDetails(selectedPack, true);
+        } catch {
+          setError('Could not refresh generation progress. Refresh to try again.');
+        }
+      }
+    })();
+  }, [selectedPack, loadedPackId, reconcilePendingGeneration, refreshPackDetails]);
 
   useEffect(() => {
     let cancelled = false;
@@ -235,13 +326,14 @@ export default function VNAssetsWorkbench() {
     setPreflightRevision((revision) => revision + 1);
     setError(null);
     try {
+      await reconcilePendingGeneration(selectedPack);
       await refreshPackDetails(selectedPack);
     } catch {
       if (selectedPackIdRef.current === selectedPack.id) {
         setError('Could not refresh generation progress. Refresh to try again.');
       }
     }
-  }, [selectedPack, refreshPackDetails]);
+  }, [selectedPack, reconcilePendingGeneration, refreshPackDetails]);
 
   const handleCreatePack = useCallback(async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -300,12 +392,20 @@ export default function VNAssetsWorkbench() {
 
   const runGeneration = useCallback(async (slotId?: number) => {
     if (!selectedPack || loadedPackId !== selectedPack.id || generationCommandPending.current.has(selectedPack.id)) return;
+    const stored = readPendingVNAssetGeneration(selectedPack.owner_user_id, selectedPack.id);
+    if (stored && (stored.kind !== (slotId === undefined ? 'start' : 'retry') || stored.slotId !== slotId)) {
+      setError('Finish the previous generation request with Refresh before starting another.');
+      return;
+    }
     generationCommandPending.current.add(selectedPack.id);
     ++refreshRevision.current;
     const packId = selectedPack.id;
-    const operation = `${packId}:${slotId ?? 'start'}`;
-    const idempotencyKey = generationKeys.current.get(operation) ?? createVNAssetIdempotencyKey('vn-generation');
+    const operation = `${selectedPack.owner_user_id ?? 'unknown'}:${packId}:${slotId ?? 'start'}`;
+    const idempotencyKey = stored?.key ?? generationKeys.current.get(operation) ?? createVNAssetIdempotencyKey('vn-generation');
     generationKeys.current.set(operation, idempotencyKey);
+    writePendingVNAssetGeneration(selectedPack.owner_user_id, packId, {
+      kind: slotId === undefined ? 'start' : 'retry', slotId, key: idempotencyKey,
+    });
     setPendingCommands((previous) => ({ ...previous, [packId]: { kind: slotId === undefined ? 'start' : 'retry', slotId } }));
     setError(null);
     try {
@@ -314,11 +414,16 @@ export default function VNAssetsWorkbench() {
         ? await startVNAssetGeneration(packId, request)
         : await retryVNAssetSlot(packId, slotId, request);
       generationKeys.current.delete(operation);
+      clearPendingVNAssetGeneration(selectedPack.owner_user_id, packId, idempotencyKey);
       if (selectedPackIdRef.current === packId) {
         setGeneration(nextGeneration);
         setActiveWorkflowStep('generation');
       }
     } catch (startError) {
+      if (isMissingGenerationResource(startError)) {
+        clearPendingVNAssetGeneration(selectedPack.owner_user_id, packId, idempotencyKey);
+        generationKeys.current.delete(operation);
+      }
       if (selectedPackIdRef.current === packId) {
         setError(startError instanceof Error ? startError.message : 'Generation could not be started. Retry to check the same request.');
       }
@@ -329,19 +434,30 @@ export default function VNAssetsWorkbench() {
 
   const handleCancelGeneration = useCallback(async () => {
     if (!selectedPack || generationCommandPending.current.has(selectedPack.id)) return;
-    generationCommandPending.current.add(selectedPack.id);
+    const packId = selectedPack.id;
+    const ownerUserId = selectedPack.owner_user_id;
+    const pending = readPendingVNAssetGeneration(ownerUserId, packId);
+    const operationPrefix = `${ownerUserId ?? 'unknown'}:${packId}:`;
+    const pendingKeys: [string, string][] = pending
+      ? [[`${operationPrefix}${pending.slotId ?? 'start'}`, pending.key]]
+      : [...generationKeys.current.entries()].filter(([operation]) => operation.startsWith(operationPrefix));
+    generationCommandPending.current.add(packId);
     ++refreshRevision.current;
-    setPendingCommands((previous) => ({ ...previous, [selectedPack.id]: { kind: 'cancel' } }));
+    setPendingCommands((previous) => ({ ...previous, [packId]: { kind: 'cancel' } }));
     setError(null);
     try {
-      const nextGeneration = await cancelVNAssetGeneration(selectedPack.id);
-      if (selectedPackIdRef.current === selectedPack.id) setGeneration(nextGeneration);
+      const nextGeneration = await cancelVNAssetGeneration(packId);
+      if (pending) clearPendingVNAssetGeneration(ownerUserId, packId, pending.key);
+      for (const [operation, key] of pendingKeys) {
+        if (generationKeys.current.get(operation) === key) generationKeys.current.delete(operation);
+      }
+      if (selectedPackIdRef.current === packId) setGeneration(nextGeneration);
     } catch (cancelError) {
-      if (selectedPackIdRef.current === selectedPack.id) {
+      if (selectedPackIdRef.current === packId) {
         setError(cancelError instanceof Error ? cancelError.message : 'Failed to cancel generation');
       }
     } finally {
-      finishGenerationCommand(selectedPack.id);
+      finishGenerationCommand(packId);
     }
   }, [selectedPack, finishGenerationCommand]);
 

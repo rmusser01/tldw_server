@@ -8,14 +8,21 @@ from __future__ import annotations
 
 import contextlib
 import json
+import re
 import uuid as uuid_module
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+from tldw_Server_API.app.core.AuthNZ.database import (
+    DatabasePool,
+    _convert_question_mark_to_dollar,
+    _flatten_params,
+)
+from tldw_Server_API.app.core.DB_Management.vn_generated_files_queries import VNGeneratedFilesQueries
 
 # File categories (used for file_category field)
 FILE_CATEGORY_TTS_AUDIO = "tts_audio"
@@ -64,6 +71,42 @@ RETENTION_POLICY_TRANSIENT = "transient"
 RETENTION_POLICY_CUSTOM = "custom"
 
 
+def is_vn_item_source_ref(source_feature: str, source_ref: str | None) -> bool:
+    """Apply VN idempotency only to canonical positive item-ID references."""
+    return (
+        source_feature == SOURCE_FEATURE_VN_ASSETS and isinstance(source_ref, str)
+        and re.fullmatch(r"vn_asset_item:[1-9][0-9]*", source_ref) is not None
+    )
+
+
+class _TransactionBoundPool:
+    """Compose file and quota repositories on one guarded transaction connection."""
+
+    def __init__(self, conn: Any, *, postgres: bool) -> None:
+        self._conn = conn
+        self.pool = object() if postgres else None
+
+    @contextlib.asynccontextmanager
+    async def acquire(self) -> AsyncIterator[Any]:
+        """Borrow the connection without releasing or committing it."""
+        yield self._conn
+
+    @contextlib.asynccontextmanager
+    async def transaction(self) -> AsyncIterator[Any]:
+        """Join the owning transaction; only its outer context commits."""
+        yield self._conn
+
+    async def fetchone(self, query: str, *args: Any) -> dict[str, Any] | None:
+        """Read quota information without opening an independent connection."""
+        params = _flatten_params(args)
+        if self.pool is not None:
+            row = await self._conn.fetchrow(_convert_question_mark_to_dollar(query, params), *params)
+            return dict(row) if row else None
+        cursor = await self._conn.execute(query, params)
+        row = await cursor.fetchone()
+        return dict(zip((col[0] for col in cursor.description), row)) if row else None
+
+
 @dataclass
 class AuthnzGeneratedFilesRepo:
     """
@@ -78,6 +121,30 @@ class AuthnzGeneratedFilesRepo:
     def _is_postgres(self) -> bool:
         """Detect whether the current AuthNZ backend is PostgreSQL."""
         return getattr(self.db_pool, "pool", None) is not None
+
+    @contextlib.asynccontextmanager
+    async def vn_item_transaction(
+        self, *, user_id: int, source_ref: str,
+    ) -> AsyncIterator[AuthnzGeneratedFilesRepo]:
+        """Serialize a VN item and bind registration/accounting to one transaction."""
+        async with self.db_pool.transaction() as conn:
+            postgres = self._is_postgres()
+            await VNGeneratedFilesQueries(conn, postgres=postgres).lock_item(
+                user_id=user_id, source_ref=source_ref,
+            )
+            yield AuthnzGeneratedFilesRepo(_TransactionBoundPool(conn, postgres=postgres))
+
+    async def lock_quota_scopes(
+        self, *, user_id: int, org_id: int | None, team_id: int | None,
+    ) -> None:
+        """Lock admission counters in user/org/team order until registration commits."""
+        if not self._is_postgres():
+            # BEGIN IMMEDIATE already serializes SQLite admissions and usage writes.
+            return
+        async with self.db_pool.acquire() as conn:
+            await VNGeneratedFilesQueries(conn, postgres=True).lock_quota_scopes(
+                user_id=user_id, org_id=org_id, team_id=team_id,
+            )
 
     @staticmethod
     def _normalize_record(row: Any) -> dict[str, Any]:
@@ -173,6 +240,14 @@ class AuthnzGeneratedFilesRepo:
 
         try:
             async with self.db_pool.transaction() as conn:
+                if is_vn_item_source_ref(source_feature, source_ref):
+                    queries = VNGeneratedFilesQueries(conn, postgres=self._is_postgres())
+                    await queries.lock_item(user_id=user_id, source_ref=source_ref)
+                    existing = await queries.find_live_by_source_ref(
+                        user_id=user_id, source_feature=source_feature, source_ref=source_ref,
+                    )
+                    if existing is not None:
+                        return {**self._normalize_record(existing), "_idempotent_replay": True}
                 if self._is_postgres():
                     # PostgreSQL path
                     row = await conn.fetchrow(
@@ -258,6 +333,26 @@ class AuthnzGeneratedFilesRepo:
         except Exception as exc:
             logger.error(f"AuthnzGeneratedFilesRepo.get_file_by_id failed: {exc}")
             raise
+
+    async def get_file_by_source_ref(
+        self, *, user_id: int, source_feature: str, source_ref: str
+    ) -> dict[str, Any] | None:
+        """Find the newest live file for an owned, exact source reference."""
+        async with self.db_pool.acquire() as conn:
+            row = await VNGeneratedFilesQueries(conn, postgres=self._is_postgres()).find_live_by_source_ref(
+                user_id=user_id, source_feature=source_feature, source_ref=source_ref,
+            )
+            return self._normalize_record(row) if row is not None else None
+
+    async def get_live_file_by_storage_path(
+        self, *, user_id: int, storage_path: str,
+    ) -> dict[str, Any] | None:
+        """Find a committed live reference before considering byte cleanup."""
+        async with self.db_pool.acquire() as conn:
+            row = await VNGeneratedFilesQueries(conn, postgres=self._is_postgres()).find_live_by_storage_path(
+                user_id=user_id, storage_path=storage_path,
+            )
+        return self._normalize_record(row) if row else None
 
     async def get_files_by_ids(self, file_ids: list[int]) -> list[dict[str, Any]]:
         """Fetch generated file records for a bounded list of IDs."""

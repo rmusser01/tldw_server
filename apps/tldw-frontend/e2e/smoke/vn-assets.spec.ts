@@ -216,6 +216,80 @@ test.describe('VN asset packs smoke', () => {
     });
     await expect(page.getByText('Export job: 700')).toBeVisible();
   });
+
+  test('replays an ambiguous generation request after a browser reload', async ({ page }) => {
+    await seedAuth(page);
+    await page.addInitScript(() => {
+      localStorage.setItem('assistant_setup_dismissed', 'true');
+    });
+    const submittedKeys: string[] = [];
+    await page.route(/\/api\/v1\/health(?:\/.*)?$/, async (route) => {
+      await fulfillJson(route, 200, {
+        status: 'ok', auth_mode: 'single_user',
+        test_api_key: 'THIS-IS-A-SECURE-KEY-123-LOCAL-TEST',
+      });
+    });
+    await page.route(/\/api\/v1\/persona\/profiles(?:\?.*)?$/, async (route) => {
+      await fulfillJson(route, 200, [{ id: 'smoke-profile', name: 'Smoke profile' }]);
+    });
+    await page.route(/\/api\/v1\/vn\/vn-assets(?:\/.*)?$/, async (route) => {
+      const request = route.request();
+      const path = new URL(request.url()).pathname.replace('/api/v1/vn/vn-assets', '');
+      if (request.method() === 'GET' && path === '/starter-matrices') {
+        await fulfillJson(route, 200, { matrices: [] });
+      } else if (request.method() === 'GET' && path === '/packs') {
+        await fulfillJson(route, 200, [{
+          id: 1, owner_user_id: 1, title: 'Reload Pack', primary_character_id: 42,
+          status: 'draft',
+        }]);
+      } else if (request.method() === 'GET' && path === '/packs/1/slots') {
+        await fulfillJson(route, 200, [{
+          id: 4, pack_id: 1, asset_type: 'sprite', slot_key: 'neutral',
+          variant_count: 1, status: 'failed', last_error: 'interrupted',
+        }]);
+      } else if (request.method() === 'GET' && path === '/packs/1/items') {
+        await fulfillJson(route, 200, []);
+      } else if (request.method() === 'GET' && path === '/packs/1/generation') {
+        await fulfillJson(route, 200, {
+          status: submittedKeys.length > 1 ? 'queued' : 'failed', batch_id: 51,
+        });
+      } else if (request.method() === 'GET' && path === '/packs/1/readiness') {
+        await fulfillJson(route, 200, {
+          ready: false, status: 'not_ready', warnings: [], errors: [],
+        });
+      } else if (request.method() === 'GET' && path === '/packs/1/generation/preflight') {
+        await fulfillJson(route, 200, {
+          scope: 'api_process_configuration', worker_health: 'unknown',
+          local_workers_enabled: true, warnings: [], slots: [],
+        });
+      } else if (request.method() === 'POST' && path === '/packs/1/generate') {
+        const body = request.postDataJSON() as { idempotency_key: string };
+        submittedKeys.push(body.idempotency_key);
+        await fulfillJson(route, submittedKeys.length === 1 ? 503 : 202, {
+          status: 'queued', batch_id: 51,
+        });
+      } else {
+        await fulfillJson(route, 404, { detail: `unhandled VN asset route: ${path}` });
+      }
+    });
+
+    await page.goto('/vn-assets');
+    await waitForAppShell(page, SMOKE_LOAD_TIMEOUT);
+    await page.getByRole('button', { name: 'Start generation' }).click();
+    await expect.poll(() => submittedKeys.length).toBe(1);
+    await expect.poll(async () => page.evaluate(
+      () => Object.keys(sessionStorage).filter((key) => key.startsWith('vn-assets:pending-generation:')).length
+    )).toBe(1);
+
+    await page.reload();
+
+    await expect.poll(() => submittedKeys.length).toBe(2);
+    expect(submittedKeys[1]).toBe(submittedKeys[0]);
+    await expect(page.getByRole('status', { name: 'Generation status' })).toContainText('queued');
+    await expect.poll(async () => page.evaluate(
+      () => Object.keys(sessionStorage).filter((key) => key.startsWith('vn-assets:pending-generation:')).length
+    )).toBe(0);
+  });
 });
 
 for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]) {

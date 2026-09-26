@@ -4,6 +4,7 @@
 # Imports
 import asyncio
 import contextlib
+import copy
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
@@ -18,7 +19,9 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import QuotaExceededError, Stora
 from tldw_Server_API.app.core.AuthNZ.profile_version import VersionedUserWriteGateway
 from tldw_Server_API.app.core.AuthNZ.repos.generated_files_repo import (
     FILE_CATEGORY_VOICE_CLONE,
+    SOURCE_FEATURE_VN_ASSETS,
     AuthnzGeneratedFilesRepo,
+    is_vn_item_source_ref,
 )
 from tldw_Server_API.app.core.AuthNZ.repos.storage_quotas_repo import (
     AuthnzStorageQuotasRepo,
@@ -29,6 +32,7 @@ from tldw_Server_API.app.core.AuthNZ.repos.storage_quotas_repo import (
 from tldw_Server_API.app.core.AuthNZ.settings import Settings, get_settings
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Metrics import get_metrics_registry
+from tldw_Server_API.app.core.Storage.file_integrity import generated_file_bytes_match
 
 #######################################################################################################################
 #
@@ -794,6 +798,62 @@ class StorageQuotaService:
     # Generated Files Integration
     # =========================================================================
 
+    async def get_vn_generated_file(
+        self, *, user_id: int, source_ref: str,
+    ) -> dict[str, Any] | None:
+        """Resolve an owned VN replay, refusing live rows with missing image bytes."""
+        if not is_vn_item_source_ref(SOURCE_FEATURE_VN_ASSETS, source_ref):
+            return None
+        repo = await self.get_generated_files_repo()
+        record = await repo.get_file_by_source_ref(
+            user_id=user_id, source_feature=SOURCE_FEATURE_VN_ASSETS, source_ref=source_ref,
+        )
+        if record is None:
+            return None
+
+        def bytes_present() -> bool:
+            """Validate the contained registration bytes on the filesystem thread."""
+            root = DatabasePaths.get_user_outputs_dir(user_id).resolve()
+            path = (root / str(record.get("storage_path") or "")).resolve()
+            return (
+                path.is_relative_to(root) and generated_file_bytes_match(
+                    path, expected_size=int(record["file_size_bytes"]), checksum=record.get("checksum"),
+                )
+            )
+
+        try:
+            valid = await asyncio.to_thread(bytes_present)
+        except OSError:
+            valid = False
+        if not valid:
+            raise StorageError(f"Registered VN file {record['id']} has missing or invalid bytes")
+        return record
+
+    async def _register_vn_generated_file(
+        self, file_values: dict[str, Any], *, check_quota: bool,
+    ) -> dict[str, Any]:
+        """Commit a VN file and all applicable usage deltas together."""
+        repo = await self.get_generated_files_repo()
+        user_id = file_values["user_id"]
+        async with repo.vn_item_transaction(user_id=user_id, source_ref=file_values["source_ref"]) as bound_repo:
+            # A separate service view keeps concurrent requests on this instance
+            # from sharing the transaction connection or uncommitted quota cache.
+            bound_service = copy.copy(self)
+            bound_service.db_pool = bound_repo.db_pool
+            bound_service.quota_cache = TTLCache(maxsize=1000, ttl=300)
+            bound_service.storage_cache = TTLCache(maxsize=1000, ttl=600)
+            existing = await bound_service.get_vn_generated_file(
+                user_id=user_id, source_ref=file_values["source_ref"],
+            )
+            if existing is not None:
+                return existing
+            await bound_repo.lock_quota_scopes(
+                user_id=user_id, org_id=file_values["org_id"], team_id=file_values["team_id"],
+            )
+            record = await bound_service._register_and_account_generated_file(file_values, check_quota=check_quota)
+        self.invalidate_user_cache(user_id)
+        return record
+
     async def register_generated_file(
         self,
         *,
@@ -856,35 +916,54 @@ class StorageQuotaService:
                 f"maximum allowed size of {MAX_FILE_SIZE_BYTES / (1024*1024*1024):.0f} GB"
             )
 
-        # Check quota if requested
+        file_values = {
+            "user_id": user_id,
+            "filename": filename,
+            "storage_path": storage_path,
+            "file_category": file_category,
+            "source_feature": source_feature,
+            "file_size_bytes": file_size_bytes,
+            "org_id": org_id,
+            "team_id": team_id,
+            "original_filename": original_filename,
+            "mime_type": mime_type,
+            "checksum": checksum,
+            "source_ref": source_ref,
+            "folder_tag": folder_tag,
+            "tags": tags,
+            "is_transient": is_transient,
+            "expires_at": expires_at,
+            "retention_policy": retention_policy,
+        }
+
+        if is_vn_item_source_ref(source_feature, source_ref):
+            return await self._register_vn_generated_file(file_values, check_quota=check_quota)
+        return await self._register_and_account_generated_file(file_values, check_quota=check_quota)
+
+    async def _register_and_account_generated_file(
+        self, file_values: dict[str, Any], *, check_quota: bool,
+    ) -> dict[str, Any]:
+        """Apply the existing registration flow using this service's pool."""
+        user_id = file_values["user_id"]
+        file_size_bytes = file_values["file_size_bytes"]
+        org_id = file_values["org_id"]
+        team_id = file_values["team_id"]
         if check_quota:
-            has_quota, quota_info = await self.check_combined_quota(
+            await self.check_combined_quota(
                 user_id, file_size_bytes,
                 org_id=org_id, team_id=team_id,
-                raise_on_exceed=True
+                raise_on_exceed=True,
             )
-
-        # Create file record
         files_repo = await self.get_generated_files_repo()
-        file_record = await files_repo.create_file(
-            user_id=user_id,
-            filename=filename,
-            storage_path=storage_path,
-            file_category=file_category,
-            source_feature=source_feature,
-            file_size_bytes=file_size_bytes,
-            org_id=org_id,
-            team_id=team_id,
-            original_filename=original_filename,
-            mime_type=mime_type,
-            checksum=checksum,
-            source_ref=source_ref,
-            folder_tag=folder_tag,
-            tags=tags,
-            is_transient=is_transient,
-            expires_at=expires_at,
-            retention_policy=retention_policy,
-        )
+        file_record = await files_repo.create_file(**file_values)
+
+        if is_vn_item_source_ref(file_values["source_feature"], file_values["source_ref"]) and (
+            not file_record.get("id") or file_record.get("user_id") != user_id
+            or not file_record.get("storage_path")
+        ):
+            raise StorageError("VN registration did not return a complete file record")
+        if file_record.pop("_idempotent_replay", False):
+            return file_record
 
         # Update usage counters
         await self.update_usage(user_id, file_size_bytes, operation="add")
@@ -896,7 +975,7 @@ class StorageQuotaService:
             await self.update_team_usage(team_id, file_size_bytes)
 
         logger.info(
-            f"Registered generated file: {file_category}/{filename} "
+            f"Registered generated file: {file_values['file_category']}/{file_values['filename']} "
             f"({file_size_bytes} bytes) for user {user_id}"
         )
 

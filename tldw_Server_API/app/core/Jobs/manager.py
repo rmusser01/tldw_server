@@ -18,6 +18,9 @@ from typing import Any, ClassVar
 
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.jobs_failed_requeue import (
+    retry_failed_job_admission as _retry_failed_job_admission,
+)
 from tldw_Server_API.app.core.DB_Management.jobs_sql_fragments import (
     fetch_slides_archive_collision_rows,
     job_event_filter_fragment,
@@ -3982,6 +3985,74 @@ class JobManager:
         )
         return self._map_admission_result(result)
 
+    def retry_failed_job_admission(
+        self,
+        *,
+        job_id: int,
+        owner_user_id: str,
+        expected_uuid: str,
+        domain: str,
+        queue: str,
+        job_type: str,
+        expected_payload: dict[str, Any],
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        """Admit an explicit retry of an exactly matched failed Job, even exhausted.
+
+        Call only from unfinished VN receipt recovery, not worker redelivery
+        or an admin retry override. Preserve identity and immutable controls;
+        renew only the bounded attempt budget. Queued/processing concurrent
+        calls replay without consuming quota or emitting another event.
+        Rejections, cancellations and bookkeeping errors make no transition.
+        """
+        if isinstance(job_id, bool) or not isinstance(job_id, int) or job_id <= 0:
+            raise ValueError("Jobs retry requires a positive job ID")
+        for value in (owner_user_id, expected_uuid, domain, queue, job_type, idempotency_key):
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError("Jobs retry identity must be nonempty")
+        if not isinstance(expected_payload, dict):
+            raise ValueError("Jobs retry payload must be an object")
+        if domain != "vn_assets" or job_type != "vn_asset_enqueue_batch":
+            raise ValueError("Jobs explicit retry requires a VN receipt parent")
+        if (
+            set(expected_payload) != {"pack_id", "batch_id", "user_id"}
+            or any(type(value) is not int or value <= 0 for value in expected_payload.values())
+            or str(expected_payload["user_id"]) != owner_user_id
+        ):
+            raise ValueError("Jobs retry requires an exact owned VN parent payload")
+        command = CreateJobCommand(
+            domain=domain, queue=queue, job_type=job_type, owner_user_id=owner_user_id,
+            payload=expected_payload, idempotency_key=idempotency_key,
+        )
+
+        def check_policy() -> None:
+            """Reuse facade admission policy without rewriting immutable payload."""
+            if queue not in self._get_allowed_queues(domain):
+                raise ValueError("Jobs retry queue is not allowed")
+            allowed_types = []
+            for variable in ("JOBS_ALLOWED_JOB_TYPES", f"JOBS_ALLOWED_JOB_TYPES_{domain.upper()}"):
+                allowed_types.extend(value.strip() for value in os.getenv(variable, "").split(",") if value.strip())
+            if allowed_types and job_type not in allowed_types:
+                raise ValueError("Jobs retry type is not allowed")
+            if owner_user_id and _fair_share_enabled():
+                scheduler = _get_fair_share()
+                if not scheduler.can_submit(owner_user_id, self._count_active_jobs_for_user(owner_user_id)):
+                    raise BadRequestError("Jobs retry exceeds fair-share concurrency")
+
+        conn = self._connect()
+        try:
+            result = _retry_failed_job_admission(
+                conn, backend=self.backend, cursor_factory=self._pg_cursor, command=command,
+                job_id=job_id, expected_uuid=expected_uuid, now=self._clock.now_utc(),
+                max_queued_quota=self._quota_get("JOBS_QUOTA_MAX_QUEUED", domain, owner_user_id),
+                submits_per_minute_quota=self._quota_get("JOBS_QUOTA_SUBMITS_PER_MIN", domain, owner_user_id),
+                counters_enabled=JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")),
+                decode_payload=self._maybe_decrypt_json, check_policy=check_policy,
+            )
+            return self._map_admission_result(result)
+        finally:
+            conn.close()
+
     def find_job_by_identity(
         self,
         command: FindJobByIdentityCommand,
@@ -4489,6 +4560,29 @@ class JobManager:
                 return d
         finally:
             conn.close()
+
+    def has_live_processing_lease(self, job_id: int, *, owner_user_id: str) -> bool:
+        """Read whether an owned Job has a live, uncancelled processing lease.
+
+        Jobs owns the clock and lease interpretation. This point-in-time read
+        does not renew, reconcile or requeue anything; expired processing rows
+        remain for normal Jobs maintenance. Missing, terminal, cancellation-
+        requested or malformed/unheld leases return False.
+        """
+        if isinstance(job_id, bool) or not isinstance(job_id, int) or job_id <= 0:
+            raise ValueError("Jobs lease health requires a positive job ID")
+        if not isinstance(owner_user_id, str) or not owner_user_id.strip():
+            raise ValueError("Jobs lease health requires an owner")
+        row = self.get_job(job_id, owner_user_id=owner_user_id)
+        if (
+            row is None or row.get("status") != "processing"
+            or row.get("cancel_requested_at") is not None
+            or not row.get("worker_id") or not row.get("lease_id")
+        ):
+            return False
+        deadline = _as_utc_datetime(row.get("leased_until"))
+        now = _as_utc_datetime(self._clock.now_utc())
+        return deadline is not None and now is not None and deadline > now
 
     def get_job_by_uuid(self, job_uuid: str) -> dict[str, Any] | None:
         """Fetch a job by UUID string.
