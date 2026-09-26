@@ -2,11 +2,7 @@
 
 from __future__ import annotations
 
-from inspect import unwrap
-from typing import Any
-
 import pytest
-from _pytest.fixtures import FixtureDef, getfixturemarker
 
 from tldw_Server_API.tests._plugins import authnz_isolated_fixtures
 from tldw_Server_API.tests.AuthNZ import conftest as authnz_fixtures
@@ -16,30 +12,69 @@ pytest_plugins = shared_guards.pytest_plugins
 pytestmark = pytest.mark.unit
 
 
-def _selected_fixture(request: pytest.FixtureRequest, name: str) -> FixtureDef[Any]:
-    """Inspect pytest's actual applicable definition without resolving its body."""
-    definitions = request._fixturemanager.getfixturedefs(name, request.node)
-    assert definitions, f"No applicable fixture: {name}"
-    return definitions[-1]
-
-
 def test_jobs_selection_excludes_authnz_autouse(request: pytest.FixtureRequest) -> None:
     """Importing the bridge must not add AuthNZ resets to a Jobs test's closure."""
     assert {"reset_singletons", "clear_app_overrides"}.isdisjoint(request.fixturenames)
 
 
-def test_jobs_event_loop_is_not_authnz(request: pytest.FixtureRequest) -> None:
-    """Jobs must retain its normal loop, not AuthNZ's session-loop override."""
-    selected = _selected_fixture(request, "event_loop")
-    assert unwrap(selected.func).__module__ != authnz_fixtures.__name__
+def test_bridge_resolution_preserves_jobs_loop_and_isolation(
+    pytester: pytest.Pytester,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Observe reset selection and function-loop teardown, including a bad bridge."""
+    pytester.makepyfile(baseline_plugin="from tldw_Server_API.tests.conftest import event_loop")
+    pytester.makepyfile(
+        test_probe="""
+        import pytest
+        loops = []
+
+        def test_no_resets(request: pytest.FixtureRequest) -> None:
+            assert {"reset_singletons", "clear_app_overrides"}.isdisjoint(
+                request.fixturenames
+            ), "AuthNZ reset fixtures leaked"
+            assert "isolated_test_environment" not in request.fixturenames
+            assert "pg_temp_db" not in request.fixturenames
+
+        def test_first_loop(request: pytest.FixtureRequest) -> None:
+            loops.append(request.getfixturevalue("event_loop"))
+            assert not loops[0].is_closed()
+
+        def test_loop_lifetime(request: pytest.FixtureRequest) -> None:
+            assert loops[0].is_closed(), "AuthNZ session event loop leaked"
+            assert request.getfixturevalue("event_loop") is not loops[0]
+    """
+    )
+    for bridge, failed in [("authnz_full_fixtures", 2), ("authnz_isolated_fixtures", 0)]:
+        pytester.makeconftest(f"""
+            import asyncpg
+            import psycopg
+            import pytest
+            from typing import Any, NoReturn
+
+            pytest_plugins = ["baseline_plugin", "tldw_Server_API.tests._plugins.{bridge}"]
+
+            @pytest.fixture(autouse=True)
+            def _forbid_pg_io(monkeypatch: pytest.MonkeyPatch) -> None:
+                def forbidden(*args: Any, **kwargs: Any) -> NoReturn:
+                    pytest.fail("Registration probe attempted PostgreSQL I/O")
+                monkeypatch.setattr(asyncpg, "connect", forbidden)
+                monkeypatch.setattr(psycopg, "connect", forbidden)
+        """)
+        result = shared_guards._run_fixture_probe(
+            pytester,
+            monkeypatch,
+            f"registration-{bridge}",
+            "--randomly-dont-reorganize",
+        )
+        result.assert_outcomes(passed=3 - failed, failed=failed)
+        if failed:
+            assert "AuthNZ reset fixtures leaked" in result.stdout.str()
+            assert "AuthNZ session event loop leaked" in result.stdout.str()
 
 
 def test_shared_fixture_selection_preserves_original(request: pytest.FixtureRequest) -> None:
     """The bridge must select the existing lifecycle with only native dependencies."""
-    selected = _selected_fixture(request, "isolated_test_environment")
-    assert unwrap(selected.func) is unwrap(authnz_fixtures.isolated_test_environment)
-    assert selected.argnames == ("monkeypatch", "tmp_path")
-    assert not selected._autouse
+    assert authnz_isolated_fixtures.isolated_test_environment is authnz_fixtures.isolated_test_environment
     assert "isolated_test_environment" not in request.fixturenames
     assert "pg_temp_db" not in request.fixturenames
 
@@ -47,6 +82,7 @@ def test_shared_fixture_selection_preserves_original(request: pytest.FixtureRequ
 def test_narrow_plugin_exports_only_original_lifecycle() -> None:
     """No autouse reset or custom loop may escape through the narrow namespace."""
     assert authnz_isolated_fixtures.isolated_test_environment is authnz_fixtures.isolated_test_environment
-    assert {name for name, value in vars(authnz_isolated_fixtures).items() if getfixturemarker(value) is not None} == {
-        "isolated_test_environment",
+    assert authnz_isolated_fixtures.__all__ == ["isolated_test_environment"]
+    assert {name for name in vars(authnz_isolated_fixtures) if name.isidentifier() and not name.startswith("_")} == {
+        "isolated_test_environment"
     }

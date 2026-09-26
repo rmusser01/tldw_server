@@ -620,3 +620,79 @@ byte-identical B608 baseline and no errors/new findings. Warning noise and
 broader collection/version permutations remain qualified, not pristine or
 whole-suite claims. Both agents and all covering sessions are closed. Normal
 commit/push and individual external evidence replies are next; merge gates pending.
+
+Task19 integration: normal commit/push a003fe395eb3090c666e47a946e09f581c7bb7d5
+on unchanged dev59bd584503, all63 freeze hashes match after commit. Three
+individual evidence replies4110677065/4110677221/4110677407 posted08:14:22-31Z;
+paginated GraphQL31threads0unresolved with no remaining pages. Summary08:13:44Z
+says0bugs0rules16historicalomitted after push, not a completed full new-head
+review. One full request5844537850 at08:16:10Z is pending. Human paragraph
+remains verbatim; only Verification changed. Exact-head54checks33queued21done,
+no actionablefailure, seven required contexts absent; skipped/cancelled not
+passes. OPEN/BLOCKED, no merge attempted. AC5 checked; AC6/finalization pending.
+
+## Full Qodo Review on a003fe395e
+
+Review5325161826 completed08:18:18Z, ack5844550270. Prior31 threads remain
+resolved; one new testability finding4110684831 is verified, AC5 reopened.
+No review request is pending. Required CI still has33 queued checks and the
+seven gate contexts absent; no merge attempted.
+
+### Task 20: Observable Fixture Resolution Guards
+
+**Base:** a003fe395eb3090c666e47a946e09f581c7bb7d5.
+**Files:** test_retry_admission_fixture_registration.py and
+test_shared_retry_admission_pg_fixtures.py only, plus a narrowly owned test
+helper if demonstrably necessary. Production, fixture implementations,
+original bridge, native Jobs modules and global configuration are frozen.
+
+- [x] Replace private fixture-manager/FixtureDef inspection and direct
+  fixture-wrapper calls with bounded probes through normal pytest resolution.
+  Keep actual AuthNZ-reset/event-loop pollution negative controls, explicit
+  shared lifecycle ownership and no unexpected PostgreSQL allocation.
+- [x] Exercise historical explicit/autouse/environment routing using normal
+  fixture resolution and sentinel database/I/O boundaries, not a second DB
+  creator or copied fixture body. Cover shared env-bypass rejection before
+  normal setup; preserve real native shared-PG identity and closed connections.
+- [x] Prove negative controls fail for the actual forbidden behavior and pass
+  after restoration, with any harness failures qualified. Run only changed
+  guards, one representative owned native-PG case and bounded coexistence;
+  do not repeat the previous completed broad matrices.
+- [x] Scoped checks, source-boundary preservation, frozen evidence package and
+  independent spec, quality and final fixture-interaction review.
+- [ ] Normal commit/push, individual tested reply/resolution, one full exact-head
+  review and required CI/current-dev/human gates before authorized normal merge.
+
+**Ruling:** These guards protect observable registration, isolation and DSN
+selection, not pytest's private representation of those behaviors. A bounded
+normal-resolution sentinel harness preserves their sensitivity without calling
+.__wrapped__, request._fixturemanager, FixtureDef._autouse or private pytest
+fixture-marker APIs. Sentinel schema I/O remains a routing unit boundary;
+existing actual migration/transaction tests stay native and unchanged. Cost
+if wrong: a small guard correction, not a new lifecycle or production change.
+
+Task20 implementation is frozen. Worker final scope16passed0skips12warnings
+40.25s, Jobs-disabled units10passed3deselected; nested negative controls retain
+their actual assertion/setup-failure sensitivity and are not added to outer
+totals. Initial config-path, random loop-order and native seeder-order harness
+failures are qualified, diagnosed and corrected. Main's final admission-first
+normal required-PG integration16passed0skips12warnings42.46s, exit0. Applicable
+five-file normal hooks passed; no-file hooks skipped, existing warnings retained.
+Main Ruff/Bandit/compile/diff checks on two touched guards passed, Bandit zero
+findings/errors. All268 frozen hashes match after Main's verification/hooks;
+production/fixtures/native admission/index/globalconfig remain unchanged.
+
+The failed seeder's disposable database tldw_test_44e59370 was verified owned
+and inactive, cleaned only through the existing official helper, and freshly
+verified absent with closed observer. No other DB or lifecycle was touched.
+Independent spec/quality/final interaction review remains pending; no new push,
+external evidence reply/resolution or merge is claimed yet.
+
+Task20 Mencius independent spec/quality/final scoped interaction PASS;
+no actionable findings. Audited all268 hashes, archive/actual-delta identity,
+outer and nested outcomes, native and sentinel setup/teardown, Main's final
+different-admission probe and exact-name cleanup without repeating suites.
+Named limits and prior failed attempts remain qualified. Reviewer closed;
+all task-needed agents/tests/shell sessions closed. Dev59bd584503 remains
+unchanged ancestor. Normal commit/push and evidence reply next; external
+exact-head review, CI/current-base/human gates and final merge still pending.
