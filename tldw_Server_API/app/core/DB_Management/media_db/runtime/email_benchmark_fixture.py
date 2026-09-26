@@ -257,12 +257,33 @@ def seed_email_benchmark_fixture(
     }
 
 
+def describe_postgres_benchmark_settings(db: Any) -> dict[str, str]:
+    """Read only the non-sensitive resource settings needed to reproduce a probe."""
+    if db.backend_type != BackendType.POSTGRESQL:
+        raise ValueError("benchmark resource settings require PostgreSQL")
+    names = (
+        "work_mem", "shared_buffers", "hash_mem_multiplier",
+        "max_parallel_workers_per_gather", "row_security",
+    )
+    with db.transaction() as conn:
+        row = db._fetchone_with_connection(
+            conn,
+            "SELECT current_setting('work_mem') AS work_mem, "
+            "current_setting('shared_buffers') AS shared_buffers, "
+            "current_setting('hash_mem_multiplier') AS hash_mem_multiplier, "
+            "current_setting('max_parallel_workers_per_gather') AS max_parallel_workers_per_gather, "
+            "current_setting('row_security') AS row_security",
+        )
+    return {name: str(row[name]) for name in names}
+
+
 def describe_fixture_security(db: Any, *, tenant_id: str = "email-benchmark:42") -> dict[str, Any]:
     """Inspect synthetic persisted parity and the real PostgreSQL authorization boundary.
 
     Call outside any open transaction, with the matching non-admin PostgreSQL
     scope active. The other-user check uses a separate transaction and restores
-    the caller's scope. Returned values contain only counts and booleans, never
+    the caller's scope. Returned values contain counts, booleans and the bounded
+    PostgreSQL resource settings needed for reproduction, never
     connection strings, credentials, subjects, bodies or resource names.
     """
     suffix = tenant_id.removeprefix("email-benchmark:")
@@ -339,4 +360,5 @@ def describe_fixture_security(db: Any, *, tenant_id: str = "email-benchmark:42")
         with db.transaction() as conn:
             restored = db._fetchone_with_connection(conn, "SELECT COUNT(*) AS n FROM Media")
         report["owner_scope_restored"] = get_scope() == scope and int(restored["n"]) == report["owner_media_rows"]
+        report["postgres_runtime_settings"] = describe_postgres_benchmark_settings(db)
     return report

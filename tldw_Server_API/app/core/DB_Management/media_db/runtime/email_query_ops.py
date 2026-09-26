@@ -267,6 +267,7 @@ def search_email_messages(
 
         group_sql_clauses: list[str] = []
         count_group_sql_clauses: list[str] = []
+        postgres_label_patterns: dict[int, str] = {}
         direct_label_count = (
             self.backend_type == BackendType.SQLITE and len(parsed_groups) == 1
             and len(parsed_groups[0]) == 1 and parsed_groups[0][0].get("kind") == "label"
@@ -310,16 +311,28 @@ def search_email_messages(
                         f"{_email_like_clause(self, 'el.label_name')} "
                         f"OR {_email_like_clause(self, 'el.label_key')}"
                     )
-                    part_sql = (
-                        "EXISTS ("  # nosec B608
-                        "SELECT 1 FROM email_message_labels eml "
-                        "WHERE eml.email_message_id = em.id "
-                        "AND eml.label_id IN (SELECT el.id FROM email_labels el "
-                        "WHERE el.tenant_id = ? "
-                        f"AND ({label_text_clause}))"
-                        ")"
-                    )
-                    part_params.extend([resolved_tenant, like_value, like_value])
+                    if self.backend_type == BackendType.POSTGRESQL:
+                        # Resolve the small matching label set in the same
+                        # transaction below. A bound array lets PostgreSQL use
+                        # label-ID frequency statistics for broad labels.
+                        postgres_label_patterns[len(where_params)] = like_value
+                        part_sql = (
+                            "EXISTS (SELECT 1 FROM email_message_labels eml "
+                            "WHERE eml.email_message_id = em.id "
+                            "AND eml.label_id = ANY(?))"
+                        )
+                        part_params.append([])
+                    else:
+                        part_sql = (
+                            "EXISTS ("  # nosec B608
+                            "SELECT 1 FROM email_message_labels eml "
+                            "WHERE eml.email_message_id = em.id "
+                            "AND eml.label_id IN (SELECT el.id FROM email_labels el "
+                            "WHERE el.tenant_id = ? "
+                            f"AND ({label_text_clause}))"
+                            ")"
+                        )
+                        part_params.extend([resolved_tenant, like_value, like_value])
                 elif kind == "has_attachment":
                     bool_true = True if self.backend_type == BackendType.POSTGRESQL else 1
                     part_sql = (
@@ -374,10 +387,8 @@ def search_email_messages(
                     # Count all matching IDs through the reverse label index;
                     # the page keeps its lazy per-message membership check.
                     count_part_sql = (
-                        "em.id IN (SELECT eml.email_message_id FROM email_labels el "  # nosec B608 - fixed columns; values bound
-                        "JOIN email_message_labels eml ON eml.label_id = el.id "
-                        "WHERE el.tenant_id = ? "
-                        f"AND ({label_text_clause}))"
+                        "em.id IN (SELECT eml.email_message_id FROM email_message_labels eml "
+                        "WHERE eml.label_id = ANY(?))"
                     )
                 if negated:
                     part_sql = f"NOT ({part_sql})"
@@ -441,6 +452,16 @@ def search_email_messages(
             ordering = " ORDER BY em.internal_date DESC NULLS LAST, em.id DESC "
 
         with self.transaction() as conn:
+            for parameter_index, pattern in postgres_label_patterns.items():
+                matching_labels = self._fetchall_with_connection(
+                    conn,
+                    "SELECT id FROM email_labels WHERE tenant_id = ? "
+                    "AND (label_name ILIKE ? OR label_key ILIKE ?)",
+                    (resolved_tenant, pattern, pattern),
+                )
+                label_ids = [int(row["id"]) for row in matching_labels]
+                where_params[parameter_index] = label_ids
+                page_params[parameter_index] = label_ids
             count_select = "SELECT COUNT(*) AS total"
             if direct_label_count:
                 # One matched label cannot duplicate an email: the link's

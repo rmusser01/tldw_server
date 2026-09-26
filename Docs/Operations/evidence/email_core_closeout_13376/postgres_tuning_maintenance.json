@@ -1,0 +1,21 @@
+{
+  "report_version": 1,
+  "backend": "postgresql",
+  "postgres_resources": {
+    "role": "email_probe_eb21582dcd",
+    "auth_db": "email_auth_eb21582dcd",
+    "content_db": "email_content_eb21582dcd"
+  },
+  "generated_at": "2026-09-26T18:42:27.337430+00:00",
+  "actions": [
+    {
+      "name": "ensure_search_stats_trigram_index_and_rls_initplans",
+      "duration_seconds": 19.002133
+    },
+    {
+      "name": "analyze_media_email_messages_label_links_and_labels",
+      "duration_seconds": 34.987543
+    }
+  ],
+  "source_revision": "76f5b5caba5a1a0cb6e3ca04cea44f0f3389fcb2"
+}
