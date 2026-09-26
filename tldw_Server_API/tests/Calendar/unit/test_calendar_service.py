@@ -25,6 +25,29 @@ from tldw_Server_API.app.core.DB_Management.Calendar_DB import CalendarDatabase,
 pytestmark = pytest.mark.unit
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("view_kind", ["agenda", "week"])
+@pytest.mark.parametrize("persisted_start", [None, "2026-06-05T09:00:00Z"])
+async def test_todo_views_expose_canonical_start_separately_from_due_fallback(
+    calendar_db: CalendarDatabase, view_kind: str, persisted_start: str | None,
+) -> None:
+    """Drawer validation cannot confuse a view's synthetic display start with storage."""
+    from tldw_Server_API.app.core.Calendar.view_service import CalendarViewService
+
+    service = CalendarService(db=calendar_db)
+    calendar = service.create_calendar(actor_user_id=1, name="Todos", timezone="UTC")
+    service.create_item(actor_user_id=1, calendar_id=calendar.id, kind="todo", title="Due",
+                        start_at=persisted_start, due_at="2026-06-05T09:00:00Z")
+    view = CalendarViewService(calendar_service=service)
+    result = (
+        await view.agenda(actor_user_id=1, start_at="2026-06-01T00:00:00Z", end_at="2026-06-08T00:00:00Z")
+        if view_kind == "agenda" else await view.week(actor_user_id=1, week_start="2026-06-01", timezone="UTC")
+    )
+    assert len(result.items) == 1
+    assert result.items[0].start_at == "2026-06-05T09:00:00Z"
+    assert result.items[0].metadata["item_start_at"] == persisted_start
+
+
 @pytest.mark.parametrize("zone", ["Unknown/Zone", "../etc/passwd", "/etc/passwd", "", "UTC\x00"])
 def test_calendar_creation_rejects_invalid_zone_without_writes(
     calendar_db: CalendarDatabase, zone: str,

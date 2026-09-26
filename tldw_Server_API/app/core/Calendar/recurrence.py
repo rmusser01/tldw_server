@@ -299,8 +299,8 @@ class RecurrenceOccurrence:
 def validate_query_window(window_start: TemporalValue, window_end: TemporalValue) -> None:
     """Reject missing, reversed, or over-broad Calendar query windows."""
 
-    start = _coerce_datetime(window_start)
-    end = _coerce_datetime(window_end)
+    start = _coerce_datetime(window_start).astimezone(timezone.utc)
+    end = _coerce_datetime(window_end).astimezone(timezone.utc)
     if end <= start:
         raise CalendarValidationError("Calendar query window end must be after start")
     if end - start > timedelta(days=MAX_QUERY_WINDOW_DAYS):
@@ -387,7 +387,7 @@ def expand_recurrence_set(
     start = _coerce_datetime(master_start, zone)
     end = _coerce_datetime(master_end, zone) if master_end else None
     duration = (
-        (end - start if all_day else end.astimezone(timezone.utc) - start.astimezone(timezone.utc))
+        (end - start if all_day else _elapsed_duration(start, end))
         if end else timedelta(days=1) if all_day else timedelta(0)
     )
     if duration < timedelta(0):
@@ -408,7 +408,10 @@ def expand_recurrence_set(
                 if provider_recurrence is not None:
                     rules.rrule(_utc_candidates(provider_recurrence))
             else:
-                rules.rrule(_utc_candidates(_dateutil_rule(LocalRecurrenceRule.from_rrule(rrule_text), dtstart=start)))
+                local_recurrence = LocalRecurrenceRule.from_rrule(rrule_text)
+                rules.rrule(_utc_candidates(_fold_aware_candidates(
+                    _dateutil_rule(local_recurrence, dtstart=start), dtstart=start, until=local_recurrence.until,
+                )))
         for value in rdates:
             rules.rdate(_coerce_datetime(value, zone).astimezone(timezone.utc))
         for value in exdates:
@@ -445,13 +448,50 @@ def expand_recurrence_set(
     return occurrences
 
 
+def _fold_aware_candidates(
+    values: Iterable[datetime], *, dtstart: datetime, until: TemporalValue | None = None,
+) -> Iterator[datetime]:
+    """Restore the initial fold before ordering or filtering generated candidates.
+
+    Dateutil rebuilds wall times with fold=0 and whole seconds, including
+    DTSTART. A second-fold seed and subday candidates in that same repeated
+    hour must not rewind before the seed. Later dates retain local-clock rules.
+
+    Args:
+        values: Productive dateutil candidates in the seed's local timezone.
+        dtstart: Original aware seed, before dateutil resets its fold.
+        until: Optional inclusive rule limit, interpreted in the seed's zone.
+
+    Yields:
+        Local candidates with the initial fold restored, bounded by UTC UNTIL.
+        COUNT remains owned by the underlying rule; no candidates are added.
+
+    Raises:
+        CalendarValidationError: UNTIL is not a supported temporal value.
+        OverflowError: Converting a candidate or boundary to UTC exceeds range.
+    """
+    start_utc = dtstart.astimezone(timezone.utc)
+    until_utc = _coerce_until(until, dtstart).astimezone(timezone.utc) if until is not None else None
+    for value in values:
+        candidate = value.astimezone(timezone.utc)
+        if dtstart.fold and candidate < start_utc:
+            value = (
+                dtstart if value.replace(tzinfo=None) == dtstart.replace(tzinfo=None, microsecond=0)
+                else value.replace(fold=dtstart.fold)
+            )
+            candidate = value.astimezone(timezone.utc)
+        if until_utc is not None and candidate > until_utc:
+            break
+        yield value
+
+
 def _utc_candidates(values: Iterable[datetime]) -> Iterator[datetime]:
     """Normalize before set ordering/deduplication so repeated local clock hours stay distinct."""
     for value in values:
         yield value.astimezone(timezone.utc)
 
 
-def _provider_dateutil_rule(value: str, *, dtstart: datetime, search_start: datetime) -> rrule.rrule | None:
+def _provider_dateutil_rule(value: str, *, dtstart: datetime, search_start: datetime) -> Iterator[datetime] | None:
     """Expand only productive provider rules; preserve complex rules without evaluating them.
 
     Dateutil can scan to year 9999 without yielding for impossible BYxxx sets, so
@@ -500,7 +540,25 @@ def _provider_dateutil_rule(value: str, *, dtstart: datetime, search_start: date
         if frequency != "WEEKLY" or len(days) > 7 or any(day not in _WEEKDAYS for day in days):
             raise CalendarValidationError("Unsupported provider weekday recurrence")
         kwargs["byweekday"] = tuple(_WEEKDAYS[day] for day in days)
-    return rrule.rrule(**kwargs)
+    return _fold_aware_candidates(rrule.rrule(**kwargs), dtstart=dtstart, until=kwargs.get("until"))
+
+
+def _elapsed_duration(start: datetime, end: datetime) -> timedelta:
+    """Subtract instants rather than same-zone wall times across DST and folds.
+
+    Args:
+        start: Timezone-aware master start normalized by the caller.
+        end: Timezone-aware master end normalized by the caller.
+
+    Returns:
+        Signed elapsed duration in UTC. Zero and negative values are returned
+        unchanged; each expansion API retains its own interval validation.
+        All-day civil spans and lexical provider DURATION are handled separately.
+
+    Raises:
+        OverflowError: Converting an endpoint to UTC exceeds datetime's range.
+    """
+    return end.astimezone(timezone.utc) - start.astimezone(timezone.utc)
 
 
 def _expand_timed_recurrence(
@@ -515,21 +573,25 @@ def _expand_timed_recurrence(
     tz = _zoneinfo(timezone_name)
     start = _coerce_datetime(master_start, tz)
     end = _coerce_datetime(master_end, tz) if master_end is not None else None
-    duration = (end - start) if end is not None else timedelta(0)
-    query_start = _coerce_datetime(window_start, tz)
-    query_end = _coerce_datetime(window_end, tz)
+    duration = _elapsed_duration(start, end) if end is not None else timedelta(0)
+    query_start = _coerce_datetime(window_start, tz).astimezone(timezone.utc)
+    query_end = _coerce_datetime(window_end, tz).astimezone(timezone.utc)
     search_start = query_start - duration
     rule = _dateutil_rule(recurrence, dtstart=start)
-    candidates = rule.between(search_start, query_end, inc=True)
     occurrences: list[RecurrenceOccurrence] = []
-    for candidate in candidates:
-        occurrence_end = candidate + duration if end is not None else None
-        if not _overlaps(candidate, occurrence_end, query_start, query_end):
+    for candidate in _fold_aware_candidates(rule, dtstart=start, until=recurrence.until):
+        candidate_utc = candidate.astimezone(timezone.utc)
+        if candidate_utc > query_end:
+            break
+        if candidate_utc < search_start:
+            continue
+        end_utc = candidate_utc + duration if end is not None else None
+        if not _overlaps(candidate_utc, end_utc, query_start, query_end):
             continue
         occurrences.append(
             RecurrenceOccurrence(
                 start_at=candidate,
-                end_at=occurrence_end,
+                end_at=end_utc.astimezone(tz) if end_utc is not None else None,
                 occurrence_index=len(occurrences),
             )
         )
@@ -612,6 +674,20 @@ def _date_overlaps(
 
 
 def _coerce_until(value: TemporalValue, dtstart: datetime) -> datetime:
+    """Interpret civil limits locally, then give dateutil an instant-safe UTC bound.
+
+    Args:
+        value: Inclusive timestamp or civil date ending at local time.max.
+        dtstart: Seed supplying the timezone for floating or civil limits.
+
+    Returns:
+        UTC-aware limit for an aware seed, avoiding same-zone fold comparisons.
+        A naive seed retains the existing naive return contract.
+
+    Raises:
+        CalendarValidationError: The supplied temporal value cannot be parsed.
+        OverflowError: UTC conversion exceeds datetime's representable range.
+    """
     if isinstance(value, date) and not isinstance(value, datetime):
         coerced = datetime.combine(value, time.max, tzinfo=dtstart.tzinfo)
     else:
@@ -620,7 +696,7 @@ def _coerce_until(value: TemporalValue, dtstart: datetime) -> datetime:
         return coerced.replace(tzinfo=None)
     if coerced.tzinfo is None:
         return coerced.replace(tzinfo=dtstart.tzinfo)
-    return coerced.astimezone(dtstart.tzinfo)
+    return coerced.astimezone(timezone.utc)
 
 
 def _coerce_datetime(value: TemporalValue | None, tz: tzinfo | None = None) -> datetime:

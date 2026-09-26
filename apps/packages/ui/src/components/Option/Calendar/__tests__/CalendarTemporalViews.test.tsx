@@ -29,6 +29,35 @@ const dayGroup = (day: number, month = 5): HTMLElement => screen.getByText(dayLa
 const weekDay = (day: number): HTMLElement => dayGroup(day).parentElement!
 const juneWindow = () => ({ windowStart: new Date(2026, 5, 1), windowEnd: new Date(2026, 6, 1) })
 
+describe("Same-day timed events", () => {
+  it.each([
+    { scenario: "floating 09:00-10:00", start_at: "2026-06-05T09:00:00", end_at: "2026-06-05T10:00:00" },
+    { scenario: "Paris offset 09:00-10:00", start_at: "2026-06-05T09:00:00+02:00", end_at: "2026-06-05T10:00:00+02:00" }
+  ])("renders $scenario once on its local day in BOTH agenda and week, with selectable items", async (times) => {
+    const user = userEvent.setup()
+    const item = { ...allDayItem, ...times, all_day: false, title: "Morning review" }
+    const localDay = new Date(times.start_at).getDate()
+    const onSelectItem = vi.fn()
+    const agenda = render(<CalendarAgenda {...juneWindow()} calendars={[]} items={[item]} onSelectItem={onSelectItem} />)
+    const agendaButton = within(dayGroup(localDay)).getByRole("button", { name: /Morning review/ })
+    expect(screen.getAllByRole("button", { name: /Morning review/ })).toHaveLength(1)
+    expect(screen.queryByText(dayLabel(localDay - 1))).toBeNull()
+    expect(screen.queryByText(dayLabel(localDay + 1))).toBeNull()
+    await user.click(agendaButton)
+    expect(onSelectItem).toHaveBeenLastCalledWith(item)
+    agenda.unmount()
+
+    render(<CalendarWeekView calendars={[]} items={[item]} weekStart={new Date(2026, 5, 1)} onSelectItem={onSelectItem} />)
+    const weekButton = within(weekDay(localDay)).getByRole("button", { name: /Morning review/ })
+    expect(screen.getAllByRole("button", { name: /Morning review/ })).toHaveLength(1)
+    expect(within(weekDay(localDay - 1)).queryByRole("button", { name: /Morning review/ })).toBeNull()
+    expect(within(weekDay(localDay + 1)).queryByRole("button", { name: /Morning review/ })).toBeNull()
+    await user.click(weekButton)
+    expect(onSelectItem).toHaveBeenCalledTimes(2)
+    expect(onSelectItem).toHaveBeenLastCalledWith(item)
+  })
+})
+
 describe("Calendar civil-date rendering", () => {
   it("keeps an overnight timed event overlapping the start of the agenda window", () => {
     const item = { ...allDayItem, all_day: false,

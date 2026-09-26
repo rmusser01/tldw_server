@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 from tldw_Server_API.app.core.Calendar.calendar_sync_worker import (
     CalendarSyncJobResponse,
+    _run_db_phase,
     queue_calendar_binding_sync,
 )
 from tldw_Server_API.app.core.Calendar.errors import CalendarError
@@ -39,6 +40,50 @@ async def queue_due_calendar_sync_jobs(
     now: datetime | None = None,
     limit: int = 100,
 ) -> list[CalendarSyncJobResponse]:
+    """Queue due bindings off-loop and drain the complete synchronous phase.
+
+    Args:
+        db: Repository to use; None initializes the default repository off-loop.
+        job_manager: Jobs manager to use; None initializes the default off-loop.
+        now: Scan timestamp; None samples UTC time after repository initialization.
+        limit: Due-scan limit forwarded unchanged to the repository.
+
+    Returns:
+        Responses for successfully processed bindings, including reused active jobs.
+
+    Raises:
+        asyncio.CancelledError: Re-raises caller cancellation only after started
+            DB work and transactions finish. An unhandled phase failure is retained
+            as the cancellation's cause.
+        Exception: Propagates unhandled initialization, due-scan, or per-binding
+            failures when not cancelled. Per-binding CalendarError and scheduler
+            guard exceptions are safely logged and skipped.
+    """
+    return await _run_db_phase(_queue_due_calendar_sync_jobs, db, job_manager, now, limit)
+
+
+def _queue_due_calendar_sync_jobs(
+    db: CalendarDatabase | None,
+    job_manager: JobManager | None,
+    now: datetime | None,
+    limit: int,
+) -> list[CalendarSyncJobResponse]:
+    """Initialize, scan, authorize, and queue entirely on the owning DB thread.
+
+    Args:
+        db: Repository to use, or None to initialize the default repository.
+        job_manager: Jobs manager to use, or None to initialize the default manager.
+        now: Scan timestamp, or None to sample the current UTC time.
+        limit: Due-scan limit forwarded unchanged to the repository.
+
+    Returns:
+        Responses for successfully queued or already-active binding jobs.
+
+    Raises:
+        Exception: Propagates initialization, due-scan, and unguarded per-binding
+            failures. Per-binding CalendarError and scheduler guard exceptions are
+            safely logged and skipped so later bindings can still be queued.
+    """
     calendar_db = db or CalendarDatabase()
     jobs = job_manager or JobManager()
     scan_at = now or datetime.now(timezone.utc)
