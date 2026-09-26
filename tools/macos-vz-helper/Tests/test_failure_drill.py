@@ -10,6 +10,42 @@ from typing import NoReturn, Optional
 import pytest
 
 
+@pytest.mark.unit
+def test_boot_stall_profile_is_registered(drill: ModuleType) -> None:
+    """The manual workflow must include both cases of the approved sixth profile."""
+    assert drill.TESTS["boot_stall"] == (
+        "test_vz_linux_boot_stall_host_gated.py",
+        "test_vz_linux_boot_stall_then_healthy_session_reuse",
+        "Boot stall did not fail",
+        "TLDW_SANDBOX_VZ_LINUX_BOOT_STALL_BASE_IMAGE",
+        "TLDW_SANDBOX_VZ_LINUX_BOOT_STALL_DRILL",
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("fault", [None, "nonce", "vm_id", "stage", "mode"])
+def test_boot_stall_negative_control_requires_correlated_early_boot_and_exec(
+    drill: ModuleType, tmp_path: Path, fault: str | None
+) -> None:
+    """A passing command alone cannot prove the initramfs control was exercised."""
+    path = tmp_path / "pytest/case"
+    path.mkdir(parents=True)
+    proof = {"nonce": "abc123", "vm_id": "vm-1", "mode": "continue", "stage": "initramfs"}
+    if fault:
+        proof[fault] = "wrong"
+    data = {
+        "created_vms": [{"vm_id": "vm-1"}],
+        "attempted_creates": [{"expected_vm_id": "vm-1", "boot_nonce": "abc123"}],
+        "boot_proof": proof,
+        "runs": [{"phase": "completed", "exit_code": 0, "stdout": "boot_stall-drill-first\n"}],
+        "exec_vm_ids": ["vm-1"],
+        "cleanup_errors": [],
+        "remaining_owned_vms": [],
+    }
+    (path / "guest-boot-stall.json").write_text(json.dumps(data))
+    assert drill.negative_execution(tmp_path, "boot_stall")["ok"] is (fault is None)
+
+
 @pytest.fixture
 def drill() -> ModuleType:
     """Load the operator entrypoint without starting a helper."""
