@@ -319,19 +319,36 @@ export class TldwModelsService {
       return Boolean(String(config.accessToken || "").trim())
     }
 
-    return hasUsableApiKey(getRuntimeSingleUserApiKeyOverride()) || hasUsableApiKey(config.apiKey)
+    return (
+      (config.authMode === "single-user" &&
+        config.authSource === "cookie-session") ||
+      hasUsableApiKey(getRuntimeSingleUserApiKeyOverride()) ||
+      hasUsableApiKey(config.apiKey)
+    )
   }
 
   private buildCacheScope(config: TldwConfig | null): string {
     if (!config) return "none"
-    const serverUrl = String(config.serverUrl || "").trim().toLowerCase()
+    const serverUrl = String(config.serverUrl || "")
+      .trim()
+      .toLowerCase()
     const authMode = String(config.authMode || "single-user")
     const hasAccessToken = Boolean(String(config.accessToken || "").trim())
     const hasApiKey =
       hasUsableApiKey(config.apiKey) ||
       hasUsableApiKey(getRuntimeSingleUserApiKeyOverride())
+    const hasCookieSession =
+      config.authMode === "single-user" &&
+      config.authSource === "cookie-session"
     const orgId = config.orgId != null ? String(config.orgId) : "none"
-    return `${serverUrl}|${authMode}|${hasAccessToken ? "token" : hasApiKey ? "key" : "none"}|${orgId}`
+    const authScope = hasCookieSession
+      ? "cookie-session"
+      : hasAccessToken
+        ? "token"
+        : hasApiKey
+          ? "key"
+          : "none"
+    return `${serverUrl}|${authMode}|${authScope}|${orgId}`
   }
 
   /**

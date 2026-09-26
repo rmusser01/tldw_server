@@ -114,6 +114,164 @@ describe("TldwModelsService caching", () => {
     )
   })
 
+  it("discovers models using a single-user cookie session without a master key", async () => {
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: "http://127.0.0.1:19083",
+      authMode: "single-user",
+      authSource: "cookie-session"
+    })
+    mocks.getModels.mockResolvedValue([
+      {
+        id: "gpt-4",
+        name: "GPT-4",
+        provider: "custom-openai-api",
+        type: "chat"
+      }
+    ])
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+
+    const models = await service.getModels()
+
+    expect(models.map((model) => model.id)).toEqual(["gpt-4"])
+    expect(mocks.getModels).toHaveBeenCalledTimes(1)
+    expect(mocks.storageSet).toHaveBeenCalledWith(
+      "tldwModelsCache",
+      expect.objectContaining({
+        scope: "http://127.0.0.1:19083|single-user|cookie-session|none"
+      })
+    )
+  })
+
+  it.each(["none", "key"])(
+    "does not reuse a %s persisted cache after cookie sign-in",
+    async (authScope) => {
+      mocks.storageValue = {
+        version: 4,
+        scope: `http://127.0.0.1:19083|single-user|${authScope}|none`,
+        models: [],
+        timestamp: Date.now()
+      }
+      mocks.getConfig.mockResolvedValue({
+        serverUrl: "http://127.0.0.1:19083",
+        authMode: "single-user",
+        authSource: "cookie-session"
+      })
+      mocks.getModels.mockResolvedValue([
+        {
+          id: "gpt-4",
+          name: "GPT-4",
+          provider: "custom-openai-api",
+          type: "chat"
+        }
+      ])
+      const { TldwModelsService } = await importService()
+      const service = new TldwModelsService()
+
+      expect((await service.getModels()).map((model) => model.id)).toEqual([
+        "gpt-4"
+      ])
+      expect(mocks.getModels).toHaveBeenCalledTimes(1)
+    }
+  )
+
+  it("keeps JWT model discovery scoped to the multi-user token", async () => {
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "multi-user",
+      accessToken: "disposable-test-token",
+      authSource: "cookie-session"
+    })
+    mocks.getModels.mockResolvedValue([
+      {
+        id: "local-model",
+        name: "Local Model",
+        provider: "llama",
+        type: "chat"
+      }
+    ])
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+
+    expect((await service.getModels()).map((model) => model.id)).toEqual([
+      "local-model"
+    ])
+    expect(mocks.getModels).toHaveBeenCalledTimes(1)
+    expect(mocks.storageSet).toHaveBeenCalledWith(
+      "tldwModelsCache",
+      expect.objectContaining({
+        scope: "http://127.0.0.1:8000|multi-user|token|none"
+      })
+    )
+  })
+
+  it("does not return cookie-session models after the session source is removed", async () => {
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: "http://127.0.0.1:19083",
+      authMode: "single-user",
+      authSource: "cookie-session"
+    })
+    mocks.getModels.mockResolvedValue([
+      {
+        id: "gpt-4",
+        name: "GPT-4",
+        provider: "custom-openai-api",
+        type: "chat"
+      }
+    ])
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+    expect((await service.getModels()).map((model) => model.id)).toEqual([
+      "gpt-4"
+    ])
+
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: "http://127.0.0.1:19083",
+      authMode: "single-user"
+    })
+
+    expect(await service.getModels()).toEqual([])
+    expect(mocks.getModels).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([401, 403])(
+    "does not advertise models for a cookie session rejected with %s",
+    async (status) => {
+      mocks.getConfig.mockResolvedValue({
+        serverUrl: "http://127.0.0.1:19083",
+        authMode: "single-user",
+        authSource: "cookie-session"
+      })
+      mocks.getModels.mockRejectedValue(
+        Object.assign(new Error("Session rejected"), { status })
+      )
+      const { TldwModelsService } = await importService()
+      const service = new TldwModelsService()
+
+      expect(await service.getModels()).toEqual([])
+      expect(mocks.getModels).toHaveBeenCalledTimes(1)
+    }
+  )
+
+  it.each([
+    { serverUrl: "", authMode: "single-user", authSource: "cookie-session" },
+    {
+      serverUrl: "http://127.0.0.1:19083",
+      authMode: "multi-user",
+      authSource: "cookie-session"
+    }
+  ])(
+    "does not use a cookie marker to bypass missing server or multi-user JWT requirements",
+    async (config) => {
+      mocks.getConfig.mockResolvedValue(config)
+      const { TldwModelsService } = await importService()
+      const service = new TldwModelsService()
+
+      expect(await service.getModels()).toEqual([])
+      expect(mocks.getModels).not.toHaveBeenCalled()
+    }
+  )
+
   it.each(["CHANGE_ME_TO_SECURE_API_KEY", "   "])(
     "does not treat invalid runtime single-user auth %s as model-ready",
     async (runtimeKey) => {
