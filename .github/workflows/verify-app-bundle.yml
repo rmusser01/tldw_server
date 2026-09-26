@@ -7,7 +7,11 @@ on:
   # Bootstrap the new workflow from this branch before it exists on default.
   push:
     branches: [codex/complete-app-wp1]
-    paths: [.github/workflows/verify-app-bundle.yml]
+    paths:
+      - .github/workflows/verify-app-bundle.yml
+      - Dockerfiles/app-bundle/**
+      - apps/tldw-frontend/gateway/**
+      - Helper_Scripts/test_app_bundle_docker.sh
 
 permissions:
   contents: read

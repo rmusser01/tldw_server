@@ -106,11 +106,29 @@ lane's policy. The promotion verifier rejects it as required. The runner's
 Docker `.Size` values are 8,515,093,284 backend, 534,186,910 WebUI, 249,104,975
 gateway, and 164,181,011 control bytes; these metadata values are not a measured
 download/installation footprint and are not compared with Docker Desktop's
-earlier values. The amd64 result is still pending. The setup/docs source fix is
+earlier values. The amd64 job also passed, and the required-both status passed.
+Its manifest hash is `15cbe30fd80b8a3805d4ca7d71cf8c26f0129edeb39a1dbca83e86ef1c6b40ef`;
+all eight downloaded file hashes match. The setup/docs source fix is
 committed separately at `9755c7eaaf` and is not covered by this candidate. Future
 evidence uploads include the ephemeral public verification key, allowing the
 downloaded provisional manifest signature to be checked independently; the
 private signing key remains excluded.
+
+Subsequent cookie review found that the successful run's generic Set-Cookie
+assertion could accept a CSRF cookie without an authenticated session. Compose
+passed the instance session-cookie name to Next but omitted it from the backend;
+Next therefore filtered out the backend's default-named session cookie. The
+backend also defaulted to HTTPS-only cookies despite this bundle's HTTP loopback
+endpoint. Two regression tests failed before the correction. Compose now shares
+the instance name and explicitly disables Secure cookies for its loopback HTTP
+gateway. The smoke requires both named cookies and uses the cookie jar to fetch
+the authenticated profile without an API-key header. Run 36209873850 was cancelled
+to avoid qualifying the obsolete configuration. All 49 lean release tests and
+three existing AuthNZ integration tests pass, as do Black, shell syntax, and
+Compose validation. Test-file Bandit reports only assertions and existing
+subprocess harness warnings; production Release code still has no findings.
+Authenticated container behavior remains pending the corrected native run;
+the earlier run is not evidence that the browser session authenticated.
 
 The manual `verify-app-bundle.yml` lane builds separate job-local candidates
 for linux/amd64 and linux/arm64 and leaves G2/G4/G12 false. Its required-both

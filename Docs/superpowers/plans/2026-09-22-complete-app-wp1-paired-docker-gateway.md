@@ -254,6 +254,15 @@ backend docs assets routed to Next. The real-socket regression was red; routing
 is corrected, 13 gateway tests/lint pass, and standalone Next `/setup` returns
 200 through the gateway. Added exact container smoke checks for that page and
 docs assets; this source revision must be exercised after the auth-mode run.
+Cookie review then found the backend lacked the shared instance session-cookie
+name and retained its HTTPS-only default on the loopback HTTP gateway. Two
+regressions failed before the Compose correction; 49 release tests and three
+focused existing AuthNZ integration tests now pass. The smoke requires both
+configured cookie names and authenticates the profile using only the cookie
+jar. Both-platform run 36208320371 passed its older smoke, whose generic cookie
+assertion did not establish authenticated browser behavior. Run 36209873850
+was cancelled before exercising the obsolete configuration. Corrected native
+smoke remains required, with G2/G4/G12 still open.
 
 - Sections 5/10/11 and gates G2/G4/G10/G12 map to Tasks 1–8. Backend dependency slimming and complete storage inventory are WP2; native lifecycle and the single-source verifier packaging check are WP3; automatic update/backup/restore is WP4; guided heavy components and final public promotion are WP5.
 - Verify exact code symbols in the interface blocks when implementing each task; preserve existing quickstart/hosted paths and test both managed and legacy modes.

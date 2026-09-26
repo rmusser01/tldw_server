@@ -202,3 +202,18 @@ def test_compose_keeps_webui_auth_mode_matched_to_backend() -> None:
     services = yaml.safe_load((BUNDLE / "compose.yaml").read_text())["services"]
 
     assert services["webui"]["environment"].get("AUTH_MODE") == services["app"]["environment"]["AUTH_MODE"]
+
+
+def test_compose_shares_instance_session_cookie_name_between_backend_and_webui() -> None:
+    services = yaml.safe_load((BUNDLE / "compose.yaml").read_text())["services"]
+
+    assert (
+        services["app"]["environment"].get("SINGLE_USER_SESSION_COOKIE_NAME")
+        == services["webui"]["environment"]["SINGLE_USER_SESSION_COOKIE_NAME"]
+    )
+
+
+def test_compose_uses_cookies_on_its_http_loopback_gateway() -> None:
+    services = yaml.safe_load((BUNDLE / "compose.yaml").read_text())["services"]
+
+    assert services["app"]["environment"].get("SESSION_COOKIE_SECURE") == "0"

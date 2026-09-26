@@ -24,6 +24,9 @@ cd "$test_root"
 env_file="$TLDW_APP_STATE_DIR/instance/config.env"
 first_config_hash=$(sha256sum "$env_file" | awk '{print $1}')
 project_id=$(sed -n 's/^TLDW_PROJECT_ID=//p' "$env_file")
+session_cookie_name=$(sed -n 's/^SINGLE_USER_SESSION_COOKIE_NAME=//p' "$env_file")
+csrf_cookie_name=$(sed -n 's/^CSRF_COOKIE_NAME=//p' "$env_file")
+[[ -n "$session_cookie_name" && -n "$csrf_cookie_name" ]]
 
 ready=0
 for _ in $(seq 1 120); do
@@ -57,10 +60,15 @@ fi
 curl --fail --silent --show-error "$public_url$static_path" >/dev/null
 
 session_headers="$test_root/session-headers"
+session_cookies="$test_root/session-cookies"
 curl --fail --silent --show-error --dump-header "$session_headers" --output /dev/null \
+  --cookie-jar "$session_cookies" \
   --request POST --header "Origin: $public_url" \
   "$public_url/api/_tldw-webui/session"
-grep -qi '^set-cookie:' "$session_headers"
+grep -qi "^set-cookie: $session_cookie_name=" "$session_headers"
+grep -qi "^set-cookie: $csrf_cookie_name=" "$session_headers"
+curl --fail --silent --show-error --cookie "$session_cookies" \
+  "$public_url/api/v1/users/me/profile" >/dev/null
 if [[ $(curl --silent --output /dev/null --write-out '%{http_code}' \
   --header 'Host: hostile.invalid' "$public_url/_tldw/status") != 403 ]]; then
   echo 'Gateway accepted a hostile Host header.' >&2

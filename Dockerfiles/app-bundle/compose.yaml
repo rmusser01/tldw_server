@@ -5,7 +5,10 @@ services:
     environment:
       AUTH_MODE: single_user
       SINGLE_USER_API_KEY: ${SINGLE_USER_API_KEY:?Instance API key is required}
+      SINGLE_USER_SESSION_COOKIE_NAME: ${SINGLE_USER_SESSION_COOKIE_NAME:?Instance session cookie is required}
       CSRF_COOKIE_NAME: ${CSRF_COOKIE_NAME:?Instance CSRF name is required}
+      # This bundle publishes HTTP on loopback only.
+      SESSION_COOKIE_SECURE: "0"
       TLDW_ENV_FILE: /app/managed-config/.env
       TLDW_RUN_AUTH_INIT_ON_START: "1"
       HOST: 0.0.0.0

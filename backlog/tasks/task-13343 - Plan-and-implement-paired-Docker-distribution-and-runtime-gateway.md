@@ -4,7 +4,7 @@ title: Plan and implement paired Docker distribution and runtime gateway
 status: In Progress
 assignee: []
 created_date: '2026-09-23 06:15'
-updated_date: '2026-09-26 01:52'
+updated_date: '2026-09-26 02:05'
 labels:
   - distribution
   - docker
@@ -69,6 +69,8 @@ User authorized branch push and native CI. Branch-only workflow trigger bootstra
 Further G4 review found /setup routed to legacy FastAPI setup rather than the Next wizard, and backend docs-static/favicon routed to Next. Real-socket regression red; corrected route ownership passes 13 gateway tests and lint; actual standalone Next /setup returns 200 with Next assets through gateway. Added container smoke checks for setup and concrete docs assets; exact follow-up candidate run still required. Official upstream checks confirm Python 3.12 security support through October 2028 and current patch 3.12.14; Node 24 LTS through April 2028/current patch 24.21.0 with GNU/Linux x64/arm64 Tier 1. Sources are linked in the acceptance record; full G12 stays open.
 
 Run 36208320371 at dbc1100323: complete arm64 extracted smoke passes assets/session cookies/host rejection/private ports/repeat persisted config-data/tamper rejection. Downloaded all 8 helper hashes match manifest SHA256 1b7201d4730e230ef59661878e532b5ff87e3ed48a9b39500354ecc054e806db. Actual Python 3.12.14/Node 24.21.0; G10 true, provisional G2/G4/G12 false and promotion rejected as intended. amd64 pending. Setup/docs routing fix committed 9755c7eaaf needs exact candidate run; next CI evidence upload adds public key for independent signature verification, never private key.
+
+Cookie configuration follow-up: both native jobs in run 36208320371 passed the older smoke, but its generic Set-Cookie assertion could accept CSRF alone. Two red regressions exposed missing backend instance session-cookie name and HTTPS-only cookie default on the HTTP loopback gateway. Compose corrected both; smoke now requires both configured cookie names and authenticates /api/v1/users/me/profile using only the cookie jar. All 49 lean Release tests and three focused existing AuthNZ integration tests pass; Black, shell syntax, Compose validation pass. Test Bandit findings are assertions and unchanged subprocess harness warnings, no new production finding. Cancelled obsolete run 36209873850. Corrected native amd64/arm64 candidate run remains required; G2/G4/G12 remain open.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
