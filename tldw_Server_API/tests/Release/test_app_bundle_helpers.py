@@ -196,3 +196,9 @@ def test_compose_exposes_only_loopback_gateway() -> None:
     assert services["gateway"]["ports"] == ["127.0.0.1:${TLDW_PUBLIC_PORT}:8080"]
     assert not any("docker.sock" in str(service) for service in services.values())
     assert compose["networks"]["private"] is None or not compose["networks"]["private"].get("internal")
+
+
+def test_compose_keeps_webui_auth_mode_matched_to_backend() -> None:
+    services = yaml.safe_load((BUNDLE / "compose.yaml").read_text())["services"]
+
+    assert services["webui"]["environment"].get("AUTH_MODE") == services["app"]["environment"]["AUTH_MODE"]

@@ -26,6 +26,7 @@ services:
       app:
         condition: service_healthy
     environment:
+      AUTH_MODE: single_user
       NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE: managed
       TLDW_WEBUI_EXPOSE_RUNTIME_AUTH: "1"
       TLDW_INTERNAL_API_ORIGIN: http://app:8000

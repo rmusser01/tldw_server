@@ -9,13 +9,13 @@ entry has been published.
 | --- | --- | --- |
 | Section 5: one browser gateway, same-origin managed WebUI, private backend/Next ports | Gateway real-socket tests cover routing, Host/Origin rejection, forwarded-header stripping, multipart body forwarding, redirects, cookies, SSE cancellation, and WebSocket upgrade. Managed standalone Next and runtime session tests cover the private hop. Compose publishes only `127.0.0.1:${TLDW_PUBLIC_PORT}:8080`; `docker compose config` parsed on both platform settings. | Implemented locally; exact extracted-container and two-instance browser proof pending. |
 | Section 10: Docker-only extracted first start, stable identity, stop/status, retained data | Control tests cover signature-before-init, mode-0600 credentials, repeat identity, conflicting release, and tampering. Fake-Docker helper tests cover ordering, unavailable daemon/Compose, occupied port, and stop/status from another directory. The backend DB and generated config use named volumes. | Live G2 first/repeat/stop/restart and browser setup pending. |
-| Section 11: signed manifest and immutable artifacts | Ed25519 exact-byte manifest verification, per-file SHA-256, platform selection, path/symlink checks, fixed control-image/key bootstrap, and candidate-gate tests pass. A local arm64 build pushed four digest-pinned images to a temporary registry; signed control verification and initialization passed from the extracted bundle. | Local arm64 smoke stopped at backend readiness; one qualified multi-platform manifest is not produced. |
-| G2 Docker first install | A signed arm64 bundle ran from a temporary directory outside the checkout. Control verification and initialization passed, and Compose created the private network, volumes, and containers. | Open: the backend was unhealthy, so the browser gateway, repeat start, and guided setup were not reached. |
+| Section 11: signed manifest and immutable artifacts | Ed25519 exact-byte manifest verification, per-file SHA-256, platform selection, path/symlink checks, fixed control-image/key bootstrap, and candidate-gate tests pass. Native amd64 and arm64 CI built all four images; signed extracted-bundle verification and initialization passed. | Both CI smoke checks stopped after service readiness; one qualified multi-platform manifest is not produced. |
+| G2 Docker first install | Native amd64 and arm64 CI signed bundles ran outside the checkout and reached healthy backend, WebUI, and gateway services. | Open: an HTTP smoke request failed before repeat start and guided setup. A missing WebUI auth-mode setting is fixed and awaiting the corrected CI smoke. |
 | G4 networking/auth | Focused gateway, backend AuthNZ, Next runtime, and browser-networking tests pass; real standalone Next session exchange through the gateway passed before image work. | Open: exact two-instance browser/auth and real-container upload/stream/WebSocket cases are not yet qualified. |
 | G10 artifact trust | Manifest/control/candidate test suites pass, including altered signature, wrong platform, unsafe path, changed file, and missing image. Local image-content guards and extracted control verification passed. | Partially evidenced; the extracted tamper check was after the failed readiness step and has not run. |
 | G12 release policy | The local arm64 images reported Python 3.12.14 and Node 24.21.0. The candidate code records exact patches and refuses unsupported families/mismatches. | Open: upstream support/security status, both-platform results, download size, and protected publication gate are unverified. |
 
-Local verification before this WP1 review: 46 lean Release tests pass;
+Local verification after the CI follow-up: 47 lean Release tests pass;
 Black checks, shell syntax, Compose config for amd64 and arm64 settings,
 gateway dependency lock installation, `git diff --check`, and scoped Bandit
 (zero findings) pass. Prior slices recorded 64 managed-WebUI Vitest tests,
@@ -41,11 +41,36 @@ The local arm64 inventory reported Docker `image inspect .Size` values of
 gateway, and 50,144,556 for control. The corrected backend reported
 4,302,321,900 bytes. These are local image metadata values, not download or
 installed-footprint measurements. No end-to-end setup duration, arm64 browser
-result, amd64 result, or PowerShell runtime result is available. `pwsh` is
-absent locally; the manual CI lane has not run. Docker build data reduced host
+result or PowerShell runtime result is available. `pwsh` is
+absent locally; CI PowerShell parsing passes. Docker build data reduced host
 free space to about 15 GiB, so a third four-image rebuild was not attempted.
 The start helpers wait for Compose health before reporting/opening the URL and
 stop partial services after failed readiness while retaining instance state.
+
+The user authorized branch push and native CI on September 25. Manual
+dispatch was unavailable because the new workflow was absent from the default
+branch, so a push trigger restricted to this branch and workflow file bootstraps
+the lane. The first run passed 46 release tests but stopped on formatter drift;
+Black is now pinned to the locally verified 25.1.0 version. The
+[second run](https://github.com/rmusser01/tldw_server/actions/runs/36206663211)
+at `754c9dd521` passed the focused Python/browser/gateway checks and Windows
+helper parsing, built all four images on both native platforms, verified and
+initialized the signed bundles, and reached healthy services. Each platform
+then exited 22 on a silent HTTP smoke request. The WebUI service omitted
+`AUTH_MODE=single_user`, which its session policy requires. A failing Compose
+regression and a real standalone Next through-gateway reproduction confirm
+503 with the setting omitted versus 204 with two cookies when supplied. The
+configuration fix passes 47 release tests and awaits the next container run.
+HTTP smoke errors now report their line/status, and failed CI runs retain the
+provisional bundle/inventory/evidence without the private signing key.
+
+The production release Python scope still has zero Bandit findings. The helper
+test file reports its existing subprocess warnings and test assertions; the
+new finding is the regression assertion, not a production security change.
+The arm64 runner reported 104 GiB free before build and completed all image
+builds, so the standard runner disk concern did not block this attempt. Local
+Docker image inspection now reports a content-store I/O error and the host has
+about 4.5 GiB free; further local container builds are held.
 
 The manual `verify-app-bundle.yml` lane builds separate job-local candidates
 for linux/amd64 and linux/arm64 and leaves G2/G4/G12 false. Its required-both

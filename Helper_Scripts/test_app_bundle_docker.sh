@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
+trap 'status=$?; printf "Bundle smoke failed at line %s (exit %s).\n" "$LINENO" "$status" >&2' ERR
 
 if [[ $# -ne 1 ]]; then
   echo 'Usage: test_app_bundle_docker.sh <extracted-bundle-directory>' >&2
@@ -37,19 +38,19 @@ if [[ $ready != 1 ]]; then
   exit 1
 fi
 
-curl --fail --silent "$public_url/_tldw/status" | grep -q '"ready":true'
-curl --fail --silent "$public_url/favicon.ico" >/dev/null
-curl --fail --silent "$public_url/docs" >/dev/null
-page=$(curl --fail --silent --location "$public_url/")
+curl --fail --silent --show-error "$public_url/_tldw/status" | grep -q '"ready":true'
+curl --fail --silent --show-error "$public_url/favicon.ico" >/dev/null
+curl --fail --silent --show-error "$public_url/docs" >/dev/null
+page=$(curl --fail --silent --show-error --location "$public_url/")
 static_path=$(printf '%s' "$page" | grep -oE '/_next/static/[^" ]+' | head -n 1)
 if [[ -z "$static_path" ]]; then
   echo 'Running WebUI did not reference a copied static asset.' >&2
   exit 1
 fi
-curl --fail --silent "$public_url$static_path" >/dev/null
+curl --fail --silent --show-error "$public_url$static_path" >/dev/null
 
 session_headers="$test_root/session-headers"
-curl --fail --silent --dump-header "$session_headers" --output /dev/null \
+curl --fail --silent --show-error --dump-header "$session_headers" --output /dev/null \
   --request POST --header "Origin: $public_url" \
   "$public_url/api/_tldw-webui/session"
 grep -qi '^set-cookie:' "$session_headers"

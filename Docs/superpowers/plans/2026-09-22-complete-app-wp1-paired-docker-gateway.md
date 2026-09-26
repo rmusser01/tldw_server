@@ -239,6 +239,17 @@ The code paths above are the planned ownership boundaries. If an existing helper
 
 ## Plan self-review checklist
 
+CI follow-up (September 25): user-authorized branch push bootstrapped the new
+workflow with a branch/file-restricted push trigger. Run 36206663211 at
+754c9dd521 built all four images and reached healthy extracted backend/WebUI/
+gateway services on native amd64 and arm64; Windows helper parsing passed.
+Both smoke checks then failed on an HTTP request. A red Compose regression and
+real standalone Next/gateway exchange identify missing WebUI AUTH_MODE:
+omitted returns 503, single_user returns 204 with two cookies. The corrected
+Compose setting, HTTP failure-line diagnostics, and failure-evidence retention
+are implemented; 47 lean release tests, shell/Compose validation, and production
+Bandit (zero findings) pass. Corrected both-platform smoke remains required.
+
 - Sections 5/10/11 and gates G2/G4/G10/G12 map to Tasks 1–8. Backend dependency slimming and complete storage inventory are WP2; native lifecycle and the single-source verifier packaging check are WP3; automatic update/backup/restore is WP4; guided heavy components and final public promotion are WP5.
 - Verify exact code symbols in the interface blocks when implementing each task; preserve existing quickstart/hosted paths and test both managed and legacy modes.
 - Do not claim G2/G4/G10/G12 complete until candidate artifacts pass the corresponding tests. This plan is executable work, not evidence that they already pass.
