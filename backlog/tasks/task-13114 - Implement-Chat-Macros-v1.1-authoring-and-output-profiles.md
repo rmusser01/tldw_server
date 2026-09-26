@@ -4,7 +4,7 @@ title: Implement Chat Macros v1.1 authoring and output profiles
 status: In Progress
 assignee: []
 created_date: 2026-08-24 04:15
-updated_date: 2026-09-26 00:32
+updated_date: 2026-09-26 00:59
 labels:
 - chat-macros
 - frontend
@@ -74,6 +74,7 @@ Heading follow-up verified: 16 new validation/legacy-read regressions failed bef
 2026-09-26 CI blocker investigation: backend-required run36162910088 failed only OpenAPI contract drift. Checked-in812c35ad has2098 paths/3211 schemas; CI7a9fc914 has2098 paths/3210 schemas. CI installs Pydantic2.13.5/pydantic-core2.46.5/pydantic-settings2.15.0/Starlette1.7.0; local shared venv uses Pydantic2.11.7/Starlette1.2.1. Regenerating in isolated temp dependency overlay matching CI and inspecting schema differences before snapshot update. Human Change summary received and published verbatim; merge gate satisfied on that requirement.
 Root cause confirmed: isolated CI dependency overlay reproduces CI fingerprint7a9fc91443c4cfca4e929fafb9c54cc5daab78d00cea3b1085011a39bc60e83e exactly. Schema diff has no changed paths or Chat Macros schemas; Pydantic2.13.5 combines equivalent OscePatientContext-Input/-Output into OscePatientContext, updating references in three OSCE models. Updating only generated fingerprint (types regenerated locally, gitignored). No backend behavior change or shared-venv modification.
 Fingerprint correction verification: regenerated OpenAPI JSON+TypeScript using CI-matched dependency overlay; a separate fresh exporter --check passes with expected7a9fc914 fingerprint. Package-wide bun run typecheck exits0; git diff --check passes. Only tracked changes are fingerprint and task record, no application code; prior security scan remains applicable.
+2026-09-26 rebased onto dev3f909e133b (ADR inventory documentation update), cleanly. git range-diff shows all24 PR commits patch-equivalent; application/frontend/helper trees are identical to prior da6c9dfa9e. New AGENTS ADR assessment requirement: ADR required:no new ADR; governed by Docs/ADR/003-jobs-vs-scheduler-default.md. This v1.1 authoring/profile UI and validation follow-up retains v1 per-user YAML storage, database records and Jobs ownership; no durable architecture decision changes. Recording same assessment in implementation plan and PR. Rechecking CI-matched OpenAPI contract before publication.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
