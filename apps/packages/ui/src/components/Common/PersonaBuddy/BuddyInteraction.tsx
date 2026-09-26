@@ -194,7 +194,8 @@ export const BuddyInteraction = ({
       if (pending) return
       pending = true
       try {
-        const state = await getBuddyAttachment()
+        const passiveReadOptions = { suppressBackendUnavailableEvent: true }
+        const state = await getBuddyAttachment(passiveReadOptions)
         if (!state.attachment || state.version !== attachmentVersion)
           throw new Error(
             label(
@@ -203,9 +204,9 @@ export const BuddyInteraction = ({
             )
           )
         const [results, activeTurns, updates] = await Promise.all([
-          listBuddyTurns({ pages: turnPages }),
-          listBuddyTurns({ status: "active" }),
-          listBuddyActivity({ conversationPages })
+          listBuddyTurns({ pages: turnPages }, passiveReadOptions),
+          listBuddyTurns({ status: "active" }, passiveReadOptions),
+          listBuddyActivity({ conversationPages }, passiveReadOptions)
         ])
         if (!active) return
         const ids = new Set(conversations.map((c) => c.id))

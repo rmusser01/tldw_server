@@ -9,13 +9,17 @@ from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeam
 from tldw_Server_API.app.core.AuthNZ.repos.storage_quotas_repo import AuthnzStorageQuotasRepo
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
+from tldw_Server_API.tests.MediaIngestion_NEW.integration.test_email_authenticated_access import (
+    authenticated_email as _authenticated_email,
+)
 from tldw_Server_API.tests.MediaIngestion_NEW.integration.test_email_offline_ingestion import (
     OFFLINE_OPTIONS,
     synthetic_message,
 )
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
-pytest_plugins = ["tldw_Server_API.tests.MediaIngestion_NEW.integration.test_email_authenticated_access"]
+# Register the shared fixture locally, including when its source module is also collected.
+authenticated_email = _authenticated_email
 
 
 async def _upload(env, key: str | None, number: int, *, headers: dict[str, str] | None = None):

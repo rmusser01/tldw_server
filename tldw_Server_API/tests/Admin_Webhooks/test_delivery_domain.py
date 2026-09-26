@@ -47,7 +47,7 @@ from tldw_Server_API.tests.Admin_Webhooks.test_repository_sqlite import (
     sqlite_repo,
 )
 
-pytest_plugins = ("tldw_Server_API.tests.AuthNZ.conftest",)
+pytest_plugins = ("tldw_Server_API.tests._plugins.authnz_full_fixtures",)
 
 NOW = datetime(2026, 8, 23, 12, 0, tzinfo=timezone.utc)
 API_VERSION = "2026-07-01"

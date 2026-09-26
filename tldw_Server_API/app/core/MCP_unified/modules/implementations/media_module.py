@@ -46,7 +46,6 @@ from ..disk_space import get_free_disk_space_gb
 MediaDbLike = Any
 
 _MEDIA_MODULE_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,
@@ -177,26 +176,23 @@ class MediaModule(BaseModule):
                 cur = self.db.execute_query("SELECT 1")
                 _ = cur.fetchone()
                 checks["database_connection"] = True
-            except _MEDIA_MODULE_NONCRITICAL_EXCEPTIONS as _db_e:
+            except (DatabaseError, *_MEDIA_MODULE_NONCRITICAL_EXCEPTIONS) as _db_e:
                 logger.debug(f"Media DB connection check failed: {_db_e}")
                 checks["database_connection"] = False
 
-            # Check if database is writable (use a test table or transaction)
-            # This is a simplified check - implement proper health check table
+            # Probe writes through the DB adapter with a key owned by this check.
             try:
-                # Use a short-lived transaction to avoid leaving artifacts
+                probe_key = uuid.uuid4().hex
                 with self.db.transaction():
                     self.db.execute_query("CREATE TABLE IF NOT EXISTS _mcp_healthcheck (k TEXT PRIMARY KEY, v TEXT)")
                     self.db.execute_query(
-                        "INSERT INTO _mcp_healthcheck(k, v) VALUES (?, ?) "
-                        "ON CONFLICT(k) DO UPDATE SET v = excluded.v",
-                        ("ping", datetime.utcnow().isoformat()),
+                        "INSERT INTO _mcp_healthcheck(k, v) VALUES (?, ?)",
+                        (probe_key, datetime.utcnow().isoformat()),
                     )
-                    # Best-effort cleanup to keep DB tidy (ignore errors for non-SQLite backends)
-                    with contextlib.suppress(_MEDIA_MODULE_NONCRITICAL_EXCEPTIONS):
-                        self.db.execute_query("DELETE FROM _mcp_healthcheck WHERE k = ?", ("ping",))
+                    # Cleanup must succeed too; otherwise roll back the probe.
+                    self.db.execute_query("DELETE FROM _mcp_healthcheck WHERE k = ?", (probe_key,))
                 checks["database_writable"] = True
-            except _MEDIA_MODULE_NONCRITICAL_EXCEPTIONS as _w_e:
+            except (DatabaseError, *_MEDIA_MODULE_NONCRITICAL_EXCEPTIONS) as _w_e:
                 logger.debug(f"Media DB writable check failed: {_w_e}")
                 checks["database_writable"] = False
 

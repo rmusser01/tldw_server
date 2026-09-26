@@ -2462,11 +2462,27 @@ class EvaluationsDatabase:
         }
         return RecipeRunRecord.model_validate(payload)
 
+    @staticmethod
+    def _utc_epoch(dt: datetime) -> int:
+        """Convert a datetime to a Unix epoch int, treating naive values as UTC.
+
+        Stored timestamps in this database are UTC: SQLite's CURRENT_TIMESTAMP emits
+        'YYYY-MM-DD HH:MM:SS' with no offset, and a driver may return a naive
+        datetime for a 'timestamp without time zone' column. Calling .timestamp()
+        directly on a naive value interprets it in the *host local* zone, which made
+        every converted value wrong by the host's UTC offset on any non-UTC
+        deployment. ADR-014 preserves these as OpenAI-compatible Unix `created`
+        values, so the error was a contract violation, not only a bug.
+        """
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return int(dt.timestamp())
+
     def _ensure_unix_timestamp(self, value: Any, *, fallback_now: bool = False) -> Optional[int]:
         """Convert various timestamp representations to a Unix epoch int.
 
         Supports:
-        - datetime instances (including tz-aware)
+        - datetime instances, tz-aware or naive (naive is interpreted as UTC)
         - numeric (int/float) epoch values
         - strings in ISO8601 (with optional 'Z') or '%Y-%m-%d %H:%M:%S'
         Returns None when unparsable unless fallback_now=True, in which case 'now'.
@@ -2482,7 +2498,7 @@ class EvaluationsDatabase:
         # datetime instance
         if isinstance(value, datetime):
             try:
-                return int(value.timestamp())
+                return self._utc_epoch(value)
             except _EVAL_DB_NONCRITICAL_EXCEPTIONS:
                 return int(datetime.now().timestamp()) if fallback_now else None
         # string inputs
@@ -2498,7 +2514,7 @@ class EvaluationsDatabase:
                 except ValueError:
                     # Try legacy SQLite format
                     dt = datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
-                return int(dt.timestamp())
+                return self._utc_epoch(dt)
             except _EVAL_DB_NONCRITICAL_EXCEPTIONS as e:
                 logger.debug(f"Failed to parse timestamp value: value={value!r}, error={e}")
                 return int(datetime.now().timestamp()) if fallback_now else None
@@ -2577,7 +2593,18 @@ class EvaluationsDatabase:
     ) -> tuple[str, list[Any]]:
         variants = self._user_id_variants(user_id)
         if not variants:
-            return query, params
+            if user_id is None:
+                # Explicit opt-out: the caller asked for an unscoped read. Kept
+                # because workers and admin paths legitimately span accounts.
+                return query, params
+            # A scope was intended and could not be applied. Returning the query
+            # unchanged here is how a blank or unparseable user id silently
+            # turned a scoped read -- or a delete -- into one over every
+            # account's rows.
+            raise ValueError(
+                f"user_id {user_id!r} yielded no filter variants; refusing to run "
+                f"an unscoped query on {field}. Pass None to opt out explicitly."
+            )
         if len(variants) == 1:
             query += f" AND {field} = ?"
             params.append(variants[0])

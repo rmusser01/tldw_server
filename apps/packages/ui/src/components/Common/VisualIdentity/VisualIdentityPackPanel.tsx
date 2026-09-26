@@ -128,8 +128,12 @@ export const VisualIdentityPackPanel: React.FC<VisualIdentityPackPanelProps> = (
     [packs, resolved?.pack_id]
   )
   const apiReady = hasVisualIdentityApi(client)
+  const metadataAuthoringSupported = capabilities?.metadata_supported !== false
   const canImportArchive =
-    apiReady && typeof client.startVisualIdentityZipImport === "function"
+    apiReady &&
+    capabilities !== null &&
+    metadataAuthoringSupported &&
+    typeof client.startVisualIdentityZipImport === "function"
 
   const buildAssetUrl = React.useCallback(
     (asset: VisualIdentityAssetResponse): string => {
@@ -148,19 +152,19 @@ export const VisualIdentityPackPanel: React.FC<VisualIdentityPackPanelProps> = (
     setLoading(true)
     setError(null)
     try {
-      const [nextCapabilities, nextSlots, nextResolved, nextPacks] =
-        await Promise.all([
-          client.getVisualIdentityCapabilities!(),
-          client.listVisualIdentityExpressionSlots!(),
-          client.resolveVisualIdentityBinding!({
-            actor_kind: actorKind,
-            actor_id: actorId,
-            expression_key: "neutral"
-          }),
-          typeof client.listVisualIdentityPacks === "function"
-            ? client.listVisualIdentityPacks({ status: "active" })
-            : Promise.resolve([])
-        ])
+      const nextCapabilities = await client.getVisualIdentityCapabilities!()
+      const [nextSlots, nextResolved, nextPacks] = await Promise.all([
+        client.listVisualIdentityExpressionSlots!(),
+        client.resolveVisualIdentityBinding!({
+          actor_kind: actorKind,
+          actor_id: actorId,
+          expression_key: "neutral"
+        }),
+        nextCapabilities.metadata_supported !== false &&
+        typeof client.listVisualIdentityPacks === "function"
+          ? client.listVisualIdentityPacks({ status: "active" })
+          : Promise.resolve([])
+      ])
       setCapabilities(nextCapabilities)
       setExpressionSlots(nextSlots)
       setResolved(nextResolved)
@@ -387,7 +391,12 @@ export const VisualIdentityPackPanel: React.FC<VisualIdentityPackPanelProps> = (
         </div>
       ) : null}
 
-      {draft ? (
+      {capabilities?.metadata_supported === false ? (
+        <div className="mt-3 rounded-md border border-border bg-bg px-3 py-3 text-xs text-text-muted">
+          Expression-pack authoring is unavailable on this server. Existing expression resolution
+          remains available.
+        </div>
+      ) : draft ? (
         <div className="mt-3">
           <VisualIdentityDraftReview
             actorKind={actorKind}

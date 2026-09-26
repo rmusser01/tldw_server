@@ -300,7 +300,16 @@ function finalSummaryInput(summaryInput, evidence, childrenClosed, runtimeDelete
   };
 }
 
-/** Finalize cleanup and retained evidence in the required fixed order. */
+/** Finalize cleanup and retained evidence in the required fixed order.
+ * @param {{
+ *   evidence?: ReturnType<typeof createSkillsCertificationEvidence>,
+ *   runtime?: {baseRoot: string, root: string, markerPath: string},
+ *   scanArtifacts?: typeof onboardingAssertNoSecretLeaks,
+ *   summaryInput?: Record<string, unknown>,
+ *   syntheticKey?: string,
+ *   teardownOutcome?: PromiseSettledResult<unknown>
+ * }} [options]
+ */
 export async function finalizeSkillsCertificationEvidence({
   evidence,
   runtime,

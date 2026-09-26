@@ -356,6 +356,7 @@ class SyncV2ProfileManager:
             )
         )
         dataset = self.store.get_or_create_default_personal_dataset(user_id)
+        self.service.prepare_notes_suggestion_authority(user_id=user_id, dataset=dataset)
         if organization_requested:
             dataset = self.store.begin_notes_organization_bootstrap(
                 dataset.dataset_id,
@@ -702,6 +703,8 @@ class SyncV2ProfileManager:
             or existing_state.get("authority_id") != authority_id
         ):
             raise PersonalContextBootstrapError("personal_context_authority_mismatch")
+        if self.service is not None:
+            self.service.prepare_notes_suggestion_authority(user_id=user_id, dataset=dataset)
         selected_store = store or self.store
         try:
             return selected_store.bind_personal_context_dataset(

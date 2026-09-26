@@ -99,9 +99,10 @@ regressions; all 55 exact roots and five scoped database/role/manifest targets,
 plus only the owned container/volume, are cleaned. The 27.87 failed HTTP and
 bounded profiling results remain historical; single-owner approval is unrecorded.
 
-Optional live Gmail, staging sync lag and enabled real PST/OST files remain
-unverified. Synthetic adapter tests and deterministic missing-parser errors are
-separate evidence. None of the optional live Gmail checks blocks core release.
+Optional live Gmail, staging sync lag and actual OST files remain unverified.
+TASK-13377 executes both native PST endpoint tests with a pinned public synthetic
+container; see `Docs/Operations/Email_Real_PST_Validation_2026-09-26.md`. Synthetic
+adapter tests and deterministic missing-parser errors are separate evidence. None of the optional live Gmail checks blocks core release.
 
 ## Summary
 
@@ -772,7 +773,7 @@ Should Tickets:
 - [x] `EMAIL-M3-006` Add attachment extraction policy toggles and MIME-specific defaults.
   Depends On: `EMAIL-M1-003`.
   Acceptance: Extraction behavior configurable and documented.
-  Validation (2026-09-26): TASK-13376.3 is implemented in `b880be1b53`. The FR-INGEST-005 contract, parser policy and persisted nested-child paths are included in the 328-pass core suite; two optional real-PST fixtures are skipped, with fake-adapter metadata-only behavior and missing-parser errors separately tested. See `Docs/API-related/Email_Attachment_Policy_13376.md` and `Docs/Operations/Email_Core_Closeout_Validation_2026-09-26.md`.
+  Validation (2026-09-26): TASK-13376.3 is implemented in `b880be1b53`. The FR-INGEST-005 contract, parser policy and persisted nested-child paths are included in the 328-pass core suite; two optional real-PST fixtures are skipped, with fake-adapter metadata-only behavior and missing-parser errors separately tested. See `Docs/API-related/Email_Attachment_Policy_13376.md` and `Docs/Operations/Email_Core_Closeout_Validation_2026-09-26.md`. TASK-13377 subsequently passes both native real-PST endpoint cases; provenance and limits are in `Docs/Operations/Email_Real_PST_Validation_2026-09-26.md`.
 
 Milestone Exit Gate:
 

@@ -555,5 +555,11 @@
     "minutesAgoShort": "{{count}}m siden",
     "hoursAgoShort": "{{count}}t siden",
     "daysAgoShort": "{{count}}d siden"
+  },
+  "help": {
+    "loadFailed": "Hjælpen kunne ikke indlæses. Opret forbindelse igen, gem dine ændringer, og genindlæs siden.",
+    "loading": "Indlæser hjælp…",
+    "confirmReload": "Genindlæs denne side? Ikke-gemte ændringer kan gå tabt.",
+    "reload": "Genindlæs siden"
   }
 }

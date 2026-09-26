@@ -31,7 +31,7 @@ env:
   SKIP_WXT_PREPARE: '1'
 
 concurrency:
-  group: frontend-e2e-tiers-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || github.ref || github.run_id }}
+  group: frontend-e2e-tiers-${{ github.event_name }}-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || github.ref || github.run_id }}
   cancel-in-progress: true
 
 jobs:

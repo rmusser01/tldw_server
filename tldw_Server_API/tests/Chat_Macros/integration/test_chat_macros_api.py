@@ -11,11 +11,6 @@ from fastapi.testclient import TestClient
 
 os.environ.setdefault("MINIMAL_TEST_APP", "1")
 os.environ.setdefault("TEST_MODE", "1")
-_routes_disable = {
-    part.strip() for part in str(os.environ.get("ROUTES_DISABLE", "")).split(",") if part and part.strip()
-}
-_routes_disable.update({"media", "audio", "audio-websocket"})
-os.environ["ROUTES_DISABLE"] = ",".join(sorted(_routes_disable))
 
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user

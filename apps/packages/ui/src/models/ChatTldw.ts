@@ -17,6 +17,7 @@ import { extractChatLoopEvent } from "@/services/chat-loop/stream"
 import { extractStreamTransportInterruption } from "@/utils/extract-token-from-chunk"
 import type { ChatRequestDebugMetadata } from "@/services/tldw/chat-request-debug"
 import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
+import { ImageSupportUnconfirmedError } from "@/utils/chat-error-message"
 
 export interface ChatTldwOptions {
   model: string
@@ -49,6 +50,9 @@ export interface ChatTldwOptions {
   researchContext?: ChatResearchContext
   chatDebugMetadata?: ChatRequestDebugMetadata
   requestScope?: ServicePromptRequestScope
+  retryFailedTurn?: boolean
+  clientMessageId?: string
+  regenerateFromMessageId?: string
 }
 
 export class ChatTldw {
@@ -67,6 +71,8 @@ export class ChatTldw {
   supportsMultimodal: boolean
   saveToDb?: boolean
   conversationId?: string
+  serverMessageId?: string
+  userServerMessageId?: string
   historyMessageLimit?: number
   historyMessageOrder?: string
   slashCommandInjectionMode?: string
@@ -76,6 +82,9 @@ export class ChatTldw {
   researchContext?: ChatResearchContext
   chatDebugMetadata?: ChatRequestDebugMetadata
   requestScope?: ServicePromptRequestScope
+  retryFailedTurn?: boolean
+  clientMessageId?: string
+  regenerateFromMessageId?: string
 
   constructor(options: ChatTldwOptions) {
     // Normalize model id: drop internal prefix like "tldw:" so server receives provider/model
@@ -103,6 +112,9 @@ export class ChatTldw {
     this.researchContext = options.researchContext
     this.chatDebugMetadata = options.chatDebugMetadata
     this.requestScope = options.requestScope
+    this.retryFailedTurn = options.retryFailedTurn
+    this.clientMessageId = options.clientMessageId
+    this.regenerateFromMessageId = options.regenerateFromMessageId
   }
 
   /**
@@ -122,6 +134,8 @@ export class ChatTldw {
     }
   ): Promise<AsyncGenerator<any, void, unknown>> {
     const { signal, callbacks } = options || {}
+    this.serverMessageId = undefined
+    this.userServerMessageId = undefined
 
     const tldwMessages = this.convertToTldwMessages(messages)
     const toolCalls: ToolCall[] = []
@@ -161,6 +175,7 @@ export class ChatTldw {
     }
 
     const handleChunk = (chunk: any) => {
+      if (signal?.aborted) return
       const streamedConversationId =
         typeof chunk?.tldw_conversation_id === "string" &&
         chunk.tldw_conversation_id.trim().length > 0
@@ -169,9 +184,20 @@ export class ChatTldw {
               chunk.conversation_id.trim().length > 0
             ? chunk.conversation_id.trim()
             : null
-      if (streamedConversationId) {
+      // Nonpersisted completions also carry a request-scoped conversation UUID.
+      // It must not turn local history into a link to a nonexistent server chat.
+      if (streamedConversationId && this.saveToDb !== false) {
         this.conversationId = streamedConversationId
         this.saveToDb = true
+      }
+      if (this.saveToDb !== false && typeof chunk?.tldw_message_id === "string") {
+        const savedMessageId = chunk.tldw_message_id.trim()
+        if (savedMessageId) this.serverMessageId = savedMessageId
+      }
+
+      if (this.saveToDb !== false && typeof chunk?.tldw_user_message_id === "string") {
+        const savedUserMessageId = chunk.tldw_user_message_id.trim()
+        if (savedUserMessageId) this.userServerMessageId = savedUserMessageId
       }
 
       const loopEvent = extractChatLoopEvent(chunk)
@@ -211,6 +237,9 @@ export class ChatTldw {
         toolChoice: this.toolChoice,
         tools: this.tools,
         saveToDb: this.saveToDb,
+        retryFailedTurn: this.retryFailedTurn,
+        clientMessageId: this.clientMessageId,
+        regenerateFromMessageId: this.regenerateFromMessageId,
         conversationId: this.conversationId,
         historyMessageLimit: this.historyMessageLimit,
         historyMessageOrder: this.historyMessageOrder,
@@ -290,6 +319,9 @@ export class ChatTldw {
       toolChoice: this.toolChoice,
       tools: this.tools,
       saveToDb: this.saveToDb,
+      retryFailedTurn: this.retryFailedTurn,
+      clientMessageId: this.clientMessageId,
+      regenerateFromMessageId: this.regenerateFromMessageId,
       conversationId: this.conversationId,
       historyMessageLimit: this.historyMessageLimit,
       historyMessageOrder: this.historyMessageOrder,
@@ -436,6 +468,13 @@ export class ChatTldw {
         }
       }
       if (msg instanceof HumanMessage) {
+        if (
+          !this.supportsMultimodal &&
+          Array.isArray(msg.content) &&
+          msg.content.some((part) => part?.type === "image_url")
+        ) {
+          throw new ImageSupportUnconfirmedError(this.retryFailedTurn === true)
+        }
         return {
           role: "user",
           content: this.supportsMultimodal

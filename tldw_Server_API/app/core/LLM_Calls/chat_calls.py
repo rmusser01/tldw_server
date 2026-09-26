@@ -114,26 +114,30 @@ def create_session_with_retries(
     status_forcelist: Optional[list[int]] = None,
     allowed_methods: Optional[list[str]] = None,
 ):
-    """Return a session object.
+    """Return a session facade for provider POSTs.
 
-    Provider POSTs are single-attempt until an idempotency contract exists.
-    - Under pytest, return the legacy session facade so tests can patch
-      `create_session_with_retries` directly.
-    - In production, return a shim that routes non-streaming POSTs through
-      the centralized HTTP client (egress policy, TLS pinning) and streaming
-      through the legacy session facade for iter_lines semantics.
+    Non-streaming POSTs go through the centralized HTTP client, which is what applies
+    egress policy and TLS pinning. Streaming delegates to the legacy session facade to
+    preserve ``iter_lines()`` semantics.
+
+    Args:
+        total: Accepted and ignored. Provider POSTs are single-attempt until an
+            idempotency contract exists, so no value here enables retries.
+        backoff_factor: Accepted and ignored, for the same reason.
+        status_forcelist: Accepted and ignored, for the same reason.
+        allowed_methods: Accepted and ignored, for the same reason.
+
+    All four exist only so callers written against the ``urllib3.Retry`` signature keep
+    working. ``_SessionShim`` pins ``RetryPolicy(attempts=1)`` regardless; a caller that
+    needs retries must establish idempotency first, not pass a number here.
+
+    Returns:
+        A ``_SessionShim``, always. This used to return the legacy facade instead
+        whenever ``PYTEST_CURRENT_TEST`` was set, which meant the object every production
+        call receives was never constructed by the test suite. Tests that need to control
+        the session monkeypatch this function directly, so that branch bought nothing the
+        seam did not already provide.
     """
-    import os as _os
-    if _os.getenv("PYTEST_CURRENT_TEST"):
-        log_runtime_deprecation(
-            "llm_chat_legacy_session",
-            message=(
-                "LLM chat used legacy session compatibility path under pytest runtime."
-            ),
-        )
-        return _legacy_create_session_with_retries(
-            total=1,
-        )
     return _SessionShim(
         total=total,
         backoff_factor=backoff_factor,

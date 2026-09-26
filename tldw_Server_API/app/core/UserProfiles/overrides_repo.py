@@ -13,7 +13,9 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
-from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import ensure_authnz_core_tables_pg
+from tldw_Server_API.app.core.AuthNZ.profile_candidate_schema import (
+    validate_postgres_profile_candidate_schema,
+)
 
 
 def _log_override_failure(repository: str, operation: str, exc: Exception) -> None:
@@ -24,22 +26,22 @@ def _log_override_failure(repository: str, operation: str, exc: Exception) -> No
     ).error("Profile override repository operation failed")
 
 
-async def _ensure_postgres_override_schema(db_pool: DatabasePool) -> None:
+async def _ensure_postgres_override_schema(db_pool: DatabasePool, db_conn: Any | None = None) -> None:
+    """Check bootstrap-owned metadata without DDL inside a profile request."""
     try:
-        ready = await ensure_authnz_core_tables_pg(db_pool)
+        # A profile command can already hold a users-table lock on its write
+        # connection. Re-running bootstrap DDL on another connection would wait
+        # for that same request to finish. Keep runtime readiness read-only.
+        if db_conn is not None:
+            await validate_postgres_profile_candidate_schema(db_conn)
+        else:
+            async with db_pool.acquire() as conn:
+                await validate_postgres_profile_candidate_schema(conn)
     except Exception as exc:  # noqa: BLE001
         logger.bind(exception_type=type(exc).__name__).error(
             "PostgreSQL AuthNZ profile override schema readiness failed"
         )
-        raise RuntimeError(
-            "PostgreSQL AuthNZ profile override schema readiness failed"
-        ) from None
-    if not ready:
-        logger.error("PostgreSQL AuthNZ profile override schema readiness failed")
-        raise RuntimeError(
-            "PostgreSQL AuthNZ profile override schema readiness failed"
-        )
-
+        raise RuntimeError("PostgreSQL AuthNZ profile override schema readiness failed") from None
 
 
 # Schema readiness already confirmed for a given pool, keyed by table name.
@@ -87,11 +89,11 @@ class UserProfileOverridesRepo:
 
     db_pool: DatabasePool
 
-    async def ensure_tables(self) -> None:
+    async def ensure_tables(self, *, db_conn: Any | None = None) -> None:
         """Ensure user_config_overrides schema exists."""
         try:
             if getattr(self.db_pool, "pool", None) is not None:
-                await _ensure_postgres_override_schema(self.db_pool)
+                await _ensure_postgres_override_schema(self.db_pool, db_conn)
                 return
 
             if _schema_already_verified(self.db_pool, "user_config_overrides"):

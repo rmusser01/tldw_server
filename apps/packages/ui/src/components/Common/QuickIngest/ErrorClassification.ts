@@ -92,11 +92,28 @@ const TIMEOUT_CATEGORY: ErrorCategory = {
 
 const UNKNOWN_CATEGORY: ErrorCategory = {
   classification: "unknown",
-  retryable: true,
-  badgeLabel: "Error \u00b7 Retryable",
+  retryable: false,
+  badgeLabel: "Error \u00b7 Review Details",
   badgeColor: "bg-gray-100 text-gray-800 dark:bg-gray-800/40 dark:text-gray-300",
   userMessage: "An unexpected error occurred.",
-  suggestion: "Try again or check the server logs.",
+  suggestion: "Check the error details or server logs before trying again.",
+}
+
+const EXTRACTION_CATEGORIES: Record<string, ErrorCategory> = {
+  source_access_denied: {
+    classification: "validation", retryable: false,
+    badgeLabel: "Access blocked", badgeColor: VALIDATION_CATEGORY.badgeColor,
+    userMessage: "The website or the server's outbound access policy blocked this source.",
+    suggestion: "Use an accessible source or upload a copy you are permitted to use.",
+  },
+  empty_extraction: {
+    classification: "validation", retryable: false,
+    badgeLabel: "No content", badgeColor: VALIDATION_CATEGORY.badgeColor,
+    userMessage: "No readable content was extracted from this source.",
+    suggestion: "Check the source content or upload a readable document.",
+  },
+  extraction_timeout: TIMEOUT_CATEGORY,
+  extraction_failed: UNKNOWN_CATEGORY,
 }
 
 /**
@@ -144,9 +161,24 @@ const PATTERN_TABLE: PatternEntry[] = [
  * Pattern matching follows `PATTERN_TABLE` order so timeout, job-limit, and
  * client-configuration errors win before broader auth, validation, server, and
  * network patterns.
- * If nothing matches, the error is classified as `"unknown"` (retryable).
+ * Confirmed extraction codes take precedence. Unknown or mixed extraction
+ * failures do not establish that retrying is useful.
  */
-export function classifyError(error: string | undefined): ErrorCategory {
+export function classifyError(error: string | undefined, data?: unknown): ErrorCategory {
+  const result = data && typeof data === "object" ? data as Record<string, unknown> : null
+  const payload = result?.result && typeof result.result === "object"
+    ? result.result as Record<string, unknown> : result
+  const failures = payload?.extraction_failures
+  if (Array.isArray(failures) && failures.length > 0) {
+    // Extraction metadata does not cover unrelated storage or processing errors.
+    if (Array.isArray(payload?.errors) && payload.errors.length !== failures.length) {
+      return UNKNOWN_CATEGORY
+    }
+    const codes = failures.map(failure => failure && typeof failure === "object" ? failure.code : null)
+    const code = codes[0]
+    return typeof code === "string" && Object.hasOwn(EXTRACTION_CATEGORIES, code) && codes.every(value => value === code)
+      ? EXTRACTION_CATEGORIES[code] : UNKNOWN_CATEGORY
+  }
   if (!error) return UNKNOWN_CATEGORY
 
   for (const entry of PATTERN_TABLE) {

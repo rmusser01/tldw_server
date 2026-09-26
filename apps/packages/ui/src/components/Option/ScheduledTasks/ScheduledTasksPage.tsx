@@ -321,7 +321,7 @@ export const ScheduledTasksPage: React.FC = () => {
 
   const tasksQuery = useQuery({
     queryKey: ["scheduled-tasks"],
-    queryFn: listScheduledTasks,
+    queryFn: () => listScheduledTasks(),
     enabled: scheduledTasksSupported === true
   })
   const automationCapabilitiesQuery = useQuery({

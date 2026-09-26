@@ -41,6 +41,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     get_rate_limiter_dep,
     get_request_user,
     rbac_rate_limit,
+    require_expected_user,
 )
 
 # Dependency to get user-specific ChaChaNotes_DB instance
@@ -225,7 +226,6 @@ from tldw_Server_API.app.core.Writing.note_title import TitleGenOptions, generat
 # Functions:
 
 _NOTES_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     AssertionError,
     AttributeError,
     ConnectionError,
@@ -2064,6 +2064,7 @@ async def notes_health() -> dict[str, Any]:
     response_model=NoteResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create a new note",
+    dependencies=[Depends(require_expected_user)],
     tags=["notes"]
 )
 async def create_note(
@@ -4712,6 +4713,7 @@ async def update_note_studio_diagram_endpoint(
     "/{note_id}",
     response_model=NoteResponse,
     summary="Get a specific note by ID",
+    dependencies=[Depends(require_expected_user)],
     tags=["notes"],
     responses={status.HTTP_404_NOT_FOUND: {"model": DetailResponse}}
 )
@@ -5982,6 +5984,7 @@ async def _search_keywords_impl(
     "/{note_id}",
     response_model=NoteResponse,
     summary="Update an existing note",
+    dependencies=[Depends(require_expected_user)],
     tags=["notes"],
     responses={
         status.HTTP_404_NOT_FOUND: {"model": DetailResponse},

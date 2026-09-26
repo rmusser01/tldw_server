@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import uuid
 from contextlib import suppress
 from datetime import datetime, timezone
-import uuid
 from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
@@ -16,7 +16,7 @@ class MediaFilesRepository:
         self.session = session
 
     @classmethod
-    def from_legacy_db(cls, db: MediaDbLike) -> "MediaFilesRepository":
+    def from_legacy_db(cls, db: MediaDbLike) -> MediaFilesRepository:
         return cls(session=db)
 
     def insert(
@@ -46,16 +46,16 @@ class MediaFilesRepository:
             "last_modified": now,
             "version": 1,
             "client_id": db.client_id,
-            "deleted": 0,
+            "deleted": False,
             "prev_version": None,
             "merge_parent_uuid": None,
         }
-        placeholders = ", ".join([f":{key}" for key in data])
+        placeholders = ", ".join("?" for _ in data)
         columns = ", ".join(data.keys())
         sql = f"INSERT INTO MediaFiles ({columns}) VALUES ({placeholders})"  # nosec B608
         try:
             with db.transaction() as conn:
-                db._execute_with_connection(conn, sql, data)
+                db._execute_with_connection(conn, sql, tuple(data.values()))
                 with suppress(Exception):
                     db._log_sync_event(
                         conn,
@@ -82,8 +82,8 @@ class MediaFilesRepository:
     ) -> dict[str, Any] | None:
         db = self.session
         conn = db.get_connection()
-        clauses: list[str] = ["media_id = :media_id", "file_type = :file_type"]
-        params: dict[str, Any] = {"media_id": media_id, "file_type": file_type}
+        clauses: list[str] = ["media_id = ?", "file_type = ?"]
+        params = (media_id, file_type)
         if not include_deleted:
             clauses.append("deleted = 0")
         where_sql = " AND ".join(clauses)
@@ -102,15 +102,15 @@ class MediaFilesRepository:
         include_deleted: bool = False,
     ) -> list[dict[str, Any]]:
         db = self.session
-        clauses: list[str] = ["media_id = :media_id"]
-        params: dict[str, Any] = {"media_id": media_id}
+        clauses: list[str] = ["media_id = ?"]
+        params = (media_id,)
         if not include_deleted:
             clauses.append("deleted = 0")
         where_sql = " AND ".join(clauses)
         sql = f"SELECT * FROM MediaFiles WHERE {where_sql} ORDER BY file_type, id"  # nosec B608
         try:
             # execute_query owns its connection, including when called from a worker.
-            return db.execute_query(sql, params).fetchall()
+            return [dict(row) for row in db.execute_query(sql, params).fetchall()]
         except Exception as exc:
             raise DatabaseError(f"Failed to list MediaFiles for media_id={media_id}: {exc}") from exc  # noqa: TRY003
 
@@ -123,7 +123,7 @@ class MediaFilesRepository:
         """
         rows = self.session.execute_query(
             """SELECT ref.id FROM MediaFiles AS ref
-               WHERE ref.storage_path = :storage_path
+               WHERE ref.storage_path = ?
                  AND (ref.file_type <> 'original' OR NOT EXISTS (
                      SELECT 1 FROM MediaFiles AS newer
                      WHERE newer.media_id = ref.media_id
@@ -131,7 +131,7 @@ class MediaFilesRepository:
                        AND newer.deleted = 0
                        AND newer.id > ref.id
                  ))""",
-            {"storage_path": storage_path},
+            (storage_path,),
         ).fetchall()
         return any(row["id"] not in excluded_file_ids for row in rows)
 
@@ -145,8 +145,8 @@ class MediaFilesRepository:
             with db.transaction() as conn:
                 rows = db._fetchall_with_connection(
                     conn,
-                    "SELECT uuid, version FROM MediaFiles WHERE id = :id",
-                    {"id": file_id},
+                    "SELECT uuid, version FROM MediaFiles WHERE id = ?",
+                    (file_id,),
                 )
                 if not rows:
                     return
@@ -156,7 +156,7 @@ class MediaFilesRepository:
                 new_version = current_version + 1
                 if hard_delete:
                     cursor = db._execute_with_connection(
-                        conn, "DELETE FROM MediaFiles WHERE id = :id", {"id": file_id},
+                        conn, "DELETE FROM MediaFiles WHERE id = ?", (file_id,),
                     )
                     if cursor.rowcount:
                         db._log_sync_event(
@@ -168,8 +168,8 @@ class MediaFilesRepository:
 
                 db._execute_with_connection(
                     conn,
-                    "UPDATE MediaFiles SET deleted = 1, version = :version, last_modified = :last_modified WHERE id = :id",
-                    {"id": file_id, "version": new_version, "last_modified": now},
+                    "UPDATE MediaFiles SET deleted = 1, version = ?, last_modified = ? WHERE id = ?",
+                    (new_version, now, file_id),
                 )
                 with suppress(Exception):
                     db._log_sync_event(
@@ -194,16 +194,16 @@ class MediaFilesRepository:
             with db.transaction() as conn:
                 rows = db._fetchall_with_connection(
                     conn,
-                    "SELECT id, uuid, version, deleted FROM MediaFiles WHERE media_id = :media_id",
-                    {"media_id": media_id},
+                    "SELECT id, uuid, version, deleted FROM MediaFiles WHERE media_id = ?",
+                    (media_id,),
                 )
                 if hard_delete:
                     if not rows:
                         return
                     db._execute_with_connection(
                         conn,
-                        "DELETE FROM MediaFiles WHERE media_id = :media_id",
-                        {"media_id": media_id},
+                        "DELETE FROM MediaFiles WHERE media_id = ?",
+                        (media_id,),
                     )
                     for row in rows:
                         file_uuid = row.get("uuid")
@@ -228,8 +228,8 @@ class MediaFilesRepository:
                     new_version = current_version + 1
                     db._execute_with_connection(
                         conn,
-                        "UPDATE MediaFiles SET deleted = 1, version = :version, last_modified = :last_modified WHERE uuid = :uuid",
-                        {"uuid": file_uuid, "version": new_version, "last_modified": now},
+                        "UPDATE MediaFiles SET deleted = 1, version = ?, last_modified = ? WHERE uuid = ?",
+                        (new_version, now, file_uuid),
                     )
                     with suppress(Exception):
                         db._log_sync_event(

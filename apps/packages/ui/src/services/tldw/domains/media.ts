@@ -380,8 +380,13 @@ export const mediaMethods = {
   async uploadMedia(
     file: File,
     fields?: Record<string, any>,
-    getConfig?: () => Promise<any>
+    getConfigOrOptions?: (() => Promise<any>) | { signal?: AbortSignal; requestScope?: ServicePromptRequestScope; assertCurrent?: () => void },
+    requestOptions?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope; assertCurrent?: () => void }
   ): Promise<any> {
+    const getConfig = typeof getConfigOrOptions === "function" ? getConfigOrOptions : undefined
+    const options = typeof getConfigOrOptions === "function" ? requestOptions : getConfigOrOptions ?? requestOptions
+    options?.signal?.throwIfAborted()
+    options?.assertCurrent?.()
     const data = await file.arrayBuffer()
     const name = file.name || 'upload'
     const type = file.type || 'application/octet-stream'
@@ -402,7 +407,11 @@ export const mediaMethods = {
       }
     }
     uploadTimeoutMs = Math.max(uploadTimeoutMs, 5000)
+    options?.signal?.throwIfAborted()
+    options?.assertCurrent?.()
     return await bgUpload<any>({
+      ...requestScopeFields(options?.requestScope),
+      abortSignal: options?.signal,
       path: '/api/v1/media/add',
       method: 'POST',
       fields: normalized,
@@ -418,10 +427,11 @@ export const mediaMethods = {
       results_per_page?: number
       include_keywords?: boolean
     },
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<any> {
     const query = buildQuery(params as Record<string, any>)
     return await bgRequest<any>({
+      ...requestScopeFields(options?.requestScope),
       path: `/api/v1/media${query}`,
       method: "GET",
       abortSignal: options?.signal
@@ -452,7 +462,7 @@ export const mediaMethods = {
       boost_fields?: Record<string, number>
     },
     params?: { page?: number; results_per_page?: number },
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<any> {
     const query = buildQuery(params as Record<string, any>)
     return await bgRequest<any>({
@@ -460,6 +470,7 @@ export const mediaMethods = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: payload,
+      ...requestScopeFields(options?.requestScope),
       abortSignal: options?.signal
     })
   },
@@ -666,6 +677,7 @@ export const mediaMethods = {
       include_content?: boolean
       include_versions?: boolean
       include_version_content?: boolean
+      requestScope?: ServicePromptRequestScope
       signal?: AbortSignal
       suppressBackendUnavailableEvent?: boolean
     }
@@ -679,6 +691,7 @@ export const mediaMethods = {
     return await bgRequest<any>({
       path: `/api/v1/media/${id}${query}`,
       method: "GET",
+      ...requestScopeFields(options?.requestScope),
       abortSignal: options?.signal,
       suppressBackendUnavailableEvent: options?.suppressBackendUnavailableEvent
     })

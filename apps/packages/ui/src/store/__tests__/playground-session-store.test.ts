@@ -31,4 +31,21 @@ describe("playground-session-store", () => {
       false
     )
   })
+
+  it("records each accepted source intent without resetting its revision on session clear", () => {
+    const initial = usePlaygroundSessionStore.getState().sourceSelectionRevision
+    usePlaygroundSessionStore.getState().markSourceSelectionIntent()
+    usePlaygroundSessionStore.getState().markSourceSelectionIntent()
+    usePlaygroundSessionStore.getState().clearSession()
+    expect(usePlaygroundSessionStore.getState().sourceSelectionRevision).toBe(initial + 2)
+  })
+
+  it("keeps source intent revision out of the persisted session payload", () => {
+    usePlaygroundSessionStore.getState().markSourceSelectionIntent()
+    usePlaygroundSessionStore.getState().saveSession({ scopeKey: "scope:a", ragMediaIds: [42] })
+    const saved = JSON.parse(localStorage.getItem("tldw-playground-session")!)
+    expect(saved.state.ragMediaIds).toEqual([42])
+    expect(saved.state).not.toHaveProperty("sourceSelectionRevision")
+    expect(saved.state).not.toHaveProperty("markSourceSelectionIntent")
+  })
 })

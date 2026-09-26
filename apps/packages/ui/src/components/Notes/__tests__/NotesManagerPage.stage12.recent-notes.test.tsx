@@ -1,11 +1,11 @@
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
 
 vi.mock("@/components/Notes/hooks/useNotesGraphAuthorityScope", () => ({
-  useNotesGraphAuthorityScope: () => "test-notes-authority"
+  useNotesGraphAuthorityScope: () => mockAuthority.value
 }))
 
 const {
@@ -18,7 +18,8 @@ const {
   mockConfirmDanger,
   mockGetSetting,
   mockSetSetting,
-  mockClearSetting
+  mockClearSetting,
+  mockAuthority
 } = vi.hoisted(() => {
   return {
     mockBgRequest: vi.fn(),
@@ -30,7 +31,8 @@ const {
     mockConfirmDanger: vi.fn(),
     mockGetSetting: vi.fn(),
     mockSetSetting: vi.fn(),
-    mockClearSetting: vi.fn()
+    mockClearSetting: vi.fn(),
+    mockAuthority: { value: "alice" as string | null }
   }
 })
 
@@ -163,16 +165,15 @@ const renderPage = () => {
       mutations: { retry: false }
     }
   })
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <NotesManagerPage />
-    </QueryClientProvider>
-  )
+  return render(<NotesManagerPage />, {
+    wrapper: ({ children }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  })
 }
 
 describe("NotesManagerPage stage 12 recent notes", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockAuthority.value = "alice"
     mockConfirmDanger.mockResolvedValue(true)
     mockGetSetting.mockResolvedValue(null)
     mockSetSetting.mockResolvedValue(undefined)
@@ -234,7 +235,7 @@ describe("NotesManagerPage stage 12 recent notes", () => {
     })
 
     const persistedCall = mockSetSetting.mock.calls
-      .filter(([setting]) => setting?.key === "tldw:notesRecentOpened")
+      .filter(([setting]) => setting?.key === "tldw:notesRecentOpened:alice")
       .at(-1)
     expect(persistedCall).toBeTruthy()
     expect(persistedCall?.[1]?.[0]?.id).toBe("n2")
@@ -253,7 +254,7 @@ describe("NotesManagerPage stage 12 recent notes", () => {
     })
     await waitFor(() => {
       expect(mockSetSetting).toHaveBeenCalledWith(
-        expect.objectContaining({ key: "tldw:notesRecentOpened" }),
+        expect.objectContaining({ key: "tldw:notesRecentOpened:alice" }),
         expect.arrayContaining([expect.objectContaining({ id: "n1" })])
       )
     })
@@ -262,7 +263,7 @@ describe("NotesManagerPage stage 12 recent notes", () => {
 
   it("loads persisted recent notes and keeps in-note search guidance visible", async () => {
     mockGetSetting.mockImplementation(async (setting: { key?: string }) => {
-      if (setting?.key === "tldw:notesRecentOpened") {
+      if (setting?.key === "tldw:notesRecentOpened:alice") {
         return [{ id: "seed-note", title: "Seeded recent note" }]
       }
       return null
@@ -276,5 +277,67 @@ describe("NotesManagerPage stage 12 recent notes", () => {
     expect(screen.getByTestId("notes-in-note-search-guidance")).toHaveTextContent(
       "For in-note search, use browser Ctrl/Cmd+F."
     )
+  })
+
+  it("hides Alice's recent notes when authority changes and restores only Bob's history", async () => {
+    mockGetSetting.mockImplementation(async (setting: { key?: string }) => {
+      if (setting.key === "tldw:notesRecentOpened:bob") {
+        return [{ id: "bob-note", title: "Bob private note" }]
+      }
+      return null
+    })
+    const view = renderPage()
+    fireEvent.click(await screen.findByTestId("mock-note-n1"))
+    expect(await screen.findByTestId("notes-recent-item-n1")).toHaveTextContent("Alpha note")
+    mockAuthority.value = null
+    view.rerender(<NotesManagerPage />)
+    expect(screen.queryByTestId("notes-recent-item-n1")).not.toBeInTheDocument()
+    mockAuthority.value = "bob"
+    view.rerender(<NotesManagerPage />)
+    expect(await screen.findByTestId("notes-recent-item-bob-note")).toHaveTextContent("Bob private note")
+    expect(screen.queryByTestId("notes-recent-item-n1")).not.toBeInTheDocument()
+  })
+
+  it("does not hydrate legacy browser-wide history into a newly signed-in account", async () => {
+    mockAuthority.value = "bob"
+    mockGetSetting.mockImplementation(async (setting: { key?: string }) =>
+      setting.key === "tldw:notesRecentOpened"
+        ? [{ id: "alice-secret", title: "Alice private title" }]
+        : []
+    )
+    renderPage()
+    await screen.findByTestId("notes-list-panel")
+    await act(async () => {})
+    expect(screen.queryByText("Alice private title")).not.toBeInTheDocument()
+  })
+
+  it("ignores a pending Alice history read after signing in as Bob", async () => {
+    let resolveAlice!: (value: unknown) => void
+    const aliceRead = new Promise((resolve) => { resolveAlice = resolve })
+    mockGetSetting.mockImplementation(async (setting: { key?: string }) => {
+      if (setting.key === "tldw:notesRecentOpened:alice") return aliceRead
+      if (setting.key === "tldw:notesRecentOpened:bob") return [{ id: "bob-note", title: "Bob private note" }]
+      return []
+    })
+    const view = renderPage()
+    mockAuthority.value = "bob"
+    view.rerender(<NotesManagerPage />)
+    await screen.findByTestId("notes-recent-item-bob-note")
+    await act(async () => resolveAlice([{ id: "alice-secret", title: "Alice private title" }]))
+    expect(screen.queryByText("Alice private title")).not.toBeInTheDocument()
+    expect(screen.getByTestId("notes-recent-item-bob-note")).toBeInTheDocument()
+  })
+
+  it("identifies a loaded Chat-derived note from its persisted conversation backlink", async () => {
+    const request = mockBgRequest.getMockImplementation()!
+    mockBgRequest.mockImplementation(async (input) => {
+      const response = await request(input)
+      return input.path === "/api/v1/notes/n1"
+        ? { ...response, metadata: { conversation_id: "conversation-1", message_id: "message-1" } }
+        : response
+    })
+    renderPage()
+    fireEvent.click(await screen.findByTestId("mock-note-n1"))
+    await waitFor(() => expect(screen.getByTestId("notes-editor-provenance")).toHaveTextContent("Origin: Saved from Chat"))
   })
 })

@@ -45,7 +45,7 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-from tldw_Server_API.app.core.DB_Management.scope_context import set_scope
+from tldw_Server_API.app.core.DB_Management.scope_context import ScopeContext, get_scope, set_scope
 from tldw_Server_API.app.core.exceptions import InactiveUserError
 from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode, is_truthy
 
@@ -1466,6 +1466,48 @@ def _warn_single_user_context_mismatch(
         )
 
 
+def activate_authenticated_content_scope(
+    principal: AuthPrincipal, *, request: Request | None = None
+) -> None:
+    """Restore content authority from the canonical authenticated user claims.
+
+    Keep an already matching scope (including its database session role). Never
+    carry a session role or stale memberships across a changed authority scope.
+    A validated request-local organization selection may narrow the canonical
+    scope. Raw request selectors and selections from changed claims are ignored.
+    Service and anonymous principals have no authenticated content owner.
+    """
+    if principal.kind not in {"user", "api_key"} or principal.user_id is None:
+        return
+    authority = {
+        "user_id": principal.user_id,
+        "org_ids": principal.org_ids,
+        "team_ids": principal.team_ids,
+        "active_org_id": principal.active_org_id,
+        "active_team_id": principal.active_team_id,
+        "is_admin": principal.is_admin,
+    }
+    selection = getattr(request.state, "_validated_content_scope", None) if request is not None else None
+    if (
+        isinstance(selection, tuple)
+        and len(selection) == 2
+        and selection[0] == principal
+        and isinstance(selection[1], ScopeContext)
+    ):
+        selected_scope = selection[1]
+        authority.update(
+            active_org_id=selected_scope.active_org_id,
+            team_ids=selected_scope.team_ids,
+            active_team_id=selected_scope.active_team_id,
+        )
+    scope = get_scope()
+    if scope is not None and all(
+        getattr(scope, field) == value for field, value in authority.items()
+    ):
+        return
+    set_scope(**authority)
+
+
 async def get_request_user(
     request: Request,
     api_key: Optional[str] = Header(None, alias="X-API-KEY"),
@@ -1530,6 +1572,7 @@ async def get_request_user(
         cached_user = getattr(request.state, "_auth_user", None)
         if isinstance(existing_ctx, AuthContext) and isinstance(cached_user, User):
             logger.debug("get_request_user: Reusing cached AuthPrincipal/_auth_user from request.state.")
+            activate_authenticated_content_scope(existing_ctx.principal, request=request)
             return cached_user
     except _USER_DB_NONCRITICAL_EXCEPTIONS as fastpath_exc:
         # Fall through to normal auth paths on any issues, but make failures observable.

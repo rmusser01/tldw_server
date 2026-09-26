@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { deriveSingleUserApiKeyCredentialScope } from "@/services/chat-surface-scope"
 
 const mocks = vi.hoisted(() => ({
@@ -39,6 +39,10 @@ vi.mock("@/services/tldw/request-core", async () => {
 })
 
 vi.mock("@/utils/safe-storage", () => ({
+  safeStorageSerde: {
+    serializer: JSON.stringify,
+    deserializer: (value: unknown) => value
+  },
   createSafeStorage: (options?: { area?: string }) => ({
     get: async (...args: unknown[]) =>
       await (options?.area === "session"
@@ -77,6 +81,234 @@ describe("background proxy fallback safety", () => {
     mocks.sessionStorageGet.mockResolvedValue(null)
     mocks.storageSet.mockResolvedValue(undefined)
     mocks.storageRemove.mockResolvedValue(undefined)
+  })
+
+  describe("failed Chat completion transport", () => {
+    afterEach(() => {
+      vi.restoreAllMocks()
+    })
+
+    const request = {
+      model: "auto",
+      messages: [{ role: "user" as const, content: "hello" }]
+    }
+    const config = {
+      serverUrl: "http://127.0.0.1:19999",
+      authMode: "single-user",
+      credentialSource: "manual",
+      apiKeyPersistence: "device",
+      apiKeyServerOrigin: "http://127.0.0.1:19999",
+      apiKey: "synthetic-test-key"
+    }
+
+    // Keep the client, proxy and response parser real; replace only storage,
+    // extension messaging and the HTTP boundary. No server is contacted.
+    const setupTransport = async (
+      transport: "direct" | "extension",
+      data: unknown,
+      status: number
+    ) => {
+      mocks.runtimeId = transport === "direct" ? null : "test-extension"
+      mocks.storageGet.mockImplementation(async (key) =>
+        key === "tldwConfig" ? config : null
+      )
+      const actual = await vi.importActual<typeof import("@/services/tldw/request-core")>(
+        "@/services/tldw/request-core"
+      )
+      const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(data), {
+        status,
+        headers: { "content-type": "application/json", "retry-after": "12" }
+      }))
+      vi.stubGlobal("fetch", fetchMock)
+      mocks.tldwRequest.mockImplementation(actual.tldwRequest)
+      mocks.sendMessage.mockImplementation(async ({ payload }) =>
+        actual.tldwRequest(payload, { getConfig: async () => config })
+      )
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+      const { TldwApiClient } = await import("@/services/tldw/TldwApiClient")
+      const { bgRequest } = await importProxy()
+      return { client: new TldwApiClient(), bgRequest, fetchMock, warn }
+    }
+
+    it.each(["direct", "extension"] as const)(
+      "redacts genuine %s non-2xx errors before rejection, warnings and stored diagnostics",
+      async (transport) => {
+        const { client, fetchMock, warn } = await setupTransport(transport, {
+          detail: "Provider unavailable at /Users/private/stack.txt. Try another model.",
+          traceback: "Traceback: private implementation",
+          nested: { messages: ["Cannot read /etc/provider.conf"], attempt: 2 }
+        }, 500)
+        try {
+          const error = await client.createChatCompletion(request).catch((failure) => failure)
+          expect(error).toMatchObject({
+            status: 500,
+            message: expect.stringContaining("Try another model"),
+            retryAfterMs: 12_000,
+            details: {
+              detail: "Provider unavailable at [redacted-path] Try another model.",
+              traceback: "[REDACTED]",
+              nested: { messages: ["Cannot read [redacted-path]"], attempt: 2 }
+            }
+          })
+          expect(error.message).not.toContain("/Users/private")
+          expect(warn.mock.calls.flat().join(" ")).not.toContain("/Users/private")
+          const diagnostic = mocks.storageSet.mock.calls.find(
+            ([key]) => key === "__tldwLastRequestError"
+          )?.[1]
+          expect(diagnostic).toMatchObject({
+            status: 500,
+            source: transport === "direct" ? "direct" : "background",
+            error: expect.stringContaining("Try another model")
+          })
+          expect(JSON.stringify(diagnostic)).not.toContain("/Users/private")
+          expect(fetchMock).toHaveBeenCalledTimes(1)
+          expect(fetchMock.mock.calls[0]?.[0]).toBe(
+            "http://127.0.0.1:19999/api/v1/chat/completions"
+          )
+          if (transport === "extension") expect(mocks.tldwRequest).not.toHaveBeenCalled()
+        } finally {
+          vi.unstubAllGlobals()
+        }
+      }
+    )
+
+    it.each(["direct", "extension"] as const)(
+      "sanitizes %s returnResponse details while preserving actionable validation and retry metadata",
+      async (transport) => {
+        const { bgRequest, fetchMock } = await setupTransport(transport, {
+          detail: [{ loc: ["body", "model"], msg: "Choose a supported model", type: "value_error" }],
+          context: { message: "Config at /home/private/provider.json", attempts: 3 },
+          traceback: "Traceback: /Users/private/stack.txt"
+        }, 422)
+        try {
+          const result = await bgRequest({
+            path: "/api/v1/chat/completions",
+            method: "POST",
+            body: request,
+            returnResponse: true
+          })
+          expect(result).toMatchObject({
+            ok: false,
+            status: 422,
+            error: "Choose a supported model",
+            headers: { "retry-after": "12" },
+            retryAfterMs: 12_000,
+            data: {
+              detail: [{ loc: ["body", "model"], msg: "Choose a supported model", type: "value_error" }],
+              context: { message: "Config at [redacted-path]", attempts: 3 },
+              traceback: "[REDACTED]"
+            }
+          })
+          expect(fetchMock).toHaveBeenCalledTimes(1)
+        } finally {
+          vi.unstubAllGlobals()
+        }
+      }
+    )
+
+    it.each(["direct", "extension"] as const)(
+      "preserves successful %s assistant content including paths, code and error-like text",
+      async (transport) => {
+        const data = {
+          choices: [{ message: { role: "assistant", content: "Error example:\n`cat /Users/private/stack.txt`\nKeep every byte." } }],
+          error: "Example error at /etc/config",
+          details: { traceback: "Example traceback", code: "example" }
+        }
+        const { client, warn } = await setupTransport(transport, data, 200)
+        try {
+          const response = await client.createChatCompletion(request)
+          expect(await response.json()).toEqual(data)
+          expect(warn).not.toHaveBeenCalled()
+          expect(mocks.storageSet.mock.calls.some(([key]) => key === "__tldwLastRequestError")).toBe(false)
+        } finally {
+          vi.unstubAllGlobals()
+        }
+      }
+    )
+
+    it.each(["direct", "extension"] as const)(
+      "preserves %s cancellation identity without logging or retrying",
+      async (transport) => {
+        const { bgRequest, warn, fetchMock } = await setupTransport(transport, {}, 200)
+        const failure = {
+          ok: false,
+          status: 0,
+          code: "REQUEST_ABORTED",
+          error: "Request stopped at /Users/private/request.txt"
+        }
+        mocks.tldwRequest.mockResolvedValue(failure)
+        mocks.sendMessage.mockResolvedValue(failure)
+        try {
+          await expect(bgRequest({
+            path: "/api/v1/chat/completions",
+            method: "POST",
+            body: request
+          })).rejects.toMatchObject({ name: "AbortError", status: 0, code: "REQUEST_ABORTED" })
+          expect(warn).not.toHaveBeenCalled()
+          expect(mocks.storageSet.mock.calls.some(([key]) => key === "__tldwLastRequestError")).toBe(false)
+          expect(fetchMock).not.toHaveBeenCalled()
+        } finally {
+          vi.unstubAllGlobals()
+        }
+      }
+    )
+
+    it("preserves failure codes and retry metadata in extension returnResponse", async () => {
+      const { bgRequest } = await setupTransport("extension", {}, 200)
+      mocks.sendMessage.mockResolvedValue({
+        ok: false, status: 429, code: "RATE_LIMITED",
+        error: "Wait before retrying /private/provider.log",
+        headers: { "retry-after": "12" }, retryAfterMs: 12_000
+      })
+      try {
+        expect(await bgRequest({ path: "/api/v1/chat/completions", method: "POST", returnResponse: true }))
+          .toMatchObject({
+            ok: false, status: 429, code: "RATE_LIMITED",
+            error: "Wait before retrying [redacted-path]",
+            headers: { "retry-after": "12" }, retryAfterMs: 12_000
+          })
+      } finally {
+        vi.unstubAllGlobals()
+      }
+    })
+
+    it.each(["direct", "extension"] as const)(
+      "retains %s text-only cancellation classification before shortening error text",
+      async (transport) => {
+        const { bgRequest, warn, fetchMock } = await setupTransport(
+          transport, { detail: "Provider\nrequest aborted." }, 499
+        )
+        try {
+          const init = { path: "/api/v1/chat/completions" as const, method: "POST" as const, body: request }
+          await expect(bgRequest(init)).rejects.toMatchObject({
+            name: "AbortError", code: "REQUEST_ABORTED", status: 499
+          })
+          const response = await bgRequest({ ...init, returnResponse: true })
+          const { isExplicitRequestCancellation } = await import("@/services/request-events")
+          expect(isExplicitRequestCancellation(response.error)).toBe(true)
+          expect(response.status).toBe(499)
+          expect(warn).not.toHaveBeenCalled()
+          expect(mocks.storageSet.mock.calls.some(([key]) => key === "__tldwLastRequestError")).toBe(false)
+          expect(fetchMock).toHaveBeenCalledTimes(2)
+        } finally {
+          vi.unstubAllGlobals()
+        }
+      }
+    )
+
+    it.each([
+      { path: "/api/v1/chat/completions", method: "GET" },
+      { path: "/api/v1/chat/completions/other", method: "POST" },
+      { path: "/api/v1/chats/", method: "POST" }
+    ])("retains existing error behavior for $method $path", async ({ path, method }) => {
+      const { bgRequest } = await setupTransport("direct", { detail: "Config at /Users/private/provider.txt" }, 500)
+      try {
+        await expect(bgRequest({ path: path as `/${string}`, method: method as "GET" | "POST" }))
+          .rejects.toThrow("Config at /Users/private/provider.txt")
+      } finally {
+        vi.unstubAllGlobals()
+      }
+    })
   })
 
   it("does not fall back to direct request when background returns non-2xx", async () => {
@@ -2617,6 +2849,81 @@ describe("background proxy fallback safety", () => {
       expect(fetchSpy).not.toHaveBeenCalled()
     } finally {
       vi.useRealTimers()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it("bounds direct stream response acquisition before any headers arrive", async () => {
+    vi.useFakeTimers()
+    mocks.runtimeId = null
+    mocks.storageGet.mockImplementation(async (key: string) => key === "tldwConfig" ? {
+      serverUrl: "http://127.0.0.1:19999", authMode: "single-user", apiKey: "synthetic-test-key",
+      credentialSource: "manual", apiKeyPersistence: "device", apiKeyServerOrigin: "http://127.0.0.1:19999"
+    } : null)
+    const requestState: { signal: AbortSignal | null } = { signal: null }
+    const fetchSpy = vi.fn((_input: unknown, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      requestState.signal = init!.signal!
+      requestState.signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true })
+    }))
+    vi.stubGlobal("fetch", fetchSpy)
+    const caller = new AbortController()
+    try {
+      const { bgStream } = await importProxy()
+      const consume = async () => {
+        for await (const chunk of bgStream({
+          path: "/api/v1/rag/search/stream", method: "POST", body: { query: "Cedar" },
+          streamIdleTimeoutMs: 50, abortSignal: caller.signal, sanitizeRagProviderStreamError: true
+        })) { void chunk }
+      }
+      const handled = consume().catch((error: Error) => error)
+      await vi.advanceTimersByTimeAsync(51)
+      const timedOut = requestState.signal?.aborted
+      // Baseline cleanup must also terminate the deliberately unanswered fetch.
+      if (!timedOut) caller.abort()
+      const error = await handled
+      expect(timedOut).toBe(true)
+      expect(error).toMatchObject({ message: expect.stringMatching(/timed out/i) })
+      expect(fetchSpy).toHaveBeenCalledTimes(1)
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it.each(["idle", "caller"] as const)("owns errored-body cancellation after %s abort", async (cause) => {
+    mocks.runtimeId = null
+    mocks.storageGet.mockImplementation(async (key: string) => key === "tldwConfig" ? {
+      serverUrl: "http://127.0.0.1:19999", authMode: "single-user", apiKey: "synthetic-test-key",
+      credentialSource: "manual", apiKeyPersistence: "device", apiKeyServerOrigin: "http://127.0.0.1:19999"
+    } : null)
+    const unhandled: unknown[] = []
+    const observe = (reason: unknown) => { unhandled.push(reason) }
+    process.on("unhandledRejection", observe)
+    const caller = new AbortController()
+    let bodyStarted!: () => void
+    const started = new Promise<void>((resolve) => { bodyStarted = resolve })
+    const fetchSpy = vi.fn(async (_input: unknown, init?: RequestInit) => new Response(new ReadableStream({
+      start(controller) {
+        init!.signal!.addEventListener("abort", () => controller.error(new DOMException("BodyStreamBuffer was aborted", "AbortError")), { once: true })
+        bodyStarted()
+      }
+    }), { status: 200, headers: { "Content-Type": "text/event-stream" } }))
+    vi.stubGlobal("fetch", fetchSpy)
+    try {
+      const { bgStream } = await importProxy()
+      const consume = async () => { for await (const chunk of bgStream({ path: "/api/v1/rag/search/stream", method: "POST", body: { query: "Cedar" }, streamIdleTimeoutMs: cause === "idle" ? 10 : 1000, abortSignal: caller.signal, sanitizeRagProviderStreamError: true })) { void chunk } }
+      const handled = consume().catch((error: Error) => error)
+      await started
+      if (cause === "caller") caller.abort()
+      const error = await handled
+      if (cause === "idle") expect(error).toMatchObject({ message: expect.stringMatching(/timed out/i) })
+      else expect(error).toMatchObject({ name: "AbortError" })
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(unhandled).toEqual([])
+      expect(fetchSpy).toHaveBeenCalledTimes(1)
+    } finally {
+      process.off("unhandledRejection", observe)
       vi.unstubAllGlobals()
     }
   })

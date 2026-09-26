@@ -591,6 +591,10 @@
     "daysAgoShort": "{{count}}d ago"
   },
   "help": {
+    "loadFailed": "Help could not be loaded. Reconnect, save any edits, then reload the page.",
+    "loading": "Loading help…",
+    "confirmReload": "Reload this page? Unsaved edits may be lost.",
+    "reload": "Reload page",
     "pageHelp": "Page Help",
     "tutorials": "Tutorials",
     "shortcuts": "Shortcuts",

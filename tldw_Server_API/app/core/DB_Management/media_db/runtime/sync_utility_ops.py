@@ -100,12 +100,13 @@ def _log_sync_event(
                 (entity, entity_uuid, operation, current_time, client_id, version, scope_org_id, scope_team_id, payload_json),
             )
         else:
+            identity = "entity_id" if getattr(self, "_sync_entity_column", None) == "entity_id" else "entity_uuid"
             self._execute_with_connection(
                 conn,
-                """
-                INSERT INTO sync_log (entity, entity_uuid, operation, timestamp, client_id, version, org_id, team_id, payload)
+                f"""
+                INSERT INTO sync_log (entity, {identity}, operation, timestamp, client_id, version, org_id, team_id, payload)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
+                """,  # nosec B608 -- identity is selected from two fixed names; all values remain bound.
                 (entity, entity_uuid, operation, current_time, client_id, version, scope_org_id, scope_team_id, payload_json),
             )
         logging.debug(

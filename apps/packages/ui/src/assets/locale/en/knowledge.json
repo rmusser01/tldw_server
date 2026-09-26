@@ -198,6 +198,25 @@
     "sourcesHelp": "Leave empty to search all sources",
     "openFullSettings": "Open full RAG settings"
   },
+  "answerPanel": {
+    "loading": "Working on your question...",
+    "modelReadiness": "Response time depends on your sources and model readiness."
+  },
+  "answerWorkspace": {
+    "cancelled": "Search cancelled",
+    "cancelledAnnouncement": "Search cancelled. You can ask again when ready.",
+    "retainedSources": "Retrieved sources are still available."
+  },
+  "trustSummary": {
+    "selectedSources": "selected sources",
+    "sourcePair": "{{first}} and {{last}}",
+    "sourceList": "{{first}}, and {{last}}",
+    "sourceSeparator": ", ",
+    "unavailable": "Could not search {{sources}}.",
+    "partialFailure": "Some searches failed for {{sources}}.",
+    "searched": "Searched {{sources}}. {count, plural, one {# source returned} other {# sources returned}}, {{citationCount}} cited.",
+    "unsearched": "No selected sources were searched. {count, plural, one {# source returned} other {# sources returned}}, {{citationCount}} cited."
+  },
   "chat": {
     "title": "Ask about this source",
     "untitledSource": "Selected source",

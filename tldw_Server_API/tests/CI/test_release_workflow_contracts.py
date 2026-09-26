@@ -52,21 +52,32 @@ def test_publish_docker_release_workflow_targets_ghcr_only() -> None:
 
 
 @pytest.mark.unit
-def test_publish_pypi_workflow_installs_portaudio_before_dev_dependencies() -> None:
-    """PyPI release tests must install PortAudio before installing dev extras."""
+def test_publish_pypi_workflow_runs_targeted_release_contract_gate() -> None:
+    """PyPI release gating must avoid running the full backend test suite.
+
+    Returns:
+        None. The pytest assertions encode the release workflow contract.
+    """
     workflow = _load(".github/workflows/publish-pypi.yml")
     on = _workflow_on(workflow)
-    steps = workflow["jobs"]["test-suite"]["steps"]
+    steps = workflow["jobs"]["release-gate"]["steps"]
     install_step = _get_step(steps, "Install FFmpeg and PortAudio (Linux)")
     setup_step = _get_step(steps, "Setup Python")
     deps_step = _get_step(steps, "Install test dependencies")
+    tests_step = _get_step(steps, "Run release contract tests")
+    smoke_step = _get_step(steps, "Run minimal startup smoke")
 
-    assert ".github/workflows/publish-pypi.yml" in on["push"]["paths"]
-    assert install_step["uses"] == "./.github/actions/setup-ffmpeg"
-    assert install_step["with"]["install-ffmpeg"] == "false"
-    assert install_step["with"]["install-portaudio"] == "true"
-    assert steps.index(install_step) < steps.index(setup_step) < steps.index(deps_step)
-    assert 'python -m pip install -e ".[dev]"' in deps_step["run"]
+    assert ".github/workflows/publish-pypi.yml" in on["push"]["paths"]  # nosec B101
+    assert install_step["uses"] == "./.github/actions/setup-ffmpeg"  # nosec B101
+    assert install_step["with"]["install-ffmpeg"] == "false"  # nosec B101
+    assert install_step["with"]["install-portaudio"] == "true"  # nosec B101
+    assert steps.index(install_step) < steps.index(setup_step) < steps.index(deps_step)  # nosec B101
+    assert 'python -m pip install -e ".[dev]"' in deps_step["run"]  # nosec B101
+    assert "tldw_Server_API/tests/CI/test_pypi_workflow_contracts.py" in tests_step["run"]  # nosec B101
+    assert all(  # nosec B101
+        line.strip() != "python -m pytest -q" for line in tests_step["run"].splitlines()
+    )
+    assert smoke_step["run"] == "python Helper_Scripts/ci/minimal_env_smoke.py --timeout 150"  # nosec B101
 
 
 def test_publish_ghcr_main_workflow_remains_push_to_main_driven() -> None:
@@ -121,16 +132,55 @@ def test_publish_ghcr_main_preserves_backend_publish_controls() -> None:
     }
 
 
-def test_container_build_check_remains_three_image_build_only_validation() -> None:
+def test_container_build_check_covers_workers_without_publishing_images() -> None:
     workflow = _load(".github/workflows/container-build-check.yml")
     job = workflow["jobs"]["build"]
     matrix = job["strategy"]["matrix"]["include"]
     build = _get_step(job["steps"], "Build container images")
 
-    assert [entry["name"] for entry in matrix] == ["app", "webui", "admin-ui"]
+    assert [entry["name"] for entry in matrix] == ["app", "worker", "audio-worker", "webui", "admin-ui"]
     assert [entry["dockerfile"] for entry in matrix] == [
         "Dockerfiles/Dockerfile.prod",
+        "Dockerfiles/Dockerfile.worker",
+        "Dockerfiles/Dockerfile.audio_gpu_worker",
         "Dockerfiles/Dockerfile.webui",
         "Dockerfiles/Dockerfile.admin-ui",
     ]
     assert build["with"]["push"] is False
+    assert workflow["permissions"] == {"contents": "read"}
+    assert [entry["backend"] for entry in matrix] == [True, True, True, False, False]
+    assert build["with"]["load"] == "${{ matrix.backend }}"
+
+
+def test_container_backend_smoke_uses_the_built_image_and_isolated_imports() -> None:
+    """Backend packaging omissions must fail before the matrix result is green."""
+    workflow = _load(".github/workflows/container-build-check.yml")
+    steps = workflow["jobs"]["build"]["steps"]
+    build = _get_step(steps, "Build container images")
+    smoke = _get_step(steps, "Verify backend local package imports")
+
+    assert steps.index(smoke) > steps.index(build)
+    assert smoke["if"] == "matrix.backend"
+    assert smoke["env"]["IMAGE_REF"] == build["with"]["tags"]
+    assert "docker image inspect --format" in smoke["run"]
+    assert '"$image_id" -I -c' in smoke["run"]
+    assert "--entrypoint python" in smoke["run"]
+    assert "import mcp_unified; import tldw_profile_core" in smoke["run"]
+    assert "--network none" in smoke["run"]
+    assert "--read-only" in smoke["run"]
+    assert not smoke.get("continue-on-error", False)
+
+
+def test_frontend_required_enforces_shared_hooks_and_preserves_full_lint() -> None:
+    """Shared UI must reach the hook gate even though frontend lint runs locally."""
+    workflow = _load(".github/workflows/frontend-required.yml")
+    steps = workflow["jobs"]["frontend-required"]["steps"]
+    lint = _get_step(steps, "Run frontend lint")
+    hooks = _get_step(steps, "Run shared UI hook enforcement")
+
+    assert lint["run"] == "bun run lint"
+    assert lint["working-directory"] == "apps/tldw-frontend"
+    assert hooks["if"] == lint["if"]
+    assert hooks["working-directory"] == "apps/tldw-frontend"
+    assert hooks["run"] == "bun scripts/check-shared-hooks.mjs"
+    assert not hooks.get("continue-on-error", False)

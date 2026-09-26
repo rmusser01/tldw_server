@@ -9,7 +9,6 @@ import { cn } from "@/libs/utils"
 import type { KnowledgeQAMessage, RagContextData } from "./types"
 import { useKnowledgeQaBranching } from "@/hooks/useFeatureFlags"
 import { createComparisonDraft, isComparisonReady } from "./comparisonModel"
-import { tldwClient } from "@/services/tldw/TldwApiClient"
 
 type ConversationThreadProps = {
   className?: string
@@ -60,9 +59,10 @@ function buildConversationTurns(
     const message = messages[index]
     if (message.role !== "user") continue
 
-    const assistantMessage = messages
+    const nextMessage = messages
       .slice(index + 1)
-      .find((candidate) => candidate.role === "assistant")
+      .find((candidate) => candidate.role === "assistant" || candidate.role === "user")
+    const assistantMessage = nextMessage?.role === "assistant" ? nextMessage : undefined
     const ragCitations = assistantMessage?.ragContext?.citations
     const explicitRagCitationIndices = Array.isArray(ragCitations)
       ? ragCitations
@@ -171,6 +171,8 @@ function getTurnsForThread(
 
 export function ConversationThread({ className }: ConversationThreadProps) {
   const {
+    client: tldwClient,
+    isAuthorityCurrent,
     messages,
     setQuery,
     branchFromTurn,
@@ -288,6 +290,7 @@ export function ConversationThread({ className }: ConversationThreadProps) {
           throw new Error(`Failed to load comparison thread ${threadId}`)
         }
         const rawMessages = await response.json()
+        if (!isAuthorityCurrent()) return
         const normalizedMessages = normalizeRemoteMessages(rawMessages, threadId)
         const turns = buildConversationTurns(normalizedMessages, threadId)
         setLoadedTurnsByThread((previous) => ({
@@ -298,6 +301,7 @@ export function ConversationThread({ className }: ConversationThreadProps) {
           previous.filter((candidate) => candidate !== threadId)
         )
       } catch (error) {
+        if (!isAuthorityCurrent()) return
         console.error("Failed to load comparison thread:", error)
         setFailedThreadIds((previous) =>
           previous.includes(threadId) ? previous : [...previous, threadId]
@@ -308,7 +312,7 @@ export function ConversationThread({ className }: ConversationThreadProps) {
         )
       }
     },
-    [currentThreadId, loadedTurnsByThread]
+    [currentThreadId, isAuthorityCurrent, loadedTurnsByThread, tldwClient]
   )
 
   useEffect(() => {

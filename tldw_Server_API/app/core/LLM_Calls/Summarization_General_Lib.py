@@ -18,6 +18,7 @@ import copy
 import inspect
 import json
 import os
+import re
 from collections.abc import Generator
 from typing import Any, Callable, Optional, Union
 
@@ -252,7 +253,7 @@ def _summarize_via_adapter(
         if provider_section:
             effective_app_config.setdefault(provider_section, {})
     else:
-        effective_app_config = ensure_app_config(app_config if app_config is not None else loaded_config_data)
+        effective_app_config = ensure_app_config(app_config if app_config is not None else load_and_log_configs())
     registry = get_registry()
     adapter = registry.get_adapter(provider)
     if adapter is None:
@@ -345,7 +346,41 @@ def _summarize_via_adapter(
         return stream_generator()
     try:
         response = adapter.chat(request, timeout=timeout)
-        return extract_response_content(response) or str(response)
+        if isinstance(response, dict):
+            choices = response.get("choices")
+            first_choice = choices[0] if isinstance(choices, list) and choices else None
+            if isinstance(first_choice, dict) and first_choice.get("finish_reason") == "length":
+                return _summary_failure(
+                    code="provider_failure",
+                    provider=provider,
+                    raise_on_error=raise_on_error,
+                    legacy_message=(
+                        "Error: Provider analysis was truncated before completion. "
+                        "Try a shorter source or a higher output limit."
+                    ),
+                )
+        answer = extract_response_content(response)
+        if isinstance(answer, str):
+            # Strip only well-formed flat blocks. Remaining delimiters (including
+            # nested or unclosed blocks) make the final answer ambiguous.
+            reasoning_tag = r"(?:think|reason|reasoning|thought)"
+            reasoning_delimiter = rf"<\s*/?\s*{reasoning_tag}\b"
+            answer = re.sub(
+                rf"<({reasoning_tag})>(?:(?!{reasoning_delimiter}).)*</\1>",
+                "",
+                answer,
+                flags=re.IGNORECASE | re.DOTALL,
+            ).strip()
+            if re.search(reasoning_delimiter, answer, flags=re.IGNORECASE):
+                answer = None
+        if not isinstance(answer, str) or not answer:
+            return _summary_failure(
+                code="provider_failure",
+                provider=provider,
+                raise_on_error=raise_on_error,
+                legacy_message="Error: Provider returned no usable analysis. Try again or choose another model.",
+            )
+        return answer
     except _SUMMARY_ADAPTER_EXCEPTIONS as exc:
         if raise_on_error:
             logging.error(f"Adapter summarization failed for {provider}")

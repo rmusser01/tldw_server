@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest"
+import { normalizeTldwModels } from "@/services/tldw/model-normalization"
+import { getCanonicalModelKey } from "@/hooks/playground/modelSelectorUtils"
 import {
   buildCharacterChatReadiness,
   buildAvailableChatModelIds,
@@ -11,6 +13,32 @@ import {
 } from "../chat-model-availability"
 
 describe("chat model availability utilities", () => {
+  const llamaId = "../../../models/Gemma:Q4.gguf"
+  const llamaModels = normalizeTldwModels([{ id: llamaId, provider: "llama", type: "chat", is_configured: true }])
+
+  it.each([llamaId, `tldw:${llamaId}`, `tldw:llama.cpp:${llamaId}`, getCanonicalModelKey(llamaModels[0])])(
+    "recognizes actual configured llama catalog through setup/picker selection %s", selectedModel => {
+      expect(buildCharacterChatReadiness({
+        isServerConnected: true, selectedCharacter: { id: 1, name: "TestBot" },
+        selectedModel, availableModels: llamaModels
+      })).toMatchObject({ status: "ready" })
+    }
+  )
+
+  it.each(["ollama", "openai", "unconfigured-provider"])("rejects a different %s provider despite equal model text", provider => {
+    expect(buildCharacterChatReadiness({
+      isServerConnected: true, selectedCharacter: { id: 1, name: "TestBot" },
+      selectedModel: `${provider}:${llamaId}`, availableModels: llamaModels
+    }).status).toBe("blocked")
+  })
+
+  it.each([{ is_configured: false }, { is_configured: true, catalog_only: true }])("does not admit explicitly unconfigured or catalog-only llama models: %s", flags => {
+    const models = normalizeTldwModels([{ id: llamaId, provider: "llama", type: "chat", ...flags }])
+    expect(buildCharacterChatReadiness({
+      isServerConnected: true, selectedCharacter: { id: 1, name: "TestBot" },
+      selectedModel: `llama.cpp:${llamaId}`, availableModels: models
+    }).status).toBe("blocked")
+  })
   it("normalizes prefixed model IDs", () => {
     expect(normalizeChatModelId(" tldw:gpt-4o-mini ")).toBe("gpt-4o-mini")
   })

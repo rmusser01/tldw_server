@@ -147,6 +147,10 @@ from tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_telemetry 
     compute_persona_exemplar_telemetry,
 )
 from tldw_Server_API.app.core.Chat.persistence_service import save_workspace_chat_model_selection
+from tldw_Server_API.app.core.Chat.knowledge_save import (
+    KnowledgeFlashcardError,
+    resolve_knowledge_flashcard,
+)
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatAPIError,
     ChatAuthenticationError,
@@ -345,7 +349,6 @@ from . import chat_dictionaries, chat_documents, chat_grammars
 from .llm_providers import get_configured_providers
 
 _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,
@@ -2799,11 +2802,14 @@ def _validate_explicit_model_availability(provider: str, model: str) -> dict[str
 
 async def _process_content_for_db_sync(
     content_iterable: Any, # Can be list of dicts or string
-    conversation_id: str # For logging
+    conversation_id: str, # For logging
+    *,
+    image_details: list[str] | None = None,
 ) -> tuple[list[str], list[tuple[bytes, str]]]:
     """
     Async helper to process message content, including base64 decoding.
     Runs within the event loop (uses async image processor when available).
+    When supplied, image_details receives one option per successfully decoded image.
     """
     text_parts_sync: list[str] = []
     images_sync: list[tuple[bytes, str]] = []   # (bytes, mime)
@@ -2879,6 +2885,9 @@ async def _process_content_for_db_sync(
                 if not isinstance(url_dict, dict):
                     url_dict = {"url": getattr(url_dict, "url", "")}
             url_str = url_dict.get("url", "")
+            detail = url_dict.get("detail")
+            if not isinstance(detail, str) or detail not in {"auto", "high", "low"}:
+                detail = "auto"
 
             if url_str.startswith("data:"):
                 # Use chunked image processor for large images
@@ -2889,6 +2898,8 @@ async def _process_content_for_db_sync(
                     )
                     if is_valid and decoded_bytes:
                         images_sync.append((decoded_bytes, mime_type))
+                        if image_details is not None:
+                            image_details.append(detail)
                         logger.debug("[DB SYNC] Successfully processed large image for conv={}", conversation_id)
                     else:
                         logger.warning(
@@ -2901,6 +2912,8 @@ async def _process_content_for_db_sync(
                     is_valid, mime_type, decoded_bytes = validate_image_url(url_str)
                     if is_valid and decoded_bytes:
                         images_sync.append((decoded_bytes, mime_type))
+                        if image_details is not None:
+                            image_details.append(detail)
                         logger.debug("[DB SYNC] Successfully validated and decoded image for conv={}", conversation_id)
                     else:
                         logger.warning(
@@ -3043,7 +3056,10 @@ async def _save_message_turn_to_db(
         # Track image processing if content contains images
         image_start_time = time.time()
         # Call async function directly instead of using run_in_executor
-        text_parts, images = await _process_content_for_db_sync(content, conversation_id)
+        image_details: list[str] = []
+        text_parts, images = await _process_content_for_db_sync(
+            content, conversation_id, image_details=image_details,
+        )
 
         # Track image processing metrics if images were processed
         if images:
@@ -3118,6 +3134,13 @@ async def _save_message_turn_to_db(
             serialized_extra = {}
         serialized_extra["content_placeholder_reason"] = placeholder_reason
 
+    # This application-only correlation is written with the user, even if the provider fails.
+    client_message_id = message_obj.get("client_message_id")
+    if role == "user" and isinstance(client_message_id, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", client_message_id):
+        if serialized_extra is None:
+            serialized_extra = {}
+        serialized_extra["client_message_id"] = client_message_id
+
     if sender_meta:
         if serialized_extra is None:
             serialized_extra = {}
@@ -3139,8 +3162,16 @@ async def _save_message_turn_to_db(
             primary_image_data = normalized_images[0]["data"]
             primary_image_mime = normalized_images[0]["mime"]
 
+    if normalized_images:
+        if serialized_extra is None:
+            serialized_extra = {}
+        serialized_extra["image_details"] = image_details
+
     if not text_parts and normalized_images:
         text_parts = [f"<Image attachment x{len(normalized_images)}>"]
+        if serialized_extra is None:
+            serialized_extra = {}
+        serialized_extra["content_placeholder_reason"] = "image_attachment"
 
     # Store sender role in DB; preserve display name in metadata.
     sender = role or "assistant"
@@ -5314,6 +5345,7 @@ async def create_chat_completion(
                             chat_db=chat_db,
                             save_message_fn=_save_message_turn_to_db,
                             system_message_id=system_message_id,
+                            user_message_id=continuation_runtime.get("user_message_id"),
                             audit_service=audit_service,
                             audit_context=context,
                             client_id=user_id,
@@ -5602,6 +5634,7 @@ async def create_chat_completion(
                             chat_db=chat_db,
                             save_message_fn=_save_message_turn_to_db,
                             system_message_id=system_message_id,
+                            user_message_id=continuation_runtime.get("user_message_id"),
                             audit_service=audit_service,
                             audit_context=context,
                             client_id=user_id,
@@ -6451,7 +6484,20 @@ def _get_knowledge_qa_share_signing_key() -> bytes:
     try:
         return derive_hmac_key()
     except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
-        fallback = (os.getenv("JWT_SECRET_KEY") or "knowledge_qa_share_link_default")
+        # Fall back only to a real deployment secret. This previously ended with
+        # `or "knowledge_qa_share_link_default"` -- a constant published in this
+        # open-source repository -- so any deployment that reached this branch signed
+        # every share token with a key anybody could read, making share links
+        # forgeable. Fail closed instead: an unsigned-in-practice link is worse than
+        # an error. Note lru_cache does not memoize exceptions, so a transient
+        # derivation failure is retried on the next call rather than pinning a
+        # degraded key for the process lifetime.
+        fallback = (os.getenv("JWT_SECRET_KEY") or "").strip()
+        if not fallback:
+            raise RuntimeError(
+                "Cannot sign knowledge-QA share links: key derivation failed and "
+                "neither KNOWLEDGE_QA_SHARE_LINK_SECRET nor JWT_SECRET_KEY is set."
+            ) from None
         return fallback.encode("utf-8")
 
 
@@ -6488,7 +6534,17 @@ def _decode_knowledge_qa_share_token(token: str) -> dict[str, Any]:
         encoded_payload.encode("utf-8"),
         hashlib.sha256,
     ).digest()
-    provided_signature = _urlsafe_b64decode(encoded_signature)
+    # The signature decode must sit inside a guard: binascii.Error is a ValueError,
+    # but this call used to run *before* the try below, so a malformed signature
+    # segment escaped as an unhandled exception and the public, unauthenticated share
+    # route answered HTTP 500 where 400 is correct. The token is attacker-supplied by
+    # construction -- share links are meant to be pasted by third parties.
+    try:
+        provided_signature = _urlsafe_b64decode(encoded_signature)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Malformed share token"
+        ) from exc
     if not hmac.compare_digest(expected_signature, provided_signature):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid share token")
 
@@ -6705,6 +6761,7 @@ async def save_chat_knowledge(
             scope,
         )
 
+        message = None
         if payload.message_id:
             message = _verify_message_ownership(
                 db,
@@ -6714,6 +6771,28 @@ async def save_chat_knowledge(
             )
             if message.get("conversation_id") != payload.conversation_id:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Message is not in conversation")
+
+        flashcard_front = payload.flashcard_front
+        flashcard_back = payload.flashcard_back
+        if payload.make_flashcard:
+            parent = None
+            if flashcard_front is None and flashcard_back is None and message and message.get("parent_message_id"):
+                parent = _verify_message_ownership(
+                    db,
+                    str(message["parent_message_id"]),
+                    current_user,
+                    scope,
+                )
+            try:
+                flashcard_front, flashcard_back = resolve_knowledge_flashcard(
+                    snippet=payload.snippet,
+                    front=flashcard_front,
+                    back=flashcard_back,
+                    message=message,
+                    parent=parent,
+                )
+            except KnowledgeFlashcardError as exc:
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
         export_status = "not_requested"
         export_job_id: str | None = None
@@ -6754,8 +6833,8 @@ async def save_chat_knowledge(
             if payload.make_flashcard:
                 flashcard_id = db.add_flashcard(
                     {
-                        "front": payload.snippet,
-                        "back": "",
+                        "front": flashcard_front,
+                        "back": flashcard_back,
                         "notes": f"From {safe_title}",
                         "source_ref_type": "note",
                         "source_ref_id": note_id,
@@ -6789,8 +6868,8 @@ async def save_chat_knowledge(
                 if payload.make_flashcard:
                     flashcard_id = db.add_flashcard(
                         {
-                            "front": payload.snippet,
-                            "back": "",
+                            "front": flashcard_front,
+                            "back": flashcard_back,
                             "notes": f"From {safe_title}",
                             "source_ref_type": "note",
                             "source_ref_id": note_id,

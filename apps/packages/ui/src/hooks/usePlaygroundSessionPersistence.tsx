@@ -19,20 +19,9 @@ import {
   resolveEffectiveAssistantState
 } from "@/hooks/chat/effective-assistant-state"
 import {
-  characterToAssistantSelection,
   getAssistantSelectionMode,
   normalizeAssistantSelection
 } from "@/types/assistant-selection"
-import {
-  SELECTED_ASSISTANT_STORAGE_KEY,
-  parseSelectedAssistantValue,
-  selectedAssistantStorage
-} from "@/utils/selected-assistant-storage"
-import {
-  SELECTED_CHARACTER_STORAGE_KEY,
-  parseSelectedCharacterValue,
-  selectedCharacterStorage
-} from "@/utils/selected-character-storage"
 
 const DEBOUNCE_MS = 1000
 
@@ -60,7 +49,12 @@ export function usePlaygroundSessionPersistence() {
   const clearSession = usePlaygroundSessionStore((s) => s.clearSession)
   const isSessionValid = usePlaygroundSessionStore((s) => s.isSessionValid)
   const [currentScopeKey, setCurrentScopeKey] = useState<string | null>(null)
-  const [sessionScopeReady, setSessionScopeReady] = useState(false)
+  const [connectionScopeReady, setSessionScopeReady] = useState(false)
+  const persistenceRevision = sessionStore.restoreRevision
+  const isCurrentPersistence = useCallback(
+    () => usePlaygroundSessionStore.getState().restoreRevision === persistenceRevision,
+    [persistenceRevision]
+  )
 
   // Main message option store
   const {
@@ -74,6 +68,7 @@ export function usePlaygroundSessionPersistence() {
     webSearch,
     compareMode,
     compareSelectedModels,
+    fileRetrievalEnabled,
     ragMediaIds,
     ragSearchMode,
     ragTopK,
@@ -83,6 +78,7 @@ export function usePlaygroundSessionPersistence() {
     temporaryChat,
     setHistoryId,
     setServerChatId,
+    setServerChatTitle,
     setServerChatCharacterId,
     setServerChatAssistantKind,
     setServerChatAssistantId,
@@ -92,6 +88,7 @@ export function usePlaygroundSessionPersistence() {
     setWebSearch,
     setCompareMode,
     setCompareSelectedModels,
+    setFileRetrievalEnabled,
     setRagMediaIds,
     setRagSearchMode,
     setRagTopK,
@@ -113,6 +110,7 @@ export function usePlaygroundSessionPersistence() {
       webSearch: state.webSearch,
       compareMode: state.compareMode,
       compareSelectedModels: state.compareSelectedModels,
+      fileRetrievalEnabled: state.fileRetrievalEnabled,
       ragMediaIds: state.ragMediaIds,
       ragSearchMode: state.ragSearchMode,
       ragTopK: state.ragTopK,
@@ -122,6 +120,7 @@ export function usePlaygroundSessionPersistence() {
       temporaryChat: state.temporaryChat,
       setHistoryId: state.setHistoryId,
       setServerChatId: state.setServerChatId,
+      setServerChatTitle: state.setServerChatTitle,
       setServerChatCharacterId: state.setServerChatCharacterId,
       setServerChatAssistantKind: state.setServerChatAssistantKind,
       setServerChatAssistantId: state.setServerChatAssistantId,
@@ -131,6 +130,7 @@ export function usePlaygroundSessionPersistence() {
       setWebSearch: state.setWebSearch,
       setCompareMode: state.setCompareMode,
       setCompareSelectedModels: state.setCompareSelectedModels,
+      setFileRetrievalEnabled: state.setFileRetrievalEnabled,
       setRagMediaIds: state.setRagMediaIds,
       setRagSearchMode: state.setRagSearchMode,
       setRagTopK: state.setRagTopK,
@@ -145,7 +145,18 @@ export function usePlaygroundSessionPersistence() {
   )
 
   const { setSystemPrompt } = useStoreChatModelSettings()
-  const [selectedAssistant, setSelectedAssistant] = useSelectedAssistant(null)
+  const [selectedAssistant, setSelectedAssistant, assistantMeta] = useSelectedAssistant(null)
+  const sessionScopeReady = connectionScopeReady && !assistantMeta?.isLoading
+  const readOwnedSelection = assistantMeta?.readSelection
+  // Form handoffs can arrive before initial hydration starts or while its DB
+  // read is pending, even with identical values. Observe accepted intent, not
+  // value equality; this baseline is used only for the initial saved target.
+  const initialSourceSelectionRef = useRef({
+    revision: sessionStore.sourceSelectionRevision,
+    scopeKey: sessionStore.scopeKey,
+    historyId: sessionStore.historyId,
+    serverChatId: sessionStore.serverChatId
+  })
 
   const resolveCurrentScopeKey = useCallback(async (): Promise<string> => {
     const config = await tldwClient.getConfig().catch(() => null)
@@ -171,6 +182,7 @@ export function usePlaygroundSessionPersistence() {
   }, [lastConfigUpdatedAt, resolveCurrentScopeKey, serverUrl])
 
   const buildPersistableSessionSnapshot = useCallback(() => {
+    if (!isCurrentPersistence()) return null
     // Don't save while a restore is replaying into the stores.
     if (isRestoringRef.current) return null
 
@@ -252,6 +264,7 @@ export function usePlaygroundSessionPersistence() {
       webSearch,
       compareMode,
       compareSelectedModels,
+      fileRetrievalEnabled,
       ragMediaIds,
       ragSearchMode,
       ragTopK,
@@ -260,6 +273,7 @@ export function usePlaygroundSessionPersistence() {
       queuedMessages
     }
   }, [
+    isCurrentPersistence,
     historyId,
     serverChatId,
     serverChatAssistantKind,
@@ -270,6 +284,7 @@ export function usePlaygroundSessionPersistence() {
     webSearch,
     compareMode,
     compareSelectedModels,
+    fileRetrievalEnabled,
     ragMediaIds,
     ragSearchMode,
     ragTopK,
@@ -345,13 +360,7 @@ export function usePlaygroundSessionPersistence() {
       }
 
       try {
-        const storedAssistant = normalizeAssistantSelection(
-          parseSelectedAssistantValue(
-            await selectedAssistantStorage.get<unknown>(
-              SELECTED_ASSISTANT_STORAGE_KEY
-            )
-          )
-        )
+        const storedAssistant = await readOwnedSelection?.()
         if (
           storedAssistant &&
           getAssistantSelectionMode(storedAssistant) === "tracked" &&
@@ -368,40 +377,12 @@ export function usePlaygroundSessionPersistence() {
           }
         }
       } catch {
-        // ignore tracked assistant storage hydration failures during session save
-      }
-
-      if (snapshot.trackedAssistantKind === "character") {
-        try {
-          const legacyCharacterSelection = characterToAssistantSelection(
-            parseSelectedCharacterValue<Record<string, unknown>>(
-              await selectedCharacterStorage.get<unknown>(
-                SELECTED_CHARACTER_STORAGE_KEY
-              )
-            )
-          )
-          if (
-            legacyCharacterSelection &&
-            legacyCharacterSelection.id === snapshot.trackedAssistantId
-          ) {
-            return {
-              ...snapshot,
-              trackedAssistantSelection: legacyCharacterSelection,
-              trackedAssistantDisplayName:
-                legacyCharacterSelection.name ?? snapshot.trackedAssistantDisplayName,
-              trackedAssistantAvatarUrl:
-                legacyCharacterSelection.avatar_url ??
-                snapshot.trackedAssistantAvatarUrl
-            }
-          }
-        } catch {
-          // ignore legacy character storage hydration failures during session save
-        }
+        // Keep canonical metadata when owned selection storage is unavailable.
       }
 
       return snapshot
     },
-    []
+    [readOwnedSelection]
   )
 
   useEffect(() => {
@@ -439,6 +420,7 @@ export function usePlaygroundSessionPersistence() {
     lastImmediateSaveKeyRef.current = immediateSaveKey
 
     void enrichTrackedAssistantSnapshot(snapshot).then((enrichedSnapshot) => {
+      if (!isCurrentPersistence()) return
       saveSession({
         ...enrichedSnapshot,
         scopeKey: currentScopeKey
@@ -447,6 +429,7 @@ export function usePlaygroundSessionPersistence() {
   }, [
     buildPersistableSessionSnapshot,
     currentScopeKey,
+    isCurrentPersistence,
     enrichTrackedAssistantSnapshot,
     saveSession,
     sessionScopeReady
@@ -468,6 +451,7 @@ export function usePlaygroundSessionPersistence() {
         resolveCurrentScopeKey(),
         enrichTrackedAssistantSnapshot(snapshot)
       ]).then(([scopeKey, enrichedSnapshot]) => {
+        if (!isCurrentPersistence() || (currentScopeKey && scopeKey !== currentScopeKey)) return
         saveSession({
           ...enrichedSnapshot,
           scopeKey
@@ -477,6 +461,8 @@ export function usePlaygroundSessionPersistence() {
   }, [
     buildPersistableSessionSnapshot,
     enrichTrackedAssistantSnapshot,
+    currentScopeKey,
+    isCurrentPersistence,
     resolveCurrentScopeKey,
     saveSession
   ])
@@ -486,6 +472,7 @@ export function usePlaygroundSessionPersistence() {
       clearTimeout(saveTimerRef.current)
       saveTimerRef.current = null
     }
+    if (!isCurrentPersistence()) return
     // Prefer a fresh snapshot over the ref to avoid saving stale state on unmount.
     const snapshot = buildPersistableSessionSnapshot() ?? latestSessionSnapshotRef.current
     if (!snapshot) return
@@ -493,6 +480,7 @@ export function usePlaygroundSessionPersistence() {
       resolveCurrentScopeKey(),
       enrichTrackedAssistantSnapshot(snapshot)
     ]).then(([scopeKey, enrichedSnapshot]) => {
+      if (!isCurrentPersistence() || (currentScopeKey && scopeKey !== currentScopeKey)) return
       saveSession({
         ...enrichedSnapshot,
         scopeKey
@@ -501,6 +489,8 @@ export function usePlaygroundSessionPersistence() {
   }, [
     buildPersistableSessionSnapshot,
     enrichTrackedAssistantSnapshot,
+    currentScopeKey,
+    isCurrentPersistence,
     resolveCurrentScopeKey,
     saveSession
   ])
@@ -531,6 +521,15 @@ export function usePlaygroundSessionPersistence() {
 
   // Restore session from persisted state
   const restoreSession = useCallback(async (): Promise<PlaygroundSessionRestoreOutcome> => {
+    if (!sessionScopeReady) return "cancelled"
+    const initialSelection = initialSourceSelectionRef.current
+    const selectionBeforeRestore =
+      !initialRestoreSettledRef.current &&
+      initialSelection.scopeKey === sessionStore.scopeKey &&
+      initialSelection.historyId === sessionStore.historyId &&
+      initialSelection.serverChatId === sessionStore.serverChatId
+        ? initialSelection.revision
+        : usePlaygroundSessionStore.getState().sourceSelectionRevision
     const restoreRevision =
       usePlaygroundSessionStore.getState().restoreRevision
     const isCurrentRestore = () =>
@@ -566,6 +565,7 @@ export function usePlaygroundSessionPersistence() {
     isRestoringRef.current = true
 
     try {
+      let cachedServerTitle: string | null = null
       if (savedHistoryId) {
         // Restore messages from Dexie
         const chatData = await getFullChatData(savedHistoryId)
@@ -574,6 +574,9 @@ export function usePlaygroundSessionPersistence() {
           // History was deleted, clear session
           clearSession()
           return "not-restored"
+        }
+        if (chatData.historyInfo.server_chat_id === savedServerChatId) {
+          cachedServerTitle = chatData.historyInfo.title || null
         }
 
         // Restore messages and history
@@ -603,6 +606,25 @@ export function usePlaygroundSessionPersistence() {
           setMessages([])
         }
         setServerChatId(savedServerChatId)
+        setServerChatTitle(cachedServerTitle)
+        if (savedTrackedAssistantKind && savedTrackedAssistantId) {
+          if (savedTrackedAssistantKind === "character") {
+            setServerChatCharacterId(savedTrackedCharacterId ?? savedTrackedAssistantId)
+            setServerChatAssistantKind("character")
+            setServerChatAssistantId(savedTrackedAssistantId)
+            setServerChatPersonaMemoryMode(null)
+          } else {
+            setServerChatCharacterId(null)
+            setServerChatAssistantKind("persona")
+            setServerChatAssistantId(savedTrackedAssistantId)
+            setServerChatPersonaMemoryMode(
+              sessionStore.serverChatPersonaMemoryMode ?? "read_only"
+            )
+          }
+          // Cached assistant identity omits canonical title/version metadata.
+          // Publish it before awaiting storage so a server refresh stays authoritative.
+          setServerChatMetaLoaded(false)
+        }
         if (
           savedTrackedAssistantSelection &&
           getAssistantSelectionMode(savedTrackedAssistantSelection) === "tracked"
@@ -630,24 +652,17 @@ export function usePlaygroundSessionPersistence() {
             if (!isCurrentRestore()) return "cancelled"
           }
         }
-        if (savedTrackedAssistantKind && savedTrackedAssistantId) {
-          if (savedTrackedAssistantKind === "character") {
-            setServerChatCharacterId(savedTrackedCharacterId ?? savedTrackedAssistantId)
-            setServerChatAssistantKind("character")
-            setServerChatAssistantId(savedTrackedAssistantId)
-            setServerChatPersonaMemoryMode(null)
-          } else {
-            setServerChatCharacterId(null)
-            setServerChatAssistantKind("persona")
-            setServerChatAssistantId(savedTrackedAssistantId)
-            setServerChatPersonaMemoryMode(
-              sessionStore.serverChatPersonaMemoryMode ?? "read_only"
-            )
-          }
-          setServerChatMetaLoaded(true)
+      }
+      const sourceSelectionChanged =
+        usePlaygroundSessionStore.getState().sourceSelectionRevision !==
+        selectionBeforeRestore
+      if (!sourceSelectionChanged) {
+        setChatMode(sessionStore.chatMode)
+        setFileRetrievalEnabled(sessionStore.fileRetrievalEnabled === true)
+        if (sessionStore.ragMediaIds) {
+          setRagMediaIds(sessionStore.ragMediaIds)
         }
       }
-      setChatMode(sessionStore.chatMode)
       setWebSearch(sessionStore.webSearch)
       setCompareMode(sessionStore.compareMode)
       if (sessionStore.compareSelectedModels.length > 0) {
@@ -655,9 +670,6 @@ export function usePlaygroundSessionPersistence() {
       }
 
       // Restore RAG settings
-      if (sessionStore.ragMediaIds) {
-        setRagMediaIds(sessionStore.ragMediaIds)
-      }
       setRagSearchMode(sessionStore.ragSearchMode)
       if (sessionStore.ragTopK !== null) {
         setRagTopK(sessionStore.ragTopK)
@@ -676,12 +688,14 @@ export function usePlaygroundSessionPersistence() {
       initialRestoreSettledRef.current = true
     }
   }, [
+    sessionScopeReady,
     isSessionValid,
     sessionStore,
     clearSession,
     resolveCurrentScopeKey,
     setHistoryId,
     setServerChatId,
+    setServerChatTitle,
     setServerChatAssistantId,
     setServerChatAssistantKind,
     setServerChatCharacterId,
@@ -696,6 +710,7 @@ export function usePlaygroundSessionPersistence() {
     setWebSearch,
     setCompareMode,
     setCompareSelectedModels,
+    setFileRetrievalEnabled,
     setRagMediaIds,
     setRagSearchMode,
     setRagTopK,

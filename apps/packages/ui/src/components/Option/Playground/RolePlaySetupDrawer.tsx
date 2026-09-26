@@ -5,6 +5,8 @@ import { X } from "lucide-react"
 import { shallow } from "zustand/shallow"
 
 import { AssistantSelect } from "@/components/Common/AssistantSelect"
+import { useStoreMessageOption } from "@/store/option"
+import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { useActorStore } from "@/store/actor"
 import { createDefaultActorSettings, type ActorSettings } from "@/types/actor"
 import type { AssistantSelection } from "@/types/assistant-selection"
@@ -63,11 +65,13 @@ type RolePlaySetupDrawerProps = {
   savedSetupDraftName?: string
   savedSetupNameFallback?: string
   onClose: () => void
-  onApply: (payload: RolePlaySetupApplyPayload) => void | Promise<void>
+  onApply: (payload: RolePlaySetupApplyPayload) => boolean | void | Promise<boolean | void>
+  /** Capture the initiating owner action after its synchronous identity transition. */
+  captureApplyGuard?: () => () => boolean
   onSavedSetupDraftNameChange?: (name: string) => void
   onSaveRolePlaySetup?: (payload: RolePlaySetupSavePayload) => void
   onPreviewSavedSetup?: (id: string) => void
-  onApplySavedSetup?: (setup: StartupTemplateBundle) => void | Promise<void>
+  onApplySavedSetup?: (setup: StartupTemplateBundle) => boolean | void | Promise<boolean | void>
   onRenameSavedSetup?: (id: string, name: string) => void
   onDeleteSavedSetup?: (id: string) => void
   returnFocusRef?: React.RefObject<HTMLElement>
@@ -104,6 +108,7 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
   savedSetupNameFallback = "New role-play setup",
   onClose,
   onApply,
+  captureApplyGuard,
   onSavedSetupDraftNameChange,
   onSaveRolePlaySetup,
   onPreviewSavedSetup,
@@ -123,8 +128,23 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
   const [loading, setLoading] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
   const applyingRef = React.useRef(false)
+  const applyingDestinationRef = React.useRef<{
+    historyId: string | null
+    serverChatId: string | null
+    isCurrent: () => boolean
+  } | null>(null)
+  const mountedRef = React.useRef(true)
+  const lifetimeRef = React.useRef({ open, revision: 0 })
+  if (lifetimeRef.current.open !== open) {
+    lifetimeRef.current = { open, revision: lifetimeRef.current.revision + 1 }
+  }
+  const scopeRef = React.useRef({ open, historyId, serverChatId })
+  scopeRef.current = { open, historyId, serverChatId }
+  React.useEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
   const contentRef = React.useRef<HTMLFieldSetElement>(null)
-  const originalSceneRef = React.useRef<ActorSettings | null>(null)
   const [sceneDraft, setSceneDraft] = React.useState<ActorSettings | null>(null)
   const [stagedIdentity, setStagedIdentity] =
     React.useState<AssistantSelection | null>(null)
@@ -168,11 +188,15 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
 
   React.useEffect(() => {
     if (!open) return
+    const ownDestination = applyingDestinationRef.current
+    if (ownDestination?.historyId === historyId &&
+        ownDestination.serverChatId === serverChatId && ownDestination.isCurrent()) {
+      return
+    }
 
     let cancelled = false
     setLoading(true)
     setSceneDraft(null)
-    originalSceneRef.current = null
     setStagedIdentity(null)
     setApplyError(null)
     setClearIdentity(false)
@@ -192,7 +216,6 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
         })
         if (cancelled) return
         setSceneDraft(actor)
-        originalSceneRef.current = actor
       } catch (error) {
         console.error("Failed to load role-play scene settings", error)
         if (!cancelled) {
@@ -317,28 +340,49 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
   const applyWithScene = React.useCallback(
     async (
       scene: ActorSettings | null,
-      applySettings: () => void | Promise<void>
+      applySettings: () => boolean | void | Promise<boolean | void>
     ) => {
       if (applyingRef.current || loading || sceneLoadError) return
-      const originalScene = originalSceneRef.current
       applyingRef.current = true
       setSaving(true)
       setApplyError(null)
-      let sceneSaved = false
-      let applyingSettings = false
+      const lifetimeRevision = lifetimeRef.current.revision
+      let settingsAccepted = false
+      let isCurrent = () => mountedRef.current && lifetimeRef.current.revision === lifetimeRevision && scopeRef.current.open &&
+        scopeRef.current.historyId === historyId && scopeRef.current.serverChatId === serverChatId
       try {
+        // Explicit identity replacement detaches synchronously in the owner.
+        // Capture its destination before awaiting persistence.
+        const applied = applySettings()
+        const ownerIsCurrent = captureApplyGuard?.() ?? (() => true)
+        const destination = useStoreMessageOption.getState()
+        const destinationHistoryId = destination.historyId
+        const destinationServerChatId = destination.serverChatId
+        const restoreRevision = usePlaygroundSessionStore.getState().restoreRevision
+        isCurrent = () => {
+          const current = useStoreMessageOption.getState()
+          const props = scopeRef.current
+          const propsMatch =
+            (props.historyId === historyId && props.serverChatId === serverChatId) ||
+            (props.historyId === destinationHistoryId && props.serverChatId === destinationServerChatId)
+          return mountedRef.current && lifetimeRef.current.revision === lifetimeRevision &&
+            ownerIsCurrent() && props.open && propsMatch &&
+            current.historyId === destinationHistoryId && current.serverChatId === destinationServerChatId &&
+            usePlaygroundSessionStore.getState().restoreRevision === restoreRevision
+        }
+        applyingDestinationRef.current = {
+          historyId: destinationHistoryId, serverChatId: destinationServerChatId, isCurrent
+        }
+        if (await applied === false || !isCurrent()) return
+        settingsAccepted = true
         if (scene) {
           const saved = await saveActorSettingsForChat({
-            historyId,
-            serverChatId,
+            historyId: destinationHistoryId,
+            serverChatId: destinationServerChatId,
             settings: scene
           })
+          if (!isCurrent()) return
           if (!saved) throw new Error("Scene settings save failed")
-          sceneSaved = true
-        }
-        applyingSettings = true
-        await applySettings()
-        if (scene) {
           setSettings(scene)
           const preview = summarizeRolePlayScene(scene)
           setPreviewAndTokens(preview.prompt, preview.tokenCount)
@@ -346,41 +390,25 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
         applyingRef.current = false
         closeAndReturnFocus()
       } catch {
-        let restored = true
-        if (sceneSaved && originalScene) {
-          try {
-            restored = await saveActorSettingsForChat({
-              historyId,
-              serverChatId,
-              settings: originalScene
-            })
-          } catch {
-            restored = false
-          }
-        }
-        setApplyError(
-          !restored
-            ? t(
-                "playground:composer.rolePlayRestoreError",
-                "Settings could not be applied, and the previous scene could not be restored. Keep this drawer open and retry Apply."
-              )
-            : applyingSettings
-              ? t(
-                  "playground:composer.rolePlayApplyError",
-                  "Settings could not be applied. Your draft is still here; retry Apply."
-                )
-              : t(
-                  "playground:composer.rolePlaySaveError",
-                  "Scene settings could not be saved. Your draft is still here; retry Apply."
-                )
-        )
+        if (!isCurrent()) return
+        setApplyError(settingsAccepted
+          ? t(
+              "playground:composer.rolePlayScenePartialSaveError",
+              "Identity and behavior were applied, but scene settings could not be saved. Your draft is still here; retry Apply."
+            )
+          : t(
+              "playground:composer.rolePlayApplyError",
+              "Settings could not be applied. Your draft is still here; retry Apply."
+            ))
       } finally {
+        applyingDestinationRef.current = null
         applyingRef.current = false
-        setSaving(false)
+        if (mountedRef.current) setSaving(false)
       }
     },
     [
       closeAndReturnFocus,
+      captureApplyGuard,
       historyId,
       loading,
       sceneLoadError,

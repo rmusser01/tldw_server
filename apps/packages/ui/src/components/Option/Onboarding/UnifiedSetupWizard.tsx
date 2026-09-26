@@ -1,13 +1,29 @@
 import React from "react";
+import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 
 import { PageAssistLoader } from "@/components/Common/PageAssistLoader";
 import { useSetupReadinessSummary } from "@/hooks/useSetupReadinessSummary";
 import { useSetupOnboarding } from "@/hooks/useSetupOnboarding";
+import { useConnectionActions } from "@/hooks/useConnectionState";
+import {
+  normalizeSelectedModel,
+  useSelectedModel,
+} from "@/hooks/chat/useSelectedModel";
+import { useStoreMessageOption } from "@/store/option";
+import { createSafeStorage } from "@/utils/safe-storage";
+import { tldwClient, type TldwConfig } from "@/services/tldw/TldwApiClient";
+import { normalizeProviderAvailabilityKey } from "@/services/tldw/model-provider-availability";
+import { parseProviderQualifiedModelSelection } from "@/utils/resolve-api-provider";
+import { servicePromptTargetsMatch } from "@/services/tldw/service-prompt-scope-error";
+import { derivePromptAssistAuthorizationRevision } from "@/services/chat-surface-scope";
 import type {
   FirstRunMetadata,
   FirstRunState,
   FirstRunStepUpdateRequest,
   SetupProviderSaveResponse,
+  FirstChatVerifyResponse,
+  SetupCompleteResponse,
 } from "@/types/setup-onboarding";
 import { SetupPathStep } from "./steps/SetupPathStep";
 import { PrivacySecurityStep } from "./steps/PrivacySecurityStep";
@@ -47,6 +63,21 @@ type UnifiedSetupWizardProps = {
 
 const setupPathToBackend = (path: SoloSetupPath) =>
   path === "docker" ? "docker_single_user" : "local_single_user";
+
+const modelStorage = createSafeStorage();
+const configStorage = createSafeStorage({ area: "local" });
+const setupChatProviderAliases: Record<string, string> = {
+  koboldcpp: "kobold",
+  custom_openai_api2: "custom-openai-api-2",
+};
+type SetupModelHandoff = {
+  generation: number;
+  config: TldwConfig;
+  selectionRevision: number;
+  eligible: boolean;
+  verified?: FirstChatVerifyResponse;
+  completed?: SetupCompleteResponse;
+};
 
 const stepFromState = (state: FirstRunState | null): WizardStep => {
   const completed = new Set(state?.completed_steps ?? []);
@@ -93,6 +124,51 @@ export function UnifiedSetupWizard({
   onStateChange,
   onComplete,
 }: UnifiedSetupWizardProps = {}) {
+  const navigate = useNavigate();
+  const { t } = useTranslation("settings");
+  const { setConfigPartial } = useConnectionActions();
+  const { setSelectedModel } = useSelectedModel();
+  const handoffRef = React.useRef<SetupModelHandoff | null>(null);
+  const handoffGeneration = React.useRef(0);
+  const selectionRevision = React.useRef(0);
+  React.useEffect(() => {
+    const invalidate = () => {
+      handoffGeneration.current += 1;
+    };
+    const watchedConfig = Object.fromEntries(
+      ["tldwConfig", "tldwCookieSessionConfig", "tldwManualSessionApiKey"].map(
+        (key) => [key, invalidate],
+      ),
+    );
+    configStorage.watch(watchedConfig);
+    const unsubscribe = useStoreMessageOption.subscribe((next, previous) => {
+      if (next.selectedModel !== previous.selectedModel)
+        selectionRevision.current += 1;
+    });
+    const storageChanged = (event: StorageEvent) => {
+      const key = event.key?.replace(/^plasmo-(?:local|sync):/, "");
+      if (
+        key == null ||
+        [
+          "tldwConfig",
+          "tldwCookieSessionConfig",
+          "tldwManualSessionApiKey",
+        ].includes(key)
+      )
+        invalidate();
+    };
+    window.addEventListener("tldw:config-updated", invalidate);
+    window.addEventListener("tldw:auth-principal-changed", invalidate);
+    window.addEventListener("storage", storageChanged);
+    return () => {
+      invalidate();
+      configStorage.unwatch(watchedConfig);
+      unsubscribe();
+      window.removeEventListener("tldw:config-updated", invalidate);
+      window.removeEventListener("tldw:auth-principal-changed", invalidate);
+      window.removeEventListener("storage", storageChanged);
+    };
+  }, []);
   const {
     state,
     metadata,
@@ -126,7 +202,9 @@ export function UnifiedSetupWizard({
     loading: setupReadinessLoading,
     error: setupReadinessError,
     refresh: refreshSetupReadinessStatus,
-  } = useSetupReadinessSummary();
+  } = useSetupReadinessSummary({
+    enabled: Boolean(metadata) && metadata.auth_mode !== "multi_user",
+  });
   const [step, setStep] = React.useState<WizardStep>(() =>
     stepFromState(initialState),
   );
@@ -142,8 +220,8 @@ export function UnifiedSetupWizard({
     setProviderSavedPayloadFingerprints,
   ] = React.useState<ProviderSavedPayloadFingerprintState>({});
   const [providerSavedDefaultProvider, setProviderSavedDefaultProvider] =
-    React.useState<string | null>(() =>
-      providerSelectionFromState(initialState)?.provider ?? null,
+    React.useState<string | null>(
+      () => providerSelectionFromState(initialState)?.provider ?? null,
     );
   const [providerValidationState, setProviderValidationState] = React.useState<
     Record<string, ProviderValidationViewState>
@@ -157,6 +235,37 @@ export function UnifiedSetupWizard({
   const [mcpToolsSkipPending, setMcpToolsSkipPending] = React.useState(false);
   const mcpToolsSkipPendingRef = React.useRef(false);
   const [stepError, setStepError] = React.useState<string | null>(null);
+  const [loginPending, setLoginPending] = React.useState(false);
+  const isMultiUserServer = metadata?.auth_mode === "multi_user";
+  // Public progress can omit a saved local path. Keep anonymous resume actionable.
+  const activeStep = isMultiUserServer
+    ? "multi_user_exit"
+    : step === "first_chat" && !providerSelection ? "provider_setup" : step;
+
+  const handleSignIn = async () => {
+    setLoginPending(true);
+    setStepError(null);
+    let stage = "configuration";
+    try {
+      await setConfigPartial({ authMode: "multi-user" });
+      stage = "navigation";
+      navigate("/settings/tldw");
+    } catch (error) {
+      // Config/navigation errors can contain credentials. Report only the
+      // operation and built-in type; omit payload, stack, and custom names.
+      console.error("Setup sign-in failed", {
+        stage,
+        errorType:
+          error instanceof TypeError ? "TypeError" :
+          error instanceof Error ? "Error" : "NonError",
+      });
+      setStepError(t("onboarding.loginSettingsError", {
+        defaultValue: "Login settings could not be opened. Try again.",
+      }));
+    } finally {
+      setLoginPending(false);
+    }
+  };
 
   React.useEffect(() => {
     if (!state) return;
@@ -166,12 +275,12 @@ export function UnifiedSetupWizard({
   }, [state]);
 
   React.useEffect(() => {
-    if (step !== "provider_setup" || providerCatalog.length > 0) return;
+    if (activeStep !== "provider_setup" || providerCatalog.length > 0) return;
     void loadProviderCatalog().catch((err) => {
       console.error("Provider catalog could not be loaded", err);
       setStepError("Provider catalog could not be loaded. Try again.");
     });
-  }, [loadProviderCatalog, providerCatalog.length, step]);
+  }, [loadProviderCatalog, providerCatalog.length, activeStep]);
 
   React.useEffect(() => {
     if (step !== "audio_defaults" || audioRecommendations.length > 0) return;
@@ -202,11 +311,17 @@ export function UnifiedSetupWizard({
     [onStateChange, saveStep],
   );
 
-  const refreshParentState = React.useCallback(async () => {
-    const nextState = await refresh().catch(() => null);
-    if (nextState) onStateChange?.(nextState);
-    return nextState;
-  }, [onStateChange, refresh]);
+  const refreshParentState = React.useCallback(
+    async (beforePublish?: () => Promise<void>) => {
+      const nextState = await refresh().catch(() => null);
+      if (nextState) {
+        await beforePublish?.();
+        onStateChange?.(nextState);
+      }
+      return nextState;
+    },
+    [onStateChange, refresh],
+  );
 
   const refreshSetupReadiness = React.useCallback(() => {
     void refreshSetupReadinessStatus().catch((err) => {
@@ -327,13 +442,120 @@ export function UnifiedSetupWizard({
     [refreshParentState, refreshSetupReadiness, validateMcpTools],
   );
 
-  const completeAndPublish = React.useCallback(
-    async (...args: Parameters<typeof complete>) => {
-      const response = await complete(...args);
-      await refreshParentState();
+  const assertHandoffCurrent = React.useCallback(
+    async (handoff: SetupModelHandoff) => {
+      const config = await tldwClient.getConfig();
+      if (
+        handoff.generation !== handoffGeneration.current ||
+        !config ||
+        !servicePromptTargetsMatch(config, handoff.config) ||
+        derivePromptAssistAuthorizationRevision(config) !==
+          derivePromptAssistAuthorizationRevision(handoff.config)
+      ) {
+        throw new Error(
+          "The connection changed. Return to setup for the current server before finishing.",
+        );
+      }
+    },
+    [],
+  );
+
+  const verifyFirstChatForHandoff = React.useCallback(
+    async (...args: Parameters<typeof verifyFirstChat>) => {
+      const generation = ++handoffGeneration.current;
+      const revision = selectionRevision.current;
+      handoffRef.current = null;
+      const config = await tldwClient.getConfig();
+      const stored = await modelStorage.get<string | null>("selectedModel");
+      if (
+        !config?.serverUrl ||
+        config.authMode !== "single-user" ||
+        generation !== handoffGeneration.current
+      ) {
+        throw new Error(
+          "The setup connection is unavailable. Reconnect before verifying the model.",
+        );
+      }
+      const handoff: SetupModelHandoff = {
+        generation,
+        config: { ...config },
+        selectionRevision: revision,
+        eligible:
+          revision === selectionRevision.current &&
+          !normalizeSelectedModel(
+            useStoreMessageOption.getState().selectedModel,
+          ) &&
+          !normalizeSelectedModel(stored),
+      };
+      await assertHandoffCurrent(handoff);
+      const response = await verifyFirstChat(...args);
+      await assertHandoffCurrent(handoff);
+      if (response.status === "ready") {
+        if (
+          normalizeProviderAvailabilityKey(response.provider) !==
+            normalizeProviderAvailabilityKey(args[0].provider) ||
+          response.model.trim() !== args[0].model.trim()
+        ) {
+          throw new Error(
+            "The verified model did not match the requested setup selection. Verify it again.",
+          );
+        }
+        handoff.verified = response;
+        handoffRef.current = handoff;
+      }
       return response;
     },
-    [complete, refreshParentState],
+    [assertHandoffCurrent, verifyFirstChat],
+  );
+
+  const completeAndPublish = React.useCallback(
+    async (...args: Parameters<typeof complete>) => {
+      const handoff = handoffRef.current;
+      if (!handoff?.verified)
+        throw new Error("Verify the current setup model before finishing.");
+      await assertHandoffCurrent(handoff);
+      const response = handoff.completed ?? (await complete(...args));
+      if (!response.success)
+        throw new Error(
+          response.message || "Setup completion could not be saved.",
+        );
+      handoff.completed = response;
+      await assertHandoffCurrent(handoff);
+      if (
+        handoff.eligible &&
+        handoff.selectionRevision === selectionRevision.current
+      ) {
+        const verified = handoff.verified;
+        // First-run verification precedes browser authentication. Its matching
+        // ready response is authoritative even while the protected catalog is
+        // unavailable; do not make finishing setup depend on that catalog.
+        let qualified = parseProviderQualifiedModelSelection(
+          `${verified.provider}:${verified.model.trim()}`,
+        );
+        if (!qualified.provider) {
+          const provider =
+            normalizeProviderAvailabilityKey(verified.provider) || "";
+          qualified = parseProviderQualifiedModelSelection(
+            `${setupChatProviderAliases[provider] || provider}:${verified.model.trim()}`,
+          );
+        }
+        if (!qualified.provider || qualified.modelId !== verified.model.trim())
+          throw new Error(
+            "The verified model provider could not be selected. Check the provider settings.",
+          );
+        const write = setSelectedModel(
+          `tldw:${qualified.provider}:${qualified.modelId}`,
+        );
+        // Our own publication may be retried after a rejected device write.
+        // Any later user operation still advances beyond this revision.
+        handoff.selectionRevision = selectionRevision.current;
+        await write;
+      }
+      await assertHandoffCurrent(handoff);
+      await refreshParentState(() => assertHandoffCurrent(handoff));
+      return response;
+    },
+    [assertHandoffCurrent, complete, refreshParentState, setSelectedModel],
   );
 
   const saveProviderAndRefreshReadiness = React.useCallback(
@@ -395,7 +617,7 @@ export function UnifiedSetupWizard({
     >
       <header className="mb-6">
         <p className="text-xs font-medium uppercase tracking-normal text-text-muted">
-          Solo onboarding
+          {isMultiUserServer ? "Multi-user connection" : "Solo onboarding"}
         </p>
         <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -403,17 +625,21 @@ export function UnifiedSetupWizard({
               First-time setup
             </h1>
             <p className="mt-2 max-w-2xl text-sm text-text-muted">
-              Configure the minimum needed to reach a successful first chat.
+              {isMultiUserServer
+                ? "Sign in to your server with an account created by its administrator."
+                : "Configure the minimum needed to reach a successful first chat."}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={handleSkip}
-            disabled={skipPending}
-            className="rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-text hover:bg-surface2 disabled:opacity-50"
-          >
-            {skipPending ? "Skipping..." : "Skip for now"}
-          </button>
+          {!isMultiUserServer ? (
+            <button
+              type="button"
+              onClick={handleSkip}
+              disabled={skipPending}
+              className="rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-text hover:bg-surface2 disabled:opacity-50"
+            >
+              {skipPending ? "Skipping..." : "Skip for now"}
+            </button>
+          ) : null}
         </div>
       </header>
 
@@ -422,9 +648,9 @@ export function UnifiedSetupWizard({
           role="alert"
           className="mb-4 rounded-md border border-danger/40 bg-danger/10 px-4 py-3 text-sm text-text"
         >
-          Setup progress could not be loaded. The server may still be
-          starting, or the connection details may be missing - the wizard
-          works once the app can reach your tldw server.
+          Setup progress could not be loaded. The server may still be starting,
+          or the connection details may be missing - the wizard works once the
+          app can reach your tldw server.
         </div>
       ) : null}
 
@@ -437,18 +663,20 @@ export function UnifiedSetupWizard({
         </div>
       ) : null}
 
-      <SetupReadinessPanel
-        status={setupReadinessStatus}
-        loading={setupReadinessLoading}
-        error={setupReadinessError}
-        onRetry={refreshSetupReadiness}
-      />
+      {!isMultiUserServer ? (
+        <SetupReadinessPanel
+          status={setupReadinessStatus}
+          loading={setupReadinessLoading}
+          error={setupReadinessError}
+          onRetry={refreshSetupReadiness}
+        />
+      ) : null}
 
       <div className="rounded-md border border-border bg-bg px-4 py-5 shadow-sm md:px-6">
-        {step === "setup_path" ? (
+        {activeStep === "setup_path" ? (
           <SetupPathStep onSelect={handlePathSelect} />
         ) : null}
-        {step === "privacy_security" ? (
+        {activeStep === "privacy_security" ? (
           <PrivacySecurityStep
             metadata={metadata}
             onBack={() => setStep("setup_path")}
@@ -456,13 +684,15 @@ export function UnifiedSetupWizard({
             saving={savingStep}
           />
         ) : null}
-        {step === "multi_user_exit" ? (
+        {activeStep === "multi_user_exit" ? (
           <MultiUserExitPanel
             metadata={metadata}
-            onBack={() => setStep("setup_path")}
+            onBack={isMultiUserServer ? undefined : () => setStep("setup_path")}
+            onSignIn={isMultiUserServer ? handleSignIn : undefined}
+            loginPending={loginPending}
           />
         ) : null}
-        {step === "provider_setup" ? (
+        {activeStep === "provider_setup" ? (
           <ProviderSetupStep
             providers={providerCatalog}
             initialSelection={providerSelection}
@@ -484,14 +714,14 @@ export function UnifiedSetupWizard({
             onBack={() => setStep("privacy_security")}
           />
         ) : null}
-        {step === "ingest_defaults" ? (
+        {activeStep === "ingest_defaults" ? (
           <IngestDefaultsStep
             saveIngestDefaults={saveIngestAndPublish}
             onContinue={() => setStep("audio_defaults")}
             onBack={() => setStep("provider_setup")}
           />
         ) : null}
-        {step === "audio_defaults" ? (
+        {activeStep === "audio_defaults" ? (
           <AudioSetupStep
             recommendations={audioRecommendations}
             saveAudioDefaults={saveAudioAndPublish}
@@ -499,14 +729,14 @@ export function UnifiedSetupWizard({
             onBack={() => setStep("ingest_defaults")}
           />
         ) : null}
-        {step === "optional_advanced" ? (
+        {activeStep === "optional_advanced" ? (
           <OptionalAdvancedStep
             saveOptionalAdvanced={saveAdvancedAndPublish}
             onContinue={() => setStep("mcp_tools")}
             onBack={() => setStep("audio_defaults")}
           />
         ) : null}
-        {step === "mcp_tools" ? (
+        {activeStep === "mcp_tools" ? (
           <McpToolsStep
             catalog={mcpToolsCatalog}
             initialStepData={
@@ -540,11 +770,11 @@ export function UnifiedSetupWizard({
             }}
           />
         ) : null}
-        {step === "first_chat" && providerSelection ? (
+        {activeStep === "first_chat" && providerSelection ? (
           <FirstChatStep
             provider={providerSelection.provider}
             model={providerSelection.model}
-            verifyFirstChat={verifyFirstChat}
+            verifyFirstChat={verifyFirstChatForHandoff}
             complete={completeAndPublish}
             onComplete={() => {
               onComplete?.();

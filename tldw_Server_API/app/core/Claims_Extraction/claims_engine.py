@@ -130,6 +130,7 @@ class Claim:
     span: tuple[int, int] | None = None
     claim_type: ClaimType = ClaimType.GENERAL
     extracted_values: dict[str, Any] = field(default_factory=dict)
+    requires_semantic_verification: bool = False
 
 
 @dataclass
@@ -467,7 +468,7 @@ def determine_verification_status(
         return VerificationStatus.UNVERIFIED, 0.0, "No evidence available"
 
     # Quote verification
-    if claim.claim_type == ClaimType.QUOTE:
+    if claim.claim_type == ClaimType.QUOTE and not claim.requires_semantic_verification:
         if quote_match is True:
             return VerificationStatus.VERIFIED, 0.95, "Quote matches source"
         elif quote_match is False:
@@ -507,6 +508,8 @@ def determine_verification_status(
     max_score = max((e.score for e in evidence_snippets), default=0.0)
     max_authority = max((e.authority.value for e in evidence_snippets), default=1)
 
+    if claim.requires_semantic_verification:
+        return VerificationStatus.UNVERIFIED, nli_confidence, "The question and answer require semantic evidence support"
     if max_score >= 0.8 and max_authority >= 3:
         return VerificationStatus.VERIFIED, max_score, "High-quality evidence from authoritative source"
     elif max_score >= 0.6:

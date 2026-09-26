@@ -16,12 +16,14 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequirePermission,
     get_auth_principal,
     get_db_transaction,
     get_password_service_dep,
     get_session_manager_dep,
     get_storage_service_dep,
     require_api_key_scope,
+    require_expected_user,
 )
 from tldw_Server_API.app.api.v1.schemas.api_key_schemas import (
     APIKeyCreateRequest,
@@ -40,6 +42,7 @@ from tldw_Server_API.app.api.v1.schemas.auth_schemas import (
     StorageQuotaResponse,
     UpdateProfileRequest,
 )
+from tldw_Server_API.app.api.v1.schemas.user_capabilities import UserCapabilities
 from tldw_Server_API.app.api.v1.schemas.user_profile_schemas import (
     UserProfileCatalogResponse,
     UserProfileErrorDetail,
@@ -63,6 +66,7 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import (
     WeakPasswordError,
 )
 from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
+from tldw_Server_API.app.core.AuthNZ.permissions import NOTIFICATIONS_READ, SYSTEM_LOGS, TASKS_READ
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal, is_single_user_principal
 from tldw_Server_API.app.core.AuthNZ.profile_version import (
     ProfileVersionNotFound,
@@ -368,6 +372,30 @@ async def _emit_user_profile_audit_event(
 router = APIRouter(prefix="/users", tags=["users"], responses={404: {"description": "Not found"}})
 
 
+@router.get("/me/capabilities", response_model=UserCapabilities)
+async def get_current_user_capabilities(
+    response: Response,
+    principal: AuthPrincipal = Depends(get_auth_principal),
+) -> UserCapabilities:
+    """Report only this authenticated caller's optional-read permission decisions."""
+    decisions: dict[str, bool] = {}
+    for field, permission in (
+        ("can_read_scheduled_tasks", TASKS_READ),
+        ("can_read_notifications", NOTIFICATIONS_READ),
+        ("can_read_monitoring_alerts", SYSTEM_LOGS),
+    ):
+        try:
+            await RequirePermission(permission)(principal)
+        except HTTPException as exc:
+            if exc.status_code != status.HTTP_403_FORBIDDEN:
+                raise
+            decisions[field] = False
+        else:
+            decisions[field] = True
+    response.headers["Cache-Control"] = "no-store"
+    return UserCapabilities(user_id=principal.user_id, **decisions)
+
+
 #######################################################################################################################
 #
 # User Profile Endpoints
@@ -405,7 +433,12 @@ async def get_user_profile_catalog(
     return response
 
 
-@router.get("/me/profile", response_model=UserProfileResponse, response_model_exclude_none=True)
+@router.get(
+    "/me/profile",
+    response_model=UserProfileResponse,
+    response_model_exclude_none=True,
+    dependencies=[Depends(require_expected_user)],
+)
 async def get_current_user_profile_view(
     sections: Optional[str] = Query(None, description="Comma-separated list of sections to include"),
     include_sources: bool = Query(False, description="Include per-field source attribution"),
@@ -452,7 +485,11 @@ async def get_current_user_profile_view(
     return UserProfileResponse(**profile)
 
 
-@router.patch("/me/profile", response_model=UserProfileUpdateResponse)
+@router.patch(
+    "/me/profile",
+    response_model=UserProfileUpdateResponse,
+    dependencies=[Depends(require_expected_user)],
+)
 async def update_current_user_profile(
     payload: UserProfileUpdateRequest,
     http_request: Request,

@@ -27,6 +27,8 @@ import {
   useUpdateFlashcardMutation
 } from "../../hooks"
 
+vi.mock("@/services/service-prompts", () => import("./review-scope-fixture"))
+
 const reviewMutationMock = vi.hoisted(() => vi.fn())
 const endSessionMutationMock = vi.hoisted(() => vi.fn())
 const assistantRefetchMock = vi.hoisted(() => vi.fn())
@@ -114,7 +116,7 @@ vi.mock("../../hooks", () => ({
   useReviewAnalyticsSummaryQuery: vi.fn(),
   useHasCardsQuery: vi.fn(),
   useNextDueQuery: vi.fn(),
-  useEndFlashcardReviewSessionMutation: vi.fn(),
+  useEndFlashcardReviewSessionMutation: vi.fn(() => ({ mutateAsync: vi.fn().mockResolvedValue({ id: 77 }), isPending: false })),
   useRecentFlashcardReviewSessionsQuery: vi.fn(() => ({
     data: [],
     isLoading: false,
@@ -462,12 +464,46 @@ describe("ReviewTab study suggestions", () => {
       expect(reviewMutationMock).toHaveBeenCalledWith(
         expect.objectContaining({
           cardUuid: "card-1",
-          rating: 3
+          rating: 3,
+          reviewContext: { review_mode: "due", deck_id: 1, tag_filter: null }
         })
       )
     })
 
     expect(screen.getByRole("button", { name: /End Session/i })).toBeInTheDocument()
+  })
+
+  it.each(["deck-first", "undecked-first"])("retains one explicit global session across seven mixed cards (%s)", async order => {
+    const deckIds = order === "deck-first" ? [1, 1, 1, 1, 1, null, null] : [null, null, 1, 1, 1, 1, 1]
+    const cards = deckIds.map((deck_id, index) => ({ ...buildCard(), uuid: `mixed-${index}`, deck_id }))
+    const query = { data: cards[0] as typeof cards[0] | null, isSuccess: true, isFetching: false,
+      refetch: vi.fn().mockResolvedValue(undefined) }
+    vi.mocked(useReviewQuery).mockImplementation(() => query as never)
+    reviewMutationMock.mockImplementation(async params => ({
+      review_session_id: params.reviewSessionId ?? (params.reviewContext?.deck_id === null ? 77 : cards.find(card => card.uuid === params.cardUuid)?.deck_id ? 81 : 82),
+      interval_days: 1, due_at: null
+    }))
+    const props = { onNavigateToCreate: vi.fn(), onNavigateToImport: vi.fn(), reviewDeckId: null,
+      onReviewDeckChange: vi.fn(), isActive: true }
+    const view = render(<ReviewTab {...props} />)
+    fireEvent.click(screen.getByRole("button", { name: /Review all due/i }))
+    for (let index = 0; index < cards.length; index++) {
+      query.data = cards[index]
+      view.rerender(<ReviewTab {...props} />)
+      fireEvent.click(screen.getByTestId("flashcards-review-show-answer"))
+      fireEvent.click(screen.getByTestId("flashcards-review-rate-3"))
+      await waitFor(() => expect(reviewMutationMock).toHaveBeenCalledTimes(index + 1))
+      expect(reviewMutationMock.mock.calls[index][0]).toEqual(expect.objectContaining({
+        cardUuid: cards[index].uuid,
+        reviewContext: { review_mode: "due", deck_id: null, tag_filter: null },
+        ...(index > 0 ? { reviewSessionId: 77 } : {})
+      }))
+      await waitFor(() => expect(screen.getByRole("button", { name: /End Session/i })).toBeInTheDocument())
+    }
+    query.data = null
+    view.rerender(<ReviewTab {...props} />)
+    await waitFor(() => expect(endSessionMutationMock).toHaveBeenCalledTimes(1))
+    expect(endSessionMutationMock).toHaveBeenCalledWith(expect.objectContaining({ reviewSessionId: 77 }))
   })
 
   it("clicking End Session completes the session and reveals the panel", async () => {
@@ -491,7 +527,7 @@ describe("ReviewTab study suggestions", () => {
     fireEvent.click(screen.getByRole("button", { name: /End Session/i }))
 
     await waitFor(() => {
-      expect(endSessionMutationMock).toHaveBeenCalledWith(77)
+      expect(endSessionMutationMock).toHaveBeenCalledWith(expect.objectContaining({ reviewSessionId: 77 }))
     })
 
     expect(await screen.findByText("Flashcard follow-up")).toBeInTheDocument()
@@ -499,8 +535,62 @@ describe("ReviewTab study suggestions", () => {
     expect(screen.getByRole("button", { name: /Create quiz/i })).toBeInTheDocument()
   })
 
+  it("does not end a live session for a transient or failed next-card query", async () => {
+    const query = { data: buildCard() as ReturnType<typeof buildCard> | null, isSuccess: true,
+      isFetching: false, refetch: vi.fn() }
+    vi.mocked(useReviewQuery).mockImplementation(() => query as never)
+    const props = { onNavigateToCreate: vi.fn(), onNavigateToImport: vi.fn(), reviewDeckId: 1,
+      onReviewDeckChange: vi.fn(), isActive: true }
+    const view = render(<ReviewTab {...props} />)
+    fireEvent.click(screen.getByTestId("flashcards-review-show-answer"))
+    fireEvent.click(screen.getByTestId("flashcards-review-rate-3"))
+    await screen.findByRole("button", { name: /End Session/i })
+    query.data = null
+    query.isFetching = true
+    view.rerender(<ReviewTab {...props} />)
+    expect(endSessionMutationMock).not.toHaveBeenCalled()
+    query.isFetching = false
+    query.isSuccess = false
+    view.rerender(<ReviewTab {...props} />)
+    expect(endSessionMutationMock).not.toHaveBeenCalled()
+    query.data = { ...buildCard(), uuid: "next-card" }
+    query.isSuccess = true
+    view.rerender(<ReviewTab {...props} />)
+    fireEvent.click(screen.getByTestId("flashcards-review-show-answer"))
+    fireEvent.click(screen.getByTestId("flashcards-review-rate-3"))
+    await waitFor(() => expect(reviewMutationMock).toHaveBeenCalledTimes(2))
+    expect(reviewMutationMock.mock.calls[1][0].reviewSessionId).toBe(77)
+    expect(endSessionMutationMock).not.toHaveBeenCalled()
+  })
+
+  it("offers an explicit new session for an expired session while retaining the card and answer", async () => {
+    const query = { data: buildCard(), isSuccess: true, isFetching: false, refetch: vi.fn() }
+    vi.mocked(useReviewQuery).mockImplementation(() => query as never)
+    const props = { onNavigateToCreate: vi.fn(), onNavigateToImport: vi.fn(), reviewDeckId: 1,
+      onReviewDeckChange: vi.fn(), isActive: true }
+    const view = render(<ReviewTab {...props} />)
+    fireEvent.click(screen.getByTestId("flashcards-review-show-answer"))
+    fireEvent.click(screen.getByTestId("flashcards-review-rate-3"))
+    await screen.findByRole("button", { name: /End Session/i })
+    query.data = { ...buildCard(), uuid: "next-card", front: "Keep this question", back: "Keep this answer" }
+    view.rerender(<ReviewTab {...props} />)
+    reviewMutationMock.mockRejectedValueOnce(Object.assign(new Error("Flashcard review session is not active"), { status: 404 }))
+    fireEvent.click(screen.getByTestId("flashcards-review-show-answer"))
+    fireEvent.click(screen.getByTestId("flashcards-review-rate-3"))
+    fireEvent.click(await screen.findByRole("button", { name: "Start new session" }))
+    expect(screen.getByText("Keep this question")).toBeInTheDocument()
+    expect(screen.getByText("Keep this answer")).toBeInTheDocument()
+    expect(reviewMutationMock).toHaveBeenCalledTimes(2)
+    expect(endSessionMutationMock).not.toHaveBeenCalled()
+    expect(screen.queryByTestId("flashcards-review-retry-alert")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("flashcards-review-rate-3"))
+    await waitFor(() => expect(reviewMutationMock).toHaveBeenCalledTimes(3))
+    expect(reviewMutationMock.mock.calls[2][0].reviewSessionId).toBeUndefined()
+  })
+
   it("queue exhaustion auto-calls the end-session path once", async () => {
     const reviewQueryState = {
+      isSuccess: true, isFetching: false,
       data: buildCard(),
       refetch: vi.fn().mockResolvedValue(undefined)
     }
@@ -665,7 +755,7 @@ describe("ReviewTab study suggestions", () => {
     )
 
     await waitFor(() => {
-      expect(endSessionMutationMock).toHaveBeenCalledWith(77)
+      expect(endSessionMutationMock).toHaveBeenCalledWith(expect.objectContaining({ reviewSessionId: 77 }))
     })
   })
 

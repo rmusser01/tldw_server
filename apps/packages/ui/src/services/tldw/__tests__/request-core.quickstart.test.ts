@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import type { PathOrUrl } from "../openapi-guard"
 
 describe("tldwRequest quickstart and advanced transport", () => {
   const originalDeploymentMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
@@ -29,6 +30,27 @@ describe("tldwRequest quickstart and advanced transport", () => {
       configurable: true
     })
   })
+
+  it.each(["quickstart", "hosted"])(
+    "rejects network-path references in %s same-origin transport",
+    async (mode) => {
+      process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = mode
+      const fetchMock = vi.fn().mockResolvedValue(new Response("{}"))
+      const { tldwRequest } = await import("@/services/tldw/request-core")
+      for (const path of ["//attacker.example/collect", "/\\attacker.example/collect"]) {
+        const result = await tldwRequest({ path: path as PathOrUrl, method: "POST" }, {
+          getConfig: async () => ({
+            serverUrl: window.location.origin,
+            authMode: "single-user",
+            authSource: "cookie-session"
+          }),
+          fetchFn: fetchMock
+        })
+        expect(result.status).toBe(400)
+      }
+      expect(fetchMock).not.toHaveBeenCalled()
+    }
+  )
 
   it("uses cookie auth and csrf for same-origin mutations without stale headers", async () => {
     process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"

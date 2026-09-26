@@ -487,7 +487,17 @@ async def list_suggestions(
                 "existing_tag": item.suggestion.keyword_sync_id is not None,
                 "match_strength": item.suggestion.match_strength,
                 "rationale": item.suggestion.rationale,
-                "evidence": item.evidence,
+                "evidence": tuple(
+                    {
+                        "side": evidence.side,
+                        "note_id": evidence.note_id,
+                        "field": evidence.field,
+                        "start_offset": evidence.start_offset,
+                        "end_offset": evidence.end_offset,
+                        "text": evidence.text,
+                    }
+                    for evidence in item.evidence
+                ),
                 "updated_at": item.suggestion.updated_at,
             }
             for item in page.items

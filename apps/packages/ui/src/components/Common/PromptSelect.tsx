@@ -305,6 +305,7 @@ export const PromptSelect: React.FC<Props> = ({
   useEffect(() => {
     if (
       !editorOpen ||
+      recipeMode ||
       !editorFocusRequestedRef.current ||
       (promptAssist.state.status !== "idle" &&
         promptAssist.state.status !== "applied")
@@ -313,7 +314,7 @@ export const PromptSelect: React.FC<Props> = ({
     }
     editorFocusRequestedRef.current = false
     editorInputRef.current?.focus()
-  }, [editorOpen, promptAssist.state.status])
+  }, [editorOpen, recipeMode, promptAssist.state.status])
 
   const restorePromptSelectFocus = React.useCallback(() => {
     const returnFocusSelector =
@@ -510,9 +511,9 @@ export const PromptSelect: React.FC<Props> = ({
       })
       applySystemPromptCandidate(compiledText)
       setRecipeMode(false)
-      window.setTimeout(requestEditorFocus, 0)
+      editorFocusRequestedRef.current = true
     },
-    [applySystemPromptCandidate, requestEditorFocus, selectedSystemPrompt]
+    [applySystemPromptCandidate, selectedSystemPrompt]
   )
 
   const undoRecipe = React.useCallback(() => {

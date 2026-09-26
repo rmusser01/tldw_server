@@ -1,0 +1,336 @@
+"""Study replies exercise real target resolution and Chat adapter dispatch."""
+
+import asyncio
+import json
+from configparser import ConfigParser
+from types import SimpleNamespace
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from tldw_Server_API.app.api.v1.API_Deps.study_assistant_deps import get_study_assistant_guidance
+from tldw_Server_API.app.api.v1.endpoints import flashcards, quizzes
+from tldw_Server_API.app.core.AuthNZ import llm_provider_overrides as overrides
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.Chat import chat_service
+from tldw_Server_API.app.core.Chat import chat_target_resolution as targets
+from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.exceptions import (
+    ChatAuthenticationError,
+    ChatBadRequestError,
+    ChatProviderError,
+    ChatRateLimitError,
+)
+from tldw_Server_API.app.core.Flashcards import study_assistant
+from tldw_Server_API.app.core.LLM_Calls import adapter_registry, adapter_utils
+
+
+@pytest.fixture
+def provider_boundary(monkeypatch):
+    """Replace config sources and terminal inference, retaining both real adapters' call boundaries."""
+    state = SimpleNamespace(
+        config={
+            "llm_api_settings": {"default_api": "llama.cpp"},
+            "llama_api": {"model": "fixture-default"},
+            "openai_api": {"model": "remote-default", "api_key": "synthetic-test-key"},
+        },
+        parser=ConfigParser(),
+        overrides={},
+        calls=[],
+        error=None,
+        override_error=None,
+        answer="Citrine meets Tuesday at 14:00.",
+    )
+    registry = adapter_registry.ChatProviderRegistry()
+
+    class TerminalAdapter:
+        async_chat_is_native = True
+
+        def __init__(self, provider):
+            self.provider = provider
+
+        async def achat(self, request, **kwargs):
+            state.calls.append((self.provider, request))
+            if state.error is not None:
+                raise state.error
+            return {"choices": [{"message": {"role": "assistant", "content": state.answer}}]}
+
+    monkeypatch.setattr(
+        registry,
+        "get_adapter",
+        lambda provider: TerminalAdapter(provider) if provider in {"llama.cpp", "openai"} else None,
+    )
+    monkeypatch.setattr(adapter_registry, "get_registry", lambda: registry)
+    monkeypatch.setattr(targets, "load_and_log_configs", lambda: state.config)
+    monkeypatch.setattr(adapter_utils, "ensure_app_config", lambda _config=None: state.config)
+
+    def override_snapshot(provider):
+        if state.override_error is not None:
+            raise state.override_error
+        return overrides.ProviderOverrideCallSnapshot(provider, state.overrides.get(provider))
+
+    monkeypatch.setattr(overrides, "capture_provider_override_call_snapshot", override_snapshot)
+    original_model_resolver = targets.get_default_model_for_provider
+    monkeypatch.setattr(
+        targets,
+        "get_default_model_for_provider",
+        lambda provider: original_model_resolver(
+            provider,
+            override_default_resolver=lambda name: (
+                state.overrides[name].config.get("default_model") if name in state.overrides else None
+            ),
+            override_resolver=lambda name: state.overrides.get(name),
+            config_loader=lambda: state.parser,
+            provider_config_loader=lambda: state.config,
+        ),
+    )
+    for name in ("DEFAULT_LLM_PROVIDER", "DEFAULT_MODEL_LLAMA_CPP", "DEFAULT_MODEL_OPENAI"):
+        monkeypatch.delenv(name, raising=False)
+    assert study_assistant.perform_chat_api_call_async is chat_service.perform_chat_api_call_async
+    return state
+
+
+def _context():
+    return {
+        "context_type": "flashcard",
+        "flashcard": {"front": "When does Citrine meet?", "back": "Tuesday at 14:00."},
+        "history": [{"role": "user", "content": "Keep the time exact."}],
+    }
+
+
+@pytest.mark.unit
+def test_existing_study_argument_aliases_reach_the_real_chat_adapter(provider_boundary):
+    result = asyncio.run(
+        study_assistant.generate_study_assistant_reply(
+            action="follow_up", context=_context(), message="Which day?", provider="llama.cpp", model="fixture-explicit"
+        )
+    )
+    provider, request = provider_boundary.calls[0]
+    assert (provider, request["model"]) == ("llama.cpp", "fixture-explicit")
+    assert "focused study assistant" in request["system_message"]
+    assert "Tuesday at 14:00" in request["messages"][0]["content"]
+    assert "Keep the time exact." in request["messages"][0]["content"]
+    assert request["messages"][0]["content"].endswith("Learner message: Which day?")
+    assert (request["temperature"], request["max_tokens"]) == (0.3, 1000)
+    assert result["assistant_text"] == "Citrine meets Tuesday at 14:00."
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("provider", "model", "expected"),
+    [
+        (None, None, ("llama.cpp", "fixture-default")),
+        ("llama.cpp", None, ("llama.cpp", "fixture-default")),
+        (None, "fixture-explicit", ("llama.cpp", "fixture-explicit")),
+        (None, "llama.cpp/fixture-qualified", ("llama.cpp", "fixture-qualified")),
+        (" llamacpp ", " fixture-explicit ", ("llama.cpp", "fixture-explicit")),
+        ("openai", "remote-explicit", ("openai", "remote-explicit")),
+    ],
+)
+def test_study_uses_canonical_target_and_persists_resolved_identity(provider_boundary, provider, model, expected):
+    result = asyncio.run(
+        study_assistant.generate_study_assistant_reply(
+            action="explain", context=_context(), provider=provider, model=model
+        )
+    )
+    actual_provider, request = provider_boundary.calls[0]
+    assert (actual_provider, request["model"]) == expected
+    assert (result["provider"], result["model"]) == expected
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("source", ["admin_default", "allowed_model", "environment", "chat_config", "provider_config"])
+def test_study_default_model_retains_server_precedence(provider_boundary, monkeypatch, source):
+    state = provider_boundary
+    state.parser["Chat-Module"] = {"default_model_llama_cpp": "chat-model"}
+    if source in {"admin_default", "allowed_model", "environment"}:
+        monkeypatch.setenv("DEFAULT_MODEL_LLAMA_CPP", "environment-model")
+    if source in {"admin_default", "allowed_model"}:
+        state.overrides["llama.cpp"] = overrides.LLMProviderOverride(
+            provider="llama.cpp",
+            allowed_models=["allowed-model", "admin-model"],
+            config={"default_model": "admin-model"} if source == "admin_default" else {},
+        )
+    if source == "provider_config":
+        state.parser.remove_section("Chat-Module")
+    expected = {
+        "admin_default": "admin-model",
+        "allowed_model": "allowed-model",
+        "environment": "environment-model",
+        "chat_config": "chat-model",
+        "provider_config": "fixture-default",
+    }[source]
+    result = asyncio.run(study_assistant.generate_study_assistant_reply(action="explain", context=_context()))
+    assert provider_boundary.calls[0][1]["model"] == result["model"] == expected
+
+
+@pytest.mark.unit
+def test_fact_check_keeps_grounding_and_structured_result_through_real_adapter(provider_boundary):
+    provider_boundary.answer = json.dumps(
+        {"verdict": "incorrect", "corrections": ["Tuesday at 14:00."], "response_text": "Use Tuesday at 14:00."}
+    )
+    result = asyncio.run(
+        study_assistant.generate_study_assistant_reply(
+            action="fact_check", context=_context(), message="Monday?", provider="llama.cpp", model="fixture-explicit"
+        )
+    )
+    request = provider_boundary.calls[0][1]
+    assert "Return a JSON object" in request["system_message"]
+    assert "Tuesday at 14:00" in request["messages"][0]["content"]
+    assert result["assistant_text"] == "Use Tuesday at 14:00."
+    assert result["structured_payload"]["verdict"] == "incorrect"
+    assert result["structured_payload"]["corrections"] == ["Tuesday at 14:00."]
+
+
+@pytest.fixture(params=["sqlite", pytest.param("postgres", marks=pytest.mark.postgres)])
+def study_database(request, tmp_path):
+    backend = None
+    if request.param == "postgres":
+        backend = DatabaseBackendFactory.create_backend(request.getfixturevalue("pg_database_config"))
+    db = CharactersRAGDB(tmp_path / "assistant-adapter.db", client_id="1", backend=backend)
+    try:
+        yield db
+    finally:
+        db.close_all_connections()
+        if backend is not None:
+            backend.get_pool().close_all()
+
+
+@pytest.fixture(params=["flashcard", "quiz"])
+def study_route(request, study_database, provider_boundary):
+    db = study_database
+    if request.param == "flashcard":
+        card = db.add_flashcard({"front": "When does Citrine meet?", "back": "Tuesday at 14:00."})
+        path = f"/api/v1/flashcards/{card}/assistant"
+    else:
+        quiz = db.create_quiz(name="Citrine")
+        question = db.create_question(
+            quiz_id=quiz,
+            question_type="multiple_choice",
+            question_text="When does Citrine meet?",
+            correct_answer=0,
+            options=["Tuesday 14:00", "Monday 10:00"],
+            explanation="Tuesday at 14:00.",
+        )
+        attempt = db.start_attempt(quiz)
+        db.submit_attempt(int(attempt["id"]), answers=[{"question_id": question, "user_answer": 1}])
+        path = f"/api/v1/quizzes/attempts/{attempt['id']}/questions/{question}/assistant"
+    app = FastAPI()
+    app.include_router(flashcards.router, prefix="/api/v1")
+    app.include_router(quizzes.router, prefix="/api/v1")
+    app.dependency_overrides[flashcards.get_chacha_db_for_user] = lambda: db
+    app.dependency_overrides[get_study_assistant_guidance] = lambda: "Stay with the study context."
+    with TestClient(app, raise_server_exceptions=False) as client:
+        initial = client.get(path)
+        assert initial.status_code == 200
+        yield SimpleNamespace(client=client, path=path, initial=initial.json(), db=db)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("use_defaults", [False, True], ids=["explicit", "defaults"])
+def test_actual_study_response_and_reload_preserve_one_pair_and_timestamps(
+    study_route, provider_boundary, use_defaults
+):
+    route = study_route
+    payload = {
+        "action": "follow_up",
+        "message": "Which day and time?",
+        "expected_thread_version": route.initial["thread"]["version"],
+    }
+    if not use_defaults:
+        payload.update(provider="llama.cpp", model="fixture-explicit")
+    response = route.client.post(route.path + "/respond", json=payload)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["thread"]["id"] == route.initial["thread"]["id"]
+    assert body["thread"]["message_count"] == 2
+    assert len(provider_boundary.calls) == 1
+    expected_model = "fixture-default" if use_defaults else "fixture-explicit"
+    assert (body["assistant_message"]["provider"], body["assistant_message"]["model"]) == ("llama.cpp", expected_model)
+    reloaded = route.client.get(route.path).json()
+    assert [row["id"] for row in reloaded["messages"]] == [body["user_message"]["id"], body["assistant_message"]["id"]]
+    assert reloaded["messages"][-1]["content"] == "Citrine meets Tuesday at 14:00."
+    assert all(isinstance(row["created_at"], str) for row in reloaded["messages"])
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("failure", "status"),
+    [
+        ("missing_model", 400),
+        ("disabled", 400),
+        ("forbidden_model", 400),
+        ("unknown_provider", 400),
+        ("policy_store_unavailable", 400),
+        ("upstream", 502),
+        ("rate_limit", 429),
+        ("provider_auth", 400),
+        ("bad_request", 400),
+        ("unexpected", 502),
+    ],
+)
+def test_study_failure_is_safe_and_preserves_existing_history(study_route, provider_boundary, failure, status):
+    route = study_route
+    state = provider_boundary
+    thread = route.initial["thread"]
+    prior = route.db.append_study_assistant_message(
+        thread_id=thread["id"],
+        role="user",
+        action_type="freeform",
+        input_modality="text",
+        content="Retain this prior message",
+    )
+    payload = {"action": "follow_up", "message": "Which day?", "provider": "llama.cpp", "model": "fixture-explicit"}
+    if failure == "missing_model":
+        state.config["llama_api"] = {}
+        payload.pop("model")
+    elif failure == "disabled":
+        state.overrides["llama.cpp"] = overrides.LLMProviderOverride(provider="llama.cpp", is_enabled=False)
+    elif failure == "forbidden_model":
+        state.overrides["llama.cpp"] = overrides.LLMProviderOverride(
+            provider="llama.cpp", allowed_models=["allowed-model"]
+        )
+    elif failure == "unknown_provider":
+        payload["provider"] = "not-a-provider"
+    elif failure == "policy_store_unavailable":
+        state.override_error = ByokResolutionError("credential_store_unavailable", "llama.cpp")
+    elif failure == "upstream":
+        state.error = ChatProviderError(message="upstream-secret-/private/provider", status_code=502)
+    elif failure == "rate_limit":
+        state.error = ChatRateLimitError(message="upstream-secret-/private/provider")
+    elif failure == "provider_auth":
+        state.error = ChatAuthenticationError(message="upstream-secret-/private/provider")
+    elif failure == "bad_request":
+        state.error = ChatBadRequestError(message="upstream-secret-/private/provider")
+    else:
+        state.error = RuntimeError("upstream-secret-/private/provider")
+    response = route.client.post(route.path + "/respond", json=payload)
+    assert response.status_code == status, response.text
+    assert "upstream-secret" not in response.text
+    assert isinstance(response.json()["detail"], str)
+    assert response.json()["detail"].strip()
+    if failure in {"missing_model", "disabled", "forbidden_model", "unknown_provider", "policy_store_unavailable"}:
+        assert state.calls == []
+    reloaded = route.client.get(route.path).json()
+    assert [row["id"] for row in reloaded["messages"]] == [prior["id"]]
+
+
+@pytest.mark.integration
+def test_study_version_conflict_still_stops_before_dispatch_or_new_messages(study_route, provider_boundary):
+    route = study_route
+    prior = route.db.append_study_assistant_message(
+        thread_id=route.initial["thread"]["id"],
+        role="user",
+        action_type="freeform",
+        input_modality="text",
+        content="Keep prior history",
+    )
+    response = route.client.post(
+        route.path + "/respond",
+        json={"action": "explain", "expected_thread_version": route.initial["thread"]["version"]},
+    )
+    assert response.status_code == 409
+    assert provider_boundary.calls == []
+    assert [row["id"] for row in route.client.get(route.path).json()["messages"]] == [prior["id"]]

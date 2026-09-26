@@ -78,7 +78,6 @@ router = APIRouter()
 MAX_GENERATED_DOCUMENTS_OFFSET = 10_000
 
 _CHAT_DOCS_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     AssertionError,
     AttributeError,
     ConnectionError,

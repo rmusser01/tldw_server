@@ -6,7 +6,8 @@ Pydantic schemas for character chat sessions and messages.
 from datetime import datetime
 from typing import Any, Literal, Optional, Union
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_serializer, model_validator
+
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta, PagePaginationMeta
 from tldw_Server_API.app.core.Character_Chat.emote_directives import CharacterEmoteEvent
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingOverride
@@ -465,9 +466,17 @@ class MessageResponse(BaseModel):
     timestamp: datetime = Field(..., description="Message timestamp")
     ranking: Optional[int] = Field(None, description="Message ranking/rating")
     has_image: bool = Field(False, description="Whether message has an attached image")
+    images: Optional[list[str]] = Field(None, description="Complete ordered image data URLs, only when explicitly requested")
     version: int = Field(1, description="Version number for optimistic locking")
     tool_calls: Optional[list[dict[str, Any]]] = Field(None, description="Tool calls associated with this message (if any)")
     metadata_extra: Optional[dict[str, Any]] = Field(None, description="Additional stored metadata for this message (if requested)")
+
+    @model_serializer(mode="wrap")
+    def omit_unrequested_images(self, handler):
+        result = handler(self)
+        if self.images is None:
+            result.pop("images", None)
+        return result
 
     model_config = {"from_attributes": True}
 

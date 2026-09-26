@@ -373,7 +373,17 @@ def _activate_scope_context(
     try:
         active_org = getattr(request.state, "active_org_id", None)
         active_team = getattr(request.state, "active_team_id", None)
-        token = set_scope(
+        # No reset token is kept, and none is needed. Starlette runs each request
+        # in its own copied context -- for threadpool handlers as well as async
+        # ones -- so a scope set here cannot reach another request. See
+        # tests/API_Deps/test_content_scope_does_not_leak_between_requests.py,
+        # which pins that invariant rather than leaving it assumed.
+        #
+        # Work that outlives the request is a different matter: a task spawned
+        # here captures the context as it was at creation, and resetting here
+        # would not affect it. Such workers must establish their own scope, as
+        # services/media_ingest_jobs_worker.py does with scoped_context.
+        set_scope(
             user_id=user_id,
             org_ids=org_ids or (),
             team_ids=team_ids or (),
@@ -381,7 +391,6 @@ def _activate_scope_context(
             active_team_id=active_team,
             is_admin=is_admin,
         )
-        request.state._content_scope_token = token
     except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS as exc:
         logger.debug(
             "Unable to establish content scope context: {}",
@@ -390,18 +399,28 @@ def _activate_scope_context(
 
 
 async def get_login_db_connection() -> AsyncGenerator[Any, None]:
-    """Yield a statement-autocommit connection for the login lifecycle.
+    """Yield a statement-autocommit connection for login and token refresh.
 
-    Login's lockout and session services use separate database connections. A
+    Lockout and session services use separate database connections. A
     SQLite ``BEGIN IMMEDIATE`` around the whole request would block those
     security checks against the same database, while a normal deferred
     connection could retain a rehash write lock. SQLite therefore uses a true
     autocommit connection; asyncpg statements are already autocommit outside an
     explicit transaction.
     """
-    db_pool = await get_db_pool()
-    async with db_pool.acquire_statement_autocommit() as conn:
-        yield conn
+    connection_entered = False
+    try:
+        db_pool = await get_db_pool()
+        async with db_pool.acquire_statement_autocommit() as conn:
+            connection_entered = True
+            yield conn
+    except (DatabaseLockError, ConnectionPoolExhaustedError) as exc:
+        # Only acquisition failure guarantees that the request has not written.
+        if connection_entered:
+            raise
+        raise _authnz_busy_http_exception(
+            get_authnz_transaction_policy().busy_retry_after_seconds
+        ) from exc
 
 
 async def get_db_transaction() -> AsyncGenerator[Any, None]:
@@ -2196,9 +2215,11 @@ def _catalog_rate_limit_for_resource(resource: str) -> tuple[int, int] | None:
 async def enforce_rbac_rate_limit(
     request: Request,
     resource: str,
-    db_pool: DatabasePool = Depends(get_db_pool)
+    db_pool: DatabasePool = Depends(get_db_pool),
+    *,
+    per_user: bool = False,
 ):
-    """Enforce the strictest catalog, user, or role per-minute limit."""
+    """Enforce configured limits, optionally sharing a user's budget across auth kinds."""
     user_id = getattr(request.state, "user_id", None)
     if not user_id:
         return
@@ -2293,7 +2314,7 @@ async def enforce_rbac_rate_limit(
     ]
     limit_per_min = min(per_minute_values)
     burst = min(burst_values) if burst_values else limit_per_min
-    identifier = _auth_deps_rate_limit_identifier(request, resource)
+    identifier = f"user:{user_id}:{resource}" if per_user else _auth_deps_rate_limit_identifier(request, resource)
     try:
         allowed, retry_after = _consume_auth_deps_fallback_rate_token(
             dependency=f"rbac_rate_limit:{resource}",
@@ -2320,11 +2341,14 @@ async def enforce_rbac_rate_limit(
         )
 
 
-def rbac_rate_limit(resource: str, *, detail: Any | None = None):
-    """Factory returning an enforcing RBAC resource-rate dependency."""
+def rbac_rate_limit(resource: str, *, detail: Any | None = None, per_user: bool = False):
+    """Build a rate dependency; opt into per-user buckets independent of auth kind."""
     async def _dep(request: Request, db_pool: DatabasePool = Depends(get_db_pool)):
         try:
-            await enforce_rbac_rate_limit(request, resource, db_pool)
+            if per_user:
+                await enforce_rbac_rate_limit(request, resource, db_pool, per_user=True)
+            else:
+                await enforce_rbac_rate_limit(request, resource, db_pool)
         except HTTPException as exc:
             if detail is None or exc.status_code != status.HTTP_429_TOO_MANY_REQUESTS:
                 raise

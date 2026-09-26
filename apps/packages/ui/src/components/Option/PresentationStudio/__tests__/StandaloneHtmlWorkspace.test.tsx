@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
+  translations: {} as Record<string, string>,
   online: true,
   runtimeExtension: false,
   navigate: vi.fn(),
@@ -23,6 +24,12 @@ const mocks = vi.hoisted(() => ({
   outlineTerminate: vi.fn()
 }))
 
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (key: string, fallback?: string) => mocks.translations[key] ?? fallback ?? key
+  })
+}))
+
 vi.mock("react-router-dom", async () => {
   const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom")
   const ReactModule = await import("react")
@@ -30,7 +37,7 @@ vi.mock("react-router-dom", async () => {
     ...actual,
     useNavigate: () => mocks.navigate,
     useBlocker: () => ({ state: "unblocked", proceed: undefined, reset: undefined }),
-    unstable_usePrompt: (...args: any[]) => {
+    unstable_usePrompt: function usePrompt(...args: unknown[]) {
       mocks.usePrompt(...args)
       ReactModule.useEffect(() => {
         mocks.promptActive = true
@@ -226,6 +233,7 @@ const readyCapabilities = {
 
 describe("StandaloneHtmlWorkspace", () => {
   beforeEach(() => {
+    mocks.translations = {}
     sessionStorage.clear()
     localStorage.clear()
     mocks.online = true
@@ -656,6 +664,38 @@ describe("StandaloneHtmlWorkspace", () => {
     fireEvent.click(download)
     expect(mocks.downloadStandaloneHtmlDraft).not.toHaveBeenCalled()
     expect(editor).toHaveValue(SOURCE)
+  })
+
+  it("localizes recovery actions and conflict guidance, including an active locale change", async () => {
+    const recovery = await loadRecovery()
+    const source = await vi.importActual<typeof import("../standalone-html-source")>(["..", "standalone-html-source"].join("/"))
+    recovery.writeStandaloneHtmlRecovery(
+      sessionStorage, recovery.createPresentationPrincipalScope("https://tldw.example", "42"),
+      { presentationId: "html-1", baseEtag: '"v6"', baseDigest: "f".repeat(64),
+        acceptedSource: await source.validateStandaloneHtmlSource(RECOVERED), updatedAt: Date.now() }
+    )
+    mocks.translations = {
+      "standaloneHtml.recoveredDraft": "Borrador recuperado",
+      "standaloneHtml.restoreRecovery": "Restaurar borrador",
+      "standaloneHtml.discardRecovery": "Descartar borrador",
+      "standaloneHtml.confirmDiscardRecovery": "Confirmar descarte",
+      "standaloneHtml.statusConflict": "Conflicto",
+      "standaloneHtml.serverChanged": "La versión del servidor cambió."
+    }
+    mocks.saveStandaloneHtmlSource.mockRejectedValueOnce(Object.assign(new Error("conflict"), { status: 412 }))
+    const { StandaloneHtmlWorkspace } = await loadWorkspace()
+    const view = render(<StandaloneHtmlWorkspace presentationId="html-1" />)
+    expect(await screen.findByRole("region", { name: "Borrador recuperado" })).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: "Descartar borrador" }))
+    expect(screen.getByRole("button", { name: "Confirmar descarte" })).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: "Restaurar borrador" }))
+    await waitFor(() => expect(screen.getByText("Not saved")).toBeVisible())
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(screen.getByTestId("standalone-html-save-status")).toHaveTextContent("Conflicto"))
+    expect(screen.getByText("La versión del servidor cambió.")).toBeVisible()
+    mocks.translations["standaloneHtml.serverChanged"] = "Die Serverversion hat sich geändert."
+    view.rerender(<StandaloneHtmlWorkspace presentationId="html-1" />)
+    expect(screen.getByText("Die Serverversion hat sich geändert.")).toBeVisible()
   })
 
   it("enforces draft authority on current, recovered, and conflict download actions", async () => {

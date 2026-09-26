@@ -90,6 +90,9 @@ const contentSecurityPolicy = [
 const nextConfig = {
   reactStrictMode: true,
   reactCompiler: false,
+  // Keep the optional development badge clear of sidebar and drawer actions.
+  // Runtime error overlays remain enabled independently of this badge.
+  devIndicators: false,
   ...(liveTierDistDir ? { distDir: liveTierDistDir } : {}),
   // Preserve backend API paths exactly in quickstart mode. FastAPI routes such as
   // POST /api/v1/chats/ are slash-sensitive and otherwise bounce through redirects
@@ -172,6 +175,13 @@ const nextConfig = {
   // Runtime works correctly; these are type-definition mismatches.
   typescript: {
     ignoreBuildErrors: true,
+  },
+  experimental: {
+    // Generation already allows 180s on the client. Next's 30s rewrite default
+    // otherwise drops valid backend responses before that budget expires.
+    ...(deploymentMode === 'quickstart' ? { proxyTimeout: 180000 } : {}),
+    // Isolated UAT runs rebuild from fresh state; avoid multi-GB dev caches.
+    ...(liveTierDistDir ? { turbopackFileSystemCacheForDev: false } : {}),
   },
   turbopack: {
     root: repoWorkspaceRoot,

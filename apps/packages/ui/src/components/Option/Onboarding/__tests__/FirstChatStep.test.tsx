@@ -1,11 +1,52 @@
 // @vitest-environment jsdom
 import React from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { useMilestoneStore } from "@/store/milestones";
+const scope = vi.hoisted(() => ({ current: "server-a:alice" as string | null }));
+vi.mock("@/hooks/useHomeMilestoneScope", () => ({ useHomeMilestoneScope: () => scope.current }));
 
 import { FirstChatStep } from "../steps/FirstChatStep";
 
 describe("FirstChatStep", () => {
+  beforeEach(() => { scope.current = "server-a:alice"; useMilestoneStore.getState().resetMilestones(); });
+  it.each(["ready", "failed"])("credits only the request owner after verification is %s", async (status) => {
+    let resolve!: (value: unknown) => void;
+    const verifyFirstChat = vi.fn().mockImplementation(() => new Promise((done) => { resolve = done; }));
+    const props = { provider: "llamacpp", model: "local", verifyFirstChat, complete: vi.fn().mockResolvedValue({ success: true }), onComplete: vi.fn(), onBack: vi.fn() };
+    const view = render(<FirstChatStep {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: /send test chat/i }));
+    scope.current = "server-a:bob";
+    view.rerender(<FirstChatStep {...props} />);
+    resolve({ status, response_text: "Verified response" });
+    await screen.findByText("Verified response");
+    expect(useMilestoneStore.getState().scopedMilestones["server-a:alice"]?.first_chat != null).toBe(status === "ready");
+    expect(useMilestoneStore.getState().scopedMilestones["server-a:bob"]?.first_chat).toBeUndefined();
+  });
+
+  it("does not credit a successful chat with an unknown request owner", async () => {
+    scope.current = null;
+    render(<FirstChatStep provider="llamacpp" model="local" verifyFirstChat={vi.fn().mockResolvedValue({ status: "ready", response_text: "Verified response" })} complete={vi.fn().mockResolvedValue({ success: true })} onComplete={vi.fn()} onBack={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /send test chat/i }));
+    await screen.findByText("Verified response");
+    expect(useMilestoneStore.getState().scopedMilestones).toEqual({});
+  });
+
+  it("explains an inference deadline instead of exposing an unknown abort", async () => {
+    const complete = vi.fn();
+    render(<FirstChatStep
+      provider="llamacpp" model="local.gguf"
+      verifyFirstChat={vi.fn().mockRejectedValue(new DOMException("signal is aborted without reason", "AbortError"))}
+      complete={complete} onComplete={vi.fn()} onBack={vi.fn()}
+      onEditProvider={vi.fn()} onSwitchProvider={vi.fn()} onSkip={vi.fn()}
+    />);
+    fireEvent.click(screen.getByRole("button", { name: /send test chat/i }));
+    expect(await screen.findByText(/model took too long/i)).toBeInTheDocument();
+    expect(screen.queryByText("signal is aborted without reason")).not.toBeInTheDocument();
+    expect(complete).not.toHaveBeenCalled();
+  });
+
   it("uses provider back label by default and allows wizard-specific copy", () => {
     const onBack = vi.fn();
     const props = {

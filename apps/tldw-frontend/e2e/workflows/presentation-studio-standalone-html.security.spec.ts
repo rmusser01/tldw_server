@@ -811,7 +811,7 @@ const installPageSecurityInstrumentation = async (
       calibrateBlobUrlSinks
     }) => {
       type EventRecord = SecurityEvent
-      type SecurityWindow = typeof window & {
+      type SecurityWindow = Omit<typeof window, "chrome"> & {
         __task17SecurityEvents?: EventRecord[]
         __task17SecurityOverflow?: number
         __task17RecordSecurityEvent?: (event: EventRecord) => Promise<void>

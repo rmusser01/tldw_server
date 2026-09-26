@@ -36,6 +36,8 @@ async def _activate_selected_org(
         is_admin=scope.is_admin if scope is not None else principal.is_admin,
         session_role=scope.session_role if scope is not None else None,
     )
+    # Cached authentication must preserve only this validated request selection.
+    request.state._validated_content_scope = (principal.model_copy(deep=True), get_scope())
     return selected
 
 

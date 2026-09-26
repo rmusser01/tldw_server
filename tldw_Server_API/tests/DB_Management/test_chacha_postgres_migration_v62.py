@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.DB_Management.chacha import schema_bootstrap
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 pytestmark = pytest.mark.unit
@@ -42,6 +43,9 @@ def test_postgres_initializer_routes_schema_v61_through_v62(
     db._uses_shared_content_backend = False
     db._backend_refresh_suspended = False
     db._local = SimpleNamespace()
+    # This unit test covers version routing; real lock lifetime is covered by
+    # test_chacha_postgres_schema_lock and the Notes bootstrap lifecycle suite.
+    monkeypatch.setattr(schema_bootstrap, "postgres_schema_migration", lambda *_args: _FakeTransaction())
 
     monkeypatch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 62)
     monkeypatch.setattr(db, "_get_schema_version_postgres", lambda _conn, lock=False: 61)

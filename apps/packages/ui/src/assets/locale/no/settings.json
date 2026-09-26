@@ -1001,10 +1001,11 @@
     }
   },
   "onboarding": {
+    "loginSettingsError": "Kunne ikke åpne innloggingsinnstillingene. Prøv igjen.",
     "title": "Velkommen — La oss koble deg til",
     "description": "Konfigurer server og autentisering. Vi sjekker tilkobling og RAG-helse underveis.",
     "learnMoreTldw": "Lær hvordan tldw-serveren fungerer",
-    "serverDocsUrl": "https://github.com/rmusser01/tldw_browser_assistant",
+    "serverDocsUrl": "https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting_Started/README.md",
     "serverUrl": {
       "placeholder": "http://127.0.0.1:8000",
       "help": "Eksempel: http://127.0.0.1:8000",

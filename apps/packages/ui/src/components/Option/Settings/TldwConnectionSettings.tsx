@@ -5,7 +5,6 @@ import {
   Input,
   Checkbox,
   Form,
-  Modal,
   Button,
   Tag
 } from "antd"
@@ -13,7 +12,9 @@ import type { FormInstance } from "antd"
 import React from "react"
 import type { TFunction } from "i18next"
 import { isFirefoxTarget } from "@/config/platform"
+import { isExtensionRuntime } from "@/utils/browser-runtime"
 import { Alert } from "@/components/ui/primitives"
+import { useAntdModal } from "@/hooks/useAntdModal"
 import { shouldClearManualApiKeyForServerChange } from "@/components/Option/Onboarding/validation"
 import {
   getCoreStatusLabel,
@@ -36,6 +37,7 @@ export type TldwConnectionSettingsProps = {
   setAuthMode: (mode: "single-user" | "multi-user") => void
   isLoggedIn: boolean
   setIsLoggedIn: (loggedIn: boolean) => void
+  refreshLoginStatus: () => Promise<void>
   loginMethod: LoginMethod
   setLoginMethod: (method: LoginMethod) => void
   magicEmail: string
@@ -94,6 +96,7 @@ export const TldwConnectionSettings = ({
   setAuthMode,
   isLoggedIn,
   setIsLoggedIn,
+  refreshLoginStatus,
   loginMethod,
   setLoginMethod,
   magicEmail,
@@ -117,6 +120,7 @@ export const TldwConnectionSettings = ({
   onGrantSiteAccess,
   onOpenHealthDiagnostics
 }: TldwConnectionSettingsProps) => {
+  const modal = useAntdModal()
   return (
     <>
       <Form.Item
@@ -155,34 +159,44 @@ export const TldwConnectionSettings = ({
         rules={[{ required: true }]}
       >
         <Segmented
+          name="tldw-auth-mode"
           options={[
             { label: t('settings:tldw.authMode.single', 'Single User (API Key)'), value: 'single-user' },
             { label: t('settings:tldw.authMode.multi', 'Multi User (Login)'), value: 'multi-user' }
           ]}
           onChange={(value) => {
             if (authMode !== value) {
-              Modal.confirm({
+              const changeMode = () => {
+                setAuthMode(value as 'single-user' | 'multi-user')
+                form.setFieldValue('authMode', value)
+                for (const field of ['apiKey', 'username', 'password', 'magicEmail', 'magicToken']) {
+                  form.setFieldValue(field, '')
+                }
+                setMagicEmail('')
+                setMagicToken('')
+                setMagicSent(false)
+                setIsLoggedIn(false)
+                void refreshLoginStatus()
+              }
+              const hasCredentials = isLoggedIn || authSource === 'cookie-session' || magicEmail || magicToken ||
+                ['apiKey', 'username', 'password'].some((field) => Boolean(form.getFieldValue?.(field)))
+              if (!hasCredentials) {
+                changeMode()
+                return
+              }
+              modal.confirm({
                 title: t('settings:tldw.authModeChangeWarning.title', 'Change authentication mode?'),
                 content: t('settings:tldw.authModeChangeWarning.content',
                   'Switching authentication modes will clear your current credentials. You will need to re-enter them after saving.'),
-                okText: t('common:continue', 'Continue'),
+                okText: t('settings:tldw.authModeChangeWarning.confirm', 'Change mode'),
                 cancelText: t('common:cancel', 'Cancel'),
                 centered: true,
-                onOk: () => {
-                  setAuthMode(value as 'single-user' | 'multi-user')
-                  form.setFieldValue('apiKey', '')
-                  form.setFieldValue('username', '')
-                  form.setFieldValue('password', '')
-                  form.setFieldValue('magicEmail', '')
-                  form.setFieldValue('magicToken', '')
-                  setMagicEmail('')
-                  setMagicToken('')
-                  setMagicSent(false)
-                  setIsLoggedIn(false)
-                },
+                onOk: changeMode,
                 onCancel: () => {
                   // Reset the Segmented back to current value
                   form.setFieldValue('authMode', authMode)
+                  // Programmatic Form updates do not emit onValuesChange.
+                  void refreshLoginStatus()
                 }
               })
             }
@@ -248,6 +262,11 @@ export const TldwConnectionSettings = ({
                   'Keep signed in until this browser closes.'
                 )}
           </p>
+          {configuredServerUrl && (
+            <Button onClick={onLogout} loading={logoutLoading} className="mb-4">
+              {t('settings:tldw.buttons.disconnect', 'Disconnect')}
+            </Button>
+          )}
         </>
       )}
 
@@ -264,6 +283,7 @@ export const TldwConnectionSettings = ({
             label={t('settings:tldw.loginMethod.label', 'Login Method')}
           >
             <Segmented
+              name="tldw-login-method"
               options={[
                 { label: t('settings:tldw.loginMethod.magic', 'Magic link'), value: 'magic-link' },
                 { label: t('settings:tldw.loginMethod.password', 'Password'), value: 'password' }
@@ -284,7 +304,7 @@ export const TldwConnectionSettings = ({
                 name="username"
                 rules={[{ required: true, message: t('settings:tldw.fields.username.required', 'Please enter your username') }]}
               >
-                <Input placeholder={t('settings:tldw.fields.username.placeholder', 'Enter username')} />
+                <Input autoComplete="username" placeholder={t('settings:tldw.fields.username.placeholder', 'Enter username')} />
               </Form.Item>
 
               <Form.Item
@@ -292,7 +312,7 @@ export const TldwConnectionSettings = ({
                 name="password"
                 rules={[{ required: true, message: t('settings:tldw.fields.password.required', 'Please enter your password') }]}
               >
-                <Input.Password placeholder={t('settings:tldw.fields.password.placeholder', 'Enter password')} />
+                <Input.Password autoComplete="current-password" placeholder={t('settings:tldw.fields.password.placeholder', 'Enter password')} />
               </Form.Item>
 
               <Form.Item>
@@ -378,7 +398,7 @@ export const TldwConnectionSettings = ({
             {t('settings:tldw.buttons.testConnection', 'Test Connection')}
           </Button>
 
-          {!isFirefoxTarget && (
+          {isExtensionRuntime() && !isFirefoxTarget && (
             <Button onClick={onGrantSiteAccess}>
               {t('settings:tldw.buttons.grantSiteAccess', 'Grant Site Access')}
             </Button>

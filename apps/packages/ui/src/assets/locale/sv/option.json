@@ -487,7 +487,8 @@
     "collapseSidebar": "Fäll in sidopanelen",
     "titlePlaceholder": "Titel",
     "keywordsEditorPlaceholder": "Nyckelord (taggar)",
-    "tagsHelp": "Nyckelord hjälper dig att hitta den här anteckningen med nyckelordsfiltret till vänster."
+    "tagsHelp": "Nyckelord hjälper dig att hitta den här anteckningen med nyckelordsfiltret till vänster.",
+    "offlineSaveUnavailable": "Offline-sparande är inte tillgängligt förrän ditt konto och den lokala lagringen har bekräftats. Dina ändringar förblir osparade."
   },
   "tts": {
     "playground": "TTS‑lekplats"

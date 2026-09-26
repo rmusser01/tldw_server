@@ -1,4 +1,6 @@
 import { bgRequest, bgUpload } from "@/services/background-proxy"
+import type { FlashcardsRequestOptions } from "./flashcards"
+import { requestScopeFields } from "./tldw/domains/service-prompts"
 import type { AllowedPath } from "@/services/tldw/openapi-guard"
 
 export const FLASHCARD_ASSET_SCHEME = "flashcard-asset://"
@@ -34,12 +36,17 @@ export const parseFlashcardAssetReference = (
 }
 
 export async function uploadFlashcardAsset(
-  file: File
+  file: File,
+  options?: FlashcardsRequestOptions
 ): Promise<FlashcardAssetMetadata> {
+  options?.signal?.throwIfAborted()
   const data = new Uint8Array(await file.arrayBuffer())
+  options?.signal?.throwIfAborted()
   return await bgUpload<FlashcardAssetMetadata>({
     path: "/api/v1/flashcards/assets" as AllowedPath,
     method: "POST",
+    ...requestScopeFields(options?.requestScope),
+    abortSignal: options?.signal,
     fileFieldName: "file",
     file: {
       name: file.name,

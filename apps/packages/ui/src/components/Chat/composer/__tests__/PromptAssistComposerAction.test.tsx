@@ -6,6 +6,7 @@ import {
   markRecipePersistenceScoped
 } from "@/services/recipe-persistence-uncertainty"
 import * as recipeAuthority from "@/services/recipe-persistence-uncertainty"
+import * as servicePrompts from "@/services/service-prompts"
 import {
   clearRuntimeAuthOverride,
   setRuntimeSingleUserApiKeyOverride
@@ -1899,19 +1900,24 @@ describe("PromptAssistComposerAction exact Undo lifecycle", () => {
   })
 
   it("persists the existing owner after Apply and exact Undo", async () => {
+    vi.spyOn(servicePrompts, "resolveServicePromptScope").mockResolvedValue({
+      config: { serverUrl: "http://chat.test", authMode: "multi-user", authSource: "manual" },
+      scopeKey: "unit-owner", userId: "unit-owner", clientPrincipalVerified: true
+    })
+    const ownedDraftKey = expect.stringMatching(/^tldw:test:prompt-assist-composer:owner:[a-f0-9]{64}$/)
     const user = userEvent.setup()
     renderHarness({ draftEnabled: true })
 
     await waitFor(() =>
       expect(draftBucketMocks.set).toHaveBeenLastCalledWith(
-        "tldw:test:prompt-assist-composer",
+        ownedDraftKey,
         "Original user draft"
       )
     )
     await improveNow(user)
     await waitFor(() =>
       expect(draftBucketMocks.set).toHaveBeenLastCalledWith(
-        "tldw:test:prompt-assist-composer",
+        ownedDraftKey,
         "Improved user draft"
       )
     )
@@ -1919,7 +1925,7 @@ describe("PromptAssistComposerAction exact Undo lifecycle", () => {
 
     await waitFor(() =>
       expect(draftBucketMocks.set).toHaveBeenLastCalledWith(
-        "tldw:test:prompt-assist-composer",
+        ownedDraftKey,
         "Original user draft"
       )
     )

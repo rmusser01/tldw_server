@@ -387,7 +387,7 @@ export const MediaReviewReadingPane: React.FC<MediaReviewReadingPaneProps> = ({ 
               {isLoadingDetail ? (
                 <Skeleton active paragraph={{ rows: 2 }} title={false} />
               ) : hasAnalysis ? (
-                analysisShown
+                <ContentRenderer content={analysisShown} contentType="markdown" />
               ) : (
                 <span className="text-text-muted">{t("mediaPage.noAnalysis", "No analysis available")}</span>
               )}

@@ -1,0 +1,62 @@
+"""Persona-memory COUNT returns actual PostgreSQL and SQLite aggregate rows."""
+
+import pytest
+
+from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+
+pytestmark = pytest.mark.integration
+
+
+@pytest.fixture(params=["sqlite", "postgresql"])
+def count_db(request, tmp_path):
+    backend = None
+    if request.param == "postgresql":
+        backend = DatabaseBackendFactory.create_backend(request.getfixturevalue("pg_database_config"))
+    db = CharactersRAGDB(tmp_path / "memory-count.db", client_id="1", backend=backend)
+    try:
+        yield db
+    finally:
+        db.close_all_connections()
+        if backend is not None:
+            backend.get_pool().close_all()
+
+
+def add(db, persona, owner="1", **fields):
+    return db.add_persona_memory_entry(
+        {"persona_id": persona, "user_id": owner, "memory_type": "fact", "content": "Count fixture", **fields}
+    )
+
+
+def test_empty_count_returns_zero(count_db):
+    assert count_db.count_persona_memory_entries(user_id="1", include_archived=True, include_deleted=True) == 0
+
+
+@pytest.mark.parametrize(
+    "archived,deleted,expected", [(False, False, 1), (True, False, 2), (False, True, 2), (True, True, 4)]
+)
+def test_count_respects_archive_and_deleted_visibility(count_db, archived, deleted, expected):
+    profile = count_db.create_persona_profile({"user_id": "1", "name": "Citrine"})
+    for a, d in ((False, False), (True, False), (False, True), (True, True)):
+        add(count_db, profile, archived=a, deleted=d)
+    assert (
+        count_db.count_persona_memory_entries(
+            user_id="1", persona_id=profile, include_archived=archived, include_deleted=deleted
+        )
+        == expected
+    )
+
+
+def test_count_keeps_owner_persona_and_type_boundaries(count_db):
+    first = count_db.create_persona_profile({"user_id": "1", "name": "First"})
+    second = count_db.create_persona_profile({"user_id": "1", "name": "Second"})
+    foreign = count_db.create_persona_profile({"user_id": "2", "name": "Other owner"})
+    add(count_db, first)
+    add(count_db, first, memory_type="preference")
+    add(count_db, second)
+    add(count_db, foreign, owner="2")
+    assert count_db.count_persona_memory_entries(user_id="1") == 3
+    assert count_db.count_persona_memory_entries(user_id="1", persona_id=first) == 2
+    assert count_db.count_persona_memory_entries(user_id="1", persona_id=first, memory_type="fact") == 1
+    assert count_db.count_persona_memory_entries(user_id="2", persona_id=first) == 0
+    assert count_db.count_persona_memory_entries(user_id="2") == 1

@@ -90,6 +90,25 @@ def test_prepare_backend_statement_positional_params():
     assert prepared == params
 
 
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("sql", "expected", "params"),
+    [
+        ("SELECT name FROM books WHERE name LIKE ? ESCAPE '\\'",
+         "SELECT name FROM books WHERE name LIKE %s ESCAPE '\\'", ("%literal%",)),
+        ("SELECT name FROM books WHERE name ILIKE ? ESCAPE ?",
+         "SELECT name FROM books WHERE name ILIKE %s ESCAPE %s", ("%literal%", "!")),
+        ("SELECT payload ? 'like' FROM books WHERE name LIKE ? ESCAPE '!'",
+         "SELECT payload ? 'like' FROM books WHERE name LIKE %s ESCAPE '!'", ("%!_%",)),
+    ],
+)
+def test_like_escape_parameters_are_not_jsonb_operators(sql, expected, params):
+    """Pattern binds reach the driver without consuming genuine JSONB operators."""
+    prepared = prepare_backend_statement(BackendType.POSTGRESQL, sql, params)
+    assert prepared == (expected, params)
+    assert prepare_backend_statement(BackendType.POSTGRESQL, *prepared) == (expected, params)
+
+
 def test_prepare_backend_many_statement_batch_params():
 
     sql = "INSERT INTO items (sku, qty) VALUES (?, ?)"

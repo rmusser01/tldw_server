@@ -128,7 +128,6 @@ export function KnowledgeQASetupDiagnostics({
     extensionFailureState === "backend_auth_failed" ||
     uxState === "configuring_auth" ||
     uxState === "error_auth" ||
-    connection.configStep === "auth" ||
     connection.errorKind === "auth"
   const unreachable =
     extensionFailureState === "backend_unreachable" ||
@@ -322,7 +321,7 @@ export function KnowledgeQASetupDiagnostics({
               label: "Browser access",
               status: "review",
               description:
-                "If you are using the extension, grant host access for this server. In WebUI, ensure the backend allows this browser origin.",
+                "The browser could not reach the server. Check the server and network connection, then retry.",
             }
           : {
               id: "browser-access",

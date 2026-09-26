@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import functools
 import hashlib
 import inspect
@@ -93,7 +94,6 @@ except AttributeError:  # Starlette < 0.27
     HTTP_413_TOO_LARGE = status.HTTP_413_REQUEST_ENTITY_TOO_LARGE
 
 _PERSISTENCE_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     AssertionError,
     AttributeError,
     ConnectionError,
@@ -1121,7 +1121,7 @@ async def _fetch_unvectorized_chunk_count(
             return None
 
     try:
-        return await loop.run_in_executor(None, _count_worker)
+        return await loop.run_in_executor(None, contextvars.copy_context().run, _count_worker)
     except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
         return None
 
@@ -4030,6 +4030,7 @@ async def persist_primary_av_item(
 
         media_id_result, media_uuid_result, db_message_result = await loop.run_in_executor(
             None,
+            contextvars.copy_context().run,
             _db_worker,
         )
 
@@ -4104,7 +4105,7 @@ async def persist_primary_av_item(
                         ),
                     )
 
-                write_payload = await loop.run_in_executor(None, _upsert_worker)
+                write_payload = await loop.run_in_executor(None, contextvars.copy_context().run, _upsert_worker)
                 with contextlib.suppress(_PERSISTENCE_NONCRITICAL_EXCEPTIONS):
                     emit_stt_run_write_total(
                         provider=provider_name,
@@ -4140,7 +4141,7 @@ async def persist_primary_av_item(
                         analysis_details=process_result.get("analysis_details") or {},
                     )
 
-                created_visual_docs = await loop.run_in_executor(None, _visual_docs_worker)
+                created_visual_docs = await loop.run_in_executor(None, contextvars.copy_context().run, _visual_docs_worker)
                 if created_visual_docs:
                     logger.info(
                         "Persisted {} VisualDocuments for media_id={} (input_ref={})",
@@ -5630,9 +5631,12 @@ async def process_document_like_item(
                     proc_warnings = None
 
             if isinstance(proc_warnings, list):
-                if not isinstance(final_result.get("warnings"), list):
-                    final_result["warnings"] = []
-                final_result["warnings"].extend(proc_warnings)
+                if final_result.get("warnings") is proc_warnings:
+                    # update(process_result_dict) already copied this reference.
+                    # Own the list rather than extending (and mutating) it with itself.
+                    final_result["warnings"] = list(proc_warnings)
+                else:
+                    _ensure_warnings_list(final_result).extend(proc_warnings)
             elif proc_warnings:
                 if not isinstance(final_result.get("warnings"), list):
                     final_result["warnings"] = []
@@ -6047,6 +6051,7 @@ async def persist_doc_item_and_children(
 
             db_worker_result = await loop.run_in_executor(  # type: ignore[arg-type]
                 None,
+                contextvars.copy_context().run,
                 _db_worker,
             )
             if isinstance(db_worker_result, tuple) and len(db_worker_result) == 4:
@@ -6276,6 +6281,7 @@ async def persist_doc_item_and_children(
                                         child_msg,
                                     ) = await loop.run_in_executor(  # type: ignore[arg-type]
                                         None,
+                                        contextvars.copy_context().run,
                                         _db_child_worker,
                                     )
                                     await _enforce_chunk_consistency_after_persist(

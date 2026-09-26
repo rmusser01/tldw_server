@@ -15,6 +15,7 @@ import {
   useImportLimitsQuery,
   usePreviewStructuredQaImportMutation
 } from "../../hooks"
+import type { ServicePromptSnapshot } from "@/services/service-prompts"
 import type { DeckSchedulerSettings, DeckSchedulerSettingsEnvelope } from "@/services/flashcards"
 
 const messageSpies = {
@@ -358,4 +359,39 @@ describe("ImportExportTab deck creation flows", () => {
       })
     )
   })
+  it.each(["pending", "error", "ready"])("requires a successful scoped deck list before new-deck save (%s)", async state => {
+    const controller = new AbortController()
+    const scope = {
+      scopeKey: "owner-1", requestScope: { config: { serverUrl: "https://owner.test", authMode: "multi-user" }, userId: 1 },
+      scopeSignal: controller.signal, scopeInvalidatedSignal: controller.signal, capability: "unchecked", definitions: {}, release: () => controller.abort()
+    } as ServicePromptSnapshot
+    const refetch = vi.fn().mockRejectedValue(new Error("Deck service unavailable"))
+    vi.mocked(useDecksQuery).mockReturnValue({ data: [], isLoading: state === "pending", isError: state === "error", isSuccess: state === "ready", refetch } as ReturnType<typeof useDecksQuery>)
+    generateMutateAsync.mockResolvedValue({ flashcards: [{ front: "Question", back: "Answer", model_type: "basic" }], count: 1 })
+    createDeckMutateAsync.mockResolvedValue({ id: 12, name: "Generated Flashcards", version: 1 })
+    createCardMutateAsync.mockResolvedValue({})
+    render(<ImportExportTab generationScope={scope} />)
+    fireEvent.change(screen.getByTestId("flashcards-generate-text"), { target: { value: "Current source" } })
+    fireEvent.click(screen.getByTestId("flashcards-generate-button"))
+    fireEvent.click(await screen.findByTestId("flashcards-generate-save-button"))
+    if (state !== "ready") {
+      await waitFor(() => expect(messageSpies.error).toHaveBeenCalled())
+      expect(createDeckMutateAsync).not.toHaveBeenCalled()
+      expect(createCardMutateAsync).not.toHaveBeenCalled()
+      expect(refetch).toHaveBeenCalledTimes(state === "error" ? 1 : 0)
+      expect(screen.getByTestId("flashcards-generate-deck")).not.toHaveTextContent("Create new deck")
+      return
+    }
+    const requestOptions = { signal: scope.scopeSignal, requestScope: scope.requestScope }
+    await waitFor(() => expect(createCardMutateAsync).toHaveBeenCalledWith(expect.objectContaining({ deck_id: 12, requestOptions })))
+    expect(createDeckMutateAsync).toHaveBeenCalledWith(expect.objectContaining({ requestOptions }))
+    expect(screen.getByTestId("flashcards-generate-deck")).toHaveTextContent("Generated Flashcards")
+    // The owned create acknowledgment is valid even before a list refetch observes it.
+    fireEvent.click(screen.getByTestId("flashcards-generate-button"))
+    await waitFor(() => expect(generateMutateAsync).toHaveBeenCalledTimes(2))
+    fireEvent.click(await screen.findByTestId("flashcards-generate-save-button"))
+    await waitFor(() => expect(createCardMutateAsync).toHaveBeenCalledTimes(2))
+    expect(createDeckMutateAsync).toHaveBeenCalledTimes(1)
+  })
+
 })

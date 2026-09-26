@@ -1912,7 +1912,6 @@ class CollectionsDatabase:
         output_columns = self._table_columns("outputs")
         digest_columns = self._table_columns("reading_digest_schedules")
         file_artifact_columns = self._table_columns("file_artifacts")
-        content_columns = self._table_columns("content_items")
         audiobook_project_columns = self._table_columns("audiobook_projects")
         # Backfill columns for existing tables
         if "metadata_json" not in output_template_columns:

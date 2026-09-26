@@ -5,6 +5,7 @@ import { runtimeBootstrapReady } from "@web/extension/shims/runtime-bootstrap"
 import "@web/lib/i18n-web"
 import type { AppProps } from "next/app"
 import dynamic from "next/dynamic"
+import Head from "next/head"
 import { useRouter } from "next/router"
 import React from "react"
 import { BackendRecoveryUiProvider } from "@/components/Common/BackendRecoveryUiContext"
@@ -21,8 +22,17 @@ import {
   hasActiveCookieSessionAuth,
   hasEnvApiAuth
 } from "@web/lib/authStorage"
-import { loadTldwAuth, loadTldwClient } from "@web/lib/configured-auth-state"
+import {
+  loadTldwAuth,
+  loadConfiguredAuthConfig
+} from "@web/lib/configured-auth-state"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
+import {
+  REFRESH_ROTATION_KEY,
+  REFRESH_SESSION_INVALIDATION_PREFIX
+} from "@/services/tldw/single-user-credential"
+import { COOKIE_SESSION_CONFIG_KEY } from "@/services/tldw/browser-networking"
+import { createSafeStorage } from "@/utils/safe-storage"
 import {
   buildFirstRunOnboardingRoute,
   CHARACTER_CHAT_ONBOARDING_INTENT,
@@ -147,10 +157,12 @@ const buildFirstRunSetupRoute = (asPath: string): string => {
   return buildFirstRunOnboardingRoute(routeParts)
 }
 
-const getConfiguredAuthState = async (): Promise<ConfiguredAuthState> => {
+const getConfiguredAuthState = async (
+  isCurrent: () => boolean
+): Promise<ConfiguredAuthState | null> => {
   try {
-    const tldwClient = await loadTldwClient()
-    const config = await tldwClient.getConfig()
+    const config = await loadConfiguredAuthConfig()
+    if (!isCurrent()) return null
     if (!config) {
       return {
         hasConfig: false,
@@ -175,6 +187,7 @@ const getConfiguredAuthState = async (): Promise<ConfiguredAuthState> => {
       }
 
       const tldwAuth = await loadTldwAuth()
+      if (!isCurrent()) return null
       try {
         await tldwAuth.getCurrentUser()
         return {
@@ -184,6 +197,7 @@ const getConfiguredAuthState = async (): Promise<ConfiguredAuthState> => {
           serverUrl
         }
       } catch (error) {
+        if (!isCurrent()) return null
         if (!isAuthValidationFailure(error)) {
           return {
             hasConfig: true,
@@ -242,37 +256,44 @@ export default function App({ Component, pageProps }: AppProps) {
   const [configuredServerUrl, setConfiguredServerUrl] =
     React.useState<string | null>(null)
   const [authResolved, setAuthResolved] = React.useState(false)
+  const [requiresLogin, setRequiresLogin] = React.useState(false)
   const didWarmRoutePrefetch = React.useRef(false)
 
   React.useEffect(() => {
     if (typeof window === "undefined") return
 
     let cancelled = false
+    let refreshGeneration = 0
     const refreshAuthState = async () => {
+      const generation = ++refreshGeneration
+      const isCurrent = () => !cancelled && generation === refreshGeneration
       await runtimeBootstrapReady.catch(() => undefined)
-      if (cancelled) return
+      if (!isCurrent()) return
 
       const envAuthed =
         hasEnvApiAuth() ||
         Boolean(getRuntimeApiKey()) ||
         Boolean(getRuntimeApiBearer())
-      const configuredAuth = await getConfiguredAuthState()
+      const configuredAuth = await getConfiguredAuthState(isCurrent)
+      if (!configuredAuth || !isCurrent()) return
       const authed = configuredAuth.hasConfig
         ? configuredAuth.authMode === "multi-user"
           ? configuredAuth.isAuthenticated
           : configuredAuth.isAuthenticated || envAuthed
         : envAuthed
 
-      if (!cancelled) {
+      if (isCurrent()) {
         setIsAuthenticated(authed)
         setConfiguredServerUrl(configuredAuth.serverUrl ?? null)
         setAuthResolved(true)
-        if (
+        const needsLogin =
           !authed &&
           configuredAuth.hasConfig &&
-          configuredAuth.authMode === "multi-user" &&
-          !shouldBypassGates
-        ) {
+          configuredAuth.authMode === "multi-user"
+        setRequiresLogin(needsLogin)
+        // Next can fall back to a full-page navigation when its route manifest
+        // is unavailable. Keep the loaded signed-out screen while offline.
+        if (needsLogin && !shouldBypassGates && navigator.onLine !== false) {
           void router.push("/login")
         }
       }
@@ -284,19 +305,35 @@ export default function App({ Component, pageProps }: AppProps) {
       void refreshAuthState()
     }
     const onStorage = (event: StorageEvent) => {
-      if (!event.key || event.key === "tldwConfig") {
+      if (
+        !event.key ||
+        event.key === "tldwConfig" ||
+        event.key === REFRESH_ROTATION_KEY ||
+        event.key === COOKIE_SESSION_CONFIG_KEY ||
+        event.key.startsWith(REFRESH_SESSION_INVALIDATION_PREFIX)
+      ) {
         void refreshAuthState()
       }
     }
 
+    const storage = createSafeStorage({ area: "local" })
+    const watchers = {
+      tldwConfig: onConfigUpdated,
+      [REFRESH_ROTATION_KEY]: onConfigUpdated,
+      [COOKIE_SESSION_CONFIG_KEY]: onConfigUpdated
+    }
+    storage.watch(watchers)
     window.addEventListener("tldw:config-updated", onConfigUpdated)
     window.addEventListener("focus", onConfigUpdated)
+    window.addEventListener("online", onConfigUpdated)
     window.addEventListener("storage", onStorage)
 
     return () => {
       cancelled = true
+      storage.unwatch(watchers)
       window.removeEventListener("tldw:config-updated", onConfigUpdated)
       window.removeEventListener("focus", onConfigUpdated)
+      window.removeEventListener("online", onConfigUpdated)
       window.removeEventListener("storage", onStorage)
     }
   }, [router, router.asPath, shouldBypassGates])
@@ -437,6 +474,22 @@ export default function App({ Component, pageProps }: AppProps) {
     return <PageAssistLoader label="Loading..." autoFocus={false} />
   }
 
+  // Unmount private route content without needing a new page chunk or network
+  // readiness check. Account-scoped offline draft storage remains untouched.
+  if (requiresLogin && !shouldBypassGates) {
+    return (
+      <main className="mx-auto max-w-lg px-6 py-16" aria-live="polite">
+        <Head><title>Signed out | tldw</title></Head>
+        <h1 className="text-2xl font-semibold">Signed out</h1>
+        <p className="mt-3">
+          {navigator.onLine === false
+            ? "Reconnect to sign in."
+            : "Opening sign-in…"}
+        </p>
+      </main>
+    )
+  }
+
   const layoutContent = (
     <OptionLayout {...layoutProps}>
       <Component {...pageProps} />
@@ -450,7 +503,8 @@ export default function App({ Component, pageProps }: AppProps) {
   ) : (
     <FirstRunGate
       onStartSetup={handleStartSetup}
-      bypass={shouldBypassFirstRunOverlay}>
+      allowCompletedSetup={routePath === "/knowledge" || routePath === "/chat"}
+      bypass={!isAuthenticated || shouldBypassFirstRunOverlay}>
       {layoutContent}
     </FirstRunGate>
   )

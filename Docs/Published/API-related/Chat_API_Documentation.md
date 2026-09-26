@@ -35,6 +35,13 @@ Parameter glossary:
 - `start_date`/`end_date`: ISO-8601 range bounds for analytics.
 - `bucket_granularity`: `day` or `week` for analytics buckets.
 
+Knowledge-save accepts `conversation_id`, an optional `message_id`, and a nonempty
+`snippet`. Model reasoning blocks are excluded from saved content. With
+`make_flashcard=true`, supply both `flashcard_front` (the reviewed question) and
+`flashcard_back` (the reviewed answer); missing or blank sides return `422` before
+any note or card is created. Notes and cards retain the conversation/message
+backlinks. The Chat UI opens a question/answer editor before saving a flashcard.
+
 ## Auth + Rate Limits
 - Single-user: `X-API-KEY: <key>`
 - Multi-user: `Authorization: Bearer <JWT>`

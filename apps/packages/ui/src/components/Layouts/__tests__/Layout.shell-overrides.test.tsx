@@ -2,14 +2,24 @@
 
 import React from "react"
 import { MemoryRouter } from "react-router-dom"
-import { render, waitFor } from "@testing-library/react"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import OptionLayout, { useOptionLayoutShellOverrides } from "../Layout"
 
 const storeMessageOptionMock = vi.hoisted(() =>
   vi.fn(() => ({ historyId: null, serverChatId: null }))
 )
+const sidebarState = vi.hoisted(() => ({ enabled: false, mobile: false }))
+
+vi.mock("antd", async (importOriginal) => ({
+  ...await importOriginal<typeof import("antd")>(),
+  Drawer: ({ children, open }: { children: React.ReactNode; open: boolean }) => open ? <div role="dialog">{children}</div> : null
+}))
+
+vi.mock("@/components/Common/ChatSidebar", () => ({
+  ChatSidebar: ({ onConversationSelected }: { onConversationSelected?: () => void }) => <aside data-testid="chat-sidebar"><button onClick={onConversationSelected}>Select saved conversation</button></aside>
+}))
 
 vi.mock("@/hooks/useLayoutEffectsOwner", () => ({
   useLayoutEffectsOwner: () => false
@@ -46,11 +56,11 @@ vi.mock("@/hooks/useMigration", () => ({
 }))
 
 vi.mock("@/hooks/useFeatureFlags", () => ({
-  useChatSidebar: () => [false]
+  useChatSidebar: () => [sidebarState.enabled]
 }))
 
 vi.mock("@/hooks/useMediaQuery", () => ({
-  useMobile: () => false
+  useMobile: () => sidebarState.mobile
 }))
 
 vi.mock("@/hooks/useSetting", () => ({
@@ -145,6 +155,10 @@ vi.mock("@/context/demo-mode", () => ({
 }))
 
 describe("OptionLayout shell overrides", () => {
+  beforeEach(() => {
+    sidebarState.enabled = false
+    sidebarState.mobile = false
+  })
   afterEach(() => {
     delete (
       globalThis as typeof globalThis & {
@@ -152,6 +166,24 @@ describe("OptionLayout shell overrides", () => {
       }
     ).__tldwOptionShell
     storeMessageOptionMock.mockClear()
+  })
+
+  it("closes the mobile drawer on accepted selection without a route change", () => {
+    sidebarState.enabled = true
+    sidebarState.mobile = true
+    render(<MemoryRouter initialEntries={["/chat"]}><OptionLayout><div>Chat</div></OptionLayout></MemoryRouter>)
+    act(() => window.dispatchEvent(new CustomEvent("tldw:open-chat-sidebar")))
+    expect(screen.getByRole("dialog")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Select saved conversation" }))
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+  })
+
+  it("keeps the desktop sidebar mounted after selection", () => {
+    sidebarState.enabled = true
+    render(<MemoryRouter initialEntries={["/chat"]}><OptionLayout><div>Chat</div></OptionLayout></MemoryRouter>)
+    fireEvent.click(screen.getByRole("button", { name: "Select saved conversation" }))
+    expect(screen.getByTestId("chat-sidebar")).toBeInTheDocument()
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
   })
 
   it("does not clear another shell override if this render never applied one", () => {

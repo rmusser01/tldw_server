@@ -83,6 +83,7 @@ describe("QAQuickSettings", () => {
     fireEvent.click(screen.getByText("Anthropic"))
 
     expect(onGenerationProviderChange).toHaveBeenCalledWith("anthropic")
+    expect(onGenerationModelChange).toHaveBeenCalledWith("claude-3-7-sonnet-20250219")
 
     const modelInput = screen.getByRole("combobox", { name: "Answer model" })
     fireEvent.change(modelInput, { target: { value: "claude-3-7-sonnet-20250219" } })

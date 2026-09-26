@@ -323,6 +323,8 @@ Release approval is a separate human record in the checklist and has not been
 inferred from implementation, test results or the instruction to finish the work.
 
 Optional live Gmail OAuth/provider behavior and staging sync lag remain deferred.
-Two real-PST fixture skips limit enabled-adapter evidence; synthetic adapter and
-missing-parser checks remain separate. None of these optional live-mail checks
+The historical two real-PST fixture skips are closed by TASK-13377: both native
+endpoint cases pass with a pinned public synthetic PST. See
+[real PST validation](Email_Real_PST_Validation_2026-09-26.md). Actual OST containers
+remain unverified; synthetic adapters and missing-parser checks are separate evidence. None of these optional live-mail checks
 claims access to a personal account or authorizes downstream model processing.

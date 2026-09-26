@@ -789,7 +789,8 @@
     "collapseSidebar": "Contraer barra lateral",
     "titlePlaceholder": "Título",
     "keywordsEditorPlaceholder": "Palabras clave (etiquetas)",
-    "tagsHelp": "Las palabras clave te ayudan a encontrar esta nota usando el filtro de palabras clave de la izquierda."
+    "tagsHelp": "Las palabras clave te ayudan a encontrar esta nota usando el filtro de palabras clave de la izquierda.",
+    "offlineSaveUnavailable": "El guardado sin conexión no está disponible hasta que se confirmen tu cuenta y el almacenamiento local. Tus cambios siguen sin guardarse."
   },
   "tts": {
     "playground": "Playground de TTS"

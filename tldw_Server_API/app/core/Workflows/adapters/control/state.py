@@ -13,7 +13,11 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Workflows.adapters._common import resolve_artifacts_dir
+from tldw_Server_API.app.core.Workflows.adapters._common import (
+    resolve_artifacts_dir,
+    resolve_context_user_id,
+    workflow_chroma_manager,
+)
 from tldw_Server_API.app.core.Workflows.adapters._registry import get_adapter, registry
 from tldw_Server_API.app.core.Workflows.adapters.control._config import (
     BatchConfig,
@@ -36,11 +40,15 @@ _STATE_ADAPTER_EXCEPTIONS = (
 _STATE_JSON_EXCEPTIONS = (TypeError, ValueError, json.JSONDecodeError)
 
 
-def _get_workflow_cache_collection(collection_name: str):
-    """Resolve a Chroma collection for workflow cache storage."""
-    from tldw_Server_API.app.core.Embeddings.ChromaDB_Library import get_default_chroma_manager
+def _get_workflow_cache_collection(collection_name: str, user_id: str):
+    """Resolve the Chroma collection holding one account's workflow cache.
 
-    manager = get_default_chroma_manager()
+    Chroma isolates by directory, so the manager must be built for the account
+    running the step. Resolving it from a process-global default put every
+    account's entries in one collection keyed by a caller-supplied string,
+    which let one workflow read another's cached step output by guessing a key.
+    """
+    manager = workflow_chroma_manager(user_id)
     if not manager:
         return None
     return manager.get_or_create_collection(collection_name=collection_name)
@@ -118,10 +126,16 @@ async def run_cache_result_adapter(config: dict[str, Any], context: dict[str, An
         prev = context.get("prev") or context.get("last") or {}
         data = prev
 
+    user_id = resolve_context_user_id(context)
+    if not user_id:
+        # No account means no cache partition to read or write. Failing here is
+        # the point: the previous default landed in user 1's store.
+        return {"cached": False, "data": data, "error": "missing_user_id"}
+
     try:
         cache_collection_name = "workflow_cache"
         try:
-            collection = _get_workflow_cache_collection(cache_collection_name)
+            collection = _get_workflow_cache_collection(cache_collection_name, user_id)
         except _STATE_ADAPTER_EXCEPTIONS:
             return {"cached": False, "data": data, "error": "cache_collection_error"}
         if not collection:

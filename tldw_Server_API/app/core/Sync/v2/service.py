@@ -13,7 +13,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from time import monotonic_ns
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 from uuid import RFC_4122, UUID, uuid4
 
 from loguru import logger
@@ -115,6 +115,8 @@ from .models import (
     SyncRestoreCompletenessStatus,
     SyncRestoreDomainCompleteness,
     _sync_v2_internal_domain_schemas,
+    blob_upload_expires_at,
+    blob_upload_session_is_expired,
     client_private_server_frontend_limitation_warning,
     normalize_supported_adapter_versions,
     normalize_sync_timestamp,
@@ -842,6 +844,11 @@ class SyncV2Settings:
     max_blob_bytes: int | None = None
     max_chunk_bytes: int = 4_194_304
     max_active_blob_uploads: int = 8
+    # How long a started upload holds its quota reservation. 0 disables expiry, which
+    # restores the pre-TASK-13321 behaviour where an abandoned upload held its slot and
+    # its bytes forever. 24h is long enough for a resumable upload over a poor link and
+    # short enough that a crashed client recovers the same day.
+    blob_upload_session_ttl_seconds: int = 86_400
     user_blob_quota_bytes: int | None = None
     reserved_blob_bytes: int = 0
     used_blob_bytes: int = 0
@@ -2468,6 +2475,28 @@ class SyncV2Service:
         if outcome == "mismatch":
             raise SyncStoreError("Personal Context authority cancellation raced")
         return outcome
+
+    def prepare_notes_suggestion_authority(
+        self, *, user_id: str, dataset: SyncDataset, note_db: Any | None = None
+    ) -> None:
+        """Fence prior local review state before a real Notes default snapshot."""
+
+        actual = self.store.get_dataset(dataset.dataset_id)
+        if (
+            actual is None
+            or actual.owner_user_id != user_id
+            or actual.scope_type != "personal"
+            or actual.metadata.get("default_personal") is not True
+            or actual.metadata.get("client_family") != "chatbook"
+        ):
+            raise SyncStoreError("Notes suggestion authority requires the owned default dataset")
+        product_db = note_db if note_db is not None else getattr(self.materializers.get("notes.note"), "note_db", None)
+        if product_db is None:
+            # A service without a Notes materializer owns no local Notes state.
+            return
+        if str(product_db.client_id) != str(user_id):
+            raise SyncStoreError("Notes suggestion product owner does not match")
+        product_db.note_graph_suggestion_store.reserve_canonical_scope(dataset_id=actual.dataset_id)
 
     def _notes_task_domains_ready(self, dataset: SyncDataset | None) -> bool:
         """Return the single service-level task/activity activation predicate."""
@@ -6144,6 +6173,14 @@ class SyncV2Service:
                 reserved_quota_bytes=size_bytes,
                 idempotency_key=idempotency_key,
                 metadata=normalized_metadata,
+                # Set here because it was set nowhere: the column, the "expired" status and
+                # the quota query's status filter were all built for a lifecycle whose
+                # writer was missing, so 8 crashed uploads locked a user out permanently.
+                # See TASK-13321.
+                expires_at=blob_upload_expires_at(
+                    self.settings.blob_upload_session_ttl_seconds,
+                    now=self.clock(),
+                ),
             )
         )
 
@@ -6348,6 +6385,11 @@ class SyncV2Service:
             raise SyncIdempotencyConflictError(
                 "Sync blob chunk was reused with different content"
             )
+        # Refuse before touching disk: an expired session's staged chunks are never
+        # completed, so writing one only leaves bytes behind. See TASK-13321.
+        if blob_upload_session_is_expired(session.expires_at, now=self.clock()):
+            blob_store.discard_upload(upload_id)
+            raise SyncStoreError("Sync blob upload session has expired")
         try:
             storage_key = blob_store.write_upload_chunk(
                 upload_id=upload_id,
@@ -6357,17 +6399,25 @@ class SyncV2Service:
             )
         except SyncBlobStoreError as exc:
             raise SyncStoreError(str(exc)) from exc
-        return self.store.record_blob_chunk(
-            SyncBlobChunkCreate(
-                upload_id=upload_id,
-                dataset_id=dataset_id,
-                chunk_index=chunk_index,
-                offset_bytes=offset_bytes,
-                size_bytes=len(chunk_payload),
-                chunk_hash=chunk_hash,
-                storage_key=storage_key,
+        try:
+            return self.store.record_blob_chunk(
+                SyncBlobChunkCreate(
+                    upload_id=upload_id,
+                    dataset_id=dataset_id,
+                    chunk_index=chunk_index,
+                    offset_bytes=offset_bytes,
+                    size_bytes=len(chunk_payload),
+                    chunk_hash=chunk_hash,
+                    storage_key=storage_key,
+                )
             )
-        )
+        except SyncStoreError:
+            # The deadline can pass between the check above and the store's own check.
+            # The session is then dead, so discard its staged chunks rather than leave
+            # them on disk until an explicit cancel that will never come.
+            if blob_upload_session_is_expired(session.expires_at, now=self.clock()):
+                blob_store.discard_upload(upload_id)
+            raise
 
     def complete_blob_upload(
         self,
@@ -10662,14 +10712,22 @@ class SyncV2Service:
             != SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION
             else None
         )
+        if blocker_cursor is not None:
+            # End the scan at the blocker rather than filtering around it, matching how
+            # _scan_pull_page_versioned breaks out of its merge loop. The caller derives
+            # both `has_more` and the next watermark from `raw`, so leaving withheld
+            # envelopes in it advanced the device cursor past rows this function refused
+            # to deliver -- they were then never sent again, and the device was told it
+            # was caught up. Silent, permanent, per-device data loss.
+            raw = [
+                envelope
+                for envelope in raw
+                if envelope.server_sequence < blocker_cursor
+            ]
         visible = [
             envelope
             for envelope in raw
             if envelope.apply_status not in {"conflict", "superseded"}
-            and (
-                blocker_cursor is None
-                or envelope.server_sequence < blocker_cursor
-            )
             and _personal_context_pull_visible(
                 envelope,
                 authorized=personal_context_egress_authorized,

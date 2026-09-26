@@ -37,15 +37,19 @@ export type BuddySource =
   | { kind: "starter"; starter_id: string }
   | { kind: "persona_pack"; persona_id: string; pack_id: string }
 
+type BuddyReadOptions = { suppressBackendUnavailableEvent?: boolean }
+
 export async function buddyRequest<T>(
   path: string,
   method = "GET",
-  body?: unknown
+  body?: unknown,
+  options?: BuddyReadOptions
 ): Promise<T> {
   const response = await tldwClient.fetchWithAuth(
     toAllowedPath(`/api/v1/buddies${path}`),
     {
       method,
+      ...options,
       ...(body === undefined
         ? {}
         : {
@@ -69,10 +73,14 @@ export const BUDDY_PAGE_SIZE = 100
 type BuddyPage = { limit?: number; offset?: number }
 const pageQuery = ({ limit = BUDDY_PAGE_SIZE, offset = 0 }: BuddyPage = {}) =>
   `limit=${Math.min(BUDDY_PAGE_SIZE, Math.max(1, Math.floor(limit)))}&offset=${Math.max(0, Math.floor(offset))}`
-export const listBuddies = (page?: BuddyPage) =>
-  buddyRequest<{ buddies: BuddyProfile[] }>(`?${pageQuery(page)}`)
-export const getBuddy = (id: string) =>
-  buddyRequest<BuddyProfile>(`/${encodeURIComponent(id)}`)
+export const listBuddies = (page?: BuddyPage, options?: BuddyReadOptions) =>
+  buddyRequest<{ buddies: BuddyProfile[] }>(
+    `?${pageQuery(page)}`, "GET", undefined, options
+  )
+export const getBuddy = (id: string, options?: BuddyReadOptions) =>
+  buddyRequest<BuddyProfile>(
+    `/${encodeURIComponent(id)}`, "GET", undefined, options
+  )
 export const createBuddy = (body: {
   name: string
   source: BuddySource
@@ -88,8 +96,10 @@ export const updateBuddy = (
     display_mode?: "dynamic" | "static"
   }
 ) => buddyRequest<BuddyProfile>(`/${encodeURIComponent(id)}`, "PATCH", body)
-export const getBuddyAttachment = () =>
-  buddyRequest<BuddyAttachmentState>("/attachment?client_slot=default")
+export const getBuddyAttachment = (options?: BuddyReadOptions) =>
+  buddyRequest<BuddyAttachmentState>(
+    "/attachment?client_slot=default", "GET", undefined, options
+  )
 export const putBuddyAttachment = (
   body: BuddyAttachment & { expected_version: number }
 ) =>
@@ -103,9 +113,13 @@ export const detachBuddy = (version: number) =>
     `/attachment?client_slot=default&expected_version=${version}`,
     "DELETE"
   )
-export const listBuddyConversations = (page?: BuddyPage) =>
+export const listBuddyConversations = (
+  page?: BuddyPage,
+  options?: BuddyReadOptions
+) =>
   buddyRequest<{ conversations: BuddyConversationSummary[] }>(
-    `/attachment/conversations?client_slot=default&${pageQuery(page)}`
+    `/attachment/conversations?client_slot=default&${pageQuery(page)}`,
+    "GET", undefined, options
   )
 export const resolveBuddyConversationTarget = (id: string) =>
   buddyRequest<BuddyConversationSummary>(
@@ -127,14 +141,15 @@ const pageOffsets = (pages: number) =>
     { length: Math.max(1, Math.floor(pages)) },
     (_, index) => index * BUDDY_PAGE_SIZE
   )
-export const listBuddyTurns = async ({
-  pages = 1,
-  status
-}: { pages?: number; status?: "active" } = {}) => {
+export const listBuddyTurns = async (
+  { pages = 1, status }: { pages?: number; status?: "active" } = {},
+  options?: BuddyReadOptions
+) => {
   const results = await Promise.all(
     pageOffsets(pages).map((offset) =>
       buddyRequest<{ turns: BuddyTurn[] }>(
-        `/turns?client_slot=default&${pageQuery({ offset })}${status ? `&status=${status}` : ""}`
+        `/turns?client_slot=default&${pageQuery({ offset })}${status ? `&status=${status}` : ""}`,
+        "GET", undefined, options
       )
     )
   )
@@ -164,14 +179,16 @@ export type BuddyActivity = {
   result: { id: string; created_at: string; content: string } | null
   acknowledged: boolean
 }
-export const listBuddyActivity = async ({
-  conversationPages = 1
-}: { conversationPages?: number } = {}) => {
+export const listBuddyActivity = async (
+  { conversationPages = 1 }: { conversationPages?: number } = {},
+  options?: BuddyReadOptions
+) => {
   // Activity pages follow conversation pages; an empty result page is not the end.
   const results = await Promise.all(
     pageOffsets(conversationPages).map((offset) =>
       buddyRequest<{ items: BuddyActivity[] }>(
-        `/attachment/activity?client_slot=default&${pageQuery({ offset })}`
+        `/attachment/activity?client_slot=default&${pageQuery({ offset })}`,
+        "GET", undefined, options
       )
     )
   )

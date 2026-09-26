@@ -1,8 +1,18 @@
 import i18n from "i18next"
 import { formatErrorMessage } from "@/utils/format-error-message"
 import { parseBillingLimitError } from "@/utils/billing-error"
+import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
 
 export const TLDW_ERROR_BUBBLE_PREFIX = "__tldw_error__:"
+
+// Only this local pretransport error can establish that server Retry is not
+// required. A provider's matching message or arbitrary object cannot do so.
+export class ImageSupportUnconfirmedError extends Error {
+  constructor(readonly serverRetryRequired: boolean) {
+    super("Image support is not confirmed for this model.")
+    this.name = "ImageSupportUnconfirmedError"
+  }
+}
 
 export type ChatErrorPayload = {
   summary: string
@@ -12,6 +22,7 @@ export type ChatErrorPayload = {
   category?: string
   recoveryAction?: "open-model-selector" | "open-model-settings"
   recoveryLabel?: string
+  serverRetryRequired?: boolean
 }
 
 export const encodeChatErrorPayload = (payload: ChatErrorPayload): string =>
@@ -42,6 +53,8 @@ export const decodeChatErrorPayload = (
           : undefined,
       recoveryLabel:
         typeof parsed.recoveryLabel === "string" ? parsed.recoveryLabel : undefined,
+      serverRetryRequired:
+        typeof parsed.serverRetryRequired === "boolean" ? parsed.serverRetryRequired : undefined,
     }
   } catch {
     return null
@@ -55,9 +68,51 @@ const translateErrorText = (key: string, fallback: string): string => {
     : fallback
 }
 
+const findModelUnavailableError = (error: unknown): unknown => {
+  const seen = new Set<unknown>()
+  let current = error
+  while (current && typeof current === "object" && !seen.has(current)) {
+    seen.add(current)
+    const record = current as {
+      details?: { detail?: unknown }
+      detail?: unknown
+      cause?: unknown
+    }
+    if ([record, record.details, record.details?.detail, record.detail].some(
+      value => value && typeof value === "object" &&
+        (value as { error_code?: unknown }).error_code === "model_not_available"
+    )) return current
+    current = record.cause
+  }
+  return undefined
+}
+
 export const buildFriendlyErrorMessage = (rawError: unknown): string => {
-  const detail = formatErrorMessage(rawError, "Request failed")
+  let detail = formatErrorMessage(rawError, "Request failed")
   const lower = detail.toLowerCase()
+  // Ordinary chat wraps the direct transport error in Error.cause. Preserve
+  // its model-selection guidance without changing unrelated error handling.
+  const modelUnavailable = findModelUnavailableError(rawError)
+
+  if (rawError instanceof ImageSupportUnconfirmedError) {
+    return encodeChatErrorPayload({
+      summary: translateErrorText(
+        "common:error.imageSupportUnconfirmedSummary",
+        "Image support is not confirmed for this model."
+      ),
+      hint: translateErrorText(
+        "common:error.imageSupportUnconfirmedHint",
+        "Choose a model that supports images, or start a new text-only conversation."
+      ),
+      detail,
+      recoveryAction: "open-model-selector",
+      recoveryLabel: translateErrorText(
+        "common:error.chooseAnotherModel",
+        "Choose another model"
+      ),
+      serverRetryRequired: rawError.serverRetryRequired
+    })
+  }
 
   let summary: string
   let hint: string
@@ -74,11 +129,14 @@ export const buildFriendlyErrorMessage = (rawError: unknown): string => {
       "Your API key may be invalid. Open Settings → tldw server to check your URL and API key, then try again."
     )
   } else if (
+    modelUnavailable ||
+    lower.includes("model_not_available") ||
     lower.includes("not a valid model id") ||
     lower.includes("invalid model id") ||
     lower.includes("model_not_found") ||
     lower.includes("no such model")
   ) {
+    detail = sanitizeServerErrorMessage(modelUnavailable ?? rawError, "The selected model is not available.")
     summary = translateErrorText(
       "common:error.friendlyModelUnavailableSummary",
       "The selected model is not available."

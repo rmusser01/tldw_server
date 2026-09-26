@@ -1,6 +1,7 @@
 import importlib
 import sqlite3
 import uuid
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -233,9 +234,15 @@ def test_ensure_postgres_post_core_structures_runs_followup_ensures(monkeypatch)
         raising=False,
     )
 
+    monkeypatch.setattr(
+        postgres_helpers_module,
+        "ensure_postgres_sync_log_contract",
+        lambda value, connection: calls.append(("sync_contract", value, connection)),
+    )
     postgres_helpers_module.ensure_postgres_post_core_structures(db, conn)
 
     assert calls == [
+        ("sync_contract", db, conn),
         ("collections", conn),
         ("tts_history", conn),
         ("audio_presets", conn),
@@ -747,12 +754,12 @@ def test_sync_postgres_sequences_skips_incomplete_rows() -> None:
 
 
 @pytest.mark.unit
-def test_sync_postgres_sequences_invalid_scalar_uses_safe_setval_branch() -> None:
+def test_sync_postgres_sequences_invalid_scalar_does_not_reset_sequence() -> None:
     from tldw_Server_API.app.core.DB_Management.media_db.schema import (
         postgres_sequence_maintenance as postgres_sequence_maintenance_module,
     )
 
-    conn = object()
+    conn = SimpleNamespace(transaction=lambda **_kwargs: nullcontext())
     execute_calls: list[tuple[str, tuple[object, ...] | None, object]] = []
 
     class FakeBackend:
@@ -779,7 +786,9 @@ def test_sync_postgres_sequences_invalid_scalar_uses_safe_setval_branch() -> Non
                         }
                     ]
                 )
-            if len(execute_calls) == 2:
+            if query.startswith("SELECT last_value"):
+                return SimpleNamespace(rows=[{"last_value": 41, "is_called": True}])
+            if query.startswith("SELECT COALESCE(MAX"):
                 return SimpleNamespace(scalar="not-an-int")
             return SimpleNamespace()
 
@@ -801,13 +810,15 @@ def test_sync_postgres_sequences_invalid_scalar_uses_safe_setval_branch() -> Non
                 "        JOIN pg_class tab ON tab.oid = dep.refobjid\n"
                 "        JOIN pg_namespace tab_ns ON tab_ns.oid = tab.relnamespace\n"
                 "        JOIN pg_attribute col ON col.attrelid = tab.oid AND col.attnum = dep.refobjsubid\n"
-                "        WHERE seq.relkind = 'S' AND tab_ns.nspname = 'public';"
+                "        WHERE seq.relkind = 'S' AND tab_ns.nspname = 'public'\n"
+                "        ORDER BY sequence_ns.nspname, seq.relname;"
             ),
             None,
             conn,
         ),
+        ('ALTER SEQUENCE "public"."media_id_seq" OWNED BY "public"."media"."id"', None, conn),
+        ('SELECT last_value, is_called FROM "public"."media_id_seq"', None, conn),
         ('SELECT COALESCE(MAX("id"), 0) AS max_id FROM "media"', None, conn),
-        ("SELECT setval(%s, %s, false)", ("public.media_id_seq", 1), conn),
     ]
 
 
@@ -817,7 +828,7 @@ def test_sync_postgres_sequences_positive_scalar_uses_max_id_branch() -> None:
         postgres_sequence_maintenance as postgres_sequence_maintenance_module,
     )
 
-    conn = object()
+    conn = SimpleNamespace(transaction=lambda **_kwargs: nullcontext())
     execute_calls: list[tuple[str, tuple[object, ...] | None, object]] = []
 
     class FakeBackend:
@@ -844,7 +855,9 @@ def test_sync_postgres_sequences_positive_scalar_uses_max_id_branch() -> None:
                         }
                     ]
                 )
-            if len(execute_calls) == 2:
+            if query.startswith("SELECT last_value"):
+                return SimpleNamespace(rows=[{"last_value": 1, "is_called": False}])
+            if query.startswith("SELECT COALESCE(MAX"):
                 return SimpleNamespace(scalar=7)
             return SimpleNamespace()
 
@@ -854,7 +867,7 @@ def test_sync_postgres_sequences_positive_scalar_uses_max_id_branch() -> None:
 
     assert execute_calls[-1] == (
         "SELECT setval(%s, %s)",
-        ("custom_schema.media_id_seq", 7),
+        ('"custom_schema"."media_id_seq"', 7),
         conn,
     )
 

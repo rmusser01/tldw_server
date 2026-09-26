@@ -24,7 +24,6 @@ router = APIRouter()
 
 
 _RATE_LIMITS_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,

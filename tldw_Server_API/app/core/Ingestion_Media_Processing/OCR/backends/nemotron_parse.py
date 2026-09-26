@@ -13,6 +13,9 @@ import threading
 from typing import Any
 
 from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.base import OCRBackend
+from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.runtime_support import (
+    discard_staged_page_image,
+)
 from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.types import (
     OCRResult,
     normalize_ocr_format,
@@ -348,9 +351,16 @@ def _ocr_via_vllm(image_bytes: bytes, prompt: str, skip_special_tokens: bool) ->
         content_image = {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}}
     else:
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-            f.write(image_bytes)
-            f.flush()
+            # Record the path before writing. delete=False means a write that fails on a
+            # full filesystem leaves the file behind, and the cleanup below can only
+            # remove a path it has been given.
             tmp_path = f.name
+            try:
+                f.write(image_bytes)
+                f.flush()
+            except BaseException:
+                discard_staged_page_image(tmp_path)
+                raise
         content_image = {"type": "image_url", "image_url": {"url": tmp_path}}
 
     def _getf(env, cast, default):
@@ -383,9 +393,7 @@ def _ocr_via_vllm(image_bytes: bytes, prompt: str, skip_special_tokens: bool) ->
     try:
         j = fetch_json(method="POST", url=url, json=data, timeout=timeout)
     finally:
-        if tmp_path:
-            with contextlib.suppress(OSError):
-                os.unlink(tmp_path)
+        discard_staged_page_image(tmp_path)
     choice = (j.get("choices") or [{}])[0]
     content = (
         choice.get("message", {}).get("content")

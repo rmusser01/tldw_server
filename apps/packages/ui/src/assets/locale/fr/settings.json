@@ -1001,10 +1001,11 @@
   },
   "mermaid": "Diagrammes Mermaid",
   "onboarding": {
+    "loginSettingsError": "Impossible d’ouvrir les paramètres de connexion. Réessayez.",
     "title": "Bienvenue — connectons votre extension",
     "description": "Configurez votre serveur et l’authentification. Nous vérifierons en direct la connexion et l’état de la recherche Knowledge (RAG).",
     "learnMoreTldw": "Découvrir le fonctionnement du serveur tldw",
-    "serverDocsUrl": "https://github.com/rmusser01/tldw_browser_assistant",
+    "serverDocsUrl": "https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting_Started/README.md",
     "serverUrl": {
       "placeholder": "ex. http://127.0.0.1:8000",
       "help": "Exemple : http://127.0.0.1:8000",

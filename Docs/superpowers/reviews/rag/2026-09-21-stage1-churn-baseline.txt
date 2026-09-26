@@ -1,0 +1,36 @@
+# RAG churn, 12 months to 2026-09-21
+# git log --since='12 months ago' --name-only --pretty=format: -- tldw_Server_API/app/core/RAG | grep '.py$' | sort | uniq -c | sort -rn
+
+ 105 tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py
+  66 tldw_Server_API/app/core/RAG/rag_service/database_retrievers.py
+  37 tldw_Server_API/app/core/RAG/rag_service/agentic_chunker.py
+  28 tldw_Server_API/app/core/RAG/rag_service/generation.py
+  27 tldw_Server_API/app/core/RAG/rag_service/semantic_cache.py
+  24 tldw_Server_API/app/core/RAG/rag_service/advanced_reranking.py
+  23 tldw_Server_API/app/core/RAG/rag_service/post_generation_verifier.py
+  22 tldw_Server_API/app/core/RAG/rag_service/rewrite_cache.py
+  20 tldw_Server_API/app/core/RAG/rag_service/analytics_system.py
+  18 tldw_Server_API/app/core/RAG/rag_service/vector_stores/pgvector_adapter.py
+  15 tldw_Server_API/app/core/RAG/rag_service/research_agent.py
+  15 tldw_Server_API/app/core/RAG/rag_service/query_features.py
+  15 tldw_Server_API/app/core/RAG/rag_service/analytics_db.py
+  15 tldw_Server_API/app/core/RAG/rag_service/agentic_execution.py
+  14 tldw_Server_API/app/core/RAG/rag_service/streaming_executor.py
+  13 tldw_Server_API/app/core/RAG/rag_service/payload_exemplars.py
+  12 tldw_Server_API/app/core/RAG/rag_service/vector_stores/chromadb_adapter.py
+  12 tldw_Server_API/app/core/RAG/rag_service/quality_graders.py
+  12 tldw_Server_API/app/core/RAG/rag_service/hyde.py
+  12 tldw_Server_API/app/core/RAG/rag_service/guardrails.py
+  12 tldw_Server_API/app/core/RAG/rag_service/advanced_retrieval.py
+  11 tldw_Server_API/app/core/RAG/rag_service/user_personalization_store.py
+  11 tldw_Server_API/app/core/RAG/rag_service/types.py
+  11 tldw_Server_API/app/core/RAG/rag_service/quick_wins.py
+  11 tldw_Server_API/app/core/RAG/rag_service/document_grader.py
+  10 tldw_Server_API/app/core/RAG/rag_service/resilience.py
+  10 tldw_Server_API/app/core/RAG/rag_service/connection_pool.py
+   9 tldw_Server_API/app/core/RAG/rag_service/prf.py
+   9 tldw_Server_API/app/core/RAG/rag_service/knowledge_strips.py
+   9 tldw_Server_API/app/core/RAG/rag_service/citations.py
+
+# commits touching unified_pipeline.py SINCE the 2026-04-07 review:
+      42

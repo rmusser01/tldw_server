@@ -534,7 +534,7 @@ describe("ComposerToolbar web search", () => {
     ).toBeNull()
   })
 
-  it("wraps casual controls below desktop while keeping the dense desktop row", () => {
+  it("wraps casual control groups to the available pane width at desktop sizes too", () => {
     render(<ComposerToolbar {...createProps()} />)
 
     const actionsRow = document.querySelector<HTMLElement>(
@@ -542,8 +542,13 @@ describe("ComposerToolbar web search", () => {
     )
     expect(actionsRow).not.toBeNull()
     expect(actionsRow?.className).toContain("flex-wrap")
-    expect(actionsRow?.className).toContain("lg:flex-nowrap")
-    expect(actionsRow?.className).toContain("lg:overflow-x-auto")
+    expect(actionsRow?.className).not.toContain("lg:flex-nowrap")
+    expect(actionsRow?.className).not.toContain("overflow-x-auto")
+    for (const name of ["Mode and context controls", "Run input controls"]) {
+      const group = screen.getByRole("group", { name })
+      expect(group).toHaveClass("flex-wrap", "[&>*]:shrink-0")
+      expect(group.className).not.toContain("lg:flex-nowrap")
+    }
   })
 
   it("keeps MCP in the casual actions row when advanced controls are expanded", () => {

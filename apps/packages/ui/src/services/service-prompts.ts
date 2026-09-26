@@ -257,7 +257,7 @@ const unresolvedServicePromptScopeError = () => Object.assign(
 export type ServicePromptSnapshot = Readonly<{
   scopeKey: string
   requestScope: ServicePromptRequestScope
-  capability: "supported" | "legacy-404"
+  capability: "supported" | "legacy-404" | "unchecked"
   definitions: Readonly<
     Partial<Record<KnownServicePromptId, Readonly<{
       definition: ServicePromptRenderDefinition
@@ -801,6 +801,9 @@ export const loadServicePromptSnapshot = async (
     }
     lease.bind(scope)
     throwIfAborted(lease.signal)
+    if (requested.length === 0) {
+      return freezeSnapshot(scope, "unchecked", {}, lease)
+    }
     let catalog: ServicePromptCatalogItem[]
     try {
       catalog = await tldwClient.listServicePrompts({

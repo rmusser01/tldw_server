@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next"
 import { useLocation, useNavigate } from "react-router-dom"
 import { Button, Input, InputNumber, Modal, Tooltip } from "antd"
 import { isMac } from "@/hooks/keyboard/useKeyboardShortcuts"
-import { getTitleById, updateHistory } from "@/db"
+import { useActiveChatTitle } from "@/hooks/useActiveChatTitle"
 import { useMessageOption } from "~/hooks/useMessageOption"
 import { useSetting } from "@/hooks/useSetting"
 import { HEADER_SHORTCUTS_EXPANDED_SETTING } from "@/services/settings/ui-settings"
@@ -68,8 +68,12 @@ export const Header: React.FC<Props> = ({
   )
   const navigate = useNavigate()
   const location = useLocation()
-  const [chatTitle, setChatTitle] = React.useState("")
-  const [isEditingTitle, setIsEditingTitle] = React.useState(false)
+  const { title: activeTitle, renameTitle, owner: titleOwner, ready: titleReady } = useActiveChatTitle()
+  const [titleEdit, setTitleEdit] = React.useState<{
+    owner: typeof titleOwner
+    value: string
+  } | null>(null)
+  const [titleFailure, setTitleFailure] = React.useState<typeof titleEdit>(null)
   const [ttsClipsOpen, setTtsClipsOpen] = React.useState(false)
   const [shareModalOpen, setShareModalOpen] = React.useState(false)
   const [shareLinks, setShareLinks] = React.useState<ConversationShareLinkSummary[]>([])
@@ -86,28 +90,8 @@ export const Header: React.FC<Props> = ({
   )
   const isChatRoute = headerActionPolicy.showChatSessionActions
 
-  React.useEffect(() => {
-    ;(async () => {
-      try {
-        if (historyId && historyId !== "temp" && !temporaryChat) {
-          const title = await getTitleById(historyId)
-          setChatTitle(title || "")
-        } else {
-          setChatTitle("")
-        }
-      } catch {}
-    })()
-  }, [historyId, temporaryChat])
-
-  const saveTitle = async (value: string) => {
-    try {
-      if (historyId && historyId !== "temp" && !temporaryChat) {
-        await updateHistory(historyId, value.trim() || "Untitled")
-      }
-    } catch (e) {
-      console.error("Failed to update chat title", e)
-    }
-  }
+  const isEditingTitle = titleReady && titleEdit?.owner === titleOwner
+  const chatTitle = isEditingTitle ? titleEdit.value : activeTitle
 
   const openCommandPalette = React.useCallback(() => {
     if (typeof window === "undefined") return
@@ -132,27 +116,36 @@ export const Header: React.FC<Props> = ({
   }, [setHeaderShortcutsExpanded])
 
   const handleTitleEditStart = React.useCallback(() => {
-    setIsEditingTitle(true)
-  }, [])
+    setTitleFailure(null)
+    setTitleEdit({ owner: titleOwner, value: activeTitle })
+  }, [activeTitle, titleOwner])
 
   const handleTitleCommit = React.useCallback(
     async (value: string) => {
-      setIsEditingTitle(false)
-      await saveTitle(value)
+      // Keep a newer edit visible while the previous rename is still pending.
+      if (titleOwner.saving) return
+      setTitleEdit(null)
+      setTitleFailure(null)
+      try {
+        await renameTitle(value)
+      } catch (error) {
+        setTitleFailure({ owner: titleOwner, value })
+        console.error("Failed to update chat title", error)
+      }
     },
-    [saveTitle]
+    [renameTitle, titleOwner]
   )
 
   const startSavedChat = React.useCallback(() => {
+    if (clearChat() === false) return
     setTemporaryChat(false)
     void setSelectedCharacter(null)
-    clearChat()
   }, [clearChat, setSelectedCharacter, setTemporaryChat])
 
   const startTemporaryChat = React.useCallback(() => {
+    if (clearChat() === false) return
     setTemporaryChat(true)
     void setSelectedCharacter(null)
-    clearChat()
   }, [clearChat, setSelectedCharacter, setTemporaryChat])
 
   const startCharacterChat = React.useCallback(() => {
@@ -360,7 +353,7 @@ export const Header: React.FC<Props> = ({
         historyId={historyId}
         chatTitle={chatTitle}
         isEditingTitle={isEditingTitle}
-        onTitleChange={setChatTitle}
+        onTitleChange={(value) => setTitleEdit({ owner: titleOwner, value })}
         onTitleEditStart={handleTitleEditStart}
         onTitleCommit={handleTitleCommit}
         onToggleSidebar={onToggleSidebar}
@@ -402,6 +395,22 @@ export const Header: React.FC<Props> = ({
         notificationState={notificationState}
         onRetryNotifications={onRetryNotifications}
       />
+      {titleReady && titleOwner.saving && headerActionPolicy.showChatTitle ? (
+        <div role="status" className="px-3 py-1 text-sm text-text-muted">
+          {t("playground:header.titleSaving", "Saving conversation title…")}
+        </div>
+      ) : null}
+      {titleReady && titleFailure?.owner === titleOwner && headerActionPolicy.showChatTitle ? (
+        <div role="alert" className="px-3 py-1 text-sm text-danger">
+          {t("playground:header.titleSaveError", "Could not rename this conversation.")}{" "}
+          <button type="button" className="underline" onClick={() => {
+            setTitleEdit(titleFailure)
+            setTitleFailure(null)
+          }}>
+            {t("playground:header.titleSaveRetry", "Retry rename")}
+          </button>
+        </div>
+      ) : null}
       {ttsClipsOpen ? (
         <TtsClipsDrawer
           open={ttsClipsOpen}

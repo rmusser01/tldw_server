@@ -7,6 +7,8 @@ import {
 } from "@/services/note-graph-suggestions"
 import {
   type InfiniteData,
+  type QueryKey,
+  isCancelledError,
   useInfiniteQuery,
   useQueryClient
 } from "@tanstack/react-query"
@@ -142,9 +144,22 @@ const boundGraphData = (data: GraphInfiniteData): GraphInfiniteData => {
 const authority = (value: string | null | undefined): string | null =>
   typeof value === "string" && value.length > 0 ? value : null
 
+const isPermissionError = (error: unknown): boolean =>
+  Number((error as { status?: number } | null)?.status) === 403
+
 export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
   const queryClient = useQueryClient()
   const authorityScope = authority(options.authorityScope)
+  const [deniedAuthority, setDeniedAuthority] = React.useState<string | null>(
+    null
+  )
+  const activeAuthorityRef = React.useRef(authorityScope)
+  activeAuthorityRef.current = authorityScope
+  const deniedAuthorityRef = React.useRef(deniedAuthority)
+  deniedAuthorityRef.current = deniedAuthority
+  const isPermissionDenied = Boolean(
+    authorityScope && deniedAuthority === authorityScope
+  )
   const inputIdentity = JSON.stringify([
     authorityScope,
     options.datasetId ?? null,
@@ -180,12 +195,13 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
   const radius = options.radius ?? 1
   const maxNodes = options.maxNodes ?? 120
   const maxEdges = options.maxEdges ?? 480
-  const enabled = Boolean(
+  const canRequest = Boolean(
     authorityScope &&
       options.enabled &&
       options.isOnline &&
       (effectiveNavigation.scope === "all" || centerNoteId)
   )
+  const enabled = canRequest && !isPermissionDenied
 
   const queryKey = React.useMemo(
     () =>
@@ -213,16 +229,58 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
   )
   const queryIdentity = JSON.stringify(queryKey)
   const fetchPage = React.useCallback(
-    (pageParam: string | undefined) =>
-      fetchNotesGraph({
-        centerNoteId,
-        datasetId: options.datasetId,
-        radius,
-        maxNodes,
-        maxEdges,
-        cursor: pageParam
-      }),
-    [centerNoteId, maxEdges, maxNodes, options.datasetId, radius]
+    async (
+      pageParam: string | undefined,
+      requestKey: QueryKey,
+      signal: AbortSignal
+    ) => {
+      try {
+        return await fetchNotesGraph({
+          centerNoteId,
+          datasetId: options.datasetId,
+          radius,
+          maxNodes,
+          maxEdges,
+          cursor: pageParam
+        })
+      } catch (error) {
+        if (isPermissionError(error) && !signal.aborted) {
+          const reportingQuery = queryClient.getQueryCache().find({
+            queryKey: requestKey,
+            exact: true
+          })
+          // Retire pending writers before clearing pages. Without this, an old
+          // success can refill denied data; reverting can also return old pages
+          // to a cursor command's success callback.
+          await queryClient.cancelQueries(
+            {
+              queryKey: [...notesGraphWorkspaceQueryKey, authorityScope],
+              predicate: (query) => query !== reportingQuery
+            },
+            { revert: false }
+          )
+          // A later explicit reopening must not briefly redisplay revoked data.
+          // Cursor queries store a single response, not paginated workspace data.
+          queryClient.setQueriesData<GraphInfiniteData>(
+            { queryKey: [...notesGraphWorkspaceQueryKey, authorityScope] },
+            (current) =>
+              current?.pages ? { pages: [], pageParams: [] } : current
+          )
+          if (activeAuthorityRef.current === authorityScope)
+            setDeniedAuthority(authorityScope)
+        }
+        throw error
+      }
+    },
+    [
+      authorityScope,
+      centerNoteId,
+      maxEdges,
+      maxNodes,
+      options.datasetId,
+      queryClient,
+      radius
+    ]
   )
   const graphQuery = useInfiniteQuery<
     NotesGraphResponse,
@@ -233,13 +291,15 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
   >({
     queryKey,
     initialPageParam: undefined as string | undefined,
-    enabled,
+    // Read current denial in the callback so a successful manual refetch does
+    // not also trigger a second fetch through a false-to-true enabled option.
+    enabled: () => canRequest && deniedAuthorityRef.current !== authorityScope,
     retry: false,
     refetchOnWindowFocus: false,
     structuralSharing: (_previous, next: GraphInfiniteData) =>
       boundGraphData(next),
-    queryFn: async ({ pageParam }) => {
-      const page = await fetchPage(pageParam)
+    queryFn: async ({ pageParam, queryKey: requestKey, signal }) => {
+      const page = await fetchPage(pageParam, requestKey, signal)
       return pageParam === undefined
         ? boundGraphData({ pages: [page], pageParams: [pageParam] }).pages[0]
         : page
@@ -256,8 +316,8 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
   })
 
   const graph = React.useMemo(
-    () => aggregatePages(graphQuery.data),
-    [graphQuery.data]
+    () => (isPermissionDenied ? null : aggregatePages(graphQuery.data)),
+    [graphQuery.data, isPermissionDenied]
   )
 
   const allNotes = React.useMemo(() => {
@@ -307,7 +367,8 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
     const expansion = queryClient
       .fetchQuery({
         queryKey: expansionPageKey,
-        queryFn: () => fetchPage(requestCursor),
+        queryFn: ({ queryKey: requestKey, signal }) =>
+          fetchPage(requestCursor, requestKey, signal),
         retry: false,
         staleTime: Infinity,
         gcTime: 0
@@ -330,6 +391,10 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
         return aggregatePages(
           queryClient.getQueryData<GraphInfiniteData>(queryKey)
         )
+      })
+      .catch((error) => {
+        if (isPermissionError(error) || isCancelledError(error)) return null
+        throw error
       })
     expansionInFlight.current.set(queryIdentity, expansion)
     const clear = () => {
@@ -380,10 +445,16 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
   }, [])
 
   const refresh = React.useCallback(async () => {
-    if (!enabled) return graph
-    await graphQuery.refetch({ cancelRefetch: true })
+    if (!canRequest) return graph
+    const result = await graphQuery.refetch({ cancelRefetch: true })
+    if (isPermissionError(result.error)) return null
+    if (!result.error) {
+      setDeniedAuthority((current) =>
+        current === authorityScope ? null : current
+      )
+    }
     return aggregatePages(queryClient.getQueryData<GraphInfiniteData>(queryKey))
-  }, [enabled, graph, graphQuery, queryClient, queryKey])
+  }, [authorityScope, canRequest, graph, graphQuery, queryClient, queryKey])
 
   return {
     graph,
@@ -408,6 +479,7 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
     focus,
     showAllNotes,
     refresh,
+    isPermissionDenied,
     isOffline: !options.isOnline,
     isLoading: Boolean(authorityScope && graphQuery.isLoading && !graph),
     error: graphQuery.error

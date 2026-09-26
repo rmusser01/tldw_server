@@ -2,6 +2,8 @@ import React from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { useMediaSearch } from "@/components/Review/hooks/useMediaSearch"
 
 const mocks = vi.hoisted(() => ({
   startQuickIngestSession: vi.fn(),
@@ -15,6 +17,11 @@ const mocks = vi.hoisted(() => ({
   runtimeListeners: [] as Array<(message: any) => void>,
   modalProps: [] as any[],
   afterCancelProcessing: null as null | (() => void),
+  useActualProcessingStep: false,
+  useActualResultsStep: false,
+  queueSourceFile: false,
+  bgRequest: vi.fn(),
+  bgUpload: vi.fn(),
   connectionState: {
     phase: "connected",
     isConnected: true,
@@ -39,6 +46,15 @@ vi.mock("react-i18next", () => ({
       return defaultValueOrOptions?.defaultValue || key
     },
   }),
+}))
+
+vi.mock("@/services/background-proxy", () => ({
+  bgRequest: (...args: unknown[]) => mocks.bgRequest(...args),
+  bgUpload: (...args: unknown[]) => mocks.bgUpload(...args),
+}))
+
+vi.mock("@/hooks/useServerCapabilities", () => ({
+  useServerCapabilities: () => ({ capabilities: {} }),
 }))
 
 vi.mock("antd", () => ({
@@ -117,18 +133,20 @@ vi.mock("@/routes/route-paths", () => ({
 }))
 
 vi.mock("@/store/connection", () => ({
-  useConnectionStore: (selector: any) =>
+  useConnectionStore: Object.assign((selector: any) =>
     selector({
       state: mocks.connectionState,
       checkOnce: mocks.checkConnection,
-    }),
+    }), { subscribe: () => () => {} }),
 }))
 
-vi.mock("lucide-react", () => {
+vi.mock("lucide-react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("lucide-react")>()
   const icon = (name: string) => (props: any) => (
     <span data-icon={name} aria-hidden={props?.["aria-hidden"]} />
   )
   return {
+    ...actual,
     ArrowLeft: icon("ArrowLeft"),
     ArrowRight: icon("ArrowRight"),
     ChevronDown: icon("ChevronDown"),
@@ -172,6 +190,7 @@ vi.mock("@/services/tldw/quick-ingest-session-reattach", () => ({
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: (...args: unknown[]) => mocks.initialize(...args),
+    ensureConfigForRequest: async () => JSON.parse(localStorage.getItem("tldwConfig") || "null"),
   },
 }))
 
@@ -199,7 +218,12 @@ vi.mock("@/components/Common/QuickIngest/AddContentStep", async () => {
           <button
             onClick={() => {
               setQueueItems([
-                {
+                mocks.queueSourceFile ? {
+                  id: "queued-url-1", kind: "file", fileName: "source.txt",
+                  file: { name: "source.txt", size: 1, arrayBuffer: async () => new Uint8Array([65]).buffer },
+                  detectedType: "document", icon: "FileText", fileSize: 1,
+                  validation: { valid: true },
+                } : {
                   id: "queued-url-1",
                   url: "https://example.com/article",
                   detectedType: "web",
@@ -323,27 +347,35 @@ vi.mock("@/components/Common/QuickIngest/ProcessingStep", async () => {
   const actual = await vi.importActual<
     typeof import("@/components/Common/QuickIngest/IngestWizardContext")
   >("@/components/Common/QuickIngest/IngestWizardContext")
+  const { ProcessingStep: ActualProcessingStep } = await vi.importActual<
+    typeof import("@/components/Common/QuickIngest/ProcessingStep")
+  >("@/components/Common/QuickIngest/ProcessingStep")
   return {
-    ProcessingStep: ({ onCancelAll }: { onCancelAll?: () => void }) => {
-      const { state, cancelProcessing } = actual.useIngestWizard()
-      return (
-        <div data-testid="wizard-processing">
-          {state.processingState.status}:{state.processingState.perItemProgress.length}
-          <button
-            onClick={() => {
-              if (onCancelAll) {
-                onCancelAll()
-              } else {
-                cancelProcessing()
-              }
-              mocks.afterCancelProcessing?.()
-            }}
-          >
-            Cancel Processing
-          </button>
-        </div>
-      )
+    ProcessingStep: (props: React.ComponentProps<typeof ActualProcessingStep>) => {
+      if (mocks.useActualProcessingStep) return <ActualProcessingStep {...props} />
+      return <StubProcessingStep {...props} />
     },
+  }
+
+  function StubProcessingStep({ onCancelAll }: { onCancelAll?: () => void }) {
+    const { state, cancelProcessing } = actual.useIngestWizard()
+    return (
+      <div data-testid="wizard-processing">
+        {state.processingState.status}:{state.processingState.perItemProgress.length}
+        <button
+          onClick={() => {
+            if (onCancelAll) {
+              onCancelAll()
+            } else {
+              cancelProcessing()
+            }
+            mocks.afterCancelProcessing?.()
+          }}
+        >
+          Cancel Processing
+        </button>
+      </div>
+    )
   }
 })
 
@@ -351,14 +383,17 @@ vi.mock("@/components/Common/QuickIngest/WizardResultsStep", async () => {
   const actual = await vi.importActual<
     typeof import("@/components/Common/QuickIngest/IngestWizardContext")
   >("@/components/Common/QuickIngest/IngestWizardContext")
+  const { WizardResultsStep: ActualResultsStep } = await vi.importActual<
+    typeof import("@/components/Common/QuickIngest/WizardResultsStep")
+  >("@/components/Common/QuickIngest/WizardResultsStep")
   return {
-    WizardResultsStep: ({
-      onOpenCollection,
-      onIngestMore,
-    }: {
-      onOpenCollection?: (collectionId: string) => void
-      onIngestMore?: () => void
-    }) => {
+    WizardResultsStep: (props: React.ComponentProps<typeof ActualResultsStep>) => {
+      if (mocks.useActualResultsStep) return <ActualResultsStep {...props} />
+      return <StubResultsStep {...props} />
+    },
+  }
+
+  function StubResultsStep({ onOpenCollection, onIngestMore }: React.ComponentProps<typeof ActualResultsStep>) {
       const { state, reset } = actual.useIngestWizard()
       return (
         <div data-testid="wizard-results">
@@ -381,7 +416,6 @@ vi.mock("@/components/Common/QuickIngest/WizardResultsStep", async () => {
           </button>
         </div>
       )
-    },
   }
 })
 
@@ -424,8 +458,78 @@ const SessionBackedQuickIngestModal = () => {
   )
 }
 
+vi.mock("@plasmohq/storage", async () => import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage"))
+vi.mock("@/services/tldw/TldwAuth", () => ({ tldwAuth: { getCurrentUser: async () => ({ id: 1 }) } }))
+vi.mock("@/services/tldw/deployment-mode", () => ({ isHostedTldwDeployment: () => false }))
+import { quickIngestAuthority } from "@/services/tldw/quick-ingest-authority"
+let releaseAuthority: (() => void) | undefined
+
+const catalogueT = (key: string, opts?: Record<string, unknown>) => String(opts?.defaultValue ?? key)
+const catalogueMessage = { error: vi.fn(), warning: vi.fn() }
+function CatalogueProbe() {
+  const search = useMediaSearch({ t: catalogueT, message: catalogueMessage })
+  return <div data-testid="actual-catalogue">{search.results.map(item => item.title).join(',')} / {search.mediaTotal}</div>
+}
+
 describe("QuickIngestWizardModal session runtime", () => {
-  beforeEach(() => {
+  it.each([false, true])("refreshes the actual catalogue for current wizard completion (before mount=%s)", async beforeMount => {
+    let saved = false
+    mocks.bgRequest.mockImplementation(async ({ path }: { path: string }) => path.startsWith('/api/v1/media/?')
+      ? { items: saved ? [{ id: 7, title: 'New Cedar source', type: 'document' }] : [], pagination: { total_items: saved ? 1 : 0, total_pages: 1 } }
+      : { keywords: [] })
+    mocks.startQuickIngestSession.mockResolvedValue({ ok: true, sessionId: 'qi-catalogue' })
+    useQuickIngestSessionStore.getState().createDraftSession({ queueItems: [{ id: 'cedar', kind: 'url', url: 'https://example.com/cedar', detectedType: 'web', icon: 'Globe', fileSize: 0, validation: { valid: true } }] })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const view = render(<QueryClientProvider client={client}>
+      {!beforeMount && <CatalogueProbe />}<QuickIngestWizardModal key="wizard" open autoProcessQueued onClose={vi.fn()} />
+    </QueryClientProvider>)
+    if (!beforeMount) await waitFor(() => expect(screen.getByTestId('actual-catalogue')).toHaveTextContent('/ 0'))
+    await waitFor(() => expect(mocks.startQuickIngestSession).toHaveBeenCalled())
+    await act(async () => {
+      saved = true
+      for (const listener of mocks.runtimeListeners) listener({ type: 'tldw:quick-ingest/completed', payload: { sessionId: 'qi-catalogue', results: [{ id: 'cedar', status: 'ok', type: 'document', mediaId: 7 }] } })
+    })
+    await screen.findByTestId('wizard-result-cedar')
+    if (beforeMount) view.rerender(<QueryClientProvider client={client}><CatalogueProbe /><QuickIngestWizardModal key="wizard" open autoProcessQueued onClose={vi.fn()} /></QueryClientProvider>)
+    await waitFor(() => expect(screen.getByTestId('actual-catalogue')).toHaveTextContent('New Cedar source / 1'))
+  })
+
+  it.each(['error', 'process-only'])("does not announce a saved catalogue change for %s results", async kind => {
+    const listener = vi.fn()
+    window.addEventListener('tldw:quick-ingest-complete', listener)
+    try {
+      useQuickIngestSessionStore.getState().createDraftSession({ ...createEmptyQuickIngestSession(), currentStep: 5, lifecycle: 'completed',
+        results: [{ id: 'cedar', type: 'document', status: kind === 'error' ? 'error' : 'ok', ...(kind === 'error' ? { mediaId: 7 } : {}) }] })
+      render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+      await screen.findByTestId('wizard-result-cedar')
+      expect(listener).not.toHaveBeenCalled()
+    } finally { window.removeEventListener('tldw:quick-ingest-complete', listener) }
+  })
+
+  it("masks Bob's completed result on logout before a replacement account can act", async () => {
+    useQuickIngestSessionStore.getState().createDraftSession({
+      ...createEmptyQuickIngestSession(),
+      currentStep: 5,
+      lifecycle: "completed",
+      processingState: { status: "complete", perItemProgress: [], elapsed: 1, estimatedRemaining: 0 },
+      results: [{ id: "Bob-private.pdf", status: "ok", type: "pdf", mediaId: 7 }],
+    })
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    expect(await screen.findByTestId("wizard-result-Bob-private.pdf")).toBeInTheDocument()
+    act(() => {
+      window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed", { detail: { kind: "logout" } }))
+      window.dispatchEvent(new CustomEvent("tldw:config-updated", { detail: { authorityChanged: true } }))
+    })
+    await waitFor(() => expect(screen.queryByTestId("wizard-result-Bob-private.pdf")).not.toBeInTheDocument())
+    expect(mocks.cancelQuickIngestSession).not.toHaveBeenCalled()
+  })
+
+  beforeEach(async () => {
+    mocks.useActualProcessingStep = false
+    mocks.useActualResultsStep = false
+    mocks.queueSourceFile = false
+    mocks.bgRequest.mockReset()
+    mocks.bgUpload.mockReset()
     mocks.runtimeListeners.splice(0, mocks.runtimeListeners.length)
     mocks.startQuickIngestSession.mockReset()
     mocks.submitQuickIngestBatch.mockReset()
@@ -447,6 +551,11 @@ describe("QuickIngestWizardModal session runtime", () => {
       offlineBypass: false,
     })
     mocks.cancelQuickIngestSession.mockResolvedValue({ ok: true })
+    localStorage.setItem("tldwConfig", JSON.stringify({ serverUrl: "https://test.test", authMode: "single-user", apiKey: "synthetic" }))
+    useQuickIngestSessionStore.getState().setAuthority(null)
+    releaseAuthority = quickIngestAuthority.retain()
+    await waitFor(() => expect(useQuickIngestSessionStore.getState().authorityKey).toBeTruthy())
+    mocks.initialize.mockClear()
     useQuickIngestSessionStore.setState({
       session: null,
       triggerSummary: { count: 0, label: null, hadFailure: false },
@@ -454,8 +563,151 @@ describe("QuickIngestWizardModal session runtime", () => {
   })
 
   afterEach(() => {
+    releaseAuthority?.()
     vi.useRealTimers()
     vi.restoreAllMocks()
+  })
+
+  it.each(["direct upload", "reattach", "StrictMode reattach"])("keeps a saved-source Warning navigable through actual %s, session state, and results UI", async (mode) => {
+    mocks.useActualResultsStep = true
+    const result = { status: "Warning", media_id: 1, error: null, warnings: ["Analysis failed for chunk 1", "Analysis failed for chunk 1"] }
+    mocks.bgRequest.mockResolvedValue({ ok: true, data: { status: "completed", result, error_message: null } })
+    if (mode === "direct upload") {
+      mocks.queueSourceFile = true
+      const batch = await vi.importActual<typeof import("@/services/tldw/quick-ingest-batch")>("@/services/tldw/quick-ingest-batch")
+      mocks.startQuickIngestSession.mockImplementation(batch.startQuickIngestSession)
+      mocks.submitQuickIngestBatch.mockImplementation(batch.submitQuickIngestBatch)
+      mocks.bgUpload.mockResolvedValue({ batch_id: "warning-batch", jobs: [{ id: 77 }] })
+    } else {
+      const reattach = await vi.importActual<typeof import("@/services/tldw/quick-ingest-session-reattach")>("@/services/tldw/quick-ingest-session-reattach")
+      mocks.reattachQuickIngestSession.mockImplementation(reattach.reattachQuickIngestSession)
+      useQuickIngestSessionStore.getState().createDraftSession({
+        ...createEmptyQuickIngestSession(), lifecycle: "processing", currentStep: 4,
+        queueItems: [{ id: "queued-url-1", kind: "url", url: "https://source.test/source.pdf", detectedType: "pdf", icon: "FileText", fileSize: 0, validation: { valid: true } }],
+        processingState: { status: "running", perItemProgress: [], elapsed: 1, estimatedRemaining: 0 },
+        tracking: { mode: "webui-direct", batchId: "warning-batch", jobIds: [77], startedAt: Date.now() },
+      })
+    }
+    const wizard = <QuickIngestWizardModal open onClose={vi.fn()} />
+    render(mode === "StrictMode reattach" ? <React.StrictMode>{wizard}</React.StrictMode> : wizard)
+    if (mode === "direct upload") fireEvent.click(screen.getByText("Queue And Process"))
+    expect(await screen.findByRole("region", { name: "Items saved with warnings" })).toBeVisible()
+    expect(screen.getByText("Analysis failed for chunk 1")).toBeVisible()
+    expect(screen.queryByText("Review failed items")).toBeNull()
+    expect(useQuickIngestSessionStore.getState().session?.results).toEqual([
+      expect.objectContaining({ status: "ok", mediaId: 1, warning: "Analysis failed for chunk 1", data: result }),
+    ])
+    expect(mocks.bgRequest).toHaveBeenCalledWith(expect.objectContaining({ path: "/api/v1/media/ingest/jobs/77", method: "GET" }))
+    if (mode !== "direct upload") {
+      expect(mocks.startQuickIngestSession).not.toHaveBeenCalled()
+      expect(mocks.bgUpload).not.toHaveBeenCalled()
+      expect(mocks.cancelQuickIngestSession).not.toHaveBeenCalled()
+    }
+    fireEvent.click(screen.getByRole("button", { name: /open .* media/i }))
+    expect(mocks.navigate).toHaveBeenCalledWith(expect.stringContaining("media"))
+  })
+
+  it("ignores the cancelled StrictMode poll after its replacement accepts terminal results", async () => {
+    const staleRead = deferred<{ ok: boolean; data: { status: string; error_message: string } }>()
+    const reattach = await vi.importActual<typeof import("@/services/tldw/quick-ingest-session-reattach")>("@/services/tldw/quick-ingest-session-reattach")
+    mocks.reattachQuickIngestSession.mockImplementation(reattach.reattachQuickIngestSession)
+    mocks.bgRequest.mockReturnValueOnce(staleRead.promise).mockResolvedValue({
+      ok: true, data: { status: "completed", result: { status: "Success", media_id: 77 } },
+    })
+    useQuickIngestSessionStore.getState().createDraftSession({
+      ...createEmptyQuickIngestSession(), lifecycle: "processing", currentStep: 4,
+      queueItems: [{ id: "queued-url-1", kind: "url", url: "https://source.test/source.pdf", detectedType: "pdf", icon: "FileText", fileSize: 0, validation: { valid: true } }],
+      processingState: { status: "running", perItemProgress: [], elapsed: 1, estimatedRemaining: 0 },
+      tracking: { mode: "webui-direct", batchId: "strict-batch", jobIds: [77], startedAt: Date.now() },
+    })
+    render(<React.StrictMode><QuickIngestWizardModal open onClose={vi.fn()} /></React.StrictMode>)
+    await waitFor(() => expect(useQuickIngestSessionStore.getState().session?.results).toEqual([
+      expect.objectContaining({ mediaId: 77, status: "ok" }),
+    ]))
+    await act(async () => {
+      staleRead.resolve({ ok: true, data: { status: "failed", error_message: "Stale first read" } })
+      await staleRead.promise
+    })
+    expect(useQuickIngestSessionStore.getState().session).toMatchObject({
+      lifecycle: "completed", currentStep: 5,
+      results: [expect.objectContaining({ mediaId: 77, status: "ok" })],
+    })
+    expect(mocks.cancelQuickIngestSession).not.toHaveBeenCalled()
+    expect(mocks.startQuickIngestSession).not.toHaveBeenCalled()
+  })
+
+  it.each(["processing button", "close confirmation"])(
+    "minimizes the actual processing view through %s and resumes the same job",
+    async (via) => {
+      mocks.useActualProcessingStep = true
+      useQuickIngestSessionStore.getState().createDraftSession({
+        ...createEmptyQuickIngestSession(),
+        lifecycle: "processing",
+        currentStep: 4,
+        queueItems: [{
+          id: "minimize-item", kind: "url", url: "https://example.com/article",
+          detectedType: "web", icon: "Globe", fileSize: 0, validation: { valid: true },
+        }],
+        processingState: {
+          status: "running", elapsed: 1, estimatedRemaining: 12,
+          perItemProgress: [{
+            id: "minimize-item", status: "processing", progressPercent: 40,
+            currentStage: "Processing", estimatedRemaining: 12,
+          }],
+        },
+        tracking: {
+          mode: "extension-runtime", sessionId: "minimize-runtime",
+          itemIds: ["minimize-item"], startedAt: Date.now(),
+        },
+      })
+      const original = useQuickIngestSessionStore.getState().session!
+      render(<SessionBackedQuickIngestModal />)
+      const minimizeButton = await screen.findByRole("button", { name: "Minimize to Background" })
+      if (via === "processing button") {
+        await userEvent.click(minimizeButton)
+      } else {
+        await userEvent.click(screen.getByRole("button", { name: "Close", exact: true }))
+        const { Modal } = await import("antd")
+        const options = vi.mocked(Modal.confirm).mock.calls.at(-1)?.[0]
+        await act(async () => { await options?.onOk?.() })
+      }
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+      expect(useQuickIngestSessionStore.getState().session).toMatchObject({
+        id: original.id, visibility: "hidden", lifecycle: "processing",
+        tracking: original.tracking,
+        processingState: {
+          status: "running", perItemProgress: original.processingState.perItemProgress,
+        },
+      })
+      expect(mocks.cancelQuickIngestSession).not.toHaveBeenCalled()
+      expect(mocks.startQuickIngestSession).not.toHaveBeenCalled()
+      await act(async () => { useQuickIngestSessionStore.getState().showSession() })
+      expect(await screen.findByRole("button", { name: "Minimize to Background" })).toBeInTheDocument()
+      expect(useQuickIngestSessionStore.getState().session?.id).toBe(original.id)
+    }
+  )
+
+  it("leaves pending stages and percentages unchanged as elapsed time passes, then accepts a terminal result", async () => {
+    vi.useFakeTimers()
+    mocks.startQuickIngestSession.mockResolvedValue({ ok: true, sessionId: "qi-confirmed-only" })
+    useQuickIngestSessionStore.getState().createDraftSession({
+      queueItems: [{ id: "cedar", kind: "url", url: "https://example.com/cedar", detectedType: "web", icon: "Globe", fileSize: 0, validation: { valid: true } }],
+    })
+    await act(async () => {
+      render(<QuickIngestWizardModal open autoProcessQueued onClose={vi.fn()} />)
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    const before = useQuickIngestSessionStore.getState().session!.processingState.perItemProgress[0]
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
+    expect(useQuickIngestSessionStore.getState().session!.processingState.perItemProgress[0]).toEqual(before)
+    expect(before.progressPercent).toBe(0)
+    expect(useQuickIngestSessionStore.getState().session!.processingState.elapsed).toBe(60)
+    act(() => {
+      for (const listener of mocks.runtimeListeners) listener({ type: "tldw:quick-ingest/completed", payload: {
+        sessionId: "qi-confirmed-only", results: [{ id: "cedar", status: "ok", type: "document", mediaId: 1 }],
+      } })
+    })
+    expect(useQuickIngestSessionStore.getState().session!.processingState.perItemProgress[0]).toMatchObject({ status: "complete", progressPercent: 100 })
   })
 
   it("submits the queued wizard batch through the authenticated quick-ingest transport", async () => {
@@ -1021,7 +1273,7 @@ describe("QuickIngestWizardModal session runtime", () => {
       resolveBatch = resolve
     })
 
-    useQuickIngestSessionStore.getState().upsertSession({
+    useQuickIngestSessionStore.getState().createDraftSession({
       ...createEmptyQuickIngestSession(),
       lifecycle: "processing",
       currentStep: 4,
@@ -1150,7 +1402,7 @@ describe("QuickIngestWizardModal session runtime", () => {
           plannedItemIds: ["11"],
           jobIdToCollectionItemId: { "77": "11" },
           durableMode: "durable_collection",
-        })
+        }), expect.objectContaining({ requestScope: expect.any(Object), signal: expect.any(AbortSignal) })
       )
     })
     await waitFor(() => {
@@ -1498,7 +1750,7 @@ describe("QuickIngestWizardModal session runtime", () => {
   it("rehydrates a hidden processing session when the modal is reopened", () => {
     const onClose = vi.fn()
 
-    useQuickIngestSessionStore.getState().upsertSession({
+    useQuickIngestSessionStore.getState().createDraftSession({
       ...createEmptyQuickIngestSession(),
       lifecycle: "processing",
       visibility: "hidden",
@@ -1540,7 +1792,7 @@ describe("QuickIngestWizardModal session runtime", () => {
   })
 
   it("rehydrates a completed session with results after a remount", () => {
-    useQuickIngestSessionStore.getState().upsertSession({
+    useQuickIngestSessionStore.getState().createDraftSession({
       ...createEmptyQuickIngestSession(),
       lifecycle: "completed",
       currentStep: 5,
@@ -1585,7 +1837,7 @@ describe("QuickIngestWizardModal session runtime", () => {
   })
 
   it("restores persisted file stubs with a reattach-required warning", () => {
-    useQuickIngestSessionStore.getState().upsertSession({
+    useQuickIngestSessionStore.getState().createDraftSession({
       ...createEmptyQuickIngestSession(),
       lifecycle: "draft",
       currentStep: 1,
@@ -1632,7 +1884,7 @@ describe("QuickIngestWizardModal session runtime", () => {
       errorMessage: null,
     })
 
-    useQuickIngestSessionStore.getState().upsertSession({
+    useQuickIngestSessionStore.getState().createDraftSession({
       ...createEmptyQuickIngestSession(),
       lifecycle: "processing",
       currentStep: 4,
@@ -1677,7 +1929,7 @@ describe("QuickIngestWizardModal session runtime", () => {
           mode: "webui-direct",
           batchId: "batch-77",
           jobIds: [77],
-        })
+        }), expect.objectContaining({ requestScope: expect.any(Object), signal: expect.any(AbortSignal) })
       )
     })
 
@@ -1702,7 +1954,7 @@ describe("QuickIngestWizardModal session runtime", () => {
       errorMessage: null,
     })
 
-    useQuickIngestSessionStore.getState().upsertSession({
+    useQuickIngestSessionStore.getState().createDraftSession({
       ...createEmptyQuickIngestSession(),
       lifecycle: "processing",
       currentStep: 4,
@@ -1758,7 +2010,7 @@ describe("QuickIngestWizardModal session runtime", () => {
   })
 
   it("does not run persisted direct-job reattach for extension runtime sessions", async () => {
-    useQuickIngestSessionStore.getState().upsertSession({
+    useQuickIngestSessionStore.getState().createDraftSession({
       ...createEmptyQuickIngestSession(),
       lifecycle: "processing",
       currentStep: 4,
@@ -1828,7 +2080,7 @@ describe("QuickIngestWizardModal session runtime", () => {
       ],
     })
 
-    useQuickIngestSessionStore.getState().upsertSession({
+    useQuickIngestSessionStore.getState().createDraftSession({
       ...createEmptyQuickIngestSession(),
       lifecycle: "processing",
       currentStep: 4,
@@ -1876,7 +2128,7 @@ describe("QuickIngestWizardModal session runtime", () => {
       errorMessage: null,
     })
 
-    useQuickIngestSessionStore.getState().upsertSession({
+    useQuickIngestSessionStore.getState().createDraftSession({
       ...createEmptyQuickIngestSession(),
       lifecycle: "processing",
       currentStep: 4,
@@ -1915,6 +2167,10 @@ describe("QuickIngestWizardModal session runtime", () => {
       expect(mocks.reattachQuickIngestSession).toHaveBeenCalled()
     })
 
+    expect(useQuickIngestSessionStore.getState().session?.processingState.perItemProgress).toEqual([
+      expect.objectContaining({ id: "queued-url-1", status: "processing", progressPercent: 0 }),
+    ])
+
     await user.click(screen.getByRole("button", { name: "Cancel Processing" }))
 
     await waitFor(() => {
@@ -1933,7 +2189,7 @@ describe("QuickIngestWizardModal session runtime", () => {
     const reattach = deferred<any>()
     mocks.reattachQuickIngestSession.mockReturnValue(reattach.promise)
 
-    useQuickIngestSessionStore.getState().upsertSession({
+    useQuickIngestSessionStore.getState().createDraftSession({
       ...createEmptyQuickIngestSession(),
       lifecycle: "processing",
       currentStep: 4,
@@ -1993,7 +2249,7 @@ describe("QuickIngestWizardModal session runtime", () => {
     const reattach = deferred<any>()
     mocks.reattachQuickIngestSession.mockReturnValue(reattach.promise)
 
-    useQuickIngestSessionStore.getState().upsertSession({
+    useQuickIngestSessionStore.getState().createDraftSession({
       ...createEmptyQuickIngestSession(),
       lifecycle: "processing",
       currentStep: 4,
@@ -2059,7 +2315,7 @@ describe("QuickIngestWizardModal session runtime", () => {
       errorMessage: null,
     })
 
-    useQuickIngestSessionStore.getState().upsertSession({
+    useQuickIngestSessionStore.getState().createDraftSession({
       ...createEmptyQuickIngestSession(),
       lifecycle: "processing",
       currentStep: 4,
@@ -2115,7 +2371,7 @@ describe("QuickIngestWizardModal session runtime", () => {
 
   it("preserves already completed item results when cancellation finalizes pending items", async () => {
     const user = userEvent.setup()
-    useQuickIngestSessionStore.getState().upsertSession({
+    useQuickIngestSessionStore.getState().createDraftSession({
       ...createEmptyQuickIngestSession(),
       lifecycle: "processing",
       currentStep: 4,
@@ -2201,7 +2457,7 @@ describe("QuickIngestWizardModal session runtime", () => {
   it("opens durable conference collections from terminal results", async () => {
     const user = userEvent.setup()
     const onClose = vi.fn()
-    useQuickIngestSessionStore.getState().upsertSession({
+    useQuickIngestSessionStore.getState().createDraftSession({
       ...createEmptyQuickIngestSession(),
       lifecycle: "completed",
       currentStep: 5,
@@ -2259,7 +2515,7 @@ describe("QuickIngestWizardModal session runtime", () => {
         errorMessage: null,
       })
 
-    useQuickIngestSessionStore.getState().upsertSession({
+    useQuickIngestSessionStore.getState().createDraftSession({
       ...createEmptyQuickIngestSession(),
       lifecycle: "processing",
       currentStep: 4,

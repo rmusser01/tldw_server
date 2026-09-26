@@ -90,6 +90,29 @@ func TestGuestServerExecStopsAtMaxOutputBytes(t *testing.T) {
 	}
 }
 
+func TestGuestServerExecPreservesOutputBelowLimit(t *testing.T) {
+	server, err := NewServer(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	capBytes := 1024
+	for i := 0; i < 100; i++ {
+		resp, execErr := server.Exec(ExecRequest{
+			ProtocolVersion: ProtocolVersion,
+			RequestID:       "req-small-output",
+			Type:            "exec",
+			Argv:            []string{"/bin/sh", "-c", "printf stdout; printf stderr >&2"},
+			MaxOutputBytes:  &capBytes,
+		})
+		if execErr != nil {
+			t.Fatalf("iteration %d: Exec() error = %#v", i, execErr)
+		}
+		if resp.ExitCode != 0 || resp.Stdout != "stdout" || resp.Stderr != "stderr" {
+			t.Fatalf("iteration %d: output lost: %#v", i, resp)
+		}
+	}
+}
+
 func TestGuestServerExecOutputCapKeepsUTF8Valid(t *testing.T) {
 	root := t.TempDir()
 	server, err := NewServer(root)

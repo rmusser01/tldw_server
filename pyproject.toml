@@ -10,7 +10,7 @@ build-backend = "setuptools.build_meta"
 ###########################
 [project]
 name = "tldw-server"
-version = "0.1.41"
+version = "0.1.43"
 description = "A comprehensive research assistant and media analysis platform - Too Long; Didn't Watch Server"
 requires-python = ">=3.11"
 readme = "README.md"
@@ -70,7 +70,7 @@ dependencies = [
   "pathspec>=0.12.1",
   "prometheus-client",
   "psutil>=5.9.0",
-  "pydantic>=2.0.0",
+  "pydantic>=2.13.5,<2.14.0",
   "pydantic-core>=2.0.0",
   "pydantic-settings>=2.2.1",
   "python-dotenv>=1.0.0",

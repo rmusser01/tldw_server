@@ -1,3 +1,6 @@
 import dynamic from "next/dynamic"
+import { withPageTitle } from "@web/components/navigation/withPageTitle"
 
-export default dynamic(() => import("@/routes/option-knowledge"), { ssr: false })
+const Knowledge = dynamic(() => import("@/routes/option-knowledge"), { ssr: false })
+
+export default withPageTitle("Knowledge", Knowledge)

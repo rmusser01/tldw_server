@@ -62,6 +62,26 @@ def _now_iso() -> str:
     except _CHUNKING_TEMPLATES_NONCRITICAL_EXCEPTIONS:
         return ""
 
+def _resolve_owner(requested_user_id: Any, current_user: Any) -> str:
+    """Return the owner id to use, refusing to act for another user.
+
+    `user_id` reaches these handlers from the request -- a query parameter when
+    listing, a body field when creating. Both must resolve to the caller: a
+    listing that trusts it reads another user's templates, and a create that
+    trusts it stamps a row with someone else's name. Called directly rather
+    than through FastAPI the unfilled default is a `Query` object, so the
+    request value is recognised by type rather than by identity.
+    """
+    caller = str(getattr(current_user, 'id', '') or '')
+    requested = requested_user_id if isinstance(requested_user_id, str) else None
+    if requested is not None and requested != caller:
+        raise HTTPException(
+            status_code=403,
+            detail="Cannot act on another user's chunking templates",
+        )
+    return caller
+
+
 def _fb_bucket(user_id: Optional[str]) -> dict[str, dict[str, Any]]:
     uid = str(user_id or "default")
     if uid not in _FALLBACK_TEMPLATES:
@@ -180,19 +200,25 @@ async def list_templates(
             _emit_db_capability_headers(response, db, ["list_chunking_templates"])
             _set_db_capability_gauge(response)
         _ensure_fallback_policy(db, ["list_chunking_templates"])  # Enforce prod safeguard
+        # `user_id` arrives from the query string. It used to be passed straight
+        # through, so ?user_id=<someone else> read their templates and omitting
+        # it read everyone's -- the in-memory fallback below is a process-global
+        # dict keyed by user id, so that held on SQLite too, not just on a
+        # shared PostgreSQL content backend.
+        scoped_user_id = _resolve_owner(user_id, current_user) or None
         if _supports(db, 'list_chunking_templates'):
             templates = db.list_chunking_templates(
                 include_builtin=include_builtin,
                 include_custom=include_custom,
                 tags=tags,
-                user_id=user_id,
+                user_id=scoped_user_id,
                 include_deleted=False
             )
         else:
             increment_counter("chunking_templates_fallback_list_total", labels={"mode": "fallback"})
             # Fallback: aggregate from in-memory store
             templates = []
-            buckets = [_fb_bucket(user_id)] if user_id is not None else list(_FALLBACK_TEMPLATES.values())
+            buckets = [_fb_bucket(scoped_user_id)]
             for bucket in buckets:
                 for _, rec in bucket.items():
                     if tags and not any(t in (rec.get('tags') or []) for t in tags):
@@ -310,6 +336,10 @@ async def create_template(
             _emit_db_capability_headers(response, db, ["create_chunking_template", "get_chunking_template"])
             _set_db_capability_gauge(response)
         _ensure_fallback_policy(db, ["create_chunking_template", "get_chunking_template"])  # Enforce prod safeguard
+        # Ownership comes from the authenticated caller, never from the body.
+        # Listing is scoped to the owner, so a row stored with a null or foreign
+        # owner would be invisible to the client that just created it.
+        owner_user_id = _resolve_owner(template_data.user_id, current_user)
         # Create template in database (or fallback)
         if _supports(db, 'create_chunking_template'):
             created = db.create_chunking_template(
@@ -318,14 +348,14 @@ async def create_template(
                 description=template_data.description,
                 is_builtin=False,
                 tags=template_data.tags,
-                user_id=template_data.user_id
+                user_id=owner_user_id
             )
             stored = db.get_chunking_template(name=created['name'])
         else:
             increment_counter("chunking_templates_create_total", labels={"mode": "fallback"})
             # In-memory fallback
             from uuid import uuid4
-            uid = str(template_data.user_id or getattr(current_user, 'id', ''))
+            uid = owner_user_id
             bucket = _fb_bucket(uid)
             if template_data.name in bucket:
                 raise HTTPException(status_code=409, detail={

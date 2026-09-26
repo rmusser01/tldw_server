@@ -143,6 +143,10 @@ optional real-PST skips, 83 focused logging/pool/access-log cases, and subsequen
 legacy-search sentinel/regression coverage. See the audit and core closeout
 record for scope, remaining measured gates and final artifacts. A test snapshot
 does not stand in for the sustained or million-message measurements above.
+TASK-13377 subsequently runs both real-PST cases without skips using a pinned
+public synthetic fixture and isolated optional parser; see
+[real PST validation and reproduction](Email_Real_PST_Validation_2026-09-26.md).
+Actual OST containers and live provider behavior remain unverified.
 
 PostgreSQL tuning in `aac02e68e8` preserves substring predicates and forced RLS,
 using bound label IDs, statement InitPlans, expression statistics and a native

@@ -17,9 +17,9 @@ from tldw_Server_API.app.core.Image_Generation.adapters.image_format_utils impor
 )
 from tldw_Server_API.app.core.Image_Generation.config import (
     DEFAULT_OPENROUTER_IMAGE_BASE_URL,
-    DEFAULT_OPENROUTER_IMAGE_MODEL,
     DEFAULT_OPENROUTER_IMAGE_TIMEOUT_SECONDS,
     get_image_generation_config,
+    resolve_image_generation_model,
 )
 from tldw_Server_API.app.core.Image_Generation.exceptions import ImageBackendUnavailableError, ImageGenerationError
 from tldw_Server_API.app.core.Image_Generation.request_validation import effective_inline_max_bytes
@@ -110,12 +110,7 @@ class OpenRouterImageAdapter:
         if request.negative_prompt:
             prompt = f"{prompt}\n\nNegative prompt: {request.negative_prompt.strip()}"
         payload: dict[str, Any] = {
-            "model": (
-                request.model
-                or os.getenv("OPENROUTER_IMAGE_MODEL")
-                or self._config.openrouter_image_default_model
-                or DEFAULT_OPENROUTER_IMAGE_MODEL
-            ),
+            "model": resolve_image_generation_model(self.name, request.model, self._config),
             "messages": [{"role": "user", "content": prompt}],
             "modalities": ["image", "text"],
             "stream": False,

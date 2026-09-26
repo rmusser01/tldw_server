@@ -1,8 +1,14 @@
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
+import { consumeFlashcardsGenerateHandoff, consumeStudyPackHandoff } from "@/services/tldw/flashcards-generate-handoff"
+import { loadServicePromptSnapshot } from "@/services/service-prompts"
+import { flashcardsHandoffAuthority } from "@/services/tldw/flashcards-generate-transfer"
+vi.mock("@plasmohq/storage", async () => import("../../../../../../tldw-frontend/extension/shims/plasmo-storage"))
+vi.mock("@/services/tldw/deployment-mode", () => ({ isHostedTldwDeployment: () => false }))
+vi.mock("@/services/tldw/TldwAuth", () => ({ tldwAuth: { getCurrentUser: async () => ({ id: 1, is_active: true }) } }))
 
 const {
   mockBgRequest,
@@ -112,6 +118,8 @@ vi.mock("@/services/settings/registry", async (importOriginal) => {
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: vi.fn(async () => undefined),
+    getConfig: async () => JSON.parse(window.localStorage.getItem("tldwConfig") || "null"),
+    ensureConfigForRequest: async () => JSON.parse(window.localStorage.getItem("tldwConfig") || "null"),
     getChat: vi.fn(async () => null),
     listChatMessages: vi.fn(async () => []),
     getCharacter: vi.fn(async () => null)
@@ -125,7 +133,7 @@ vi.mock("@/components/Common/MarkdownPreview", () => ({
 }))
 
 vi.mock("@/components/Notes/NotesListPanel", () => ({
-  default: () => <div data-testid="notes-list-panel" />
+  default: ({ onSelectNote }: { onSelectNote: (id: string) => void }) => <div data-testid="notes-list-panel"><button onClick={() => onSelectNote("11")}>Open saved note</button></div>
 }))
 
 const renderPage = () => {
@@ -145,6 +153,11 @@ const renderPage = () => {
 describe("NotesManagerPage stage 3 toolbar and metrics", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    window.localStorage.clear()
+    window.localStorage.setItem("tldwConfig", JSON.stringify({ serverUrl: "https://notes.test", authMode: "multi-user", accessToken: `test.${btoa(JSON.stringify({ sub: "1" }))}.signature` }))
+    let tail = Promise.resolve()
+    const locks = { request: (_name: string, work: () => unknown) => { const next = tail.then(work); tail = next.then(() => undefined, () => undefined); return next } }
+    vi.stubGlobal("navigator", new Proxy(window.navigator, { get: (target, key) => key === "locks" ? locks : Reflect.get(target, key, target) }))
     mockConfirmDanger.mockResolvedValue(true)
     mockGetSetting.mockResolvedValue(null)
     mockClearSetting.mockResolvedValue(undefined)
@@ -159,6 +172,35 @@ describe("NotesManagerPage stage 3 toolbar and metrics", () => {
       }
       return {}
     })
+  })
+
+  afterEach(() => vi.unstubAllGlobals())
+
+  it.each(["single-user", "multi-user"])("transfers the selected saved Note into a Study Pack with verified ownership (%s)", async authMode => {
+    if (authMode === "single-user") window.localStorage.setItem("tldwConfig", JSON.stringify({ serverUrl: "https://notes.test", authMode, apiKey: "synthetic-key" }))
+    const note = { id: "11", title: "Private saved note", content: "Private content", metadata: { keywords: [] }, version: 1 }
+    mockBgRequest.mockImplementation(async ({ path }: { path: string }) => {
+      if (path.startsWith("/api/v1/notes/?")) return { items: [note], pagination: { total_items: 1, total_pages: 1 } }
+      if (path === "/api/v1/notes/11") return note
+      return {}
+    })
+    renderPage()
+    await waitFor(() => expect(mockBgRequest.mock.calls.some(([request]) => request.path.startsWith("/api/v1/notes/?"))).toBe(true))
+    fireEvent.click(await screen.findByRole("button", { name: "Open saved note" }))
+    await screen.findByDisplayValue(note.title)
+    const button = screen.getByTestId("notes-create-study-pack-button")
+    await waitFor(() => expect(button).toBeEnabled())
+    fireEvent.click(button)
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledTimes(1))
+    const route = new URL(mockNavigate.mock.calls[0][0], "https://app.test")
+    expect(route.href).not.toContain("Private")
+    const snapshot = await loadServicePromptSnapshot([])
+    try {
+      expect(await consumeStudyPackHandoff(route.searchParams.get("study_pack_handoff")!, flashcardsHandoffAuthority(snapshot))).toEqual({
+        title: note.title, sourceItems: [{ sourceType: "note", sourceId: "11", sourceTitle: note.title }]
+      })
+    } finally { snapshot.release() }
+    expect(screen.getByDisplayValue(note.title)).toBeInTheDocument()
   })
 
   it("inserts markdown syntax at cursor/selection via toolbar", async () => {
@@ -219,4 +261,33 @@ describe("NotesManagerPage stage 3 toolbar and metrics", () => {
     const position = saveButton.compareDocumentPosition(overflowButton)
     expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
+  it("transfers the actual unsaved Note exactly through an opaque route", async () => {
+    renderPage()
+    const text = " \nPrivate unsaved note\n\t "
+    const textarea = screen.getByPlaceholderText("Write your note here... (Markdown supported)")
+    fireEvent.change(textarea, { target: { value: text } })
+    fireEvent.click(screen.getByTestId("notes-overflow-menu-button"))
+    fireEvent.click(await screen.findByText("Generate flashcards"))
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledTimes(1))
+    const route = mockNavigate.mock.calls[0][0]
+    expect(route).not.toContain("Private")
+    const token = new URL(route, "https://app.test").searchParams.get("generate_handoff")!
+    const snapshot = await loadServicePromptSnapshot([])
+    try { expect(await consumeFlashcardsGenerateHandoff(token, flashcardsHandoffAuthority(snapshot))).toMatchObject({ text, sourceType: "note" }) }
+    finally { snapshot.release() }
+    expect(textarea).toHaveValue(text)
+  })
+
+  it("keeps the unsaved Note and reports unavailable shared transfer storage", async () => {
+    renderPage()
+    const textarea = screen.getByPlaceholderText("Write your note here... (Markdown supported)")
+    fireEvent.change(textarea, { target: { value: "Keep my draft" } })
+    vi.stubGlobal("navigator", new Proxy(window.navigator, { get: (target, key) => key === "locks" ? undefined : Reflect.get(target, key, target) }))
+    fireEvent.click(screen.getByTestId("notes-overflow-menu-button"))
+    fireEvent.click(await screen.findByText("Generate flashcards"))
+    await waitFor(() => expect(mockMessageError).toHaveBeenCalled())
+    expect(mockNavigate).not.toHaveBeenCalled()
+    expect(textarea).toHaveValue("Keep my draft")
+  })
+
 })

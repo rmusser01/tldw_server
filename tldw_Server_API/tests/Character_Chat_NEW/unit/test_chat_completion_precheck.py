@@ -20,6 +20,46 @@ from tldw_Server_API.app.core.LLM_Calls.routing.models import (
 )
 
 
+@pytest.mark.integration
+@pytest.mark.parametrize("penalty,expected_status", [(1.0, 200), (1.1, 400)])
+def test_complete_v2_neutral_sampling_works_with_local_adapter_validation(
+    monkeypatch, test_client, auth_headers, populated_character_db, penalty, expected_status
+):
+    """A factory's neutral penalty must not block an otherwise valid local turn."""
+    from tldw_Server_API.app.core.LLM_Calls.capability_registry import validate_payload
+
+    characters = test_client.get("/api/v1/characters/", headers=auth_headers)
+    assert characters.status_code == 200, characters.text
+    character = characters.json()[0]
+    created = test_client.post(
+        "/api/v1/chats/", headers=auth_headers, json={"character_id": character["id"]}
+    )
+    assert created.status_code == 201, created.text
+    chat_id = created.json()["id"]
+    settings = test_client.put(
+        f"/api/v1/chats/{chat_id}/settings",
+        headers=auth_headers,
+        json={"settings": {"chatGenerationOverride": {"enabled": True, "repetition_penalty": penalty}}},
+    )
+    assert settings.status_code == 200, settings.text
+
+    def validated_completion(**kwargs):
+        validate_payload("llama.cpp", {
+            "messages": kwargs["messages_payload"],
+            "repetition_penalty": kwargs.get("repetition_penalty"),
+        })
+        return {"choices": [{"message": {"content": "The garden has seven beds."}}]}
+
+    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call", validated_completion)
+    monkeypatch.setattr(character_chat_sessions, "is_model_known_for_provider", lambda *args: None)
+    response = test_client.post(
+        f"/api/v1/chats/{chat_id}/complete-v2",
+        headers=auth_headers,
+        json={"provider": "llama", "model": "garden-model", "append_user_message": "How many beds?", "save_to_db": False},
+    )
+    assert response.status_code == expected_status, response.text
+
+
 @pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize("captured_key", ["router-key-a", None], ids=["a-to-b", "absent-to-b"])

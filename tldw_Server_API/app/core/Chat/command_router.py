@@ -71,7 +71,9 @@ except ImportError:  # pragma: no cover - fallback if AuthNZ is trimmed in tests
         return False
 
 
-SLASH_RE = re.compile(r"^/(\w+)(?:\s+(.*))?$")
+# Callers strip the message, so arguments start with a non-whitespace character.
+# Keep that boundary explicit to prevent backtracking over long separators.
+SLASH_RE = re.compile(r"^/(\w+)(?:\s+(\S.*))?$")
 RPM_VALUE_RE = re.compile(
     r"^\s*(?P<value>\d+)\s*(?:$|/(?P<unit>m|min|minute|minutes)|\s+per\s+(?P<unit_per>m|min|minute|minutes))\s*$",
     re.IGNORECASE,

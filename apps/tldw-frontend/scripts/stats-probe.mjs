@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /* Probe: why does /admin/server never request /api/v1/admin/stats? */
 import { chromium } from "@playwright/test"
+import { seedManualUatBrowser } from "./browser-uat-seed.mjs"
 
 const WEB = "http://localhost:8080"
 const SERVER = "http://127.0.0.1:8000"
@@ -8,18 +9,7 @@ const API_KEY = process.env.TLDW_API_KEY || ""
 
 const browser = await chromium.launch()
 const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } })
-await ctx.addInitScript(({ serverUrl, apiKey }) => {
-  const cfg = { serverUrl, authMode: "single-user", apiKey }
-  localStorage.setItem("tldwConfig", JSON.stringify(cfg))
-  localStorage.setItem("isMigrated", "true")
-  localStorage.setItem("__tldw_first_run_complete", "true")
-  localStorage.setItem("assistant_setup_dismissed", "true")
-  localStorage.setItem("serverUrl", serverUrl)
-  localStorage.setItem("tldwServerUrl", serverUrl)
-  localStorage.setItem("tldw-api-host", serverUrl)
-  localStorage.setItem("authMode", "single-user")
-  localStorage.setItem("apiKey", apiKey)
-}, { serverUrl: SERVER, apiKey: API_KEY })
+await ctx.addInitScript(seedManualUatBrowser, { legacyBootstrap: true, webUrl: WEB, serverUrl: SERVER, apiKey: API_KEY })
 
 const page = await ctx.newPage()
 const consoleLines = []

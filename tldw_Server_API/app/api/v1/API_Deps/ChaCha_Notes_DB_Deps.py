@@ -22,6 +22,9 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_u
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management import sqlite_policy
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError as BackendDatabaseError
+from tldw_Server_API.app.core.DB_Management.chacha.health import probe_chacha_connection
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
 from tldw_Server_API.app.core.DB_Management.chacha.runtime import (
     ChaChaRuntimeManager,
     ChaChaRuntimeUnavailableError,
@@ -441,24 +444,17 @@ def _apply_sqlite_tuning(db_instance: CharactersRAGDB) -> None:
         logger.debug("ChaChaNotes tuning skipped ({})", type(e).__name__)
 
 
+@chacha_operation(independent=True)
 def _health_check_instance(db_instance: CharactersRAGDB) -> bool:
     try:
-        conn = db_instance.get_connection()
-        sqlite_policy.configure_sqlite_connection(
-            conn,
-            use_wal=False,
-            synchronous=None,
-            foreign_keys=True,
-            busy_timeout_ms=1000,
-            temp_store=None,
-        )
-        conn.execute("SELECT 1")
+        probe_chacha_connection(db_instance)
         return True
-    except (CharactersRAGDBError, sqlite3.Error, OSError, RuntimeError, ValueError) as e:
+    except (BackendDatabaseError, CharactersRAGDBError, sqlite3.Error, OSError, RuntimeError, ValueError) as e:
         logger.warning("ChaChaNotes health probe failed ({})", type(e).__name__)
         return False
 
 
+@chacha_operation(independent=True)
 def _create_and_prepare_db(user_id: int, client_id: str) -> CharactersRAGDB:
     """Prepare an owner database and seed its bundled content before publication."""
     db_path: Optional[Path] = None
@@ -498,7 +494,7 @@ def _create_and_prepare_db(user_id: int, client_id: str) -> CharactersRAGDB:
 async def _ensure_default_character_async(db_instance: CharactersRAGDB, user_id: int) -> None:
     loop = asyncio.get_running_loop()
     try:
-        future = loop.run_in_executor(_get_chacha_executor(), _ensure_default_character, db_instance)
+        future = loop.run_in_executor(_get_chacha_executor(), _ensure_default_character_owned, db_instance)
         _track_default_character_future(future)
         await asyncio.wait_for(
             asyncio.shield(future),
@@ -523,6 +519,12 @@ async def _ensure_default_character_async(db_instance: CharactersRAGDB, user_id:
             "Error ensuring default character ({}); continuing; will retry on next access.",
             type(e).__name__,
         )
+
+
+@chacha_operation(independent=True)
+def _ensure_default_character_owned(db_instance: CharactersRAGDB) -> Optional[int]:
+    """Keep executor maintenance independent of the request that scheduled it."""
+    return _ensure_default_character(db_instance)
 
 
 def _ensure_default_character(db_instance: CharactersRAGDB) -> Optional[int]:
@@ -763,7 +765,9 @@ async def warm_chacha_db_for_user(user_id: int, client_id: str | None = None) ->
         logger.debug("ChaChaNotes shutdown in progress; skipping warmup for user {}", user_id)
         return
     try:
-        db_instance = await _get_or_init_db_instance_from_runtime(user_id, client_id or str(user_id))
+        db_instance = await _get_or_init_db_instance_from_runtime(
+            user_id, _tenant_client_id(user_id, client_id)
+        )
         with _CHACHA_HEALTH_LOCK:
             _CHACHA_HEALTH["warm_startups"] += 1
         task = asyncio.create_task(_ensure_default_character_async(db_instance, user_id))
@@ -771,6 +775,35 @@ async def warm_chacha_db_for_user(user_id: int, client_id: str | None = None) ->
         task.add_done_callback(_chacha_default_char_tasks.discard)
     except (HTTPException, OSError, RuntimeError, ValueError, TypeError) as e:
         logger.warning("Warm-up for ChaChaNotes failed ({})", type(e).__name__)
+
+
+def _tenant_client_id(user_id: int, client_id: str | None) -> str:
+    """Return the client_id to bind this instance to, which is always the user.
+
+    client_id is not a free-form label. On PostgreSQL it becomes
+    app.current_user_id (ChaChaNotes_DB._set_session_client_id), and every
+    ChaCha row-level security policy compares client_id against that setting,
+    so it is the tenant identity.
+
+    Callers had been passing descriptive strings: "voice_assistant" is a
+    constant shared by every user, which pooled them all into one tenant on
+    PostgreSQL, and "chat-macro-worker-<id>" is per-user but does not match the
+    user's normal tenant, so rows written under it were invisible to them
+    afterwards. The instance cache compounds it: its key is the user directory
+    alone, so whichever caller initialised a user first fixed that user's
+    tenant for the life of the process.
+
+    Attribution belongs in logs, not in the tenant key.
+    """
+    resolved = str(user_id)
+    if client_id is not None and str(client_id) != resolved:
+        logger.debug(
+            "Ignoring non-tenant client_id {!r} for user {}; client_id is the "
+            "PostgreSQL tenant key and must be the user id",
+            client_id,
+            user_id,
+        )
+    return resolved
 
 
 async def get_chacha_db_for_user_id(user_id: int, client_id: str | None = None) -> CharactersRAGDB:
@@ -786,7 +819,9 @@ async def get_chacha_db_for_user_id(user_id: int, client_id: str | None = None) 
             detail="Invalid owner_user_id.",
         )
 
-    db_instance = await _get_or_init_db_instance_from_runtime(user_id, client_id or str(user_id))
+    db_instance = await _get_or_init_db_instance_from_runtime(
+        user_id, _tenant_client_id(user_id, client_id)
+    )
     if not _is_chacha_shutting_down():
         task = asyncio.create_task(_ensure_default_character_async(db_instance, user_id))
         _chacha_default_char_tasks.add(task)
@@ -831,7 +866,9 @@ async def get_chacha_db_for_user(current_user: User = Depends(get_request_user))
         )
 
     user_id = current_user.id
-    db_instance = await _get_or_init_db_instance_from_runtime(user_id, str(current_user.id))
+    db_instance = await _get_or_init_db_instance_from_runtime(
+        user_id, _tenant_client_id(user_id, None)
+    )
     if not _is_chacha_shutting_down():
         task = asyncio.create_task(_ensure_default_character_async(db_instance, user_id))
         _chacha_default_char_tasks.add(task)
@@ -851,7 +888,9 @@ async def get_chacha_db_for_owner(owner_user_id: int) -> CharactersRAGDB:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid owner_user_id.",
         )
-    return await _get_or_init_db_instance_from_runtime(owner_user_id, str(owner_user_id))
+    return await _get_or_init_db_instance_from_runtime(
+        owner_user_id, _tenant_client_id(owner_user_id, None)
+    )
 
 
 def close_all_chacha_db_instances():

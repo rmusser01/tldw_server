@@ -3,6 +3,7 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.tests.AuthNZ_SQLite._user_fixtures import create_authnz_test_user
 
 pytestmark = pytest.mark.integration
 
@@ -108,16 +109,15 @@ async def test_single_user_bootstrap_reuses_preseeded_primary_key_postgres(
 
     # Pre-seed a primary key row for SINGLE_USER_API_KEY to simulate an existing deployment.
     # Use DatabasePool helpers so placeholder handling stays backend-agnostic.
-    await pool.execute(
-        """
-        INSERT INTO users (id, username, email, password_hash, is_active, is_verified, role)
-        VALUES (?, ?, ?, ?, TRUE, TRUE, 'admin')
-        ON CONFLICT (id) DO NOTHING
-        """,
-        single_user_id,
-        "single_user",
-        "single_user@example.local",
-        "",
+    await create_authnz_test_user(
+        pool,
+        user_id=single_user_id,
+        username="single_user",
+        email="single_user@example.local",
+        password_hash="",
+        role="admin",
+        is_verified=True,
+        ignore_conflict=True,
     )
     await pool.execute(
         """
@@ -183,16 +183,14 @@ async def test_single_user_bootstrap_fails_with_extra_active_user_postgres(
 
     pool = await get_db_pool()
 
-    await pool.execute(
-        """
-        INSERT INTO users (id, username, email, password_hash, is_active, is_verified, role)
-        VALUES (?, ?, ?, ?, TRUE, TRUE, 'user')
-        ON CONFLICT (id) DO NOTHING
-        """,
-        999,
-        "extra_user",
-        "extra@example.local",
-        "",
+    await create_authnz_test_user(
+        pool,
+        user_id=999,
+        username="extra_user",
+        email="extra@example.local",
+        password_hash="",
+        is_verified=True,
+        ignore_conflict=True,
     )
 
     ok = await bootstrap_single_user_profile()
@@ -222,16 +220,15 @@ async def test_single_user_bootstrap_fails_with_multiple_primary_keys_postgres(
     settings = get_settings()
     single_user_id = settings.SINGLE_USER_FIXED_ID
 
-    await pool.execute(
-        """
-        INSERT INTO users (id, username, email, password_hash, is_active, is_verified, role)
-        VALUES (?, ?, ?, ?, TRUE, TRUE, 'admin')
-        ON CONFLICT (id) DO NOTHING
-        """,
-        single_user_id,
-        "single_user",
-        "single_user@example.local",
-        "",
+    await create_authnz_test_user(
+        pool,
+        user_id=single_user_id,
+        username="single_user",
+        email="single_user@example.local",
+        password_hash="",
+        role="admin",
+        is_verified=True,
+        ignore_conflict=True,
     )
 
     manager = APIKeyManager()

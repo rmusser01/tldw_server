@@ -456,12 +456,15 @@ class TestAPIEndpoints:
         """Test GET /api/v1/chunking/templates endpoint."""
         db, _ = temp_db
 
-        # Create test templates
+        # Stamp the owner the way the create endpoint does. Listing is scoped to
+        # the caller, so an unowned custom template is no longer visible to
+        # everyone -- which is the point of the scoping, not a regression.
         db.create_chunking_template(
             name="api_test1",
             template_json='{"chunking": {"method": "words"}}',
             description="API test 1",
             tags=["api", "test"],
+            user_id="1",
         )
 
         # Test listing

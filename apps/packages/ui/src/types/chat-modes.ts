@@ -16,6 +16,9 @@ export interface SaveMessageBase {
   modelId: string
   userModelId?: string
   userMessageId?: string
+  userServerMessageId?: string
+  retryFailedTurn?: boolean
+  assistantServerMessageId?: string
   assistantMessageId: string
   userParentMessageId?: string | null
   assistantParentMessageId?: string | null

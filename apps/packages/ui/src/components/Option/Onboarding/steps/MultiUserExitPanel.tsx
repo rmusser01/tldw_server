@@ -5,7 +5,9 @@ import type { FirstRunMetadata } from "@/types/setup-onboarding"
 
 type MultiUserExitPanelProps = {
   metadata: FirstRunMetadata | null
-  onBack: () => void
+  onBack?: () => void
+  onSignIn?: () => void
+  loginPending?: boolean
 }
 
 const DOCS_REPO_BASE = "https://github.com/rmusser01/tldw_server/blob/main/"
@@ -22,7 +24,7 @@ const resolveDocsHref = (path: string): string => {
   return `${DOCS_REPO_BASE}${trimmed.replace(/^\.?\//, "")}`
 }
 
-export function MultiUserExitPanel({ metadata, onBack }: MultiUserExitPanelProps) {
+export function MultiUserExitPanel({ metadata, onBack, onSignIn, loginPending }: MultiUserExitPanelProps) {
   const guidePath = resolveDocsHref(
     metadata?.multi_user_exit?.guide_path ||
     "Docs/Getting_Started/Profile_Docker_Multi_User_Postgres.md"
@@ -42,16 +44,16 @@ export function MultiUserExitPanel({ metadata, onBack }: MultiUserExitPanelProps
             Multi-user setup guide
           </h2>
           <p className="mt-1 text-sm text-text-muted">
-            Multi-user deployments need the operator guide before continuing.
+            {onSignIn ? "Your server is configured for multi-user access." : "Use the operator guide to configure multi-user access."}
           </p>
         </div>
       </div>
 
       <div className="rounded-md border border-border bg-surface px-4 py-4">
         <p className="text-sm text-text">
-          Follow the multi-user guide for auth mode, database, admin account, and
-          deployment hardening. Return here when the server is back in a
-          first-run setup state.
+          {onSignIn
+            ? "Sign in with your server account. If you need an account, ask your administrator. Operators can use the guide to finish deployment configuration."
+            : "Follow the multi-user guide for auth mode, database, admin account, and deployment hardening. Then open connection settings to sign in."}
         </p>
         <div className="mt-4 flex flex-wrap gap-2">
           <a
@@ -73,13 +75,21 @@ export function MultiUserExitPanel({ metadata, onBack }: MultiUserExitPanelProps
         </div>
       </div>
 
-      <button
+      {onSignIn ? <button
+        type="button"
+        onClick={onSignIn}
+        disabled={loginPending}
+        className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+      >
+        {loginPending ? "Opening login..." : "Sign in"}
+      </button> : null}
+      {onBack ? <button
         type="button"
         onClick={onBack}
         className="rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-text hover:bg-surface2"
       >
         Back to setup paths
-      </button>
+      </button> : null}
     </section>
   )
 }

@@ -16,10 +16,10 @@
 **Goal**: Preserve current dev behavior and email fixes while resolving conflicts.
 **Success Criteria**: Reviewed merge, focused regression suites, Ruff/Bandit/compile checks and dated evidence.
 **Tests**: Changed source and integration behavior suites; source provenance kept distinct from benchmark snapshots.
-**Status**: In Progress
+**Status**: Complete
 
 ## Stage 4: Publish PR
 **Goal**: Create and attach a reviewable pull request against dev.
 **Success Criteria**: Verified commits pushed, PR base dev and URL recorded; human-written Change summary merge gate explicit.
 **Tests**: Remote PR metadata and local clean worktree verification.
-**Status**: Not Started
+**Status**: In Progress

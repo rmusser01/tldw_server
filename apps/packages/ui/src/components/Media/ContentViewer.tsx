@@ -175,6 +175,7 @@ interface ContentViewerProps {
   /** True only when the server has zero media items (no filters/search active). */
   isLibraryEmpty?: boolean
   onChatWithMedia?: () => void
+  chatWithMediaDisabledReason?: string
   onChatAboutMedia?: () => void
   onGenerateFlashcardsFromContent?: (payload: {
     text: string
@@ -188,6 +189,7 @@ interface ContentViewerProps {
   onSendAnalysisToChat?: (text: string) => void
   contentRef?: (node: HTMLDivElement | null) => void
   onDeleteItem?: (item: MediaResultItem, detail: any | null) => Promise<void>
+  deleteDisabledReason?: string
   navigationTarget?: MediaNavigationTargetLike | null
   navigationNodeTitle?: string | null
   navigationPageCountHint?: number | null
@@ -213,6 +215,7 @@ export function ContentViewer({
   totalResults = 0,
   isLibraryEmpty: isLibraryEmptyProp = false,
   onChatWithMedia,
+  chatWithMediaDisabledReason,
   onChatAboutMedia,
   onGenerateFlashcardsFromContent,
   onRefreshMedia,
@@ -222,12 +225,16 @@ export function ContentViewer({
   onSendAnalysisToChat,
   contentRef,
   onDeleteItem,
+  deleteDisabledReason,
   navigationTarget = null,
   navigationNodeTitle = null,
   navigationPageCountHint = null,
   navigationSelectionNonce = 0
 }: ContentViewerProps) {
   const { t } = useTranslation(['review', 'common'])
+  const fullContentDisabledReason = chatWithMediaDisabledReason || (isDetailLoading
+    ? t('review:mediaPage.fullContentLoading', { defaultValue: 'Loading full content…' })
+    : !content.trim() ? t('review:mediaPage.fullContentUnavailable', { defaultValue: 'Full content is not available for this item.' }) : undefined)
   const [collapsedSections, setCollapsedSections] = useSetting(
     MEDIA_COLLAPSED_SECTIONS_SETTING
   )
@@ -515,6 +522,7 @@ export function ContentViewer({
     editState,
     modals,
     onChatWithMedia,
+    chatWithMediaDisabledReason: fullContentDisabledReason,
     onChatAboutMedia,
     onGenerateFlashcardsFromContent,
     onCreateNoteWithContent,
@@ -652,7 +660,7 @@ export function ContentViewer({
   }
 
   return (
-    <div ref={setRootContainerRef} className="relative flex-1 flex flex-col bg-bg">
+    <div ref={setRootContainerRef} className="relative min-h-0 min-w-0 flex-1 flex flex-col bg-bg">
       <div
         className="sr-only"
         aria-live="polite"
@@ -662,8 +670,8 @@ export function ContentViewer({
         {readingProgress.contentSelectionAnnouncement}
       </div>
       {/* Compact Header */}
-      <div className="px-4 py-2 border-b border-border bg-surface">
-        <div className="flex flex-col md:flex-row items-center gap-3">
+      <div className="shrink-0 px-4 py-2 border-b border-border bg-surface">
+        <div className="flex min-w-0 flex-col md:flex-row items-center gap-3">
           {/* Left: Navigation */}
           <div className="flex items-center gap-1">
             <Tooltip
@@ -699,25 +707,26 @@ export function ContentViewer({
 
           {/* Center: Title */}
           <Tooltip title={selectedMedia.title || ''} placement="bottom">
-            <h3 className="flex-1 text-sm font-medium text-text truncate text-center px-2 max-w-[300px] md:max-w-none">
+            <h3 className="min-w-0 flex-1 text-sm font-medium text-text truncate text-center px-2 max-w-full md:max-w-none">
               {selectedMedia.title || `${selectedMedia.kind} ${selectedMedia.id}`}
             </h3>
           </Tooltip>
 
           {/* Right: Chat Button + Actions Dropdown */}
-          <div className="flex items-center gap-1">
+          <div className="flex max-w-full flex-wrap items-center justify-center gap-1">
             {!isNote && onChatWithMedia && (
               <Tooltip
-                title={t('review:reviewPage.chatWithMediaTooltipClarified', {
+                title={fullContentDisabledReason || t('review:reviewPage.chatWithMediaTooltipClarified', {
                   defaultValue:
                     'Chat with this media by sending its full content to the composer.'
                 })}
               >
                 <button
                   onClick={onChatWithMedia}
+                  disabled={Boolean(fullContentDisabledReason)}
                   className="p-1.5 text-text-muted hover:bg-surface2 rounded"
                   aria-label={chatWithLabel}
-                  title={chatWithLabel}
+                  title={fullContentDisabledReason || chatWithLabel}
                 >
                   <MessageSquare className="w-4 h-4" />
                 </button>
@@ -759,7 +768,7 @@ export function ContentViewer({
       {/* Content Area */}
       <div
         ref={contentScrollContainerRef}
-        className="flex-1 overflow-y-auto p-4"
+        className="min-h-0 flex-1 overflow-y-auto p-4"
         data-testid="content-scroll-container"
       >
         {isDetailLoading ? (
@@ -1037,7 +1046,7 @@ export function ContentViewer({
 
           {/* Main Content */}
           <div className="bg-surface border border-border rounded-lg mb-2 overflow-hidden">
-            <div className="flex items-center justify-between px-3 py-2 bg-surface2">
+            <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-surface2">
               <button
                 onClick={() => toggleSection('content')}
                 className="flex items-center gap-2 hover:bg-surface -ml-1 px-1 rounded transition-colors"
@@ -1052,7 +1061,7 @@ export function ContentViewer({
                   <ChevronUp className="w-4 h-4 text-text-subtle" />
                 )}
               </button>
-                <div className="flex items-center gap-1">
+                <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1">
                   {readingProgress.navigationTargetDescription ? (
                     <span className="rounded bg-surface px-2 py-0.5 text-[11px] text-text-muted">
                       {readingProgress.navigationTargetDescription}
@@ -1204,7 +1213,7 @@ export function ContentViewer({
                     className="mb-3 rounded-md border border-border bg-surface2 px-2 py-1.5"
                     data-testid="content-find-bar"
                   >
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <label htmlFor="content-find-input" className="sr-only">
                         {t('review:mediaPage.findInContent', {
                           defaultValue: 'Find in content'
@@ -1214,7 +1223,7 @@ export function ContentViewer({
                         id="content-find-input"
                         ref={transcript.findInputRef}
                         type="text"
-                        className="h-7 w-full rounded border border-border bg-surface px-2 text-xs text-text outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                        className="h-7 min-w-0 flex-1 basis-32 rounded border border-border bg-surface px-2 text-xs text-text outline-none focus:border-primary focus:ring-1 focus:ring-primary"
                         placeholder={t('review:mediaPage.findPlaceholder', {
                           defaultValue: 'Find in content'
                         })}
@@ -1522,7 +1531,7 @@ export function ContentViewer({
           {/* Analysis - only for media, not notes */}
           {!isNote && (
             <div className="bg-surface border border-border rounded-lg mb-2 overflow-hidden">
-              <div className="flex items-center justify-between px-3 py-2 bg-surface2">
+              <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-surface2">
               <button
                 onClick={() => toggleSection('analysis')}
                 className="flex items-center gap-2 hover:bg-surface -ml-1 px-1 rounded transition-colors"
@@ -1537,7 +1546,7 @@ export function ContentViewer({
                     <ChevronUp className="w-4 h-4 text-text-subtle" />
                   )}
                 </button>
-                <div className="flex items-center gap-2">
+                <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
                 <button
                   onClick={() => modals.setAnalysisModalOpen(true)}
                   className="px-2 py-1 bg-primary hover:bg-primaryStrong text-white rounded text-xs font-medium flex items-center gap-1 transition-colors"
@@ -1682,8 +1691,13 @@ export function ContentViewer({
                                 <Copy className="w-3 h-3" />
                               </button>
                             </div>
-                            <div className="text-sm text-text whitespace-pre-wrap leading-relaxed">
-                            {editState.analysisShown}
+                            <div className="text-sm text-text leading-relaxed">
+                              <Suspense fallback={<div className="whitespace-pre-wrap">{editState.analysisShown}</div>}>
+                                <LazyMarkdownPreview
+                                  content={editState.analysisShown}
+                                  size={rendering.markdownPreviewSize}
+                                />
+                              </Suspense>
                             </div>
                           </div>
                         )
@@ -1896,14 +1910,14 @@ export function ContentViewer({
               />
             </Suspense>
           ) : null}
-          {selectedMedia && onDeleteItem && (
+          {selectedMedia && (onDeleteItem || deleteDisabledReason) && (
             <div className="mt-2">
               <button
                 type="button"
                 onClick={editState.handleDeleteItem}
-                disabled={editState.deletingItem}
+                disabled={editState.deletingItem || Boolean(deleteDisabledReason)}
                 className="w-full inline-flex items-center justify-center gap-2 rounded-md border border-danger/30 px-3 py-2 text-sm text-danger hover:bg-danger/10 disabled:opacity-60"
-                title={t('review:mediaPage.deleteItem', { defaultValue: 'Delete item' })}
+                title={deleteDisabledReason || t('review:mediaPage.deleteItem', { defaultValue: 'Delete item' })}
               >
                 {editState.deletingItem ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
@@ -1914,6 +1928,7 @@ export function ContentViewer({
                   ? t('review:mediaPage.deletingItem', { defaultValue: 'Deleting...' })
                   : t('review:mediaPage.deleteItem', { defaultValue: 'Delete item' })}
               </button>
+              {deleteDisabledReason && <p className="mt-1 text-xs text-text-muted">{deleteDisabledReason}</p>}
             </div>
           )}
         </div>

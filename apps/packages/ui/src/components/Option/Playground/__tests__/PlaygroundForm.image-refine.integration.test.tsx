@@ -209,6 +209,16 @@ vi.mock("react-i18next", () => ({
   })
 }))
 
+// Home milestone ownership is unrelated to research, image refinement, and dictation.
+vi.mock("@/hooks/useHomeMilestoneScope", () => ({
+  useHomeMilestoneScope: () => null
+}))
+
+// Prompt Assist has its own lifecycle suites; this fixture exercises the Form flow.
+vi.mock("@/components/Chat/composer/PromptAssistComposerAction", () => ({
+  PromptAssistComposerAction: () => null
+}))
+
 vi.mock("@tanstack/react-query", () => ({
   useQuery: () => ({ data: [] }),
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
@@ -955,7 +965,8 @@ vi.mock("@/utils/resolve-api-provider", () => ({
   resolveApiProviderForModel: vi.fn(async () => "custom")
 }))
 
-vi.mock("@/services/service-prompts", () => ({
+vi.mock("@/services/service-prompts", async importOriginal => ({
+  ...await importOriginal<typeof import("@/services/service-prompts")>(),
   loadServicePromptSnapshot: vi.fn(async () => ({
     definitions: {
       "image.prompt.refinement": {

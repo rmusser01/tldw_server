@@ -10,7 +10,7 @@ import {
 } from "./helpers"
 
 test.describe("Onboarding UAT first source milestone", () => {
-  test("first-source-after-chat opens Quick Ingest from the guided milestone", async ({
+  test("first-source-after-chat ingests a source and opens its grounded Chat composer", async ({
     firstRunPage: page,
     artifact,
     diagnostics,

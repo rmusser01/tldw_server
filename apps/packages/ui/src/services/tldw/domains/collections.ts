@@ -1,3 +1,5 @@
+import { requestScopeFields } from "./service-prompts"
+import type { ScopedRequestOptions } from "../TldwApiClient"
 import { bgRequest } from "@/services/background-proxy"
 import { getTldwTTSModel, getTldwTTSVoice } from "@/services/tts"
 import { buildQuery } from "../client-utils"
@@ -69,11 +71,14 @@ export type PromptPayload = {
 export const collectionsMethods = {
   // ── Notes ──
 
-  async createNote(content: string, metadata?: any): Promise<any> {
+  async createNote(content: string, metadata?: any, options?: ScopedRequestOptions): Promise<any> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     return await bgRequest<any>({
+      ...scopeFields,
+      ...(options?.signal ? { abortSignal: options.signal } : {}),
       path: "/api/v1/notes/",
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...scopeFields.headers },
       body: { content, ...metadata }
     })
   },
@@ -912,7 +917,7 @@ export const collectionsMethods = {
 
   async listIngestionSources(this: TldwApiClientCore): Promise<IngestionSourceListResponse> {
     const response = await this.request<any>({
-      path: "/api/v1/ingestion-sources",
+      path: "/api/v1/ingestion-sources/",
       method: "GET"
     })
     return normalizeIngestionSourceListResponse(response)
@@ -959,7 +964,7 @@ export const collectionsMethods = {
     payload: CreateIngestionSourceRequest
   ): Promise<IngestionSourceSummary> {
     const response = await this.request<any>({
-      path: "/api/v1/ingestion-sources",
+      path: "/api/v1/ingestion-sources/",
       method: "POST",
       body: payload
     })

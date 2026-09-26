@@ -428,6 +428,17 @@ def test_list_media_trash_sanitizes_outer_failure_log(monkeypatch):
     _assert_sanitized_error_log(logger_stub, "Error listing trashed media")
 
 
+def test_list_media_trash_preserves_deletion_date(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints.media import listing as listing_endpoints
+    monkeypatch.setattr(listing_endpoints, "get_paginated_trash_files", lambda *_args, **_kwargs: (
+        [{"id": 1, "title": "Aster", "type": "document", "trash_date": "2026-09-15T05:00:00Z"}], 1, 1, 1
+    ))
+    with _build_media_auxiliary_client(_FakeMediaAuxDb()) as (client, _db):
+        response = client.get("/api/v1/media/trash")
+    assert response.status_code == 200
+    assert response.json()["items"][0]["deleted_at"] == "2026-09-15T05:00:00Z"
+
+
 def test_list_media_trash_invalid_row_id_log_is_sanitized(monkeypatch):
     logger_stub = _patch_listing_logger(monkeypatch)
     from tldw_Server_API.app.api.v1.endpoints.media import listing as listing_endpoints

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /* Admin UAT pass D — targeted interaction probes. */
 import { chromium } from "@playwright/test"
+import { seedManualUatBrowser } from "./browser-uat-seed.mjs"
 import fs from "node:fs/promises"
 
 const WEB = process.env.WEB_URL || "http://localhost:8080"
@@ -11,20 +12,6 @@ const OUT = process.env.OUT_DIR || "/tmp/admin-uat"
 const out = { steps: [] }
 const note = (s, detail) => { out.steps.push({ s, detail }); console.log(`[step] ${s} :: ${detail || ""}`) }
 
-const seed = ({ serverUrl, apiKey }) => {
-  const cfg = { serverUrl, authMode: "single-user", apiKey }
-  try { localStorage.setItem("tldwConfig", JSON.stringify(cfg)) } catch {}
-  try { localStorage.setItem("isMigrated", "true") } catch {}
-  try { localStorage.setItem("__tldw_first_run_complete", "true") } catch {}
-  try { localStorage.setItem("assistant_setup_dismissed", "true") } catch {}
-  try {
-    localStorage.setItem("serverUrl", serverUrl)
-    localStorage.setItem("tldwServerUrl", serverUrl)
-    localStorage.setItem("tldw-api-host", serverUrl)
-    localStorage.setItem("authMode", "single-user")
-    localStorage.setItem("apiKey", apiKey)
-  } catch {}
-}
 
 async function shot(page, name) {
   try { await page.screenshot({ path: `${OUT}/${name}.png` }) } catch {}
@@ -55,7 +42,7 @@ async function main() {
 
   // Authed context for the rest
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } })
-  await ctx.addInitScript(seed, { serverUrl: SERVER, apiKey: API_KEY })
+  await ctx.addInitScript(seedManualUatBrowser, { legacyBootstrap: true, webUrl: WEB, serverUrl: SERVER, apiKey: API_KEY })
   const page = await ctx.newPage()
 
   // D2: server admin — Create role with empty name (validation?) then real create (feedback?)

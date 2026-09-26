@@ -802,17 +802,28 @@ export const PromptBody = () => {
   }, [isOnline, selectedSegment])
 
   // Handle ?edit=<id> and ?new=1 URL params for full editor
+  const handledEditorIntentRef = React.useRef<string | null>(null)
   useEffect(() => {
     if (status !== "success" || !Array.isArray(data)) return
     const editIdParam = searchParams.get("edit")
     const isNew = searchParams.get("new")
+    const intent = editIdParam ? `edit:${editIdParam}` : isNew === "1" ? "new" : null
+    if (!intent) {
+      handledEditorIntentRef.current = null
+      return
+    }
+    if (handledEditorIntentRef.current === intent) return
     if (editIdParam && !editor.fullEditorOpen) {
       const prompt = data.find((p: any) => String(p.id) === editIdParam)
       if (prompt) {
+        handledEditorIntentRef.current = intent
         editor.openFullEditor(prompt)
       }
     } else if (isNew === "1" && !editor.fullEditorOpen) {
+      handledEditorIntentRef.current = intent
       editor.openFullEditor()
+    } else if (editor.fullEditorOpen) {
+      handledEditorIntentRef.current = intent
     }
   }, [status, data, searchParams, editor.fullEditorOpen, editor.openFullEditor])
 
@@ -2623,7 +2634,7 @@ export const PromptBody = () => {
         mode={editor.fullEditorMode}
         initialValues={editor.fullEditorInitialValues}
         onSubmit={editor.handleFullEditorSubmit}
-        isLoading={editor.fullEditorMode === "create" ? editor.savePromptLoading : editor.isUpdatingPrompt}
+        isLoading={editor.savePromptLoading || editor.isUpdatingPrompt}
         allTags={allTags}
         savedRecipes={savedRecipes}
         recipePersistenceAvailable={recipePersistence.available}

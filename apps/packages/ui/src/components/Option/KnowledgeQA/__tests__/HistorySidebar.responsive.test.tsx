@@ -51,6 +51,7 @@ vi.mock("@/hooks/useAntdMessage", () => ({
 
 vi.mock("../KnowledgeQAProvider", () => ({
   useKnowledgeQA: () => ({
+    isAuthorityCurrent: () => true,
     searchHistory: state.searchHistory,
     historyHydrated: state.historyHydrated,
     currentThreadId: state.currentThreadId,

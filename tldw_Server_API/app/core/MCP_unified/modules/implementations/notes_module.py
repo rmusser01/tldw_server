@@ -31,7 +31,6 @@ from ..base import BaseModule, create_tool_definition
 from ..disk_space import get_free_disk_space_gb
 
 _NOTES_MODULE_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     AssertionError,
     AttributeError,
     ConnectionError,

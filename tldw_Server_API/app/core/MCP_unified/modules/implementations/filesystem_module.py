@@ -48,7 +48,7 @@ from tldw_Server_API.app.services.mcp_hub_workspace_root_resolver import (
 )
 
 from ...tool_observability import build_execution_eval_metadata
-from ..base import BaseModule, ModuleConfig, create_tool_definition
+from ..base import CONTROL_CHARS_RE, BaseModule, ModuleConfig, create_tool_definition
 from .filesystem_diff import FilesystemPatchError, PatchFile, apply_patch_to_text, parse_unified_diff
 from .filesystem_receipts import ReadReceiptError, ReadReceiptManager
 from .notebook_files import apply_cell_edit, parse_notebook_payload, summarize_notebook
@@ -605,6 +605,16 @@ class FilesystemModule(BaseModule):
         ]
 
     async def execute_tool(self, tool_name: str, arguments: dict[str, Any], context: Any | None = None) -> Any:
+        # The per-key exemptions below do not protect what they name on the production
+        # path: tool_execution/security.py:harden_and_sanitize_tool_arguments already
+        # called self.sanitize_input(arguments) unconditionally before execute_tool was
+        # reached, so old_string/new_string/source/diff arrive already stripped and
+        # exempting them from a second, idempotent pass changes nothing. They cannot be
+        # made to work from here -- sanitize_input receives the whole dict with no tool
+        # name, so the upstream pass has no way to know which keys this tool exempts.
+        # Left in place rather than deleted: the intent (byte-preserve exact-match
+        # strings) is right, and honouring it means threading tool_name through
+        # sanitize_input across all 22 inheriting modules. TASK-13294 AC#6.
         raw_args = arguments or {}
         if tool_name == "fs.edit":
             args = {
@@ -1462,19 +1472,10 @@ class FilesystemModule(BaseModule):
                 )
         return candidates
 
-    def sanitize_input(self, input_data: Any, _depth: int = 0) -> Any:
-        """Sanitize filesystem inputs while allowing portable glob syntax."""
-
-        if _depth > 20:
-            raise ValueError("Input too deeply nested")
-
-        if isinstance(input_data, str):
-            return "".join(ch for ch in input_data if ch >= " " or ch == "\n")
-        if isinstance(input_data, dict):
-            return {k: self.sanitize_input(v, _depth + 1) for k, v in input_data.items()}
-        if isinstance(input_data, list):
-            return [self.sanitize_input(v, _depth + 1) for v in input_data]
-        return input_data
+    # No sanitize_input override. It existed to allow portable glob syntax past the
+    # base SQL-injection denylist, which is gone (TASK-13294). Keeping it meant keeping
+    # a second copy of the char predicate in sync with the base -- the drift that left
+    # fs.write corrupting tab-significant files after the base was already fixed.
 
     @staticmethod
     def _sanitize_patch_diff(input_data: Any) -> Any:
@@ -1482,7 +1483,8 @@ class FilesystemModule(BaseModule):
 
         if not isinstance(input_data, str):
             return input_data
-        return "".join(ch for ch in input_data if ch >= " " or ch in {"\n", "\r", "\t"})
+        # Same rule as BaseModule.sanitize_input, from the one shared definition.
+        return CONTROL_CHARS_RE.sub("", input_data)
 
     async def _resolve_workspace_root(self, context: Any | None) -> Path:
         metadata = getattr(context, "metadata", None)

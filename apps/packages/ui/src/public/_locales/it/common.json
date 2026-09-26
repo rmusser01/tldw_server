@@ -1261,5 +1261,17 @@
   },
   "modelSelect_sort_localFirst": {
     "message": "Local-first"
+  },
+  "help_loadFailed": {
+    "message": "Impossibile caricare la guida. Riconnettiti, salva le modifiche e ricarica la pagina."
+  },
+  "help_loading": {
+    "message": "Caricamento della guida…"
+  },
+  "help_confirmReload": {
+    "message": "Ricaricare questa pagina? Le modifiche non salvate potrebbero andare perse."
+  },
+  "help_reload": {
+    "message": "Ricarica pagina"
   }
 }

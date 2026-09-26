@@ -22,6 +22,15 @@ vi.mock("@/hooks/chat-modes/normalChatMode", () => ({
   normalChatMode: normalChatModeMock
 }))
 
+vi.mock("@/services/service-prompts", () => ({
+  loadServicePromptSnapshot: async () => ({
+    definitions: {}, scopeSignal: new AbortController().signal,
+    scopeInvalidatedSignal: new AbortController().signal,
+    requestScope: { config: { serverUrl: "https://chat.test", authMode: "single-user" }, userId: null },
+    release: vi.fn()
+  })
+}))
+
 vi.mock("@/hooks/chat-modes/continueChatMode", () => ({
   continueChatMode: vi.fn()
 }))
@@ -236,6 +245,7 @@ const createHookOptions = () => ({
 describe("useChatActions overlay integration", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    createChatMock.mockResolvedValue({ id: "server-chat-42", title: "Overlay hello" })
     normalChatModeMock.mockResolvedValue(undefined)
     streamCharacterChatCompletionMock.mockImplementation(async function* () {
       yield {
@@ -261,7 +271,10 @@ describe("useChatActions overlay integration", () => {
       })
     })
 
-    expect(createChatMock).not.toHaveBeenCalled()
+    expect(createChatMock).toHaveBeenCalledWith(
+      expect.not.objectContaining({ character_id: expect.anything() }),
+      expect.objectContaining({ requestScope: expect.anything() })
+    )
     expect(streamCharacterChatCompletionMock).not.toHaveBeenCalled()
     expect(normalChatModeMock).toHaveBeenCalledTimes(1)
     expect(normalChatModeMock.mock.calls[0]?.[6]).toEqual(

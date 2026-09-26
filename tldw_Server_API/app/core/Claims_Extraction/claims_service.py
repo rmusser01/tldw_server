@@ -1839,6 +1839,13 @@ def _resolve_media_db(
             with _claims_user_override_db(int(user_id)) as (override_db, _db_path):
                 yield override_db, owner_user_id
             return
+    elif owner_filter and db.backend_type == BackendType.POSTGRESQL:
+        # SQLite hands each account its own database file, so an absent owner
+        # predicate is still scoped. PostgreSQL shares one set of tables across
+        # every account, and this path previously yielded owner_user_id=None,
+        # leaving nothing at all scoping the query. Scope it to the caller.
+        with suppress(AttributeError, TypeError, ValueError):
+            owner_user_id = int(current_user.id)
     yield db, owner_user_id
 
 

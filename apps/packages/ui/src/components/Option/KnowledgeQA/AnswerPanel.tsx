@@ -2,7 +2,10 @@
  * AnswerPanel - Displays generated answer with inline citations
  */
 
+import { hasLowMeasuredRelevance } from "./sourceListUtils"
+
 import React, { type ReactNode, useEffect, useMemo, useRef, useState } from "react"
+import { useTranslation } from "react-i18next"
 import { Sparkles, AlertCircle, Loader2, ThumbsUp, ThumbsDown } from "lucide-react"
 import { useKnowledgeQA } from "./KnowledgeQAProvider"
 import { cn } from "@/libs/utils"
@@ -170,6 +173,7 @@ function sourceHealthNeedsAttention(
 }
 
 export function AnswerPanel({ className }: AnswerPanelProps) {
+  const { t } = useTranslation(["knowledge", "sidepanel"])
   const {
     answer,
     answerTrustState = "unknown_trust",
@@ -181,12 +185,13 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
     focusedSourceIndex = null,
     results,
     searchDetails,
+    completedGenerationEnabled = null,
+    search,
     query = "",
     currentThreadId = null,
     messages = [],
     setSettingsPanelOpen,
     updateSetting,
-    preset,
     settings,
     rerunWithTokenLimit,
     retrySync,
@@ -277,9 +282,11 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
         generationProvider: settings?.generation_provider,
         generationModel: settings?.generation_model,
         sourceHealthCaveatCount,
+        sourceStatus: searchDetails?.sourceStatus,
         trustState: answerTrustState,
-      }),
+      }, t),
     [
+      t,
       answerTrustState,
       citations.length,
       results.length,
@@ -290,6 +297,7 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
       settings?.generation_provider,
       settings?.sources,
       sourceHealthCaveatCount,
+      searchDetails?.sourceStatus,
     ]
   )
   const lowConfidenceRecovery = useMemo(() => {
@@ -322,15 +330,7 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
     }
 
     const threshold = settings?.strip_min_relevance ?? 0.3
-    const hasScoredResults = results.some(
-      (result: { score?: number }) => typeof result.score === "number"
-    )
-    const allLowRelevance =
-      hasScoredResults &&
-      results.every(
-        (result: { score?: number }) =>
-          typeof result.score === "number" && result.score < threshold
-      )
+    const allLowRelevance = hasLowMeasuredRelevance(results, threshold)
     const uncitedAnswer = citations.length === 0 || groundingCoverage?.percent === 0
     const weakVerification = faithfulnessDescriptor?.label === "Weak"
 
@@ -629,26 +629,6 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
     }
   }
 
-  const loadingStageLabel = useMemo(() => {
-    if (loadingElapsedSeconds < 5) return "Searching documents..."
-    if (loadingElapsedSeconds < 10) return "Reranking results..."
-    if (loadingElapsedSeconds < 20) return "Generating answer..."
-    return "Verifying citations..."
-  }, [loadingElapsedSeconds])
-
-  const presetLatencyHint = useMemo(() => {
-    if (preset === "fast") {
-      return "Fast preset usually completes in a few seconds."
-    }
-    if (preset === "balanced") {
-      return "Balanced preset typically completes within about 10 seconds."
-    }
-    if (preset === "thorough") {
-      return "Deep preset may take up to 30 seconds."
-    }
-    return "Custom preset timing varies with your settings."
-  }, [preset])
-
   // Loading state
   if (isSearching && !normalizedAnswer) {
     return (
@@ -657,13 +637,15 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
           <Loader2 className="w-5 h-5 animate-spin text-primary" />
           <div>
             <p className="font-medium">
-              {loadingStageLabel}{" "}
+              {t("answerPanel.loading", { defaultValue: "Working on your question..." })}{" "}
               {loadingElapsedSeconds > 0 && (
                 <span className="text-text-muted">({loadingElapsedSeconds}s)</span>
               )}
             </p>
             <p className="text-sm text-text-muted">
-              {presetLatencyHint}
+              {t("answerPanel.modelReadiness", {
+                defaultValue: "Response time depends on your sources and model readiness.",
+              })}
             </p>
           </div>
         </div>
@@ -720,7 +702,29 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
       )
     }
 
-    // Results but no generated answer
+    // Unknown legacy request settings must not be mistaken for disabled generation.
+    if (completedGenerationEnabled !== false) {
+      return (
+        <div className={cn("p-6 rounded-xl bg-warn/10 border border-warn/25", className)}>
+          <p className="font-medium text-text">No generated answer</p>
+          <p className="mt-1 text-sm text-text-muted">
+            {completedGenerationEnabled === true
+              ? "This search requested an answer, but no answer was returned. Your retrieved sources are still available. Retry the search or choose another answer model."
+              : "No generated answer is available for this result. Review generation settings and search again. Your retrieved sources are still available."}
+          </p>
+          <div className="mt-2 flex gap-2">
+            <button type="button" onClick={() => { void search() }} className="rounded-md border border-primary/30 bg-primary/10 px-2 py-1 text-xs font-medium text-primary">
+              Retry search
+            </button>
+            <button type="button" onClick={() => setSettingsPanelOpen(true)} className="rounded-md border border-border px-2 py-1 text-xs font-medium">
+              Review generation settings
+            </button>
+          </div>
+        </div>
+      )
+    }
+
+    // Generation was deliberately disabled for the completed request.
     return (
       <div className={cn("p-6 rounded-xl bg-muted/30 border border-border", className)}>
         <div className="flex items-start gap-3">

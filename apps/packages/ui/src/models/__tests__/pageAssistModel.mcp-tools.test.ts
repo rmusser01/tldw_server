@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { pageAssistModel } from "../index"
-import { tldwModels, type ModelInfo } from "@/services/tldw"
+import { tldwModels, tldwChat, type ModelInfo } from "@/services/tldw"
 import { useMcpToolsStore } from "@/store/mcp-tools"
 import { useStoreChatModelSettings } from "@/store/model"
 import { useStoreMessageOption } from "@/store/option"
@@ -26,7 +26,8 @@ vi.mock("@/services/tldw", () => ({
   }
 }))
 
-vi.mock("@/utils/resolve-api-provider", () => ({
+vi.mock("@/utils/resolve-api-provider", async () => ({
+  ...await vi.importActual<typeof import("@/utils/resolve-api-provider")>("@/utils/resolve-api-provider"),
   resolveApiProviderForModel: vi.fn(async () => "openai")
 }))
 
@@ -69,6 +70,28 @@ describe("pageAssistModel MCP tools", () => {
         chatEnabled: 0
       }
     })
+  })
+
+  it("persists the first saved conversation without requiring an existing server id", async () => {
+    useStoreMessageOption.setState({ temporaryChat: false, serverChatId: null })
+    const chat = await pageAssistModel({ model: "tool-model" })
+    expect(chat.saveToDb).toBe(true)
+  })
+
+  it("forwards failed-turn retry intent through the real model without changing messages", async () => {
+    vi.mocked(tldwChat.streamMessage).mockImplementation(async function* () { yield "Recovered" })
+    const chat = await pageAssistModel({ model: "tool-model", conversationId: "saved", saveToDb: true, retryFailedTurn: true, clientMessageId: "local-user" })
+    for await (const _token of await chat.stream([])) { /* consume */ }
+    expect(vi.mocked(tldwChat.streamMessage).mock.calls.at(-1)?.[1]).toMatchObject({ retryFailedTurn: true, clientMessageId: "local-user", conversationId: "saved" })
+    vi.mocked(tldwChat.sendMessage).mockResolvedValue("Recovered")
+    await chat.invoke([])
+    expect(vi.mocked(tldwChat.sendMessage).mock.calls.at(-1)?.[1]).toMatchObject({ retryFailedTurn: true, clientMessageId: "local-user", conversationId: "saved" })
+  })
+
+  it("keeps temporary conversations unpersisted even with a stale server id", async () => {
+    useStoreMessageOption.setState({ temporaryChat: true, serverChatId: "old-chat" })
+    const chat = await pageAssistModel({ model: "tool-model" })
+    expect({ saved: chat.saveToDb, id: chat.conversationId }).toEqual({ saved: false, id: undefined })
   })
 
   it("uses stored chatTools instead of all executable MCP tools", async () => {

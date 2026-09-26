@@ -21,8 +21,10 @@ def get_sync_log_entries(
     limit: int | None = None,
 ) -> list[dict[str, Any]]:
     """Return sync-log rows newer than the given change id."""
+    identity = "entity_id AS entity_uuid" if getattr(self, "_sync_entity_column", None) == "entity_id" else "entity_uuid"
+    # The projection is one of two fixed application-owned column names.
     query = (
-        "SELECT change_id, entity, entity_uuid, operation, timestamp, client_id, version, "
+        f"SELECT change_id, entity, {identity}, operation, timestamp, client_id, version, "  # nosec B608
         "org_id, team_id, payload FROM sync_log WHERE change_id > ? ORDER BY change_id ASC"
     )
     params: list[Any] = [since_change_id]

@@ -1,13 +1,16 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import json
 import uuid
+from datetime import datetime, timezone
 
 import pytest
+from fastapi.testclient import TestClient
 
-from tldw_Server_API.app.core.AuthNZ.repos.api_keys_repo import AuthnzApiKeysRepo
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager, APIKeyStatus
-
+from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+from tldw_Server_API.app.core.AuthNZ.repos.api_keys_repo import AuthnzApiKeysRepo
+from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
 
 pytestmark = pytest.mark.integration
 
@@ -196,3 +199,102 @@ async def test_authnz_api_keys_repo_usage_and_audit_postgres(test_db_pool):
     assert int(last_row["api_key_id"]) == key_id
     assert last_row["action"] == "unit_test_pg"
     assert int(last_row["user_id"]) == user_id_int
+
+
+@pytest.mark.asyncio
+async def test_create_virtual_key_row_persists_text_and_jsonb_lists_postgres(
+    isolated_test_environment: tuple[TestClient, str],
+) -> None:
+    """Exercise column-type changes only in the standard per-test database."""
+    _client, db_name = isolated_test_environment
+    pool = await get_db_pool()
+    assert await pool.fetchval("SELECT current_database()") == db_name  # nosec B101
+    username = "pg_virtual_key_repo_user"
+    users_db = UsersDB(pool)
+    await users_db.initialize()
+    user = await users_db.create_user(
+        username=username,
+        email=f"{username}@example.com",
+        password_hash=uuid.uuid4().hex,
+        role="user",
+        is_active=True,
+        is_superuser=False,
+        storage_quota_mb=5120,
+    )
+    user_id = int(user["id"])
+
+    repo = AuthnzApiKeysRepo(db_pool=pool)
+
+    async def _create_key(name: str) -> int:
+        async with pool.transaction() as conn:
+            return await repo.create_virtual_key_row(
+                user_id=user_id,
+                key_hash=f"hash-{name}",
+                key_identifier=f"id-{name}",
+                key_prefix="vk_test...",
+                name=name,
+                description="virtual-key persistence coverage",
+                expires_at=None,
+                org_id=11,
+                team_id=12,
+                scope="read",
+                allowed_endpoints=["chat.completions"],
+                allowed_providers=["openai"],
+                allowed_models=["gpt-test"],
+                budget_day_tokens=100,
+                budget_month_tokens=200,
+                budget_day_usd=1.5,
+                budget_month_usd=2.5,
+                parent_key_id=None,
+                allowed_methods=["post"],
+                allowed_paths=["/api/v1/chat/completions"],
+                max_calls=3,
+                max_runs=4,
+                conn=conn,
+            )
+
+    async def _assert_stored_lists(key_id: int) -> None:
+        row = await pool.fetchrow(
+            """
+            SELECT is_virtual, scope, llm_allowed_endpoints, llm_allowed_providers,
+                   llm_allowed_models, metadata
+            FROM api_keys WHERE id = $1
+            """,
+            key_id,
+        )
+        assert row is not None
+        assert row["is_virtual"] is True
+        assert row["scope"] == "read"
+        assert json.loads(row["llm_allowed_endpoints"]) == ["chat.completions"]
+        assert json.loads(row["llm_allowed_providers"]) == ["openai"]
+        assert json.loads(row["llm_allowed_models"]) == ["gpt-test"]
+        assert json.loads(row["metadata"]) == {
+            "allowed_methods": ["POST"],
+            "allowed_paths": ["/api/v1/chat/completions"],
+            "max_calls": 3,
+            "max_runs": 4,
+        }
+
+    text_key_id = await _create_key("pg-virtual-text")
+    await _assert_stored_lists(text_key_id)
+
+    try:
+        for column in (
+            "llm_allowed_endpoints",
+            "llm_allowed_providers",
+            "llm_allowed_models",
+        ):
+            await pool.execute(
+                f"ALTER TABLE api_keys ALTER COLUMN {column} TYPE JSONB USING {column}::jsonb"
+            )
+        jsonb_key_id = await _create_key("pg-virtual-jsonb")
+        await _assert_stored_lists(jsonb_key_id)
+    finally:
+        for column in (
+            "llm_allowed_endpoints",
+            "llm_allowed_providers",
+            "llm_allowed_models",
+        ):
+            await pool.execute(
+                f"ALTER TABLE api_keys ALTER COLUMN {column} TYPE TEXT USING {column}::text"
+            )

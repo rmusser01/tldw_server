@@ -817,11 +817,12 @@ def _load_world_books_for_participants(
                   JOIN character_world_books cwb ON cwb.world_book_id = wb.id
                   JOIN character_cards cc ON cc.id = cwb.character_id
                  WHERE cwb.character_id = ? AND cc.client_id = ?
+                   AND wb.client_id = ?
                    AND cc.deleted = FALSE AND wb.deleted = FALSE
                  ORDER BY cwb.priority DESC, wb.name, wb.id
                  LIMIT 65
                 """,
-                (character_id, owner_user_id),
+                (character_id, owner_user_id, owner_user_id),
             )
         else:
             books = _select_rows(
@@ -1540,10 +1541,15 @@ def _materialize_world_books_by_id(
             ).fetchone()
             if authorized is None:
                 raise InputError(f"World book ID {world_book_id} not found.")
-        result = conn.execute(
-            "SELECT * FROM world_books WHERE id = ? AND deleted = FALSE LIMIT 1",
-            (world_book_id,),
-        )
+            result = conn.execute(
+                "SELECT * FROM world_books WHERE id = ? AND client_id = ? AND deleted = FALSE LIMIT 1",
+                (world_book_id, owner_user_id),
+            )
+        else:
+            result = conn.execute(
+                "SELECT * FROM world_books WHERE id = ? AND deleted = FALSE LIMIT 1",
+                (world_book_id,),
+            )
         row = result.fetchone()
         if row is None:
             raise InputError(f"World book ID {world_book_id} not found.")

@@ -57,7 +57,7 @@ async def test_dual_backend_character_chats_retrieval(dual_backend_env: DualBack
     conv_id = env.chacha_db.add_conversation({
         "character_id": card_id,
         "title": "Parity Conversation",
-        "client_id": "pytest",
+        "client_id": env.chacha_db.client_id,
     })
     assert conv_id is not None
 
@@ -65,7 +65,7 @@ async def test_dual_backend_character_chats_retrieval(dual_backend_env: DualBack
         "conversation_id": conv_id,
         "sender": "Tester",
         "content": "This chat mentions Parity retrieval explicitly.",
-        "client_id": "pytest",
+        "client_id": env.chacha_db.client_id,
     })
     assert msg_id is not None
 
