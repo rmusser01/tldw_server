@@ -545,3 +545,21 @@ while private signing files stay0600/outsideimage. Scoped exactcontrolimage
 validsignature passes and tampering refuses;87Release tests pass. Owned proof
 containers/tags/signing state removed. Exactfulllocal/nativecandidate remains
 Task13, and G2/G4 are not qualified by these scoped checks.
+
+### Task 17: Finish bootstrap responses and qualify the existing API cookie scope
+
+**Files:** `apps/tldw-frontend/extension/shims/runtime-bootstrap.ts`, its focused
+Vitest tests, and the existing paired browser probe/tests. TASK-13343 covers this
+actual-browser follow-up; production auth/cookie settings stay unchanged.
+
+- [ ] **Step 1:** Regress actual session `Path=/api` discovery and validation at
+  every probe lookup, including hostile-input checks and rebootstrap. Require
+  exact existing session `/api` and readable CSRF `/` scopes; reject broader or
+  mismatched scopes. Preserve all other cookie/isolation policy checks.
+- [ ] **Step 2:** Add behavioral response-body lifecycle regressions before
+  draining successful bootstrap and profile responses inside their existing
+  request-timeout callbacks. Preserve failure/manual-config behavior, deadlines
+  and secret-free runtime metadata. Keep the strict network-error latch.
+- [ ] **Step 3:** Run focused suites, scoped lint/security and a real Chromium
+  response-consumption proof, independently review, then return exact clean
+  full local/native artifact qualification to Task13. No public publication.
