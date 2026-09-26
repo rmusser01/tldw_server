@@ -254,6 +254,7 @@ export interface CalendarItemCopyRequest {
 
 export interface CalDavAccountCreateRequest {
   display_name: string
+  verify_before_create?: boolean
   server_url?: string
   username?: string
   password?: string

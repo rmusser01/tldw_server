@@ -13,6 +13,7 @@ from tldw_Server_API.app.api.v1.schemas.reminders_schemas import ReminderTaskCre
 from tldw_Server_API.app.api.v1.schemas.scheduled_tasks_control_plane_schemas import ScheduledTask
 from tldw_Server_API.app.core.Calendar.constants import (
     CALENDAR_SOURCE_OWNER_LINKED_PROJECTION,
+    DEFAULT_SYNC_INTERVAL_MINUTES,
 )
 from tldw_Server_API.app.core.Calendar.errors import CalendarValidationError
 from tldw_Server_API.app.core.Calendar.recurrence import LocalRecurrenceRule
@@ -528,6 +529,7 @@ class ExternalCalendarAccountCreateRequest(BaseModel):
     token: str | None = Field(default=None, max_length=4000)
     secret_ref: str | None = None
     account_metadata: dict[str, Any] | None = None
+    verify_before_create: bool = False
 
 
 class CalDavAccountVerifyRequest(BaseModel):
@@ -612,7 +614,7 @@ class ExternalCalendarDiscoveryResponse(BaseModel):
 
 
 class ExternalCalendarBindingCreateRequest(BaseModel):
-    """Bind a remote calendar with a positive sync interval and bounded scan windows."""
+    """Bind with hourly polling by default, or null for manual-only bounded sync."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -621,7 +623,7 @@ class ExternalCalendarBindingCreateRequest(BaseModel):
     remote_calendar_id: str = Field(..., min_length=1, max_length=500)
     remote_display_name: str | None = None
     sync_enabled: bool = True
-    sync_interval_minutes: int | None = Field(default=None, ge=1)
+    sync_interval_minutes: int | None = Field(default=DEFAULT_SYNC_INTERVAL_MINUTES, ge=1)
     lookback_days: int = Field(default=90, ge=0, le=3700)
     lookahead_days: int = Field(default=365, ge=0, le=3700)
     provider_capabilities: dict[str, Any] | None = None
@@ -745,13 +747,13 @@ class CalendarSyncEventListResponse(BaseModel):
 
 
 class CalendarSyncTriggerRequest(BaseModel):
-    """Manual sync reason and optional nonempty window-boundary overrides."""
+    """Manual sync reason and bounded overrides validated as aware timestamps before queueing."""
 
     model_config = ConfigDict(extra="forbid")
 
     reason: str = Field(default="manual", min_length=1, max_length=64)
-    window_start: str | None = Field(default=None, min_length=1)
-    window_end: str | None = Field(default=None, min_length=1)
+    window_start: str | None = Field(default=None, min_length=1, max_length=64)
+    window_end: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 class CalendarSyncTriggerResponse(BaseModel):
