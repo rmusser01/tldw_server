@@ -32,3 +32,11 @@
 - Verification: the 312-test VN run had 308 passes, zero assertion failures, and four setup errors from disk exhaustion. All four passed on rerun in the approved temporary root. Final scoped Ruff passed and Bandit returned zero findings; prior frontend VN tests/typecheck remain applicable because this follow-up is backend-only.
 - Tracking collision resolved: rebasing introduced an unrelated ADR task with the same TASK-13356 ID as the VN recipe task. With explicit requester approval, only the VN record was manually renumbered to TASK-13358; the ADR record and its references remain unchanged. Subsequent task updates use the Backlog CLI again.
 - ADR check: ADR required: no for these correctness fixes. `Docs/ADR/003-jobs-vs-scheduler-default.md` continues to govern Jobs ownership; no new worker, persistence, or public API rule is introduced by this review follow-up.
+
+### Latest Dev Rebase Verification (2026-09-26 UTC)
+
+- Rebased onto `origin/dev` at `59bd584503` without conflicts; all five PR patches are unchanged according to `git range-diff`.
+- Fresh verification: 312 VN backend tests passed without setup errors; 37 frontend VN tests, frontend typecheck, OpenAPI drift, scoped Ruff, and diff check passed. Bandit returned zero findings/errors.
+- An initial typecheck environment failure was resolved by linking the existing monorepo dependency installation into the isolated worktree; no tracked dependency or configuration change was needed.
+- Qodo and CodeRabbit had no unresolved findings before this push. Current-head re-review and all required remote gates remain prerequisites to merge.
+- Merge method is `merge`, as required by the `dev` ruleset; no admin bypass or alternative merge method is permitted.
