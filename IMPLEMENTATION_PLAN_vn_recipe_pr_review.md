@@ -64,3 +64,10 @@
 - The first broader run exposed legitimate zero-variant lazy-depth slots. Matched the existing slot schema's `ge=0` bound and retained exact seed-count validation. A unit regression demonstrated the initial rejection and now verifies valid lazy-depth replay.
 - Final verification: 336 VN backend tests passed, including 18 new API regressions and six recipe unit cases. The focused 81-test run also passed. Scoped Ruff with documented exclusions, compilation, OpenAPI drift, and diff checks passed; Bandit returned zero findings/errors.
 - The 37 frontend VN tests and typecheck passed earlier in this same rebase. This follow-up changes no frontend or public schema. Stage 4 remains In Progress until the new head passes review and all remote gates, followed by a verified normal merge commit.
+
+### Exact Recipe Version Review Follow-Up (2026-09-26 UTC)
+
+- Qodo cleared head `8c2811e37b`, but CodeRabbit inline comment `4112954271` identified JSON boolean versions accepted as version 1. Both authored and execution loaders used equality-only checks; floating-point 1.0 had the same issue.
+- All eight new regressions failed before the fix: four real Retry API cases returned 202 instead of the documented 409, and four loader cases accepted non-integer versions. Require an exact integer version in both loaders before comparing to the supported version, preserving valid snapshots and existing error codes.
+- Fresh verification: the focused 26-test run and all 344 VN backend tests passed (181.62s full run). Scoped Ruff with documented exclusions, compilation, OpenAPI drift, and diff checks passed; Bandit returned zero findings/errors. The 37 frontend VN tests and typecheck from this same dev rebase remain applicable because no frontend or public schema changed.
+- Confirmed owned remote head `8c2811e37b3ade6663f114f7cf462d4268f32dbf` and unchanged dev `f5fa1f3a41855aa02871d8b76d0ec0cebbaf9e07` before publishing. Reply in the inline review thread and obtain current-head re-review; Stage 4 remains In Progress until all required checks and the normal merge complete.
