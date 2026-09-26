@@ -8,7 +8,7 @@ labels:
 - integration
 documentation:
 - Docs/superpowers/plans/2026-09-26-calendar-pr3019-qodo-remediation.md
-updated_date: 2026-09-26 06:15
+updated_date: 2026-09-26 06:22
 references:
 - https://github.com/rmusser01/tldw_server/pull/3019
 modified_files:
@@ -51,6 +51,8 @@ Independent review on a4c76e9c00 found eight additional issues: provider recurre
 Final review follow-up fixes verified: 173 Calendar backend tests, 58 frontend tests, TypeScript and full touched-source Ruff pass. Bandit0 findings/errors. Fixes include bounded productive provider recurrence and arithmetic history seeking, explicit truncation warnings, native soft-delete API, item-zone/custom-offset view handling, lexical VEVENT duration and DST-safe per-occurrence arithmetic, timestamp-preserving text edits, occurrence time/kind locking, civil-date all-day spans, and visible-window agenda clamping. Added failing regressions before fixes; scoped independent re-review ongoing. Merge remains blocked by queued required GitHub checks, unrun live CalDAV/Fastmail smoke, and the repo human-summary rationale gate. Requester-authored text remains unchanged.
 Final focused verification advanced to 175 backend and 59 frontend tests, TypeScript, Ruff, Bandit0 findings/errors, shardguard0 new uncovered, and normal pre-commit checks. Frontend scoped reviewer approved after overnight/exclusive-midnight coverage. Backend DST-fold regression fixes passed exact red/green tests; narrow final re-review pending before publishing.
 Both independent scoped re-reviews are now clear: frontend spec/quality approved; backend no remaining P1/P2, seven targeted temporal probes pass. Publishing verified review fixes and requesting final exact-head Qodo review. No merge attempted while required CI/smoke/human-summary gates remain unsatisfied.
+Fresh full Qodo review on34e644438e reports bugs0 and one new test-only rule finding: CalendarTemporalViews labels hard-code English while production intentionally follows host locale. Reproducing under French locale, then changing expected labels to actual locale formatting; no production behavior change. Current merge gates unchanged.
+Locale regression reproduced with LANG/LC_ALL fr_FR:10 temporal-view tests failed. Test-only formatter now generates expected labels in the active locale while retaining numeric civil-date and negative-offset assertions. Full59 Calendar frontend tests plus TypeScript pass in French. Production backend/source unchanged from verified175-test head. Preparing normal test-only commit and exact-head follow-up review; heartbeat calendar-pr-3019-follow-up active for pending external gates.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
