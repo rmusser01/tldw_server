@@ -4,7 +4,7 @@ title: Plan and implement paired Docker distribution and runtime gateway
 status: In Progress
 assignee: []
 created_date: '2026-09-23 06:15'
-updated_date: '2026-09-26 05:05'
+updated_date: '2026-09-26 05:07'
 labels:
   - distribution
   - docker
@@ -34,7 +34,7 @@ WP1 of TASK-13265: establish the shared manifest/artifact contract, runtime gate
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Execute the eight tasks and four stages in Docs/superpowers/plans/2026-09-22-complete-app-wp1-paired-docker-gateway.md, with a failing behavioral test, focused pass, review, and scoped commit for each task. Preserve the frontend publication freeze; qualify candidate images in a job-local ephemeral registry only.
+Execute the original WP1 stages and scoped live-qualification Tasks9-13 in Docs/superpowers/plans/2026-09-22-complete-app-wp1-paired-docker-gateway.md. Keep completed Tasks1-8 evidence; do not restart them. Use red behavioral proof, focused pass, independent review and scoped commits for the browser harness, managed setup hop, published docs, MCP local policy and remaining real transports. Preserve frontend publication freeze; qualify exact clean local/native signed artifacts in ephemeral registries only.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
