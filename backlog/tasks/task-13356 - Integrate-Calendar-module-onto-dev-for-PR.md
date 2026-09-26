@@ -8,7 +8,7 @@ labels:
 - integration
 documentation:
 - Docs/superpowers/plans/2026-09-26-calendar-pr3019-qodo-remediation.md
-updated_date: 2026-09-26 04:56
+updated_date: 2026-09-26 06:15
 references:
 - https://github.com/rmusser01/tldw_server/pull/3019
 modified_files:
@@ -29,7 +29,7 @@ Port the completed Calendar module from the isolated feature branch onto current
 - [x] #3 Security scan and route/build verification are recorded.
 - [x] #4 Pull request targets dev and documents manual provider-smoke limits.
 - [x] #5 Calendar tests are assigned to the Python 3.12 and 3.13 full-suite shards and the shard coverage guard passes.
-- [ ] #6 PR #3019 is rebased onto latest dev, actionable Qodo feedback is addressed with verification, and merge status or remaining gates are recorded.
+- [x] #6 PR #3019 is rebased onto latest dev, actionable Qodo feedback is addressed with verification, and merge status or remaining gates are recorded.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -47,6 +47,10 @@ CI follow-up verification: added Calendar to gap-verified-2 in both Linux Python
 User requested rebase onto latest dev, address all Qodo issues/comments once posted, then merge. Initial PR state: draft, BEHIND, head c8295ff2b155ae5db01b75c777e51b50ddb1c1b8. No PR reviews or inline review comments have been posted yet.
 Rebased cleanly onto origin/dev 59bd584503. Range-diff confirms the three original Calendar implementation/docs/CI commits are unchanged. Frontend verification from apps/tldw-frontend reproduced 2 route-test failures caused by process.cwd assumptions; replaced them with the existing fileURLToPath(import.meta.url) pattern. Red/green: frontend runner changed from 28 passed/2 failed to 30 passed, and shared UI runner route tests also passed (3). Backend Calendar suite: 112 passed; shard guard: new_uncovered=0; TypeScript: passed; Bandit on all touched backend source: 0 findings, 0 errors. pnpm exec attempted auto-install and could not find @tldw/ui; used installed Vitest/TypeScript binaries directly without tracked dependency changes. Qodo review remains unposted before publishing the rebased head.
 Qodo posted 21 findings (including omitted endpoint docstrings). Executing the linked 4-stage remediation plan with TDD before fresh review and merge-gate validation.
+Independent review on a4c76e9c00 found eight additional issues: provider recurrence no-yield CPU bound, occurrence edits shifting masters, timestamp offset loss, missing native-item DELETE route, item timezone overlap, date-only all-day display, VEVENT DURATION omission, and silent recurrence truncation. Addressing with failing regressions under Stage 4 before merge. All 20 original Qodo inline threads are now resolved and have implementation/test replies; finding 21 acknowledged and fresh /agentic_review requested.
+Final review follow-up fixes verified: 173 Calendar backend tests, 58 frontend tests, TypeScript and full touched-source Ruff pass. Bandit0 findings/errors. Fixes include bounded productive provider recurrence and arithmetic history seeking, explicit truncation warnings, native soft-delete API, item-zone/custom-offset view handling, lexical VEVENT duration and DST-safe per-occurrence arithmetic, timestamp-preserving text edits, occurrence time/kind locking, civil-date all-day spans, and visible-window agenda clamping. Added failing regressions before fixes; scoped independent re-review ongoing. Merge remains blocked by queued required GitHub checks, unrun live CalDAV/Fastmail smoke, and the repo human-summary rationale gate. Requester-authored text remains unchanged.
+Final focused verification advanced to 175 backend and 59 frontend tests, TypeScript, Ruff, Bandit0 findings/errors, shardguard0 new uncovered, and normal pre-commit checks. Frontend scoped reviewer approved after overnight/exclusive-midnight coverage. Backend DST-fold regression fixes passed exact red/green tests; narrow final re-review pending before publishing.
+Both independent scoped re-reviews are now clear: frontend spec/quality approved; backend no remaining P1/P2, seven targeted temporal probes pass. Publishing verified review fixes and requesting final exact-head Qodo review. No merge attempted while required CI/smoke/human-summary gates remain unsatisfied.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 

@@ -24,6 +24,7 @@ from tldw_Server_API.app.api.v1.schemas.calendar_schemas import (
     CalendarCreateRequest,
     CalendarItemCopyRequest,
     CalendarItemCreateRequest,
+    CalendarItemDeleteResponse,
     CalendarItemResponse,
     CalendarItemUpdateRequest,
     CalendarLinkCreateRequest,
@@ -374,6 +375,26 @@ async def create_calendar(
     ) as exc:
         raise _map_calendar_error(exc) from exc
     return CalendarResponse.from_row(row)
+
+
+@router.delete(
+    "/items/{item_id}",
+    response_model=CalendarItemDeleteResponse,
+    dependencies=[Depends(rbac_rate_limit("calendar.write"))],
+)
+async def delete_calendar_item(
+    item_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    _principal=Depends(RequirePermission(CALENDAR_WRITE)),  # noqa: B008
+    service: CalendarService = Depends(get_calendar_service),
+) -> CalendarItemDeleteResponse:
+    """Soft-delete a writable native item; deny provider-owned and inaccessible items."""
+    try:
+        service.delete_item(actor_user_id=_user_id(current_user), item_id=item_id)
+    except (CalendarReadOnlyError, CalendarNotFound, CalendarItemNotFound,
+            CalendarPermissionDenied, CalendarValidationError) as exc:
+        raise _map_calendar_error(exc) from exc
+    return CalendarItemDeleteResponse(deleted=True)
 
 
 @router.get(

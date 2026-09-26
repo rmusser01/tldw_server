@@ -411,6 +411,8 @@ export const CalendarPage: React.FC = () => {
                 <CalendarAgenda
                   calendars={calendars}
                   items={agendaItems}
+                  windowStart={agendaStart}
+                  windowEnd={agendaEnd}
                   onSelectItem={openItemDrawer}
                 />
               ) : (

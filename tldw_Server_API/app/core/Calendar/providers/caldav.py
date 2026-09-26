@@ -15,9 +15,11 @@ from dateutil import parser as date_parser
 from dateutil import tz
 from defusedxml import ElementTree
 from icalendar import Calendar as ICalendar
+from icalendar.parser import Contentlines
 
 from tldw_Server_API.app.core.Calendar.errors import CalendarValidationError
 from tldw_Server_API.app.core.Calendar.provider_operations import log_calendar_failure
+from tldw_Server_API.app.core.Calendar.temporal import add_ical_duration
 from tldw_Server_API.app.core.http_client import _prepare_pinned_transport_target, create_client
 from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
 
@@ -179,11 +181,12 @@ class CalDavProvider:
             raise CalendarValidationError("iCalendar payload exceeds byte limit")
         try:
             calendar = ICalendar.from_ical(ics_payload)
+            duration_texts = _event_duration_texts(ics_payload)
         except ValueError as exc:
             raise CalendarValidationError("Invalid iCalendar payload") from exc
 
         events: list[CalDavEvent] = []
-        for component in calendar.walk("VEVENT"):
+        for event_index, component in enumerate(calendar.walk("VEVENT")):
             uid = str(component.get("UID") or "").strip()
             if not uid:
                 continue
@@ -200,12 +203,20 @@ class CalDavProvider:
             rdates = self._component_dates(component, "RDATE")
             exdates = self._component_dates(component, "EXDATE")
             tzid = component.get("DTSTART").params.get("TZID") if component.get("DTSTART") else None
+            end_at = self._component_datetime_iso(component, "DTEND")
+            if component.get("DURATION") is not None:
+                if end_at is not None:
+                    raise CalendarValidationError("VEVENT cannot specify both DTEND and DURATION")
+                duration_text = duration_texts[event_index]
+                if start_value is None or duration_text is None:
+                    raise CalendarValidationError("Invalid VEVENT duration")
+                end_at = add_ical_duration(start_value, duration_text).isoformat()
             events.append(
                 CalDavEvent(
                     uid=uid,
                     title=str(component.get("SUMMARY") or "Untitled event"),
                     start_at=self._component_datetime_iso(component, "DTSTART") or recurrence_id,
-                    end_at=self._component_datetime_iso(component, "DTEND"),
+                    end_at=end_at,
                     location=str(component.get("LOCATION") or "") or None,
                     description=str(component.get("DESCRIPTION") or "") or None,
                     source_updated_at=self._component_datetime_iso(component, "LAST-MODIFIED"),
@@ -223,6 +234,7 @@ class CalDavProvider:
                             "rdate": rdates,
                             "exdate": exdates,
                             "recurrence_id": recurrence_id,
+                            "duration": duration_texts[event_index],
                         }
                     ),
                 )
@@ -490,6 +502,28 @@ class CalDavProvider:
         if target_origin != base_origin:
             raise CalendarValidationError("CalDAV calendar URL must use the same origin as the account server")
         return resolved
+
+
+def _event_duration_texts(payload: str) -> list[str | None]:
+    """Retain lexical DURATION: the library's timedelta loses P1D versus PT24H."""
+    stack: list[str] = []
+    durations: list[str | None] = []
+    for line in Contentlines.from_ical(payload):
+        if not line:
+            continue
+        name, _params, value = line.parts()
+        name = name.upper()
+        if name == "BEGIN":
+            stack.append(value.upper())
+            if stack[-1] == "VEVENT":
+                durations.append(None)
+        elif name == "END":
+            stack.pop()
+        elif name == "DURATION" and stack and stack[-1] == "VEVENT":
+            if durations[-1] is not None:
+                raise CalendarValidationError("VEVENT cannot specify multiple durations")
+            durations[-1] = value
+    return durations
 
 
 def sanitize_provider_metadata(value: Any) -> Any:

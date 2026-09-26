@@ -16,6 +16,51 @@ from tldw_Server_API.app.core.Calendar.providers import caldav as caldav_module
 pytestmark = pytest.mark.unit
 
 
+@pytest.mark.parametrize(
+    ("start", "duration", "expected_end"),
+    [
+        ("DTSTART:20260605T090000Z", "PT1H", "2026-06-05T10:00:00+00:00"),
+        ("DTSTART;VALUE=DATE:20260605", "P2D", "2026-06-07"),
+    ],
+)
+def test_parse_derives_exclusive_end_from_duration(start: str, duration: str, expected_end: str) -> None:
+    """DURATION supplies the same exclusive end as an equivalent DTEND."""
+    event = CalDavProvider().parse_vevents(
+        f"BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:duration\n{start}\nDURATION:{duration}\nEND:VEVENT\nEND:VCALENDAR"
+    )[0]
+    assert event.end_at == expected_end
+
+
+@pytest.mark.parametrize("duration", ["-PT1H", "PT0S", "PT1H"])
+def test_parse_rejects_invalid_all_day_duration(duration: str) -> None:
+    """All-day events require a strictly positive whole-day duration."""
+    with pytest.raises(CalendarValidationError):
+        CalDavProvider().parse_vevents(
+            f"BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:duration\nDTSTART;VALUE=DATE:20260605\n"
+            f"DURATION:{duration}\nEND:VEVENT\nEND:VCALENDAR"
+        )
+
+
+@pytest.mark.parametrize(
+    ("start", "duration", "expected_end"),
+    [
+        ("20260308T013000", "PT2H", "2026-03-08T04:30:00-07:00"),
+        ("20261101T003000", "PT2H", "2026-11-01T01:30:00-08:00"),
+        ("20260307T120000", "PT24H", "2026-03-08T13:00:00-07:00"),
+        ("20260307T120000", "P1D", "2026-03-08T12:00:00-07:00"),
+    ],
+)
+def test_duration_preserves_elapsed_hours_and_nominal_days_at_dst(
+    start: str, duration: str, expected_end: str,
+) -> None:
+    """Accurate hour durations and nominal civil days retain distinct DST semantics."""
+    event = CalDavProvider().parse_vevents(
+        f"BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:dst\nDTSTART;TZID=America/Los_Angeles:{start}\n"
+        f"DURATION:{duration}\nEND:VEVENT\nEND:VCALENDAR"
+    )[0]
+    assert event.end_at == expected_end
+
+
 def test_parse_preserves_date_only_events_and_exclusive_end() -> None:
     event = CalDavProvider().parse_vevents("""BEGIN:VCALENDAR
 BEGIN:VEVENT
