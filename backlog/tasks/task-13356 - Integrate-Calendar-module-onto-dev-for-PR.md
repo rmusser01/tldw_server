@@ -8,11 +8,12 @@ labels:
 - integration
 documentation:
 - Docs/superpowers/plans/2026-09-25-calendar-dev-integration-plan.md
-updated_date: 2026-09-26 04:32
+updated_date: 2026-09-26 04:39
 references:
 - https://github.com/rmusser01/tldw_server/pull/3019
 modified_files:
 - .github/workflows/ci.yml
+- apps/packages/ui/src/routes/__tests__/calendar-route.test.ts
 ---
 
 ## Description
@@ -44,6 +45,7 @@ Ported Calendar onto origin/dev in an isolated worktree. Final focused verificat
 PR #3019 CI failed Shard coverage guard because 10 Calendar test files are unassigned. Reproduced locally: shards=811, test_files=4802, new_uncovered=10, exit=1. User approved the scoped CI fix. Backlog MCP/CLI global searches stalled on active branch scanning; searched local task records and retained existing TASK-13356.
 CI follow-up verification: added Calendar to gap-verified-2 in both Linux Python 3.12/3.13 matrices. Guard passed (shards=812, test_files=4802, new_uncovered=0); direct YAML assertions confirmed both assignments; 112 Calendar tests passed on local Python 3.11; workflow-contract suite had 56 passed and 1 pre-existing chunking-coverage assertion failure at line 1511, reproduced against HEAD workflow identical to origin/dev. Pre-commit checks passed. Bandit is not applicable to this YAML/task-only change; no Python source changed. Initial hook run hit disk exhaustion; removed only this Calendar worktree generated .next cache (1.1 GB), with no preview listener on port 13008.
 User requested rebase onto latest dev, address all Qodo issues/comments once posted, then merge. Initial PR state: draft, BEHIND, head c8295ff2b155ae5db01b75c777e51b50ddb1c1b8. No PR reviews or inline review comments have been posted yet.
+Rebased cleanly onto origin/dev 59bd584503. Range-diff confirms the three original Calendar implementation/docs/CI commits are unchanged. Frontend verification from apps/tldw-frontend reproduced 2 route-test failures caused by process.cwd assumptions; replaced them with the existing fileURLToPath(import.meta.url) pattern. Red/green: frontend runner changed from 28 passed/2 failed to 30 passed, and shared UI runner route tests also passed (3). Backend Calendar suite: 112 passed; shard guard: new_uncovered=0; TypeScript: passed; Bandit on all touched backend source: 0 findings, 0 errors. pnpm exec attempted auto-install and could not find @tldw/ui; used installed Vitest/TypeScript binaries directly without tracked dependency changes. Qodo review remains unposted before publishing the rebased head.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
