@@ -31,6 +31,9 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     BackendType,
     InputError,
 )
+from tldw_Server_API.tests.AuthNZ.integration.test_single_user_login_api_key import (
+    single_user_client as single_user_client,
+)
 
 
 def _create_behavior_sources(db):
@@ -265,6 +268,67 @@ def test_workspace_chat_settings_reject_deleted_parent_over_http(
     assert response.status_code == 409, response.text
     assert character_db.get_conversation_by_id(conversation_id) == before
     assert character_db.get_conversation_settings(conversation_id) == settings_before
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("identity_loss", ["owner_change", "trashed"])
+def test_chat_settings_identity_loss_returns_404_over_http(
+    single_user_client, character_db, monkeypatch, identity_loss,
+):
+    from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+    from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+
+    test_client, _, api_key = single_user_client
+    auth_headers = {"X-API-KEY": api_key}
+    monkeypatch.setattr(character_db, "client_id", str(get_settings().SINGLE_USER_FIXED_ID))
+    # Use the isolated AuthNZ bootstrap fixture and override only the product DB.
+    monkeypatch.setitem(test_client.app.dependency_overrides, get_chacha_db_for_user, lambda: character_db)
+    character_db.upsert_workspace("settings-identity-workspace", "Workspace")
+    conversation_id = character_db.add_conversation({
+        "title": "Workspace chat", "scope_type": "workspace",
+        "workspace_id": "settings-identity-workspace",
+    })
+    assert character_db.upsert_conversation_settings(conversation_id, {"authorNote": "Original"})
+    get_conversation = character_db.get_conversation_by_id
+    after_change = {}
+
+    def snapshot():
+        return {
+            table: [dict(row) for row in character_db.execute_query(f"SELECT * FROM {table}").fetchall()]
+            for table in ("conversations", "conversation_settings")
+        }
+
+    def change_after_preflight(*args, **kwargs):
+        conversation = get_conversation(*args, **kwargs)
+        monkeypatch.setattr(character_db, "get_conversation_by_id", get_conversation)
+        if identity_loss == "trashed":
+            assert character_db.soft_delete_conversation(conversation_id, conversation["version"])
+        else:
+            assert character_db.upsert_conversation_from_sync(
+                conversation_id=conversation_id, title="Other owner's chat", sync_client_id="other-owner",
+                object_revision=1, object_hash="moved", scope_type="workspace", workspace_id="settings-identity-workspace",
+            )
+        after_change.update(snapshot())
+        return conversation
+
+    before_unauthenticated = snapshot()
+    unauthenticated = test_client.put(
+        f"/api/v1/chats/{conversation_id}/settings",
+        params={"scope_type": "workspace", "workspace_id": "settings-identity-workspace"},
+        json={"settings": {"authorNote": "Must not be stored"}},
+    )
+    assert unauthenticated.status_code == 401, unauthenticated.text
+    assert snapshot() == before_unauthenticated
+
+    monkeypatch.setattr(character_db, "get_conversation_by_id", change_after_preflight)
+    response = test_client.put(
+        f"/api/v1/chats/{conversation_id}/settings", headers=auth_headers,
+        params={"scope_type": "workspace", "workspace_id": "settings-identity-workspace"},
+        json={"settings": {"authorNote": "Must not be stored"}},
+    )
+    assert response.status_code == 404, response.text
+    assert response.json()["detail"] == "Conversation not found."
+    assert snapshot() == after_change
 
 
 @pytest.mark.integration

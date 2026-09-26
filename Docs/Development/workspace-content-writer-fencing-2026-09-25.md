@@ -382,7 +382,7 @@ when ownership changed after preflight. Added explicit 404 mapping and reran.
 | Check | Result | Evidence |
 | --- | --- | --- |
 | Reviewed metadata fence/identity/concurrency matrix | 29 passed, no skips, 4 warnings | `/tmp/workspace-chat-metadata-reviewed.log`, `.xml` |
-| Error mapping and authenticated HTTP deletion conflict | 130 passed, no skips, 4 warnings | `/tmp/workspace-chat-metadata-api.log`, `.xml` |
+| Error mapping and FastAPI HTTP deletion conflict (fixture authentication) | 130 passed, no skips, 4 warnings | `/tmp/workspace-chat-metadata-api.log`, `.xml` |
 | Production Bandit | 0 findings/errors | `/tmp/workspace-chat-metadata-bandit.json` |
 | Three touched test files Ruff | Passed after import ordering fix | Scoped Ruff command |
 | Diff whitespace | Passed | `git diff --check` |
@@ -402,3 +402,53 @@ unfinished: generic DB updates, messages, direct Sync, other settings writers,
 runtime/root/inventory/membership/study/migration and sharing cleanup are not
 certified by this slice. No owned route enablement or full UI/live acceptance is
 claimed.
+
+Verification correction: the Character_Chat_NEW `test_client` fixture overrides
+`get_request_user` and `get_current_user`. The historical settings/metadata HTTP
+cases using it test endpoint ownership and error dispatch, not actual credential
+authentication. Earlier descriptions of these cases as authenticated were
+incorrect. This does not invalidate their endpoint assertions or the separate
+real-process authentication probes in the dev-integration report. The new
+identity-loss HTTP cases reuse the isolated AuthNZ bootstrap fixture instead,
+with only the product database overridden and an explicit no-key 401 check.
+
+## Settings Identity-Loss Error Boundary
+
+The primary settings endpoint's locked owner-filtered resume read can raise
+unified `NotFoundError` if the chat is trashed or its owner changes after
+preflight. That class is not covered by the endpoint's previous handler set.
+Map it through `map_db_error_to_http` to 404; no locking, authorization or
+publication behavior is loosened.
+
+The RED run reproduced four failures (owner/trash on each backend), while the
+four scope-change cases already returned 404:
+`/tmp/workspace-settings-identity-red.log`, `.xml`. After the two-line handler
+change, the combined real SQLite/PostgreSQL settings/metadata matrix passes
+52 cases with no skips and four warnings:
+`/tmp/workspace-settings-identity-green.log`, `.xml`.
+
+The first combined unit/HTTP run passed 160 cases but used the auth-overriding
+chat fixture. Review identified that evidence limitation. Removing the overrides
+rejected its unregistered legacy test key with 401, confirming it was not a
+real credential test. The corrected cases reuse the existing isolated AuthNZ
+`single_user_client` fixture and override only the product DB; their focused
+run passes two cases (seven warnings):
+`/tmp/workspace-settings-identity-auth-bootstrap.log`, `.xml`.
+The earlier failed credential run remains in `/tmp/workspace-settings-identity-auth.log`.
+
+Identity changes are deterministic committed preflight interleavings, not
+independent-thread owner races. Product graph/settings are unchanged after
+rejection. HTTP authentication coverage is SQLite-only. Independent review
+confirms the corrected harness keeps production authentication and restores its
+fixture state. Production Bandit has zero findings/errors:
+`/tmp/workspace-settings-identity-bandit.json`; touched tests pass Ruff.
+
+Final combined regression with the corrected AuthNZ fixture: 160 passed, no
+failures/errors/skips, eight warnings, exit 0 in 118.86 seconds:
+`/tmp/workspace-settings-identity-api-final.log`, `.xml`. This includes two
+credential-authenticated HTTP cases, not 160 credential tests. After tightening
+the unauthenticated assertion to full conversation/settings rows (including
+versions/timestamps), the final focused HTTP rerun passes both cases:
+`/tmp/workspace-settings-identity-auth-final.log`, `.xml` (seven warnings).
+The reviewer confirms the full-row assertion closes that coverage gap; no
+additional defect was identified. All verification processes have finished.

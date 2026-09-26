@@ -136,6 +136,19 @@ PostgreSQL parent-before-child deadlock regression also passes. Review is clear.
 This certifies only this endpoint, not direct `upsert_conversation_settings`, greeting,
 message-pin, completion or other settings writers.
 
+Settings identity-loss follow-up: reproduce owner change or trashing between
+preflight and the locked resume read. The read raises unified `NotFoundError`,
+which the endpoint previously did not map. Use the existing HTTP mapper to
+return 404 without changing admission or authorization. Real-backend identity
+and settings immutability regressions cover owner, trash, global and other
+workspace changes; authenticated HTTP covers owner/trash loss. This is an
+endpoint error boundary, not direct Sync fencing.
+Verified: 52 combined SQLite/PostgreSQL boundary cases and 160 combined unit/HTTP
+cases pass with no skips; the two true-auth HTTP cases also pass after tightening
+401 immutability to full rows. Independent review, touched-test Ruff and
+production Bandit are clear. Historical fixture-auth evidence is corrected in
+the fencing report. This follow-up is complete; Stage 2 remains In Progress.
+
 Metadata endpoint slice: `PUT /api/v1/chats/{chat_id}` now performs parent
 admission before a locked conversation identity reread and metadata publication
 in the same transaction. It checks ownership/scope again, maps a lost owner or
@@ -144,8 +157,8 @@ transaction still holds its locks. The existing global Sync path is unchanged.
 The deleted-parent counterexample failed on both backends before the fix. All
 29 real-backend metadata cases pass, including ownership/scope reassignment,
 both deletion orderings and commit/rollback, global compatibility, and a
-PostgreSQL parent-before-child deadlock test. The error-mapping plus authenticated
-HTTP regression passes 130 cases. Review-driven tests additionally cover version
+PostgreSQL parent-before-child deadlock test. The error-mapping plus FastAPI HTTP
+regression (fixture authentication) passes 130 cases. Review-driven tests additionally cover version
 races, empty updates, and response-failure rollback. See the fencing report for evidence and
 review disposition. This is not generic `update_conversation` certification:
 message edit/enrichment and direct Sync callers remain outstanding.
@@ -170,6 +183,14 @@ Remaining chat implementation inventory (not covered by creation/restore):
   state before persistence. Parent admission must precede these locks, not be
   added only inside the final update. Preserve global and recipient-owned shared
   chat behavior, which must not require a local owner workspace row.
+- Next bounded implementation is `character_messages.edit_message`: admit the
+  requested parent before message/metadata locks; reread the locked message's
+  conversation identity and verify transactional owner/scope; reject reparenting
+  rather than acquiring another parent after child locks. Its current post-commit
+  conversation metadata bump is also a writer and must move under the admitted
+  transaction. Keep response reads coherent, preserve global behavior and test
+  content/pin/no-op, version conflicts, both deletion orderings and rollback on
+  SQLite/PostgreSQL. Do not certify send/completion/Sync via this edit-only slice.
 - Verify losing operations leave history versions, search/sync projections and
   settings unchanged, including caller-owned transactions and failures. Reuse
   real PostgreSQL concurrency fixtures rather than mocked lock-call assertions.

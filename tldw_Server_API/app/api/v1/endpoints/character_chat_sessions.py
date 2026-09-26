@@ -7694,6 +7694,8 @@ async def update_chat_settings(
         )
     except HTTPException:
         raise
+    except NotFoundError as exc:
+        raise map_db_error_to_http(exc) from exc
     except ConflictError as exc:
         logger.warning(f"Concurrent settings update for {chat_id}: {exc}")
         raise map_db_error_to_http(exc) from exc

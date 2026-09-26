@@ -625,6 +625,46 @@ def _update_workspace_chat_settings(db, conversation_id, *, workspace_scoped=Tru
     ))
 
 
+@pytest.mark.parametrize("new_identity", ["other_owner", "trashed", "global", "other_workspace"])
+def test_chat_settings_rechecks_identity_after_preflight(deletion_db, monkeypatch, new_identity):
+    db = deletion_db
+    conversation_id, *_ = _seed_deletion_graph(db)
+    db.upsert_workspace("ws-other", "Other workspace")
+    assert db.upsert_conversation_settings(conversation_id, {"authorNote": "Original"})
+    get_conversation = db.get_conversation_by_id
+    after_change = {}
+
+    def snapshot():
+        return {
+            "graph": _deletion_snapshot(db),
+            "settings": [dict(row) for row in db.execute_query("SELECT * FROM conversation_settings").fetchall()],
+        }
+
+    def change_after_preflight(*args, **kwargs):
+        conversation = get_conversation(*args, **kwargs)
+        monkeypatch.setattr(db, "get_conversation_by_id", get_conversation)
+        if new_identity == "trashed":
+            assert db.soft_delete_conversation(conversation_id, conversation["version"])
+        else:
+            assert db.upsert_conversation_from_sync(
+                conversation_id=conversation_id, title="Moved", object_revision=1,
+                object_hash="moved", sync_client_id="other-owner" if new_identity == "other_owner" else db.client_id,
+                scope_type="global" if new_identity == "global" else "workspace",
+                workspace_id=(
+                    None if new_identity == "global"
+                    else "ws-other" if new_identity == "other_workspace" else "ws-delete"
+                ),
+            )
+        after_change.update(snapshot())
+        return conversation
+
+    monkeypatch.setattr(db, "get_conversation_by_id", change_after_preflight)
+    with pytest.raises(HTTPException) as exc:
+        _update_workspace_chat_settings(db, conversation_id)
+    assert exc.value.status_code == 404
+    assert snapshot() == after_change
+
+
 def test_workspace_chat_settings_reject_active_projection_under_deleted_parent(deletion_db):
     db = deletion_db
     conversation_id, *_ = _seed_deletion_graph(db)
