@@ -91,7 +91,10 @@ describe('VNAssetsWorkbench', () => {
       { id: 12, pack_id: 7, asset_type: 'sprite', slot_key: 'sprite_neutral',
         variant_count: 1, status: 'failed', last_error: 'image_backend_unavailable' },
     ]);
-    mocks.getVNAssetGeneration.mockResolvedValue({ status: 'failed', failed_count: 1 });
+    mocks.getVNAssetGeneration.mockResolvedValue({
+      batch_id: 41, status: 'failed', failed_count: 1,
+      selected_slot_ids: [12], failed_slot_batch_ids: { 12: 41 },
+    });
   }
 
   it('reuses the required start key after an ambiguous transport failure', async () => {
@@ -121,9 +124,24 @@ describe('VNAssetsWorkbench', () => {
     await waitFor(() => expect(mocks.retryVNAssetSlot).toHaveBeenCalledTimes(2));
     const request = mocks.retryVNAssetSlot.mock.calls[0][2];
     expect(request.idempotency_key).toEqual(expect.any(String));
+    expect(request.source_batch_id).toBe(41);
     expect(mocks.retryVNAssetSlot.mock.calls[1]).toEqual([7, 12, request]);
     expect(mocks.startVNAssetGeneration).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'Retry sprite_neutral' })).toBeDisabled();
+  });
+
+  it('does not bind an older failed slot to the latest unrelated batch', async () => {
+    existingFailedPack();
+    mocks.getVNAssetGeneration.mockResolvedValue({
+      batch_id: 42, status: 'failed', failed_count: 1,
+      selected_slot_ids: [12], failed_slot_batch_ids: { 12: 41 },
+    });
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    await user.click(await screen.findByRole('button', { name: 'Retry sprite_neutral' }));
+
+    const request = mocks.retryVNAssetSlot.mock.calls[0][2];
+    expect(request.source_batch_id).toBe(41);
   });
 
   it('recovers an initial status failure through Refresh without starting work', async () => {

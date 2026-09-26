@@ -188,8 +188,9 @@ failure retains that operation's key while the page remains mounted, so clicking
 the same action again replays the request safely. Active generation progress
 refreshes automatically; the refresh control also retries a failed status or
 configuration check. Refreshing/reopening the entire page does not preserve
-unacknowledged client keys. Durable recipe snapshots and worker crash-replay
-hardening remain tracked in issue #2021.
+unacknowledged client keys. Accepted generation batches now store a versioned
+recipe; recovery after a crash between output persistence and job completion
+remains tracked in issue #2021.
 
 Start generation:
 
@@ -207,11 +208,33 @@ curl -X POST "http://127.0.0.1:8000/api/v1/vn/vn-assets/packs/1/generate" \
 
 Generation creates one parent fanout job (`vn_asset_enqueue_batch`) in the `vn_assets` domain. The parent job creates idempotent variant jobs (`vn_asset_generate_variant`) gradually, so API callers do not enqueue hundreds of child jobs directly.
 
+At acceptance, the per-user VN database freezes each selected slot's rendered
+prompt (including character and enabled world-book context), negative prompt,
+labels, dimensions, format, parameters, seeds, requested backend/model, and
+variant count. If a configured world book cannot be read, acceptance fails; it
+does not silently generate an incomplete prompt. The first worker to fan out a
+batch stores the effective backend and public model selector once, before
+creating child jobs. Later fanout attempts use the stored choice. A transient
+fanout failure can replay the same batch and reuse deterministic child keys;
+terminal variant-failed or completed batches are not reopened. Provider
+credentials remain execution-time configuration and are not stored in the
+recipe. For an implicit
+local model, the execution record stores a configured-path digest and CLI mode,
+not the path itself. A changed path or mode fails with
+`vn_asset_local_model_changed`; restore the original configuration to Retry or
+Start generation to use the new configuration. The referenced file's contents
+are not copied or pinned.
+
 Status response:
 
 ```json
 {
   "batch_id": 7,
+  "source_batch_id": null,
+  "recipe_available": true,
+  "selected_slot_ids": [10, 11],
+  "failed_slot_batch_ids": {},
+  "failed_slot_recipe_available": {},
   "job_batch_id": "vn_assets:user:1:pack:1:batch:7",
   "status": "queued",
   "total_slots": 2,
@@ -225,7 +248,22 @@ Status response:
 }
 ```
 
-Poll `GET /packs/{pack_id}/generation` for status. Use `POST /packs/{pack_id}/generation/cancel` to request cancellation. Use the slot retry or item regenerate endpoints for targeted retries after failures.
+Poll `GET /packs/{pack_id}/generation` for status. Use `POST /packs/{pack_id}/generation/cancel` to request cancellation.
+
+`POST /packs/{pack_id}/slots/{slot_id}/retry` replays the selected failed
+batch's accepted recipe for that slot. Send its `batch_id` as `source_batch_id`
+along with a fresh idempotency key. If omitted, the server selects the newest
+recorded failed batch for that slot for older clients. The returned status has
+a new `batch_id` and the original `source_batch_id`. The WebUI uses
+`failed_slot_batch_ids` and `failed_slot_recipe_available` from generation
+status, so a later batch that merely selected the slot cannot replace its
+failure source or hide an older source without a recipe. A different variant count, slot
+selection, or recipe-affecting option is rejected. An old failed batch
+without a recipe cannot be faithfully retried: the API returns
+`409 vn_asset_recipe_unavailable`; Start generation uses current settings
+instead. `POST /packs/{pack_id}/items/{item_id}/regenerate` also uses current
+pack and slot settings. Neither action guarantees byte-identical output from a
+nondeterministic provider or a mutable local model file.
 
 ## Review And Manifest
 

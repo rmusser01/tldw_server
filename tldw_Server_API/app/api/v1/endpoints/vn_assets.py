@@ -86,6 +86,14 @@ CONFLICT_ERROR_CODES = {
     "slot_already_exists",
     "slot_has_dependents",
 }
+GENERATION_RECIPE_CONFLICTS = {
+    "vn_asset_recipe_unavailable": "Original generation settings are unavailable. Start generation to use current settings.",
+    "vn_asset_recipe_invalid": "Original generation settings cannot be read. Start generation to use current settings.",
+    "vn_asset_recipe_slot_mismatch": "This slot was not in the selected batch. Refresh generation status and retry the failed slot.",
+    "vn_asset_retry_source_unavailable": "No failed generation batch is available for Retry. Refresh generation status or start generation.",
+    "vn_asset_retry_override_conflict": "Retry uses the original settings. Use Regenerate or Start generation for changed settings.",
+    "vn_asset_execution_recipe_invalid": "The original backend selection cannot be read. Start generation to use current settings.",
+}
 TERMINAL_JOB_STATUSES = {"completed", "failed", "cancelled", "quarantined"}
 UPLOAD_CHUNK_SIZE_BYTES = 1024 * 1024
 
@@ -132,6 +140,11 @@ def _cleanup_blocker_provider(
 
 def _handle_value_error(exc: ValueError) -> HTTPException:
     detail = str(exc) or "invalid_request"
+    if detail in GENERATION_RECIPE_CONFLICTS:
+        return HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=vn_error_detail(detail, GENERATION_RECIPE_CONFLICTS[detail]),
+        )
     if "not_found" in detail:
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
     if detail in CONFLICT_ERROR_CODES:
@@ -1841,7 +1854,7 @@ async def prompt_preview(
     status_code=status.HTTP_202_ACCEPTED,
     dependencies=[Depends(rbac_rate_limit("vn_assets.generate"))],
 )
-async def start_generation(
+def start_generation(
     pack_id: int,
     request: VNAssetGenerationRequest | None = None,
     service: VNAssetPackService = Depends(_service),
@@ -1933,7 +1946,7 @@ async def cancel_generation(
     status_code=status.HTTP_202_ACCEPTED,
     dependencies=[Depends(rbac_rate_limit("vn_assets.generate"))],
 )
-async def retry_slot_generation(
+def retry_slot_generation(
     pack_id: int,
     slot_id: int,
     request: VNAssetGenerationRequest | None = None,
@@ -2005,7 +2018,7 @@ async def retry_slot_generation(
     response_model=VNAssetGenerationStatusResponse,
     status_code=status.HTTP_202_ACCEPTED,
 )
-async def regenerate_item(
+def regenerate_item(
     pack_id: int,
     item_id: int,
     request: VNAssetGenerationRequest | None = None,
