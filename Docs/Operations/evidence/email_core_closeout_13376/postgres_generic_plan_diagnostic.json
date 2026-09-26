@@ -1,0 +1,117 @@
+{
+  "report_version": 1,
+  "backend": "postgresql",
+  "generated_at": "2026-09-26T19:08:42.685314+00:00",
+  "postgres_resources": {
+    "role": "email_probe_eb21582dcd",
+    "auth_db": "email_auth_eb21582dcd",
+    "content_db": "email_content_eb21582dcd"
+  },
+  "source_revision": "1fee95629a5c5d7c91fba3fe7da8ab1f284889ab",
+  "guards": {
+    "synthetic_only": true,
+    "outbound_attempts": 0,
+    "model_attempts": 0,
+    "gmail_connector_enabled": false,
+    "connectors_worker_enabled": false,
+    "non_loopback_socket_and_dns_blocked": true,
+    "background_tasks_blocked": true
+  },
+  "settings": {
+    "work_mem": "64MB",
+    "max_parallel_workers_per_gather": "2",
+    "plan_cache_mode": "auto",
+    "dynamic_shared_memory_type": "posix",
+    "row_security": "on",
+    "scope_user": "42",
+    "scope_admin": "0"
+  },
+  "normal_failure": {
+    "phase": "normal",
+    "case": "label_filter",
+    "iteration": 11,
+    "kind": "count",
+    "connection_slot": 1,
+    "status": "failed",
+    "error_type": "DiskFull",
+    "sqlstate": "53100",
+    "message_primary": "could not resize shared memory segment \"/PostgreSQL.3706749100\" to 16777216 bytes: No space left on device",
+    "sql": "SELECT COUNT(*) AS total FROM email_messages em JOIN Media m ON m.id = em.media_id WHERE em.tenant_id = %s AND COALESCE(m.deleted, FALSE) = FALSE AND COALESCE(m.is_trash, FALSE) = FALSE AND ((em.id IN (SELECT eml.email_message_id FROM email_message_labels eml WHERE eml.label_id = ANY(%s))))"
+  },
+  "custom_plan_comparison": {
+    "transaction_setting": "SET LOCAL plan_cache_mode = force_custom_plan",
+    "repetitions": 23,
+    "exact_matches_every_repetition": 1000000
+  },
+  "prepared_statement_counter_evidence": [
+    {
+      "iteration": 5,
+      "matches": 1000000,
+      "prepared_counters": []
+    },
+    {
+      "iteration": 6,
+      "matches": 1000000,
+      "prepared_counters": [
+        {
+          "generic_plans": 0,
+          "custom_plans": 1
+        }
+      ]
+    },
+    {
+      "iteration": 10,
+      "matches": 1000000,
+      "prepared_counters": [
+        {
+          "generic_plans": 0,
+          "custom_plans": 5
+        }
+      ]
+    },
+    {
+      "iteration": 11,
+      "error_type": "DiskFull",
+      "sqlstate": "53100",
+      "prepared_counters": []
+    }
+  ],
+  "evidence_logs": [
+    "/tmp/email_pg_prepared_search_diagnostic_13376.log",
+    "/tmp/email_pg_generic_counter_final_13376.log"
+  ],
+  "prepared_counter_interpretation": "Iteration 6 observed one custom plan; iteration 10 observed five custom plans and zero generic plans. Iteration 11 failed. Counters are absent after recovery because installed psycopg clears/deallocates its prepared statements upon ROLLBACK, including the savepoint rollback command status. The generic transition is inferred from this boundary and the 23 successful forced-custom comparisons; a post-failure generic count was not observed.",
+  "diagnostic_temp_roots": [
+    {
+      "root": "/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw-email-live-postgres-6osqgh1f",
+      "log": "/tmp/email_pg_fixture_diagnostic_13376.log",
+      "root_created_seconds_after_log": 0.075
+    },
+    {
+      "root": "/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw-email-live-postgres-ozloh39j",
+      "log": "/tmp/email_pg_fixture_plan_13376.log",
+      "root_created_seconds_after_log": 0.041
+    },
+    {
+      "root": "/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw-email-live-postgres-cs4q9pn2",
+      "log": "/tmp/email_pg_search_diagnostic_13376.log",
+      "root_created_seconds_after_log": 0.074
+    },
+    {
+      "root": "/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw-email-live-postgres-79amyk0r",
+      "log": "/tmp/email_pg_prepared_search_diagnostic_13376.log",
+      "root_created_seconds_after_log": 0.047
+    },
+    {
+      "root": "/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw-email-live-postgres-ayocvowf",
+      "log": "/tmp/email_pg_generic_counter_13376.log",
+      "root_created_seconds_after_log": 0.092
+    },
+    {
+      "root": "/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw-email-live-postgres-i5s3h69v",
+      "log": "/tmp/email_pg_generic_counter_final_13376.log",
+      "root_created_seconds_after_log": 0.04
+    }
+  ],
+  "diagnostic_temp_root_identification": "Each diagnostic log has exactly one generated guard root created 0.040-0.092 seconds after the log. All diagnostic processes exited and pools were closed."
+}

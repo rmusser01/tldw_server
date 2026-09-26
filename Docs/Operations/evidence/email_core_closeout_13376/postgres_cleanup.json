@@ -1,0 +1,39 @@
+{
+  "resources": [
+    {
+      "host": "127.0.0.1",
+      "port": 5434,
+      "role": "email_probe_e30ff7699e",
+      "auth_db": "email_auth_e30ff7699e",
+      "content_db": "email_content_e30ff7699e",
+      "private_manifest": "/tmp/email_pg_million_manifest_final_13376.json",
+      "remaining_database_count": 0,
+      "remaining_role_count": 0,
+      "private_manifest_absent": true
+    },
+    {
+      "host": "127.0.0.1",
+      "port": 5434,
+      "role": "email_probe_910895ce4b",
+      "auth_db": "email_auth_910895ce4b",
+      "content_db": "email_content_910895ce4b",
+      "private_manifest": "/tmp/email_pg_sustained_manifest_13376.json",
+      "remaining_database_count": 0,
+      "remaining_role_count": 0,
+      "private_manifest_absent": true
+    },
+    {
+      "host": "127.0.0.1",
+      "port": 5434,
+      "role": "email_probe_cef3538fe9",
+      "auth_db": "email_auth_cef3538fe9",
+      "content_db": "email_content_cef3538fe9",
+      "private_manifest": "/tmp/email_pg_http_profile_manifest_13376.json",
+      "remaining_database_count": 0,
+      "remaining_role_count": 0,
+      "private_manifest_absent": true
+    }
+  ],
+  "shared_postgres_service_preserved": true,
+  "unrelated_resources_targeted": false
+}

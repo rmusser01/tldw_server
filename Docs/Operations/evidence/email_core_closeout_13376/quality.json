@@ -4,6 +4,6 @@
   "bandit_findings": 0,
   "bandit_errors": 0,
   "whitespace_exit": 0,
-  "compiled_python_files": 56,
-  "production_and_probe_files": 36
+  "compiled_python_files": 62,
+  "production_and_probe_files": 38
 }

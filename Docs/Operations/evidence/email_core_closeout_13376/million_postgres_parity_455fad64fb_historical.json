@@ -1,0 +1,76 @@
+{
+  "fixture_validation": {
+    "native_samples": 3,
+    "cross_tenant_matches": 0,
+    "messages": 1000000,
+    "attachments": 200000,
+    "negation": {
+      "positive_matches": 166667,
+      "negated_matches": 165000,
+      "removed_matches": 1667
+    },
+    "validated_scope": {
+      "user_id": 42,
+      "is_admin": false
+    }
+  },
+  "fixture_security": {
+    "legacy_indexed_body_rows": 1000000,
+    "backend": "postgresql",
+    "native_rows": 1000000,
+    "owner_media_rows": 1000000,
+    "linked_legacy_rows": 1000000,
+    "matching_body_version_rows": 1000000,
+    "synthetic_identity_rows": 1000000,
+    "distinct_senders": 200,
+    "distinct_recipients": 500,
+    "superuser": false,
+    "bypass_rls": false,
+    "rls_enabled": true,
+    "rls_forced": true,
+    "parity_verification_parallel_workers": 0,
+    "other_media_rows": 0,
+    "owner_scope_restored": true,
+    "postgres_runtime_settings": {
+      "work_mem": "64MB",
+      "shared_buffers": "128MB",
+      "hash_mem_multiplier": "2",
+      "max_parallel_workers_per_gather": "2",
+      "row_security": "on"
+    }
+  },
+  "validation_guards": {
+    "synthetic_only": true,
+    "gmail_connector_enabled": false,
+    "outbound_attempts": 0,
+    "model_attempts": 0,
+    "background_tasks_blocked": true,
+    "non_loopback_socket_and_dns_blocked": true
+  },
+  "source_identity": {
+    "revision": "455fad64fb75c35084c357f671f5d6121b3adb09",
+    "sha256": {
+      "Docs/Operations/probes/email_million_search_13376.py": "80aae0540ddaa904a413f4ea1f36c0876653592796a0fbdb179d1d06967d6c62",
+      "Docs/Operations/probes/email_archive_throughput_sqlite_2026_09_25.py": "1f0735567d31913bb225bd129fc8ee98760a44d9332edc0b516203f09f113675",
+      "Docs/Operations/probes/email_archive_throughput_postgres_2026_09_25.py": "97e700887e777ac9f9c24d7ee7b271d2b6d87b376422acfe3e1c20166e52b24d",
+      "Docs/Operations/probes/email_local_release_checks_13376.py": "7b6898f1abf8df3bc2916e5fd29e3979f271c1820b7c677c6dcbc81516cbbd82",
+      "Helper_Scripts/benchmarks/email_search_bench.py": "827c26a396b26dcadcc4ded2c9e9b1309b85ab03bdf33b17b2af232ea66fb991",
+      "tldw_Server_API/app/core/DB_Management/backends/postgresql_backend.py": "55f7a37c91f17f811a91e682730ee63a1dc234f1f574dd639836557085f1d4cf",
+      "tldw_Server_API/app/core/DB_Management/backends/sqlite_backend.py": "8a08c4f6b499406fa6d3057fe64cdf4ee95c9431f237e10b7886cec728a15235",
+      "tldw_Server_API/app/core/DB_Management/media_db/media_database_impl.py": "07e311516af634c23cd2170332c91bde72da71e371cc3775a1528e83fb1587fa",
+      "tldw_Server_API/app/core/DB_Management/media_db/runtime/execution_ops.py": "aed8b8b2ea4f7e02bf38da71395fec889685734035a995972120a88c41f1e3ea",
+      "tldw_Server_API/app/core/DB_Management/media_db/runtime/email_query_ops.py": "9b3e4385a1f39d76d763361a2b4adb1f4a405adcbfbf4bf44661fdc9207332b3",
+      "tldw_Server_API/app/core/DB_Management/media_db/runtime/email_benchmark_fixture.py": "cb4f615bffc512779685ec1afdf3651be42a40a5427b0c4ecc87a72a59d77b6e",
+      "tldw_Server_API/app/core/DB_Management/media_db/runtime/email_graph_persistence_ops.py": "fecc3eb7cc60164a3ed82f756bd9b6424d5f8bc5db3d3c0a7c0a395cf3c17664",
+      "tldw_Server_API/app/core/DB_Management/media_db/schema/email_schema_structures.py": "b9ee5e90eacca190af638e7ae82a7bdac8ac5bd8247cf35ca284b0c1b939768f",
+      "tldw_Server_API/app/core/DB_Management/media_db/schema/features/postgres_rls.py": "7236e2c6dd3957ea48d2c9bf2cb46a21fe155b797ee85324304d299df5516f52",
+      "tldw_Server_API/app/core/DB_Management/media_db/repositories/media_repository.py": "44e0215e569b862b5e46a267768f8cd447db803503784aa8a3bac8d0eb2c4fcd",
+      "tldw_Server_API/app/core/DB_Management/media_db/repositories/media_search_repository.py": "8977be09d2652e2017a06ce84199bac08435f081ff30d702811f93038d6fe46d",
+      "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py": "9419d6c081704af513cd367b9fb61c0e2d40ac29d5a63c99f3958a328d1b4f09",
+      "tldw_Server_API/app/core/Ingestion_Media_Processing/Email/Email_Processing_Lib.py": "768eb28505313f4d386efe68a622c8007a4fedf51f5045177b7dde8999bef499",
+      "tldw_Server_API/app/core/Ingestion_Media_Processing/Email/email_ingestion_metrics.py": "2b8d1ec859b5429aa7b1e1c2e5f69e922eedcb50fa2224d7e61da70ce9bab4d6",
+      "tldw_Server_API/app/core/Ingestion_Media_Processing/Email/attachment_policy.py": "e9b023d3ae924fb1385fcf8fd2f5589fe1078bc127f6824e879616c1578c8b56",
+      "tldw_Server_API/app/core/Metrics/metrics_manager.py": "f3a152d6b3548357b2a1a3675a3912752992f76153d32a7a64419097a3dedba4"
+    }
+  }
+}
