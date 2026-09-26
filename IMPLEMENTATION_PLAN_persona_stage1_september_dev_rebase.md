@@ -2,6 +2,17 @@
 
 September 26 continuation: the requester now explicitly authorizes merge after another refresh onto latest `dev`, current-head Qodo remediation, and passing required checks. Fetched `origin/dev` is `a2826f103f02a67f57adb40ed048dbfa2ecfc6e5`; published PR head before this refresh is `e7a577c9245374a815120f08aa70463d9295348e`. Preserve the dirty root checkout and both recovery snapshots. The human-owned Change summary must explain implementation reasoning before merge; the current body describes the feature but does not yet satisfy that rationale requirement.
 
+### Additional dev advance, September 26 at 21:29 UTC
+
+`dev` advanced to `f5fa1f3a41855aa02871d8b76d0ec0cebbaf9e07` through Sync upload-expiry PR #3006. Refresh the existing series from published head `0d92194ebe83796ab43dc4d0afe930d35821786a`. Runtime changes do not overlap Persona; upstream includes the same two published-doc corrections already applied here.
+
+- [ ] Preserve both original recovery refs and create `codex/persona-ambient-stage1-pre-20260926-2130` before rebasing.
+- [ ] Rebase onto the fetched dev tip and inspect range-diff for unintended implementation changes.
+- [ ] Re-run the Persona backend/UI matrices, full Docs suite, API drift check with the existing CI overlay, scoped compilation, boundary checks, and Bandit.
+- [ ] Record verification, commit tracking, publish with a fresh exact remote lease, and wait for new-head Qodo and required checks.
+
+**ADR check**: ADR required: no; this refresh changes history and integration baseline, not durable architecture. ADR-004, ADR-006, and ADR-020 continue to govern. Merge remains blocked until the requester supplies an owned what/why Change summary.
+
 ## Stage 1: Review the current PR and integration surface
 **Goal**: Identify the exact PR commit range, current `origin/dev`, Qodo findings, and overlapping Persona files.
 **Success Criteria**: The original branch tip is recorded, every Qodo finding is classified, and a recovery ref exists before rewriting history.
