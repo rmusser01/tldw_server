@@ -12,6 +12,12 @@
 
 **Backlog:** `TASK-13114`
 
+## ADR Check
+
+- **ADR required:** No new ADR.
+- **Governing ADR:** [ADR-003: Jobs Vs Scheduler Default](../../ADR/003-jobs-vs-scheduler-default.md).
+- **Reason:** v1.1 extends authoring and profile validation while retaining the v1 per-user YAML storage, database records, and Jobs execution ownership; it does not change a durable architecture rule.
+
 ## Global Constraints
 
 - Built-in macro definitions remain immutable; users may disable or clone them.
