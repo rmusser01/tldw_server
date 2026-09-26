@@ -1,10 +1,10 @@
 ---
-id: TASK-13356
+id: TASK-13358
 title: Persist VN generation recipe snapshots and replay them on Retry
 status: In Progress
 assignee: []
 created_date: '2026-09-25 16:11'
-updated_date: '2026-09-25 19:58'
+updated_date: '2026-09-26 01:25'
 labels:
   - vn-assets
 dependencies: []
@@ -35,6 +35,8 @@ Issue #2021 follow-up after PR #2954. Freeze the authored generation recipe when
 
 <!-- SECTION:NOTES:BEGIN -->
 PR #3015 against dev is ready for review with the requester-authored Change summary. Recipe snapshots, Retry provenance, local-model drift protection, and replay-safe fanout are implemented. Qodo three correctness bugs and CodeRabbit fanout completion bug were reproduced and fixed: latest-batch slot guards preserve sibling failures; batch counters/status update atomically; generation status reports per-slot failed-source recipe availability; synchronous generation endpoints run in FastAPI threadpool. Review follow-up also added docstrings, reflowed added long lines, classified VN tests, used the CharacterStore update API in a generation test, and added contextual recipe diagnostics without changing stable API error codes. Verification after final changes: full VN suite 305 passed; frontend VN 37 passed; typecheck, OpenAPI drift, scoped Ruff, Bandit (0 findings), and diff check passed. Black --check reports pre-existing whole-file formatting drift; no broad reformat. Authenticated browser QA unavailable in isolated checkout. GitHub Actions remain queued. Remaining #2021 work: crash-after-file-registration exactly-once recovery and mutable local model file contents.
+
+Renumbered from the VN branch-local TASK-13356 to TASK-13358 with explicit requester approval on 2026-09-26 UTC, resolving the collision with the unrelated ADR task from dev. Only the VN task ID/file and its VN spec/plan/PR references changed; ADR tracking remains untouched. Latest PR #3015 review follow-up is bc1b775699: rejected parent enqueue writes owned-slot failure atomically, retryable variant attempts remain active, final slot/batch failures commit together, and lost-response fanout recovery preserves persisted images. Seven new regressions pass. Final 312-test VN run: 308 passes, zero assertion failures, four disk-full setup errors; all four passed on isolated rerun. Scoped Ruff, OpenAPI drift, diff checks passed; Bandit returned zero findings. Tracking-only renumber needs no additional runtime tests or Bandit scan. ADR check: no new ADR required for review correctness fixes; Docs/ADR/003-jobs-vs-scheduler-default.md continues to govern Jobs ownership. Task remains In Progress until PR review/CI and merge finish.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

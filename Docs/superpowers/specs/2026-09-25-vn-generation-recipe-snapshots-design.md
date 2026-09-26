@@ -1,6 +1,6 @@
 # VN Asset Generation Recipe Snapshots
 
-Backlog: TASK-13356. Parent issue: #2021. Base: `dev` at `a2f5e1b816`.
+Backlog: TASK-13358. Parent issue: #2021. Base: `dev` at `a2f5e1b816`.
 
 ## Problem and Goal
 
