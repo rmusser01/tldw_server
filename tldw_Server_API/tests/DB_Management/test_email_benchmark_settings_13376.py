@@ -51,3 +51,37 @@ def test_settings_evidence_reads_live_transaction_memory_budget(pg_database_conf
     finally:
         db.close_connection()
         backend.get_pool().close_all()
+
+
+@pytest.mark.integration
+@pytest.mark.postgres
+def test_full_parity_verification_preserves_benchmark_parallel_budget(pg_database_config, monkeypatch):
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = MediaDatabase(":memory:", client_id="42", backend=backend)
+    try:
+        with scoped_context(user_id=42):
+            with db.transaction() as conn:
+                backend.execute("SET max_parallel_workers_per_gather = 2", connection=conn)
+                backend.execute("SET work_mem = '64MB'", connection=conn)
+            original = db._fetchone_with_connection
+            parity_workers = []
+
+            def observe(conn, query, params=None):
+                if "AS linked" in query:
+                    setting = backend.execute(
+                        "SELECT current_setting('max_parallel_workers_per_gather') AS workers",
+                        connection=conn,
+                    ).rows[0]
+                    parity_workers.append(setting["workers"])
+                return original(conn, query, params)
+
+            monkeypatch.setattr(db, "_fetchone_with_connection", observe)
+            security = fixture.describe_fixture_security(db)
+            after = fixture.describe_postgres_benchmark_settings(db)
+            assert parity_workers == ["0"]
+            assert security["parity_verification_parallel_workers"] == 0
+            assert after["max_parallel_workers_per_gather"] == "2"
+            assert after["work_mem"] == "64MB"
+    finally:
+        db.close_connection()
+        backend.get_pool().close_all()

@@ -295,6 +295,12 @@ def describe_fixture_security(db: Any, *, tenant_id: str = "email-benchmark:42")
     if postgres and (scope is None or scope.user_id != owner or scope.is_admin):
         raise ValueError("fixture inspection requires matching non-admin PostgreSQL scope")
     with db.transaction() as conn:
+        if postgres:
+            # Full body/version verification needs two wide hash joins. Keep
+            # these outside the timing window and within a process's memory;
+            # Docker's default shared-memory segment is only 64 MiB. SET LOCAL
+            # ends here, preserving the benchmark's normal parallel budget.
+            db._execute_with_connection(conn, "SET LOCAL max_parallel_workers_per_gather = 0")
         native = db._fetchone_with_connection(
             conn,
             "SELECT COUNT(*) AS n FROM email_messages WHERE tenant_id=?",
@@ -350,6 +356,7 @@ def describe_fixture_security(db: Any, *, tenant_id: str = "email-benchmark:42")
                     "bypass_rls": bool(role["rolbypassrls"]),
                     "rls_enabled": bool(rls["relrowsecurity"]),
                     "rls_forced": bool(rls["relforcerowsecurity"]),
+                    "parity_verification_parallel_workers": 0,
                 }
             )
     if postgres:
