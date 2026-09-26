@@ -18,6 +18,7 @@ import tempfile
 import time
 import zipfile
 from collections.abc import Iterator
+from datetime import datetime
 from email import policy
 from email.header import decode_header, make_header
 from email.message import EmailMessage, Message
@@ -1061,7 +1062,7 @@ def process_pst_bytes(
                             continue
 
                         # Extract basic fields with broad compatibility
-                        def _get(obj, names: list[str]) -> str | None:
+                        def _get(obj, names: list[str]) -> str | datetime | None:
                             for n in names:
                                 v = getattr(obj, n, None)
                                 if callable(v):
@@ -1071,6 +1072,8 @@ def process_pst_bytes(
                                         v = None
                                 if isinstance(v, (str, bytes)):
                                     return v.decode("utf-8", errors="ignore") if isinstance(v, (bytes, bytearray)) else v
+                                if isinstance(v, datetime):
+                                    return v
                             return None
 
                         subject = _get(msg, ["get_subject", "subject"]) or ""
@@ -1078,6 +1081,12 @@ def process_pst_bytes(
                         sender_email = _get(msg, ["get_sender_email_address", "sender_email_address"]) or ""
                         plain_body = _get(msg, ["get_plain_text_body", "plain_text_body", "body"])
                         html_body = _get(msg, ["get_html_body", "html_body"]) if not plain_body else None
+                        # Native libpff exposes addresses in transport headers rather
+                        # than the recipient convenience methods available in some builds.
+                        raw_headers = _get(msg, ["get_transport_headers", "transport_headers"]) or ""
+                        headers = BytesParser(policy=policy.default).parsebytes(
+                            raw_headers.encode("utf-8"), headersonly=True,
+                        )
                         # Recipients
                         recipients_to: list[str] = []
                         recipients_cc: list[str] = []
@@ -1126,14 +1135,22 @@ def process_pst_bytes(
                                     recipients_bcc.append(rcpt_email)
                         except _EMAIL_NONCRITICAL_EXCEPTIONS:
                             pass
+                        if not recipients_to:
+                            recipients_to = _addresses_from_header(headers, "To").split(", ")
+                        if not recipients_cc:
+                            recipients_cc = _addresses_from_header(headers, "Cc").split(", ")
+                        if not recipients_bcc:
+                            recipients_bcc = _addresses_from_header(headers, "Bcc").split(", ")
                         # Date
-                        msg_date = _get(msg, ["get_delivery_time", "delivery_time", "get_client_submit_time", "client_submit_time"]) or None
+                        msg_date = _get(msg, ["get_delivery_time", "delivery_time", "get_client_submit_time", "client_submit_time"]) or str(headers.get("Date") or "")
 
-                        from_str = (f"{sender_name} <{sender_email}>".strip() if sender_email else sender_name) or "Unknown"
+                        from_str = (f"{sender_name} <{sender_email}>".strip() if sender_email else str(headers.get("From") or sender_name)) or "Unknown"
 
                         # Reconstruct a minimal RFC822 email
                         em = EmailMessage()
                         em["From"] = from_str
+                        if headers.get("Message-ID"):
+                            em["Message-ID"] = str(headers["Message-ID"])
                         if subject:
                             em["Subject"] = subject
                         # Normalize and set recipients once
