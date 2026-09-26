@@ -115,6 +115,51 @@ END:VCALENDAR""")
     assert events[1].recurrence_id == "2026-06-07T09:00:00+00:00"
 
 
+def test_parse_preserves_floating_and_explicit_recurrence_date_semantics() -> None:
+    """Floating dates remain wall times; UTC and explicit TZID values retain their offsets."""
+    event = CalDavProvider().parse_vevents(
+        "BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:floating-dates\n"
+        "DTSTART;TZID=America/Los_Angeles:20260306T090000\nRRULE:FREQ=DAILY;COUNT=3\n"
+        "RDATE:20260309T090000\nRDATE:20260310T160000Z\n"
+        "RDATE;TZID=Europe/Paris:20260311T090000\nEXDATE:20260308T090000\n"
+        "EXDATE:20260312T160000Z\nEXDATE;TZID=Europe/Paris:20260313T090000\n"
+        "END:VEVENT\nEND:VCALENDAR"
+    )[0]
+    assert event.rdate == [
+        "2026-03-09T09:00:00", "2026-03-10T16:00:00+00:00", "2026-03-11T09:00:00+01:00",
+    ]
+    assert event.exdate == [
+        "2026-03-08T09:00:00", "2026-03-12T16:00:00+00:00", "2026-03-13T09:00:00+01:00",
+    ]
+
+
+@pytest.mark.parametrize("rule", [
+    "FREQ=YEARLY;BYMONTHDAY=31", "FREQ=YEARLY;BYMONTHDAY=-31",
+    "FREQ=YEARLY;BYMONTH=2,3;BYMONTHDAY=31", "FREQ=YEARLY;BYMONTH=2,3;BYMONTHDAY=-31",
+    "FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=28,30", "FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=-28,-30",
+    "FREQ=YEARLY;BYMONTH=2,4;BYMONTHDAY=29", "FREQ=YEARLY;BYMONTH=2,4;BYMONTHDAY=-29",
+])
+def test_provider_accepts_productive_timezone_month_day_sets(rule: str) -> None:
+    """Invalid dates in some months do not suppress valid annual transitions in others."""
+    from datetime import datetime
+
+    from dateutil import rrule
+
+    from tldw_Server_API.app.core.Calendar.recurrence import _validate_timezone_rule
+
+    finite_rule = f"{rule};UNTIL=20271231T235959Z"
+    estimate = _validate_timezone_rule({"DTSTART": "20260101T000000", "RRULE": finite_rule})
+    actual = list(rrule.rrulestr(finite_rule, dtstart=datetime(2026, 1, 1), ignoretz=True))
+    assert estimate >= len(actual) > 0
+    event = CalDavProvider().parse_vevents(
+        "BEGIN:VCALENDAR\nBEGIN:VTIMEZONE\nTZID:Custom/MonthDays\nBEGIN:STANDARD\n"
+        "DTSTART:20260101T000000\nTZOFFSETFROM:+0100\nTZOFFSETTO:+0100\n"
+        f"RRULE:{finite_rule}\nEND:STANDARD\nEND:VTIMEZONE\nBEGIN:VEVENT\nUID:month-days\n"
+        "DTSTART;TZID=Custom/MonthDays:20260605T090000\nEND:VEVENT\nEND:VCALENDAR"
+    )[0]
+    assert event.start_at == "2026-06-05T09:00:00+01:00"
+
+
 @pytest.mark.parametrize("start_property", ["DTSTART", "RECURRENCE-ID"])
 def test_embedded_timezone_rules_are_scoped_to_each_payload(start_property: str) -> None:
     """A library TZID cache must not substitute another account's custom definition."""
@@ -155,6 +200,8 @@ def test_invalid_timezone_structure_is_a_domain_validation_error(payload: str) -
 @pytest.mark.parametrize("rule", [
     "FREQ=SECONDLY", "FREQ=YEARLY;BYSECOND=0,1,2", "FREQ=YEARLY;INTERVAL=0", "FREQ=YEARLY;COUNT=0",
     "FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=30", "FREQ=YEARLY;INTERVAL=4;BYMONTH=2;BYMONTHDAY=29",
+    "FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=-30", "FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=30,31",
+    "FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=0,28", "FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=28,32",
     "FREQ=YEARLY\nEXRULE:FREQ=SECONDLY", "FREQ=YEARLY\nEXDATE:19700101T000000",
 ])
 def test_provider_rejects_unsafe_timezone_rules_before_parsing(
@@ -201,6 +248,7 @@ def test_timezone_productivity_guard_does_not_scan_to_year_9999(
     ("FREQ=YEARLY;BYDAY=MO,TU,WE,TH,FR,SA,SU", 1),
     ("FREQ=YEARLY;BYMONTH=3;BYDAY=2SU", 32),
     ("FREQ=YEARLY;BYMONTHDAY=1", 1),
+    ("FREQ=YEARLY;BYMONTHDAY=31", 1),
 ])
 def test_provider_timezone_transition_history_budget_rejects_before_parsing(
     monkeypatch: pytest.MonkeyPatch, rule: str, copies: int,
