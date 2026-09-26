@@ -3,20 +3,20 @@ id: TASK-13114
 title: Implement Chat Macros v1.1 authoring and output profiles
 status: In Progress
 assignee: []
-created_date: 2026-08-24 04:15
-updated_date: 2026-09-26 00:59
+created_date: '2026-08-24 04:15'
+updated_date: '2026-09-26 03:48'
 labels:
-- chat-macros
-- frontend
-- backend
+  - chat-macros
+  - frontend
+  - backend
 dependencies:
-- TASK-12126
-documentation:
-- Docs/superpowers/specs/2026-07-03-chat-macros-design.md
-- Docs/superpowers/plans/IMPLEMENTATION_PLAN_chat_macros_v1_1_authoring.md
-priority: medium
+  - TASK-12126
 references:
-- https://github.com/rmusser01/tldw_server/pull/2951
+  - 'https://github.com/rmusser01/tldw_server/pull/2951'
+documentation:
+  - Docs/superpowers/specs/2026-07-03-chat-macros-design.md
+  - Docs/superpowers/plans/IMPLEMENTATION_PLAN_chat_macros_v1_1_authoring.md
+priority: medium
 ---
 
 ## Description
@@ -43,6 +43,7 @@ Detailed TDD plan: Docs/superpowers/plans/IMPLEMENTATION_PLAN_chat_macros_v1_1_a
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-08-23 baseline: backend Chat_Macros suite passed 134 tests with 2 warnings. ChatMacrosSettings frontend component suite passed 4 tests. The frontend service suite could not collect in this isolated worktree because wxt/browser was unresolved across the monorepo dependency roots; stop-after-three-attempts rule applied and the plan requires a complete workspace dependency layout before Task 2.
 
@@ -76,6 +77,10 @@ Root cause confirmed: isolated CI dependency overlay reproduces CI fingerprint7a
 Fingerprint correction verification: regenerated OpenAPI JSON+TypeScript using CI-matched dependency overlay; a separate fresh exporter --check passes with expected7a9fc914 fingerprint. Package-wide bun run typecheck exits0; git diff --check passes. Only tracked changes are fingerprint and task record, no application code; prior security scan remains applicable.
 2026-09-26 rebased onto dev3f909e133b (ADR inventory documentation update), cleanly. git range-diff shows all24 PR commits patch-equivalent; application/frontend/helper trees are identical to prior da6c9dfa9e. New AGENTS ADR assessment requirement: ADR required:no new ADR; governed by Docs/ADR/003-jobs-vs-scheduler-default.md. This v1.1 authoring/profile UI and validation follow-up retains v1 per-user YAML storage, database records and Jobs ownership; no durable architecture decision changes. Recording same assessment in implementation plan and PR. Rechecking CI-matched OpenAPI contract before publication.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+2026-09-26 follow-up rebase: dev advanced to 59bd584503 (PR2996 MCP sanitizer changes, no Chat Macros overlap). Rebased all25 PR commits cleanly; git range-diff confirms every commit patch-equivalent. Fresh CI-matched OpenAPI contract check passes using /tmp/pr2951-openapi-ci-deps. No new application edits or security findings introduced by this rebase. Publishing with an exact lease against2445e67792; required CI and any new review feedback remain merge gates.
+<!-- SECTION:NOTES:END -->
+
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
