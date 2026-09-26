@@ -1087,7 +1087,11 @@ class HybridClaimVerifier:
                         # Classify match level
                         best_ev_text = evidence_snips[best_tuple[2]].snippet if best_tuple[2] >= 0 else ""
                         match_lvl, _ = classify_match_confidence(claim_text, best_ev_text, best_tuple[1])
-                        max_auth = max((ev.authority for ev in evidence_snips), default=SourceAuthority.SECONDARY)
+                        max_auth = max(
+                            (ev.authority for ev in evidence_snips),
+                            key=lambda authority: authority.value,
+                            default=SourceAuthority.SECONDARY,
+                        )
                         return ClaimVerification(
                             claim=claim,
                             status=nli_status,
@@ -1350,7 +1354,11 @@ class HybridClaimVerifier:
         # Classify match level
         best_ev_text = evidence_snips[0].snippet if evidence_snips else ""
         match_lvl, _ = classify_match_confidence(claim_text, best_ev_text, decision_conf)
-        max_auth = max((ev.authority for ev in evidence_snips), default=SourceAuthority.SECONDARY)
+        max_auth = max(
+            (ev.authority for ev in evidence_snips),
+            key=lambda authority: authority.value,
+            default=SourceAuthority.SECONDARY,
+        )
 
         # Check if external knowledge is required
         requires_external = (
