@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 from datetime import date, datetime, timedelta, timezone
+from typing import Any
 
 import pytest
 
@@ -19,12 +20,101 @@ def _recurrence_module():
         pytest.fail(f"calendar recurrence module is missing: {exc}")
 
 
+@pytest.mark.unit
+@pytest.mark.parametrize("rule", ["FREQ=SECONDLY;BYSETPOS=2", "FREQ=DAILY;BYMONTH=2;BYMONTHDAY=30"])
+def test_provider_no_yield_rules_are_rejected_before_dateutil(monkeypatch: pytest.MonkeyPatch, rule: str) -> None:
+    """Impossible complex rules fail before entering a potentially non-yielding parser."""
+    recurrence = _recurrence_module()
+
+    def must_not_parse(*args: Any, **kwargs: Any) -> None:
+        """Fail if validation passes an unsupported rule to dateutil."""
+        pytest.fail("unsafe provider rule reached dateutil")
+
+    monkeypatch.setattr(recurrence.rrule, "rrulestr", must_not_parse)
+    with pytest.raises(CalendarValidationError):
+        recurrence.expand_recurrence_set(
+            master_start="2026-06-05T09:00:00Z", master_end=None,
+            rrule_text=rule, rdates=[], exdates=[], provider_rule=True,
+            window_start="2026-06-05T00:00:00Z", window_end="2026-06-06T00:00:00Z",
+        )
+
+
 def _dates(occurrences):
     values = []
     for occurrence in occurrences:
         value = occurrence.start_at
         values.append(value if isinstance(value, date) and not isinstance(value, datetime) else value.date())
     return values
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("rule", ["FREQ=MINUTELY", "FREQ=SECONDLY;INTERVAL=60"])
+def test_old_frequent_provider_recurrence_seeks_current_window(rule: str) -> None:
+    """High-frequency provider rules retain current occurrences without scanning their entire history."""
+    recurrence = _recurrence_module()
+    occurrences = recurrence.expand_recurrence_set(
+        master_start="2020-01-01T00:00:00Z", master_end=None, rrule_text=rule,
+        rdates=[], exdates=[], provider_rule=True,
+        window_start="2026-06-05T09:00:00Z", window_end="2026-06-05T09:03:00Z",
+    )
+    assert [value.start_at.isoformat() for value in occurrences] == [
+        "2026-06-05T09:00:00+00:00", "2026-06-05T09:01:00+00:00", "2026-06-05T09:02:00+00:00",
+    ]
+
+
+@pytest.mark.unit
+def test_seeking_preserves_provider_count_and_interval_phase() -> None:
+    """Seeking a counted rule retains its original interval alignment and series end."""
+    recurrence = _recurrence_module()
+    occurrences = recurrence.expand_recurrence_set(
+        master_start="2026-06-05T09:00:00Z", master_end=None,
+        rrule_text="FREQ=MINUTELY;INTERVAL=3;COUNT=4", rdates=[], exdates=[], provider_rule=True,
+        window_start="2026-06-05T09:07:00Z", window_end="2026-06-05T09:20:00Z",
+    )
+    assert [value.start_at.isoformat() for value in occurrences] == ["2026-06-05T09:09:00+00:00"]
+
+
+@pytest.mark.unit
+def test_provider_duration_remains_elapsed_hours_for_each_occurrence() -> None:
+    """A DST-crossing master must not turn a two-hour duration into three hours on later dates."""
+    recurrence = _recurrence_module()
+    occurrences = recurrence.expand_recurrence_set(
+        master_start="2026-03-08T01:30:00-08:00", master_end="2026-03-08T04:30:00-07:00",
+        rrule_text="FREQ=DAILY;COUNT=2", rdates=[], exdates=[], provider_rule=True,
+        timezone_name="America/Los_Angeles", duration_text="PT2H",
+        window_start="2026-03-08T00:00:00-08:00", window_end="2026-03-10T00:00:00-07:00",
+    )
+    assert [value.end_at.isoformat() for value in occurrences] == [
+        "2026-03-08T04:30:00-07:00", "2026-03-09T03:30:00-07:00",
+    ]
+
+
+@pytest.mark.unit
+def test_fall_fold_duration_is_validated_and_filtered_as_instants() -> None:
+    """The repeated clock hour cannot make a positive elapsed duration negative or hide overlap."""
+    recurrence = _recurrence_module()
+    occurrences = recurrence.expand_recurrence_set(
+        master_start="2026-11-01T01:45:00-07:00", master_end="2026-11-01T01:15:00-08:00",
+        rrule_text="FREQ=DAILY;COUNT=2", rdates=[], exdates=[], provider_rule=True,
+        timezone_name="America/Los_Angeles", duration_text="PT30M",
+        window_start="2026-11-01T08:50:00Z", window_end="2026-11-03T00:00:00Z",
+    )
+    assert [value.end_at.isoformat() for value in occurrences] == [
+        "2026-11-01T01:15:00-08:00", "2026-11-02T02:15:00-08:00",
+    ]
+
+
+@pytest.mark.unit
+def test_rdate_duration_preserves_second_fold_instant() -> None:
+    """A duration with zero nominal days retains the explicit second-fold occurrence."""
+    recurrence = _recurrence_module()
+    occurrences = recurrence.expand_recurrence_set(
+        master_start="2026-10-31T01:30:00-07:00", master_end="2026-10-31T02:00:00-07:00",
+        rrule_text=None, rdates=["2026-11-01T09:30:00Z"], exdates=[], provider_rule=True,
+        timezone_name="America/Los_Angeles", duration_text="PT30M",
+        window_start="2026-11-01T09:20:00Z", window_end="2026-11-01T10:10:00Z",
+    )
+    assert [value.end_at.isoformat() for value in occurrences] == ["2026-11-01T02:00:00-08:00"]
 
 
 def test_daily_recurrence_respects_count() -> None:

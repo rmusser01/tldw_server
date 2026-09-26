@@ -230,6 +230,10 @@ class CalendarItemUpdateRequest(BaseModel):
         return updates
 
 
+class CalendarItemDeleteResponse(BaseModel):
+    deleted: bool
+
+
 class CalendarItemResponse(BaseModel):
     id: int
     calendar_id: int

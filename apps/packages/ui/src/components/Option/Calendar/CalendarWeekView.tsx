@@ -5,6 +5,7 @@ import type {
   CalendarViewItemResponse
 } from "@/services/calendar"
 import { CalendarOwnershipBadge } from "./CalendarOwnershipBadge"
+import { calendarItemDayRange } from "./calendarTemporal"
 
 const startOfDay = (date: Date): Date =>
   new Date(date.getFullYear(), date.getMonth(), date.getDate())
@@ -13,11 +14,6 @@ const addDays = (date: Date, days: number): Date => {
   const next = new Date(date)
   next.setDate(next.getDate() + days)
   return next
-}
-
-const sameDay = (value: string | null | undefined, day: Date): boolean => {
-  if (!value) return false
-  return startOfDay(new Date(value)).getTime() === startOfDay(day).getTime()
 }
 
 const formatTime = (value: string | null | undefined): string => {
@@ -57,9 +53,11 @@ export const CalendarWeekView: React.FC<CalendarWeekViewProps> = ({
       ) : null}
       <div className="grid min-h-[520px] grid-cols-7 overflow-hidden rounded border border-slate-200 bg-slate-50/40">
         {days.map((day) => {
-          const dayItems = items.filter((item) =>
-            sameDay(item.start_at ?? item.due_at, day)
-          )
+          const civilDay = startOfDay(day)
+          const dayItems = items.filter((item) => {
+            const range = calendarItemDayRange(item)
+            return range !== null && civilDay >= range.start && civilDay < range.end
+          })
           const allDayItems = dayItems.filter((item) => item.all_day)
           const timedItems = dayItems.filter((item) => !item.all_day)
           return (

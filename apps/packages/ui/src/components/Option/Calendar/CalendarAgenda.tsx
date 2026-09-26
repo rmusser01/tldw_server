@@ -5,17 +5,15 @@ import type {
   CalendarViewItemResponse
 } from "@/services/calendar"
 import { CalendarOwnershipBadge } from "./CalendarOwnershipBadge"
+import { calendarItemDayRange } from "./calendarTemporal"
 
-const itemTimestamp = (item: CalendarViewItemResponse): string | null =>
-  item.start_at ?? item.due_at ?? item.end_at ?? null
-
-const formatDay = (value: string | null): string => {
+const formatDay = (value: Date | null): string => {
   if (!value) return "Unscheduled"
   return new Intl.DateTimeFormat(undefined, {
     weekday: "short",
     month: "short",
     day: "numeric"
-  }).format(new Date(value))
+  }).format(value)
 }
 
 const formatTime = (item: CalendarViewItemResponse): string => {
@@ -37,12 +35,16 @@ const formatTime = (item: CalendarViewItemResponse): string => {
 export interface CalendarAgendaProps {
   calendars: CalendarResponse[]
   items: CalendarViewItemResponse[]
+  windowStart: Date
+  windowEnd: Date
   onSelectItem: (item: CalendarViewItemResponse) => void
 }
 
 export const CalendarAgenda: React.FC<CalendarAgendaProps> = ({
   calendars,
   items,
+  windowStart,
+  windowEnd,
   onSelectItem
 }) => {
   const calendarsById = React.useMemo(
@@ -51,12 +53,25 @@ export const CalendarAgenda: React.FC<CalendarAgendaProps> = ({
   )
   const groupedItems = React.useMemo(() => {
     const groups = new Map<string, CalendarViewItemResponse[]>()
-    for (const item of items) {
-      const key = formatDay(itemTimestamp(item))
+    const addToGroup = (day: Date | null, item: CalendarViewItemResponse) => {
+      const key = formatDay(day)
       groups.set(key, [...(groups.get(key) ?? []), item])
     }
+    for (const item of items) {
+      const range = calendarItemDayRange(item)
+      if (!range) {
+        addToGroup(null, item)
+        continue
+      }
+      const firstVisibleDay = new Date(windowStart.getFullYear(), windowStart.getMonth(), windowStart.getDate())
+      const firstDay = new Date(Math.max(range.start.getTime(), firstVisibleDay.getTime()))
+      const end = Math.min(range.end.getTime(), windowEnd.getTime())
+      for (const day = firstDay; day.getTime() < end; day.setDate(day.getDate() + 1)) {
+        addToGroup(day, item)
+      }
+    }
     return Array.from(groups.entries())
-  }, [items])
+  }, [items, windowStart, windowEnd])
 
   return (
     <section aria-label="Agenda" className="min-w-0 flex-1">

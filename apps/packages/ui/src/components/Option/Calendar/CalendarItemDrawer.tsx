@@ -26,6 +26,17 @@ import { CalendarOwnershipBadge } from "./CalendarOwnershipBadge"
 const toInputDateTime = (value?: string | null): string =>
   value ? value.slice(0, 16) : ""
 
+const toUpdatedDateTime = (
+  value: string, original: string | null | undefined, allDay: boolean, itemTimezone: unknown
+): string | null => {
+  if (!value) return null
+  if (allDay || !value.includes("T") || /(?:Z|[+-]\d{2}:\d{2})$/i.test(value)) return value
+  if (typeof itemTimezone === "string" && itemTimezone) return value
+  // Inputs show the timestamp's wall time, not a browser-local conversion.
+  const offset = original?.includes("T") ? original.match(/(?:Z|[+-]\d{2}:\d{2})$/i)?.[0] : null
+  return offset ? `${value}${offset}` : value
+}
+
 const parseTags = (value: string): string[] =>
   value
     .split(",")
@@ -94,6 +105,8 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
   const isLinkedProjection = item?.source_owner === "linked_projection"
   const canEditItemFields = Boolean(isCreate || (!isProviderOwned && !isLinkedProjection && !item?.read_only_reason))
   const canEditLocalContext = Boolean(item?.calendar_item_id && !isLinkedProjection)
+  const isOccurrence = item?.recurrence_id != null || item?.occurrence_index != null
+  const canEditTemporalFields = canEditItemFields && !isOccurrence
 
   React.useEffect(() => {
     if (!open) return
@@ -177,16 +190,30 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
 
       if (item) {
         const updates: CalendarItemUpdateRequest = {
-          kind: payload.kind,
           title: payload.title,
           description: payload.description,
           location: payload.location,
-          start_at: payload.start_at,
-          end_at: payload.end_at,
-          due_at: payload.due_at,
-          status: payload.status,
           source_owner: item.source_owner as CalendarSourceOwner,
           provider_owned: false
+        }
+        if (canEditTemporalFields) {
+          const kindChanged = kind !== inferKind(item)
+          if (kindChanged) {
+            updates.kind = kind
+            updates.status = payload.status
+          }
+          // Occurrence timestamps are not master timestamps; unchanged fields
+          // must also stay omitted to preserve offsets and sub-minute precision.
+          for (const [field, input] of [
+            ["start_at", startAt],
+            ["end_at", endAt],
+            ["due_at", dueAt]
+          ] as const) {
+            if (kindChanged || input !== toInputDateTime(item[field])) {
+              const active = field === "due_at" ? kind === "todo" : kind === "event"
+              updates[field] = active ? toUpdatedDateTime(input, item[field], item.all_day, item.metadata?.timezone) : null
+            }
+          }
         }
         if (shouldSaveTags) {
           updates.local_tags = currentTags
@@ -323,7 +350,7 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
                 type="radio"
                 name="calendar-kind"
                 checked={kind === "event"}
-                disabled={!canEditItemFields}
+                disabled={!canEditTemporalFields}
                 onChange={() => setKind("event")}
               />
               Event
@@ -333,7 +360,7 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
                 type="radio"
                 name="calendar-kind"
                 checked={kind === "todo"}
-                disabled={!canEditItemFields}
+                disabled={!canEditTemporalFields}
                 onChange={() => setKind("todo")}
               />
               Todo
@@ -378,7 +405,7 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
                 <Input
                   aria-label="Start"
                   value={startAt}
-                  disabled={!canEditItemFields}
+                  disabled={!canEditTemporalFields}
                   placeholder="2026-06-05T09:00"
                   onChange={(event) => setStartAt(event.target.value)}
                 />
@@ -388,7 +415,7 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
                 <Input
                   aria-label="End"
                   value={endAt}
-                  disabled={!canEditItemFields}
+                  disabled={!canEditTemporalFields}
                   placeholder="2026-06-05T10:00"
                   onChange={(event) => setEndAt(event.target.value)}
                 />
@@ -400,7 +427,7 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
               <Input
                 aria-label="Due"
                 value={dueAt}
-                disabled={!canEditItemFields}
+                disabled={!canEditTemporalFields}
                 placeholder="2026-06-05T17:00"
                 onChange={(event) => setDueAt(event.target.value)}
               />

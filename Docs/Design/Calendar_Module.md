@@ -1,6 +1,6 @@
 # Calendar Module
 
-Last updated: 2026-06-06
+Last updated: 2026-09-26
 
 ## Purpose
 
@@ -42,6 +42,14 @@ Calendar item source ownership is explicit:
 - `source_owner="linked_projection"`: read-only projection from another tldw domain, currently Scheduled Tasks/reminders. Edits belong in the owning domain.
 
 Provider refreshes must preserve local annotations, links, and local tags. The current bounded polling import does not infer remote deletion from absent events; safe tombstoning requires a complete provider delta or other explicit deletion signal.
+
+## Recurrence And Time Boundaries
+
+Native recurrence supports daily, weekly, and monthly rules plus explicit added/excluded dates. Provider recurrence retains raw RRULE/RDATE/EXDATE and detached recurrence identities. Expansion supports frequency, interval, count, until, week start, and plain weekly weekday selection; complex BYxxx rules are preserved but return a partial-result warning rather than entering potentially non-yielding expansion. High-frequency rules seek to the requested window without scanning their entire history. Reaching the 2,000-occurrence cap retains bounded results and marks the view partial.
+
+Editing a local occurrence's title or context updates series text without rewriting master timestamps. Occurrence-specific time/kind edits remain disabled pending an exception editor. Unchanged times retain their stored offsets; naive timed records use their item timezone. All-day values remain civil dates with exclusive end dates, including imported DURATION values.
+
+Native item deletion uses the authorized `DELETE /items/{item_id}` soft-delete path; provider-owned items cannot be deleted through it. Persisted links can be retrieved with `GET /items/{item_id}/links` and removed with `DELETE /items/{item_id}/links/{link_id}` under the item's scope.
 
 ## Scheduled Tasks Boundary
 
@@ -107,11 +115,14 @@ Core endpoints:
 - `DELETE /calendars/{calendar_id}/memberships/{principal_type}/{principal_id}`
 - `POST /items`
 - `PATCH /items/{item_id}`
+- `DELETE /items/{item_id}`
 - `GET /views/agenda`
 - `GET /views/week`
 - `POST /items/{item_id}/annotations`
 - `PUT /items/{item_id}/local-tags`
 - `POST /items/{item_id}/links`
+- `GET /items/{item_id}/links`
+- `DELETE /items/{item_id}/links/{link_id}`
 - `POST /items/{item_id}/copy`
 - `POST /reminders`
 
