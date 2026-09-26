@@ -2,6 +2,8 @@
 
 **Goal:** Resolve verified Qodo findings on PR #3002 while preserving its internal native-fork storage scope and its dependency on H1.
 
+**ADR check:** ADR required: yes. `Docs/ADR/050-native-chat-fork-storage-lifecycle.md` records the durable operation-receipt and workspace-admission rule in this PR; `Docs/ADR/049-chat-history-selection-ownership.md` governs its inherited H1 selection boundary.
+
 ## Stage 1: Reproduce substantive findings
 **Goal:** Confirm snapshot-bound assistant projection and caller-owned PostgreSQL transaction behavior against real storage paths.
 **Success Criteria:** Failing focused tests demonstrate both reported defects before fixes.
@@ -42,3 +44,5 @@ the stacked diff check passes. Required CI must rerun on the new head.
 H1 later corrected an `unavailable` history-owner TypeScript narrowing error
 and moved to `63e95039db`. H2 restacked cleanly; all eight existing H2
 commits are unchanged by range-diff, and the stacked diff check passes.
+
+On 2026-09-26, H2 was restacked onto H1 `b789d5567d`, based on server dev `f5fa1f3a41`. Upstream claimed ADR-048, so inherited history selection is now ADR-049 and native storage is ADR-050. Only ADR identifiers, cross-references, indexes and tracking changed; accepted rationale and native source remain unchanged. The first nine H2 patches are identical by range-diff. Native projection/migration/transaction/workspace regressions passed 155 tests; 68 PostgreSQL parametrizations skipped because the local fixture reported PostgreSQL unavailable. ADR source/published mirrors, unique identifiers and diff checks pass. Prior touched-source security qualification remains applicable. Fresh CI and final H1 merge ancestry remain pending.
