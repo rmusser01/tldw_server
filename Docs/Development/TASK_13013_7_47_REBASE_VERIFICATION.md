@@ -64,3 +64,32 @@ introduced. An updated human-written summary is requested under
 `Docs/superpowers/AI_GENERATED_PR_CHANGE_SUMMARY_POLICY_2026_04_17.md` before
 merge. This checkpoint does not claim current-head CI, fresh Qodo review, or
 merge completion.
+
+## Follow-up after current-head CI
+
+The requester supplied an updated human Change summary, which was posted
+verbatim to PR 2869. That merge prerequisite is satisfied.
+
+CI on `2e1fc271f8` completed with source and all five image admission jobs
+rejecting `TASK-13013.7.23-OS-01` for `expires_on`. These are the previously
+reported approval-expiry failures. Renewal remains pending. Two optional
+historical native candidate jobs also failed when their fixed producer
+artifacts returned HTTP 404; they are not required merge checks.
+
+The two Characters harness configurations each passed 111 tests and failed
+two, covering three unique edit-form cases. Failures occurred while opening
+advanced fields or Metadata, before their payload assertions. The isolated
+three-case local run passed even before this repair, consistent with an
+intermittent state-flush failure. Six native button interactions now use
+RTL's act-wrapped `fireEvent.click`, matching the existing successful form
+tests. Assertions, timeouts and product code are unchanged.
+All three affected cases pass after the repair in both the WebUI and shared
+UI configurations (110 other tests intentionally filtered in each run).
+The full harness requires fresh CI confirmation.
+
+Dev advanced to `59bd5845038342013a2d84d0130f6164f14b54fd`. The second rebase
+completed without conflicts; range-diff reports all 138 patches equivalent.
+The recovery ref is `codex/task-13013-7-before-summary-rebase`. The pinned
+offline uv check still passes. Scoped ESLint reports zero errors and the
+same 121 existing warnings. No Python code changed in this follow-up, so
+Bandit is not applicable to its TypeScript test and documentation edits.
