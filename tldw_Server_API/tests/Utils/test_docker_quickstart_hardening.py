@@ -16,6 +16,23 @@ def _require(condition: bool, message: str) -> None:
         pytest.fail(message)
 
 
+def _stage_block(text: str, name: str, parent: str) -> str:
+    """Locate a required named WebUI stage and verify its inheritance."""
+    match = re.search(
+        rf"^FROM ([^\n]+) AS {re.escape(name)}\n(.*?)(?=^FROM |\Z)",
+        text,
+        flags=re.MULTILINE | re.DOTALL,
+    )
+    _require(match is not None, f"Missing WebUI stage: {name}")
+    _require(match.group(1) == parent, f"Unexpected parent for WebUI stage: {name}")
+    return match.group(2)
+
+
+def _transfer_lines(text: str) -> tuple[str, ...]:
+    """Keep COPY and ADD instructions explicit for the source allowlists."""
+    return tuple(line.strip() for line in text.splitlines() if line.lstrip().upper().startswith(("COPY ", "ADD ")))
+
+
 def _target_block(makefile_text: str, target: str) -> str:
     """Return a Makefile target body or fail clearly."""
     pattern = rf"^{re.escape(target)}:.*?(?=^[A-Za-z0-9_.-]+:|\Z)"
@@ -114,9 +131,7 @@ def test_api_dockerfile_excludes_protected_frontend_and_bundles_legal_files():
     """The GPL API image must not bundle protected frontend source."""
     text = _read_text("Dockerfiles/Dockerfile.prod")
 
-    transfer_lines = tuple(
-        line.strip() for line in text.splitlines() if line.lstrip().upper().startswith(("COPY ", "ADD "))
-    )
+    transfer_lines = _transfer_lines(text)
     _require(
         transfer_lines
         == (
@@ -124,6 +139,7 @@ def test_api_dockerfile_excludes_protected_frontend_and_bundles_legal_files():
             "COPY LICENSES /app/LICENSES",
             "COPY tldw_Server_API /app/tldw_Server_API",
             "COPY apps/mcp-unified/src /app/apps/mcp-unified/src",
+            "COPY packages/tldw_profile_core /app/packages/tldw_profile_core",
             "COPY --from=builder /install /usr/local",
             "COPY --chown=appuser:appuser tldw_Server_API /app/tldw_Server_API",
             "COPY --chown=appuser:appuser Docs /app/Docs",
@@ -183,83 +199,251 @@ def test_api_dockerfile_uses_runtime_env_for_uvicorn_workers_and_log_level():
 
 
 def test_webui_dockerfile_uses_copy_chown_instead_of_recursive_chown():
-    """The WebUI Dockerfile should use targeted --chown copies."""
+    """Each runtime must copy its corresponding built assets with ownership."""
     text = _read_text("Dockerfiles/Dockerfile.webui")
 
     _require("chown -R webui:webui /app" not in text, "Expected Dockerfile.webui to avoid recursive chown")
+    base = _stage_block(text, "webui-runtime-base", "node:24-bookworm-slim")
+    _require("USER webui" in base, "Expected inherited unprivileged WebUI runtime user")
     _require(
-        "COPY --from=builder --chown=webui:webui /app/apps/tldw-frontend/.next/standalone /app" in text,
-        "Expected Dockerfile.webui standalone copy to use --chown",
+        _transfer_lines(base) == ("COPY --chown=webui:webui Docs/Published /app/Docs/Published",),
+        "Expected scoped owned published documentation in runtime base",
     )
+    for runtime, builder in (("runtime", "quickstart-builder"), ("managed-runtime", "managed-builder")):
+        block = _stage_block(text, runtime, "webui-runtime-base")
+        _require(
+            _transfer_lines(block)
+            == (
+                f"COPY --from={builder} --chown=webui:webui /app/apps/tldw-frontend/.next/standalone /app",
+                f"COPY --from={builder} --chown=webui:webui /app/apps/tldw-frontend/.next/static /app/apps/tldw-frontend/.next/static",
+                f"COPY --from={builder} --chown=webui:webui /app/apps/tldw-frontend/public /app/apps/tldw-frontend/public",
+            ),
+            f"Expected {runtime} to copy only its own built assets with --chown",
+        )
+        _require("USER " not in block, f"Expected {runtime} to inherit the WebUI runtime user")
 
 
 def test_webui_dockerfile_copies_only_required_workspace_sources():
     """The WebUI Docker build should avoid copying every workspace source tree."""
     text = _read_text("Dockerfiles/Dockerfile.webui")
 
+    dependencies = _stage_block(text, "dependencies", "oven/bun:1.3.2-debian")
     _require(
-        "COPY apps /app/apps" not in text,
-        "Expected Dockerfile.webui to avoid copying the full apps monorepo into the WebUI image build context",
+        _transfer_lines(dependencies)
+        == (
+            "COPY apps/package.json apps/bun.lock /app/apps/",
+            "COPY apps/scripts /app/apps/scripts",
+            "COPY apps/extension/package.json /app/apps/extension/package.json",
+            "COPY apps/extension/scripts/wxt-prepare.mjs /app/apps/extension/scripts/wxt-prepare.mjs",
+            "COPY apps/packages/voice-assistant-sdk/package.json /app/apps/packages/voice-assistant-sdk/package.json",
+            "COPY apps/tldw-frontend /app/apps/tldw-frontend",
+            "COPY apps/packages/ui /app/apps/packages/ui",
+        ),
+        "Expected dependencies to use only the scoped workspace COPY allowlist and no ADD",
     )
-    _require(
-        "COPY apps/package.json /app/apps/package.json" in text,
-        "Expected Dockerfile.webui to copy the workspace package manifest explicitly",
-    )
-    _require(
-        "COPY apps/bun.lock /app/apps/bun.lock" in text,
-        "Expected Dockerfile.webui to copy the Bun lockfile explicitly",
-    )
-    _require(
-        "COPY apps/tldw-frontend /app/apps/tldw-frontend" in text,
-        "Expected Dockerfile.webui to copy the frontend workspace explicitly",
-    )
-    _require(
-        "COPY apps/packages/ui /app/apps/packages/ui" in text,
-        "Expected Dockerfile.webui to copy the shared ui workspace explicitly",
-    )
-    _require(
-        "COPY apps/extension/package.json /app/apps/extension/package.json" in text,
-        "Expected Dockerfile.webui to copy the extension manifest for frozen lockfile workspace resolution",
-    )
-    _require(
-        "COPY apps/extension/scripts/wxt-prepare.mjs /app/apps/extension/scripts/wxt-prepare.mjs" in text,
-        "Expected Dockerfile.webui to copy only the extension prepare shim needed for install scripts",
-    )
-    _require(
-        "COPY apps/packages/voice-assistant-sdk/package.json /app/apps/packages/voice-assistant-sdk/package.json"
-        in text,
-        "Expected Dockerfile.webui to copy the voice assistant package manifest for frozen lockfile workspace resolution",
-    )
+    for builder in ("quickstart-builder", "managed-builder"):
+        block = _stage_block(text, builder, "dependencies")
+        _require(not _transfer_lines(block), f"Expected {builder} to inherit only scoped workspace sources")
+        _require(
+            "RUN bun scripts/validate-networking-config.mjs && bun run build:prod" in block,
+            f"Expected {builder} to validate networking and build the frontend",
+        )
     _require(
         "pkg.workspaces=" not in text,
         "Expected Dockerfile.webui not to rewrite the workspace manifest because that invalidates the frozen lockfile",
     )
     _require(
-        "RUN bun install --frozen-lockfile --cwd /app/apps" in text,
+        "RUN bun install --frozen-lockfile --cwd /app/apps" in dependencies,
         "Expected Dockerfile.webui to install with the committed Bun lockfile",
     )
 
 
 def test_webui_dockerfile_bakes_quickstart_mode_build_args():
-    """The WebUI Docker build should accept quickstart-mode public env args."""
+    """Only the quickstart builder accepts legacy public networking arguments."""
     text = _read_text("Dockerfiles/Dockerfile.webui")
+    quickstart = _stage_block(text, "quickstart-builder", "dependencies")
 
     _require(
-        "ARG NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=quickstart" in text,
-        "Expected Dockerfile.webui to define NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE build arg",
+        "NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=quickstart" in quickstart,
+        "Expected fixed quickstart deployment mode at build time",
     )
     _require(
-        "ARG NEXT_PUBLIC_API_BASE_URL=" in text,
+        "ARG NEXT_PUBLIC_API_BASE_URL=" in quickstart,
         "Expected Dockerfile.webui to define NEXT_PUBLIC_API_BASE_URL build arg",
     )
     _require(
-        "ENV NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=${NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE}" in text,
-        "Expected Dockerfile.webui to export NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE at build time",
+        "NEXT_PUBLIC_X_API_KEY=${NEXT_PUBLIC_X_API_KEY}" in quickstart,
+        "Expected quickstart builder to preserve the legacy public key argument",
     )
     _require(
-        "ENV NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}" in text,
+        "NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}" in quickstart,
         "Expected Dockerfile.webui to export NEXT_PUBLIC_API_BASE_URL at build time",
     )
+    for argument in (
+        "NEXT_PUBLIC_API_URL=",
+        "NEXT_PUBLIC_API_BASE_URL=",
+        "NEXT_PUBLIC_API_VERSION=v1",
+        "NEXT_PUBLIC_X_API_KEY=",
+        "TLDW_INTERNAL_API_ORIGIN=http://app:8000",
+    ):
+        _require(
+            re.search(rf"^ARG {re.escape(argument)}$", quickstart, flags=re.MULTILINE) is not None,
+            f"Expected legacy quickstart build argument: {argument}",
+        )
+    _require(
+        "ARG NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE" not in quickstart,
+        "Expected target selection to fix quickstart deployment mode",
+    )
+
+
+def test_webui_dockerfile_managed_stages_are_origin_and_secret_independent():
+    """Managed targets must inherit clean stages rather than quickstart inputs."""
+    text = _read_text("Dockerfiles/Dockerfile.webui")
+    for stage, parent, expected in (
+        (
+            "dependencies",
+            "oven/bun:1.3.2-debian",
+            ("ENV NEXT_TELEMETRY_DISABLED=1 SKIP_WXT_PREPARE=1",),
+        ),
+        (
+            "managed-builder",
+            "dependencies",
+            ("ENV NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=managed",),
+        ),
+        (
+            "webui-runtime-base",
+            "node:24-bookworm-slim",
+            (
+                "ARG TLDW_SOURCE_COMMIT=unknown",
+                "ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 HOSTNAME=0.0.0.0 PORT=3000",
+            ),
+        ),
+        (
+            "managed-runtime",
+            "webui-runtime-base",
+            ("ENV NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=managed",),
+        ),
+    ):
+        block = _stage_block(text, stage, parent)
+        # Fold Dockerfile continuation lines; compare only the scoped ARG/ENV contract.
+        logical_lines = re.sub(r"\\\s*\n\s*", " ", block).splitlines()
+        configuration = tuple(
+            " ".join(line.split()) for line in logical_lines if line.lstrip().upper().startswith(("ARG ", "ENV "))
+        )
+        _require(
+            configuration == expected,
+            f"Expected clean build configuration with no origins or secrets in {stage}",
+        )
+
+
+@pytest.mark.parametrize(
+    "guard,path,old,new,message",
+    (
+        (
+            test_webui_dockerfile_managed_stages_are_origin_and_secret_independent,
+            "Dockerfiles/Dockerfile.webui",
+            "FROM dependencies AS managed-builder\n",
+            "FROM dependencies AS managed-builder\nARG NEXT_PUBLIC_X_API_KEY=fixture-secret\n",
+            "clean build configuration",
+        ),
+        (
+            test_webui_dockerfile_managed_stages_are_origin_and_secret_independent,
+            "Dockerfiles/Dockerfile.webui",
+            "ENV NEXT_TELEMETRY_DISABLED=1 SKIP_WXT_PREPARE=1",
+            "ENV NEXT_TELEMETRY_DISABLED=1 SKIP_WXT_PREPARE=1 NEXT_PUBLIC_API_URL=https://fixture.invalid",
+            "clean build configuration",
+        ),
+        (
+            test_webui_dockerfile_managed_stages_are_origin_and_secret_independent,
+            "Dockerfiles/Dockerfile.webui",
+            "ARG TLDW_SOURCE_COMMIT=unknown",
+            "ARG TLDW_SOURCE_COMMIT=unknown\nARG TLDW_INTERNAL_API_ORIGIN=https://fixture.invalid",
+            "clean build configuration",
+        ),
+        (
+            test_webui_dockerfile_managed_stages_are_origin_and_secret_independent,
+            "Dockerfiles/Dockerfile.webui",
+            "FROM dependencies AS managed-builder",
+            "FROM quickstart-builder AS managed-builder",
+            "Unexpected parent",
+        ),
+        (
+            test_webui_dockerfile_copies_only_required_workspace_sources,
+            "Dockerfiles/Dockerfile.webui",
+            "COPY apps/tldw-frontend /app/apps/tldw-frontend",
+            "COPY apps /app/apps",
+            "scoped workspace COPY allowlist",
+        ),
+        (
+            test_webui_dockerfile_copies_only_required_workspace_sources,
+            "Dockerfiles/Dockerfile.webui",
+            "FROM dependencies AS managed-builder\n",
+            "FROM dependencies AS managed-builder\nCOPY apps/extension /app/apps/extension\n",
+            "inherit only scoped workspace sources",
+        ),
+        (
+            test_webui_dockerfile_copies_only_required_workspace_sources,
+            "Dockerfiles/Dockerfile.webui",
+            "FROM dependencies AS quickstart-builder",
+            "FROM dependencies AS missing-builder",
+            "Missing WebUI stage",
+        ),
+        (
+            test_api_dockerfile_excludes_protected_frontend_and_bundles_legal_files,
+            "Dockerfiles/Dockerfile.prod",
+            "COPY packages/tldw_profile_core /app/packages/tldw_profile_core",
+            "COPY packages /app/packages",
+            "reviewed explicit COPY allowlist",
+        ),
+        (
+            test_api_dockerfile_excludes_protected_frontend_and_bundles_legal_files,
+            "Dockerfiles/Dockerfile.prod",
+            "COPY apps/mcp-unified/src /app/apps/mcp-unified/src",
+            "COPY apps/mcp-unified/src /app/apps/mcp-unified/src\nCOPY apps/tldw-frontend /app/apps/tldw-frontend",
+            "reviewed explicit COPY allowlist",
+        ),
+        (
+            test_api_dockerfile_excludes_protected_frontend_and_bundles_legal_files,
+            "Dockerfiles/Dockerfile.prod",
+            "COPY --chown=appuser:appuser LICENSE /app/LICENSE\n",
+            "",
+            "reviewed explicit COPY allowlist",
+        ),
+    ),
+    ids=(
+        "managed-credential-argument",
+        "inherited-public-origin",
+        "inherited-internal-origin",
+        "managed-inherits-quickstart",
+        "broadened-workspace-source",
+        "managed-extra-source",
+        "missing-builder",
+        "broadened-api-package",
+        "protected-frontend-in-api",
+        "missing-api-license",
+    ),
+)
+def test_packaging_guards_reject_unsafe_or_missing_fixture_instructions(guard, path, old, new, message, monkeypatch):
+    """Run the real guards against deliberate unsafe changes to actual Dockerfiles."""
+    text = _read_text(path)
+    _require(old in text, "Mutation fixture instruction must exist")
+    mutated = text.replace(old, new, 1)
+    monkeypatch.setitem(globals(), "_read_text", lambda _: mutated)
+    with pytest.raises(pytest.fail.Exception, match=message):
+        guard()
+
+
+@pytest.mark.parametrize("builder", ("quickstart-builder", "managed-builder"))
+@pytest.mark.parametrize("asset", (".next/standalone", ".next/static", "public"))
+def test_webui_ownership_guard_rejects_each_unowned_asset(builder, asset, monkeypatch):
+    """Every artifact transfer in both runtime targets must retain --chown."""
+    text = _read_text("Dockerfiles/Dockerfile.webui")
+    owned = f"COPY --from={builder} --chown=webui:webui /app/apps/tldw-frontend/{asset}"
+    _require(owned in text, "Owned asset mutation fixture must exist")
+    mutated = text.replace(owned, owned.replace(" --chown=webui:webui", ""), 1)
+    monkeypatch.setitem(globals(), "_read_text", lambda _: mutated)
+    with pytest.raises(pytest.fail.Exception, match="copy only its own built assets with --chown"):
+        test_webui_dockerfile_uses_copy_chown_instead_of_recursive_chown()
 
 
 def test_base_docker_compose_keeps_backward_compatible_named_volumes():

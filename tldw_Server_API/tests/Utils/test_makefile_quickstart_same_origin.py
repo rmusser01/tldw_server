@@ -64,15 +64,85 @@ def test_webui_compose_defaults_to_same_origin_browser_proxy_mode() -> None:
 def test_webui_dockerfile_bakes_in_quickstart_same_origin_defaults() -> None:
     """The WebUI Dockerfile should keep the quickstart networking defaults aligned."""
     text = _read("Dockerfiles/Dockerfile.webui")
+    builder = re.search(
+        r"^FROM dependencies AS quickstart-builder\n(.*?)(?=^FROM |\Z)",
+        text,
+        flags=re.MULTILINE | re.DOTALL,
+    )
+    _require(builder is not None, "Dockerfile.webui should inherit quickstart sources from dependencies")
+    quickstart = builder.group(1)
+    final_stage = text.rsplit("\nFROM ", maxsplit=1)[-1]
     _require(
-        "ARG NEXT_PUBLIC_API_URL=" in text,
+        final_stage.startswith("webui-runtime-base AS runtime\n"),
+        "Dockerfile.webui should keep quickstart runtime as the default final target",
+    )
+    _require(
+        re.search(r"^ARG NEXT_PUBLIC_API_URL=$", quickstart, flags=re.MULTILINE) is not None,
         "Dockerfile.webui should default NEXT_PUBLIC_API_URL to empty for same-origin quickstart",
     )
     _require(
-        "ARG NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=quickstart" in text,
-        "Dockerfile.webui should default the deployment mode to quickstart",
+        "NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}" in quickstart,
+        "Dockerfile.webui should export the quickstart browser origin argument",
     )
     _require(
-        "ARG TLDW_INTERNAL_API_ORIGIN=http://app:8000" in text,
+        "ARG TLDW_INTERNAL_API_ORIGIN=http://app:8000" in quickstart,
         "Dockerfile.webui should default the internal API origin to the app service",
     )
+    for stage in (quickstart, final_stage):
+        _require(
+            "NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=quickstart" in stage,
+            "Dockerfile.webui should fix the quickstart deployment mode in builder and runtime",
+        )
+    _require(
+        "TLDW_INTERNAL_API_ORIGIN=${TLDW_INTERNAL_API_ORIGIN}" in quickstart,
+        "Dockerfile.webui should export the quickstart internal origin argument",
+    )
+    _require(
+        "TLDW_INTERNAL_API_ORIGIN=http://app:8000" in final_stage,
+        "Dockerfile.webui should preserve the runtime app service origin",
+    )
+    logical_lines = re.sub(r"\\\s*\n\s*", " ", final_stage).splitlines()
+    runtime_configuration = tuple(
+        " ".join(line.split()) for line in logical_lines if line.lstrip().upper().startswith(("ARG ", "ENV "))
+    )
+    _require(
+        runtime_configuration
+        == ("ENV NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=quickstart TLDW_INTERNAL_API_ORIGIN=http://app:8000",),
+        "Dockerfile.webui should keep a fixed quickstart runtime environment without overrides",
+    )
+
+
+@pytest.mark.parametrize(
+    "old,new,message",
+    (
+        (
+            "ARG NEXT_PUBLIC_API_URL=\n",
+            "ARG NEXT_PUBLIC_API_URL=https://fixture.invalid\n",
+            "default NEXT_PUBLIC_API_URL to empty",
+        ),
+        (
+            "ENV NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=quickstart",
+            "ENV NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=managed",
+            "fix the quickstart deployment mode",
+        ),
+        (
+            "FROM webui-runtime-base AS runtime",
+            "FROM webui-runtime-base AS legacy-runtime",
+            "default final target",
+        ),
+        (
+            "TLDW_INTERNAL_API_ORIGIN=http://app:8000\nCOPY --from=quickstart-builder",
+            "TLDW_INTERNAL_API_ORIGIN=http://app:8000\nENV NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=managed\nCOPY --from=quickstart-builder",
+            "fixed quickstart runtime environment",
+        ),
+    ),
+    ids=("browser-origin", "runtime-mode", "default-target", "runtime-mode-override"),
+)
+def test_quickstart_default_guard_rejects_unsafe_fixture_changes(old, new, message, monkeypatch) -> None:
+    """The guard must reject changes that break the default same-origin path."""
+    text = _read("Dockerfiles/Dockerfile.webui")
+    _require(old in text, "Quickstart mutation fixture instruction must exist")
+    mutated = text.replace(old, new, 1)
+    monkeypatch.setitem(globals(), "_read", lambda _: mutated)
+    with pytest.raises(pytest.fail.Exception, match=message):
+        test_webui_dockerfile_bakes_in_quickstart_same_origin_defaults()

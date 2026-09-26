@@ -9,6 +9,8 @@ on:
     branches: [codex/complete-app-wp1]
     paths:
       - .github/workflows/verify-app-bundle.yml
+      - Dockerfiles/Dockerfile.prod
+      - Dockerfiles/Dockerfile.webui
       - Dockerfiles/app-bundle/**
       - apps/tldw-frontend/gateway/**
       - Helper_Scripts/test_app_bundle_docker.sh
@@ -16,6 +18,8 @@ on:
       - Helper_Scripts/qualify_app_bundle_candidate.sh
       - apps/tldw-frontend/scripts/qualify-app-bundle-browser.mjs
       - apps/tldw-frontend/scripts/__tests__/qualify-app-bundle-browser.test.mjs
+      - tldw_Server_API/tests/Utils/test_docker_quickstart_hardening.py
+      - tldw_Server_API/tests/Utils/test_makefile_quickstart_same_origin.py
 
 permissions:
   contents: read
@@ -73,6 +77,17 @@ jobs:
             Helper_Scripts/test_app_bundle_browser.sh
           sh -n Dockerfiles/app-bundle/start.sh Dockerfiles/app-bundle/stop.sh \
             Dockerfiles/app-bundle/status.sh
+
+      - name: Verify focused packaging and quickstart guards
+        run: |
+          source .venv/bin/activate
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -c /dev/null \
+            -p no:cacheprovider --confcutdir=tldw_Server_API/tests/Utils \
+            tldw_Server_API/tests/Utils/test_docker_quickstart_hardening.py \
+            tldw_Server_API/tests/Utils/test_makefile_quickstart_same_origin.py -q
+          python -m black --check \
+            tldw_Server_API/tests/Utils/test_docker_quickstart_hardening.py \
+            tldw_Server_API/tests/Utils/test_makefile_quickstart_same_origin.py
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
