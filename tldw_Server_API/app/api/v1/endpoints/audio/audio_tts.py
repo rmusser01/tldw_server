@@ -1523,7 +1523,7 @@ async def create_speech_metadata(
 
 @router.get(
     "/providers",
-    dependencies=[Depends(check_rate_limit)],
+    dependencies=[Depends(check_rate_limit), Depends(get_request_user)],
 )
 async def list_tts_providers(
     request: Request,
@@ -1562,7 +1562,7 @@ async def list_tts_providers(
 @router.get(
     "/tts/providers/{provider}/model-info",
     summary="Get focused TTS provider model information",
-    dependencies=[Depends(check_rate_limit)],
+    dependencies=[Depends(check_rate_limit), Depends(get_request_user)],
 )
 async def get_tts_provider_model_info(
     provider: str,
@@ -1671,7 +1671,7 @@ async def unload_tts_provider(
 @router.get(
     "/voices/catalog",
     summary="List available TTS voices across providers",
-    dependencies=[Depends(check_rate_limit)],
+    dependencies=[Depends(check_rate_limit), Depends(get_request_user)],
 )
 async def list_tts_voices(
     request: Request,
@@ -1742,7 +1742,7 @@ async def list_tts_voices(
         ) from e
 
 
-@router.post("/reset-metrics")
+@router.post("/reset-metrics", dependencies=[Depends(RequireRole("admin"))])
 async def reset_tts_metrics(
     request: Request,
     provider: Optional[str] = None,

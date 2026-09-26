@@ -139,3 +139,64 @@ async def save_tool_messages(
 
     for tool_message in tool_messages:
         await save_message_fn(chat_db, conversation_id, tool_message, use_transaction=True)
+
+
+def native_history_owner_key(request: Any, user_id: Any) -> str:
+    """Bind transport namespace to the authenticated account, separately from workspace.
+
+    ASGI root_path preserves trusted reverse-proxy base paths. No forwarded
+    header is independently trusted here; the deployment owns ASGI normalization.
+    """
+    import hashlib
+    import json
+    from urllib.parse import urlsplit
+
+    parsed = urlsplit(str(request.base_url))
+    scheme, host = parsed.scheme.lower(), (parsed.hostname or "").lower()
+    if ":" in host:
+        host = f"[{host}]"
+    port = parsed.port
+    authority = host + (f":{port}" if port and (scheme, port) not in {("http", 80), ("https", 443)} else "")
+    base = f"{scheme}://{authority}{parsed.path.rstrip('/')}"
+    payload = json.dumps(["tldw-native-history-owner", 1, base, str(user_id)], ensure_ascii=False, separators=(",", ":"))
+    return "native-history-v1:sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+async def prepare_native_history_message(message: dict[str, Any], conversation_id: str, process_content: Any) -> dict[str, Any]:
+    """Prepare validated text/images and role metadata before opening an admission transaction."""
+    content = message.get("content")
+    parts = content if isinstance(content, list) else []
+    if any(not isinstance(part, dict) or part.get("type") not in {"text", "image_url"} for part in parts):
+        raise HTTPException(422, detail="Versioned input contains unsupported content parts")
+    for part in parts:
+        if part.get("type") == "image_url":
+            options = part.get("image_url")
+            if (not isinstance(options, dict) or set(options) - {"url", "detail"}
+                    or options.get("detail", "auto") not in ("auto", "high", "low")):
+                raise HTTPException(422, detail="Versioned input contains unsupported image options")
+    image_details: list[str] = []
+    text, images = await process_content(content, conversation_id, image_details=image_details)
+    expected_images = sum(part.get("type") == "image_url" for part in parts)
+    if len(images) != expected_images or len(image_details) != expected_images:
+        raise HTTPException(422, detail="Versioned input requires every ordered image to be available")
+    role = message.get("role")
+    extra = {"sender_role": role}
+    if images:
+        extra["image_details"] = image_details
+    for key in ("function_call", "tool_call_id"):
+        if message.get(key) is not None:
+            extra[key] = message[key]
+    if message.get("name"):
+        extra["tool_name" if role == "tool" else "sender_name"] = message["name"]
+    if not text and not images:
+        if message.get("tool_calls"):
+            text = ["[tool_calls]"]
+            extra["content_placeholder_reason"] = "tool_calls"
+        elif message.get("function_call"):
+            text = ["[function_call]"]
+            extra["content_placeholder_reason"] = "function_call"
+        else:
+            raise HTTPException(422, detail="Versioned input requires supported content")
+    return {"sender": role, "content": "\n".join(text),
+            "images": [{"data": data, "mime": mime} for data, mime in images],
+            "tool_calls": message.get("tool_calls"), "extra_metadata": extra}

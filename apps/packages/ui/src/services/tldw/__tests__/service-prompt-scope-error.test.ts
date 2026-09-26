@@ -222,3 +222,26 @@ describe("Service Prompt scope policy", () => {
     })
   })
 })
+
+describe('H1 scoped routes', () => {
+  it.each(['/api/v1/chat/conversations/chat/history/selection', '/api/v1/chat/conversations/chat/history/legacy-projection', '/api/v1/chats/chat/completions/persist'])('allows only POST %s', path => {
+    expect(isServicePromptRequestPath(path, 'POST')).toBe(true)
+    for (const method of ['GET', 'PUT', 'PATCH', 'DELETE']) expect(isServicePromptRequestPath(path, method)).toBe(false)
+  })
+  it.each(['/api/v1/chat/conversations//history/selection', '/api/v1/chat/conversations/a%2fb/history/selection', '/api/v1/chat/conversations/a/history/selection/extra', '/api/v1/chat/conversations/a/history/legacy-projection/', '/api/v1/chats/a/completions/persist/extra'])('rejects malformed %s', path => {
+    expect(isServicePromptRequestPath(path, 'POST')).toBe(false)
+  })
+})
+
+it.each([
+  ["/api/v1/chats/child", "GET", true],
+  ["/api/v1/chats/child/settings?scope_type=workspace", "GET", true],
+  ["/api/v1/chats/child/settings", "PUT", true],
+  ["/api/v1/chats/child", "PUT", true],
+  ["/api/v1/chats/child/settings", "POST", false],
+  ["/api/v1/chats/child/settings/extra", "PUT", false],
+  ["/api/v1/chats/%2e%2e/settings", "PUT", false],
+  ["/api/v1/chats/child%2fother/settings", "GET", false]
+])("scoped chat path %s %s has exact access %s", (path, method, expected) => {
+  expect(isServicePromptRequestPath(path, method)).toBe(expected)
+})

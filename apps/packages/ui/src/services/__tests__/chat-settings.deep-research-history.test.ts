@@ -19,6 +19,7 @@ const storageState = vi.hoisted(() => {
 
 vi.mock("@/utils/safe-storage", () => ({
   createSafeStorage: () => ({
+    hasPersistentBackend: true,
     get: storageState.get,
     set: storageState.set,
     remove: storageState.remove
@@ -41,7 +42,8 @@ import {
 } from "@/services/chat-settings"
 
 const buildAttachment = (overrides: Record<string, unknown> = {}) => {
-  const runId = typeof overrides.run_id === "string" ? overrides.run_id : "run_123"
+  const runId =
+    typeof overrides.run_id === "string" ? overrides.run_id : "run_123"
   return {
     run_id: runId,
     query: `Query for ${runId}`,
@@ -146,12 +148,12 @@ describe("chat settings deep research attachment history", () => {
       ]
     })
 
-    expect(settings?.deepResearchAttachmentHistory?.map((entry) => entry.run_id)).toEqual([
-      "run_hist_new",
-      "run_hist_dup",
-      "run_hist_extra"
-    ])
-    expect(settings?.deepResearchAttachmentHistory?.[1]?.query).toBe("Newer dup")
+    expect(
+      settings?.deepResearchAttachmentHistory?.map((entry) => entry.run_id)
+    ).toEqual(["run_hist_new", "run_hist_dup", "run_hist_extra"])
+    expect(settings?.deepResearchAttachmentHistory?.[1]?.query).toBe(
+      "Newer dup"
+    )
   })
 
   it("merges history by per-entry updatedAt instead of top-level settings updatedAt", () => {
@@ -197,12 +199,16 @@ describe("chat settings deep research attachment history", () => {
     const merged = mergeChatSettings(local, remote)
 
     expect(merged?.deepResearchAttachment?.run_id).toBe("run_active_remote")
-    expect(merged?.deepResearchAttachmentHistory?.map((entry) => entry.run_id)).toEqual([
+    expect(
+      merged?.deepResearchAttachmentHistory?.map((entry) => entry.run_id)
+    ).toEqual([
       "run_hist_shared",
       "run_hist_remote_only",
       "run_hist_local_only"
     ])
-    expect(merged?.deepResearchAttachmentHistory?.[0]?.query).toBe("Shared newer")
+    expect(merged?.deepResearchAttachmentHistory?.[0]?.query).toBe(
+      "Shared newer"
+    )
   })
 
   it("fails cleanly when the combined active-plus-history payload exceeds the byte cap", async () => {
@@ -226,6 +232,18 @@ describe("chat settings deep research attachment history", () => {
 
     const storageKey = getChatSettingsStorageKey("local:history-too-large")
     expect(next).toBeNull()
-    expect(storageState.store.has(storageKey)).toBe(false)
+    // The guarded reader may establish an empty local baseline; the oversized payload is never saved.
+    expect(storageState.store.get(storageKey)).toBeNull()
   })
+})
+
+vi.mock("@/db/dexie/schema", async () => ({
+  db: (await import("@/hooks/chat/__tests__/local-history-fixture")).memory
+}))
+beforeEach(async () => {
+  const { memory } = await import(
+    "@/hooks/chat/__tests__/local-history-fixture"
+  )
+  memory.chatHistories.rows.clear()
+  for (const id of ["history-too-large"]) await memory.chatHistories.put({ id })
 })

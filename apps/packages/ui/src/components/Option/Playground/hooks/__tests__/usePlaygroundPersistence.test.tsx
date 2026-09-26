@@ -1,7 +1,10 @@
-import { renderHook, waitFor } from "@testing-library/react"
+import { act, renderHook, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { usePlaygroundPersistence } from "../usePlaygroundPersistence"
+
+const selectedHistory = vi.hoisted(() => ({ value: null as any }))
+vi.mock('@/hooks/chat/useHistorySelection', () => ({ useHistorySelectionContext: () => selectedHistory.value }))
 
 const mocks = vi.hoisted(() => ({
   initialize: vi.fn(),
@@ -105,6 +108,7 @@ const buildDeps = (overrides: Record<string, unknown> = {}) => ({
 
 describe("usePlaygroundPersistence", () => {
   beforeEach(() => {
+    selectedHistory.value = null
     mocks.initialize.mockReset()
     mocks.searchCharacters.mockReset()
     mocks.listCharacters.mockReset()
@@ -475,4 +479,27 @@ describe("usePlaygroundPersistence", () => {
       })
     )
   })
+  it.each(['loading', 'ready'])('does not upload an H1 %s selection through legacy save', async status => {
+    selectedHistory.value = { getCurrent: () => ({ status, owner: status === 'ready' ? { kind: 'local' } : null }), fence: () => () => true }
+    const { result } = renderHook(() => usePlaygroundPersistence(buildDeps()))
+    await act(async () => { await result.current.handleSaveChatToServer() })
+    expect(mocks.createChat).not.toHaveBeenCalled()
+    expect(mocks.addChatMessage).not.toHaveBeenCalled()
+  })
+
+  it.each(['initialize', 'createChat'] as const)('does not retarget or copy after a selection replaces a draft during %s', async held => {
+    let current = true
+    selectedHistory.value = { getCurrent: () => ({ status: current ? 'idle' : 'ready' }), fence: () => () => current }
+    let release!: (value?: any) => void
+    mocks[held].mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
+    const deps = buildDeps()
+    renderHook(() => usePlaygroundPersistence(deps))
+    await waitFor(() => expect(release).toBeTypeOf('function'))
+    current = false
+    await act(async () => { release({ id: 'late-draft' }) })
+    expect(deps.setServerChatId).not.toHaveBeenCalled()
+    expect(mocks.addChatMessage).not.toHaveBeenCalled()
+    if (held === 'initialize') expect(mocks.createChat).not.toHaveBeenCalled()
+  })
+
 })

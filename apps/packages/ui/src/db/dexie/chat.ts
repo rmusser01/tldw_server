@@ -1,4 +1,12 @@
 import {
+  assertNoPendingLocalSettingsWrite,
+  withLocalMessageMutation,
+  type LocalHistoryOwnerV1,
+  sanitizeImportedHistory,
+  sanitizeImportedMessage,
+  stripHistoryAuthority
+} from "./history-selection"
+import {
   ChatHistory,
   HistoryInfo,
   LastUsedModelType,
@@ -285,7 +293,7 @@ export class PageAssistDatabase {
   }
 
   async addChatHistory(history: HistoryInfo) {
-    await db.chatHistories.add(history);
+    await db.chatHistories.add(sanitizeImportedHistory(history));
   }
 
   async updateChatHistoryCreatedAt(id: string, createdAt: number) {
@@ -297,11 +305,22 @@ export class PageAssistDatabase {
   }
 
   async addMessage(message: Message) {
-    await db.messages.add(message);
+    await db.messages.add(stripHistoryAuthority(message));
   }
 
-  async updateMessage(history_id: string, message_id: string, content: string) {
-    await db.messages.where('id').equals(message_id).modify({ content });
+  async updateMessage(
+    history_id: string,
+    message_id: string,
+    content: string,
+    owner?: LocalHistoryOwnerV1
+  ) {
+    await withLocalMessageMutation(history_id, owner, async () => {
+      const row = await db.messages.get(message_id);
+      if (!row) throw new Error("missing_message");
+      if (row.history_id !== history_id)
+        throw new Error("message_owner_mismatch");
+      await db.messages.update(message_id, { content });
+    });
   }
 
   async updateMessageMedia(
@@ -330,12 +349,32 @@ export class PageAssistDatabase {
   }
 
   async removeChatHistory(id: string) {
-    await db.chatHistories.delete(id);
-    await db.compareStates.delete(id);
+    await db.transaction("rw", [db.chatHistories, db.compareStates], async () => {
+      assertNoPendingLocalSettingsWrite(await db.chatHistories.get(id));
+      await db.chatHistories.delete(id);
+      await db.compareStates.delete(id);
+    });
   }
 
-  async removeMessage(history_id: string, message_id: string) {
-    await db.messages.delete(message_id);
+  async removeMessage(
+    history_id: string,
+    message_id: string,
+    owner?: LocalHistoryOwnerV1
+  ) {
+    return withLocalMessageMutation(history_id, owner, async () => {
+      const row = await db.messages.get(message_id);
+      if (!row) throw new Error("missing_message");
+      if (row.history_id !== history_id)
+        throw new Error("message_owner_mismatch");
+      const rows = await db.messages
+        .where("history_id")
+        .equals(history_id)
+        .toArray();
+      if (rows.some((child) => child.parent_message_id === message_id))
+        throw new Error("message_has_descendants");
+      await db.messages.delete(message_id);
+      return row;
+    });
   }
 
   async updateLastUsedModel(history_id: string, model_id: string) {
@@ -353,6 +392,7 @@ export class PageAssistDatabase {
 
   async deleteChatHistory(id: string) {
     await db.transaction('rw', [db.chatHistories, db.messages, db.compareStates], async () => {
+      assertNoPendingLocalSettingsWrite(await db.chatHistories.get(id));
       await db.chatHistories.delete(id);
       await db.messages.where('history_id').equals(id).delete();
       await db.compareStates.delete(id);
@@ -361,6 +401,7 @@ export class PageAssistDatabase {
 
   async deleteAllChatHistory() {
     await db.transaction('rw', [db.chatHistories, db.messages, db.compareStates], async () => {
+      (await db.chatHistories.toArray()).forEach(assertNoPendingLocalSettingsWrite);
       await db.chatHistories.clear();
       await db.messages.clear();
       await db.compareStates.clear();
@@ -722,7 +763,10 @@ export class PageAssistDatabase {
   }
 
   async setUserID(id: string) {
-    await db.userSettings.put({ id: 'main', user_id: id });
+    await db.transaction('rw', [db.userSettings], async () => {
+      const previous = await db.userSettings.get('main');
+      await db.userSettings.put({ ...previous, id: 'main', user_id: id });
+    });
   }
 
 
@@ -732,16 +776,21 @@ export class PageAssistDatabase {
   } = {}) {
     const { replaceExisting = false, mergeData = true } = options;
 
-    if (!mergeData && !replaceExisting) {
-      // Clear existing data
-      await this.deleteAllChatHistory();
-    }
-
-    // Use transaction for atomic batch operations
-    await db.transaction('rw', [db.chatHistories, db.messages], async () => {
-      // Collect all histories and messages for bulk operations
-      const histories = data.filter(item => item.history).map(item => item.history);
-      const allMessages = data.flatMap(item => item.messages || []);
+    // Preserve this destination's guard, never imported authority, under the replacement lock.
+    await db.transaction('rw', [db.chatHistories, db.messages, db.compareStates], async () => {
+      const histories = data.filter(item => item.history).map(item => sanitizeImportedHistory(item.history));
+      for (const history of histories) {
+        const destination = await db.chatHistories.get(history.id);
+        if (destination?.local_settings_guard)
+          history.local_settings_guard = destination.local_settings_guard;
+      }
+      if (!mergeData && !replaceExisting) {
+        (await db.chatHistories.toArray()).forEach(assertNoPendingLocalSettingsWrite);
+        await db.chatHistories.clear();
+        await db.messages.clear();
+        await db.compareStates.clear();
+      }
+      const allMessages = data.flatMap(item => (item.messages || []).map(sanitizeImportedMessage));
 
       // Bulk put histories
       if (histories.length > 0) {

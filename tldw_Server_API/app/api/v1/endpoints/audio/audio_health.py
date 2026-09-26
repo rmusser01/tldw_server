@@ -2,7 +2,6 @@
 # Description: Audio health endpoints.
 import asyncio
 import copy
-from dataclasses import asdict, is_dataclass
 import importlib.util
 import os
 import platform
@@ -10,6 +9,7 @@ import re
 import sys
 import time
 from ctypes.util import find_library as _ctypes_find_library
+from dataclasses import asdict, is_dataclass
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -17,9 +17,11 @@ from loguru import logger
 from starlette import status
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequireRole,
     TokenScopeGuard,
     User,
     check_rate_limit,
+    get_auth_principal,
     get_request_user,
 )
 from tldw_Server_API.app.api.v1.endpoints.audio.audio_tts import get_tts_service
@@ -496,7 +498,7 @@ def _sanitize_health_path_value(value: Any) -> Any:
     return text
 
 
-@router.get("/health")
+@router.get("/health", dependencies=[Depends(get_request_user)])
 async def get_tts_health(request: Request, tts_service: TTSServiceV2 = Depends(get_tts_service)):
     """
     Get health status of TTS providers.
@@ -961,7 +963,18 @@ def get_stt_capabilities(
     return payload
 
 
-@router.get("/transcriptions/health", summary="Check STT transcription model health")
+async def _authorize_stt_health_warm(request: Request, warm: bool = Query(default=False)) -> None:
+    """Keep passive status public while reserving model warm-up for admins."""
+    if warm:
+        principal = await get_auth_principal(request)
+        await RequireRole("admin")(principal)
+
+
+@router.get(
+    "/transcriptions/health",
+    summary="Check STT transcription model health",
+    dependencies=[Depends(_authorize_stt_health_warm)],
+)
 async def get_stt_health(
     request: Request,
     model: Optional[str] = Query(

@@ -1,0 +1,11 @@
+# H1 latest-dev backend integration review
+
+Tracking: TASK-13261.5. Independent review of the merge worktree against accepted H1 `ac76c4bc5b` and server `dev` `91e8bbf84c25d3afbba2bb53ed06280d44c35307`.
+
+| Priority | Finding | Reproduction and required result |
+|---|---|---|
+| P2 | `chat_service.py` selected-history reconstruction sets `content=None` for every `content_placeholder_reason`, including `image_attachment`, after constructing valid image parts. | A selected saved image-only user turn with `<Image attachment x1>`, one data URL and `image_attachment` produced `{'role':'user','content':None}`. It must preserve the image and strip only the eligible unedited generated placeholder text. |
+| P2 | Selected-history reconstruction omits saved ordered `image_details`; `prepare_native_history_message` does not persist normalized details. | A saved `high` image option becomes an image URL with no detail, and a new H1 image turn cannot retain its option. Validate and retain each ordered detail before admitting the input. |
+| P2 | `message_store.py` H1 selected read accepts incomplete ordered image rows. | In isolated SQLite, positions `[0,2]` or empty image bytes were returned as selected content while the newer dev strict read rejected them. Reject gaps, invalid positions and empty bytes; retain the legacy primary-only fallback only when no ordered image rows exist. |
+
+All three findings were fixed and independently re-reviewed with no remaining P1/P2 in this scope. The selected-history path now preserves valid image-only content and ordered image detail; the selected read enforces contiguous positions and nonempty bytes. The fixes have focused RED/GREEN regressions in `test_history_selected_images.py` and related read tests. The independent re-review ran 92 tests (48 PostgreSQL cases deselected) with no failures; the root's dedicated live PostgreSQL migration/history rerun passed 52 tests with one intentional SQLite-only skip and four inherited warnings. The reviewer identified no additional P1/P2 in the migration lineage repair, rollback/reopen, PostgreSQL RLS, owner admission, saved-turn retry separation or streaming receipt protection. Whole-branch qualification remains separate.

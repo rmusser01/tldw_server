@@ -1,9 +1,15 @@
+import { useHistorySelectionContext } from "./useHistorySelection"
 import React from "react"
 import type { TFunction } from "i18next"
 import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 import type { ServicePromptSnapshot } from "@/services/service-prompts"
 import { linkServerChatMirror, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
+
+export type VerifiedHistoryMirrorOwner = {
+  ownerKey: string
+  validateLease: () => boolean
+}
 
 type UseServerChatHistoryIdOptions = {
   serverChatId: string | null
@@ -23,6 +29,8 @@ export const useServerChatHistoryId = ({
   temporaryChat,
   t
 }: UseServerChatHistoryIdOptions) => {
+  const selection = useHistorySelectionContext()
+  const scopedCache = React.useRef(new Map<string, string>())
   const historyIdRef = React.useRef(historyId)
   const serverChatHistoryIdRef = React.useRef<{
     chatId: string | null
@@ -48,10 +56,12 @@ export const useServerChatHistoryId = ({
       chatId: string,
       title?: string,
       scopeInvalidatedSignal?: AbortSignal,
-      snapshot?: ServicePromptSnapshot
+      ownerOrSnapshot?: VerifiedHistoryMirrorOwner | ServicePromptSnapshot
     ) => {
       if (!chatId || temporaryChat) return null
-      if (!snapshot) throw createServicePromptScopeChangedError()
+      const snapshot = ownerOrSnapshot && "requestScope" in ownerOrSnapshot ? ownerOrSnapshot : undefined
+      const verifiedOwner = ownerOrSnapshot && "validateLease" in ownerOrSnapshot ? ownerOrSnapshot : undefined
+      if (!snapshot && !verifiedOwner && !selection) throw createServicePromptScopeChangedError()
       const throwIfScopeInvalidated = () => {
         if (scopeInvalidatedSignal?.aborted) {
           throw createServicePromptScopeChangedError()
@@ -59,6 +69,53 @@ export const useServerChatHistoryId = ({
       }
       throwIfScopeInvalidated()
       const currentHistoryId = historyIdRef.current
+      const selectedOwner = selection?.getCurrent().owner
+      const owner = verifiedOwner ||
+        (selectedOwner?.kind === "native" &&
+        selectedOwner.conversation_id === chatId
+          ? {
+              ownerKey: serverChatMirrorOwnerKey({
+                requestScope: selectedOwner.request_scope
+              }),
+              validateLease: selectedOwner.validate_lease
+            }
+          : null)
+      if (selection && !owner) throw new Error("unbound_server_mirror")
+      if (owner) {
+        const assertCurrent = () => {
+          throwIfScopeInvalidated()
+          if (!owner.validateLease())
+            throw createServicePromptScopeChangedError()
+        }
+        assertCurrent()
+        if (snapshot && serverChatMirrorOwnerKey(snapshot) !== owner.ownerKey)
+          throw createServicePromptScopeChangedError()
+        const key = JSON.stringify([owner.ownerKey, chatId])
+        const localId =
+          scopedCache.current.get(key) ||
+          (await linkServerChatMirror({
+            chatId,
+            title:
+              title?.trim() ||
+              t("common:untitled", { defaultValue: "Untitled" }),
+            ownerKey: owner.ownerKey,
+            currentHistoryId,
+            signal: scopeInvalidatedSignal
+          }))
+        assertCurrent()
+        // A concurrent bind for this same verified owner may have installed
+        // the exact mirror while this request was awaiting storage.
+        if (historyIdRef.current !== currentHistoryId && historyIdRef.current !== localId)
+          throw createServicePromptScopeChangedError()
+        scopedCache.current.set(key, localId)
+        if (
+          historyIdRef.current === currentHistoryId &&
+          currentHistoryId !== localId
+        )
+          setHistoryId(localId, { preserveServerChatId: true })
+        return localId
+      }
+      if (!snapshot) throw createServicePromptScopeChangedError()
       const ownerKey = serverChatMirrorOwnerKey(snapshot)
       const session = usePlaygroundSessionStore.getState()
       const legacyHistoryId = session.isSessionValid(snapshot.scopeKey) &&
@@ -108,7 +165,7 @@ export const useServerChatHistoryId = ({
       }
       return linkedHistoryId
     },
-    [setHistoryId, t, temporaryChat]
+    [selection, setHistoryId, t, temporaryChat]
   )
 
   return {

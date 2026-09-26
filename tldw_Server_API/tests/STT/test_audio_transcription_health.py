@@ -1,5 +1,5 @@
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.endpoints.audio.audio import router as audio_router
@@ -41,6 +41,48 @@ def test_transcriptions_health_basic_status(client: TestClient):
 
 
 @pytest.mark.unit
+def test_transcriptions_health_rejects_anonymous_warm_up(monkeypatch, client: TestClient):
+    """An anonymous health probe must not download or initialize a model."""
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
+
+    calls = []
+    monkeypatch.setattr(atlib, "get_whisper_model", lambda *args, **kwargs: calls.append((args, kwargs)))
+
+    response = client.get("/api/v1/audio/transcriptions/health", params={"model": "whisper-1", "warm": "true"})
+    assert response.status_code == 401
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_transcriptions_health_rejects_non_admin_warm_up(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints.audio import audio_health
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+
+    async def non_admin(_request):
+        return AuthPrincipal(kind="user", user_id=2)
+
+    monkeypatch.setattr(audio_health, "get_auth_principal", non_admin)
+    request = Request({"type": "http", "method": "GET", "path": "/api/v1/audio/transcriptions/health", "headers": []})
+    with pytest.raises(HTTPException) as exc_info:
+        await audio_health._authorize_stt_health_warm(request, warm=True)
+    assert exc_info.value.status_code == 403
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("method,path", [
+    ("GET", "/api/v1/audio/health"),
+    ("GET", "/api/v1/audio/providers"),
+    ("GET", "/api/v1/audio/tts/providers/openai/model-info"),
+    ("GET", "/api/v1/audio/voices/catalog"),
+    ("POST", "/api/v1/audio/reset-metrics"),
+    ("POST", "/api/v1/audio/stream/test"),
+])
+def test_model_initializing_diagnostics_require_auth(client: TestClient, method: str, path: str):
+    response = client.request(method, path)
+    assert response.status_code == 401
+
+
+@pytest.mark.unit
 def test_transcriptions_health_warm_uses_whisper_model(monkeypatch, client: TestClient):
     """
     When warm=true and the provider is Whisper, the endpoint should attempt
@@ -61,7 +103,11 @@ def test_transcriptions_health_warm_uses_whisper_model(monkeypatch, client: Test
 
     monkeypatch.setattr(atlib, "get_whisper_model", fake_get_whisper_model)
 
-    r = client.get("/api/v1/audio/transcriptions/health", params={"model": "whisper-1", "warm": "true"})
+    r = client.get(
+        "/api/v1/audio/transcriptions/health",
+        params={"model": "whisper-1", "warm": "true"},
+        headers={"X-API-KEY": "test-api-key-1234567890"},
+    )
     assert r.status_code == 200
     data = r.json()
 

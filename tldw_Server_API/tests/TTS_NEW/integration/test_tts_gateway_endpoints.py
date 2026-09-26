@@ -391,10 +391,11 @@ async def test_tts_catalog_routes_enforce_rate_limit_dependency(
     assert response.status_code == status.HTTP_429_TOO_MANY_REQUESTS
 
 
-async def test_tts_catalog_routes_remain_public_with_server_credential_context(
+async def test_tts_catalog_routes_reject_anonymous_before_provider_discovery(
     test_client,
 ) -> None:
     catalog_user_ids: list[int | None] = []
+    service_calls: list[bool] = []
 
     class _Service:
         async def get_capabilities(self):
@@ -417,6 +418,7 @@ async def test_tts_catalog_routes_remain_public_with_server_credential_context(
             return {}
 
     async def _get_service():
+        service_calls.append(True)
         return _Service()
 
     async def _reject_required_user():
@@ -434,10 +436,11 @@ async def test_tts_catalog_routes_remain_public_with_server_credential_context(
         test_client.app.dependency_overrides.pop(audio_endpoints.get_tts_service, None)
         test_client.app.dependency_overrides.pop(audio_tts.get_request_user, None)
 
-    assert providers.status_code == status.HTTP_200_OK
-    assert model_info.status_code == status.HTTP_200_OK
-    assert voices.status_code == status.HTTP_200_OK
-    assert catalog_user_ids == [None, None, None]
+    assert providers.status_code == status.HTTP_401_UNAUTHORIZED
+    assert model_info.status_code == status.HTTP_401_UNAUTHORIZED
+    assert voices.status_code == status.HTTP_401_UNAUTHORIZED
+    assert catalog_user_ids == []
+    assert service_calls == []
 
 
 async def test_gateway_provider_and_model_scoped_voice_catalog(

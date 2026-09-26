@@ -1,3 +1,6 @@
+import { db } from "@/db/dexie/schema"
+import Dexie from "dexie"
+import { requirePersistentStorage } from "@/utils/persistent-storage"
 import { createSafeStorage } from "@/utils/safe-storage"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { buildChatLinkedResearchPath } from "@/components/Option/Playground/research-run-status"
@@ -13,6 +16,9 @@ import {
 import type { ChatScope } from "@/types/chat-scope"
 
 const storage = createSafeStorage()
+const localChatSettingsStorage = createSafeStorage({ area: "local" })
+export const chatSettingsStorageForKey = (chatKey: string) =>
+  chatKey.startsWith("local:") ? localChatSettingsStorage : storage
 const MAX_CHAT_SETTINGS_BYTES = 200_000
 const MAX_DEEP_RESEARCH_ATTACHMENT_CLAIMS = 5
 const MAX_DEEP_RESEARCH_ATTACHMENT_UNRESOLVED_QUESTIONS = 5
@@ -145,10 +151,11 @@ const normalizeConversationContextMirrors = (
   const rawContext = isRecord(raw.conversationContext)
     ? raw.conversationContext
     : null
-  const context: ConversationContextSettings =
-    isRecord(settings.conversationContext)
-      ? { ...settings.conversationContext }
-      : {}
+  const context: ConversationContextSettings = isRecord(
+    settings.conversationContext
+  )
+    ? { ...settings.conversationContext }
+    : {}
   const hasNestedDictionaryIds =
     rawContext !== null && hasOwn(rawContext, "chat_dictionary_ids")
   const hasLegacyDictionaryIds = hasOwn(raw, "chat_dictionary_ids")
@@ -340,9 +347,7 @@ const coerceSettings = (raw: any): ChatSettingsRecord | null => {
       ? raw.schemaVersion
       : CHAT_SETTINGS_SCHEMA_VERSION
   const updatedAt =
-    typeof raw.updatedAt === "string"
-      ? raw.updatedAt
-      : new Date().toISOString()
+    typeof raw.updatedAt === "string" ? raw.updatedAt : new Date().toISOString()
   const next: ChatSettingsRecord = {
     ...copyKnownChatSettings(raw),
     schemaVersion,
@@ -397,11 +402,15 @@ const coerceSettings = (raw: any): ChatSettingsRecord | null => {
       next.deepResearchPinnedAttachment = sanitizedPinnedAttachment
     }
   }
-  if (Object.prototype.hasOwnProperty.call(raw, "deepResearchAttachmentHistory")) {
+  if (
+    Object.prototype.hasOwnProperty.call(raw, "deepResearchAttachmentHistory")
+  ) {
     next.deepResearchAttachmentHistory = sanitizeDeepResearchAttachmentHistory(
       raw.deepResearchAttachmentHistory,
       [
-        sanitizedAttachment?.run_id ?? next.deepResearchAttachment?.run_id ?? null,
+        sanitizedAttachment?.run_id ??
+          next.deepResearchAttachment?.run_id ??
+          null,
         sanitizedPinnedAttachment?.run_id ??
           next.deepResearchPinnedAttachment?.run_id ??
           null
@@ -416,13 +425,11 @@ export const normalizeChatSettingsRecord = (
 ): ChatSettingsRecord | null => coerceSettings(raw)
 
 const isMissingRemoteChatSettingsError = (error: unknown): boolean => {
-  const candidate = error as
-    | {
-        status?: unknown
-        response?: { status?: unknown }
-        details?: { status?: unknown }
-      }
-    | null
+  const candidate = error as {
+    status?: unknown
+    response?: { status?: unknown }
+    details?: { status?: unknown }
+  } | null
   const status = Number(
     candidate?.status ??
       candidate?.response?.status ??
@@ -455,7 +462,9 @@ const normalizeComparableChatSettingsValue = (value: unknown): unknown => {
   }
 
   const normalizedEntries = Object.entries(value as Record<string, unknown>)
-    .filter(([key, entryValue]) => key !== "updatedAt" && entryValue !== undefined)
+    .filter(
+      ([key, entryValue]) => key !== "updatedAt" && entryValue !== undefined
+    )
     .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
     .map(([key, entryValue]) => [
       key,
@@ -529,7 +538,9 @@ export const mergeChatSettings = (
     remote.deepResearchAttachment !== null
   ) {
     const localAttachmentTime = toEpoch(local.deepResearchAttachment.updatedAt)
-    const remoteAttachmentTime = toEpoch(remote.deepResearchAttachment.updatedAt)
+    const remoteAttachmentTime = toEpoch(
+      remote.deepResearchAttachment.updatedAt
+    )
     merged.deepResearchAttachment =
       remoteAttachmentTime >= localAttachmentTime
         ? remote.deepResearchAttachment
@@ -542,8 +553,12 @@ export const mergeChatSettings = (
     local.deepResearchPinnedAttachment !== null &&
     remote.deepResearchPinnedAttachment !== null
   ) {
-    const localPinnedTime = toEpoch(local.deepResearchPinnedAttachment.updatedAt)
-    const remotePinnedTime = toEpoch(remote.deepResearchPinnedAttachment.updatedAt)
+    const localPinnedTime = toEpoch(
+      local.deepResearchPinnedAttachment.updatedAt
+    )
+    const remotePinnedTime = toEpoch(
+      remote.deepResearchPinnedAttachment.updatedAt
+    )
     merged.deepResearchPinnedAttachment =
       remotePinnedTime >= localPinnedTime
         ? remote.deepResearchPinnedAttachment
@@ -593,7 +608,10 @@ const buildPatchedChatSettingsInput = (
   if (Object.prototype.hasOwnProperty.call(patch, "assistantOverlay")) {
     if (patch.assistantOverlay === null) {
       next.assistantOverlay = null
-    } else if (isRecord(patch.assistantOverlay) && isRecord(existing?.assistantOverlay)) {
+    } else if (
+      isRecord(patch.assistantOverlay) &&
+      isRecord(existing?.assistantOverlay)
+    ) {
       next.assistantOverlay = {
         ...existing?.assistantOverlay,
         ...patch.assistantOverlay
@@ -606,12 +624,231 @@ const buildPatchedChatSettingsInput = (
   return next
 }
 
+type LocalSettingsGuard =
+  import("@/db/dexie/types").HistoryInfo["local_settings_guard"]
+const settingsGuardKey = (guard: LocalSettingsGuard) =>
+  JSON.stringify(guard ?? null)
+const validSettingsGuard = (guard: LocalSettingsGuard) =>
+  guard === undefined ||
+  (isRecord(guard) &&
+    typeof guard.revision === "string" &&
+    guard.revision.length > 0 &&
+    (guard.initialized === undefined ||
+      typeof guard.initialized === "boolean") &&
+    Array.isArray(guard.pending) &&
+    guard.pending.every(
+      (token) => typeof token === "string" && token.length > 0
+    ) &&
+    new Set(guard.pending).size === guard.pending.length)
+
+/** Strict fork read: the ordinary null-on-error reader cannot certify required state absent. */
+const requirePlainForkSettings = (raw: unknown) => {
+  if (raw === undefined) return
+  if (
+    !isRecord(raw) ||
+    raw.schemaVersion !== CHAT_SETTINGS_SCHEMA_VERSION ||
+    typeof raw.updatedAt !== "string"
+  )
+    throw new Error("fork_chat_settings_unavailable")
+  for (const [key, value] of Object.entries(raw)) {
+    if (["schemaVersion", "updatedAt", "pinnedMessageIds"].includes(key))
+      continue
+    if (
+      key === "summary" &&
+      ((value === null || value === undefined) ||
+        (isRecord(value) &&
+          Object.keys(value).every((k) =>
+            ["enabled", "content", "sourceRange", "updatedAt"].includes(k)
+          ) &&
+          (value.enabled === undefined || value.enabled === false)))
+    )
+      continue
+    const emptyArray =
+      [
+        "chat_dictionary_ids",
+        "participantCharacterIds",
+        "deepResearchAttachmentHistory"
+      ].includes(key) &&
+      Array.isArray(value) &&
+      value.length === 0
+    const emptyObject =
+      ["characterMemoryById", "conversationContext"].includes(key) &&
+      isRecord(value) &&
+      Object.keys(value).length === 0
+    const inactive = ["autoSummaryEnabled"].includes(key) && value === false
+    const unset =
+      [
+        "assistantOverlay",
+        "chatGenerationOverride",
+        "generationOverrides",
+        "directedCharacterId",
+        "chatPresetOverrideId",
+        "greetingSelectionId",
+        "greetingsVersion",
+        "greetingsChecksum",
+        "authorNotePosition",
+        "deepResearchAttachment",
+        "deepResearchPinnedAttachment",
+        "autoSummaryThresholdMessages",
+        "autoSummaryWindowMessages"
+      ].includes(key) && (value === null || value === undefined)
+    if (
+      emptyArray ||
+      emptyObject ||
+      inactive ||
+      unset ||
+      (key === "authorNote" && value === "") ||
+      (key === "imageEventSyncMode" && value === "off")
+    )
+      continue
+    throw new Error("unsupported_fork_chat_settings")
+  }
+}
+
+/** The external read happens outside Dexie; the supplied check runs inside the owning transaction. */
+export const withPlainLocalForkSettings = async <T>(
+  historyId: string,
+  operation: (
+    validate: (history: import("@/db/dexie/types").HistoryInfo) => void
+  ) => Promise<T>
+): Promise<T> => {
+  try {
+    await ensureLocalChatSettingsBaseline(historyId)
+  } catch {
+    throw new Error("fork_chat_settings_unavailable")
+  }
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const history = await db.chatHistories.get(historyId)
+    if (!history) throw new Error("missing_conversation")
+    const guard = history.local_settings_guard
+    if (!validSettingsGuard(guard) || guard?.pending.length)
+      throw new Error("fork_chat_settings_unavailable")
+    let raw: unknown
+    try {
+      requirePersistentStorage(localChatSettingsStorage)
+      raw = await localChatSettingsStorage.get(
+        getChatSettingsStorageKey(`local:${historyId}`)
+      )
+    } catch {
+      throw new Error("fork_chat_settings_unavailable")
+    }
+    if (raw !== null) requirePlainForkSettings(raw)
+    if (raw === undefined) throw new Error("fork_chat_settings_unavailable")
+    try {
+      return await operation((current) => {
+        if (
+          !validSettingsGuard(current.local_settings_guard) ||
+          current.local_settings_guard?.pending.length
+        )
+          throw new Error("fork_chat_settings_unavailable")
+        if (
+          settingsGuardKey(current.local_settings_guard) !==
+          settingsGuardKey(guard)
+        )
+          throw new Error("fork_chat_settings_changed")
+      })
+    } catch (error) {
+      if (
+        !(error instanceof Error) ||
+        error.message !== "fork_chat_settings_changed"
+      )
+        throw error
+      // A summary-only edit is not retained-context drift. Reread policy under the new guard.
+    }
+  }
+  throw new Error("fork_chat_settings_changed")
+}
+
+/** Publish the pending guard before external I/O. Dexie.waitFor keeps the owning lock alive. */
+const localSettingsWrite = async (
+  historyId: string,
+  operation: (initialized: boolean) => Promise<void>
+) => {
+  requirePersistentStorage(localChatSettingsStorage)
+  const token = crypto.randomUUID()
+  await db.transaction("rw", [db.chatHistories], async () => {
+    const history = await db.chatHistories.get(historyId)
+    if (!history) throw new Error("missing_conversation")
+    if (!validSettingsGuard(history.local_settings_guard))
+      throw new Error("fork_chat_settings_unavailable")
+    await db.chatHistories.update(historyId, {
+      local_settings_guard: {
+        ...history.local_settings_guard,
+        revision: token,
+        pending: [...(history.local_settings_guard?.pending ?? []), token]
+      }
+    })
+  })
+  // A failed/uncertain external effect is never retried here. Its committed pending token remains.
+  await db.transaction("rw", [db.chatHistories], async () => {
+    const history = await db.chatHistories.get(historyId)
+    const guard = history?.local_settings_guard
+    if (!guard || !validSettingsGuard(guard) || !guard.pending.includes(token))
+      throw new Error("fork_chat_settings_unavailable")
+    requirePersistentStorage(localChatSettingsStorage)
+    await Dexie.waitFor(operation(guard.initialized === true))
+    requirePersistentStorage(localChatSettingsStorage)
+    await db.chatHistories.update(historyId, {
+      local_settings_guard: {
+        initialized: true,
+        revision: crypto.randomUUID(),
+        pending: guard.pending.filter((value) => value !== token)
+      }
+    })
+  })
+}
+const requireSettingsRecord = (raw: unknown) => {
+  if (
+    raw !== undefined &&
+    raw !== null &&
+    (!isRecord(raw) ||
+      raw.schemaVersion !== CHAT_SETTINGS_SCHEMA_VERSION ||
+      typeof raw.updatedAt !== "string")
+  )
+    throw new Error("fork_chat_settings_unavailable")
+}
+/** One local payload authority. null is the persisted, initialized empty baseline. */
+const ensureLocalChatSettingsBaseline = async (historyId: string) => {
+  requirePersistentStorage(localChatSettingsStorage)
+  const history = await db.chatHistories.get(historyId)
+  if (!history) throw new Error("missing_conversation")
+  if (!validSettingsGuard(history.local_settings_guard))
+    throw new Error("fork_chat_settings_unavailable")
+  if (history.local_settings_guard?.initialized) return
+  await localSettingsWrite(historyId, async (initialized) => {
+    if (initialized) return
+    const key = getChatSettingsStorageKey(`local:${historyId}`)
+    // WebUI historically used local already. Always preserve an existing local baseline first.
+    const local = await localChatSettingsStorage.get(key)
+    requireSettingsRecord(local)
+    if (local !== undefined) return
+    requirePersistentStorage(storage)
+    const legacy = await storage.get(key)
+    requireSettingsRecord(legacy)
+    await localChatSettingsStorage.set(key, legacy ?? null)
+  })
+}
+const writeLocalChatSettings = async (
+  historyId: string,
+  key: string,
+  payload: ChatSettingsRecord
+) => {
+  // A complete ordinary edit can initialize the local baseline even after failed migration.
+  await localSettingsWrite(historyId, async () => {
+    await localChatSettingsStorage.set(key, payload)
+  })
+}
+
 export const getChatSettingsForKey = async (
   chatKey: string
 ): Promise<ChatSettingsRecord | null> => {
   try {
     const key = getChatSettingsStorageKey(chatKey)
-    const stored = await storage.get<ChatSettingsRecord | undefined>(key)
+    if (chatKey.startsWith("local:"))
+      await ensureLocalChatSettingsBaseline(chatKey.slice(6))
+    const stored = await chatSettingsStorageForKey(chatKey).get<
+      ChatSettingsRecord | undefined
+    >(key)
     return coerceSettings(stored)
   } catch (error) {
     console.error("Failed to load chat settings", error)
@@ -637,7 +874,9 @@ export const saveChatSettingsForKey = async (
     if (!boundedPayload) {
       return false
     }
-    await storage.set(key, boundedPayload)
+    if (chatKey.startsWith("local:"))
+      await writeLocalChatSettings(chatKey.slice(6), key, boundedPayload)
+    else await storage.set(key, boundedPayload)
     return true
   } catch (error) {
     console.error("Failed to save chat settings", error)
@@ -668,16 +907,26 @@ export const syncChatSettingsForServerChat = async (params: {
   allowScratchFallback?: boolean
   scope?: ChatScope
 }): Promise<ChatSettingsRecord | null> => {
-  const { historyId, serverChatId, allowScratchFallback = false, scope } = params
+  const {
+    historyId,
+    serverChatId,
+    allowScratchFallback = false,
+    scope
+  } = params
   if (!serverChatId) return null
   const scopeOptions = scope ? { scope } : undefined
 
   const serverKey = resolveChatSettingsKey({ historyId: null, serverChatId })
   const localKey = resolveChatSettingsKey({ historyId, serverChatId: null })
-  const scratchKey = resolveChatSettingsKey({ historyId: null, serverChatId: null })
+  const scratchKey = resolveChatSettingsKey({
+    historyId: null,
+    serverChatId: null
+  })
 
   const localForServer = await getChatSettingsForKey(serverKey)
-  const localFromHistory = historyId ? await getChatSettingsForKey(localKey) : null
+  const localFromHistory = historyId
+    ? await getChatSettingsForKey(localKey)
+    : null
   const localFromScratch =
     allowScratchFallback && !localForServer && !localFromHistory
       ? await getChatSettingsForKey(scratchKey)

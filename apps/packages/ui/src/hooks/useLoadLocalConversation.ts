@@ -1,3 +1,4 @@
+import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import React from "react"
 import { message } from "antd"
 
@@ -46,6 +47,7 @@ export function useLoadLocalConversation(
 
   const { t, errorLogPrefix, errorDefaultMessage } = options
 
+  const selection = useHistorySelectionContext()
   const dbRef = React.useRef<PageAssistDatabase | null>(null)
   const mountedRef = React.useRef(false)
   const loadGenerationRef = React.useRef(0)
@@ -69,10 +71,13 @@ export function useLoadLocalConversation(
     async (conversationId: string): Promise<boolean> => {
       const generation = ++loadGenerationRef.current
       const restoreRevision = usePlaygroundSessionStore.getState().restoreRevision
+      if (!mountedRef.current) return false
+      selection?.beginLoad()
+      let selectionCurrent = selection?.fence() || (() => true)
       const isCurrent = () => mountedRef.current &&
         generation === loadGenerationRef.current &&
-        restoreRevision === usePlaygroundSessionStore.getState().restoreRevision
-      if (!isCurrent()) return false
+        restoreRevision === usePlaygroundSessionStore.getState().restoreRevision &&
+        selectionCurrent()
       try {
         const db = dbRef.current!
         const [history, historyDetails] = await Promise.all([
@@ -81,13 +86,20 @@ export function useLoadLocalConversation(
         ])
         if (!isCurrent()) return false
 
-        setServerChatId(null)
         if (!isCurrent()) return false
+        if (selection) {
+          if (!await selection.loadConversation({ historyId: conversationId })) return false
+          if (generation !== loadGenerationRef.current) return false
+          selectionCurrent = selection.fence()
+        }
+        if (!isCurrent()) return false
+        const selected = selection?.getCurrent()
+        setServerChatId(selected?.owner?.kind === "native" ? selected.owner.conversation_id : null)
         setHistoryId(conversationId)
-        if (!isCurrent()) return false
-        setHistory(formatToChatHistory(history))
-        if (!isCurrent()) return false
-        setMessages(formatToMessage(history))
+        if (!selected || selected.capture?.status !== "captured") {
+          setHistory(formatToChatHistory(history))
+          setMessages(formatToMessage(history))
+        }
 
         if (!isCurrent()) return false
         const isLastUsedChatModel = await lastUsedChatModelEnabled()
@@ -137,6 +149,7 @@ export function useLoadLocalConversation(
       }
     },
     [
+      selection,
       errorDefaultMessage,
       errorLogPrefix,
       setContextFiles,
@@ -150,4 +163,29 @@ export function useLoadLocalConversation(
       t
     ]
   )
+}
+
+/** Read-only comparison presentation; this never upgrades an unsupported send capture. */
+export async function restoreReadableLocalComparison(
+  controller: import('@/hooks/chat/useHistorySelection').HistorySelectionController,
+  display: (value: { history: ReturnType<typeof formatToChatHistory>; messages: ReturnType<typeof formatToMessage> }) => void,
+  supplied?: Awaited<ReturnType<typeof import('@/db/dexie/helpers').getFullChatData>>
+): Promise<boolean> {
+  const initial = controller.getCurrent()
+  const owner = initial.owner
+  const view = initial.view
+  if (owner?.kind !== 'local' || !view || initial.error !== 'unsupported_comparison_history' || initial.capture?.snapshot.owner_key !== owner.owner_key) return false
+  const current = controller.fence()
+  const { getFullChatData } = await import('@/db/dexie/helpers')
+  const data = supplied === undefined ? await getFullChatData(owner.conversation_id) : supplied
+  if (!current() || !data || data.historyInfo.id !== owner.conversation_id) return false
+  const { getLocalHistoryOwner } = await import('@/db/dexie/history-selection')
+  let verified
+  try { verified = await getLocalHistoryOwner(owner.conversation_id) } catch (error) {
+    console.warn("Failed to verify readable comparison owner", error)
+    return false
+  }
+  if (!current() || controller.getCurrent().owner !== owner || controller.getCurrent().view !== view || verified.owner_key !== owner.owner_key || verified.profile_id !== owner.profile_id) return false
+  display({ history: formatToChatHistory(data.messages), messages: formatToMessage(data.messages) })
+  return true
 }

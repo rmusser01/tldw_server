@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest"
 
 describe("PlaygroundChat winner copy guard", () => {
   it("keeps winner-selection copy in plain language", () => {
-    const sourcePath = path.resolve(__dirname, "../PlaygroundChat.tsx")
+    const sourcePath = path.resolve(__dirname, "../PlaygroundCompareCluster.tsx")
     const source = fs.readFileSync(sourcePath, "utf8")
 
     expect(source).toContain("playground:composer.compareCanonicalOff")

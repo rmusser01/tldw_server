@@ -10,10 +10,11 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any, Literal, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request, Response, status
 from loguru import logger
 from PIL import Image
 from pydantic import ValidationError
+from starlette.concurrency import run_in_threadpool
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     User,
@@ -356,6 +357,7 @@ def _resolve_message_scope(
              dependencies=[Depends(require_expected_user)])
 async def send_message(
     message_data: MessageCreate,
+    request: Request,
     chat_id: str = Path(..., description="Chat session ID"),
     scope_type: Literal["global", "workspace"] | None = Query(None, description="Conversation scope type"),
     workspace_id: str | None = Query(None, description="Workspace ID when scope_type='workspace'"),
@@ -484,7 +486,12 @@ async def send_message(
                     detail="Failed to decode image data. Please provide valid base64-encoded image."
                 ) from e
 
+        history_admission = None
+        versioned = message_data.tldw_history_selection_v1 is not None or message_data.tldw_history_admission_v1 is not None
         sync_service = _active_message_sync_service(current_user, scope)
+        if versioned and sync_service is not None:
+            raise HTTPException(409, detail={"status": "unsupported_history_capability", "code": "sync_owner_unsupported"})
+
         if sync_service is not None and image_data is not None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -493,7 +500,29 @@ async def send_message(
                     "message": "Sync v2 M1 does not support binary chat message attachments.",
                 },
             )
-        if sync_service is not None:
+        if versioned:
+            from tldw_Server_API.app.core.Chat.history_selection import HistorySelectionError
+            from tldw_Server_API.app.core.Chat.persistence_service import native_history_owner_key
+            data = {"id": message_data.id, "sender": sender_override, "content": message_data.content,
+                    "image_data": image_data, "image_mime_type": image_mime_type}
+            if "parent_message_id" in message_data.model_fields_set:
+                data["parent_message_id"] = message_data.parent_message_id
+            try:
+                owner = native_history_owner_key(request, current_user.id)
+                if message_data.tldw_history_selection_v1 is not None:
+                    history_admission = await run_in_threadpool(
+                        db.append_selected_history_input, chat_id,
+                        message_data.tldw_history_selection_v1.model_dump(mode="json"), data,
+                        owner_client_id=str(current_user.id), owner_key=owner)
+                    created_id = history_admission["input_message_id"]
+                else:
+                    created_id = await run_in_threadpool(
+                        db.settle_history_admission, chat_id,
+                        message_data.tldw_history_admission_v1.model_dump(mode="json"), data,
+                        owner_client_id=str(current_user.id), owner_key=owner)
+            except HistorySelectionError as exc:
+                raise HTTPException(409, detail={"status": "stale_selection", "code": exc.code}) from exc
+        elif sync_service is not None:
             created_id = server_origin_object_id("chat.message", idempotency_key) or str(uuid.uuid4())
             stable_key = server_origin_stable_key(
                 source="server_api",
@@ -549,7 +578,9 @@ async def send_message(
 
         logger.info(f"Created message {created_id} in chat {chat_id} by user {current_user.id}")
 
-        return _convert_db_message_to_response(created_msg)
+        response = _convert_db_message_to_response(created_msg)
+        response.tldw_history_admission_v1 = history_admission
+        return response
 
     except HTTPException:
         raise

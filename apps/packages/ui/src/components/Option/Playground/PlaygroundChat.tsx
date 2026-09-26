@@ -1,4 +1,6 @@
+import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import React from "react"
+import { VirtualChatTimeline, type ChatTimelineNavigation } from "./VirtualChatTimeline"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "react-router-dom"
 import { useMessageOption } from "@/hooks/useMessageOption"
@@ -91,6 +93,8 @@ const LazyChatGreetingPicker = React.lazy(() =>
 )
 
 type PlaygroundChatProps = {
+  scrollParentRef?: React.RefObject<HTMLDivElement>
+  navigationRef?: React.MutableRefObject<ChatTimelineNavigation | null>
   showStarterDeck?: boolean
   searchQuery?: string
   matchedMessageIndices?: Set<number>
@@ -145,6 +149,8 @@ const buildBlocks = (messages: TimelineMessageShape[]): TimelineBlock[] => {
 }
 
 export const PlaygroundChat = ({
+  scrollParentRef,
+  navigationRef,
   showStarterDeck = true,
   searchQuery,
   matchedMessageIndices,
@@ -155,6 +161,7 @@ export const PlaygroundChat = ({
   onDismissReturnedResearchRun,
   onDynamicUIAction
 }: PlaygroundChatProps) => {
+  const historySelection = useHistorySelectionContext()
   const { t } = useTranslation(["playground", "common"])
   const notification = useAntdNotification()
   const [
@@ -361,6 +368,17 @@ export const PlaygroundChat = ({
     }
   }, [linkedResearchRunsQuery.errorUpdatedAt, linkedResearchRunsQuery.isError])
   const blocks = React.useMemo(() => buildBlocks(messages), [messages])
+  const messageBlocks = React.useMemo(() => {
+    const indices = new Map<number, number>()
+    blocks.forEach((block, index) => {
+      for (const messageIndex of block.kind === "single" ? [block.index] : [block.userIndex, ...block.assistantIndices]) indices.set(messageIndex, index)
+    })
+    return indices
+  }, [blocks])
+  const blockKey = React.useCallback((index: number) => {
+    const block = blocks[index]
+    return block.kind === "compare" ? "compare:" + block.clusterId : "message:" + (messages[block.index].id ?? messages[block.index].serverMessageId ?? block.index)
+  }, [blocks, messages])
   const linkedResearchRuns = React.useMemo(() => {
     if (!linkedResearchRunsEnabled || !linkedResearchRunsQuery.isSuccess) {
       return []
@@ -1149,6 +1167,14 @@ export const PlaygroundChat = ({
   const handleVariantSwipe = React.useCallback(
     (messageId: string | undefined, direction: "prev" | "next") => {
       if (!messageId) return
+      if (historySelection) {
+        const message = messages.find(row => row.id === messageId)
+        const variants = message?.variants || []
+        const currentIndex = message?.activeVariantIndex ?? variants.length - 1
+        const candidate = variants[currentIndex + (direction === "prev" ? -1 : 1)]
+        if (candidate?.id) void historySelection.choose({ kind: "after_message", message_id: candidate.id })
+        return
+      }
       setMessages((prev) =>
         prev.map((msg) => {
           if (msg.id !== messageId) return msg
@@ -1165,7 +1191,7 @@ export const PlaygroundChat = ({
         })
       )
     },
-    [setMessages]
+    [historySelection, messages, setMessages]
   )
 
   return (
@@ -1360,7 +1386,7 @@ export const PlaygroundChat = ({
             onFollowUp={onPrepareResearchFollowUp}
           />
         </React.Suspense>
-        {blocks.map((block, blockIndex) => {
+        <VirtualChatTimeline key={`${historySelection?.view?.owner_key ?? ""}:${historySelection?.view?.conversation_id ?? historyId ?? ""}`} blocks={blocks} getKey={blockKey} messageBlocks={messageBlocks} scrollParentRef={scrollParentRef} navigationRef={navigationRef} renderBlock={(block, blockIndex) => {
           if (block.kind === "single") {
             const message = messages[block.index]
             const previousUserMessage = getPreviousUserMessage(block.index)
@@ -1369,7 +1395,6 @@ export const PlaygroundChat = ({
               resolvedMessageType === IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE
             return (
               <PlaygroundMessage
-                key={`m-${blockIndex}`}
                 isBot={message.isBot}
                 message={message.message}
                 name={message.name}
@@ -1399,7 +1424,7 @@ export const PlaygroundChat = ({
                   void toggleMessagePinned(block.index)
                 }}
                 onNewBranch={() => {
-                  createChatBranch(block.index)
+                  void createChatBranch(message.id ?? "")
                 }}
                 isTTSEnabled={ttsEnabled}
                 generationInfo={message?.generationInfo}
@@ -1451,8 +1476,8 @@ export const PlaygroundChat = ({
                 message_type={resolvedMessageType}
                 variants={message.variants}
                 activeVariantIndex={message.activeVariantIndex}
-                onSwipePrev={() => handleVariantSwipe(message.id, "prev")}
-                onSwipeNext={() => handleVariantSwipe(message.id, "next")}
+                onSwipePrev={historySelection && (!historySelection.view || historySelection.status === "loading") ? undefined : () => handleVariantSwipe(message.id, "prev")}
+                onSwipeNext={historySelection && (!historySelection.view || historySelection.status === "loading") ? undefined : () => handleVariantSwipe(message.id, "next")}
                 messageSteeringMode={messageSteeringMode}
                 onMessageSteeringModeChange={setMessageSteeringMode}
                 messageSteeringForceNarrate={messageSteeringForceNarrate}
@@ -1548,7 +1573,7 @@ export const PlaygroundChat = ({
               />
             </React.Suspense>
           )
-        })}
+        }} />
       </div>
     </>
   )
