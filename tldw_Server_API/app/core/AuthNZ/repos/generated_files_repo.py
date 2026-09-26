@@ -7,7 +7,6 @@ mindmaps, spreadsheets).
 from __future__ import annotations
 
 import contextlib
-import hashlib
 import json
 import re
 import uuid as uuid_module
@@ -23,6 +22,7 @@ from tldw_Server_API.app.core.AuthNZ.database import (
     _convert_question_mark_to_dollar,
     _flatten_params,
 )
+from tldw_Server_API.app.core.DB_Management.vn_generated_files_queries import VNGeneratedFilesQueries
 
 # File categories (used for file_category field)
 FILE_CATEGORY_TTS_AUDIO = "tts_audio"
@@ -122,15 +122,6 @@ class AuthnzGeneratedFilesRepo:
         """Detect whether the current AuthNZ backend is PostgreSQL."""
         return getattr(self.db_pool, "pool", None) is not None
 
-    @staticmethod
-    async def _lock_vn_item(conn: Any, user_id: int, source_ref: str) -> None:
-        """Hold an owner/item advisory lock until the PostgreSQL commit."""
-        lock_key = int.from_bytes(
-            hashlib.sha256(f"vn_asset_file:{user_id}:{source_ref}".encode()).digest()[:8],
-            byteorder="big", signed=True,
-        )
-        await conn.fetchrow("SELECT pg_advisory_xact_lock($1)", lock_key)
-
     @contextlib.asynccontextmanager
     async def vn_item_transaction(
         self, *, user_id: int, source_ref: str,
@@ -138,8 +129,9 @@ class AuthnzGeneratedFilesRepo:
         """Serialize a VN item and bind registration/accounting to one transaction."""
         async with self.db_pool.transaction() as conn:
             postgres = self._is_postgres()
-            if postgres:
-                await self._lock_vn_item(conn, user_id, source_ref)
+            await VNGeneratedFilesQueries(conn, postgres=postgres).lock_item(
+                user_id=user_id, source_ref=source_ref,
+            )
             yield AuthnzGeneratedFilesRepo(_TransactionBoundPool(conn, postgres=postgres))
 
     async def lock_quota_scopes(
@@ -150,11 +142,9 @@ class AuthnzGeneratedFilesRepo:
             # BEGIN IMMEDIATE already serializes SQLite admissions and usage writes.
             return
         async with self.db_pool.acquire() as conn:
-            await conn.fetchrow("SELECT id FROM users WHERE id = $1 FOR UPDATE", user_id)
-            if org_id:
-                await conn.fetchrow("SELECT id FROM storage_quotas WHERE org_id = $1 FOR UPDATE", org_id)
-            if team_id:
-                await conn.fetchrow("SELECT id FROM storage_quotas WHERE team_id = $1 FOR UPDATE", team_id)
+            await VNGeneratedFilesQueries(conn, postgres=True).lock_quota_scopes(
+                user_id=user_id, org_id=org_id, team_id=team_id,
+            )
 
     @staticmethod
     def _normalize_record(row: Any) -> dict[str, Any]:
@@ -251,29 +241,11 @@ class AuthnzGeneratedFilesRepo:
         try:
             async with self.db_pool.transaction() as conn:
                 if is_vn_item_source_ref(source_feature, source_ref):
-                    # SQLite transactions already use BEGIN IMMEDIATE. PostgreSQL
-                    # serializes the same owner/item key until this transaction ends.
-                    if self._is_postgres():
-                        await self._lock_vn_item(conn, user_id, source_ref)
-                        existing = await conn.fetchrow(
-                            """
-                            SELECT * FROM generated_files
-                            WHERE user_id = $1 AND source_feature = $2 AND source_ref = $3
-                              AND is_deleted = FALSE ORDER BY id DESC LIMIT 1
-                            """,
-                            user_id, source_feature, source_ref,
-                        )
-                    else:
-                        cursor = await conn.execute(
-                            """
-                            SELECT * FROM generated_files
-                            WHERE user_id = ? AND source_feature = ? AND source_ref = ?
-                              AND is_deleted = 0 ORDER BY id DESC LIMIT 1
-                            """,
-                            (user_id, source_feature, source_ref),
-                        )
-                        row = await cursor.fetchone()
-                        existing = dict(zip((col[0] for col in cursor.description), row)) if row else None
+                    queries = VNGeneratedFilesQueries(conn, postgres=self._is_postgres())
+                    await queries.lock_item(user_id=user_id, source_ref=source_ref)
+                    existing = await queries.find_live_by_source_ref(
+                        user_id=user_id, source_feature=source_feature, source_ref=source_ref,
+                    )
                     if existing is not None:
                         return {**self._normalize_record(existing), "_idempotent_replay": True}
                 if self._is_postgres():
@@ -367,44 +339,19 @@ class AuthnzGeneratedFilesRepo:
     ) -> dict[str, Any] | None:
         """Find the newest live file for an owned, exact source reference."""
         async with self.db_pool.acquire() as conn:
-            if self._is_postgres():
-                row = await conn.fetchrow(
-                    """
-                    SELECT * FROM generated_files
-                    WHERE user_id = $1 AND source_feature = $2 AND source_ref = $3
-                      AND is_deleted = FALSE
-                    ORDER BY id DESC LIMIT 1
-                    """,
-                    user_id, source_feature, source_ref,
-                )
-                return self._normalize_record(row) if row else None
-            cursor = await conn.execute(
-                """
-                SELECT * FROM generated_files
-                WHERE user_id = ? AND source_feature = ? AND source_ref = ?
-                  AND is_deleted = 0
-                ORDER BY id DESC LIMIT 1
-                """,
-                (user_id, source_feature, source_ref),
+            row = await VNGeneratedFilesQueries(conn, postgres=self._is_postgres()).find_live_by_source_ref(
+                user_id=user_id, source_feature=source_feature, source_ref=source_ref,
             )
-            row = await cursor.fetchone()
-            if row is None:
-                return None
-            columns = [column[0] for column in cursor.description]
-            return self._normalize_record(dict(zip(columns, row)))
+            return self._normalize_record(row) if row is not None else None
 
     async def get_live_file_by_storage_path(
         self, *, user_id: int, storage_path: str,
     ) -> dict[str, Any] | None:
         """Find a committed live reference before considering byte cleanup."""
-        row = await self.db_pool.fetchone(
-            """
-            SELECT * FROM generated_files
-            WHERE user_id = ? AND storage_path = ? AND is_deleted = ?
-            ORDER BY id DESC LIMIT 1
-            """,
-            user_id, storage_path, False,
-        )
+        async with self.db_pool.acquire() as conn:
+            row = await VNGeneratedFilesQueries(conn, postgres=self._is_postgres()).find_live_by_storage_path(
+                user_id=user_id, storage_path=storage_path,
+            )
         return self._normalize_record(row) if row else None
 
     async def get_files_by_ids(self, file_ids: list[int]) -> list[dict[str, Any]]:

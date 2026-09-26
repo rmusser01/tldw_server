@@ -18,6 +18,7 @@ from tldw_Server_API.app.core.DB_Management.VNAssetPacks_DB import VNAssetPacksR
 from tldw_Server_API.app.core.exceptions import VNAssetGenerationError
 from tldw_Server_API.app.core.Image_Generation.adapter_registry import get_registry
 from tldw_Server_API.app.core.Image_Generation.adapters.base import ImageGenRequest
+from tldw_Server_API.app.core.Storage.file_integrity import generated_file_bytes_match
 from tldw_Server_API.app.core.Storage.generated_file_helpers import save_and_register_vn_asset_image
 from tldw_Server_API.app.core.VN_Assets.concurrency import get_default_backend_generation_gate
 from tldw_Server_API.app.core.VN_Assets.constants import (
@@ -286,7 +287,10 @@ class VNAssetGenerationWorker:
                 claimed_item=claimed_item,
             )
         except Exception as exc:
-            if not reconciling and not (isinstance(exc, VNAssetGenerationError) and exc.retryable):
+            definitive_replay_failure = isinstance(exc, VNAssetGenerationError) and not exc.retryable
+            if (not reconciling or definitive_replay_failure) and not (
+                isinstance(exc, VNAssetGenerationError) and exc.retryable
+            ):
                 self._record_generation_failure(
                     batch_id=batch_id, slot_id=slot_id, variant_index=variant_index,
                     error=str(exc), attempt_token=attempt_token,
@@ -368,7 +372,7 @@ class VNAssetGenerationWorker:
         if attached_file_id is None:
             if outcome["outcome_status"] == "completed":
                 raise VNAssetGenerationError(
-                    "vn_asset_item_storage_missing", retryable=True, batch_id=batch_id, item_id=item_id,
+                    "vn_asset_item_storage_missing", batch_id=batch_id, item_id=item_id,
                 )
             file_record = await files_repo.get_file_by_source_ref(
                 user_id=user_id,
@@ -393,11 +397,17 @@ class VNAssetGenerationWorker:
             valid_bytes = valid_record and await asyncio.to_thread(
                 _replay_file_bytes_present, file_record, user_id=user_id,
             )
-        except (OSError, TypeError, ValueError):
+        except OSError as exc:
+            raise VNAssetGenerationError(
+                "vn_asset_item_storage_missing", retryable=True,
+                batch_id=batch_id, slot_id=slot_id, variant_index=variant_index, item_id=item_id,
+                operation="replay_variant",
+            ) from exc
+        except (TypeError, ValueError):
             valid_bytes = False
         if not valid_bytes:
             raise VNAssetGenerationError(
-                "vn_asset_item_storage_missing", retryable=True,
+                "vn_asset_item_storage_missing",
                 batch_id=batch_id, slot_id=slot_id, variant_index=variant_index, item_id=item_id,
                 operation="replay_variant",
             )
@@ -1253,7 +1263,7 @@ def variant_seed(slot: Mapping[str, Any], variant_index: int) -> int | None:
 
 
 def _replay_file_bytes_present(record: dict[str, Any], *, user_id: int) -> bool:
-    """Check contained, nonempty replay bytes against their recorded size off-loop.
+    """Check contained replay bytes against size and persisted checksum off-loop.
 
     Filesystem and invalid-path errors propagate to the typed replay boundary.
     """
@@ -1261,7 +1271,7 @@ def _replay_file_bytes_present(record: dict[str, Any], *, user_id: int) -> bool:
         user_id=user_id, storage_path=str(record.get("storage_path") or ""),
     )
     size = generated_file_size_bytes(record)
-    return size > 0 and path.is_file() and path.stat().st_size == size
+    return generated_file_bytes_match(path, expected_size=size, checksum=record.get("checksum"))
 
 
 def _positive_int(value: Any) -> int | None:

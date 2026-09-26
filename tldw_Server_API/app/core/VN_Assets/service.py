@@ -88,6 +88,88 @@ class VNAssetPackService:
         self.item_limit = item_limit
         self.jobs_manager = jobs_manager
 
+    def claim_or_replay_idempotency(
+        self,
+        *,
+        owner_user_id: int,
+        scope: str,
+        resource_id: str,
+        idempotency_key: str | None,
+        payload_hash: str,
+        generation_pack_id: int | None = None,
+        jobs_manager: Any | None = None,
+    ) -> dict[str, Any] | None:
+        """Claim an operation or return its persisted/recovered JSON response.
+
+        None admits new work (or an operation without a key). Unfinished
+        linked generation receipts recover only when a pack is supplied;
+        other pending receipts raise the stable in-progress code.
+        """
+        if not idempotency_key:
+            return None
+        record, claimed = self.repo.claim_idempotency_record(
+            owner_user_id=owner_user_id,
+            scope=scope,
+            resource_id=resource_id,
+            idempotency_key=idempotency_key,
+            payload_hash=payload_hash,
+        )
+        if claimed:
+            return None
+        if str(record.get("status") or "completed") == "completed":
+            return json.loads(str(record["response_json"]))
+        if generation_pack_id is None or record.get("batch_id") is None:
+            raise VNAssetGenerationError(
+                "idempotency_key_in_progress",
+                retryable=True,
+                operation="claim_or_replay_idempotency",
+            )
+        try:
+            response = self._recover_generation_receipt_data(
+                record,
+                pack_id=generation_pack_id,
+                jobs_manager=jobs_manager,
+            )
+        except VNAssetGenerationError:
+            raise
+        except ValueError as exc:
+            raise VNAssetGenerationError(
+                str(exc),
+                pack_id=generation_pack_id,
+                operation="recover_generation_receipt",
+            ) from exc
+        self.complete_idempotency_response(
+            owner_user_id=owner_user_id,
+            scope=scope,
+            resource_id=resource_id,
+            idempotency_key=idempotency_key,
+            payload_hash=payload_hash,
+            response=response,
+        )
+        return response
+
+    def complete_idempotency_response(
+        self,
+        *,
+        owner_user_id: int,
+        scope: str,
+        resource_id: str,
+        idempotency_key: str | None,
+        payload_hash: str,
+        response: Mapping[str, Any],
+    ) -> None:
+        """Persist an operation's JSON response without transport models."""
+        if not idempotency_key:
+            return
+        self.repo.complete_idempotency_record(
+            owner_user_id=owner_user_id,
+            scope=scope,
+            resource_id=resource_id,
+            idempotency_key=idempotency_key,
+            payload_hash=payload_hash,
+            response=response,
+        )
+
     def create_pack(self, request: VNAssetPackCreate) -> VNAssetPackResponse:
         requested_planned_count = _planned_output_count_from_budget(request.generation_budget)
         if requested_planned_count is not None:
@@ -693,6 +775,18 @@ class VNAssetPackService:
         Job is re-enqueued only for an active batch. Raises VNAssetGenerationError
         for receipt ownership/link errors; Jobs/database failures propagate.
         """
+        return VNAssetGenerationStatusResponse(
+            **self._recover_generation_receipt_data(record, pack_id=pack_id, jobs_manager=jobs_manager)
+        )
+
+    def _recover_generation_receipt_data(
+        self,
+        record: Mapping[str, Any],
+        *,
+        pack_id: int,
+        jobs_manager: Any | None = None,
+    ) -> dict[str, Any]:
+        """Recover the owned batch's parent Job and return transport-neutral data."""
         self._require_pack(pack_id)
         if int(record.get("owner_user_id") or 0) != self.owner_user_id:
             raise VNAssetGenerationError("vn_asset_generation_receipt_not_found", pack_id=pack_id)
@@ -716,7 +810,7 @@ class VNAssetPackService:
                 batch = self.repo.update_batch(
                     batch_id, {"job_batch_id": job_batch_id, "enqueue_error": None}
                 ) or batch
-        return self._generation_status_response(batch)
+        return self._generation_status_data(batch)
 
     def get_generation_status(self, pack_id: int) -> VNAssetGenerationStatusResponse:
         self._require_pack(pack_id)
@@ -966,19 +1060,23 @@ class VNAssetPackService:
         )
 
     def _generation_status_response(self, row: Mapping[str, Any]) -> VNAssetGenerationStatusResponse:
-        return VNAssetGenerationStatusResponse(
-            batch_id=int(row["id"]),
-            job_batch_id=row["job_batch_id"],
-            status=str(row["status"]),
-            total_slots=int(row["total_slots"] or 0),
-            total_variants=int(row["total_variants"] or 0),
-            planned_count=int(row["planned_count"] or 0),
-            enqueued_count=int(row["enqueued_count"] or 0),
-            completed_count=int(row["completed_count"] or 0),
-            failed_count=int(row["failed_count"] or 0),
-            cancelled_count=int(row["cancelled_count"] or 0),
-            enqueue_error=row["enqueue_error"],
-        )
+        return VNAssetGenerationStatusResponse(**self._generation_status_data(row))
+
+    def _generation_status_data(self, row: Mapping[str, Any]) -> dict[str, Any]:
+        """Project the batch's stable response fields for receipt persistence."""
+        return {
+            "batch_id": int(row["id"]),
+            "job_batch_id": row["job_batch_id"],
+            "status": str(row["status"]),
+            "total_slots": int(row["total_slots"] or 0),
+            "total_variants": int(row["total_variants"] or 0),
+            "planned_count": int(row["planned_count"] or 0),
+            "enqueued_count": int(row["enqueued_count"] or 0),
+            "completed_count": int(row["completed_count"] or 0),
+            "failed_count": int(row["failed_count"] or 0),
+            "cancelled_count": int(row["cancelled_count"] or 0),
+            "enqueue_error": row["enqueue_error"],
+        }
 
     def _slot_response(self, row: Mapping[str, Any]) -> VNAssetSlotResponse:
         return VNAssetSlotResponse(

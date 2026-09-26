@@ -7,7 +7,6 @@ import inspect
 import json
 import os
 import uuid
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -51,6 +50,7 @@ from tldw_Server_API.app.api.v1.schemas.vn_asset_schemas import (
 from tldw_Server_API.app.core.AuthNZ.repos.generated_files_repo import AuthnzGeneratedFilesRepo
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.exceptions import VNAssetGenerationError
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Utils.path_utils import safe_join
 from tldw_Server_API.app.core.VN_Assets.cleanup_blockers import VNAssetCleanupBlockerProvider
@@ -184,49 +184,36 @@ def _claim_or_replay_idempotency(
     idempotency_key: str | None,
     payload_hash: str,
     response_model: type[BaseModel],
-    recover_in_progress: Callable[[dict[str, Any]], BaseModel] | None = None,
+    generation_pack_id: int | None = None,
+    jobs_manager: JobManager | None = None,
 ) -> BaseModel | None:
-    if not idempotency_key:
-        return None
+    """Validate a core receipt response and map domain failures to HTTP."""
     try:
-        record, claimed = service.repo.claim_idempotency_record(
+        response = service.claim_or_replay_idempotency(
             owner_user_id=owner_user_id,
             scope=scope,
             resource_id=resource_id,
             idempotency_key=idempotency_key,
             payload_hash=payload_hash,
+            generation_pack_id=generation_pack_id,
+            jobs_manager=jobs_manager,
         )
     except ValueError as exc:
         if str(exc) == "idempotency_key_conflict":
             raise _idempotency_conflict(scope=scope, resource_id=resource_id) from exc
+        if str(exc) == "idempotency_key_in_progress":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=vn_error_detail(
+                    "idempotency_key_in_progress",
+                    "An identical VN operation is already in progress.",
+                    retryable=True,
+                ),
+            ) from exc
+        if isinstance(exc, VNAssetGenerationError):
+            raise _handle_value_error(exc) from exc
         raise
-    if claimed:
-        return None
-    if str(record.get("status") or "completed") != "completed":
-        if recover_in_progress is not None and record.get("batch_id") is not None:
-            try:
-                recovered = recover_in_progress(record)
-            except ValueError as exc:
-                raise _handle_value_error(exc) from exc
-            _record_idempotency_response(
-                service,
-                owner_user_id=owner_user_id,
-                scope=scope,
-                resource_id=resource_id,
-                idempotency_key=idempotency_key,
-                payload_hash=payload_hash,
-                response=recovered,
-            )
-            return recovered
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=vn_error_detail(
-                "idempotency_key_in_progress",
-                "An identical VN operation is already in progress.",
-                retryable=True,
-            ),
-        )
-    return response_model.model_validate(json.loads(str(record["response_json"])))
+    return response_model.model_validate(response) if response is not None else None
 
 
 def _record_idempotency_response(
@@ -239,9 +226,8 @@ def _record_idempotency_response(
     payload_hash: str,
     response: BaseModel,
 ) -> None:
-    if not idempotency_key:
-        return
-    service.repo.complete_idempotency_record(
+    """Serialize the validated HTTP response for core receipt persistence."""
+    service.complete_idempotency_response(
         owner_user_id=owner_user_id,
         scope=scope,
         resource_id=resource_id,
@@ -1886,9 +1872,8 @@ async def start_generation(
         owner_user_id=owner_user_id,
         **receipt,
         response_model=VNAssetGenerationStatusResponse,
-        recover_in_progress=lambda record: service.recover_generation_receipt(
-            record, pack_id=pack_id, jobs_manager=jobs_manager
-        ),
+        generation_pack_id=pack_id,
+        jobs_manager=jobs_manager,
     )
     if replay is not None:
         return replay
@@ -1987,9 +1972,8 @@ async def retry_slot_generation(
         owner_user_id=owner_user_id,
         **receipt,
         response_model=VNAssetGenerationStatusResponse,
-        recover_in_progress=lambda record: service.recover_generation_receipt(
-            record, pack_id=pack_id, jobs_manager=jobs_manager
-        ),
+        generation_pack_id=pack_id,
+        jobs_manager=jobs_manager,
     )
     if replay is not None:
         return replay
@@ -2066,9 +2050,8 @@ async def regenerate_item(
         owner_user_id=owner_user_id,
         **receipt,
         response_model=VNAssetGenerationStatusResponse,
-        recover_in_progress=lambda record: service.recover_generation_receipt(
-            record, pack_id=pack_id, jobs_manager=jobs_manager
-        ),
+        generation_pack_id=pack_id,
+        jobs_manager=jobs_manager,
     )
     if replay is not None:
         return replay
