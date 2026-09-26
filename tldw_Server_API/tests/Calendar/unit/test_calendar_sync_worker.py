@@ -1004,6 +1004,62 @@ def test_queue_binding_sync_reuses_active_binding_job(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(("binding_patch", "next_scan_at", "due_at"), [
+    ({}, "2026-06-05T18:00:00+00:00", "2026-06-05T18:00:00+00:00"),
+    ({"sync_interval_minutes": 15}, "2026-06-05T17:15:00+00:00", "2026-06-05T17:15:00+00:00"),
+    ({"sync_interval_minutes": 120}, "2026-06-05T19:00:00+00:00", "2026-06-05T19:00:00+00:00"),
+    ({"sync_interval_minutes": None}, None, "2026-06-06T17:00:00+00:00"),
+    ({"sync_interval_minutes": 0}, None, "2026-06-06T17:00:00+00:00"),
+    ({"sync_interval_minutes": -1}, None, "2026-06-06T17:00:00+00:00"),
+], ids=["omitted-hourly", "fifteen-minutes", "two-hours", "manual-null", "legacy-zero", "legacy-negative"])
+async def test_polling_cadence_success_schedules_only_positive_intervals(
+    calendar_db: CalendarDatabase, jobs_manager: JobManager, monkeypatch: pytest.MonkeyPatch,
+    binding_patch: dict[str, int | None], next_scan_at: str | None, due_at: str,
+) -> None:
+    """Manual jobs remain available, but success cannot cause immediate periodic resync."""
+    from tldw_Server_API.app.core.Calendar import calendar_sync_worker as worker
+
+    fixture = _create_sync_fixture(calendar_db)
+    if binding_patch:
+        calendar_db.update_external_binding(fixture.binding_id, binding_patch)
+    monkeypatch.setattr(worker, "_utcnow_iso", lambda: "2026-06-05T17:00:00+00:00")
+    queued = worker.queue_calendar_binding_sync(
+        db=calendar_db, job_manager=jobs_manager, actor_user_id=1, tenant_id="default",
+        binding_id=fixture.binding_id, reason="manual",
+        window_start="2026-06-01T00:00:00+00:00", window_end="2026-06-08T00:00:00+00:00",
+    )
+    await worker.handle_calendar_sync_job(
+        jobs_manager.get_job(queued.job_id), db=calendar_db, provider=_FakeProvider(events=[_sync_event("cadence")]),
+    )
+
+    binding = calendar_db.get_external_binding(fixture.binding_id)
+    assert binding.last_sync_at == "2026-06-05T17:00:00+00:00"
+    assert binding.next_scan_at == next_scan_at
+    assert calendar_db.list_sync_events(binding_id=binding.id)[0].status == "success"
+    assert calendar_db.list_sync_enabled_bindings_due_for_scan(now_iso="2026-06-05T17:00:01+00:00") == []
+    due = calendar_db.list_sync_enabled_bindings_due_for_scan(now_iso=due_at)
+    assert [row.id for row in due] == ([binding.id] if next_scan_at is not None else [])
+
+
+@pytest.mark.asyncio
+async def test_polling_cadence_scheduler_skips_manual_binding_without_jobs(
+    calendar_db: CalendarDatabase, jobs_manager: JobManager,
+) -> None:
+    """Repeated periodic scans of a legacy null interval must create no Jobs or audits."""
+    from tldw_Server_API.app.services.calendar_sync_scheduler import queue_due_calendar_sync_jobs
+
+    fixture = _create_sync_fixture(calendar_db)
+    calendar_db.update_external_binding(fixture.binding_id, sync_interval_minutes=None)
+    for minute in [0, 1]:
+        queued = await queue_due_calendar_sync_jobs(
+            db=calendar_db, job_manager=jobs_manager, now=datetime(2026, 6, 5, 17, minute, tzinfo=timezone.utc),
+        )
+        assert queued == []
+    assert jobs_manager.count_jobs(domain="calendar", queue="default", job_type="calendar_sync") == 0
+    assert calendar_db.list_sync_events(binding_id=fixture.binding_id) == []
+
+
+@pytest.mark.asyncio
 async def test_due_calendar_sync_scheduler_queues_sanitized_scheduled_job(
     calendar_db: CalendarDatabase,
     jobs_manager: JobManager,

@@ -453,8 +453,11 @@ def _none_or_str(value: Any) -> str | None:
 
 
 def _next_scan_at(binding: ExternalCalendarBindingRow, synced_at: str) -> str | None:
-    """Compute the next UTC scan time when the binding has a polling interval."""
-    if not binding.sync_interval_minutes:
+    """Compute the next UTC scan time only for a positive polling interval.
+
+    Return None for manual-only null intervals and legacy nonpositive intervals.
+    """
+    if binding.sync_interval_minutes is None or binding.sync_interval_minutes <= 0:
         return None
     parsed = datetime.fromisoformat(synced_at.replace("Z", "+00:00"))
     return (parsed + timedelta(minutes=int(binding.sync_interval_minutes))).astimezone(timezone.utc).isoformat()

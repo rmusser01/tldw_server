@@ -25,6 +25,7 @@ import {
   triggerCalendarSync,
   updateCalendarItem,
   verifyCalDavAccount,
+  type CalDavAccountCreateRequest,
   type CalendarAgendaQuery,
   type CalendarItemCreateRequest
 } from "../calendar"
@@ -208,6 +209,39 @@ describe("calendar service contract", () => {
           "/api/v1/calendar/views/agenda?start_at=2026-06-05T09%3A00%3A00%2B00%3A00&end_at=2026-06-05T17%3A00%3A00%2B00%3A00&calendar_ids=1&calendar_ids=42&include_scheduled_tasks=false"
       })
     )
+  })
+
+  it("sends opt-in atomic verification in a single typed account creation request", async () => {
+    const payload: CalDavAccountCreateRequest = {
+      display_name: "Fastmail",
+      server_url: "https://caldav.fastmail.com/dav/calendars",
+      username: "reader@example.test",
+      password: "app-password",
+      verify_before_create: true
+    }
+    const account = { id: 3, provider: "caldav", display_name: "Fastmail" }
+    mocks.bgRequest.mockResolvedValue(account)
+
+    expect(await createCalDavAccount(payload)).toEqual(account)
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(1)
+    expect(mocks.bgRequest).toHaveBeenCalledWith({
+      method: "POST",
+      path: "/api/v1/calendar/external/accounts",
+      body: { provider: "caldav", ...payload }
+    })
+  })
+
+  it("propagates failed verified creation without making follow-up requests", async () => {
+    mocks.bgRequest.mockRejectedValue(new Error("Unable to verify CalDAV account"))
+
+    await expect(createCalDavAccount({
+      display_name: "Fastmail",
+      server_url: "https://caldav.fastmail.com/dav/calendars",
+      username: "reader@example.test",
+      password: "app-password",
+      verify_before_create: true
+    })).rejects.toThrow("Unable to verify CalDAV account")
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(1)
   })
 
   it("only sends external calendar secrets to create and verify account endpoints", async () => {
