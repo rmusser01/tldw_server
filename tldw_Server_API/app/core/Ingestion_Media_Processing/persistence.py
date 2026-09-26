@@ -56,7 +56,13 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import
     prepare_common_options,
     resolve_chunking_options_and_plan,
 )
-from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import redact_url_for_log
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Email.email_ingestion_metrics import (
+    record_email_native_persist,
+)
+from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import (
+    exception_type_for_log,
+    redact_url_for_log,
+)
 from tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils import (
     open_safe_local_path,
     open_safe_local_path_async,
@@ -254,7 +260,7 @@ def _resolve_media_budget_context(
                 policy = dict(loader.get_policy(policy_id) or {})
             except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
                 policy = {}
-        if hasattr(current_user, "id") and getattr(current_user, "id") is not None:
+        if hasattr(current_user, "id") and current_user.id is not None:
             entity = f"user:{int(current_user.id)}"
         else:
             entity = ""
@@ -749,15 +755,13 @@ def _is_email_native_persist_enabled() -> bool:
         return True
 
 
-def _emit_email_native_persist_metric(*, path_kind: str, outcome: str) -> None:
-    _emit_ingestion_metric_increment(
-        "email_native_persist_total",
-        1,
-        labels={
-            "path_kind": _coerce_ingestion_label(path_kind),
-            "outcome": _coerce_ingestion_label(outcome),
-        },
-    )
+def _emit_email_native_persist_metric(*, path_kind: str, outcome: str, duration_seconds: float = 0.0) -> None:
+    try:
+        record_email_native_persist(
+            path_kind=path_kind, outcome=outcome, duration_seconds=duration_seconds, registry=get_metrics_registry(),
+        )
+    except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
+        logger.debug("Email native persistence metric observation failed")
 
 
 def _ingestion_request_outcome_from_status(status_code: int) -> str:
@@ -1037,14 +1041,17 @@ def _enforce_metadata_contract_on_result(
 
     issue_text = "; ".join(issues)
     input_ref = result.get("input_ref") or result.get("processing_source") or "unknown"
-    logger.warning(
-        "Metadata contract violations (policy={}) for {} item {} via {}: {}",
-        policy,
-        _coerce_ingestion_label(media_type),
-        input_ref,
-        processor,
-        issue_text,
-    )
+    if _coerce_ingestion_label(media_type) == "email":
+        logger.warning("Email metadata contract violation (policy={}, issue_count={})", policy, len(issues))
+    else:
+        logger.warning(
+            "Metadata contract violations (policy={}) for {} item {} via {}: {}",
+            policy,
+            _coerce_ingestion_label(media_type),
+            input_ref,
+            processor,
+            issue_text,
+        )
     _emit_ingestion_validation_failure_metric(
         reason="metadata_contract",
         path_kind=path_kind,
@@ -2092,6 +2099,7 @@ def sync_media_add_results_to_collections(
     This is intentionally non-fatal: failures are recorded as warnings on each
     result item and do not fail the ingestion request.
     """
+    email_request = getattr(form_data, "media_type", None) == "email"
     user_id = getattr(current_user, "id", None)
     if user_id is None or not isinstance(results, list):
         return
@@ -2116,7 +2124,10 @@ def sync_media_add_results_to_collections(
         else:
             collections_db = CollectionsDatabase.for_user(user_id=user_id)
     except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning("Collections dual-write initialization failed: {}", exc)
+        if email_request:
+            logger.warning("Email collections initialization failed (error_type={})", exception_type_for_log(exc))
+        else:
+            logger.warning("Collections dual-write initialization failed: {}", exc)
         return
 
     try:
@@ -2287,7 +2298,10 @@ def sync_media_add_results_to_collections(
                 result["media_collection_item_id"] = planned_item_id
 
     except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning("Collections dual-write failed: {}", exc)
+        if email_request:
+            logger.warning("Email collections write failed (error_type={})", exception_type_for_log(exc))
+        else:
+            logger.warning("Collections dual-write failed: {}", exc)
         for result in results:
             if not isinstance(result, dict):
                 continue
@@ -2356,9 +2370,9 @@ def _mark_media_embeddings_complete(db: Any, media_id: int) -> bool:
         mark_media_as_processed(db_instance=db, media_id=media_id)
     except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as exc:
         logger.warning(
-            "Failed to mark embeddings complete for media {}: {}",
+            "Failed to mark embeddings complete for media {} (error_type={})",
             media_id,
-            exc,
+            exception_type_for_log(exc),
         )
         return False
     return True
@@ -2374,16 +2388,16 @@ def _mark_media_embeddings_error(db: Any, media_id: int, error_detail: Any) -> b
         mark_error(media_id, detail)
     except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as exc:
         logger.warning(
-            "Failed to mark embeddings error for media {}: {}",
+            "Failed to mark embeddings error for media {} (error_type={})",
             media_id,
-            exc,
+            exception_type_for_log(exc),
         )
         return False
     except AttributeError as exc:
         logger.warning(
-            "Failed to mark embeddings error for media {}: {}",
+            "Failed to mark embeddings error for media {} (error_type={})",
             media_id,
-            exc,
+            exception_type_for_log(exc),
         )
         return False
     return True
@@ -2479,6 +2493,7 @@ async def schedule_media_add_embeddings(
     3) `media_processing.media_add_embeddings_mode` config
     4) default `auto` (jobs first, fallback to background)
     """
+    email_request = getattr(form_data, "media_type", None) == "email"
     generate_embeddings = bool(getattr(form_data, "generate_embeddings", False))
     logger.info("generate_embeddings flag: {}", generate_embeddings)
     if not generate_embeddings:
@@ -2546,11 +2561,14 @@ async def schedule_media_add_embeddings(
                 )
                 dispatched = True
             except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as jobs_err:
-                logger.warning(
-                    "Failed to enqueue embeddings job for media {}: {}",
-                    media_id,
-                    jobs_err,
-                )
+                if email_request:
+                    logger.warning("Email embeddings enqueue failed (media_id={}, error_type={})", media_id, exception_type_for_log(jobs_err))
+                else:
+                    logger.warning(
+                        "Failed to enqueue embeddings job for media {}: {}",
+                        media_id,
+                        jobs_err,
+                    )
                 _emit_ingestion_embeddings_enqueue_metric(
                     path_kind="jobs",
                     outcome="failure",
@@ -2607,18 +2625,25 @@ async def schedule_media_add_embeddings(
                             media_id,
                             result_emb.get("error") or result_emb.get("message") or "Embedding generation failed",
                         )
-                    logger.info(
-                        "Embedding generation result for media {}: {}",
-                        media_id,
-                        result_emb,
-                    )
+                    if email_request:
+                        logger.info("Email embedding generation finished (media_id={}, outcome={})", media_id,
+                            "success" if result_emb.get("status") == "success" else "failure")
+                    else:
+                        logger.info(
+                            "Embedding generation result for media {}: {}",
+                            media_id,
+                            result_emb,
+                        )
                 except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as embed_err:
                     _mark_media_embeddings_error(db, media_id, embed_err)
-                    logger.error(
-                        "Failed to generate embeddings for media {}: {}",
-                        media_id,
-                        embed_err,
-                    )
+                    if email_request:
+                        logger.error("Email embedding generation failed (media_id={}, error_type={})", media_id, exception_type_for_log(embed_err))
+                    else:
+                        logger.error(
+                            "Failed to generate embeddings for media {}: {}",
+                            media_id,
+                            embed_err,
+                        )
 
             background_tasks.add_task(
                 generate_embeddings_task,
@@ -2803,6 +2828,7 @@ async def add_media_orchestrate(
         TemplateClassifier = None  # type: ignore[assignment]
         TempDirManagerCls = CoreTempDirManager  # type: ignore[assignment]
 
+    email_request = getattr(form_data, "media_type", None) == "email"
     request_started_at = time.monotonic()
     request_outcome = "error"
     total_uploaded_bytes = 0
@@ -2824,11 +2850,14 @@ async def add_media_orchestrate(
     try:
         if is_test_mode():
             _dbp = getattr(db, "db_path_str", getattr(db, "db_path", "?"))
-            logger.info(
-                "TEST_MODE: add_media db_path={} user_id={}",
-                _dbp,
-                getattr(current_user, "id", "?"),
-            )
+            if email_request:
+                logger.info("TEST_MODE: email database context resolved")
+            else:
+                logger.info(
+                    "TEST_MODE: add_media db_path={} user_id={}",
+                    _dbp,
+                    getattr(current_user, "id", "?"),
+                )
     except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
         pass
 
@@ -2893,7 +2922,10 @@ async def add_media_orchestrate(
     if not hasattr(db, "client_id") or not db.client_id:
         logger.error("CRITICAL: Database instance dependency missing client_id.")
         db.client_id = settings.get("SERVER_CLIENT_ID", "SERVER_API_V1_FALLBACK")
-        logger.warning("Manually set missing client_id on DB instance to: {}", db.client_id)
+        if email_request:
+            logger.warning("Email database client_id fallback applied")
+        else:
+            logger.warning("Manually set missing client_id on DB instance to: {}", db.client_id)
 
     results: list[dict[str, Any]] = []
     temp_dir_manager = TempDirManagerCls(  # type: ignore[call-arg]
@@ -2907,7 +2939,10 @@ async def add_media_orchestrate(
         # --- 3. Setup Temporary Directory ---
         with temp_dir_manager as temp_dir:
             temp_dir_path = FilePath(str(temp_dir))
-            logger.info("Using temporary directory: {}", temp_dir_path)
+            if email_request:
+                logger.info("Email temporary directory ready")
+            else:
+                logger.info("Using temporary directory: {}", temp_dir_path)
 
             # --- 4. Save Uploaded Files ---
             # Restrict allowed extensions based on declared media_type to avoid mismatches
@@ -3042,7 +3077,10 @@ async def add_media_orchestrate(
             except HTTPException:
                 raise
             except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as quota_err:
-                logger.warning("Quota check failed (non-fatal): {}", quota_err)
+                if email_request:
+                    logger.warning("Email quota check failed (error_type={})", exception_type_for_log(quota_err))
+                else:
+                    logger.warning("Quota check failed (non-fatal): {}", quota_err)
 
             # --- Resource Governor per-user upload-bytes budget ---
             if (
@@ -3203,7 +3241,10 @@ async def add_media_orchestrate(
                         first_filename=first_filename,
                     )
             except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as auto_err:
-                logger.warning("Auto-apply chunking template failed: {}", auto_err)
+                if email_request:
+                    logger.warning("Email template selection failed (error_type={})", exception_type_for_log(auto_err))
+                else:
+                    logger.warning("Auto-apply chunking template failed: {}", auto_err)
 
             # Even if not used directly here, preserve the existing call
             # to common options preparation to keep side effects/logging.
@@ -3224,25 +3265,34 @@ async def add_media_orchestrate(
                         temp_dir_path,
                     )
                     if resolved_path is None:
-                        logger.warning(
-                            "Skipping source path {} outside temp dir {}",
-                            path,
-                            temp_dir_path,
-                        )
+                        if email_request:
+                            logger.warning("Email source skipped (outcome=outside_temp_directory)")
+                        else:
+                            logger.warning(
+                                "Skipping source path {} outside temp dir {}",
+                                path,
+                                temp_dir_path,
+                            )
                         continue
                 except OSError as exc:
-                    logger.warning(
-                        "Skipping source path {} due to resolve error: {}",
-                        path,
-                        exc,
-                    )
+                    if email_request:
+                        logger.warning("Email source resolution failed (error_type={})", exception_type_for_log(exc))
+                    else:
+                        logger.warning(
+                            "Skipping source path {} due to resolve error: {}",
+                            path,
+                            exc,
+                        )
                     continue
                 except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as exc:
-                    logger.warning(
-                        "Skipping source path {} due to unexpected resolve error: {}",
-                        path,
-                        exc,
-                    )
+                    if email_request:
+                        logger.warning("Email source resolution failed (error_type={})", exception_type_for_log(exc))
+                    else:
+                        logger.warning(
+                            "Skipping source path {} due to unexpected resolve error: {}",
+                            path,
+                            exc,
+                        )
                     continue
                 source_to_ref_map[str(resolved_path)] = pf["original_filename"]
 
@@ -3315,12 +3365,15 @@ async def add_media_orchestrate(
                             error_msg = f"Processing failed (HTTP {status_code}): {detail_text}"
                         else:
                             error_msg = f"Processing failed: {type(result).__name__}: {detail_text}"
-                        logger.error(
-                            "Document-like processing failed for {}: {}",
-                            source,
-                            error_msg,
-                            exc_info=True,
-                        )
+                        if email_request:
+                            logger.error("Email worker failed (error_type={})", exception_type_for_log(result))
+                        else:
+                            logger.error(
+                                "Document-like processing failed for {}: {}",
+                                source,
+                                error_msg,
+                                exc_info=True,
+                            )
                         results.append(
                             {
                                 "status": "Error",
@@ -3530,7 +3583,10 @@ async def add_media_orchestrate(
                 db=db,
             )
         except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as collections_err:
-            logger.warning("Collections dual-write step failed: {}", collections_err)
+            if email_request:
+                logger.warning("Email collections synchronization failed (error_type={})", exception_type_for_log(collections_err))
+            else:
+                logger.warning("Collections dual-write step failed: {}", collections_err)
 
         # --- 7. Generate Embeddings if Requested ---
         try:
@@ -3542,10 +3598,13 @@ async def add_media_orchestrate(
                 current_user=current_user,
             )
         except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as embeddings_err:
-            logger.warning(
-                "Embeddings scheduling step failed: {}",
-                embeddings_err,
-            )
+            if email_request:
+                logger.warning("Email embeddings scheduling failed (error_type={})", exception_type_for_log(embeddings_err))
+            else:
+                logger.warning(
+                    "Embeddings scheduling step failed: {}",
+                    embeddings_err,
+                )
 
         # --- 8. Determine Final Status Code and Return Response ---
         final_status_code = _determine_final_status(results)
@@ -3602,27 +3661,36 @@ async def add_media_orchestrate(
         raise
     except HTTPException as exc:
         request_outcome = "error"
-        logger.warning(
-            "HTTP Exception encountered in /media/add: Status={}, Detail={}",
-            exc.status_code,
-            exc.detail,
-        )
+        if email_request:
+            logger.warning("Email request failed (status={}, error_type={})", exc.status_code, exception_type_for_log(exc))
+        else:
+            logger.warning(
+                "HTTP Exception encountered in /media/add: Status={}, Detail={}",
+                exc.status_code,
+                exc.detail,
+            )
         raise
     except OSError as os_err:
         request_outcome = "error"
-        logger.error("OSError during /media/add setup: {}", os_err, exc_info=True)
+        if email_request:
+            logger.error("Email request setup failed (error_type={})", exception_type_for_log(os_err))
+        else:
+            logger.error("OSError during /media/add setup: {}", os_err, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"OS error during setup: {os_err}",
         ) from os_err
     except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as unexpected:
         request_outcome = "error"
-        logger.error(
-            "Unhandled exception in /media/add endpoint: {} - {}",
-            type(unexpected).__name__,
-            unexpected,
-            exc_info=True,
-        )
+        if email_request:
+            logger.error("Email request failed (error_type={})", exception_type_for_log(unexpected))
+        else:
+            logger.error(
+                "Unhandled exception in /media/add endpoint: {} - {}",
+                type(unexpected).__name__,
+                unexpected,
+                exc_info=True,
+            )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Unexpected internal error: {type(unexpected).__name__}",
@@ -4297,7 +4365,6 @@ async def process_batch_media(
 
         if not getattr(form_data, "overwrite_existing", False) and str(media_type) in ["video", "audio"]:
             try:
-                model_for_check = getattr(form_data, "transcription_model", None)
                 url_clause, url_params = _build_url_match_clause(
                     url_dedupe_candidates,
                     column="url",
@@ -4308,7 +4375,10 @@ async def process_batch_media(
                 )
                 if source_hash and not is_url:
 
-                    def _source_hash_precheck(db: MediaDatabase) -> Any:
+                    def _source_hash_precheck(
+                        db: MediaDatabase, *, source_hash=source_hash, url_clause=url_clause,
+                        url_clause_alias=url_clause_alias, url_params=url_params, url_params_alias=url_params_alias,
+                    ) -> Any:
                         nonlocal source_hash_column_available
                         if source_hash_column_available is None:
                             source_hash_column_available = _media_has_source_hash_column(db)
@@ -4394,7 +4464,7 @@ async def process_batch_media(
                     reason = "Local file pre-check skipped (no source hash available)."
                 else:
 
-                    def _url_precheck(db: MediaDatabase) -> Any:
+                    def _url_precheck(db: MediaDatabase, *, url_clause=url_clause, url_params=url_params) -> Any:
                         pre_check_query_template = """
                                           SELECT id
                                           FROM Media
@@ -4981,7 +5051,10 @@ async def process_document_like_item(
 
     try:
         if is_url:
-            logger.info("Downloading URL: {}", redact_url_for_log(processing_source))
+            if media_type == "email":
+                logger.bind(stage="process_document_like_item").info("Email ingestion event")
+            else:
+                logger.info("Downloading URL: {}", redact_url_for_log(processing_source))
             # SSRF guard for individual item
             try:
                 from tldw_Server_API.app.core.Security.url_validation import (  # type: ignore
@@ -4995,11 +5068,14 @@ async def process_document_like_item(
                 # still execute the ingestion path.
                 detail = getattr(exc, "detail", "")
                 if is_test_mode() and isinstance(detail, str) and "Host could not be resolved" in detail:
-                    logger.warning(
-                        "TEST_MODE: ignoring host resolution error for {}: {}",
-                        processing_source,
-                        detail,
-                    )
+                    if media_type == "email":
+                        logger.bind(stage="process_document_like_item").warning("Email ingestion event")
+                    else:
+                        logger.warning(
+                            "TEST_MODE: ignoring host resolution error for {}: {}",
+                            processing_source,
+                            detail,
+                        )
                 else:
                     get_metrics_registry().increment(
                         "security_ssrf_block_total",
@@ -5095,10 +5171,13 @@ async def process_document_like_item(
                     except HTTPException:
                         raise
                     except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as quota_err:
-                        logger.warning(
-                            "Per-item quota check failed (non-fatal): {}",
-                            quota_err,
-                        )
+                        if media_type == "email":
+                            logger.bind(stage="process_document_like_item", error_type=type(quota_err).__name__[:80]).warning("Email ingestion event")
+                        else:
+                            logger.warning(
+                                "Per-item quota check failed (non-fatal): {}",
+                                quota_err,
+                            )
 
                 # Read bytes for types that operate on raw content.
                 if str(media_type) in {"pdf", "email"}:
@@ -5166,25 +5245,28 @@ async def process_document_like_item(
             with contextlib.suppress(_PERSISTENCE_NONCRITICAL_EXCEPTIONS):
                 downloaded_path_exists = downloaded_path.exists()
 
-        logger.exception(
-            "File preparation/download error for {}: {} ({}) | context: "
-            "is_url={} temp_dir={} temp_dir_exists={} processing_source={} "
-            "processing_source_exists={} downloaded_path={} downloaded_path_exists={} "
-            "processing_filepath={} processing_filepath_exists={} processing_filename={}",
-            item_input_ref,
-            error_detail,
-            prep_error_type,
-            is_url,
-            temp_dir,
-            temp_dir_exists,
-            processing_source,
-            processing_source_exists,
-            downloaded_path,
-            downloaded_path_exists,
-            processing_filepath,
-            processing_filepath_exists,
-            processing_filename,
-        )
+        if media_type == "email":
+            logger.bind(stage="process_document_like_item").error("Email ingestion event")
+        else:
+            logger.exception(
+                "File preparation/download error for {}: {} ({}) | context: "
+                "is_url={} temp_dir={} temp_dir_exists={} processing_source={} "
+                "processing_source_exists={} downloaded_path={} downloaded_path_exists={} "
+                "processing_filepath={} processing_filepath_exists={} processing_filename={}",
+                item_input_ref,
+                error_detail,
+                prep_error_type,
+                is_url,
+                temp_dir,
+                temp_dir_exists,
+                processing_source,
+                processing_source_exists,
+                downloaded_path,
+                downloaded_path_exists,
+                processing_filepath,
+                processing_filepath_exists,
+                processing_filename,
+            )
         validation_reason = _classify_ingestion_validation_failure_reason(error_detail)
         if validation_reason != "other":
             _emit_ingestion_validation_failure_metric(
@@ -5414,6 +5496,13 @@ async def process_document_like_item(
                 f"Processor not implemented for media type: '{media_type}'",
             )
 
+        if media_type == "email":
+            specific_args.update({
+                "extract_attachments": getattr(form_data, "extract_attachments", None),
+                "attachment_mime_allowlist": getattr(form_data, "attachment_mime_allowlist", None),
+                "attachment_mime_denylist": getattr(form_data, "attachment_mime_denylist", None),
+            })
+
         all_args = {**common_args, **specific_args}
         final_args = all_args
 
@@ -5423,12 +5512,15 @@ async def process_document_like_item(
                 "__name__",
                 str(processing_func),
             )
-            logger.info(
-                "Calling document-like processor '{}' for '{}' {}",
-                func_name,
-                item_input_ref,
-                "in executor" if run_in_executor else "directly",
-            )
+            if media_type == "email":
+                logger.bind(stage="process_document_like_item").info("Email ingestion event")
+            else:
+                logger.info(
+                    "Calling document-like processor '{}' for '{}' {}",
+                    func_name,
+                    item_input_ref,
+                    "in executor" if run_in_executor else "directly",
+                )
             if run_in_executor:
                 target_func = functools.partial(processing_func, **final_args)
                 process_result_dict = await loop.run_in_executor(
@@ -5554,12 +5646,15 @@ async def process_document_like_item(
             )
 
     except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as proc_err:
-        logger.error(
-            "Error during processing call for {}: {}",
-            item_input_ref,
-            proc_err,
-            exc_info=True,
-        )
+        if media_type == "email":
+            logger.bind(stage="process_document_like_item", error_type=type(proc_err).__name__[:80]).error("Email ingestion event")
+        else:
+            logger.error(
+                "Error during processing call for {}: {}",
+                item_input_ref,
+                proc_err,
+                exc_info=True,
+            )
         final_result.update(
             {
                 "status": "Error",
@@ -5675,6 +5770,20 @@ async def persist_doc_item_and_children(
     Persist a single document/email item (and any children) produced by the /add
     orchestration, mirroring the previous post-processing DB logic.
     """
+    def is_bodyless_parsed_email(result: dict[str, Any]) -> bool:
+        """Recognize successful parsed mail; synthetic envelopes lack email fields."""
+        metadata = result.get("metadata")
+        if not isinstance(metadata, dict) or metadata.get("parser_used") != "builtin-email":
+            return False
+        email_metadata = metadata.get("email")
+        return (
+            result.get("status") in ("Success", "Warning")
+            and isinstance(email_metadata, dict)
+            and isinstance(email_metadata.get("format"), str)
+            and bool(email_metadata["format"])
+            and isinstance(email_metadata.get("headers_map"), dict)
+        )
+
     resolved_email_tenant_id = email_tenant_id or str(client_id)
     email_scope = get_scope() if media_type == "email" else None
     content_for_db = final_result.get("content", "")
@@ -5716,7 +5825,11 @@ async def persist_doc_item_and_children(
         pass
 
     try:
-        if media_type == "email" and getattr(form_data, "ingest_attachments", False):
+        if media_type == "email" and (
+            getattr(form_data, "ingest_attachments", False)
+            if getattr(form_data, "extract_attachments", None) is None
+            else getattr(form_data, "extract_attachments", False)
+        ):
             parent_msg_id = None
             try:
                 parent_msg_id = ((metadata_for_db or {}).get("email") or {}).get("message_id")
@@ -5750,13 +5863,19 @@ async def persist_doc_item_and_children(
     final_keywords_list = sorted(combined_keywords)
     try:
         final_result["keywords"] = final_keywords_list
-        logger.info(
-            "Archive parent keywords set for {}: {}",
-            item_input_ref,
-            final_keywords_list,
-        )
+        if media_type == "email":
+            logger.bind(stage="persist_doc_item_and_children").info("Email ingestion event")
+        else:
+            logger.info(
+                "Archive parent keywords set for {}: {}",
+                item_input_ref,
+                final_keywords_list,
+            )
     except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as kw_err:
-        logger.warning("Failed to set parent keywords for {}: {}", item_input_ref, kw_err)
+        if media_type == "email":
+            logger.bind(stage="persist_doc_item_and_children", error_type=type(kw_err).__name__[:80]).warning("Email ingestion event")
+        else:
+            logger.warning("Failed to set parent keywords for {}: {}", item_input_ref, kw_err)
 
     model_used = metadata_for_db.get("parser_used", "Imported")
     if not model_used and media_type == "pdf":
@@ -5770,12 +5889,18 @@ async def persist_doc_item_and_children(
         getattr(form_data, "author", None) or "Unknown",
     )
 
-    if content_for_db:
+    if content_for_db or (media_type == "email" and is_bodyless_parsed_email(final_result)):
+        # Empty text is valid for genuine email nodes, including attachment-only parents.
+        if content_for_db is None:
+            content_for_db = ""
         try:
-            logger.info(
-                "Attempting DB persistence for item: {} using user DB",
-                item_input_ref,
-            )
+            if media_type == "email":
+                logger.bind(stage="persist_doc_item_and_children").info("Email ingestion event")
+            else:
+                logger.info(
+                    "Attempting DB persistence for item: {} using user DB",
+                    item_input_ref,
+                )
             safe_meta: dict[str, Any] = {}
             try:
                 safe_meta = build_safe_metadata_subset(metadata_for_db)
@@ -5869,6 +5994,7 @@ async def persist_doc_item_and_children(
                     )
                     email_graph_local: dict[str, Any] | None = None
                     if media_type == "email" and media_id_local:
+                        native_persist_started = time.perf_counter()
                         if _is_email_native_persist_enabled():
                             try:
                                 saved_metadata, saved_body = read_persisted_email_content(
@@ -5884,6 +6010,7 @@ async def persist_doc_item_and_children(
                                 )
                                 _emit_email_native_persist_metric(
                                     path_kind="primary",
+                                    duration_seconds=time.perf_counter() - native_persist_started,
                                     outcome=(
                                         "success"
                                         if isinstance(email_graph_local, dict)
@@ -5892,17 +6019,16 @@ async def persist_doc_item_and_children(
                                     ),
                                 )
                             except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as exc:
-                                logger.debug(
-                                    "Email native upsert skipped due to non-fatal error (primary): {}",
-                                    exc,
-                                )
+                                logger.bind(path_kind="primary", error_type=type(exc).__name__[:80]).warning("Email native persistence failed (error_type={})", type(exc).__name__[:80])
                                 _emit_email_native_persist_metric(
                                     path_kind="primary",
+                                    duration_seconds=time.perf_counter() - native_persist_started,
                                     outcome="error",
                                 )
                         else:
                             _emit_email_native_persist_metric(
                                 path_kind="primary",
+                                duration_seconds=time.perf_counter() - native_persist_started,
                                 outcome="skipped_flag",
                             )
                     return (
@@ -5957,30 +6083,45 @@ async def persist_doc_item_and_children(
                 chunk_method=(resolved_chunk_options or {}).get("method"),
                 chunk_count=len(chunks_for_sql) if isinstance(chunks_for_sql, list) else 0,
             )
-            logger.info(
-                "DB persistence result for {}: ID={}, UUID={}, Msg='{}'",
-                item_input_ref,
-                media_id_result,
-                media_uuid_result,
-                db_message_result,
-            )
+            if media_type == "email":
+                logger.bind(stage="persist_doc_item_and_children").info("Email ingestion event")
+            else:
+                logger.info(
+                    "DB persistence result for {}: ID={}, UUID={}, Msg='{}'",
+                    item_input_ref,
+                    media_id_result,
+                    media_uuid_result,
+                    db_message_result,
+                )
 
             try:
-                if media_type == "email" and getattr(form_data, "ingest_attachments", False):
+                if media_type == "email" and (
+                    getattr(form_data, "ingest_attachments", False)
+                    if getattr(form_data, "extract_attachments", None) is None
+                    else getattr(form_data, "extract_attachments", False)
+                ):
                     children = final_result.get("children") or []
                     if isinstance(children, list) and children:
                         if any(isinstance(child, dict) and child.get("status") != "Success" for child in children):
                             final_result["child_db_results"] = None
                         else:
                             child_db_results: list[dict[str, Any]] = []
-                            for child in children:
+                            pending_children = [
+                                (child, media_uuid_result, item_input_ref) for child in reversed(children)
+                            ]
+                            while pending_children:
+                                child, parent_media_uuid, parent_source = pending_children.pop()
+                                if not isinstance(child, dict) or child.get("status") != "Success":
+                                    continue
                                 try:
                                     child_content = child.get("content")
                                     child_meta = child.get("metadata") or {}
                                     if not child_content:
-                                        continue
+                                        if not is_bodyless_parsed_email(child):
+                                            continue
+                                        child_content = ""
                                     safe_child_meta = build_safe_metadata_subset(child_meta)
-                                    safe_child_meta["parent_media_uuid"] = media_uuid_result
+                                    safe_child_meta["parent_media_uuid"] = parent_media_uuid
                                     try:
                                         from tldw_Server_API.app.core.Utils.metadata_utils import (  # type: ignore
                                             normalize_safe_metadata,
@@ -6042,7 +6183,7 @@ async def persist_doc_item_and_children(
                                         getattr(form_data, "author", None) or "Unknown",
                                     )
                                     child_url = (
-                                        f"{item_input_ref}::child::" f"{child_meta.get('filename') or child_title}"
+                                        f"{parent_source}::child::" f"{child_meta.get('filename') or child_title}"
                                     )
 
                                     def _db_child_worker(
@@ -6083,6 +6224,7 @@ async def persist_doc_item_and_children(
                                                 )
                                             )
                                             if media_type_local == "email" and child_id_local:
+                                                native_persist_started = time.perf_counter()
                                                 if _is_email_native_persist_enabled():
                                                     try:
                                                         saved_metadata, saved_body = read_persisted_email_content(
@@ -6098,6 +6240,7 @@ async def persist_doc_item_and_children(
                                                         )
                                                         _emit_email_native_persist_metric(
                                                             path_kind="attachment_child",
+                                                            duration_seconds=time.perf_counter() - native_persist_started,
                                                             outcome=(
                                                                 "success"
                                                                 if isinstance(child_email_graph_local, dict)
@@ -6106,17 +6249,16 @@ async def persist_doc_item_and_children(
                                                             ),
                                                         )
                                                     except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as exc:
-                                                        logger.debug(
-                                                            "Email native upsert skipped due to non-fatal error (attachment_child): {}",
-                                                            exc,
-                                                        )
+                                                        logger.bind(path_kind="attachment_child", error_type=type(exc).__name__[:80]).warning("Email native persistence failed (error_type={})", type(exc).__name__[:80])
                                                         _emit_email_native_persist_metric(
                                                             path_kind="attachment_child",
+                                                            duration_seconds=time.perf_counter() - native_persist_started,
                                                             outcome="error",
                                                         )
                                                 else:
                                                     _emit_email_native_persist_metric(
                                                         path_kind="attachment_child",
+                                                        duration_seconds=time.perf_counter() - native_persist_started,
                                                         outcome="skipped_flag",
                                                     )
                                             return child_id_local, child_uuid_local, child_msg_local
@@ -6168,23 +6310,36 @@ async def persist_doc_item_and_children(
                                             "title": child_title,
                                         }
                                     )
+                                    if child_id and child_uuid:
+                                        descendants = child.get("children") or []
+                                        if isinstance(descendants, list):
+                                            pending_children.extend(
+                                                (descendant, child_uuid, child_url)
+                                                for descendant in reversed(descendants)
+                                            )
                                 except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as child_db_err:
-                                    logger.warning(
-                                        "Child email persistence failed: {}",
-                                        child_db_err,
-                                    )
+                                    if media_type == "email":
+                                        logger.bind(stage="persist_doc_item_and_children", error_type=type(child_db_err).__name__[:80]).warning("Email ingestion event")
+                                    else:
+                                        logger.warning(
+                                            "Child email persistence failed: {}",
+                                            child_db_err,
+                                        )
                             if child_db_results:
                                 final_result["child_db_results"] = child_db_results
             except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
                 pass
 
         except (DatabaseError, InputError, ConflictError) as db_err:
-            logger.error(
-                "Database operation failed for {}: {}",
-                item_input_ref,
-                db_err,
-                exc_info=True,
-            )
+            if media_type == "email":
+                logger.bind(stage="persist_doc_item_and_children", error_type=type(db_err).__name__[:80]).error("Email ingestion event")
+            else:
+                logger.error(
+                    "Database operation failed for {}: {}",
+                    item_input_ref,
+                    db_err,
+                    exc_info=True,
+                )
             final_result["status"] = "Warning"
             final_result["error"] = (final_result.get("error") or "") + f" | DB Error: {db_err}"
             if not isinstance(final_result.get("warnings"), list):
@@ -6194,12 +6349,15 @@ async def persist_doc_item_and_children(
             final_result["db_id"] = None
             final_result["media_uuid"] = None
         except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as exc:
-            logger.error(
-                "Unexpected error during DB persistence for {}: {}",
-                item_input_ref,
-                exc,
-                exc_info=True,
-            )
+            if media_type == "email":
+                logger.bind(stage="persist_doc_item_and_children", error_type=type(exc).__name__[:80]).error("Email ingestion event")
+            else:
+                logger.error(
+                    "Unexpected error during DB persistence for {}: {}",
+                    item_input_ref,
+                    exc,
+                    exc_info=True,
+                )
             final_result["status"] = "Warning"
             final_result["error"] = final_result.get("error") or ""
             if not isinstance(final_result.get("warnings"), list):
@@ -6226,13 +6384,23 @@ async def persist_doc_item_and_children(
                         async with _archive_media_db_worker(
                             db_path=db_path, client_id=client_id,
                         ) as run_archive_operation:
-                            for child in children:
+                            pending_children = [
+                                (child, None, item_input_ref) for child in reversed(children)
+                            ]
+                            while pending_children:
+                                child, parent_media_uuid, parent_source = pending_children.pop()
+                                if not isinstance(child, dict) or child.get("status") != "Success":
+                                    continue
                                 try:
                                     child_content = child.get("content")
                                     child_meta = child.get("metadata") or {}
                                     if not child_content:
-                                        continue
+                                        if not is_bodyless_parsed_email(child):
+                                            continue
+                                        child_content = ""
                                     safe_child_meta = build_safe_metadata_subset(child_meta)
+                                    if parent_media_uuid is not None:
+                                        safe_child_meta["parent_media_uuid"] = parent_media_uuid
                                     safe_child_meta_json: str | None = None
                                     try:
                                         from tldw_Server_API.app.core.Utils.metadata_utils import (  # type: ignore
@@ -6295,8 +6463,10 @@ async def persist_doc_item_and_children(
                                         getattr(form_data, "author", None) or "Unknown",
                                     )
                                     child_url = (
-                                        f"{item_input_ref}::archive::" f"{child_meta.get('filename') or child_title}"
+                                        f"{parent_source}::{'child' if parent_media_uuid else 'archive'}::"
+                                        f"{child_meta.get('filename') or child_title}"
                                     )
+                                    native_path_kind = "attachment_child" if parent_media_uuid else "archive_child"
 
                                     def _db_child_arch_worker(
                                         worker_db: MediaDatabase,
@@ -6314,6 +6484,7 @@ async def persist_doc_item_and_children(
                                         media_type_local: str = media_type,
                                         form_data_local: Any = form_data,
                                         chunk_options_local: dict[str, Any] | None = resolved_chunk_options,
+                                        native_path_kind_local: str = native_path_kind,
                                     ) -> Any:
                                         def _persist_archive_child(worker_db: MediaDatabase) -> Any:
                                             media_writer = _resolve_media_writer(worker_db)
@@ -6335,6 +6506,7 @@ async def persist_doc_item_and_children(
                                                 )
                                             )
                                             if media_type_local == "email" and child_id_local:
+                                                native_persist_started = time.perf_counter()
                                                 if _is_email_native_persist_enabled():
                                                     try:
                                                         with worker_db.transaction():
@@ -6350,7 +6522,8 @@ async def persist_doc_item_and_children(
                                                                 source_key=str(child_url_local),
                                                             )
                                                         _emit_email_native_persist_metric(
-                                                            path_kind="archive_child",
+                                                            path_kind=native_path_kind_local,
+                                                            duration_seconds=time.perf_counter() - native_persist_started,
                                                             outcome=(
                                                                 "success"
                                                                 if isinstance(child_email_graph_local, dict)
@@ -6359,17 +6532,16 @@ async def persist_doc_item_and_children(
                                                             ),
                                                         )
                                                     except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as exc:
-                                                        logger.debug(
-                                                            "Email native upsert skipped due to non-fatal error (archive_child): {}",
-                                                            exc,
-                                                        )
+                                                        logger.bind(path_kind=native_path_kind_local, error_type=type(exc).__name__[:80]).warning("Email native persistence failed (error_type={})", type(exc).__name__[:80])
                                                         _emit_email_native_persist_metric(
-                                                            path_kind="archive_child",
+                                                            path_kind=native_path_kind_local,
+                                                            duration_seconds=time.perf_counter() - native_persist_started,
                                                             outcome="error",
                                                         )
                                                 else:
                                                     _emit_email_native_persist_metric(
-                                                        path_kind="archive_child",
+                                                        path_kind=native_path_kind_local,
+                                                        duration_seconds=time.perf_counter() - native_persist_started,
                                                         outcome="skipped_flag",
                                                     )
                                             return child_id_local, child_uuid_local, child_msg_local
@@ -6412,11 +6584,21 @@ async def persist_doc_item_and_children(
                                         }
                                     )
                                     persisted_any_children = True
+                                    if child_id and child_uuid:
+                                        descendants = child.get("children") or []
+                                        if isinstance(descendants, list):
+                                            pending_children.extend(
+                                                (descendant, child_uuid, child_url)
+                                                for descendant in reversed(descendants)
+                                            )
                                 except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as child_db_err:
-                                    logger.warning(
-                                        "Archive child email persistence failed: {}",
-                                        child_db_err,
-                                    )
+                                    if media_type == "email":
+                                        logger.bind(stage="persist_doc_item_and_children", error_type=type(child_db_err).__name__[:80]).warning("Email ingestion event")
+                                    else:
+                                        logger.warning(
+                                            "Archive child email persistence failed: {}",
+                                            child_db_err,
+                                        )
                         try:
                             if child_db_results:
                                 final_result["child_db_results"] = child_db_results
@@ -6426,10 +6608,13 @@ async def persist_doc_item_and_children(
                 pass
 
         if not persisted_any_children:
-            logger.warning(
-                "Skipping DB persistence for {} due to missing content.",
-                item_input_ref,
-            )
+            if media_type == "email":
+                logger.bind(stage="persist_doc_item_and_children").warning("Email ingestion event")
+            else:
+                logger.warning(
+                    "Skipping DB persistence for {} due to missing content.",
+                    item_input_ref,
+                )
             final_result["db_message"] = "DB persistence skipped (no content)."
             final_result["db_id"] = None
             final_result["media_uuid"] = None

@@ -25,6 +25,10 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import 
     MEDIA_NONCRITICAL_EXCEPTIONS,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.validation import MediaDbLike
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Email.email_ingestion_metrics import (
+    record_email_dedupe,
+    track_email_persistence,
+)
 
 
 def _load_legacy_media_support():
@@ -46,6 +50,7 @@ class MediaRepository:
     def from_legacy_db(cls, db: MediaDbLike) -> MediaRepository:
         return cls(session=db)
 
+    @track_email_persistence
     def add_media_with_keywords(
         self,
         *,
@@ -141,7 +146,7 @@ class MediaRepository:
 
         final_chunk_status = "completed" if chunks is not None else "pending"
 
-        logger.info("add_media_with_keywords: url={}, title={}, client={}", url, title, client_id)
+        logger.info("Media persistence started")
         try:
             from tldw_Server_API.app.core.Monitoring.topic_monitoring_service import (
                 get_topic_monitoring_service,
@@ -174,17 +179,9 @@ class MediaRepository:
                     scope_id=uid,
                 )
         except noncritical_exceptions as exc:
-            logger.warning(
-                "Topic monitoring unavailable during media ingest for url {}: {}",
-                url,
-                exc,
-            )
+            logger.bind(error_type=type(exc).__name__[:80]).warning("Topic monitoring unavailable during media ingestion")
         except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
-            logger.warning(
-                "Topic monitoring failed unexpectedly during media ingest for url {}: {}",
-                url,
-                exc,
-            )
+            logger.bind(error_type=type(exc).__name__[:80]).warning("Topic monitoring failed during media ingestion")
 
         def _media_payload(
             uuid_: str,
@@ -399,6 +396,8 @@ class MediaRepository:
                         )
 
                 if row:
+                    if media_type == "email":
+                        record_email_dedupe(backend=db.backend_type)
                     media_id = row["id"]
                     media_uuid = row["uuid"]
                     current_ver = row["version"]
@@ -680,6 +679,8 @@ class MediaRepository:
                 with db._media_insert_lock:
                     recheck_row = _fetch_existing_by_url("id, uuid, version")
                     if recheck_row:
+                        if media_type == "email":
+                            record_email_dedupe(backend=db.backend_type)
                         media_id = recheck_row["id"]
                         media_uuid = recheck_row["uuid"]
                         if not overwrite:
@@ -891,7 +892,7 @@ class MediaRepository:
                                     )
                             except noncritical_exceptions as parent_error:
                                 logger.warning(
-                                    f"Structure index parent-link population failed (non-fatal): {parent_error}"
+                                    "Media structure population failed: parent-link; error_type={}", type(parent_error).__name__[:80]
                                 )
 
                         try:
@@ -965,19 +966,19 @@ class MediaRepository:
                                 order += 1
                         except noncritical_exceptions as paragraph_error:
                             logger.warning(
-                                f"Paragraph index population failed (non-fatal): {paragraph_error}"
+                                "Media structure population failed: paragraph; error_type={}", type(paragraph_error).__name__[:80]
                             )
                     except noncritical_exceptions as structure_error:
                         logger.warning(
-                            f"Structure index population failed (non-fatal): {structure_error}"
+                            "Media structure population failed: structure; error_type={}", type(structure_error).__name__[:80]
                         )
                 if chunk_options:
-                    logger.info("chunk_options ignored (placeholder): {}", chunk_options)
+                    logger.info("Unused chunk options supplied")
 
                 return media_id, media_uuid, f"Media '{title}' added."
 
         except (InputError, ConflictError, sqlite3.IntegrityError) as exc:
-            logger.exception(f"Transaction failed, rolling back: {type(exc).__name__}")
+            logger.bind(error_type=type(exc).__name__[:80]).error("Media transaction failed; rolling back")
             raise
 
     def add_text_media(

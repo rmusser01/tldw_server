@@ -30,6 +30,7 @@ import zipfile
 #
 # Local Imports (adjust path as per your project structure)
 from tldw_Server_API.app.core.config import MAGIC_FILE_PATH, loaded_config_data
+from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import exception_type_for_log
 from tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils import resolve_safe_local_path
 from tldw_Server_API.app.core.Utils.Utils import logging
 
@@ -78,9 +79,7 @@ def _get_python_magic_module():
 
     _python_magic_loaded = True
     if _is_windows_platform():
-        logging.info(
-            "Skipping python-magic fallback on Windows; relying on puremagic or extension guesses."
-        )
+        logging.info("MIME detection configured")
         return None
 
     try:
@@ -88,7 +87,7 @@ def _get_python_magic_module():
     except ImportError:
         _python_magic = None
     except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS as exc:
-        logging.warning(f"Failed to import python-magic fallback: {exc}")
+        logging.warning("MIME fallback import failed (error_type={})", exception_type_for_log(exc))
         _python_magic = None
     return _python_magic
 
@@ -440,11 +439,11 @@ class FileValidator:
                 else:
                     self._python_magic_mime = python_magic_module.Magic(mime=True)
                 self.python_magic_available = True
-                logging.info("python-magic is available and will be used for MIME detection fallback.")
+                logging.info("python-magic available for MIME detection")
             except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS as e:
                 self._python_magic_mime = None
                 self.python_magic_available = False
-                logging.warning(f"Failed to initialize python-magic fallback: {e}")
+                logging.warning("MIME fallback initialization failed (error_type={})", exception_type_for_log(e))
         self.yara_available = bool(yara)
         # Prefer a neutral name; both zipfile and tarfile are stdlib
         self.archive_scanning_available = bool(zipfile or tarfile)
@@ -460,13 +459,10 @@ class FileValidator:
         if self.yara_available and yara_rules_path:
             self._initialize_yara_scanner(yara_rules_path)
         elif yara_rules_path and not self.yara_available:
-            logging.warning("Yara rules path provided, but yara-python is not installed. Yara scanning disabled.")
+            logging.warning("Yara scanning disabled: optional dependency unavailable")
 
         if not self.magic_available and not self.python_magic_available:
-            logging.warning(
-                "puremagic/python-magic unavailable. MIME detection will rely on extension guesses. "
-                "Install 'puremagic' or 'python-magic' for stronger detection."
-            )
+            logging.warning("Yara scanning configured to permit scanner errors")
 
         self._custom_media_configs: dict[str, dict] = {}
         if custom_media_configs:
@@ -480,13 +476,13 @@ class FileValidator:
         try:
             # Check if the rules file exists
             if not os.path.exists(rules_path):
-                logging.warning(f"Yara rules file not found at {rules_path}. Yara scanning will be disabled.")
+                logging.warning("Yara scanning disabled: rules file missing")
                 return None
             rules = yara.compile(filepath=rules_path)
-            logging.info(f"Yara rules compiled successfully from {rules_path}.")
+            logging.info("Yara rules compiled")
             return rules
         except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS as e:
-            logging.error(f"An unexpected error occurred during Yara rule compilation from {rules_path}: {e}")
+            logging.error("Yara rule compilation failed (error_type={})", exception_type_for_log(e))
         return None
 
     def _initialize_yara_scanner(self, rules_path: str):
@@ -494,7 +490,7 @@ class FileValidator:
             return
         self.compiled_yara_rules = self._compile_yara_rules(rules_path)
         if self.compiled_yara_rules is None:
-            logging.warning("Yara rules not loaded. Yara scanning will be disabled for this validator instance.")
+            logging.warning("Yara scanning disabled: rules unavailable")
 
     def _scan_file_with_yara(self, file_path: Path) -> tuple[bool, list[str]]:
         if not self.yara_available or not self.compiled_yara_rules:
@@ -504,14 +500,14 @@ class FileValidator:
             matches = self.compiled_yara_rules.match(filepath=str(file_path))
             if matches:
                 match_details = [f"Rule:'{m.rule}',NS:'{m.namespace}',Tags:{m.tags},Meta:{m.meta}" for m in matches]
-                logging.warning(f"Yara rule(s) matched for file: {file_path}. Matches: {match_details}")
+                logging.warning("Yara scan rejected file (match_count={})", len(matches))
                 return False, match_details
             return True, []
         except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS as e:
             if getattr(self, '_yara_fail_open', False):
-                logging.warning(f"Yara scanning error for {file_path}: {e}. Treating as pass due to configuration.")
+                logging.warning("Yara scanner error permitted by configuration (error_type={})", exception_type_for_log(e))
                 return True, []
-            logging.error(f"Unexpected error scanning file {file_path} with Yara: {e}")
+            logging.error("Yara scan failed (error_type={})", exception_type_for_log(e))
             return False, [f"Unexpected Yara scanning error: {e}"]
 
     def get_media_config(self, media_type_key: Optional[str]) -> Optional[dict]:
@@ -661,11 +657,7 @@ class FileValidator:
                     detected_mime_type = detected_mime_type.strip()
                     mime_detection_source = "magic"
             except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS as e:  # Catch other errors during MIME detection
-                logging.warning(
-                    "MIME magic detection failed for '%s': %s. Falling back to extension guesses.",
-                    _original_filename,
-                    e,
-                )
+                logging.warning("MIME magic detection failed; using extension fallback (error_type={})", exception_type_for_log(e))
                 detected_mime_type = None
                 mime_detection_source = "fallback"
         elif self.python_magic_available and self._python_magic_mime is not None:
@@ -675,11 +667,7 @@ class FileValidator:
                     detected_mime_type = str(detected_mime_type).strip()
                     mime_detection_source = "python-magic"
             except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS as e:
-                logging.warning(
-                    "python-magic MIME detection failed for '%s': %s. Falling back to extension guesses.",
-                    _original_filename,
-                    e,
-                )
+                logging.warning("python-magic detection failed; using extension fallback (error_type={})", exception_type_for_log(e))
                 detected_mime_type = None
                 mime_detection_source = "fallback"
 
@@ -759,13 +747,10 @@ class FileValidator:
             issues.extend([f"  Yara: {detail}" for detail in yara_match_details])
 
         if issues:
-            logging.warning(f"Validation failed for '{_original_filename}' (path: {current_file_path}): {issues}")
+            logging.warning("File validation rejected upload (issue_count={})", len(issues))
             return ValidationResult(False, issues, current_file_path, detected_mime_type, disk_file_ext)
 
-        claimed_ext_log = claimed_ext_display_str
-        disk_ext_log = disk_file_ext or "<none>"
-        logging.info(f"File '{_original_filename}' (path: {current_file_path}) validated successfully. "
-                     f"MIME: {detected_mime_type}, Claimed Ext: {claimed_ext_log}, Disk Ext: {disk_ext_log}")
+        logging.info("File validation succeeded")
         return ValidationResult(True, file_path=current_file_path,
                                 detected_mime_type=detected_mime_type, detected_extension=disk_file_ext)
 
@@ -801,13 +786,13 @@ class FileValidator:
             return ValidationResult(False, issues, archive_path_obj)
 
         if not archive_config.get("scan_contents", False):
-            logging.info(f"Content scanning for archive '{archive_path_obj.name}' is disabled by config.")
+            logging.info("Archive content scanning disabled by configuration")
             return archive_file_validation_result  # Return result of archive file validation
 
         if not self.archive_scanning_available:
             # Best-effort: treat the archive file itself as valid, but attach a warning
             issues.append("Archive content scanning not available. Skipping internal file validation.")
-            logging.warning("Archive content scanning unavailable; returning archive file validation result with warning.")
+            logging.warning("Archive content scanning unavailable; returning file validation with warning")
             archive_file_validation_result.issues.extend(issues)
             return archive_file_validation_result
 
@@ -858,14 +843,14 @@ class FileValidator:
                             member_filename = member.filename
                             # Check for path traversal attempts
                             if '..' in member_filename or member_filename.startswith('/') or ':' in member_filename:
-                                logging.warning(f"Skipping potentially malicious archive member: {member_filename}")
+                                logging.warning("Archive member rejected: malicious path")
                                 issues.append(f"Archive contains potentially malicious path: {member_filename}")
                                 continue
 
                             # Additional check: ensure the extracted path stays within extract_dir.
                             intended_path = resolve_safe_local_path(extract_dir / member_filename, extract_dir)
                             if intended_path is None:
-                                logging.warning(f"Path traversal attempt detected: {member_filename}")
+                                logging.warning("Archive member rejected: path traversal")
                                 issues.append(f"Archive contains path traversal attempt: {member_filename}")
                                 continue
 
@@ -888,7 +873,7 @@ class FileValidator:
                             # Reject encrypted ZIP members explicitly
                             try:
                                 if getattr(member, 'flag_bits', 0) & 0x1:
-                                    logging.warning(f"Encrypted ZIP member detected and rejected: {member_filename}")
+                                    logging.warning("Archive member rejected: encrypted ZIP member")
                                     issues.append(f"Archive contains encrypted member: {member_filename}")
                                     continue
                             except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS:
@@ -898,14 +883,13 @@ class FileValidator:
                             external_type = (member.external_attr >> 16) & 0xFFFF
                             if external_type:
                                 if stat.S_ISLNK(external_type):
-                                    logging.warning(f"Skipping symbolic link inside archive: {member_filename}")
+                                    logging.warning("Archive member rejected: symbolic link")
                                     issues.append(f"Archive contains unsupported symbolic link: {member_filename}")
                                     continue
                                 # Treat entries lacking file-type bits (common on Windows zips) as regular files.
                                 file_type_bits = external_type & 0xF000
                                 if file_type_bits and not stat.S_ISREG(external_type):
-                                    logging.warning(
-                                        f"Skipping non-regular file inside archive: {member_filename} (mode={oct(external_type)})")
+                                    logging.warning("Archive member rejected: non-regular file")
                                     issues.append(
                                         f"Archive contains unsupported entry type (mode {oct(external_type)}): {member_filename}")
                                     continue
@@ -959,8 +943,7 @@ class FileValidator:
                             except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS as extract_err:
                                 issues.append(
                                     f"Error extracting/validating internal file '{member.filename}': {extract_err}")
-                                logging.error(f"Error extracting internal file '{member.filename}': {extract_err}",
-                                              exc_info=True)
+                                logging.error("ZIP member extraction failed (error_type={})", exception_type_for_log(extract_err))
                                 break  # Stop on extraction error for an internal file
 
                 elif is_tar:
@@ -984,19 +967,18 @@ class FileValidator:
                                 if member.isdir():
                                     continue
                                 if member.issym() or member.islnk():
-                                    logging.warning(f"Skipping symbolic/hard link inside archive: {member.name}")
+                                    logging.warning("Archive member rejected: symbolic or hard link")
                                     issues.append(f"Archive contains unsupported link entry: {member.name}")
                                     continue
                                 if not member.isfile():
-                                    logging.warning(
-                                        f"Skipping non-file archive member: {member.name} (type={member.type})")
+                                    logging.warning("Archive member rejected: non-file entry")
                                     issues.append(
                                         f"Archive contains unsupported member type ({member.type}): {member.name}")
                                     continue
                                 # Normalize member path to POSIX-like separators for consistent checks
                                 member_filename = str(PurePosixPath(member.name))
                                 if '..' in member_filename or member_filename.startswith('/') or ':' in member_filename:
-                                    logging.warning(f"Skipping potentially malicious archive member: {member_filename}")
+                                    logging.warning("Archive member rejected: malicious path")
                                     issues.append(f"Archive contains potentially malicious path: {member_filename}")
                                     continue
                                 # Per-member uncompressed size cap
@@ -1010,7 +992,7 @@ class FileValidator:
                                     pass
                                 intended_path = resolve_safe_local_path(extract_dir / member_filename, extract_dir)
                                 if intended_path is None:
-                                    logging.warning(f"Path traversal attempt detected: {member_filename}")
+                                    logging.warning("Archive member rejected: path traversal")
                                     issues.append(f"Archive contains path traversal attempt: {member_filename}")
                                     continue
 
@@ -1070,7 +1052,7 @@ class FileValidator:
                                 except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS as extract_err:
                                     issues.append(
                                         f"Error extracting/validating internal file '{member.name}': {extract_err}")
-                                    logging.error(f"Error extracting internal file '{member.name}': {extract_err}", exc_info=True)
+                                    logging.error("TAR member extraction failed (error_type={})", exception_type_for_log(extract_err))
                                     break
                     except tarfile.ReadError:
                         issues.append(f"Archive '{archive_path_obj.name}' is corrupted or not a valid TAR archive.")
@@ -1084,12 +1066,12 @@ class FileValidator:
             issues.append(f"Archive '{archive_path_obj.name}' is corrupted or not a valid ZIP file.")
         except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS as e:
             issues.append(f"Error processing archive '{archive_path_obj.name}': {e}")
-            logging.error(f"Error processing archive {archive_path_obj.name}: {e}", exc_info=True)
+            logging.error("Archive validation failed (error_type={})", exception_type_for_log(e))
 
         if issues:
             return ValidationResult(False, issues, archive_path_obj)
 
-        logging.info(f"Archive '{archive_path_obj.name}' and its contents validated successfully.")
+        logging.info("Archive content validation succeeded")
         return ValidationResult(True, file_path=archive_path_obj)
 
     def sanitize_html_content(self, html_content: str, config: Optional[dict] = None) -> str:
@@ -1147,10 +1129,10 @@ class FileValidator:
             except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS:
                 # If BeautifulSoup is unavailable, keep cleaned_html as-is.
                 pass
-            logging.info("HTML content sanitized with bleach (scripts/styles removed).")
+            logging.info("HTML content sanitized")
             return cleaned_html
         except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS as e:
-            logging.warning(f"Bleach not available or failed ({e}); falling back to tag stripping.")
+            logging.warning("HTML sanitizer unavailable; using fallback (error_type={})", exception_type_for_log(e))
             try:
                 # Prefer the preprocessed (script/style/comments removed) content if available
                 try:
@@ -1167,7 +1149,7 @@ class FileValidator:
         try:
             from defusedxml import ElementTree as DET  # type: ignore
         except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS:
-            logging.warning("defusedxml not available; returning original XML content.")
+            logging.warning("XML sanitizer unavailable; returning original content")
             return xml_content
 
         try:
@@ -1180,7 +1162,7 @@ class FileValidator:
 
         try:
             cleaned = DET.tostring(root, encoding='unicode')
-            logging.info("XML content sanitized with defusedxml.")
+            logging.info("XML content sanitized")
             return cleaned
         except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS:
             return xml_content
@@ -1209,7 +1191,7 @@ def process_and_validate_file(
     if not media_type_key:
         issue = (f"Unsupported or unrecognized media type for '{_original_filename}'. "
                  "Rejecting file with unknown extension.")
-        logging.warning(issue)
+        logging.warning("File rejected: unsupported or unrecognized media type")
         return ValidationResult(
             False,
             [issue],
@@ -1228,7 +1210,7 @@ def process_and_validate_file(
     # If basic validation passed, check for type-specific actions like archive scanning or sanitization
     if media_config:
         if media_type_key == "archive" and media_config.get("scan_contents"):
-            logging.info(f"Performing content scan for archive: {_original_filename}")
+            logging.info("Scanning archive contents")
             return validator.validate_archive_contents(p_file_path)
 
         # Optional content sanitization step for HTML/XML if enabled in config.
@@ -1241,9 +1223,9 @@ def process_and_validate_file(
                     sanitized = validator.sanitize_xml_content(text, media_config)
                 if sanitized and sanitized != text:
                     p_file_path.write_text(sanitized, encoding='utf-8')
-                    logging.info(f"Sanitized {media_type_key.upper()} file content: {_original_filename}")
+                    logging.info("File content sanitized")
             except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS as e:
-                logging.warning(f"Sanitization failed for {_original_filename}: {e}")
+                logging.warning("File sanitization failed (error_type={})", exception_type_for_log(e))
 
     return validation_result
 

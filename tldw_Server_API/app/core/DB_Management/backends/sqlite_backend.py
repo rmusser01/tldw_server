@@ -19,6 +19,8 @@ from typing import Any, Optional, Union
 
 from loguru import logger as _loguru_logger
 
+from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import exception_type_for_log
+
 from ..sqlite_policy import configure_sqlite_connection
 from .base import (
     BackendFeatures,
@@ -174,7 +176,7 @@ class SQLiteConnectionPool(ConnectionPool):
 
         A different current handle remains cached and usable. Matching cached
         handles use ``clear_thread_local_connection()``: ordinary close failures
-        are logged with a traceback, and the handle is detached to prevent reuse
+        are logged by exception type, and the handle is detached to prevent reuse
         even if the underlying resource could not be closed.
 
         Args:
@@ -199,7 +201,7 @@ class SQLiteConnectionPool(ConnectionPool):
         """Close and detach the current thread's cached connection.
 
         Ordinary exceptions from close are logged with connection/thread context
-        and traceback. The failed handle is still detached so subsequent borrows
+        and exception type. The failed handle is still detached so subsequent borrows
         create a fresh connection; its underlying resource may remain open. This
         method does not retry or reuse that handle.
 
@@ -217,11 +219,12 @@ class SQLiteConnectionPool(ConnectionPool):
                 if conn:
                     try:
                         conn.close()
-                    except Exception:
-                        logger.exception(
+                    except Exception as exc:  # noqa: BLE001 - detach after any ordinary close failure
+                        logger.error(  # noqa: TRY400 - privacy boundary excludes exception details
                             "Failed to close rejected SQLite connection {connection_id} "
-                            "on thread {thread_id}; detaching it to prevent reuse",
+                            "on thread {thread_id}; detaching it to prevent reuse (error_type={error_type})",
                             connection_id=id(conn), thread_id=thread_id,
+                            error_type=exception_type_for_log(exc),
                         )
             finally:
                 self._connections.pop(thread_id, None)
@@ -235,7 +238,7 @@ class SQLiteConnectionPool(ConnectionPool):
         try:
             yield conn
         except Exception as e:
-            logger.exception(f"Error in connection context: {e}")
+            logger.error("SQLite connection context failed (error_type={})", exception_type_for_log(e))  # noqa: TRY400 - no exception data
             raise
 
     def close_all(self) -> None:
@@ -247,7 +250,7 @@ class SQLiteConnectionPool(ConnectionPool):
                     try:
                         conn.close()
                     except (OSError, RuntimeError, sqlite3.Error) as e:
-                        logger.exception(f"Error closing connection: {e}")
+                        logger.error("SQLite connection close failed (error_type={})", exception_type_for_log(e))  # noqa: TRY400 - no exception data
             self._connections.clear()
             self._thread_refs.clear()
 
@@ -488,7 +491,7 @@ class SQLiteBackend(DatabaseBackend):
             # Execute the schema as a script
             conn.executescript(schema)
         except sqlite3.Error as e:
-            logger.exception(f"Schema creation failed: {e}")
+            logger.error("SQLite schema creation failed (error_type={})", exception_type_for_log(e))  # noqa: TRY400 - privacy boundary excludes exception details
             raise DatabaseError(f"Failed to create schema: {e}") from e
 
     def table_exists(self, table_name: str, connection: Optional[sqlite3.Connection] = None) -> bool:

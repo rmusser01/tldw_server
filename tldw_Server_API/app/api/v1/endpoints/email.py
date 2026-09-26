@@ -27,6 +27,7 @@ from tldw_Server_API.app.core.External_Sources.connectors_service import (
 from tldw_Server_API.app.core.External_Sources.connectors_service import (
     list_sources as list_connector_sources,
 )
+from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import exception_type_for_log
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id
 
 router = APIRouter(tags=["Email"])
@@ -101,7 +102,7 @@ async def list_email_sources(
     try:
         rows = await list_connector_sources(db, user_id)
     except Exception as exc:
-        logger.error("Failed to list email sources")
+        logger.error("Failed to list email sources (error_type={})", exception_type_for_log(exc))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to list email sources.",
@@ -121,8 +122,8 @@ async def list_email_sources(
                     source_key=str(source_id),
                     tenant_id=tenant_id,
                 )
-            except (DatabaseError, InputError):
-                logger.warning("Failed to fetch email sync state")
+            except (DatabaseError, InputError) as exc:
+                logger.warning("Failed to fetch email sync state (error_type={})", exception_type_for_log(exc))
 
         sync_payload = {
             "state": _derive_sync_state(sync_state),
@@ -183,7 +184,7 @@ async def trigger_email_source_sync(
     try:
         job = await create_import_job(user_id, source_id, request_id=rid)
     except Exception as exc:
-        logger.error("Failed to queue email sync job")
+        logger.error("Failed to queue email sync job (error_type={})", exception_type_for_log(exc))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to queue email sync job.",
@@ -271,10 +272,11 @@ async def search_email_messages(
         }
     except (InputError, DatabaseError) as exc:
         if isinstance(exc, DatabaseError):
-            logger.error("Database error during email search")
+            logger.error("Database error during email search (error_type={})", exception_type_for_log(exc))
         raise map_db_error_to_http(
             exc,
             default_detail="A database error occurred during email search.",
+            log_error=False,
         ) from exc
 
 
@@ -305,8 +307,9 @@ async def get_email_message_detail(
         return detail
     except (InputError, DatabaseError) as exc:
         if isinstance(exc, DatabaseError):
-            logger.error("Database error during email detail lookup")
+            logger.error("Database error during email detail lookup (error_type={})", exception_type_for_log(exc))
         raise map_db_error_to_http(
             exc,
             default_detail="A database error occurred while fetching email message detail.",
+            log_error=False,
         ) from exc

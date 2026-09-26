@@ -25,6 +25,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import 
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.rows import (
     BackendCursorAdapter,
 )
+from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import exception_type_for_log
 
 _MEDIA_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = MEDIA_NONCRITICAL_EXCEPTIONS
 
@@ -50,12 +51,7 @@ def _execute_with_connection(
         )
         return BackendCursorAdapter(result)
     except BackendDatabaseError as exc:
-        logging.error(
-            "Backend execute failed: {}... Error: {}",
-            prepared_query[:200],
-            exc,
-            exc_info=True,
-        )
+        logging.error("Backend execution failed (error_type={})", exception_type_for_log(exc))
         raise DatabaseError(f"Backend execute failed: {exc}") from exc  # noqa: TRY003
 
 
@@ -80,12 +76,7 @@ def _executemany_with_connection(
         )
         return BackendCursorAdapter(result)
     except BackendDatabaseError as exc:
-        logging.error(
-            "Backend execute_many failed: {}... Error: {}",
-            prepared_query[:200],
-            exc,
-            exc_info=True,
-        )
+        logging.error("Backend batch execution failed (error_type={})", exception_type_for_log(exc))
         raise DatabaseError(f"Backend execute_many failed: {exc}") from exc  # noqa: TRY003
 
 
@@ -189,20 +180,20 @@ def execute_query(
             msg = str(exc).lower()
             if "sync error" in msg:
                 if log_errors:
-                    logging.exception("Sync Validation Failed")
+                    logging.error("Sync validation failed (error_type={})", exception_type_for_log(exc))
                     raise
-                logging.error("Redacted SQLite sync validation failure ({})", type(exc).__name__)
+                logging.error("Redacted SQLite sync validation failure (error_type={})", exception_type_for_log(exc))
                 raise DatabaseError("Integrity constraint violation.") from None
             if not log_errors:
-                logging.error("Redacted SQLite integrity failure ({})", type(exc).__name__)
+                logging.error("Redacted SQLite integrity failure (error_type={})", exception_type_for_log(exc))
                 raise DatabaseError("Integrity constraint violation.") from None
-            logging.error("Integrity error executing query: {}", exc, exc_info=True)
+            logging.error("SQLite integrity constraint failed (error_type={})", exception_type_for_log(exc))
             raise DatabaseError(f"Integrity constraint violation: {exc}") from exc  # noqa: TRY003
         except sqlite3.Error as exc:
             if not log_errors:
-                logging.error("Redacted SQLite query failure ({})", type(exc).__name__)
+                logging.error("Redacted SQLite query failure (error_type={})", exception_type_for_log(exc))
                 raise DatabaseError("Query execution failed.") from None
-            logging.error("SQLite query failed: {}", exc, exc_info=True)
+            logging.error("SQLite query execution failed (error_type={})", exception_type_for_log(exc))
             raise DatabaseError(f"Query execution failed: {exc}") from exc  # noqa: TRY003
 
     try:
@@ -227,16 +218,16 @@ def execute_query(
                 except _MEDIA_NONCRITICAL_EXCEPTIONS as exc:
                     if log_errors:
                         raise DatabaseError(f"Backend commit failed: {exc}") from exc  # noqa: TRY003
-                    logging.error("Redacted backend commit failure ({})", type(exc).__name__)
+                    logging.error("Redacted backend commit failure (error_type={})", exception_type_for_log(exc))
                     redacted_commit_failure = True
             if redacted_commit_failure:
                 raise DatabaseError("Backend commit failed.")
         return BackendCursorAdapter(result)
     except BackendDatabaseError as exc:
         if not log_errors:
-            logging.error("Redacted backend query failure ({})", type(exc).__name__)
+            logging.error("Redacted backend query failure (error_type={})", exception_type_for_log(exc))
             raise DatabaseError("Backend query execution failed.") from None
-        logging.error("Backend query failed: {}", exc, exc_info=True)
+        logging.error("Backend query execution failed (error_type={})", exception_type_for_log(exc))
         raise DatabaseError(f"Backend query execution failed: {exc}") from exc  # noqa: TRY003
 
 
@@ -296,13 +287,13 @@ def execute_many(
                 )
                 return BackendCursorAdapter(result)
         except sqlite3.IntegrityError as exc:
-            logging.error("Integrity error during execute_many: {}", exc, exc_info=True)
+            logging.error("SQLite batch integrity constraint failed (error_type={})", exception_type_for_log(exc))
             raise DatabaseError(f"Integrity constraint violation during batch: {exc}") from exc  # noqa: TRY003
         except sqlite3.Error as exc:
-            logging.error("SQLite execute_many failed: {}", exc, exc_info=True)
+            logging.error("SQLite batch execution failed (error_type={})", exception_type_for_log(exc))
             raise DatabaseError(f"Execute Many failed: {exc}") from exc  # noqa: TRY003
         except TypeError as te:
-            logging.error("TypeError during execute_many: {}", te, exc_info=True)
+            logging.error("Batch parameter format failed (error_type={})", exception_type_for_log(te))
             raise TypeError(f"Parameter list format error: {te}") from te  # noqa: TRY003
 
     try:
@@ -321,7 +312,7 @@ def execute_many(
                     raise DatabaseError(f"Backend batch commit failed: {exc}") from exc  # noqa: TRY003
         return BackendCursorAdapter(result)
     except BackendDatabaseError as exc:
-        logging.error("Backend execute_many failed: {}", exc, exc_info=True)
+        logging.error("Backend batch execution failed (error_type={})", exception_type_for_log(exc))
         raise DatabaseError(f"Backend execute_many failed: {exc}") from exc  # noqa: TRY003
 
 

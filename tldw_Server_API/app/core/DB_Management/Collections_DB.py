@@ -29,23 +29,23 @@ from uuid import uuid4
 
 from loguru import logger
 
-from tldw_Server_API.app.core.DB_Management.schema_once import ensure_once
 from tldw_Server_API.app.core.Collections.utils import (
     build_highlight_context,
     find_highlight_span,
     hash_text_sha256,
 )
 from tldw_Server_API.app.core.config import load_comprehensive_config, settings
-from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.core.DB_Management.content_backend import (
     backend_target_key,
     get_content_backend,
     load_content_db_settings,
 )
+from tldw_Server_API.app.core.DB_Management.schema_once import ensure_once
 from tldw_Server_API.app.core.exceptions import (
     InvalidStorageUserIdError,
     StorageUnavailableError,
 )
+from tldw_Server_API.app.core.testing import is_truthy
 
 from .backends.base import BackendType, DatabaseBackend, DatabaseConfig, DatabaseError
 from .backends.factory import (
@@ -611,14 +611,14 @@ class AudioStudioIdempotencyRecordRow:
 
 def _pin_collections_public_operation(method):
     @functools.wraps(method)
-    def wrapper(self: "CollectionsDatabase", *args: Any, **kwargs: Any):
+    def wrapper(self: CollectionsDatabase, *args: Any, **kwargs: Any):
         with self._operation_backend_pin():
             return method(self, *args, **kwargs)
 
     return wrapper
 
 
-def _decorate_collections_public_operations(cls: type["CollectionsDatabase"]) -> type["CollectionsDatabase"]:
+def _decorate_collections_public_operations(cls: type[CollectionsDatabase]) -> type[CollectionsDatabase]:
     for name, attribute in list(vars(cls).items()):
         if name.startswith("_") or name in {"ensure_schema", "transaction"}:
             continue
@@ -1004,10 +1004,8 @@ class CollectionsDatabase:
         try:
             result = self.backend.execute(f"PRAGMA table_info({table})", ())
         except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as exc:
-            logger.exception(
-                "collections_db: failed to read sqlite columns for table {}: {}",
-                table,
-                exc,
+            logger.bind(error_type=type(exc).__name__[:80]).error(
+                "Collections SQLite schema inspection failed for table {}", table
             )
             return set()
         columns: set[str] = set()
@@ -1908,7 +1906,7 @@ class CollectionsDatabase:
         try:
             self.backend.create_tables(ddl)
         except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Collections schema init failed: {e}")
+            logger.bind(error_type=type(e).__name__[:80]).error("Collections schema init failed")
             raise
         output_template_columns = self._table_columns("output_templates")
         output_columns = self._table_columns("outputs")
@@ -2522,7 +2520,9 @@ class CollectionsDatabase:
         try:
             self.backend.create_tables(content_ddl)
         except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Collections content_items schema init failed: {e}")
+            logger.bind(error_type=type(e).__name__[:80]).error(
+                "Collections content_items schema init failed"
+            )
             raise
         content_columns = self._table_columns("content_items")
         if fts_available:
@@ -3369,7 +3369,7 @@ class CollectionsDatabase:
             ORDER BY updated_at DESC, id DESC
             LIMIT ? OFFSET ?
             """,  # nosec B608
-            tuple([*params, size_value, offset]),
+            (*params, size_value, offset),
         ).rows
         return [self._row_to_media_collection(row) for row in rows], total
 
@@ -3421,7 +3421,7 @@ class CollectionsDatabase:
         add_field("updated_at", _utcnow_iso())
         self.backend.execute(
             f"UPDATE media_collections SET {', '.join(fields)} WHERE id = ? AND user_id = ?",  # nosec B608
-            tuple([*params, int(collection_id), self.user_id]),
+            (*params, int(collection_id), self.user_id),
         )
         return self.get_media_collection(collection_id)
 
@@ -3668,7 +3668,7 @@ class CollectionsDatabase:
         add_field("updated_at", now)
         self.backend.execute(
             f"UPDATE media_collection_items SET {', '.join(fields)} WHERE id = ? AND user_id = ?",  # nosec B608
-            tuple([*params, int(item_id), self.user_id]),
+            (*params, int(item_id), self.user_id),
         )
         self.backend.execute(
             "UPDATE media_collections SET updated_at = ? WHERE id = ? AND user_id = ?",
@@ -3758,7 +3758,7 @@ class CollectionsDatabase:
             selectors.append(("url", url))
 
         def _lookup_existing() -> tuple[dict[str, Any] | None, int | None]:
-            for column, value in selectors:
+            for _column, value in selectors:
                 row = self.backend.execute(
                     """
                     SELECT id, user_id, origin, origin_type, origin_id, url, canonical_url, domain,
@@ -7643,7 +7643,7 @@ class CollectionsDatabase:
         if delete_ids:
             placeholders = ",".join(["?"] * len(delete_ids))
             q = f"DELETE FROM user_notifications WHERE user_id = ? AND id IN ({placeholders})"  # nosec B608
-            params = tuple([self.user_id, *delete_ids])
+            params = (self.user_id, *delete_ids)
             res = self.backend.execute(q, params)
             deleted = int(res.rowcount or 0)
 

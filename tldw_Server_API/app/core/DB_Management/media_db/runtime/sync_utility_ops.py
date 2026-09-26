@@ -3,18 +3,20 @@
 from __future__ import annotations
 
 import json
-import logging
 import re
 import sqlite3
 import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from loguru import logger as logging
+
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import (
     MEDIA_NONCRITICAL_EXCEPTIONS,
 )
+from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import exception_type_for_log
 
 _MEDIA_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = MEDIA_NONCRITICAL_EXCEPTIONS
 _SAFE_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -50,21 +52,10 @@ def _get_next_version(
             current_version = result["version"]
             if isinstance(current_version, int):
                 return current_version, current_version + 1
-            logging.error(
-                "Invalid non-integer version %r found for %s %s=%r",
-                current_version,
-                table,
-                id_col,
-                id_val,
-            )
+            logging.error("Version lookup failed: non-integer version")
             return None
     except sqlite3.Error as exc:
-        logging.exception(
-            "Database error fetching version for %s %s=%r",
-            table,
-            id_col,
-            id_val,
-        )
+        logging.error("Database version lookup failed (error_type={})", exception_type_for_log(exc))
         raise DatabaseError(f"Failed to fetch current version: {exc}") from exc  # noqa: TRY003
     return None
 
@@ -80,7 +71,7 @@ def _log_sync_event(
 ):
     """Insert a sync-log row for a completed mutation."""
     if not entity or not entity_uuid or not operation:
-        logging.error("Sync log attempt with missing entity, uuid, or operation.")
+        logging.error("Sync log insertion skipped: missing event identifiers")
         return
 
     current_time = self._get_current_utc_timestamp_str()
@@ -126,13 +117,7 @@ def _log_sync_event(
             current_time,
         )
     except _MEDIA_NONCRITICAL_EXCEPTIONS as exc:
-        logging.error(
-            "Failed to insert sync log event for %s %s: %s",
-            entity,
-            entity_uuid,
-            exc,
-            exc_info=True,
-        )
+        logging.error("Sync log insertion failed (error_type={})", exception_type_for_log(exc))
         raise DatabaseError(f"Failed to log sync event: {exc}") from exc  # noqa: TRY003
 
 

@@ -4,6 +4,12 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
+from tldw_Server_API.app.core.Chunking.auto_boundary_assistant import (
+    AutoChunkBoundaryAssistant,
+    AutoChunkBoundaryAssistantRequest,
+    ChatAutoChunkBoundaryAssistant,
+    apply_auto_chunk_boundary_result,
+)
 from tldw_Server_API.app.core.Chunking.auto_planner import (
     AutoChunkingProfile,
     merge_profiles,
@@ -11,13 +17,8 @@ from tldw_Server_API.app.core.Chunking.auto_planner import (
     profile_from_source,
     profile_from_text,
 )
-from tldw_Server_API.app.core.Chunking.auto_boundary_assistant import (
-    AutoChunkBoundaryAssistant,
-    AutoChunkBoundaryAssistantRequest,
-    ChatAutoChunkBoundaryAssistant,
-    apply_auto_chunk_boundary_result,
-)
 from tldw_Server_API.app.core.config import load_and_log_configs
+from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import exception_type_for_log
 from tldw_Server_API.app.core.Utils.Utils import logging
 
 _UNSUPPORTED_MEDIA_CHUNKING_KEYS = (
@@ -247,7 +248,7 @@ def prepare_chunking_options_dict(form_data: Any) -> dict[str, Any] | None:
         except _CHUNKING_OPTIONS_NONCRITICAL_EXCEPTIONS as cfg_err:
             logging.debug(f"Proposition config defaults not loaded: {cfg_err}")
 
-    logging.info("Chunking enabled with options: {}", chunk_options)
+    logging.info("Chunking enabled (option_count={})", len(chunk_options))
     return chunk_options
 
 
@@ -545,7 +546,7 @@ def apply_chunking_template_if_any(
             try:
                 tpl = db.get_chunking_template(name=template_name)
             except _CHUNKING_OPTIONS_NONCRITICAL_EXCEPTIONS as db_err:
-                logging.warning("Failed to load chunking template '%s': %s", template_name, db_err)
+                logging.warning("Chunking template lookup failed (error_type={})", exception_type_for_log(db_err))
                 return opts
 
             if tpl and tpl.get("template_json"):
@@ -599,7 +600,7 @@ def apply_chunking_template_if_any(
                     include_deleted=False,
                 )
             except _CHUNKING_OPTIONS_NONCRITICAL_EXCEPTIONS as list_err:
-                logging.warning("Failed to list chunking templates for auto-apply: {}", list_err)
+                logging.warning("Chunking template listing failed (error_type={})", exception_type_for_log(list_err))
                 return opts
 
             best_cfg: dict[str, Any] | None = None
@@ -656,7 +657,7 @@ def apply_chunking_template_if_any(
 
         return opts
     except _CHUNKING_OPTIONS_NONCRITICAL_EXCEPTIONS as auto_err:  # Defensive: never break callers
-        logging.warning("Auto-apply chunking template helper failed: {}", auto_err)
+        logging.warning("Chunking template application failed (error_type={})", exception_type_for_log(auto_err))
         return chunking_options_dict
 
 
