@@ -329,3 +329,37 @@ Independent read-only review found no implementation defect; its initially-globa
 coverage finding is addressed, and the corrected fixture semantics were reviewed.
 The reviewer and all verification processes finished. This is restore-specific
 certification, not full-project execution or completion of Stage 2.
+
+## Settings Endpoint Parent Admission
+
+After publishing draft PR #3020 at checkpoint `1408c78dba`, continued with the
+primary settings endpoint. It already has a single write transaction and checks
+requested ownership/scope again after locking its resume state. The change adds
+the existing workspace fence before that child lock; global requests keep their
+current path. This avoids adding a late parent lock to the shared settings store,
+whose other callers have different upstream lock ordering.
+
+Two SQLite/PostgreSQL RED cases demonstrated that settings could be updated on
+an active Sync projection whose parent was deleted, `/tmp/workspace-chat-settings-red.log`.
+The fix passes 14 focused cases, zero skips, `/tmp/workspace-chat-settings-green.log`:
+deleted-parent rejection without graph/settings side effects, active/global
+compatibility, deletion-first and settings-first transactions, commit and rollback.
+The settings/error-mapping/selected HTTP regression passes 175 cases, zero
+failures/errors/skips, six warnings, exit 0 in 573.36 seconds:
+`/tmp/workspace-chat-settings-regression.log` and `.xml`.
+
+Review found no implementation defect and suggested a stronger lock-order test.
+Added a PostgreSQL test that pauses deletion after its parent claim but before
+any child lock, starts settings admission, then resumes deletion. It requires
+deletion success and settings HTTP 409, without a deadlock or settings row.
+That additional case passes (`/tmp/workspace-chat-settings-lock-order.log`), and
+the reviewer confirmed the gap is closed. All verification processes and the
+reviewer have finished.
+
+Production Bandit has zero findings/errors, `/tmp/workspace-chat-settings-bandit.json`.
+Touched tests pass Ruff. Four endpoint Ruff findings (two I001, F401, B904)
+are also present in checkpoint HEAD; no new lint finding is introduced.
+
+This does not fence the shared DB settings primitive or other settings callers,
+nor make direct Sync upsert safe. The owned route remains disabled; durable
+sharing cleanup and the other Stage 2 writer families remain outstanding.

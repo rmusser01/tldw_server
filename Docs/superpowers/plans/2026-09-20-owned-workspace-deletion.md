@@ -67,7 +67,7 @@ operations cannot publish after deletion; sharing reads deny tombstones during
 cleanup failure; cleanup retry/state is explicit and cannot resurrect content.
 **Tests**: Real SQLite/PostgreSQL concurrent writers and readers, cleanup failure,
 repeated cleanup, and recipient access/operation completion races.
-**Status**: In Progress (direct content, ordinary chat creation and restore verified;
+**Status**: In Progress (direct content, chat creation/restore and primary settings endpoint verified;
 remaining writers and sharing cleanup pending)
 
 2026-09-25 bounded slice: fence all 13 direct source/note/artifact mutations
@@ -122,6 +122,19 @@ denial after deletion. Real-backend regression and review evidence is recorded
 in the fencing report. Final affected regression passes 563 cases, including
 132 PostgreSQL-named cases, with zero failures/errors/skips and four warnings.
 Independent review is clear after adding the initially-global scope race.
+
+Settings endpoint slice: `PUT /api/v1/chats/{chat_id}/settings` now acquires
+the requested workspace parent fence at transaction entry, before its existing
+resume/conversation lock. Existing ownership/scope validation runs both before
+admission and after the locked resume read, so a concurrent move cannot authorize
+an update to another scope. Two real-backend regressions first demonstrated
+accepted settings writes to active Sync projections under a deleted parent.
+The initial 14-case SQLite/PostgreSQL check passes, including both transaction
+orderings and rollback, global compatibility and retained-state immutability.
+Broader settings/API verification passes 175 cases with zero skips; the additional
+PostgreSQL parent-before-child deadlock regression also passes. Review is clear.
+This certifies only this endpoint, not direct `upsert_conversation_settings`, greeting,
+message-pin, completion or other settings writers.
 
 Remaining chat implementation inventory (not covered by creation/restore):
 - `ConversationStore.upsert_conversation_from_sync` can insert, resurrect, and

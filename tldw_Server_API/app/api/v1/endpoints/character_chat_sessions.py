@@ -7572,6 +7572,8 @@ async def update_chat_settings(
         )
 
         with db.transaction() as conn:
+            if scope.scope_type == "workspace":
+                db._lock_workspace_for_content_write(conn, scope.workspace_id)
             resume_state = db.get_roleplay_resume_state(
                 chat_id,
                 conn=conn,

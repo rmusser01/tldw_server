@@ -240,6 +240,34 @@ def test_workspace_chat_restore_conflicts_after_workspace_deletion(
 
 
 @pytest.mark.integration
+def test_workspace_chat_settings_reject_deleted_parent_over_http(
+    test_client, auth_headers, character_db,
+):
+    character_db.upsert_workspace("deleted-settings-workspace", "Workspace")
+    conversation_id = character_db.add_conversation({
+        "title": "Workspace chat", "scope_type": "workspace",
+        "workspace_id": "deleted-settings-workspace",
+    })
+    assert character_db.upsert_conversation_settings(conversation_id, {"authorNote": "Original"})
+    assert character_db.delete_workspace("deleted-settings-workspace", 1)
+    assert character_db.upsert_conversation_from_sync(
+        conversation_id=conversation_id, title="Retained chat", sync_client_id=character_db.client_id,
+        object_revision=5, object_hash="retained", scope_type="workspace", workspace_id="deleted-settings-workspace",
+    )
+    before = character_db.get_conversation_by_id(conversation_id)
+    settings_before = character_db.get_conversation_settings(conversation_id)
+    response = test_client.put(
+        f"/api/v1/chats/{conversation_id}/settings",
+        params={"scope_type": "workspace", "workspace_id": "deleted-settings-workspace"},
+        headers=auth_headers,
+        json={"settings": {"authorNote": "Must not be stored"}},
+    )
+    assert response.status_code == 409, response.text
+    assert character_db.get_conversation_by_id(conversation_id) == before
+    assert character_db.get_conversation_settings(conversation_id) == settings_before
+
+
+@pytest.mark.integration
 def test_api_creation_captures_all_sources_and_redacts_snapshot_body(
     test_client,
     auth_headers,
