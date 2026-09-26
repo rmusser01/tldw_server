@@ -469,6 +469,7 @@ class CalDavProvider:
     def _component_dates(
         component: Any, name: str, resolved_timezones: dict[str, tzinfo] | None = None,
     ) -> list[str]:
+        """Preserve floating wall times and explicitly zoned recurrence-date instants."""
         properties = component.get(name)
         if properties is None:
             return []
@@ -476,12 +477,12 @@ class CalDavProvider:
         for prop in properties if isinstance(properties, list) else [properties]:
             for entry in prop.dts:
                 value = entry.dt
-                tzid = str(prop.params.get("TZID"))
+                tzid = prop.params.get("TZID")
                 if isinstance(value, datetime):
-                    if resolved_timezones and tzid in resolved_timezones:
-                        value = value.replace(tzinfo=resolved_timezones[tzid])
-                    elif value.tzinfo is None:
-                        value = value.replace(tzinfo=tz.gettz(tzid) or timezone.utc)
+                    if tzid and resolved_timezones and str(tzid) in resolved_timezones:
+                        value = value.replace(tzinfo=resolved_timezones[str(tzid)])
+                    elif tzid and value.tzinfo is None:
+                        value = value.replace(tzinfo=tz.gettz(str(tzid)) or timezone.utc)
                 if not isinstance(value, (date, datetime)):
                     raise CalendarValidationError("CalDAV recurrence periods are not supported")
                 dates.append(value.isoformat())
