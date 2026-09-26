@@ -3519,7 +3519,11 @@ async def download_run_artifacts_zip(
 
 # -------------------- Options Discovery: Chunkers --------------------
 
-@router.get("/options/chunkers")
+@router.get(
+    "/options/chunkers",
+    # Capability disclosure: the server's step catalogue and shipped templates.
+    dependencies=[Depends(get_request_user)],
+)
 async def get_chunker_options():
     """Return available chunking methods with defaults and a basic parameter schema.
 
@@ -3693,6 +3697,8 @@ async def control_run(
 
 @router.get(
     "/step-types",
+    # Capability disclosure: the server's step catalogue and shipped templates.
+    dependencies=[Depends(get_request_user)],
     openapi_extra={
         "x-codeSamples": [
             {
@@ -4098,7 +4104,11 @@ async def list_step_types():
     return out
 
 
-@router.get("/templates")
+@router.get(
+    "/templates",
+    # Capability disclosure: the server's step catalogue and shipped templates.
+    dependencies=[Depends(get_request_user)],
+)
 async def list_workflow_templates(q: Optional[str] = Query(None, description="Search query on name/title/tags"), tag: Optional[str] = Query(None, description="Filter by tag")) -> list[dict[str, Any]]:
     """List available example workflow templates shipped with the server.
 
@@ -4167,6 +4177,8 @@ async def list_workflow_templates(q: Optional[str] = Query(None, description="Se
 
 @router.get(
     "/templates/tags",
+    # Capability disclosure: the server's step catalogue and shipped templates.
+    dependencies=[Depends(get_request_user)],
     openapi_extra={
         "x-codeSamples": [
             {
@@ -4214,7 +4226,11 @@ async def list_workflow_template_tags() -> list[str]:
         return []
 
 
-@router.get("/templates/{name:path}")
+@router.get(
+    "/templates/{name:path}",
+    # Capability disclosure: the server's step catalogue and shipped templates.
+    dependencies=[Depends(get_request_user)],
+)
 async def get_workflow_template(name: str) -> dict[str, Any]:
     """Return JSON content for a named workflow template (sans extension)."""
     # Disallow traversal and separators (defense-in-depth with unquoting)
@@ -4259,7 +4275,11 @@ async def get_workflow_template(name: str) -> dict[str, Any]:
         logger.warning(f"Failed to read workflow template {name}: {e}")
         raise HTTPException(status_code=500, detail="Failed to load template") from e
 
-@router.get("/templates/_byname/{name:path}")
+@router.get(
+    "/templates/_byname/{name:path}",
+    # Capability disclosure: the server's step catalogue and shipped templates.
+    dependencies=[Depends(get_request_user)],
+)
 async def get_workflow_template_legacy(name: str) -> dict[str, Any]:
     """Return JSON content for a named workflow template (sans extension)."""
     # Disallow traversal and separators (defense-in-depth with unquoting)

@@ -1574,6 +1574,7 @@ async def list_world_books(
     response_model=WorldBookRuntimeConfig,
     summary="Get world book runtime config",
     tags=["World Books"],
+    dependencies=[Depends(get_request_user)],
 )
 async def get_world_book_runtime_config():
     """Expose runtime constants used by world-book authoring UIs."""

@@ -811,7 +811,8 @@ async def apply_template(
 
 @router.post("/validate", response_model=TemplateValidationResponse)
 async def validate_template(
-    template_config: dict[str, Any] = Body(..., description="Template configuration to validate")
+    template_config: dict[str, Any] = Body(..., description="Template configuration to validate"),
+    current_user: User = Depends(get_request_user),
 ) -> TemplateValidationResponse:
     """
     Validate a template configuration without saving it.

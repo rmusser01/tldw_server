@@ -1502,7 +1502,11 @@ async def cleanup_pack_import_commit(
     )
 
 
-@router.get("/starter-matrices", response_model=VNAssetStarterMatricesResponse)
+@router.get(
+    "/starter-matrices",
+    response_model=VNAssetStarterMatricesResponse,
+    dependencies=[Depends(get_request_user)],
+)
 async def list_starter_matrices() -> VNAssetStarterMatricesResponse:
     slots = expand_starter_matrix(primary_character_id=1, variant_count=1)
     return VNAssetStarterMatricesResponse(

@@ -5038,7 +5038,12 @@ async def create_embeddings_batch_endpoint(
 # Model Management Endpoints
 # ============================================================================
 
-@router.get("/embeddings/models", summary="List available embedding models")
+@router.get(
+    "/embeddings/models",
+    summary="List available embedding models",
+    # Capability disclosure: model ids and allowlist status.
+    dependencies=[Depends(get_request_user)],
+)
 async def list_embedding_models():
     """List configured/known models with allowlist status."""
     cfg = settings.get("EMBEDDING_CONFIG", {}) or {}
