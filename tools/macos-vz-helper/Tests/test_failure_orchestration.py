@@ -1,4 +1,4 @@
-"""Portable behavioral tests for fault preparation and eight-case orchestration."""
+"""Portable behavioral tests for fault preparation and twelve-case orchestration."""
 
 from __future__ import annotations
 
@@ -469,7 +469,7 @@ class HelperStatus:
 
 @pytest.mark.unit
 @pytest.mark.parametrize("failure", [None, "rejected", "raised"])
-def test_exercise_isolates_ten_cases_and_unwinds_failed_runs(
+def test_exercise_isolates_twelve_cases_and_unwinds_failed_runs(
     drill: ModuleType,
     materializer: ModuleType,
     source_bundle: Path,
@@ -507,11 +507,16 @@ def test_exercise_isolates_ten_cases_and_unwinds_failed_runs(
         assert client is helper
         assert boot != target
         assert (boot / "rootfs.img").read_bytes() == b"healthy"
-        expected_installer = (
-            drill.FIXTURES / "install-missing-agent.sh" if packet.name == "missing_agent-prepare" else None
-        )
+        expected_installer = {
+            "missing_agent-prepare": drill.FIXTURES / "install-missing-agent.sh",
+            "boot_stall-prepare": drill.FIXTURES / "install-boot-stall.sh",
+        }.get(packet.name)
         assert installer == expected_installer
-        (target / "rootfs.img").write_bytes(binary.read_bytes())
+        if packet.name == "boot_stall-prepare":
+            assert (target / "initrd-name").read_text() == "initramfs\n"
+            (target / "original-init").write_bytes(b"#!/bin/sh\necho original-init\n")
+        else:
+            (target / "rootfs.img").write_bytes(binary.read_bytes())
 
     def run_case(
         client: Any,
@@ -528,7 +533,9 @@ def test_exercise_isolates_ten_cases_and_unwinds_failed_runs(
         assert socket_path == factory.call_args.args[0]
         assert binary == tmp_path / "helper"
         assert (healthy / "rootfs.img").read_bytes() == b"healthy"
-        assert (fault / "rootfs.img").read_bytes() == profile.encode()
+        assert (fault / "rootfs.img").read_bytes() == (b"healthy" if profile == "boot_stall" else profile.encode())
+        if profile == "boot_stall":
+            assert (fault / "initramfs").read_bytes().startswith(b"initrd\0\0" + b"070701")
         assert packet.name == profile + ("-negative" if negative else "-positive")
         seen.append((profile, negative, healthy, fault))
         (healthy / "rootfs.img").write_bytes(b"used-healthy")
@@ -557,22 +564,23 @@ def test_exercise_isolates_ten_cases_and_unwinds_failed_runs(
         drill.exercise(materializer, ctl, source_bundle, tmp_path / "helper", evidence, receipt, factory)
     expected = [
         (profile, negative)
-        for profile in ("mismatch", "readiness", "protocol", "workspace", "missing_agent")
+        for profile in ("mismatch", "readiness", "protocol", "workspace", "missing_agent", "boot_stall")
         for negative in (False, True)
     ]
     assert [(profile, negative) for profile, negative, _, _ in seen] == (expected[:2] if failure else expected)
     run_paths = [path for _, _, healthy, fault in seen for path in (healthy, fault)]
     assert len(set(run_paths)) == 2 * len(seen)
     assert all(path.is_relative_to(evidence / "image-store/runs") for path in run_paths)
-    assert builder.call_count == 5
+    assert builder.call_count == 6
     assert [call.args[0] for call in builder.call_args_list] == [
         "mismatch",
         "readiness",
         "protocol",
         "workspace",
         "missing_agent",
+        "boot_stall",
     ]
-    assert installer.call_count == (1 if failure else 5)
+    assert installer.call_count == (1 if failure else 6)
     expected_cases = {
         "mismatch-positive": {"ok": True},
         "mismatch-negative": {"ok": failure != "rejected"},
@@ -584,6 +592,8 @@ def test_exercise_isolates_ten_cases_and_unwinds_failed_runs(
         "workspace-negative": {"ok": True},
         "missing_agent-positive": {"ok": True},
         "missing_agent-negative": {"ok": True},
+        "boot_stall-positive": {"ok": True},
+        "boot_stall-negative": {"ok": True},
     }
     if failure:
         expected_cases = {name: result for name, result in expected_cases.items() if name.startswith("mismatch")}
@@ -592,14 +602,21 @@ def test_exercise_isolates_ten_cases_and_unwinds_failed_runs(
     assert receipt["cases"] == expected_cases
     assert json.loads((evidence / "receipt.json").read_text())["cases"] == expected_cases
     for profile in receipt["fault_sources"]:
-        assert (evidence / f"image-store/runs/{profile}-source/bundle/rootfs.img").read_bytes() == profile.encode()
+        fault_source = evidence / f"image-store/runs/{profile}-source/bundle"
+        assert (fault_source / "rootfs.img").read_bytes() == (
+            b"healthy" if profile == "boot_stall" else profile.encode()
+        )
+        if profile == "boot_stall":
+            provenance = json.loads((fault_source / "build-info.json").read_text())
+            assert provenance["initrd_before_sha256"] != provenance["initrd_after_sha256"]
+            assert provenance["rootfs_sha256"] == receipt["source_before"]["rootfs.img"]
     assert {path.name: path.read_bytes() for path in source_bundle.iterdir()} == source_before
     ctl.stop_helper.assert_called_once()
     assert receipt["lifecycle"]["runtime_removed"] is True
     assert not Path(receipt["lifecycle"]["runtime_dir"]).exists()
     assert receipt["errors"] == []
     tracked_disks = disk_probe.call_args.args[0]
-    assert len(tracked_disks) == (6 if failure else 30)
+    assert len(tracked_disks) == (6 if failure else 36)
     assert {path / "rootfs.img" for path in run_paths}.issubset(set(tracked_disks))
     if failure:
         helper.terminate_vm.assert_called_once_with("leftover")
