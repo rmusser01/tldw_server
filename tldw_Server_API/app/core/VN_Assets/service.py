@@ -666,13 +666,7 @@ class VNAssetPackService:
                 user_id=user_id,
             )
         except Exception as exc:
-            self.repo.update_batch(
-                int(batch["id"]),
-                {
-                    "status": "failed",
-                    "enqueue_error": str(exc),
-                },
-            )
+            self.repo.fail_batch_enqueue(int(batch["id"]), str(exc))
             raise
         job_batch_id = str(job.get("id") or job.get("uuid") or "")
         if job_batch_id:

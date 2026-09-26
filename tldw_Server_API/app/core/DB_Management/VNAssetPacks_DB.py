@@ -1793,6 +1793,33 @@ class VNAssetPacksRepository:
             raise RuntimeError("created_batch_not_found")
         return batch
 
+    def fail_batch_enqueue(self, batch_id: int, error: str) -> None:
+        """Record a rejected parent job on the batch and its owned slots atomically."""
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            batch = conn.execute(
+                "SELECT pack_id, recipe_json, status FROM vn_asset_batches WHERE id = ?", (batch_id,)
+            ).fetchone()
+            if batch is None:
+                raise ValueError("vn_asset_batch_not_found")
+            if batch["status"] != "queued":
+                return
+            conn.execute(
+                """UPDATE vn_asset_batches SET status = 'failed', enqueue_error = ?,
+                   updated_at = CURRENT_TIMESTAMP WHERE id = ?""",
+                (error, batch_id),
+            )
+            recipe = json.loads(batch["recipe_json"]) if batch["recipe_json"] else {"slots": []}
+            conn.executemany(
+                """UPDATE vn_asset_slots SET status = 'failed', last_error = ?,
+                   last_failed_batch_id = ?, updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ? AND pack_id = ? AND latest_generation_batch_id = ?""",
+                (
+                    (error, batch_id, int(slot["slot_id"]), int(batch["pack_id"]), batch_id)
+                    for slot in recipe["slots"]
+                ),
+            )
+
     def set_execution_recipe_if_absent(
         self, batch_id: int, recipe: Mapping[str, Any]
     ) -> dict[str, Any]:
@@ -1819,6 +1846,29 @@ class VNAssetPacksRepository:
     ) -> dict[str, Any]:
         self._ensure_schema_initialized()
         with self.db.transaction() as conn:
+            # Recover the enqueue outcome without erasing children that already persisted an image.
+            recovering = conn.execute(
+                """SELECT 1 FROM vn_asset_batches
+                   WHERE id = ? AND status = 'failed' AND enqueue_error IS NOT NULL
+                     AND failed_count = 0""",
+                (batch_id,),
+            ).fetchone()
+            if recovering is not None:
+                conn.execute(
+                    """UPDATE vn_asset_slots
+                       SET status = CASE WHEN EXISTS (
+                           SELECT 1 FROM vn_asset_items AS item
+                           WHERE item.slot_id = vn_asset_slots.id AND item.source = 'generated'
+                             AND (item.generated_file_id IS NOT NULL OR item.storage_ref IS NOT NULL)
+                             AND CASE WHEN json_valid(item.source_context_snapshot_json)
+                               THEN json_extract(item.source_context_snapshot_json, '$.batch_id')
+                               END = ?
+                       ) THEN 'reviewing' ELSE 'generating' END,
+                       last_error = NULL, last_failed_batch_id = NULL,
+                       updated_at = CURRENT_TIMESTAMP
+                       WHERE latest_generation_batch_id = ? AND last_failed_batch_id = ?""",
+                    (batch_id, batch_id, batch_id),
+                )
             conn.execute(
                 """UPDATE vn_asset_batches
                    SET status = CASE
@@ -1895,10 +1945,17 @@ class VNAssetPacksRepository:
                 (batch_id,),
             )
 
-    def record_batch_variant_failure(self, batch_id: int) -> None:
-        """Increment failure without reopening a completed or cancelled batch."""
+    def record_batch_variant_failure(self, batch_id: int, *, slot_id: int, error: str) -> None:
+        """Record the final slot and batch failure in one transaction."""
         self._ensure_schema_initialized()
         with self.db.transaction() as conn:
+            conn.execute(
+                """UPDATE vn_asset_slots
+                   SET status = 'failed', last_error = ?, last_failed_batch_id = ?,
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ? AND (latest_generation_batch_id = ? OR latest_generation_batch_id IS NULL)""",
+                (error, batch_id, slot_id, batch_id),
+            )
             conn.execute(
                 """UPDATE vn_asset_batches
                    SET failed_count = failed_count + 1,
