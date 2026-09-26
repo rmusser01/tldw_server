@@ -41,6 +41,28 @@ def test_calendar_owned_definitions_have_docstrings(path: Path) -> None:
     assert not missing, f"Undocumented definitions in {path.name}: {missing}"
 
 
+@pytest.mark.parametrize(("path", "function_name", "parameters"), [
+    (API_ROOT / "app/core/Calendar/recurrence.py", "_validate_timezone_rule", ("properties",)),
+    (API_ROOT / "app/core/Calendar/providers/caldav.py", "_component_dates", (
+        "component", "name", "resolved_timezones",
+    )),
+])
+def test_reviewed_recurrence_helpers_document_parameters_returns_and_validation(
+    path: Path, function_name: str, parameters: tuple[str, ...],
+) -> None:
+    """Keep the two reviewed private-helper contracts complete without importing providers."""
+    function = next(
+        node for node in ast.walk(_parse_module(path))
+        if isinstance(node, ast.FunctionDef) and node.name == function_name
+    )
+    documentation = ast.get_docstring(function) or ""
+    assert "Args:" in documentation and "Returns:" in documentation and "Raises:" in documentation
+    arguments = documentation.split("Args:", 1)[1].split("Returns:", 1)[0]
+    assert all(f"{parameter}:" in arguments for parameter in parameters)
+    assert documentation.split("Returns:", 1)[1].split("Raises:", 1)[0].strip()
+    assert "CalendarValidationError:" in documentation.split("Raises:", 1)[1]
+
+
 def test_calendar_db_test_signatures_have_concrete_annotations() -> None:
     """Require fixture/helper types and complete test signatures rather than Any placeholders."""
     expected_parameters = {
