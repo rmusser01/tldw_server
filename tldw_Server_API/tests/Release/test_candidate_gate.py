@@ -654,6 +654,9 @@ setup={setup_test!r}
 mcp={mcp_test!r}
 production={production!r}
 if args[0]=='create':
+    environment=dict(args[i+1].split('=',1) for i,arg in enumerate(args) if arg=='--env')
+    if environment.get('MCP_AUDIT_LOG_FILE') != '/app/Databases/mcp-audit.log': sys.exit(1)
+    if environment.get('MCP_AUDIT_ENABLED','true') != 'true' or '--user' in args: sys.exit(1)
     mounts=[]
     for i, arg in enumerate(args):
         if arg=='--mount':

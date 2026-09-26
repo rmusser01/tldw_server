@@ -10,7 +10,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-
 REPO = Path(__file__).resolve().parents[3]
 BUNDLE = REPO / "Dockerfiles" / "app-bundle"
 
@@ -217,6 +216,15 @@ def test_compose_uses_cookies_on_its_http_loopback_gateway() -> None:
     services = yaml.safe_load((BUNDLE / "compose.yaml").read_text())["services"]
 
     assert services["app"]["environment"].get("SESSION_COOKIE_SECURE") == "0"
+
+
+def test_compose_persists_enabled_mcp_audit_in_existing_database_volume() -> None:
+    app = yaml.safe_load((BUNDLE / "compose.yaml").read_text())["services"]["app"]
+
+    assert app["environment"].get("MCP_AUDIT_LOG_FILE") == "/app/Databases/mcp-audit.log"
+    assert "backend_data:/app/Databases" in app["volumes"]
+    assert app["environment"].get("MCP_AUDIT_ENABLED", "true") == "true"
+    assert "user" not in app
 
 
 def test_compose_binds_managed_setup_and_cookie_origins_to_persisted_public_port() -> None:

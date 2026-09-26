@@ -197,6 +197,7 @@ if ! backend_test_id=$(docker create --platform "$platform" --entrypoint sh \
   --mount "type=bind,source=$(pwd)/Dockerfiles/app-bundle,target=/app/Dockerfiles/app-bundle,readonly" \
   --mount "type=bind,source=$(pwd)/tldw_Server_API/tests/Setup/test_managed_gateway_setup.py,target=/app/tldw_Server_API/tests/Setup/test_managed_gateway_setup.py,readonly" \
   --env PYTHONPATH=/app --env TEST_MODE=false \
+  --env MCP_AUDIT_LOG_FILE=/app/Databases/mcp-audit.log \
   --env SINGLE_USER_API_KEY=ci-managed-dummy-key-with-at-least-32-characters \
   "$backend_tag" -c '
     set -eu
