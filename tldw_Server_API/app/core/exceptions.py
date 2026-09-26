@@ -70,6 +70,14 @@ class VNAssetGenerationError(ValueError):
         super().__init__(code)
 
 
+class JobsRetryAdmissionIndexError(RuntimeError):
+    """Safe Jobs retry-index coordination, definition or verification failure.
+
+    RuntimeError compatibility is retained. Native database failures are not
+    wrapped in this type; the helper preserves their original propagation.
+    """
+
+
 class LegacyDisplayReconciliationError(RuntimeError):
     """Safe VN display rollback error, not a generation or SDK retry outcome.
 

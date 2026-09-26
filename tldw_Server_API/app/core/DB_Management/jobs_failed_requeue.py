@@ -9,6 +9,7 @@ from datetime import datetime
 from time import monotonic, sleep
 from typing import Any
 
+from tldw_Server_API.app.core.exceptions import JobsRetryAdmissionIndexError
 from tldw_Server_API.app.core.Jobs.operations.contracts import AdmissionResult, CreateJobCommand
 
 _PG_RETRY_ADMISSION_INDEX_LOCK = "tldw.jobs.job_events.retry_admission_index.v1"
@@ -80,7 +81,7 @@ def _lock_pg_retry_admission_index(executor: Any) -> None:
             return
         remaining = deadline - monotonic()
         if remaining <= 0:
-            raise RuntimeError("Jobs retry-admission index advisory lock timeout")
+            raise JobsRetryAdmissionIndexError("Jobs retry-admission index advisory lock timeout")
         sleep(min(0.05, remaining))
 
 
@@ -108,8 +109,8 @@ def ensure_retry_admission_index(executor: Any, *, backend: str) -> None:
 
     Raises:
         ValueError: Unsupported backend.
-        RuntimeError: PostgreSQL advisory-lock timeout, foreign index collision
-            or failed index verification.
+        JobsRetryAdmissionIndexError: PostgreSQL advisory-lock timeout, foreign
+            index collision or failed index verification (a RuntimeError subtype).
         ImportError: The PostgreSQL branch cannot import psycopg.
         sqlite3.Error / psycopg.Error: Native DDL, catalog, timeout, permission
             or transaction-mode failures propagate unchanged (except unlock).
@@ -127,7 +128,7 @@ def ensure_retry_admission_index(executor: Any, *, backend: str) -> None:
         try:
             state = _pg_retry_admission_index_state(executor)
             if state is not None and not state[0]:
-                raise RuntimeError("Jobs retry-admission index definition collision; refusing replacement")
+                raise JobsRetryAdmissionIndexError("Jobs retry-admission index definition collision; refusing replacement")
             if state is None or not all(state[1:]):
                 if state is not None:
                     executor.execute("DROP INDEX CONCURRENTLY IF EXISTS idx_job_events_retry_admissions")
@@ -136,7 +137,7 @@ def ensure_retry_admission_index(executor: Any, *, backend: str) -> None:
                     "ON job_events(domain,owner_user_id,created_at) WHERE event_type='job.retry_admitted'"
                 )
             if _pg_retry_admission_index_state(executor) != (True, True, True):
-                raise RuntimeError("Jobs retry-admission index verification failed")
+                raise JobsRetryAdmissionIndexError("Jobs retry-admission index verification failed")
         finally:
             with suppress(psycopg.Error):
                 executor.execute(

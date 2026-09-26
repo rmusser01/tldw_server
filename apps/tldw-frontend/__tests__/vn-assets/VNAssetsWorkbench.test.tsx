@@ -103,6 +103,105 @@ describe('VNAssetsWorkbench', () => {
     mocks.getVNAssetGeneration.mockResolvedValue({ status: 'failed', failed_count: 1 });
   }
 
+  /** Keep an ambiguous operation pending while authoritative status permits cancellation. */
+  async function ambiguousCancelableStart(): Promise<{
+    user: ReturnType<typeof userEvent.setup>;
+    view: ReturnType<typeof render>;
+    key: string;
+  }> {
+    existingFailedPack();
+    mocks.listVNAssetPacks.mockResolvedValue([
+      { id: 7, owner_user_id: 1, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
+      { id: 8, owner_user_id: 2, title: 'Moon Archive', primary_character_id: 43, status: 'draft' },
+    ]);
+    mocks.startVNAssetGeneration.mockRejectedValueOnce(new Error('Ambiguous start'))
+      .mockRejectedValueOnce(new Error('Reconciliation offline'));
+    const user = userEvent.setup();
+    const view = render(<VNAssetsWorkbench />);
+    await user.click(await screen.findByRole('button', { name: 'Start generation' }));
+    await screen.findByText('Ambiguous start');
+    const key = readPendingVNAssetGeneration(1, 7)!.key;
+    mocks.getVNAssetGeneration.mockResolvedValue({ status: 'queued' });
+    await user.click(screen.getByRole('button', { name: 'Refresh generation status' }));
+    await screen.findByText('Reconciliation offline');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Cancel' })).toBeEnabled());
+    return { user, view, key };
+  }
+
+  it.each([false, true])('successful cancellation abandons ambiguous key before next start (reload=%s)', async (reload) => {
+    const { user, view, key } = await ambiguousCancelableStart();
+    mocks.cancelVNAssetGeneration.mockResolvedValue({ status: 'cancelled' });
+    mocks.getVNAssetGeneration.mockResolvedValue({ status: 'cancelled' });
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('cancelled'));
+    expect(readPendingVNAssetGeneration(1, 7)).toBeNull();
+    if (reload) {
+      view.unmount();
+      render(<VNAssetsWorkbench />);
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
+      expect(mocks.startVNAssetGeneration).toHaveBeenCalledTimes(2);
+    }
+    await user.click(screen.getByRole('button', { name: 'Start generation' }));
+    await waitFor(() => expect(mocks.startVNAssetGeneration).toHaveBeenCalledTimes(3));
+    expect(mocks.startVNAssetGeneration.mock.calls[2][1].idempotency_key).not.toBe(key);
+  });
+
+  it('failed cancellation retains the ambiguous key for reload reconciliation', async () => {
+    const { user, view, key } = await ambiguousCancelableStart();
+    mocks.cancelVNAssetGeneration.mockRejectedValue(new Error('Cancel offline'));
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await screen.findByText('Cancel offline');
+    expect(readPendingVNAssetGeneration(1, 7)?.key).toBe(key);
+    view.unmount();
+    render(<VNAssetsWorkbench />);
+    await waitFor(() => expect(mocks.startVNAssetGeneration).toHaveBeenCalledTimes(3));
+    expect(mocks.startVNAssetGeneration.mock.calls[2]).toEqual([7, { idempotency_key: key }]);
+  });
+
+  it('delayed cancellation cannot erase a newer receipt or another owner/pack operation', async () => {
+    const { user } = await ambiguousCancelableStart();
+    let finishCancel!: (value: unknown) => void;
+    mocks.cancelVNAssetGeneration.mockImplementation(() => new Promise((resolve) => { finishCancel = resolve; }));
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    writePendingVNAssetGeneration(1, 7, { kind: 'retry', slotId: 12, key: 'newer-receipt' });
+    writePendingVNAssetGeneration(2, 7, { kind: 'start', key: 'other-owner' });
+    mocks.getVNAssetGeneration.mockResolvedValue({ status: 'failed' });
+    await user.click(screen.getByText('Moon Archive'));
+    mocks.startVNAssetGeneration.mockRejectedValueOnce(new Error('New pack offline'));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Start generation' }));
+    await screen.findByText('New pack offline');
+    const otherPack = readPendingVNAssetGeneration(2, 8);
+    await act(async () => { finishCancel({ status: 'cancelled' }); });
+    expect(readPendingVNAssetGeneration(1, 7)?.key).toBe('newer-receipt');
+    expect(readPendingVNAssetGeneration(2, 7)?.key).toBe('other-owner');
+    expect(readPendingVNAssetGeneration(2, 8)).toEqual(otherPack);
+    expect(screen.getByRole('status')).toHaveTextContent('failed');
+    await user.click(screen.getByRole('button', { name: 'Start generation' }));
+    await waitFor(() => expect(mocks.startVNAssetGeneration).toHaveBeenCalledTimes(4));
+    expect(mocks.startVNAssetGeneration.mock.calls[3]).toEqual([8, { idempotency_key: otherPack!.key }]);
+  });
+
+  it('cancellation clears the matching memory key even when session storage is unavailable', async () => {
+    existingFailedPack();
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('Storage disabled'); });
+    mocks.startVNAssetGeneration.mockRejectedValueOnce(new Error('Memory-only start'));
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    await user.click(await screen.findByRole('button', { name: 'Start generation' }));
+    await screen.findByText('Memory-only start');
+    const key = mocks.startVNAssetGeneration.mock.calls[0][1].idempotency_key;
+    mocks.getVNAssetGeneration.mockResolvedValue({ status: 'queued' });
+    await user.click(screen.getByRole('button', { name: 'Refresh generation status' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Cancel' })).toBeEnabled());
+    mocks.cancelVNAssetGeneration.mockResolvedValue({ status: 'cancelled' });
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Start generation' }));
+    await waitFor(() => expect(mocks.startVNAssetGeneration).toHaveBeenCalledTimes(2));
+    expect(mocks.startVNAssetGeneration.mock.calls[1][1].idempotency_key).not.toBe(key);
+  });
+
   it.each([
     { label: 'zero', slotId: 0 },
     { label: 'negative', slotId: -1 },

@@ -1,5 +1,100 @@
 # PR 3016 VN Durability Review Implementation Plan
 
+## Current Review Wave: Task 22
+
+Full Qodo review5325783656 completed11:35:55Z on exact head
+a3f62da0a29eac3743cd184341d97206e028e238, acknowledgment5845933607.
+Six new findings;39 threads/six unresolved, prior33 preserved. AC5 reopened.
+No review pending. Current dev a2826f103f remains the base; no new rebase.
+
+### Task 22: Resolve Six Fresh Exact-Head Findings
+
+**Base:** a3f62da0a29eac3743cd184341d97206e028e238.
+**Tracking:** TASK-13369. One coordinated fix wave, then independent task
+spec/quality and scoped cross-contract review. Tasks1-21 stay frozen.
+**Files:** VN_Assets/worker.py, DB_Management/VNAssetPacks_DB.py,
+DB_Management/jobs_failed_requeue.py, core/exceptions.py, affected VN/Jobs
+regression tests, VNAssetsWorkbench.tsx and its existing tests. No shared
+fixture, global pytest configuration, Jobs authority or unrelated changes.
+
+- [x] Verify finding4111251955: synchronous outcome query inside the async
+  worker blocks the event loop. Use the smallest cohesive off-thread read
+  boundary preserving connection ownership and transaction scope. Do not
+  transfer cursors/transactions across threads or introduce a global executor.
+  Cover loop responsiveness with a controlled blocked query and real existing
+  SQLite repository replay/fencing behavior; inspect in-memory/thread-local
+  semantics and close newly owned resources appropriately.
+  Preserve private-memory and already-active caller-transaction modes using a
+  narrow documented owner-thread fallback when offloading would change their
+  connection/transaction identity. Verify normal file-backed worker wiring has
+  no outer transaction; do not claim universal nonblocking database access.
+- [x] Verify finding4111251964: recipe-count or missing-recipe integrity failure
+  terminalizes only the batch. Add an atomic DB_Management operation that
+  terminalizes surviving unfinished recipes, releases their reservation
+  capacity, adjusts failed counters once and reconciles all affected slots.
+  Preserve completed/approved bytes and outcomes, historical completed/failed/
+  cancelled counters, cancellation and sibling active work. Never invent
+  outcomes for missing rows or silently replace approved assets. Keep missing
+  ledger-row ambiguity explicit; no unsafe deletion of orphan published bytes.
+  Both worker integrity-failure paths must use this boundary. Cover partial
+  fanout with reserved items, repeated admission, rollback, completed approval,
+  cancellation and a sibling active batch. Existing execution/publication
+  fences must reject late workers after terminalization.
+- [x] Verify finding4111251958: use a centrally defined Jobs-specific exception
+  for retry-index lock timeout, definition collision and verification failure.
+  Preserve RuntimeError compatibility, existing safe messages and native DB
+  error propagation; avoid broad catch/reclassification. Cover each named
+  failure and the real existing owned PostgreSQL ensure tests through official
+  isolated_test_environment. Do not copy/alter fixture lifecycle.
+- [x] Verify finding4111251961: every newly added executable test in the two
+  cited VN modules must have exactly one accepted tier, including inherited
+  markers. Real SQLite/database concurrency/schema tests use integration;
+  database-free tests use unit. Preserve asyncio/parametrize metadata. Prove
+  actual public collection RED/GREEN without a new general policy engine.
+- [x] Verify finding4111251962: add immediate nonempty concise docstrings to
+  new concurrency/replay test doubles and their methods lacking them, including
+  EmptyGeneratedFiles and BlockingFirstImageAdapter. Scope to PR-added code,
+  not an unrelated rewrite; do not change executable behavior for docs alone.
+- [x] Verify finding4111251966: after successful cancel clear the matching
+  owner/pack pending receipt and matching in-memory operation key. Snapshot the
+  pending key before await; conditional cleanup must not erase a newer receipt
+  or unrelated pack/owner state. Failed cancellation retains its key. Cover
+  ambiguous start + failed reconciliation + successful cancellation + next
+  start with fresh key, reload, failed cancel and selected-pack/key races.
+- [x] Run focused RED/GREEN, then affected VN/Jobs/frontend scope once, scoped
+  Ruff/Bandit/TypeScript/ESLint as applicable. Preserve logs/XML and truthful
+  counts/skips/warnings; prior broad matrices remain historical. Use project
+  venv and existing official PG fixture; unavailable required PG is a failure,
+  not a successful skip. No Python3.14/whole-repo-green claim.
+- [x] Freeze report/diff/evidence; independent spec/quality and changed-contract
+  review. Fix verified blocking review feedback through original implementer
+  and scoped re-review (max3 failed attempts before reassessment). Controller
+  commits normally after review with associated tracking/design/plan records;
+  no hook bypass, no unrelated dirty files staged.
+- [ ] Push normal reviewed change; reply individually with tested evidence and
+  resolve only verified findings. Request one full review on the new head,
+  then require all seven CI contexts/current strict dev/human summary gates
+  before normal authorized match-head merge. No admin bypass or skipped passes.
+
+Task22 frozen implementation10files/93source-evidence manifest entries verified.
+Covering305backendpassed0skips37warnings251.52s (17officialPG included),
+65frontendpassed0skips8.97s; public135collected101addedcasesexactlyonetier.
+ProductionBandit0; scopedRuffonebaselineBLE001/testBandit18baselineB106 no
+new findings. TypeScript/scopedESLint/compile/diff passed; earlier failures and
+warnings qualified in report. Erdos and Gibbs closed; independent SPEC/QUALITY/
+changed-contract PASS, no actionable findings. Main bounded integration16passed
+0skips plus fresh TypeScript/ESLint/Bandit passed, Ruff samebaselineBLE001.
+Dev a2826f unchanged. Normal scoped commit next; AC5 open until tested evidence
+replies and AC6/external gates pending. No merge attempted.
+
+**Ruling:** These are corrections to approved durability contracts, not a new
+feature. Keep the worker/read and integrity paths in one coordinated wave to
+avoid overlapping ownership. Preserve RuntimeError catch compatibility through
+subclassing. Review the frozen working delta before controller normal commit
+so integration records cannot be staged mid-edit. Cost if wrong: a bounded
+follow-up fix/review, not a new queue authority or data migration.
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Resolve all verified PR 3016 generation durability findings without weakening the existing API or Jobs contract.
@@ -775,3 +870,62 @@ warning/formatter/SQLite side effects remain qualified, no suppressed behavior.
 Reviewer closed; all task-needed agents/tests/shell sessions closed. Fresh dev
 59bd584503 unchanged ancestor. Normal five-file integration and individual
 evidence reply next; exact-head Qodo/CI/current-base/human/merge gates pending.
+
+Task21 integration: normal five-file commit and FF push produced GitHub-verified
+2450adb17888b67b1c393581b01b011483e7cbec; dev59bd584503 remains unchanged.
+All203 hashes matched after commit. Explicit applicable normal five-file
+pre-commit checks passed; commit-stage hook execution is not claimed because
+the normal commit produced no hook output. No bypass was used.
+Individual tested reply4111014500 posted09:52:38Z. Fresh paginated inventory
+33threads0unresolved, no remaining review/thread/comment pages; the latest
+thread was already auto-resolved after push. All20 conversation comments
+inspected, including edited summary09:46:09Z0bugs0rules18historicalomitted,
+which is not a completed full new-head review.
+Only Verification updated; human paragraph and all other body sections
+preserved and freshly verified. ONE full request5845250951 at09:53:39Z on
+2450adb is pending, with busy acknowledgment5845252770; do not duplicate.
+Exact-head54checks33queued21completed/no actionablefailure, seven required
+contexts absent. Skipped/cancelled are not passes. OPEN/BLOCKED, no merge
+attempt. AC5 checked through official CLI after the read-only MCP stalled;
+AC6/finalization pending. All task-needed agents/tests/shell sessions closed.
+Only local integration records retained; no tracking-only push.
+
+09:56 external check: full request5845250951 completed with Qodo exact-head
+acknowledgment5845262987 at09:55:07Z. Busy5845252770 was removed (fresh404);
+summary5836873877 updated09:55:04Z with exact2450adb footer, zero bugs/rules,
+and visible historical findings resolved/dismissed. No new formal Qodo Review
+object was emitted for this zero-finding run; the terminal request/ack sequence
+establishes completion, not merely the edited push summary.
+Fresh paginated inventory33threads0unresolved/no remaining pages/no new inline
+feedback; all20 conversation comments inspected. No review pending; no repeat
+request on unchanged head. Dev ref remains59bd584503 and human summary verbatim.
+Actual exact-head55checks33queued22completed/no actionablefailure; all seven
+required contexts absent. OPEN/BLOCKED/no merge attempt. AC6 remains pending.
+No source, commit, push, rebase, agents or test reruns; retain local records.
+
+## Current Dev Integration: a2826f103f
+
+11:26 heartbeat found dev advanced through unrelated VZ startup-drill PR3017.
+No overlap with owned source/tests, fixtures, global config or CI configuration.
+Clean rebase12commits produced a3f62da0a29eac3743cd184341d97206e028e238 on
+a2826f103f02a67f57adb40ed048dbfa2ecfc6e5; range-diff all12 patches identical,
+owned source/test/config blobs unchanged and all203 frozen hashes match.
+Only the two integration records were stashed and restored byte-for-byte
+(diff SHA2569448fd08f511b078ed59c00ed634f6ea613a4da93740aa5fb874948e94154207).
+Backup ref codex/vn3016-before-dev-a2826f-2450adb and scoped stash
+018ffdd24a9acd92e07499297a084268c7bcd5dc are retained; do not reapply the stash.
+
+Bounded post-rebase units10passed38deselected0fail/errors/skips5warnings17.85s.
+The unit filter deselected35 VN integration cases and3 native-PG guards; the
+two VN files were then run separately35passed0fail/errors/skips4warnings25.31s.
+Logs/XML /tmp/vn3016-post-rebase-a3f62da and -vn retained. No PG/broad rerun,
+no production edits, inherited cleanup/import-time SQLite warnings qualified.
+Exact force-with-lease2450adb push succeeded, GitHub head/base verified.
+Only PRVerification updated; human summary/all other body sections preserved.
+Fresh paginated33threads0unresolved/no remaining pages; all22 conversation
+comments checked. ONE full request5845913123 at11:32:34Z on a3f62da is pending,
+busy5845914083 at11:32:44Z. Push summary11:31:20Z0bugs0rules is not completion;
+prior2450adb full review does not satisfy the new-head gate. Do not duplicate.
+Exact-head55checks33queued22completed/no actionablefailure/7required absent.
+OPEN/BLOCKED/no merge attempted; AC5 checked/AC6pending. All task-needed
+agents/tests/shell sessions closed; only local integration records retained.

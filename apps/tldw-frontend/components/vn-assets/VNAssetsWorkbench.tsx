@@ -434,19 +434,30 @@ export default function VNAssetsWorkbench() {
 
   const handleCancelGeneration = useCallback(async () => {
     if (!selectedPack || generationCommandPending.current.has(selectedPack.id)) return;
-    generationCommandPending.current.add(selectedPack.id);
+    const packId = selectedPack.id;
+    const ownerUserId = selectedPack.owner_user_id;
+    const pending = readPendingVNAssetGeneration(ownerUserId, packId);
+    const operationPrefix = `${ownerUserId ?? 'unknown'}:${packId}:`;
+    const pendingKeys: [string, string][] = pending
+      ? [[`${operationPrefix}${pending.slotId ?? 'start'}`, pending.key]]
+      : [...generationKeys.current.entries()].filter(([operation]) => operation.startsWith(operationPrefix));
+    generationCommandPending.current.add(packId);
     ++refreshRevision.current;
-    setPendingCommands((previous) => ({ ...previous, [selectedPack.id]: { kind: 'cancel' } }));
+    setPendingCommands((previous) => ({ ...previous, [packId]: { kind: 'cancel' } }));
     setError(null);
     try {
-      const nextGeneration = await cancelVNAssetGeneration(selectedPack.id);
-      if (selectedPackIdRef.current === selectedPack.id) setGeneration(nextGeneration);
+      const nextGeneration = await cancelVNAssetGeneration(packId);
+      if (pending) clearPendingVNAssetGeneration(ownerUserId, packId, pending.key);
+      for (const [operation, key] of pendingKeys) {
+        if (generationKeys.current.get(operation) === key) generationKeys.current.delete(operation);
+      }
+      if (selectedPackIdRef.current === packId) setGeneration(nextGeneration);
     } catch (cancelError) {
-      if (selectedPackIdRef.current === selectedPack.id) {
+      if (selectedPackIdRef.current === packId) {
         setError(cancelError instanceof Error ? cancelError.message : 'Failed to cancel generation');
       }
     } finally {
-      finishGenerationCommand(selectedPack.id);
+      finishGenerationCommand(packId);
     }
   }, [selectedPack, finishGenerationCommand]);
 
