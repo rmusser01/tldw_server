@@ -10,6 +10,7 @@ from tldw_Server_API.app.core.Claims_Extraction.artifact_verification import (
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
+from tldw_Server_API.app.core.exceptions import QuizMalformedOutputError
 from tldw_Server_API.app.services import quiz_generator
 
 pytestmark = pytest.mark.integration
@@ -124,3 +125,59 @@ async def test_legacy_advanced_type_persists(quiz_context, monkeypatch, question
     assert result["questions"][0]["question_type"] == question_type
     assert result["questions"][0]["correct_answer"] == answer
     assert db.list_quizzes(limit=10, offset=0)["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_qualified_selected_citation_is_stored_with_canonical_source_id(quiz_context, monkeypatch):
+    db, args, payload = quiz_context
+    source_id = str(args["sources"][0]["source_id"])
+    payload["questions"][0]["source_citations"][0]["source_id"] = f"note:{source_id}"
+    monkeypatch.setattr(quiz_generator, "_call_quiz_generation_llm", AsyncMock(return_value=completion(payload)))
+    monkeypatch.setattr(quiz_generator, "_verify_quiz_questions_against_sources", grounded_verifier())
+
+    result = await quiz_generator.generate_quiz_from_sources(**args)
+
+    assert result["questions"][0]["source_citations"][0]["source_id"] == source_id
+    assert db.list_quizzes(limit=10, offset=0)["count"] == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source_type", ["note", "media"])
+async def test_qualified_unselected_citation_is_rejected_before_persistence(quiz_context, monkeypatch, source_type):
+    db, args, payload = quiz_context
+    source_id = str(args["sources"][0]["source_id"])
+    payload["questions"][0]["source_citations"][0].update(
+        source_type=source_type,
+        source_id=f"{source_type}:{source_id}-other",
+    )
+    verifier = AsyncMock()
+    monkeypatch.setattr(quiz_generator, "_call_quiz_generation_llm", AsyncMock(return_value=completion(payload)))
+    monkeypatch.setattr(quiz_generator, "_verify_quiz_questions_against_sources", verifier)
+
+    with pytest.raises(quiz_generator.QuizProvenanceValidationError, match="do not map"):
+        await quiz_generator.generate_quiz_from_sources(**args)
+
+    assert db.list_quizzes(limit=10, offset=0)["count"] == 0
+    verifier.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_token_limited_reasoning_response_reports_exhaustion(quiz_context, monkeypatch):
+    db, args, _ = quiz_context
+    response = {
+        "choices": [
+            {
+                "finish_reason": "length",
+                "message": {"content": None, "reasoning_content": "unfinished reasoning"},
+            }
+        ]
+    }
+    verifier = AsyncMock()
+    monkeypatch.setattr(quiz_generator, "_call_quiz_generation_llm", AsyncMock(return_value=response))
+    monkeypatch.setattr(quiz_generator, "_verify_quiz_questions_against_sources", verifier)
+
+    with pytest.raises(QuizMalformedOutputError, match="max_tokens"):
+        await quiz_generator.generate_quiz_from_sources(**args)
+
+    assert db.list_quizzes(limit=10, offset=0)["count"] == 0
+    verifier.assert_not_awaited()

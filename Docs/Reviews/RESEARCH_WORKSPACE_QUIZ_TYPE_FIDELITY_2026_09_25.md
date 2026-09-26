@@ -38,6 +38,81 @@ counts. Prompt examples are selected-type and generation-profile specific.
   `/tmp/task12020_57_dev_uat_nothink_retry_evidence.json`. Follow-up:
   TASK-12020.60.
 
+## TASK-12020.60 follow-up
+
+Raw local-model probes showed that the citation rejection was a representation
+mismatch: `source_type="media"` with `source_id="media:59"` rather than the
+selected canonical ID `"59"`. The prompt's combined `type:id` contract caused
+this ambiguity. Presenting separate JSON field pairs produced six MC/TF
+questions with canonical IDs in a controlled non-reasoning probe.
+
+The quiz source contract now shows those separate fields. A qualified ID is
+canonicalized only if its source type and remaining ID exactly match a selected
+source; exact selected IDs containing colons remain unchanged. Unselected IDs
+and wrong source types still fail strict provenance before claims/persistence.
+Media citations retain their numeric media reference.
+
+A separate automatic-reasoning probe returned `finish_reason=length`, 2,000
+completion tokens, zero content, and 6,672 characters of reasoning. Quiz
+generation now reports a specific `max_tokens` exhaustion error before JSON
+parsing. For the non-reasoning UAT configuration, use llama.cpp server
+`--reasoning off` or `LLAMA_ARG_REASONING=off`; the backend environment variable
+`LLAMA_CPP_ENABLE_THINKING=false` did not configure the current server.
+
+The new red/green regressions and focused property/integration suite passed
+(78 tests). Review also corrected the prompt instruction to preserve canonical
+IDs containing existing colons or prefixes. The first updated real-browser run
+passed the citation boundary
+but failed in ClaimsEngine with HTTP 500 because two `SourceAuthority` enum
+objects were compared by `max()` without a numeric key. The earlier working
+branch's authority-ranking fix was not included in the focused current-dev
+port; bringing that dependency forward is tracked as TASK-12020.61.
+Live evidence remains non-passing:
+`/tmp/task12020_60_uat_evidence.json`.
+
+The full Quizzes rerun collected 644 tests but terminated at 68% with filesystem
+`OSError` failures and exit code 120 as available disk space fell from 4.9 GB to
+467 MB. This is not a passing full-suite result. The final focused run passed
+78 tests, including the review regression added after full-suite collection.
+Ruff, scoped ESLint, test-file Black, Bandit, frontend typecheck, and
+`git diff --check` passed. Full-suite and live browser completion remain blocked.
+
+## TASK-12020.61 authority-ranking follow-up
+
+After requester approval to continue, regressions reproduced the shared enum
+ordering defect: seven tests failed and four passed. Multiple evidence sources
+caused `TypeError` in the LLM path; the NLI path caught the same error and
+returned an unverified result instead of its supported verdict.
+
+Both authority-selection sites now rank by `SourceAuthority.value`, retaining
+the enum object and the `SECONDARY` empty-evidence default. Regressions cover
+empty, single, repeated, and mixed authorities in both paths, plus property
+checks for order independence. The regressions and adjacent engine modes,
+status fallback, configuration, and artifact-verification tests passed
+(49 tests). Ruff, test-file Black, and Bandit passed. No unrelated predecessor
+changes were brought forward. Successful live browser validation still awaits
+sufficient free disk space; neither this fix nor the citation changes are
+reported as end-to-end validated.
+
+## Final current-dev live validation
+
+After free space was restored to 120 GB, the full Research Workspace Chromium
+quiz workflow passed against the real backend and local llama.cpp Gemma model
+with `--reasoning off`: one executed, zero skipped, flaky, or unexpected tests.
+Generation returned HTTP 200 with six questions and a `grounded` claims verdict.
+The browser test confirmed the requested MC/TF types, persisted citations with
+canonical selected-media IDs and numeric `media_id`, native Quiz page access,
+workspace visibility, and move-to-general without changing the quiz record ID.
+
+Evidence: `/tmp/task12020_61_uat_evidence.json` (`productPassed=true`,
+`failureScope=none`) and `/tmp/task12020_61_uat_report.json`. These are local,
+ephemeral artifacts. The fresh adjacent claims suite passed 49 tests. Final
+Ruff, test-file Black, Bandit on both production modules, scoped ESLint, and
+frontend typecheck passed. The validation services were stopped after the test.
+The broader Quizzes suite passed: 641 passed, 4 skipped, and 4 warnings in
+672 seconds. Log: `/tmp/task12020_61_quizzes_final.log`. The earlier disk-blocked
+attempts remain recorded above, but are superseded by this completed run.
+
 ## Separate verifier finding
 
 Two live runs with the same model failed closed at claims verification: a quiz

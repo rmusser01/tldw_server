@@ -46,6 +46,35 @@ def test_quiz_generation_prompt_formats_with_literal_citation_object():
     assert "{content}" not in rendered_prompt
 
 
+def test_quiz_prompt_gives_canonical_citation_field_pairs():
+    source_contract = quiz_generator._build_source_contract(
+        [
+            {"source_type": "media", "source_id": "59"},
+            {"source_type": "media", "source_id": "60"},
+        ]
+    )
+    rendered_prompt = quiz_generator._format_quiz_generation_prompt(
+        num_questions=2,
+        content="Source: media:59\nSample content",
+        difficulty="mixed",
+        question_types=["multiple_choice"],
+        focus_instruction="",
+        source_contract=source_contract,
+    )
+
+    assert '{"source_type": "media", "source_id": "59"}' in rendered_prompt
+    assert '{"source_type": "media", "source_id": "60"}' in rendered_prompt
+    assert '"source_id": "media:59"' not in rendered_prompt
+
+
+def test_source_contract_preserves_existing_prefix_in_canonical_id():
+    contract = quiz_generator._build_source_contract([{"source_type": "note", "source_id": "note:n1"}])
+
+    assert '"source_id": "note:n1"' in contract
+    assert "preserve source_id exactly" in contract
+    assert "never include source_type in source_id" not in contract
+
+
 def test_quiz_generation_prompt_includes_all_planned_question_shapes():
     rendered_prompt = quiz_generator._format_quiz_generation_prompt(
         num_questions=5,
