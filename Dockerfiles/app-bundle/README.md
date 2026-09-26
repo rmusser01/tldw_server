@@ -9,9 +9,9 @@ placeholders remain.
 
 The current CI candidates use a job-local registry. Their image references
 expire when the CI job ends, so an uploaded candidate bundle is evidence for
-review, not an installer for another host. G2 browser setup, G4 two-instance
-networking, and G12 runtime-support evidence remain open. No public paired
-Docker release is available from these files yet.
+review, not an installer for another host. Each candidate records its actual
+G2 Docker setup and G4 networking checks in bounded evidence. G12 release policy
+remains open. No public paired Docker release is available from these files yet.
 
 An extracted candidate needs Docker Desktop or Docker Engine with Compose v2.
 The host does not need Python, Node, Bun, a source checkout, PostgreSQL, or

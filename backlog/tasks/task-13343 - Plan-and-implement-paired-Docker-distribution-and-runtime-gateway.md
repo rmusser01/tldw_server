@@ -4,7 +4,7 @@ title: Plan and implement paired Docker distribution and runtime gateway
 status: In Progress
 assignee: []
 created_date: '2026-09-23 06:15'
-updated_date: '2026-09-26 07:38'
+updated_date: '2026-09-26 07:52'
 labels:
   - distribution
   - docker
@@ -107,6 +107,10 @@ Task16 commits537581410c/db9157a342 approved: root-owned trusted-key directory07
 Actual clean candidate0669275af5 built all four arm64 images, passed built-image MCP39/Setup60 and extracted lifecycle qualification. Browser managed bootstrap/setup rendered without a master key; cookie_attributes_1 and live_errors_absent failed. Owned registry/fixtures removed, only unrelated PostgreSQL containers remain. Evidence gates remain false and failed manifest/signature invalidated. Read-only root-cause diagnosis active before any fix; no native push/publication.
 
 Browser diagnosis isolates two issues: production session is correctly Path=/api but probe requests only root cookies and rejects /api, so cookie_attributes is a false negative; all three probe discovery sites need API-path selection. Real Chromium header-only successful bootstrap fetch returns200 and profile200 but reports ERR_ABORTED, while draining the response body removes failed-request telemetry. Add scoped Task17 to finish bootstrap/profile response bodies within existing request deadlines and fix cookie qualification assumptions, preserving strict network error checks and existing cookie scope/security.
+
+Task17 e59e926194 corrects all three browser probe lookups to the existing /api session scope, keeps CSRF / and production cookie policy unchanged, and consumes bootstrap/profile response bodies within existing eight-second deadlines. Runtime34/probe53 pass including real paired Chromium cookie/logout/rebootstrap fixture and body-error/stall behavior. Actual changed-source Chromium proof against cached endpoints preserves auth/cookies and removes aborted-request telemetry; cached WebUI itself was not rebuilt. Owned diagnostics removed. Independent scoped review active; full clean local/native artifacts still required. Bundled README will report per-candidate G2/G4 evidence rather than unconditional stale open labels, with G12 publication still open.
+
+Task17 independent review approves spec compliance and quality with no Important/Critical findings. Existing unchanged lint/Node warning noise recorded as Minor for final review. Corrected candidate README remains factual for both passing and failing development runs. Next exact clean signed full local candidate; then native CI and whole-WP1 review. No public-release permission or G12 claim.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

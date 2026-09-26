@@ -552,14 +552,21 @@ Task13, and G2/G4 are not qualified by these scoped checks.
 Vitest tests, and the existing paired browser probe/tests. TASK-13343 covers this
 actual-browser follow-up; production auth/cookie settings stay unchanged.
 
-- [ ] **Step 1:** Regress actual session `Path=/api` discovery and validation at
+- [x] **Step 1:** Regress actual session `Path=/api` discovery and validation at
   every probe lookup, including hostile-input checks and rebootstrap. Require
   exact existing session `/api` and readable CSRF `/` scopes; reject broader or
   mismatched scopes. Preserve all other cookie/isolation policy checks.
-- [ ] **Step 2:** Add behavioral response-body lifecycle regressions before
+- [x] **Step 2:** Add behavioral response-body lifecycle regressions before
   draining successful bootstrap and profile responses inside their existing
   request-timeout callbacks. Preserve failure/manual-config behavior, deadlines
   and secret-free runtime metadata. Keep the strict network-error latch.
-- [ ] **Step 3:** Run focused suites, scoped lint/security and a real Chromium
+- [x] **Step 3:** Run focused suites, scoped lint/security and a real Chromium
   response-consumption proof, independently review, then return exact clean
   full local/native artifact qualification to Task13. No public publication.
+
+Task17 e59e926194 is independently approved: runtime34/probe53 pass, strict
+Chromium source comparison preserves authentication/cookies and removes the
+abandoned-body cancellation. Both body reads remain inside eight-second
+deadlines; existing session /api scope stays unchanged. Owned proof resources
+removed. This scoped result does not qualify the rebuilt candidate; Task13
+exact local/native checks and whole-WP1 review remain pending.
