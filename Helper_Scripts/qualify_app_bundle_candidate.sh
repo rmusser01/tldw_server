@@ -104,7 +104,9 @@ gateway_node_version=$(docker run --rm --platform "$platform" --entrypoint node 
 docker run --rm --platform "$platform" --entrypoint sh "$backend_tag" -c \
   'test ! -e /app/tldw_Server_API/Config_Files/.env && test ! -e /app/Databases/users.db'
 docker run --rm --platform "$platform" --entrypoint sh "$webui_tag" -c \
-  'test ! -e /app/apps/tldw-frontend/.next/cache && test -s /app/apps/tldw-frontend/public/favicon.ico'
+  'test ! -e /app/apps/tldw-frontend/.next/cache && test -s /app/apps/tldw-frontend/public/favicon.ico &&
+   test -r /app/Docs/Published/API-related/AuthNZ-API-Guide.md &&
+   grep -q "^# AuthNZ API Guide$" /app/Docs/Published/API-related/AuthNZ-API-Guide.md'
 docker run --rm --platform "$platform" --entrypoint sh "$control_tag" -c \
   'test ! -e /opt/tldw/signing.key && test -s /opt/tldw/trusted-keys/ci-test.pub'
 

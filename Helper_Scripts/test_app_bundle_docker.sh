@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+umask 077
 trap 'status=$?; printf "Bundle smoke failed at line %s (exit %s).\n" "$LINENO" "$status" >&2' ERR
 
 if [[ $# -ne 1 ]]; then
@@ -46,6 +47,53 @@ curl --fail --silent --show-error "$public_url/favicon.ico" >/dev/null
 curl --fail --silent --show-error "$public_url/docs" >/dev/null
 curl --fail --silent --show-error "$public_url/docs-static/Documentation.md" >/dev/null
 curl --fail --silent --show-error "$public_url/static/favicon.ico" >/dev/null
+
+# Exercise the Next documentation API from the extracted bundle, outside a checkout.
+documentation_manifest="$test_root/documentation-manifest.json"
+documentation_content="$test_root/documentation-content.json"
+if [[ $(curl --silent --show-error --max-time 20 --output "$documentation_manifest" \
+  --write-out '%{http_code}' "$public_url/api/documentation/manifest") != 200 ]]; then
+  echo 'WebUI documentation manifest did not return 200.' >&2
+  exit 1
+fi
+if ! docker compose --project-name "$project_id" --env-file "$env_file" \
+  -f "$bundle_dir/compose.yaml" exec -T webui node -e '
+    try {
+      const manifest = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+      const entries = manifest.docsBySource?.server;
+      if (!Array.isArray(entries) || entries.length === 0 || !entries.some(entry =>
+        entry.source === "server" && entry.relativePath === "API-related/AuthNZ-API-Guide.md"
+      )) process.exit(1);
+    } catch { process.exit(1); }
+  ' < "$documentation_manifest"; then
+  echo 'WebUI documentation manifest omitted the published server guide.' >&2
+  exit 1
+fi
+if [[ $(curl --silent --show-error --max-time 20 --get --output "$documentation_content" \
+  --write-out '%{http_code}' --data-urlencode 'source=server' \
+  --data-urlencode 'relativePath=API-related/AuthNZ-API-Guide.md' \
+  "$public_url/api/documentation/content") != 200 ]]; then
+  echo 'WebUI published documentation content did not return 200.' >&2
+  exit 1
+fi
+if ! docker compose --project-name "$project_id" --env-file "$env_file" \
+  -f "$bundle_dir/compose.yaml" exec -T webui node -e '
+    try {
+      const body = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+      if (typeof body.content !== "string" || !body.content.startsWith("# AuthNZ API Guide\n"))
+        process.exit(1);
+    } catch { process.exit(1); }
+  ' < "$documentation_content"; then
+  echo 'WebUI published documentation content lacked the expected heading.' >&2
+  exit 1
+fi
+if [[ $(curl --silent --show-error --max-time 20 --get --output /dev/null \
+  --write-out '%{http_code}' --data-urlencode 'source=server' \
+  --data-urlencode 'relativePath=../Design/private.md' \
+  "$public_url/api/documentation/content") != 400 ]]; then
+  echo 'WebUI documentation API did not refuse path traversal.' >&2
+  exit 1
+fi
 setup_page=$(curl --fail --silent --show-error --location "$public_url/setup")
 case "$setup_page" in
   *'/_next/static/'*) ;;
@@ -105,4 +153,4 @@ if "$bad_bundle/start.sh" >"$test_root/tampered-stdout" 2>"$test_root/tampered-s
 fi
 [[ ! -e "$TLDW_APP_STATE_DIR/instance" ]]
 
-echo 'Extracted Docker bundle passed startup, static/public assets, auth, isolation, persistence, and tamper checks.'
+echo 'Extracted Docker bundle passed startup, static/public assets, published documentation, auth, isolation, persistence, and tamper checks.'

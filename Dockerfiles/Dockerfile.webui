@@ -43,6 +43,7 @@ ENV NODE_ENV=production \
     PORT=3000
 WORKDIR /app
 RUN useradd -m -u 10002 webui
+COPY --chown=webui:webui Docs/Published /app/Docs/Published
 USER webui
 WORKDIR /app/apps/tldw-frontend
 EXPOSE 3000
