@@ -19,14 +19,16 @@ from tldw_Server_API.app.core.AuthNZ.initialize import setup_database, bootstrap
 from tldw_Server_API.app.core.AuthNZ.repos.generated_files_repo import AuthnzGeneratedFilesRepo
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 
-async def main():
+async def main() -> None:
+    """Exercise concurrent registration and close the runtime database pool."""
     try:
         assert await setup_database()
         await bootstrap_single_user_profile()
         pool = await get_db_pool()
         repo = AuthnzGeneratedFilesRepo(pool)
         owner = get_settings().SINGLE_USER_FIXED_ID
-        async def register(index):
+        async def register(index: int) -> dict[str, object]:
+            """Register one candidate for the shared owned VN source reference."""
             return await repo.create_file(
                 user_id=owner, filename=f'attempt-{index}.png',
                 storage_path=f'vn_assets/attempt-{index}.png', file_category='image',
@@ -77,7 +79,9 @@ import asyncio
 import contextlib
 import json
 import os
+from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
 from tldw_Server_API.app.core.AuthNZ.initialize import setup_database, bootstrap_single_user_profile
@@ -87,7 +91,8 @@ from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.core.Storage import generated_file_helpers as helpers
 from tldw_Server_API.app.services.storage_quota_service import StorageQuotaService
 
-async def main():
+async def main() -> None:
+    """Exercise the selected storage failure or race in an isolated runtime."""
     try:
         assert await setup_database()
         await bootstrap_single_user_profile()
@@ -103,17 +108,20 @@ async def main():
         await quotas.upsert_team_quota(52, quota_mb=100)
         outputs = Path.cwd() / 'outputs'
         helpers.DatabasePaths.get_user_outputs_dir = staticmethod(lambda _user_id: outputs)
-        async def get_service():
+        async def get_service() -> StorageQuotaService:
+            """Supply the initialized service for generated-image registration."""
             return service
         helpers.get_storage_service = get_service
 
-        async def save(item=42):
+        async def save(item: int = 42) -> dict[str, object]:
+            """Save and register the owned VN image through the real helper."""
             return await helpers.save_and_register_vn_asset_image(
                 user_id=owner, pack_id=7, item_id=item, asset_type='sprite',
                 image_bytes=b'image', org_id=51, team_id=52,
             )
 
-        async def snapshot():
+        async def snapshot() -> dict[str, object]:
+            """Capture live files, quota usage and profile version for comparison."""
             user = await pool.fetchone('SELECT storage_used_mb, profile_version FROM users WHERE id = ?', owner)
             return {
                 'live': await pool.fetchval('SELECT COUNT(*) FROM generated_files WHERE is_deleted = ?', False),
@@ -130,7 +138,8 @@ async def main():
             method = {'user': 'update_usage', 'org': 'update_org_usage',
                       'team': 'update_team_usage', 'cancel': 'update_team_usage'}[case]
             original = getattr(StorageQuotaService, method)
-            async def fail_after_update(self, *args, **kwargs):
+            async def fail_after_update(self: StorageQuotaService, *args: Any, **kwargs: Any) -> None:
+                """Inject failure after the real accounting update to test rollback."""
                 await original(self, *args, **kwargs)
                 if case == 'cancel':
                     raise asyncio.CancelledError()
@@ -175,7 +184,10 @@ async def main():
             original = StorageQuotaService.get_vn_generated_file
             raced = False
             winner = None
-            async def commit_after_empty_lookup(self, **kwargs):
+            async def commit_after_empty_lookup(
+                self: StorageQuotaService, **kwargs: Any,
+            ) -> dict[str, object] | None:
+                """Commit a competing registration after the initial empty lookup."""
                 nonlocal raced, winner
                 existing = await original(self, **kwargs)
                 if self is service and existing is None and not raced:
@@ -211,7 +223,8 @@ async def main():
             result['unchanged'] = await snapshot() == before
         elif case == 'missing_race':
             original = helpers._save_file
-            async def register_missing_winner(*args, **kwargs):
+            async def register_missing_winner(*args: Any, **kwargs: Any) -> Path:
+                """Register missing winner bytes after saving the replacement file."""
                 candidate = await original(*args, **kwargs)
                 await service.register_generated_file(
                     user_id=owner, filename='missing.png', storage_path='vn_assets/missing.png',
@@ -229,7 +242,8 @@ async def main():
             result['replacement_preserved'] = len(list(outputs.rglob('*.png'))) == 1
         elif case == 'missing_record':
             original = AuthnzGeneratedFilesRepo.create_file
-            async def lose_created_record(self, **kwargs):
+            async def lose_created_record(self: AuthnzGeneratedFilesRepo, **kwargs: Any) -> dict[str, object]:
+                """Discard the created record response to test transaction rollback."""
                 await original(self, **kwargs)
                 return {}
             with patch.object(AuthnzGeneratedFilesRepo, 'create_file', lose_created_record):
@@ -243,7 +257,8 @@ async def main():
         elif case == 'postcommit':
             transaction = pool.transaction
             @contextlib.asynccontextmanager
-            async def fail_after_commit(*args, **kwargs):
+            async def fail_after_commit(*args: Any, **kwargs: Any) -> AsyncIterator[Any]:
+                """Raise after the real transaction commits without deleting live bytes."""
                 async with transaction(*args, **kwargs) as conn:
                     yield conn
                 raise RuntimeError('injected response failure after commit')

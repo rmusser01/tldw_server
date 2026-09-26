@@ -14,7 +14,10 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.repos.generated_files_repo import SOURCE_FEATURE_VN_ASSETS
-from tldw_Server_API.app.core.DB_Management.VNAssetPacks_DB import VNAssetPacksRepository
+from tldw_Server_API.app.core.DB_Management.VNAssetPacks_DB import (
+    LegacyDisplayReconciliationError,
+    VNAssetPacksRepository,
+)
 from tldw_Server_API.app.core.exceptions import VNAssetGenerationError
 from tldw_Server_API.app.core.Image_Generation.adapter_registry import get_registry
 from tldw_Server_API.app.core.Image_Generation.adapters.base import ImageGenRequest
@@ -33,7 +36,9 @@ from tldw_Server_API.app.core.VN_Assets.jobs import (
     VN_PACK_EXPORT_JOB_TYPE,
     VN_PACK_IMPORT_COMMIT_JOB_TYPE,
     VN_PACK_IMPORT_PREVIEW_JOB_TYPE,
+    build_legacy_activity_reader,
     create_generate_variant_job,
+    legacy_delivery_fingerprint,
     vn_asset_batch_group,
 )
 from tldw_Server_API.app.core.VN_Assets.portability.exporter import VNPackExporter
@@ -69,6 +74,7 @@ class VNAssetGenerationWorker:
     ) -> None:
         self.repo = repo
         self.jobs_manager = jobs_manager
+        self.repo.legacy_activity_reader = build_legacy_activity_reader(jobs_manager)
         self.image_registry = image_registry or get_registry()
         self.backend_gate = backend_gate or get_default_backend_generation_gate()
         self.save_vn_asset_image = save_vn_asset_image or save_and_register_vn_asset_image
@@ -263,6 +269,10 @@ class VNAssetGenerationWorker:
             )
 
         reconciling = outcome is not None and outcome.get("item_id") is not None
+        legacy_inline = recipe_version == 0 and job is None
+        legacy_status: str | None = None
+        if legacy_inline:
+            self.repo.begin_inline_legacy_display(batch_id, slot_id)
         try:
             if outcome is not None and outcome.get("item_id") is not None:
                 if job is not None:
@@ -274,7 +284,7 @@ class VNAssetGenerationWorker:
                 if replay is not None:
                     return replay
             reconciling = False
-            return await self._generate_variant(
+            result = await self._generate_variant(
                 pack=pack,
                 slot=slot,
                 batch=batch,
@@ -286,7 +296,10 @@ class VNAssetGenerationWorker:
                 attempt_token=attempt_token,
                 claimed_item=claimed_item,
             )
+            legacy_status = SLOT_STATUS_REVIEWING
+            return result
         except Exception as exc:
+            legacy_status = SLOT_STATUS_FAILED
             definitive_replay_failure = isinstance(exc, VNAssetGenerationError) and not exc.retryable
             if (not reconciling or definitive_replay_failure) and not (
                 isinstance(exc, VNAssetGenerationError) and exc.retryable
@@ -298,6 +311,33 @@ class VNAssetGenerationWorker:
                 )
             raise
         finally:
+            if recipe_version == 0:
+                legacy_job_id = _positive_int(_job_id(job))
+                try:
+                    self.repo.finish_legacy_display(
+                        batch_id, slot_id, inline=legacy_inline, fallback_status=legacy_status,
+                        finishing_delivery=(legacy_job_id, lease_id) if legacy_job_id is not None and lease_id else None,
+                    )
+                except Exception as exc:  # noqa: BLE001 - display cannot alter generation's SDK disposition
+                    # Frame metadata only: no messages, locals, source text or chained exceptions.
+                    frames = []
+                    error_type = type(exc)
+                    trace = exc.__traceback__
+                    if isinstance(exc, LegacyDisplayReconciliationError):
+                        error_type = exc.error_type
+                        trace = exc.error_traceback
+                    while trace is not None:
+                        frames.append({
+                            "file": trace.tb_frame.f_code.co_filename,
+                            "function": trace.tb_frame.f_code.co_name,
+                            "line": trace.tb_lineno,
+                        })
+                        trace = trace.tb_next
+                    logger.bind(
+                        operation="finish_legacy_display", user_id=user_id, pack_id=pack_id,
+                        batch_id=batch_id, slot_id=slot_id, job_id=legacy_job_id,
+                        error_type=error_type.__name__, traceback_frames=frames,
+                    ).warning("VN legacy display reconciliation failed")
             if attempt_token is not None and job is None:
                 self.repo.release_variant_claim(
                     batch_id=batch_id, slot_id=slot_id, variant_index=variant_index,
@@ -845,7 +885,14 @@ class VNAssetGenerationWorker:
             request_id=f"vn_asset:{pack_id}:{slot_id}:{batch_id}:{variant_index}",
         )
 
-        self.repo.update_slot(slot_id, {"status": SLOT_STATUS_GENERATING, "last_error": None})
+        if attempt_token is not None:
+            self.repo.start_variant_generation(
+                batch_id=batch_id, slot_id=slot_id, variant_index=variant_index,
+                attempt_token=attempt_token,
+                validate_authority=(lambda: self._require_current_job_lease(job, user_id=user_id)) if job else None,
+            )
+        else:
+            self.repo.update_slot(slot_id, {"status": SLOT_STATUS_GENERATING, "last_error": None})
         with self.backend_gate.try_acquire(backend, model=model) as lease:
             if not lease.acquired:
                 raise VNAssetGenerationError(
@@ -887,6 +934,10 @@ class VNAssetGenerationWorker:
             "variant_index": variant_index,
             "primary_character_id": recipe["primary_character_id"],
         }
+        if int(batch.get("recipe_version") or 0) == 0:
+            fingerprint = legacy_delivery_fingerprint(job)
+            if fingerprint is not None:
+                context_snapshot["legacy_delivery_fingerprint"] = fingerprint
         backend_metadata = {
             "backend": backend,
             "model": model,

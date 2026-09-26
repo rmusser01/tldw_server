@@ -10,6 +10,7 @@ import contextlib
 import os
 from typing import Any
 
+from tldw_Server_API.app.core.DB_Management.jobs_failed_requeue import ensure_retry_admission_index
 from tldw_Server_API.app.core.testing import is_truthy as _is_truthy
 
 from .migrations import (
@@ -1615,12 +1616,15 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
                 audit_cur.execute("RELEASE SAVEPOINT slides_generation_audit")
         # Create hot-path indexes concurrently (outside transaction) when possible
         archive_batch_read_indexes_verified = False
+        retry_admission_index_verified = False
         try:
             with psycopg.connect(_dsn, autocommit=True) as c2:
                 with c2.cursor() as k:
                     _configure_pg_archive_migration_session(k, local=False)
                     _ensure_pg_archive_batch_read_indexes(k)
                     archive_batch_read_indexes_verified = True
+                    ensure_retry_admission_index(k, backend="postgres")
+                    retry_admission_index_verified = True
                     for index_name, (unique, columns, predicate) in _SLIDES_ARCHIVE_INDEXES_PG.items():
                         if _pg_archive_index_matches(
                             k,
@@ -1690,6 +1694,10 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
                     raise
                 raise RuntimeError(
                     "PostgreSQL Jobs archive batch-read index migration failed"
+                ) from exc
+            if not retry_admission_index_verified:
+                raise RuntimeError(
+                    "PostgreSQL Jobs retry-admission index migration failed"
                 ) from exc
             if isinstance(exc, psycopg.Error):
                 # Optional standalone index/readiness setup must not break

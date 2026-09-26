@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Resolve Qodo's eight VN generation findings without weakening the existing API or Jobs contract.
+**Goal:** Resolve all verified PR 3016 generation durability findings without weakening the existing API or Jobs contract.
 
 **Architecture:** Jobs owns leases; V1 recipe rows own execution fences and outcome state. Storage registration converges by owner and source reference, while submission recovery and cancellation remain transactional in the VN database.
 
@@ -156,8 +156,9 @@ remain resolved. Merge is gated on this addendum, independent review, and CI.
 
 - [x] Independent review of the fresh delta, scoped backend/Storage tests,
   official PG cases, no new Ruff findings and zero production Bandit findings.
-- [ ] Commit/push, evidence-backed replies on all eight new comments, request
-  fresh exact-head Qodo review, verify CI, then perform the authorized merge.
+- [x] Commit/push, evidence-backed replies on all eight new comments, request
+  fresh exact-head Qodo review.
+- [ ] Confirm that review and required CI pass, then perform the authorized merge.
 
 **Ruling:** Do not adopt Qodo's suggested automatic reset/regeneration of a
 completed variant. The approved design makes completed outcomes and review
@@ -185,3 +186,196 @@ producer returns 'No flashcards to export' before the fake exporter is called.
 The isolated test reproduces the failure; no repository-wide green is claimed.
 Dev advanced to 59bd584503 with unrelated MCP sanitizer changes; final rebase,
 fresh exact-head external review, checks, and authorized merge remain pending.
+
+Integration update: rebased cleanly onto dev 59bd584503 and pushed head
+9e5fb2fdfc9e77fb51745d72aa36924160ccc597. Range-diff shows all six patches
+identical; changed VN source blobs are unchanged. Post-rebase 58 focused cases
+passed and commit-stage pre-commit checks passed. All eight new findings have
+individual evidence replies; paginated GraphQL confirms all 16 threads resolved.
+Requester Change summary remains verbatim. Fresh full Qodo review requested once
+in comment 5842776017. PR is OPEN/BLOCKED with CI queued; review, checks and merge
+remain pending, and skipped admission jobs are not verification passes.
+
+## Full Qodo Review on 9e5fb2fd
+
+Review 5324400373 completed at 03:33Z with seven new inline findings. Existing
+16 resolved threads remain preserved. AC5 is reopened; merge remains gated.
+
+### Task 11: Shared Slot State and Visibility Contract
+
+**Files:** VNAssetPacks_DB.py, VN_Assets/worker.py, focused VN repository/worker tests.
+
+- [x] Reproduce cancellation during generation, first completion/failure while
+  siblings or another batch remain active, and stale worker slot mutation.
+- [x] Derive affected shared slot state under the repository write transaction
+  from all active work and published items, preserving established review-state
+  precedence. Reconcile cancellation, completion and failure atomically.
+- [x] Make V1 generating admission validate current Jobs authority and the
+  current attempt token under the write lock before any visible mutation;
+  retain V0 behavior, terminal outcomes, cancellation and approval preservation.
+- [x] Document item_is_unpublished, its recipe predicate and propagating errors.
+- [x] Run RED/GREEN and independent spec/quality review with no new Bandit findings.
+
+Task 11 first independent review found a mixed-version compatibility gap:
+V1 reconciliation ignores active V0 deliveries without recipe rows. Fix round
+one must reproduce blocked legacy generation overlapping V1 cancellation and
+preserve its active signal, including the reverse terminal transition, without
+adding another lease authority or changing legacy generation/counter contracts.
+Task 11 remains incomplete pending that fix and scoped re-review.
+
+Fix round one reproduced four real blocked-adapter failures, not just a
+metadata probe. Ruling A permits a bounded owner-scoped Jobs-read callback
+for exact legacy display, with narrow service constructor/wiring ownership
+handed from the now-frozen Task 12 scope. No receipt/admission code changes,
+new persisted lease authority or ambiguous pending-as-generating fallback.
+Execution-scoped inline display must clean up in finally and state its limits.
+An append-only shared legacy Jobs-read helper in VN_Assets/jobs.py is permitted
+to avoid duplicated readers or service/worker circular imports; Task 12 parent
+recovery and admission logic remain frozen and outside this fix's ownership.
+
+Task 11 fix round two addresses two confirmed handoff regressions. Exclude only
+the exact finishing delivery and lease from its final display check, preserving
+live siblings and replacement leases. A post-outcome display failure must not
+replace a successful legacy generation return or its original error/cancellation
+classification; log safe structured identifiers/stack information instead.
+No additional model retry, job failure for a successful outcome, hidden queue
+or persisted display authority. A transient display outage may require later
+normal reconciliation; this does not authorize regeneration of committed assets.
+The display exception must also be sanitized before the existing database
+rollback logger observes it; test the full logging sink, not only the worker
+diagnostic. Do not expand this fix into general ChaChaNotes logging changes.
+
+Task 11 is locally complete. Archimedes approved both fix-round handoff findings,
+clock delegation and the full-sink logging boundary. The final owned file passed
+79 cases; Main's full integrated VN suite passed 509 cases with no skips.
+Main's four-file production Bandit has zero results/errors; Ruff contains only
+the two verified baseline BLE001 catches. External evidence replies remain pending.
+
+### Task 12: Parent Job Health Recovery
+
+**Files:** VN_Assets/service.py, VN_Assets/jobs.py, a narrowly scoped Jobs facade
+method with a DB_Management query helper, and dedicated recovery tests.
+
+- [x] Reproduce unfinished receipt recovery for a missing parent and exhausted
+  parent after partial fanout using real Jobs semantics, not only create mocks.
+- [x] Consult owner-scoped Jobs state. Restore incomplete active fanout through
+  deterministic create or supported atomic retry operations; never reopen a
+  terminal VN batch, revive deliberate admin cancellation, or requeue healthy
+  completed full fanout. Keep failed recovery receipts unfinished.
+- [x] Preserve completed receipt snapshot semantics, quotas, pause/drain controls,
+  original recipes/outcomes, and persist the authoritative parent identity.
+- [x] If existing Jobs primitives cannot requeue exhausted failures safely, add
+  one explicit owner-scoped failed-job admission method preserving canonical
+  identity, normal admission rules and counters; no general admin API change.
+- [x] Count explicit retry-admission events in the existing per-minute creation
+  quota through a DB helper, so interleaved creates/retries cannot bypass it;
+  verify both backends, concurrent replay and rollback without double charge.
+- [x] Verify concurrent recovery, wrong owner/type/queue and failure boundaries;
+  run RED/GREEN plus independent review.
+
+Task 12 is locally complete. Pascal approved lease health, first-completion
+receipt CAS and failed PostgreSQL concurrent-index recovery. A genuine writer
+timeout leaves an invalid index; ensure now verifies its canonical definition
+and readiness, repairs only its own invalid index and rejects foreign collisions.
+Snapshot-free advisory try-lock acquisition avoids the reproduced concurrent
+partial-index deadlock and uses configured positive timeouts or a 30-second
+fallback. Main's final follow-up passed 82 Jobs cases with required PostgreSQL
+and zero skips; the broader admission/quota/migration matrix passed 215 cases
+before the final index-only changes. Whole-delta review and external gates remain.
+
+### Task 13: Embedded Runtime Test Contracts
+
+**Files:** tests/AuthNZ/integration/test_vn_generated_file_idempotency.py and focused AST regression.
+
+- [x] Add explicit types to every executable embedded-script helper, including
+  variadic callbacks; retain runtime behavior and required shared PG isolation.
+- [x] Parse the scripts to validate annotation coverage; compile and run all
+  SQLite/required PostgreSQL cases without skips, plus scoped quality checks.
+
+Task 13 is locally complete: two valid RED failures, four AST unit cases and
+all 15 SQLite plus 15 required PostgreSQL cases passed with no skips. Averroes
+independently approved spec/quality; annotations and docstrings alone changed
+the scripts and fixture lifecycle is unchanged. Main independently ran all
+four AST cases. Existing warning counts are not a warning-free claim; evidence
+classification is recorded separately before integration.
+
+### Task 14: Persisted Retry Identifier Validation
+
+**Files:** frontend lib/vnAssetIdempotency.ts and its existing unit/workbench tests.
+
+- [x] Reproduce zero/negative persisted retry slot IDs reaching reload recovery.
+- [x] Reject non-positive or unsafe IDs, remove invalid stored state and verify
+  no retry API call; retain positive IDs, owner scoping and valid key recovery.
+- [x] Run focused frontend tests, TypeScript, scoped ESLint and independent review.
+
+Task 14 is locally complete: six behavioral RED failures, then 76 VN frontend
+tests passed with no skips; package and owned-file TypeScript and scoped ESLint
+passed. Nash independently approved spec/quality with no actionable defect.
+Baseline Node warning and unrelated whole-app lint warnings are qualified in
+the report; zero-line Bandit is not TypeScript security assurance. Main also
+independently passed all 76 VN frontend cases, TypeScript and scoped ESLint.
+The external exact-head gates remain pending.
+
+### Task 15: Whole Delta and External Integration
+
+- [x] Independent task and whole-delta review, scoped backend/frontend matrix,
+  production Bandit, no new Ruff findings and normal commit checks.
+- [ ] Commit/rebase/push, seven individual evidence replies and verified thread
+  resolution. Request one new full exact-head Qodo review, then await CI.
+- [ ] Merge only after review/required CI/human summary/current dev gates pass;
+  finalize Backlog and pause the heartbeat on verified merge or closed PR.
+
+Final local review is approved. Raman's sole final P2 (a published legacy
+variant hiding a live replacement delivery) was reproduced with real Jobs and
+blocked adapters, then fixed using an opaque exact-delivery fingerprint in
+existing V0 item provenance. Unknown or mismatched historical provenance cannot
+hide active work; raw lease tokens are not persisted and model inputs are
+unchanged. Scoped re-review found no new actionable issue. Main's frozen full
+VN suite passed 520 cases, zero skips, 10 existing warnings, in 307.06 seconds.
+Final three-file Bandit has zero findings/errors; expanded manager scope has
+one independently confirmed baseline B608, not a zero-findings claim. Ruff
+has only two verified baseline BLE001 catches; compileall and diff checks pass.
+Final normal commit-stage hooks passed on all 23 owned files; inapplicable
+YAML/TOML/wizard hooks were skipped, not counted as passes. Push/replies remain
+integration steps. Live dev
+remains 59bd584503 and PR head remains 9e5fb2fd before this commit; no merge
+readiness is claimed while exact-head external review and CI are pending.
+
+**Ruling:** Existing Jobs retry_now_jobs only accepts failures with retries left
+and is not owner-scoped; deterministic create replays the same dead row. A
+bounded explicit owner-scoped requeue admission method is required for exhausted
+parent recovery, rather than raw SQL from VN or new random retry keys. It must
+retain canonical identity, enforce admission/counters and never revive deliberate
+cancelled/quarantined work. Cost if wrong: a small Jobs facade/query interface to
+revise, not a second queue or hidden administrative bypass.
+
+Task 12's bounded quota integration may touch the existing SQLite/PostgreSQL
+admission quota helpers only to include the new explicit retry-admission events.
+Their legacy admin retry API remains unchanged. This shared boundary requires
+focused real-backend creation/retry/rate/rollback/counter coverage and independent
+review; SQL for the new admission/count queries stays in DB_Management.
+
+Task 12 fix round one adds a narrowly scoped partial retry-admission index on
+both backends through established fresh/upgrade migrations. Independent review
+found the new shared rate query otherwise scans all historical job events,
+including when no retry events exist, inside admission locks. Index keys are
+domain, owner_user_id and created_at, with the retry-admission event predicate.
+Keep new SQL in DB_Management and test fresh/upgrade/idempotent migration,
+SQLite indexed query plans and required PostgreSQL index/query support. No
+performance-outage claim or broader admission refactor is warranted.
+
+Consolidated Task 12 review also reproduced an expired final processing lease
+accepted as healthy, and a delayed original completion overwriting a committed
+recovery snapshot. Fix round one must use supported Jobs-authoritative lease
+health (or fail closed pending normal Jobs reconciliation) and transactionally
+conditional receipt completion. Permit a narrow read-only Jobs health method
+if no supported primitive exists, using the Jobs clock rather than a separate
+VN lease authority. DB completion method ownership is handed to Task 12;
+Task 11's constructor/activity/slot helpers remain disjoint. Preserve payload
+conflicts, owner/scope boundaries and completed response snapshots.
+
+Effective dev rulesets require backend-required, security-required,
+coverage-required, frontend-required, e2e-required, container-build-check and
+frontend-license-policy/trusted/dev. Strict base integration applies, and only
+the merge method is allowed. The legacy protection API returns 404 because
+these controls are ruleset-based, not absent. Never use admin bypass.
