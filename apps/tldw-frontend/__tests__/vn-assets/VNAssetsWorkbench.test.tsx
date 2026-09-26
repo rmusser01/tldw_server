@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
@@ -51,6 +51,8 @@ import { ApiError } from '@web/lib/api';
 import { readPendingVNAssetGeneration, writePendingVNAssetGeneration } from '@web/lib/vnAssetIdempotency';
 
 describe('VNAssetsWorkbench', () => {
+  afterEach(() => vi.restoreAllMocks());
+
   beforeEach(() => {
     vi.resetAllMocks();
     window.sessionStorage.clear();
@@ -100,6 +102,60 @@ describe('VNAssetsWorkbench', () => {
     ]);
     mocks.getVNAssetGeneration.mockResolvedValue({ status: 'failed', failed_count: 1 });
   }
+
+  it.each([
+    { label: 'zero', slotId: 0 },
+    { label: 'negative', slotId: -1 },
+    { label: 'negative slot', slotId: -12 },
+    { label: 'unsafe positive', slotId: Number.MAX_SAFE_INTEGER + 1 },
+    { label: 'unsafe negative', slotId: Number.MIN_SAFE_INTEGER - 1 },
+    { label: 'fractional', slotId: 1.5 },
+    { label: 'numeric string', slotId: '12' },
+    { label: 'null', slotId: null },
+    { label: 'missing', slotId: undefined },
+    { label: 'boolean', slotId: true },
+    { label: 'object', slotId: {} },
+    { label: 'array', slotId: [] },
+  ])('does not call the retry API on reload for a persisted $label slot ID', async ({ slotId }) => {
+    existingFailedPack();
+    mocks.listVNAssetPacks.mockResolvedValue([
+      { id: 7, owner_user_id: 1, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
+    ]);
+    const storageKey = 'vn-assets:pending-generation:v1:1:7';
+    window.sessionStorage.setItem(storageKey, JSON.stringify({ kind: 'retry', slotId, key: 'invalid-retry-key' }));
+
+    const first = render(<VNAssetsWorkbench />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
+    expect(mocks.retryVNAssetSlot).not.toHaveBeenCalled();
+    expect(mocks.startVNAssetGeneration).not.toHaveBeenCalled();
+    expect(window.sessionStorage.getItem(storageKey)).toBeNull();
+    first.unmount();
+
+    render(<VNAssetsWorkbench />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
+    expect(mocks.retryVNAssetSlot).not.toHaveBeenCalled();
+  });
+
+  it('keeps the retry key in memory after connection loss when storage is disabled', async () => {
+    existingFailedPack();
+    mocks.listVNAssetPacks.mockResolvedValue([
+      { id: 7, owner_user_id: 1, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
+    ]);
+    vi.spyOn(window, 'sessionStorage', 'get').mockImplementation(() => {
+      throw new DOMException('Storage disabled', 'SecurityError');
+    });
+    mocks.retryVNAssetSlot.mockRejectedValueOnce(new Error('Connection lost'));
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    await user.click(await screen.findByRole('button', { name: 'Retry sprite_neutral' }));
+    await screen.findByText('Connection lost');
+    const originalRequest = mocks.retryVNAssetSlot.mock.calls[0][2];
+
+    await user.click(screen.getByRole('button', { name: 'Retry sprite_neutral' }));
+    await waitFor(() => expect(mocks.retryVNAssetSlot).toHaveBeenCalledTimes(2));
+    expect(originalRequest.idempotency_key).toEqual(expect.any(String));
+    expect(mocks.retryVNAssetSlot.mock.calls[1]).toEqual([7, 12, originalRequest]);
+  });
 
   it.each(['Start', 'other Retry'])('abandons a missing-slot retry so %s works and reload does not replay it', async (nextAction) => {
     existingFailedPack();

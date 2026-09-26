@@ -8,6 +8,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
 
+from tldw_Server_API.app.core.DB_Management.jobs_failed_requeue import count_recent_job_admissions
 from tldw_Server_API.app.core.Jobs.operations.contracts import (
     AdmissionRejectionReason,
     AdmissionResult,
@@ -178,11 +179,9 @@ def _quota_rejection(
             )
 
     if submits_per_minute_quota:
-        row = conn.execute(
-            "SELECT COUNT(*) FROM jobs WHERE domain=? AND owner_user_id=? AND created_at >= DATETIME(?, '-60 seconds')",
-            (command.domain, command.owner_user_id, now_sql),
-        ).fetchone()
-        if int(row[0] if row else 0) >= submits_per_minute_quota:
+        if count_recent_job_admissions(
+            conn, backend="sqlite", domain=command.domain, owner_user_id=command.owner_user_id, now=now_sql,
+        ) >= submits_per_minute_quota:
             return AdmissionResult.rejected(
                 AdmissionRejectionReason.QUOTA_EXCEEDED,
                 message=_SUBMITS_PER_MINUTE_MESSAGE,

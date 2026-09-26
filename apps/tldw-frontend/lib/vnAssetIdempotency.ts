@@ -26,7 +26,10 @@ export function readPendingVNAssetGeneration(
     if (typeof value === 'object' && value !== null && 'kind' in value && 'key' in value) {
       const pending = value as Record<string, unknown>;
       if (typeof pending.key === 'string' && pending.key.length > 0 && (
-        pending.kind === 'start' || (pending.kind === 'retry' && Number.isSafeInteger(pending.slotId))
+        pending.kind === 'start' || (
+          pending.kind === 'retry' && typeof pending.slotId === 'number' &&
+          Number.isSafeInteger(pending.slotId) && pending.slotId > 0
+        )
       )) return pending as unknown as PendingVNAssetGeneration;
     }
     window.sessionStorage.removeItem(storageKey);

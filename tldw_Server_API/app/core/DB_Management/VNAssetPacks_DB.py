@@ -10,6 +10,22 @@ from typing import Any
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.exceptions import VNAssetGenerationError
+from tldw_Server_API.app.core.VN_Assets.state import derive_slot_status
+
+LegacyActivityReader = Callable[
+    [int, int, int, Mapping[int, str], set[tuple[int, int, str]], tuple[int, str] | None], tuple[bool, bool]
+]
+
+
+class LegacyDisplayReconciliationError(RuntimeError):
+    """Safe rollback message with original type/frames for display diagnostics only."""
+
+    def __init__(self, error: Exception) -> None:
+        """Retain no original message; callers must not format traceback source/locals."""
+        super().__init__("VN legacy display reconciliation failed")
+        self.error_type = type(error)
+        self.error_traceback = error.__traceback__
+
 
 VN_ASSET_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS vn_asset_packs (
@@ -285,6 +301,9 @@ class VNAssetPacksRepository:
         _require_sqlite_chacha_db(db)
         self.db = db
         self._schema_initialized = False
+        self.legacy_activity_reader: LegacyActivityReader | None = None
+        # Inline execution display is instance-local, never queue/lease authority.
+        self._inline_legacy_activity: dict[tuple[int, int], int] = {}
 
     @classmethod
     def initialized(cls, db: CharactersRAGDB) -> VNAssetPacksRepository:
@@ -490,62 +509,47 @@ class VNAssetPacksRepository:
         payload_hash: str,
         response: Mapping[str, Any],
     ) -> dict[str, Any]:
-        """Store the terminal response for a claimed idempotency key."""
+        """Complete once for the exact scoped payload, preserving the first JSON.
+
+        An unclaimed key retains insert-on-completion compatibility. Concurrent
+        or delayed completions replay the first terminal record; a different
+        payload hash raises the same conflict as claim without changing it.
+        """
         self._ensure_schema_initialized()
         with self.db.transaction() as conn:
-            cursor = conn.execute(
+            conn.execute(
                 """
-                UPDATE vn_asset_idempotency_records
-                SET status = 'completed',
-                    payload_hash = ?,
-                    response_json = ?,
+                INSERT INTO vn_asset_idempotency_records (
+                    owner_user_id, scope, resource_id, idempotency_key,
+                    payload_hash, status, response_json
+                ) VALUES (?, ?, ?, ?, ?, 'completed', ?)
+                ON CONFLICT(owner_user_id, scope, resource_id, idempotency_key)
+                DO UPDATE SET status = 'completed',
+                    response_json = excluded.response_json,
                     updated_at = CURRENT_TIMESTAMP
-                WHERE owner_user_id = ?
-                  AND scope = ?
-                  AND resource_id = ?
-                  AND idempotency_key = ?
+                WHERE vn_asset_idempotency_records.status = 'in_progress'
+                  AND vn_asset_idempotency_records.payload_hash = excluded.payload_hash
                 """,
                 (
-                    payload_hash,
-                    _json_dump(dict(response)),
                     owner_user_id,
                     scope,
                     resource_id,
                     idempotency_key,
+                    payload_hash,
+                    _json_dump(dict(response)),
                 ),
             )
-            if cursor.rowcount == 0:
-                conn.execute(
-                    """
-                    INSERT INTO vn_asset_idempotency_records (
-                        owner_user_id,
-                        scope,
-                        resource_id,
-                        idempotency_key,
-                        payload_hash,
-                        status,
-                        response_json
-                    )
-                    VALUES (?, ?, ?, ?, ?, 'completed', ?)
-                    """,
-                    (
-                        owner_user_id,
-                        scope,
-                        resource_id,
-                        idempotency_key,
-                        payload_hash,
-                        _json_dump(dict(response)),
-                    ),
-                )
-        record = self.get_idempotency_record(
-            owner_user_id=owner_user_id,
-            scope=scope,
-            resource_id=resource_id,
-            idempotency_key=idempotency_key,
-        )
-        if record is None:
-            raise RuntimeError("completed_idempotency_record_not_found")
-        return record
+            record = self.get_idempotency_record(
+                owner_user_id=owner_user_id,
+                scope=scope,
+                resource_id=resource_id,
+                idempotency_key=idempotency_key,
+            )
+            if record is None:
+                raise RuntimeError("completed_idempotency_record_not_found")
+            if record["payload_hash"] != payload_hash:
+                raise ValueError("idempotency_key_conflict")
+            return record
 
     def release_idempotency_claim(
         self,
@@ -1572,6 +1576,13 @@ class VNAssetPacksRepository:
         return dict(row) if row is not None else None
 
     def item_is_unpublished(self, item_id: int) -> bool:
+        """Return whether item_id is linked to any non-completed recipe.
+
+        Planned, failed and cancelled reservations are not reviewable, even if
+        file metadata is attached. False does not establish item existence or
+        approval; unlinked items and completed recipes are published. Database
+        and schema initialization errors propagate.
+        """
         self._ensure_schema_initialized()
         row = self.db.execute_query(
             """
@@ -1931,6 +1942,97 @@ class VNAssetPacksRepository:
         row = cursor.fetchone()
         return dict(row) if row is not None else None
 
+    def begin_inline_legacy_display(self, batch_id: int, slot_id: int) -> None:
+        """Track one inline call's exact slot locally, without admitting execution.
+
+        This display-only count is not shared across repository instances or
+        processes. Jobs-backed work uses the authoritative reader instead.
+        No transaction/connection is held across the caller's await.
+        """
+        with self.db.transaction() as conn:
+            _lock_variant(conn, batch_id, slot_id, None)
+            key = (batch_id, slot_id)
+            self._inline_legacy_activity[key] = self._inline_legacy_activity.get(key, 0) + 1
+
+    def finish_legacy_display(
+        self, batch_id: int, slot_id: int, *, inline: bool, fallback_status: str | None,
+        finishing_delivery: tuple[int, str] | None = None,
+    ) -> None:
+        """Clear local execution display and reconcile mixed-version work.
+
+        Legacy outcome/counter writes remain with the worker. Without V1
+        history keep its terminal display; on coroutine cancellation derive a
+        non-sticky display. Body errors propagate with a safe rollback message.
+        Local cleanup occurs even if reconciliation fails; it creates no
+        persisted claim or fence.
+        Exclude only this exact finishing Jobs ID/lease during SDK handoff;
+        replacement leases and siblings still contribute to display.
+        """
+        if inline:
+            key = (batch_id, slot_id)
+            remaining = self._inline_legacy_activity.get(key, 0) - 1
+            if remaining > 0:
+                self._inline_legacy_activity[key] = remaining
+            else:
+                self._inline_legacy_activity.pop(key, None)
+        with self.db.transaction() as conn:
+            try:
+                _lock_variant(conn, batch_id, slot_id, None)
+                mixed = conn.execute(
+                    "SELECT 1 FROM vn_asset_generation_recipes WHERE slot_id = ? LIMIT 1", (slot_id,),
+                ).fetchone()
+                if mixed is not None or fallback_status is None:
+                    self._refresh_slot_generation_status(
+                        conn, slot_id, fallback_status=fallback_status, finishing_delivery=finishing_delivery,
+                    )
+            except Exception as exc:  # noqa: BLE001 - display rollback must not log provider/reader messages
+                raise LegacyDisplayReconciliationError(exc) from None
+
+    def _refresh_slot_generation_status(
+        self, conn: Any, slot_id: int, *, fallback_status: str | None = None,
+        finishing_delivery: tuple[int, str] | None = None,
+    ) -> None:
+        """Read exact legacy activity after write admission, then reconcile V1.
+
+        Failed V0 batches may still have executing children; cancelled batches
+        never contribute. Published provenance settles only its exact Jobs
+        delivery while completing. Aggregate counters are not liveness.
+        """
+        slot = conn.execute(
+            """
+            SELECT slot.pack_id, pack.owner_user_id FROM vn_asset_slots AS slot
+            JOIN vn_asset_packs AS pack ON pack.id = slot.pack_id WHERE slot.id = ?
+            """, (slot_id,),
+        ).fetchone()
+        if slot is None:
+            return
+        batches = {int(row["id"]): str(row["status"]) for row in conn.execute(
+            "SELECT id, status FROM vn_asset_batches WHERE pack_id = ? AND recipe_version = 0 AND status != 'cancelled'",
+            (slot["pack_id"],),
+        ).fetchall()}
+        active = any(self._inline_legacy_activity.get((batch_id, slot_id), 0) for batch_id in batches)
+        queued = False
+        if batches and self.legacy_activity_reader is not None:
+            settled: set[tuple[int, int, str]] = set()
+            for row in conn.execute(
+                """
+                SELECT source_context_snapshot_json FROM vn_asset_items AS item
+                WHERE slot_id = ? AND generated_file_id IS NOT NULL AND NOT EXISTS (
+                    SELECT 1 FROM vn_asset_generation_recipes WHERE item_id = item.id
+                )
+                """, (slot_id,),
+            ).fetchall():
+                context = json.loads(row["source_context_snapshot_json"] or "{}")
+                if isinstance(context, dict) and all(type(context.get(key)) is int for key in ("batch_id", "variant_index")):
+                    fingerprint = context.get("legacy_delivery_fingerprint")
+                    if isinstance(fingerprint, str) and fingerprint:
+                        settled.add((context["batch_id"], context["variant_index"], fingerprint))
+            jobs_active, queued = self.legacy_activity_reader(
+                int(slot["pack_id"]), slot_id, int(slot["owner_user_id"]), batches, settled, finishing_delivery,
+            )
+            active = active or jobs_active
+        _refresh_slot_generation_status(conn, slot_id, legacy_activity=(active, queued), fallback_status=fallback_status)
+
     def cancel_batch(self, batch_id: int) -> dict[str, Any] | None:
         """Cancel batch_id and return its row, or None if it does not exist.
 
@@ -1940,6 +2042,8 @@ class VNAssetPacksRepository:
         """
         self._ensure_schema_initialized()
         with self.db.transaction() as conn:
+            # Acquire write admission before observing the batch or its recipes.
+            conn.execute("UPDATE vn_asset_batches SET status = status WHERE id = ?", (batch_id,))
             batch = conn.execute(
                 "SELECT status, recipe_version FROM vn_asset_batches WHERE id = ?", (batch_id,)
             ).fetchone()
@@ -1970,6 +2074,10 @@ class VNAssetPacksRepository:
                     """,
                     (batch_id, batch_id),
                 )
+                for row in conn.execute(
+                    "SELECT DISTINCT slot_id FROM vn_asset_generation_recipes WHERE batch_id = ?", (batch_id,)
+                ).fetchall():
+                    self._refresh_slot_generation_status(conn, int(row["slot_id"]))
         return self.get_batch(batch_id)
 
     def list_batches(self, pack_id: int) -> list[dict[str, Any]]:
@@ -2119,6 +2227,47 @@ class VNAssetPacksRepository:
             )
         return item
 
+    def start_variant_generation(
+        self, *, batch_id: int, slot_id: int, variant_index: int, attempt_token: str,
+        validate_authority: Callable[[], None] | None = None,
+    ) -> None:
+        """Admit V1 generating state for a current claim under the VN write lock.
+
+        Variant IDs and attempt_token must identify a planned recipe in a
+        nonterminal batch. Jobs claims require validate_authority; inline claims
+        need only their current token. The callback runs after write admission
+        and before any visible slot change. Reconcile all work sharing the slot
+        and clear its error. Raises retryable VNAssetGenerationError on lost
+        authority, fence or terminal batch; callback/database errors propagate
+        and roll back. Jobs changes after admission are not retroactive.
+        """
+        self._ensure_schema_initialized()
+        context = {"batch_id": batch_id, "slot_id": slot_id, "variant_index": variant_index}
+        with self.db.transaction() as conn:
+            _lock_variant(conn, batch_id, slot_id, variant_index)
+            if validate_authority is not None:
+                validate_authority()
+            row = conn.execute(
+                """
+                SELECT recipe.outcome_status, recipe.claim_token, recipe.claim_lease_id,
+                       batch.status AS batch_status
+                FROM vn_asset_generation_recipes AS recipe
+                JOIN vn_asset_batches AS batch ON batch.id = recipe.batch_id
+                WHERE recipe.batch_id = ? AND recipe.slot_id = ? AND recipe.variant_index = ?
+                """,
+                (batch_id, slot_id, variant_index),
+            ).fetchone()
+            if row is not None and row["batch_status"] in {"completed", "failed", "cancelled"}:
+                raise VNAssetGenerationError("vn_asset_batch_terminal", retryable=True, **context)
+            if row is None or row["outcome_status"] != "planned" or row["claim_token"] != attempt_token:
+                raise VNAssetGenerationError("vn_asset_variant_claim_lost", retryable=True, **context)
+            if row["claim_lease_id"] != "inline" and validate_authority is None:
+                raise VNAssetGenerationError("vn_asset_job_lease_lost", retryable=True, **context)
+            self._refresh_slot_generation_status(conn, slot_id)
+            conn.execute(
+                "UPDATE vn_asset_slots SET last_error = NULL WHERE id = ?", (slot_id,),
+            )
+
     def reserve_variant_item(
         self,
         *,
@@ -2182,7 +2331,7 @@ class VNAssetPacksRepository:
         """
         self._ensure_schema_initialized()
         with self.db.transaction() as conn:
-            conn.execute(
+            released = conn.execute(
                 """
                 UPDATE vn_asset_generation_recipes SET claim_lease_id = NULL, claim_token = NULL
                 WHERE batch_id = ? AND slot_id = ? AND variant_index = ?
@@ -2190,6 +2339,8 @@ class VNAssetPacksRepository:
                 """,
                 (batch_id, slot_id, variant_index, attempt_token),
             )
+            if released.rowcount:
+                self._refresh_slot_generation_status(conn, slot_id)
 
     def complete_variant(
         self, *, batch_id: int, slot_id: int, variant_index: int, item_id: int,
@@ -2250,20 +2401,14 @@ class VNAssetPacksRepository:
             )
             conn.execute(
                 """
-                UPDATE vn_asset_slots
-                SET status = 'reviewing', last_error = NULL, updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-                """,
-                (slot_id,),
-            )
-            conn.execute(
-                """
                 UPDATE vn_asset_generation_recipes SET outcome_status = 'completed'
                 WHERE batch_id = ? AND slot_id = ? AND variant_index = ?
                 """,
                 (batch_id, slot_id, variant_index),
             )
             _refresh_batch_outcome_counts(conn, batch_id)
+            self._refresh_slot_generation_status(conn, slot_id)
+            conn.execute("UPDATE vn_asset_slots SET last_error = NULL WHERE id = ?", (slot_id,))
         result = self.get_item(item_id)
         if result is None:
             raise VNAssetGenerationError("completed_item_not_found", retryable=True, **context)
@@ -2300,19 +2445,9 @@ class VNAssetPacksRepository:
             )
             if not updated.rowcount:
                 return
-            conn.execute(
-                """
-                UPDATE vn_asset_slots
-                SET status = CASE WHEN EXISTS (
-                    SELECT 1 FROM vn_asset_generation_recipes
-                    WHERE batch_id = ? AND slot_id = ? AND outcome_status = 'completed'
-                ) THEN 'reviewing' ELSE 'failed' END,
-                    last_error = ?, updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-                """,
-                (batch_id, slot_id, error, slot_id),
-            )
             _refresh_batch_outcome_counts(conn, batch_id)
+            self._refresh_slot_generation_status(conn, slot_id)
+            conn.execute("UPDATE vn_asset_slots SET last_error = ? WHERE id = ?", (error, slot_id))
 
     def mark_batch_enqueued(
         self,
@@ -2696,6 +2831,75 @@ def _lock_variant(conn: Any, batch_id: int | None, slot_id: int | None, variant_
         WHERE batch_id = ? AND slot_id = ? AND variant_index = ?
         """,
         (batch_id, slot_id, variant_index),
+    )
+
+
+def _refresh_slot_generation_status(
+    conn: Any, slot_id: int, *, legacy_activity: tuple[bool, bool] = (False, False),
+    fallback_status: str | None = None,
+) -> None:
+    """Reconcile slot_id on the caller's write-locked SQLite transaction.
+
+    Legacy activity comes from the write-admitted caller's Jobs reader/local
+    execution display, not aggregate batch counters. V1 nonterminal batches
+    contribute planned work: claimed recipes generate,
+    unclaimed recipes queue. Published items use the same visibility predicate
+    as list_items, so terminal reservations never become review candidates.
+    Existing review precedence applies after work ends; failures with no
+    published candidates are failed, even alongside cancellations. Historical
+    completed recipes without items do not manufacture review readiness.
+    Missing slots are a no-op; SQL errors propagate and roll back the caller's
+    outcome transition. This repository does not support row-lock backends.
+    """
+    slot = conn.execute(
+        "SELECT status, required_for_runtime FROM vn_asset_slots WHERE id = ?", (slot_id,),
+    ).fetchone()
+    if slot is None:
+        return
+    counts = conn.execute(
+        """
+        SELECT SUM(CASE WHEN recipe.outcome_status = 'planned'
+                       AND batch.status NOT IN ('completed', 'failed', 'cancelled')
+                       AND recipe.claim_token IS NOT NULL THEN 1 ELSE 0 END) AS active,
+               SUM(CASE WHEN recipe.outcome_status = 'planned'
+                       AND batch.status NOT IN ('completed', 'failed', 'cancelled')
+                       AND recipe.claim_token IS NULL THEN 1 ELSE 0 END) AS queued,
+               SUM(CASE WHEN recipe.outcome_status = 'failed' THEN 1 ELSE 0 END) AS failed,
+               SUM(CASE WHEN recipe.outcome_status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled
+        FROM vn_asset_generation_recipes AS recipe
+        JOIN vn_asset_batches AS batch ON batch.id = recipe.batch_id
+        WHERE recipe.slot_id = ?
+        """,
+        (slot_id,),
+    ).fetchone()
+    statuses = [row["review_status"] for row in conn.execute(
+        """
+        SELECT item.review_status FROM vn_asset_items AS item
+        WHERE item.slot_id = ? AND NOT EXISTS (
+            SELECT 1 FROM vn_asset_generation_recipes AS recipe
+            WHERE recipe.item_id = item.id AND recipe.outcome_status != 'completed'
+        )
+        """,
+        (slot_id,),
+    ).fetchall()]
+    failed = int(counts["failed"] or 0)
+    active = bool(counts["active"]) or legacy_activity[0]
+    queued = bool(counts["queued"]) or legacy_activity[1]
+    status = derive_slot_status(
+        has_active_job=active,
+        has_queued_job=queued,
+        is_skipped=slot["status"] == "skipped",
+        is_cancelled=bool(counts["cancelled"]),
+        requested_variants=failed + len(statuses),
+        failed_variants=failed,
+        review_statuses=statuses,
+        required_for_runtime=bool(slot["required_for_runtime"]),
+    )
+    if fallback_status is not None and not active and not queued:
+        status = fallback_status
+    conn.execute(
+        "UPDATE vn_asset_slots SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (status, slot_id),
     )
 
 

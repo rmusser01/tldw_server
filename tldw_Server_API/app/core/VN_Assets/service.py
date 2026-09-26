@@ -48,7 +48,11 @@ from tldw_Server_API.app.core.VN_Assets.constants import (
     SLOT_STATUS_SKIPPED,
     WARNING_DEPTH_UNAVAILABLE,
 )
-from tldw_Server_API.app.core.VN_Assets.jobs import create_enqueue_batch_job
+from tldw_Server_API.app.core.VN_Assets.jobs import (
+    build_legacy_activity_reader,
+    create_enqueue_batch_job,
+    recover_enqueue_batch_job,
+)
 from tldw_Server_API.app.core.VN_Assets.manifest import build_manifest as build_core_manifest
 from tldw_Server_API.app.core.VN_Assets.matrix import expand_starter_matrix
 from tldw_Server_API.app.core.VN_Assets.models import (
@@ -87,6 +91,8 @@ class VNAssetPackService:
         self.owner_user_id = owner_user_id
         self.item_limit = item_limit
         self.jobs_manager = jobs_manager
+        if jobs_manager is not None:
+            self.repo.legacy_activity_reader = build_legacy_activity_reader(jobs_manager)
 
     def claim_or_replay_idempotency(
         self,
@@ -124,29 +130,36 @@ class VNAssetPackService:
                 retryable=True,
                 operation="claim_or_replay_idempotency",
             )
-        try:
-            response = self._recover_generation_receipt_data(
-                record,
-                pack_id=generation_pack_id,
-                jobs_manager=jobs_manager,
+        with self.repo.db.transaction():
+            # Another client may have completed the receipt after our claim.
+            current = self.repo.get_idempotency_record(
+                owner_user_id=owner_user_id, scope=scope, resource_id=resource_id, idempotency_key=idempotency_key,
             )
-        except VNAssetGenerationError:
-            raise
-        except ValueError as exc:
-            raise VNAssetGenerationError(
-                str(exc),
-                pack_id=generation_pack_id,
-                operation="recover_generation_receipt",
-            ) from exc
-        self.complete_idempotency_response(
-            owner_user_id=owner_user_id,
-            scope=scope,
-            resource_id=resource_id,
-            idempotency_key=idempotency_key,
-            payload_hash=payload_hash,
-            response=response,
-        )
-        return response
+            if current is not None and current["status"] == "completed":
+                return json.loads(str(current["response_json"]))
+            try:
+                response = self._recover_generation_receipt_data(
+                    current or record,
+                    pack_id=generation_pack_id,
+                    jobs_manager=jobs_manager,
+                )
+            except VNAssetGenerationError:
+                raise
+            except ValueError as exc:
+                raise VNAssetGenerationError(
+                    str(exc),
+                    pack_id=generation_pack_id,
+                    operation="recover_generation_receipt",
+                ) from exc
+            self.complete_idempotency_response(
+                owner_user_id=owner_user_id,
+                scope=scope,
+                resource_id=resource_id,
+                idempotency_key=idempotency_key,
+                payload_hash=payload_hash,
+                response=response,
+            )
+            return response
 
     def complete_idempotency_response(
         self,
@@ -771,13 +784,14 @@ class VNAssetPackService:
     ) -> VNAssetGenerationStatusResponse:
         """Return generation status for record's batch belonging to pack_id.
 
-        jobs_manager optionally overrides the queue backend. A missing parent
-        Job is re-enqueued only for an active batch. Raises VNAssetGenerationError
+        jobs_manager optionally overrides the queue backend. An unhealthy parent
+        is recovered only for active, incomplete fanout. Raises VNAssetGenerationError
         for receipt ownership/link errors; Jobs/database failures propagate.
         """
-        return VNAssetGenerationStatusResponse(
-            **self._recover_generation_receipt_data(record, pack_id=pack_id, jobs_manager=jobs_manager)
-        )
+        with self.repo.db.transaction():
+            return VNAssetGenerationStatusResponse(
+                **self._recover_generation_receipt_data(record, pack_id=pack_id, jobs_manager=jobs_manager)
+            )
 
     def _recover_generation_receipt_data(
         self,
@@ -798,18 +812,22 @@ class VNAssetPackService:
             or int(batch["requested_by_user_id"]) != self.owner_user_id
         ):
             raise VNAssetGenerationError("vn_asset_generation_receipt_not_found", pack_id=pack_id, batch_id=batch_id)
-        if not batch["job_batch_id"] and batch["status"] in {"queued", "enqueued", "processing"}:
-            job = create_enqueue_batch_job(
+        if batch["status"] in {"queued", "enqueued", "processing"}:
+            planned_count = int(
+                batch["planned_count"] if int(batch.get("recipe_version") or 0) == 1 else batch["total_variants"]
+            )
+            job = recover_enqueue_batch_job(
                 jobs_manager or self._require_jobs_manager(),
+                job_batch_id=batch["job_batch_id"],
                 pack_id=pack_id,
                 batch_id=batch_id,
                 user_id=self.owner_user_id,
+                fanout_complete=int(batch["enqueued_count"]) >= planned_count,
             )
-            job_batch_id = str(job.get("id") or job.get("uuid") or "")
-            if job_batch_id:
-                batch = self.repo.update_batch(
-                    batch_id, {"job_batch_id": job_batch_id, "enqueue_error": None}
-                ) or batch
+            job_batch_id = str(job["id"])
+            batch = self.repo.update_batch(
+                batch_id, {"job_batch_id": job_batch_id, "enqueue_error": None}
+            ) or batch
         return self._generation_status_data(batch)
 
     def get_generation_status(self, pack_id: int) -> VNAssetGenerationStatusResponse:
@@ -1202,6 +1220,7 @@ class VNAssetPackService:
         from tldw_Server_API.app.core.Jobs.manager import JobManager
 
         self.jobs_manager = JobManager()
+        self.repo.legacy_activity_reader = build_legacy_activity_reader(self.jobs_manager)
         return self.jobs_manager
 
     def _items_by_slot_id(self, pack_id: int) -> dict[int, list[VNAssetItem]]:

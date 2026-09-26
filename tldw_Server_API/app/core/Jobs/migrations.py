@@ -20,6 +20,7 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.jobs_failed_requeue import ensure_retry_admission_index
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
     configure_sqlite_connection,
 )
@@ -1380,6 +1381,7 @@ def ensure_jobs_tables(db_path: Path | None = None) -> Path:
             _ensure_sqlite_archive_locators(conn)
             if not conn.in_transaction:
                 conn.execute("BEGIN IMMEDIATE")
+            ensure_retry_admission_index(conn, backend="sqlite")
             with contextlib.suppress(_JOBS_DB_EXCEPTIONS):
                 conn.execute("ALTER TABLE jobs ADD COLUMN batch_group TEXT")
             columns = {
