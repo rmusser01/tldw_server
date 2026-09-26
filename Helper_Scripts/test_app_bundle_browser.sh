@@ -17,6 +17,22 @@ cleanup() {
   local original_exit=$?
   local cleanup_failed=0
   trap - EXIT
+  # A failed browser close may leave an owned process needing recovery.
+  if ! python - "$evidence_path" <<'PY_BROWSER_CLEANUP'
+import json
+import sys
+from pathlib import Path
+try:
+    path = Path(sys.argv[1])
+    evidence = json.loads(path.read_text()) if path.exists() else {}
+    if evidence.get("checks", {}).get("browser_shutdown", {}).get("passed") is False:
+        sys.exit(1)
+except Exception:
+    sys.exit(1)
+PY_BROWSER_CLEANUP
+  then
+    cleanup_failed=1
+  fi
   for index in 1 2; do
     local env_file="$test_root/instance-$index/instance/config.env"
     if [[ -f "$env_file" ]]; then
@@ -40,7 +56,7 @@ cleanup() {
     printf '%s\n' "$test_root" > "$(dirname "$evidence_path")/.browser-cleanup-recovery" || true
     echo 'Cleanup failed; disposable instance state retained for recovery.' >&2
   fi
-  if ! python - "$evidence_path" "$cleanup_failed" <<'PY'
+  if ! python - "$evidence_path" "$cleanup_failed" "$original_exit" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -53,7 +69,7 @@ try:
     }
     removed = sys.argv[2] == "0"
     evidence["checks"]["owned_resources_removed"] = {"passed": removed}
-    if not removed:
+    if not removed or sys.argv[3] != "0":
         evidence["passed"] = False
         evidence.setdefault("failure_code", "owned_resources_removed")
     path.write_text(json.dumps(evidence, indent=2) + "\n")
@@ -195,13 +211,16 @@ PY
 browser_exit=0
 node "$repo_root/apps/tldw-frontend/scripts/qualify-app-bundle-browser.mjs" \
   "$test_root/public-input.json" "$evidence_path" || browser_exit=$?
-python - "$evidence_path" <<'PY_EVIDENCE'
+python - "$evidence_path" "$bundle_dir/manifest.json" "${TLDW_CANDIDATE_PLATFORM:-}" <<'PY_EVIDENCE'
 import json
 import sys
 from pathlib import Path
 path = Path(sys.argv[1])
 evidence = json.loads(path.read_text())
 evidence["checks"]["paired_signed_start_and_runtime_identity"] = {"passed": True}
+manifest = json.loads(Path(sys.argv[2]).read_text())
+evidence["source_commit"] = manifest["source_commit"]
+evidence["platform"] = sys.argv[3] or manifest["platforms"][0]
 path.write_text(json.dumps(evidence, indent=2) + "\n")
 PY_EVIDENCE
 exit "$browser_exit"

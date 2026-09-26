@@ -9,6 +9,14 @@ on:
     branches: [codex/complete-app-wp1]
     paths:
       - .github/workflows/verify-app-bundle.yml
+      - tldw_Server_API/app/api/v1/endpoints/setup.py
+      - tldw_Server_API/app/core/Security/managed_gateway.py
+      - tldw_Server_API/app/api/v1/API_Deps/setup_deps.py
+      - tldw_Server_API/app/core/MCP_unified/security/ip_filter.py
+      - tldw_Server_API/app/core/MCP_unified/server.py
+      - tldw_Server_API/app/core/MCP_unified/tests/test_managed_gateway_ingress.py
+      - tldw_Server_API/tests/Setup/test_managed_gateway_setup.py
+      - tldw_Server_API/tests/Release/test_candidate_gate.py
       - Dockerfiles/Dockerfile.prod
       - Dockerfiles/Dockerfile.webui
       - Dockerfiles/app-bundle/**
@@ -72,6 +80,11 @@ jobs:
             Helper_Scripts/verify_app_bundle.py \
             tldw_Server_API/app/core/Release/manifest.py \
             tldw_Server_API/scripts/app_bundle_control.py
+          python -m bandit -r tldw_Server_API/app/api/v1/endpoints/setup.py \
+            tldw_Server_API/app/core/Security/managed_gateway.py \
+            tldw_Server_API/app/api/v1/API_Deps/setup_deps.py \
+            tldw_Server_API/app/core/MCP_unified/security/ip_filter.py \
+            tldw_Server_API/app/core/MCP_unified/server.py
           bash -n Helper_Scripts/qualify_app_bundle_candidate.sh \
             Helper_Scripts/test_app_bundle_docker.sh \
             Helper_Scripts/test_app_bundle_browser.sh
@@ -141,6 +154,7 @@ jobs:
             ${{ runner.temp }}/app-candidate-${{ matrix.arch }}/inventory.json
             ${{ runner.temp }}/app-candidate-${{ matrix.arch }}/evidence.json
             ${{ runner.temp }}/app-candidate-${{ matrix.arch }}/browser-evidence.json
+            ${{ runner.temp }}/app-candidate-${{ matrix.arch }}/lifecycle-evidence.json
             ${{ runner.temp }}/app-candidate-${{ matrix.arch }}/images.tsv
             ${{ runner.temp }}/app-candidate-${{ matrix.arch }}/trust/ci-test.pub
 
@@ -172,4 +186,5 @@ jobs:
       - name: Record qualification boundary
         run: |
           echo 'Both job-local platform candidates were exercised.'
-          echo 'G2/G4/G12 remain open; no multi-platform release or install-catalog promotion occurred.'
+          echo 'Bounded G2/G4 evidence requires all transport, lifecycle, identity, and owned cleanup checks.'
+          echo 'G12 remains open; no release or install-catalog promotion occurred.'

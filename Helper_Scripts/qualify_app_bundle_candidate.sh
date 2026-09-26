@@ -1,14 +1,25 @@
 #!/usr/bin/env bash
 # CI-only: build, run, and sign a single-platform candidate in a job-local registry.
-set -euo pipefail
+set -Eeuo pipefail
+umask 077
 
 platform="${TLDW_CANDIDATE_PLATFORM:?Set TLDW_CANDIDATE_PLATFORM}"
 evidence_url="${TLDW_EVIDENCE_URL:?Set TLDW_EVIDENCE_URL}"
 output_dir="${TLDW_CANDIDATE_OUTPUT:?Set TLDW_CANDIDATE_OUTPUT}"
+registry_port="${TLDW_CANDIDATE_REGISTRY_PORT-5000}"
+if [[ ! $registry_port =~ ^[1-9][0-9]{0,4}$ ]] || (( registry_port > 65535 )); then
+  echo 'Invalid candidate registry port.' >&2
+  exit 2
+fi
+registry="localhost:$registry_port"
 case "$platform" in
   linux/amd64|linux/arm64) ;;
   *) echo "Unsupported candidate platform: $platform" >&2; exit 2 ;;
 esac
+if [[ -e "$output_dir" ]]; then
+  echo 'Candidate output must be a new private directory.' >&2
+  exit 2
+fi
 if [[ -n $(git status --porcelain) ]]; then
   echo 'Candidate builds require a clean source checkout.' >&2
   exit 1
@@ -36,12 +47,79 @@ private.chmod(0o600)
 )
 PY
 
-docker run -d --name tldw-candidate-registry \
-  -p 127.0.0.1:5000:5000 registry:2 >/dev/null
-cleanup() { docker rm -f tldw-candidate-registry >/dev/null 2>&1 || true; }
-trap cleanup EXIT
+registry_id=""
+backend_test_id=""
+cleanup_registry() {
+  if [[ -z "$registry_id" ]]; then return 0; fi
+  if [[ ! $registry_id =~ ^[0-9a-f]{64}$ ]]; then
+    echo 'Owned registry cleanup refused an invalid identity.' >&2
+    return 1
+  fi
+  if ! docker rm -f -v "$registry_id" >/dev/null 2>&1; then
+    printf '%s\n' "$registry_id" > "$output_dir/.registry-cleanup-recovery" || true
+    echo 'Registry cleanup failed; owned resource retained for recovery.' >&2
+    return 1
+  fi
+  registry_id=""
+}
+candidate_exit() {
+  local original_exit=$?
+  trap - EXIT
+  if [[ -n "$backend_test_id" ]]; then
+    if [[ ! $backend_test_id =~ ^[0-9a-f]{64}$ ]] || ! docker rm -f -v "$backend_test_id" >/dev/null 2>&1; then
+      printf '%s\n' "$backend_test_id" > "$output_dir/.backend-test-cleanup-recovery" || true
+      echo 'Backend test cleanup failed; owned resource retained for recovery.' >&2
+      if [[ $original_exit == 0 ]]; then original_exit=1; fi
+    fi
+  fi
+  if ! cleanup_registry; then
+    if [[ $original_exit == 0 ]]; then original_exit=1; fi
+  fi
+  if [[ $original_exit != 0 ]]; then
+    if [[ -f "$output_dir/evidence.json" ]]; then
+      if ! python - "$output_dir/evidence.json" <<'PY_FAILED_EVIDENCE'
+import json
+import sys
+from pathlib import Path
+try:
+    path = Path(sys.argv[1])
+    evidence = json.loads(path.read_text())
+    for item in evidence["platforms"].values():
+        item.update({gate: False for gate in ("G2", "G4", "G10", "G12")})
+    path.write_text(json.dumps(evidence, sort_keys=True))
+except Exception:
+    sys.exit("Failed-run evidence invalidation failed (private details suppressed).")
+PY_FAILED_EVIDENCE
+      then
+        # A corrupt evidence file is not eligible for the public allowlist.
+        rm -f "$output_dir/evidence.json" >/dev/null 2>&1 || echo 'Public evidence removal failed.' >&2
+      fi
+    fi
+    # Only generated public signature/manifest files are invalidated. Keys,
+    # inventory, identities and private recovery state remain recoverable.
+    rm -f "$output_dir/bundle/manifest.json" "$output_dir/bundle/manifest.sig" >/dev/null 2>&1 || echo 'Public candidate signature removal failed.' >&2
+  fi
+  exit "$original_exit"
+}
+trap candidate_exit EXIT
+# Capture ownership before start: port-binding failure must still be removable.
+if ! registry_id=$(docker create --name tldw-candidate-registry \
+  -p "127.0.0.1:$registry_port:5000" registry:2 2>"$output_dir/.registry-create.log"); then
+  registry_id=""
+  echo 'Candidate registry creation failed (private details suppressed).' >&2
+  exit 1
+fi
+if [[ ! $registry_id =~ ^[0-9a-f]{64}$ ]]; then
+  echo 'Candidate registry identity invalid.' >&2
+  exit 1
+fi
+if ! docker start "$registry_id" >"$output_dir/.registry-start.log" 2>&1; then
+  echo 'Candidate registry start failed (private details suppressed).' >&2
+  exit 1
+fi
 
 for role in control backend webui gateway; do
+  echo "Candidate image build started: $role."
   case "$role" in
     control)
       dockerfile=Dockerfiles/Dockerfile.control
@@ -49,47 +127,48 @@ for role in control backend webui gateway; do
       docker buildx build --platform "$platform" --load --target "$target" \
         --build-arg "TLDW_SOURCE_COMMIT=$source_commit" \
         --build-context "trust=$output_dir/trust" -f "$dockerfile" \
-        -t "localhost:5000/tldw/$role:candidate" . ;;
+        -t "$registry/tldw/$role:candidate" . ;;
     backend)
       dockerfile=Dockerfiles/Dockerfile.prod
       target=runtime
       docker buildx build --platform "$platform" --load --target "$target" \
         --build-arg "TLDW_SOURCE_COMMIT=$source_commit" \
-        -f "$dockerfile" -t "localhost:5000/tldw/$role:candidate" . ;;
+        -f "$dockerfile" -t "$registry/tldw/$role:candidate" . ;;
     webui)
       dockerfile=Dockerfiles/Dockerfile.webui
       target=managed-runtime
       docker buildx build --platform "$platform" --load --target "$target" \
         --build-arg "TLDW_SOURCE_COMMIT=$source_commit" \
-        -f "$dockerfile" -t "localhost:5000/tldw/$role:candidate" . ;;
+        -f "$dockerfile" -t "$registry/tldw/$role:candidate" . ;;
     gateway)
       dockerfile=Dockerfiles/Dockerfile.gateway
       target=runtime
       docker buildx build --platform "$platform" --load --target "$target" \
         --build-arg "TLDW_SOURCE_COMMIT=$source_commit" \
-        -f "$dockerfile" -t "localhost:5000/tldw/$role:candidate" . ;;
+        -f "$dockerfile" -t "$registry/tldw/$role:candidate" . ;;
   esac
   revision=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' \
-    "localhost:5000/tldw/$role:candidate")
+    "$registry/tldw/$role:candidate")
   if [[ $revision != "$source_commit" ]]; then
     echo "$role image source revision does not match the clean checkout." >&2
     exit 1
   fi
-  docker push "localhost:5000/tldw/$role:candidate" >"$output_dir/$role-push.log"
+  docker push "$registry/tldw/$role:candidate" >"$output_dir/$role-push.log"
   digest=$(sed -n 's/.*digest: \(sha256:[0-9a-f]*\).*/\1/p' "$output_dir/$role-push.log" | tail -n 1)
   if [[ ! $digest =~ ^sha256:[0-9a-f]{64}$ ]]; then
     echo "Could not capture the pushed $role digest." >&2
     exit 1
   fi
-  size=$(docker image inspect --format '{{.Size}}' "localhost:5000/tldw/$role:candidate")
-  printf '%s\t%s\t%s\n' "$role" "localhost:5000/tldw/$role@$digest" "$size" \
+  size=$(docker image inspect --format '{{.Size}}' "$registry/tldw/$role:candidate")
+  printf '%s\t%s\t%s\n' "$role" "$registry/tldw/$role@$digest" "$size" \
     >>"$output_dir/images.tsv"
+  echo "Candidate image build and local digest capture passed: $role."
 done
 
-backend_tag=localhost:5000/tldw/backend:candidate
-webui_tag=localhost:5000/tldw/webui:candidate
-gateway_tag=localhost:5000/tldw/gateway:candidate
-control_tag=localhost:5000/tldw/control:candidate
+backend_tag="$registry/tldw/backend:candidate"
+webui_tag="$registry/tldw/webui:candidate"
+gateway_tag="$registry/tldw/gateway:candidate"
+control_tag="$registry/tldw/control:candidate"
 python_version=$(docker run --rm --platform "$platform" --entrypoint python "$backend_tag" \
   --version | sed 's/^Python //')
 docker run --rm --platform "$platform" --entrypoint python "$backend_tag" \
@@ -109,6 +188,46 @@ docker run --rm --platform "$platform" --entrypoint sh "$webui_tag" -c \
    grep -q "^# AuthNZ API Guide$" /app/Docs/Published/API-related/AuthNZ-API-Guide.md'
 docker run --rm --platform "$platform" --entrypoint sh "$control_tag" -c \
   'test ! -e /opt/tldw/signing.key && test -s /opt/tldw/trusted-keys/ci-test.pub'
+
+# Exercise focused security tests on the actual built backend dependencies.
+# This one read-only mount supplies the Compose contract omitted from the image.
+echo 'Focused built-backend qualification started.'
+if ! backend_test_id=$(docker create --platform "$platform" --entrypoint sh \
+  --mount "type=bind,source=$(pwd)/Dockerfiles/app-bundle,target=/app/Dockerfiles/app-bundle,readonly" \
+  --env PYTHONPATH=/app --env TEST_MODE=false \
+  --env SINGLE_USER_API_KEY=ci-managed-dummy-key-with-at-least-32-characters \
+  "$backend_tag" -c '
+    set -eu
+    python -m venv --system-site-packages /tmp/qualification-venv
+    . /tmp/qualification-venv/bin/activate
+    python -m pip install pytest==9.0.3 pytest-asyncio==1.3.0 hypothesis==6.138.2
+    export PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
+    python -m pytest -c /dev/null --confcutdir=tldw_Server_API/app/core/MCP_unified/tests \
+      -p pytest_asyncio.plugin --asyncio-mode=auto -p no:cacheprovider -q \
+      tldw_Server_API/app/core/MCP_unified/tests/test_managed_gateway_ingress.py
+    python -m pytest -c /dev/null --confcutdir=tldw_Server_API/tests/Setup \
+      -p pytest_asyncio.plugin --asyncio-mode=auto -p no:cacheprovider -q \
+      tldw_Server_API/tests/Setup/test_managed_gateway_setup.py
+  ' 2>"$output_dir/.backend-test-create.log"); then
+  backend_test_id=""
+  echo 'Backend qualification container creation failed (private details suppressed).' >&2
+  exit 1
+fi
+[[ $backend_test_id =~ ^[0-9a-f]{64}$ ]]
+if ! docker start -a "$backend_test_id" >"$output_dir/.backend-qualification.log" 2>&1; then
+  echo 'Focused built-backend qualification failed (private details suppressed).' >&2
+  exit 1
+fi
+if [[ $(docker inspect --format '{{.State.ExitCode}}' "$backend_test_id") != 0 ]]; then
+  echo 'Focused built-backend qualification failed (private details suppressed).' >&2
+  exit 1
+fi
+if ! docker rm -v "$backend_test_id" >/dev/null 2>&1; then
+  echo 'Backend test cleanup failed (private details suppressed).' >&2
+  exit 1
+fi
+backend_test_id=""
+echo 'Focused built-backend MCP and setup qualification passed with owned cleanup.'
 
 export TLDW_CANDIDATE_PYTHON_VERSION="$python_version"
 export TLDW_CANDIDATE_NODE_VERSION="$node_version"
@@ -169,22 +288,63 @@ PY
 python -m Helper_Scripts.build_app_bundle \
   --artifacts "$output_dir/inventory.json" --evidence "$output_dir/evidence.json" \
   --signing-key "$output_dir/signing.key" --output "$output_dir/bundle"
+echo 'Extracted Docker lifecycle qualification started.'
 Helper_Scripts/test_app_bundle_docker.sh "$output_dir/bundle"
+echo 'Paired browser transport qualification started.'
 Helper_Scripts/test_app_bundle_browser.sh "$output_dir/bundle"
 
-python - "$output_dir/evidence.json" "$platform" <<'PY'
+# No qualified evidence or signature exists until EVERY owned resource is gone.
+cleanup_registry
+echo 'Owned registry and fixture cleanup passed; closing bounded evidence.'
+node --input-type=module - "$output_dir" "$source_commit" "$platform" <<'JS_EVIDENCE'
+import { readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { completeEvidence } from './apps/tldw-frontend/scripts/qualify-app-bundle-browser.mjs'
+const [root, commit, platform] = process.argv.slice(2)
+const path = join(root, 'evidence.json')
+try {
+  const browser = JSON.parse(readFileSync(join(root, 'browser-evidence.json'), 'utf8'))
+  const lifecycle = JSON.parse(readFileSync(join(root, 'lifecycle-evidence.json'), 'utf8'))
+  for (const item of [browser, lifecycle]) {
+    if (item.schema_version !== 1 || item.source_commit !== commit || item.platform !== platform || item.passed !== true) throw new Error('fixture_evidence')
+  }
+  if (browser.planned_setup_complete !== false || browser.setup_scope !== 'managed_connection_and_initial_wizard_only' ||
+      browser.checks.owned_resources_removed?.passed !== true || browser.checks.paired_signed_start_and_runtime_identity?.passed !== true ||
+      lifecycle.owned_resources_removed !== true) throw new Error('fixture_evidence')
+  completeEvidence(browser)
+  const lifecycleChecks = ['signed_start', 'ready', 'public_assets', 'published_documentation', 'cookie_auth', 'private_isolation', 'restart_persistence', 'tamper_refused']
+  if (lifecycleChecks.some(name => lifecycle.checks[name]?.passed !== true) || Object.values(lifecycle.checks).some(check => check.passed !== true)) throw new Error('fixture_evidence')
+  const evidence = JSON.parse(readFileSync(path, 'utf8'))
+  if (evidence.source_commit !== commit || !evidence.platforms?.[platform]) throw new Error('fixture_evidence')
+  Object.assign(evidence.platforms[platform], { G2: true, G4: true, G12: false,
+    setup_scope: browser.setup_scope, planned_setup_complete: false })
+  writeFileSync(path, JSON.stringify(evidence, null, 2) + '\n')
+} catch {
+  console.error('Candidate fixture evidence closure failed (private details suppressed).')
+  process.exitCode = 1
+}
+JS_EVIDENCE
+python - "$output_dir" "$platform" <<'PY_TRUST'
 import json
 import sys
 from pathlib import Path
-
-path = Path(sys.argv[1])
-evidence = json.loads(path.read_text())
-# Smoke verifies artifact trust; browser-evidence.json records only the
-# initial managed setup path and paired cookie/routing checks. Full G2 setup,
-# broader G4 transport, and G12 policy qualification remain open.
-evidence["platforms"][sys.argv[2]]["G10"] = True
-path.write_text(json.dumps(evidence, sort_keys=True))
-PY
+from tldw_Server_API.app.core.Release.manifest import verify_artifact, verify_manifest
+root, platform = Path(sys.argv[1]), sys.argv[2]
+try:
+    bundle = root / "bundle"
+    manifest = verify_manifest((bundle / "manifest.json").read_bytes(),
+        (bundle / "manifest.sig").read_bytes(),
+        {"ci-test": (root / "trust/ci-test.pub").read_bytes()}, platform=platform)
+    for artifact in manifest.artifacts:
+        if artifact.kind == "file":
+            verify_artifact(bundle / artifact.path, artifact)
+    path = root / "evidence.json"
+    evidence = json.loads(path.read_text())
+    evidence["platforms"][platform]["G10"] = True
+    path.write_text(json.dumps(evidence, sort_keys=True))
+except Exception:
+    sys.exit("Candidate local artifact trust failed (private details suppressed).")
+PY_TRUST
 python -m Helper_Scripts.build_app_bundle \
   --artifacts "$output_dir/inventory.json" --evidence "$output_dir/evidence.json" \
   --signing-key "$output_dir/signing.key" --output "$output_dir/bundle"
@@ -197,5 +357,22 @@ if python -m Helper_Scripts.verify_app_bundle \
   echo 'Incomplete candidate unexpectedly passed the promotion gate.' >&2
   exit 1
 fi
+# Verify the final exact signature and copied helper bytes after registry removal.
+python - "$output_dir" "$platform" <<'PY_FINAL_TRUST'
+import sys
+from pathlib import Path
+from tldw_Server_API.app.core.Release.manifest import verify_artifact, verify_manifest
+root, platform = Path(sys.argv[1]), sys.argv[2]
+try:
+    bundle = root / "bundle"
+    manifest = verify_manifest((bundle / "manifest.json").read_bytes(),
+        (bundle / "manifest.sig").read_bytes(),
+        {"ci-test": (root / "trust/ci-test.pub").read_bytes()}, platform=platform)
+    for artifact in manifest.artifacts:
+        if artifact.kind == "file":
+            verify_artifact(bundle / artifact.path, artifact)
+except Exception:
+    sys.exit("Final candidate artifact trust failed (private details suppressed).")
+PY_FINAL_TRUST
 rm "$output_dir/signing.key"
-echo "Built provisional local $platform candidate in $output_dir/bundle; G2/G4/G12 remain open."
+echo "Built provisional local $platform candidate in $output_dir/bundle; G2/G4 passed bounded qualification; G12 remains open."

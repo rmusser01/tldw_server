@@ -10,19 +10,81 @@ fi
 bundle_dir=$(cd "$1" && pwd -P)
 test_root=$(mktemp -d)
 export TLDW_APP_STATE_DIR="$test_root/instance-data"
-active_state_dir=$TLDW_APP_STATE_DIR
+export TLDW_APP_NO_BROWSER=1
+env_file="$TLDW_APP_STATE_DIR/instance/config.env"
+project_id=""
+source_commit=""
+platform=""
+lifecycle_passed=0
+evidence_path="$(dirname "$bundle_dir")/lifecycle-evidence.json"
 export TLDW_APP_PUBLIC_PORT="${TLDW_APP_PUBLIC_PORT:-18080}"
 public_url="http://127.0.0.1:$TLDW_APP_PUBLIC_PORT"
 
 cleanup() {
-  TLDW_APP_STATE_DIR="$active_state_dir" "$bundle_dir/stop.sh" >/dev/null 2>&1 || true
-  rm -rf "$test_root"
+  local original_exit=$?
+  local cleanup_failed=0
+  trap - EXIT
+  if [[ -f "$env_file" ]]; then
+    project_id=$(sed -n 's/^TLDW_PROJECT_ID=//p' "$env_file" 2>/dev/null) || cleanup_failed=1
+    if [[ "$project_id" =~ ^[a-zA-Z0-9_.-]+$ ]]; then
+      docker compose --project-name "$project_id" --env-file "$env_file" \
+        -f "$bundle_dir/compose.yaml" down --volumes >/dev/null 2>&1 || cleanup_failed=1
+    else
+      cleanup_failed=1
+    fi
+  fi
+  if [[ $cleanup_failed == 0 ]]; then
+    rm -rf "$test_root" >/dev/null 2>&1 || cleanup_failed=1
+  fi
+  if [[ $cleanup_failed != 0 ]]; then
+    printf '%s\n' "$test_root" > "$(dirname "$evidence_path")/.lifecycle-cleanup-recovery" || true
+    echo 'Lifecycle cleanup failed; disposable state retained for recovery.' >&2
+  fi
+  if ! python - "$evidence_path" "$original_exit" "$cleanup_failed" "$lifecycle_passed" "$source_commit" "$platform" <<'PY_CLEANUP'
+import json
+import sys
+from pathlib import Path
+path, original, failed, lifecycle, commit, platform = sys.argv[1:]
+removed = failed == "0"
+passed = original == "0" and removed and lifecycle == "1"
+try:
+    Path(path).write_text(json.dumps({
+        "schema_version": 1, "source_commit": commit, "platform": platform,
+        "passed": passed, "owned_resources_removed": removed,
+        "checks": {name: {"passed": passed} for name in (
+            "signed_start", "ready", "public_assets", "published_documentation",
+            "cookie_auth", "private_isolation", "restart_persistence", "tamper_refused")},
+    }, indent=2) + "\n")
+except Exception:
+    sys.exit("Lifecycle evidence update failed (private details suppressed).")
+PY_CLEANUP
+  then
+    cleanup_failed=1
+  fi
+  if [[ $original_exit == 0 && $cleanup_failed != 0 ]]; then original_exit=1; fi
+  if [[ $original_exit == 0 ]]; then
+    echo 'Extracted Docker lifecycle checks and owned cleanup passed.'
+  fi
+  exit "$original_exit"
 }
 trap cleanup EXIT
 
 cd "$test_root"
 "$bundle_dir/start.sh"
-env_file="$TLDW_APP_STATE_DIR/instance/config.env"
+source_commit=$(python - "$bundle_dir/manifest.json" <<'PY_COMMIT'
+import json
+import sys
+from pathlib import Path
+print(json.loads(Path(sys.argv[1]).read_text())["source_commit"])
+PY_COMMIT
+)
+platform=${TLDW_CANDIDATE_PLATFORM:-$(python - "$bundle_dir/manifest.json" <<'PY_PLATFORM'
+import json
+import sys
+from pathlib import Path
+print(json.loads(Path(sys.argv[1]).read_text())["platforms"][0])
+PY_PLATFORM
+)}
 first_config_hash=$(sha256sum "$env_file" | awk '{print $1}')
 project_id=$(sed -n 's/^TLDW_PROJECT_ID=//p' "$env_file")
 session_cookie_name=$(sed -n 's/^SINGLE_USER_SESSION_COOKIE_NAME=//p' "$env_file")
@@ -153,4 +215,4 @@ if "$bad_bundle/start.sh" >"$test_root/tampered-stdout" 2>"$test_root/tampered-s
 fi
 [[ ! -e "$TLDW_APP_STATE_DIR/instance" ]]
 
-echo 'Extracted Docker bundle passed startup, static/public assets, published documentation, auth, isolation, persistence, and tamper checks.'
+lifecycle_passed=1

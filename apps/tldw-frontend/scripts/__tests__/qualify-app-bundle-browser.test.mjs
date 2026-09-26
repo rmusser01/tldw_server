@@ -216,9 +216,10 @@ for (const [name, mutate, success] of [
 
 for (const timing of ['early', 'late']) {
   test(`setup tracker rejects ${timing} 403 and keeps success false`, async () => {
-    const { createEvidence, createSetupResponseTracker, completeEvidence } = await load()
+    const { createEvidence, createSetupResponseTracker, completeEvidence, REQUIRED_CHECKS } = await load()
     assert.equal(typeof createSetupResponseTracker, 'function', 'setup response tracker is missing')
     const evidence = createEvidence()
+    for (const name of REQUIRED_CHECKS) evidence.checks[name] = { passed: true }
     const first = createSetupResponseTracker(evidence, 1, 'http://127.0.0.1:18081')
     const second = createSetupResponseTracker(evidence, 2, 'http://127.0.0.1:18082')
     if (timing === 'early') first.observe('http://127.0.0.1:18081/api/v1/setup/first-run/state', 403)
@@ -235,9 +236,10 @@ for (const timing of ['early', 'late']) {
 }
 
 test('expected negative auth probes do not fail setup access', async () => {
-  const { createEvidence, createSetupResponseTracker, completeEvidence } = await load()
+  const { createEvidence, createSetupResponseTracker, completeEvidence, REQUIRED_CHECKS } = await load()
   assert.equal(typeof createSetupResponseTracker, 'function', 'setup response tracker is missing')
   const evidence = createEvidence()
+  for (const name of REQUIRED_CHECKS) evidence.checks[name] = { passed: true }
   for (const index of [1, 2]) {
     const origin = `http://127.0.0.1:${18080 + index}`
     const tracker = createSetupResponseTracker(evidence, index, origin)
@@ -271,10 +273,11 @@ test('missing setup responses cannot qualify an instance', async () => {
   assert.throws(() => completeEvidence(evidence), { message: 'required_checks_failed' })
 })
 
-for (const [name, downExit, originalExit, expectedExit] of [
+for (const [name, downExit, originalExit, expectedExit, browserFailed = false] of [
   ['cleanup succeeds', 0, 0, 0],
   ['cleanup fails after passing probe', 1, 0, 1],
   ['cleanup fails after original failure', 1, 7, 7],
+  ['browser shutdown fails with retained recovery', 0, 7, 7, true],
 ]) {
   test(`helper ${name} with recoverable state and bounded output`, () => {
     const root = mkdtempSync(join(tmpdir(), 'bundle-cleanup-test-'))
@@ -285,7 +288,7 @@ for (const [name, downExit, originalExit, expectedExit] of [
       const evidencePath = join(root, 'browser-evidence.json')
       writeFileSync(evidencePath, JSON.stringify({ schema_version: 1, passed: originalExit === 0,
         failure_code: originalExit === 0 ? undefined : 'manual_master_key_required',
-        G2: false, G4: false, G12: false, checks: {} }))
+        G2: false, G4: false, G12: false, checks: browserFailed ? { browser_shutdown: { passed: false } } : {} }))
       const repo = resolve(new URL('../../../..', import.meta.url).pathname)
       const shell = readFileSync(join(repo, 'Helper_Scripts/test_app_bundle_browser.sh'), 'utf8')
       const cleanup = shell.slice(shell.indexOf('cleanup() {'), shell.indexOf('trap cleanup EXIT'))
@@ -296,15 +299,15 @@ for (const [name, downExit, originalExit, expectedExit] of [
         env: { ...process.env, PATH: join(root, 'bin') + ':' + process.env.PATH }, encoding: 'utf8', timeout: 10_000,
       })
       assert.equal(result.status, expectedExit, result.stderr)
-      assert.equal(existsSync(join(owned, 'instance-1/instance/config.env')), downExit !== 0)
+      assert.equal(existsSync(join(owned, 'instance-1/instance/config.env')), downExit !== 0 || browserFailed)
       const calls = readFileSync(join(root, 'calls.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line))
       assert.deepEqual(calls.map(args => args[args.indexOf('--project-name') + 1]), ['paired-1', 'paired-2'])
       assert.ok(calls.every(args => args.slice(-2).join() === 'down,--volumes'))
       assert.ok(!result.stderr.includes('secret-token'))
       const evidence = JSON.parse(readFileSync(evidencePath, 'utf8'))
       assert.ok(evidence.checks.owned_resources_removed, 'cleanup outcome is missing from evidence')
-      assert.equal(evidence.checks.owned_resources_removed.passed, downExit === 0)
-      if (downExit !== 0) {
+      assert.equal(evidence.checks.owned_resources_removed.passed, downExit === 0 && !browserFailed)
+      if (downExit !== 0 || browserFailed) {
         assert.equal(evidence.passed, false)
         assert.ok(result.stderr.includes('Cleanup failed; disposable instance state retained for recovery.'))
         const pointer = join(root, '.browser-cleanup-recovery')
@@ -317,3 +320,141 @@ for (const [name, downExit, originalExit, expectedExit] of [
     }
   })
 }
+
+test('missing transport check refuses successful evidence even when all present checks passed', async () => {
+  const { createEvidence, completeEvidence } = await load()
+  const evidence = createEvidence()
+  evidence.checks = { setup_api_access_1: { passed: true }, setup_api_access_2: { passed: true } }
+  assert.throws(() => completeEvidence(evidence), { message: 'required_checks_failed' })
+  assert.equal(evidence.passed, false)
+})
+
+test('browser shutdown rejection fails closed with bounded evidence', async () => {
+  const { createEvidence, closeBrowser } = await load()
+  const evidence = createEvidence()
+  evidence.passed = true
+  await assert.rejects(closeBrowser({ close: async () => { throw new Error('secret-cookie') } }, evidence), { message: 'browser_shutdown' })
+  assert.equal(evidence.passed, false)
+  assert.equal(evidence.checks.browser_shutdown.passed, false)
+  assert.ok(!JSON.stringify(evidence).includes('secret-cookie'))
+})
+
+test('browser shutdown keeps an earlier failure code', async () => {
+  const { createEvidence, closeBrowser } = await load()
+  const evidence = createEvidence()
+  evidence.failure_code = 'setup_api_access_1'
+  await assert.rejects(closeBrowser({ close: async () => { throw new Error('secret') } }, evidence))
+  assert.equal(evidence.failure_code, 'setup_api_access_1')
+})
+
+// These fixtures use real HTTP, multipart bytes, streaming cancellation and
+// Chromium WebSockets. They are deliberately separate from the live candidate.
+async function transportFixture(change = '') {
+  const { createServer } = await import('node:http')
+  const { createHash } = await import('node:crypto')
+  const sockets = new Set()
+  let uploadSeen = false
+  let streamClosed = false
+  const server = createServer((req, res) => {
+    const path = new URL(req.url, 'http://fixture').pathname
+    if (req.headers.host === 'hostile.invalid' || (req.headers.origin && req.headers.origin !== origin)) {
+      res.writeHead(403); res.end(); return
+    }
+    if (path === '/api/documentation/manifest') { res.end(JSON.stringify({ docsBySource: { server: [{ source: 'server', relativePath: 'API-related/AuthNZ-API-Guide.md' }] } })); return }
+    if (path === '/api/documentation/content') {
+      if (req.url.includes('..')) { res.writeHead(400); res.end(); return }
+      res.end(JSON.stringify({ content: '# AuthNZ API Guide\nPublic fixture.' })); return
+    }
+    if (path === '/api/v1/health/live/') { res.writeHead(307, { Location: origin + '/api/v1/health/live' }); res.end(); return }
+    if (path === '/api/v1/media/process-documents') {
+      let body = ''; req.on('data', chunk => { body += chunk }); req.on('end', () => {
+        uploadSeen = body.includes('A harmless public upload sentinel.') && body.includes('name="files"') && body.includes('name="perform_analysis"') && body.includes('false') && req.headers['x-csrf-token'] === 'public-fixture-csrf'
+        res.end(JSON.stringify({ results: [{ status: 'Success', content: change === 'content' ? 'lost' : '# WP1 qualification\nA harmless public upload sentinel.\n' }], errors: [] }))
+      }); return
+    }
+    if (path === '/api/v1/notifications/stream') {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' }); res.write('data: public\n\n')
+      res.on('close', () => { streamClosed = true }); return
+    }
+    if (change === 'reflect' && path === '/api/v1/setup/first-run/state') { res.setHeader('X-Tldw-Gateway-Hop', 'public-forged-hop'); res.end('public-forged-hop'); return }
+    res.end('{}')
+  })
+  server.on('upgrade', (req, socket) => {
+    sockets.add(socket); socket.on('error', () => {}); socket.on('close', () => sockets.delete(socket))
+    if (req.headers.origin !== origin || !req.headers.cookie?.includes('fixture_session=public-fixture-session')) {
+      socket.end('HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n'); return
+    }
+    const key = createHash('sha1').update(req.headers['sec-websocket-key'] + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64')
+    socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${key}\r\n\r\n`)
+    socket.once('data', () => {
+      const text = Buffer.from(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { protocolVersion: '2024-11-05', serverInfo: { name: change === 'ws' ? 'wrong' : 'tldw-mcp-unified' } } }))
+      const header = Buffer.from([0x81, text.length])
+      socket.write(Buffer.concat([header, text])); socket.once('data', () => socket.end(Buffer.from([0x88, 0])))
+    })
+  })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  const origin = `http://127.0.0.1:${server.address().port}`
+  return { origin, observed: () => ({ uploadSeen, streamClosed }), close: async () => {
+    for (const socket of sockets) socket.destroy()
+    server.closeAllConnections()
+    await new Promise(resolve => server.close(resolve))
+  } }
+}
+
+for (const change of ['', 'content', 'ws', 'reflect']) {
+  test(`real browser transports ${change ? 'reject ' + change + ' contract loss' : 'verify content, cancellation and cookie MCP roundtrip'}`, async () => {
+    const fixture = await transportFixture(change)
+    const { chromium } = await import('playwright')
+    const { qualifyTransports, createEvidence, createNetworkTracker } = await load()
+    const browser = await chromium.launch({ headless: true })
+    try {
+      const context = await browser.newContext()
+      await context.addCookies([{ name: 'fixture_session', value: 'public-fixture-session', url: fixture.origin }])
+      const page = await context.newPage()
+      await page.goto(fixture.origin)
+      const tracker = createNetworkTracker(page, fixture.origin)
+      const evidence = createEvidence()
+      const action = () => qualifyTransports(page, context, { publicUrl: fixture.origin, sessionCookieName: 'fixture_session' }, 'public-fixture-csrf', tracker, evidence, 1)
+      if (change) await assert.rejects(action(), { message: change === 'content' ? 'multipart_document_1' : change === 'ws' ? 'cookie_mcp_websocket_1' : 'hostile_inputs_1' })
+      else {
+        await action()
+        assert.ok(Object.values(evidence.checks).every(check => check.passed))
+        assert.deepEqual(fixture.observed(), { uploadSeen: true, streamClosed: true })
+        assert.equal(tracker.failed(), false)
+        await page.evaluate(() => fetch('/uncontrolled-failure').then(() => {}))
+        assert.ok(!JSON.stringify(evidence).includes('public-fixture-session'))
+      }
+    } finally { await browser.close(); await fixture.close() }
+  })
+}
+
+test('every mapped missing or false check refuses closure', async () => {
+  const { createEvidence, completeEvidence, REQUIRED_CHECKS } = await load()
+  for (const name of REQUIRED_CHECKS) {
+    for (const missing of [true, false]) {
+      const evidence = createEvidence()
+      for (const required of REQUIRED_CHECKS) evidence.checks[required] = { passed: true }
+      if (missing) delete evidence.checks[name]
+      else evidence.checks[name].passed = false
+      assert.throws(() => completeEvidence(evidence), { message: 'required_checks_failed' })
+      assert.equal(evidence.passed, false)
+    }
+  }
+})
+
+test('controlled cancellation never exempts a second stream or other failed requests', async () => {
+  const { EventEmitter } = await import('node:events')
+  const { createNetworkTracker } = await load()
+  const page = new EventEmitter()
+  let failures = 0
+  const tracker = createNetworkTracker(page, 'http://127.0.0.1:18081', () => { failures++ })
+  const request = path => ({ url: () => 'http://127.0.0.1:18081' + path, failure: () => ({ errorText: 'net::ERR_ABORTED' }) })
+  const first = request('/api/v1/notifications/stream')
+  page.emit('request', first); tracker.armCancellation(); page.emit('requestfailed', first)
+  assert.equal(tracker.failed(), false)
+  const second = request('/api/v1/notifications/stream')
+  page.emit('request', second); page.emit('requestfailed', second)
+  assert.equal(tracker.failed(), true)
+  page.emit('requestfailed', request('/api/v1/setup/first-run/state'))
+  assert.equal(failures, 2)
+})
