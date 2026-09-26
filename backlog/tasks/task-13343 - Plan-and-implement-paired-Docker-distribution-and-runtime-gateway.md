@@ -4,7 +4,7 @@ title: Plan and implement paired Docker distribution and runtime gateway
 status: In Progress
 assignee: []
 created_date: '2026-09-23 06:15'
-updated_date: '2026-09-26 04:47'
+updated_date: '2026-09-26 04:53'
 labels:
   - distribution
   - docker
@@ -79,6 +79,8 @@ Continuing live qualification after verified native run 36210634045. Add a real 
 Live qualification follow-up: Task 9 browser/two-instance probe is being implemented with bounded secret-free evidence. Actual Docker gateway probe forwards loopback requests as bridge addresses (172.18.0.1 client, 172.18.0.3 upstream peer); forged forwarding headers are stripped. Existing setup guard rejects the measured scope with 403. Task 10 records a scoped authenticated private-hop fix; full backend HTTP/browser reproduction and security review remain required. G2/G4/G12 remain open.
 
 Actual fresh Docker/Chromium regression confirmed at clean inspection commit 0790f7e385: first-run/state=403, first-run/metadata=403, manual_master_key_required=true. Public bounded evidence /tmp/task13343-setup-inspection-red.json. This is inspection proof, not signed-candidate acceptance. Task9 probe committed 9d8d3108ee; independent scoped review in progress. Task10 must correct access and metadata together using bounded authenticated managed hop; no global remote-setup bypass.
+
+Additional actual transport inspection at0790: browser-managed session bootstrap200, notification SSE200 with first chunk and browser cancellation; cookie MCP WebSocket fails upgrade (opened=false close1006). Backend trusted_webui_origins does not include configured public127.0.0.1:18090; wildcard=false. Task10 additionally configures existing ALLOWED_ORIGINS to the exact persisted gateway origin and tests refusal of other origins. No wildcard/global policy change.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

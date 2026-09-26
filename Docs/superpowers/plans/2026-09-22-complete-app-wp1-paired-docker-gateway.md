@@ -311,11 +311,17 @@ Host/Origin for both setup access and first-run locality metadata. Ordinary
 developer/hosted setup keeps its existing policy. No blanket proxy trust,
 remote-setup override, API-key injection or client-visible secret is allowed.
 
+Also configure existing backend `ALLOWED_ORIGINS` to that exact public origin.
+Real fresh cookie WebSocket inspection fails its upgrade while the origin is
+absent from `trusted_webui_origins`; ordinary notification SSE succeeds. This
+uses the existing origin policy and adds no wildcard or global auth relaxation.
+
 - [ ] **Step 1:** Capture actual backend HTTP failure and write red behavioral
   tests for the measured Docker scope, metadata and Compose contract.
 - [ ] **Step 2:** Implement the bounded managed-hop predicate and gateway/header
   configuration. Reject missing/wrong/duplicate hop, public peer, mismatched
   origin/Host, malformed forwarding and disabled/unconfigured managed mode.
+  Verify the managed persisted origin is the sole cookie WebSocket origin.
 - [ ] **Step 3:** Run focused positive/negative setup and gateway tests, scoped
   formatting/lint and Bandit. Review before live qualification.
 - [ ] **Step 4:** Rebuild from a clean committed source and run the actual fresh
