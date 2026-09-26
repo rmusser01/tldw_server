@@ -4,7 +4,7 @@ title: Repair ADR task references after Backlog renumbering
 status: Done
 assignee: []
 created_date: '2026-09-26 04:30'
-updated_date: '2026-09-26 04:47'
+updated_date: '2026-09-26 15:59'
 labels:
   - docs
   - adr
@@ -47,6 +47,8 @@ Final combined verification after whitespace cleanup: 34 passed, 2 deselected, 8
 Independent review found one normalization overclaim: get_unified_evaluation returns raw rows on unified and legacy paths. Verified the code and narrowed ADR-048, index, and inventory to converted primary CRUD normalization with an explicit raw unified-read caveat. No runtime fix or parity claim introduced.
 
 Post-review verification: reviewer confirmed P2 resolved with no further findings; fresh combined run passed 34 tests, 2 deselected, 8 warnings. All 48 ADR source/published mirrors and all inventory mirrors match; staged whitespace check clean.
+
+PR: https://github.com/rmusser01/tldw_server/pull/3021. Requested integration: push/create PR; do not merge until human Change summary and review gates are satisfied.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
