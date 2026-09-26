@@ -23,15 +23,91 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.mark.asyncio
-async def test_sync_provider_runs_off_event_loop(
-    calendar_db: CalendarDatabase, jobs_manager: JobManager
-) -> None:
+async def test_import_preserves_master_and_detached_occurrences_across_refresh(calendar_db: CalendarDatabase) -> None:
+    from tldw_Server_API.app.core.Calendar.calendar_sync_worker import _upsert_events
+    from tldw_Server_API.app.core.Calendar.providers.caldav import CalDavProvider
+    from tldw_Server_API.app.core.Calendar.view_service import CalendarViewService
+
+    fixture = _create_sync_fixture(calendar_db)
+    events = CalDavProvider().parse_vevents("""BEGIN:VCALENDAR
+BEGIN:VEVENT
+UID:series
+SUMMARY:Daily
+DTSTART:20260605T090000Z
+DTEND:20260605T100000Z
+RRULE:FREQ=DAILY;COUNT=4
+RDATE:20260610T090000Z
+EXDATE:20260606T090000Z
+END:VEVENT
+BEGIN:VEVENT
+UID:series
+RECURRENCE-ID:20260607T090000Z
+SUMMARY:Moved
+DTSTART:20260607T110000Z
+DTEND:20260607T120000Z
+END:VEVENT
+BEGIN:VEVENT
+UID:series
+RECURRENCE-ID:20260608T090000Z
+SUMMARY:Moved outside window
+DTSTART:20260708T090000Z
+DTEND:20260708T100000Z
+END:VEVENT
+END:VCALENDAR""")
+    binding = calendar_db.get_external_binding(fixture.binding_id)
+    _upsert_events(calendar_db, binding=binding, events=events)
+    rows = calendar_db.list_items_for_expansion(
+        calendar_ids=[fixture.calendar_id], window_start="2026-06-01", window_end="2026-07-15"
+    )
+    first_ids = {row.source_uid: row.id for row in rows}
+    assert len(rows) == 3
+    _upsert_events(calendar_db, binding=binding, events=list(reversed(events)))
+    refreshed = calendar_db.list_items_for_expansion(
+        calendar_ids=[fixture.calendar_id], window_start="2026-06-01", window_end="2026-07-15"
+    )
+    assert {row.source_uid: row.id for row in refreshed} == first_ids
+    result = await CalendarViewService(calendar_service=CalendarService(db=calendar_db)).agenda(
+        actor_user_id=1, start_at="2026-06-01T00:00:00Z", end_at="2026-06-12T00:00:00Z"
+    )
+    assert [(entry.title, entry.start_at) for entry in result.items] == [
+        ("Daily", "2026-06-05T09:00:00+00:00"),
+        ("Moved", "2026-06-07T11:00:00+00:00"),
+        ("Daily", "2026-06-10T09:00:00+00:00"),
+    ]
+
+
+def test_import_preserves_all_day_flag(calendar_db: CalendarDatabase) -> None:
+    from tldw_Server_API.app.core.Calendar.calendar_sync_worker import _upsert_events
+    from tldw_Server_API.app.core.Calendar.providers.caldav import CalDavProvider
+
+    fixture = _create_sync_fixture(calendar_db)
+    events = CalDavProvider().parse_vevents("""BEGIN:VCALENDAR
+BEGIN:VEVENT
+UID:holiday
+DTSTART;VALUE=DATE:20260605
+DTEND;VALUE=DATE:20260607
+END:VEVENT
+END:VCALENDAR""")
+    _upsert_events(calendar_db, binding=calendar_db.get_external_binding(fixture.binding_id), events=events)
+    rows = calendar_db.list_items_for_expansion(
+        calendar_ids=[fixture.calendar_id], window_start="2026-06-01", window_end="2026-06-08"
+    )
+    assert rows[0].all_day is True
+    assert rows[0].start_at == "2026-06-05"
+    assert rows[0].end_at == "2026-06-07"
+
+
+@pytest.mark.asyncio
+async def test_sync_provider_runs_off_event_loop(calendar_db: CalendarDatabase, jobs_manager: JobManager) -> None:
     from tldw_Server_API.app.core.Calendar.calendar_sync_worker import handle_calendar_sync_job
 
     fixture = _create_sync_fixture(calendar_db)
     queued = CalendarService(db=calendar_db, job_manager=jobs_manager).queue_binding_sync(
-        actor_user_id=1, binding_id=fixture.binding_id, reason="manual",
-        window_start="2026-06-01T00:00:00Z", window_end="2026-06-08T00:00:00Z",
+        actor_user_id=1,
+        binding_id=fixture.binding_id,
+        reason="manual",
+        window_start="2026-06-01T00:00:00Z",
+        window_end="2026-06-08T00:00:00Z",
     )
     call_threads: list[int] = []
 
@@ -93,11 +169,16 @@ def test_shared_credentials_enforce_scope_and_override_precedence(calendar_db: C
     with pytest.raises(CalendarPermissionDenied):
         resolve_caldav_credentials(calendar_db, account_id=fixture.account_id, actor_user_id=1, tenant_id="other")
     credentials = resolve_caldav_credentials(
-        calendar_db, account_id=fixture.account_id, actor_user_id=1, tenant_id="default",
+        calendar_db,
+        account_id=fixture.account_id,
+        actor_user_id=1,
+        tenant_id="default",
         overrides={"username": "override-user", "token": "override-token"},
     )
     assert credentials == {
-        "server_url": "https://caldav.example.test/dav/", "username": "override-user", "password": "override-token",
+        "server_url": "https://caldav.example.test/dav/",
+        "username": "override-user",
+        "password": "override-token",
     }
 
 
@@ -216,8 +297,7 @@ def test_queue_binding_sync_creates_sanitized_jobs_payload(
     assert job["job_type"] == "calendar_sync"
     assert job["owner_user_id"] == "1"
     assert job["idempotency_key"] == (
-        f"calendar:sync:binding:{fixture.binding_id}:"
-        "2026-06-01T00:00:00+00:00:2026-06-08T00:00:00+00:00:manual"
+        f"calendar:sync:binding:{fixture.binding_id}:2026-06-01T00:00:00+00:00:2026-06-08T00:00:00+00:00:manual"
     )
     assert job["payload"] == {
         "binding_id": fixture.binding_id,
@@ -385,7 +465,9 @@ async def test_worker_does_not_infer_remote_deletion_from_bounded_poll(
         window_end="2026-06-08T00:00:00+00:00",
     )
 
-    await handle_calendar_sync_job(jobs_manager.get_job(queued.job_id), db=calendar_db, provider=_FakeProvider(events=[]))
+    await handle_calendar_sync_job(
+        jobs_manager.get_job(queued.job_id), db=calendar_db, provider=_FakeProvider(events=[])
+    )
 
     preserved = calendar_db.get_item(stale_item.id, include_deleted=True)
     assert preserved.remote_deleted_at is None

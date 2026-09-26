@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from typing import Any, get_args
+from dateutil import parser as date_parser
+from datetime import timezone as utc_timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from tldw_Server_API.app.core.Calendar.constants import CALENDAR_SOURCE_OWNER_PROVIDER
 from tldw_Server_API.app.core.Calendar.errors import (
@@ -169,7 +172,7 @@ class CalendarService:
         local_tags_json: str | list[str] | None = None,
         metadata_json: str | dict[str, Any] | None = None,
     ) -> CalendarItemRow:
-        self._validate_item_time(kind=kind, start_at=start_at, due_at=due_at)
+        self._validate_item_time(kind=kind, start_at=start_at, due_at=due_at, end_at=end_at, timezone_name=timezone)
         self._assert_calendar_access(actor_user_id, calendar_id, "write")
         return self.db.create_item(
             calendar_id=calendar_id,
@@ -201,11 +204,13 @@ class CalendarService:
         item, _ = self._item_and_context(actor_user_id, item_id)
         self._raise_if_provider_owned(item)
         self._assert_calendar_access(actor_user_id, item.calendar_id, "write")
-        if {"kind", "start_at", "due_at"} & updates.keys():
+        if {"kind", "start_at", "end_at", "due_at", "timezone", "all_day"} & updates.keys():
             self._validate_item_time(
                 kind=str(updates.get("kind", item.kind)),
                 start_at=updates.get("start_at", item.start_at),
                 due_at=updates.get("due_at", item.due_at),
+                end_at=updates.get("end_at", item.end_at),
+                timezone_name=updates.get("timezone", item.timezone),
             )
         return self.db.update_item(item_id, updates)
 
@@ -224,20 +229,14 @@ class CalendarService:
         window_end: str,
     ) -> list[CalendarItemRow]:
         readable_calendar_ids = [
-            calendar_id
-            for calendar_id in calendar_ids
-            if self._can_read_calendar(actor_user_id, calendar_id)
+            calendar_id for calendar_id in calendar_ids if self._can_read_calendar(actor_user_id, calendar_id)
         ]
         items = self.db.list_items_window(
             calendar_ids=readable_calendar_ids,
             window_start=window_start,
             window_end=window_end,
         )
-        return [
-            item
-            for item in items
-            if self._can_read_item(actor_user_id=actor_user_id, item=item)
-        ]
+        return [item for item in items if self._can_read_item(actor_user_id=actor_user_id, item=item)]
 
     def create_annotation(
         self,
@@ -478,13 +477,36 @@ class CalendarService:
             raise CalendarValidationError(f"Unsupported calendar role: {role}")
 
     @staticmethod
-    def _validate_item_time(*, kind: str, start_at: str | None, due_at: str | None) -> None:
+    def _validate_item_time(
+        *,
+        kind: str,
+        start_at: str | None,
+        due_at: str | None,
+        end_at: str | None = None,
+        timezone_name: str | None = None,
+    ) -> None:
         if kind == "event" and not start_at:
             raise CalendarValidationError("Calendar events require start_at")
         if kind == "todo" and not (start_at or due_at):
             raise CalendarValidationError("Calendar todos require due_at or start_at")
         if kind not in {"event", "todo"}:
             raise CalendarValidationError(f"Unsupported calendar item kind: {kind}")
+        try:
+            zone = ZoneInfo(timezone_name) if timezone_name else utc_timezone.utc
+            parsed = {}
+            for name, value in {"start_at": start_at, "end_at": end_at, "due_at": due_at}.items():
+                if value is None:
+                    continue
+                moment = date_parser.isoparse(value)
+                parsed[name] = moment if moment.tzinfo else moment.replace(tzinfo=zone)
+        except (TypeError, ValueError, ZoneInfoNotFoundError) as exc:
+            raise CalendarValidationError(
+                "Calendar times must be valid ISO dates/timestamps and use an IANA timezone"
+            ) from exc
+        if "end_at" in parsed:
+            anchor = parsed.get("start_at") or parsed.get("due_at")
+            if anchor is None or parsed["end_at"] < anchor:
+                raise CalendarValidationError("Calendar end_at must not precede start_at/due_at")
 
 
 __all__ = ["CalendarService"]

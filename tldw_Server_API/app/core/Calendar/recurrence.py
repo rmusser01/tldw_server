@@ -141,9 +141,7 @@ def validate_query_window(window_start: TemporalValue, window_end: TemporalValue
     if end <= start:
         raise CalendarValidationError("Calendar query window end must be after start")
     if end - start > timedelta(days=MAX_QUERY_WINDOW_DAYS):
-        raise CalendarValidationError(
-            f"Calendar query window cannot exceed {MAX_QUERY_WINDOW_DAYS} days"
-        )
+        raise CalendarValidationError(f"Calendar query window cannot exceed {MAX_QUERY_WINDOW_DAYS} days")
 
 
 def expand_recurrence(
@@ -199,6 +197,68 @@ def expand_rrule(
         timezone_name=timezone_name,
         all_day=all_day,
     )
+
+
+def expand_recurrence_set(
+    *,
+    master_start: TemporalValue,
+    master_end: TemporalValue | None,
+    rrule_text: str | None,
+    rdates: list[str],
+    exdates: list[str],
+    window_start: TemporalValue,
+    window_end: TemporalValue,
+    timezone_name: str | None = None,
+    all_day: bool = False,
+    provider_rule: bool = False,
+) -> list[RecurrenceOccurrence]:
+    """Expand DTSTART/RRULE/RDATE minus EXDATE with bounded iteration and exclusive dates."""
+    validate_query_window(window_start, window_end)
+    zone = _zoneinfo(timezone_name)
+    start = _coerce_datetime(master_start, zone)
+    end = _coerce_datetime(master_end, zone) if master_end else None
+    duration = end - start if end else timedelta(days=1) if all_day else timedelta(0)
+    if duration < timedelta(0):
+        raise CalendarValidationError("Recurrence end must not precede start")
+    query_start = _coerce_datetime(window_start, zone)
+    query_end = _coerce_datetime(window_end, zone)
+    rules = rrule.rruleset()
+    rules.rdate(start)
+    try:
+        if rrule_text:
+            if provider_rule:
+                fields = dict(part.split("=", 1) for part in rrule_text.removeprefix("RRULE:").split(";"))
+                if int(fields.get("INTERVAL", "1")) < 1 or int(fields.get("COUNT", "1")) < 1:
+                    raise ValueError("Recurrence interval/count must be positive")
+                rules.rrule(rrule.rrulestr(rrule_text, dtstart=start))
+            else:
+                rules.rrule(_dateutil_rule(LocalRecurrenceRule.from_rrule(rrule_text), dtstart=start))
+        for value in rdates:
+            rules.rdate(_coerce_datetime(value, zone))
+        for value in exdates:
+            rules.exdate(_coerce_datetime(value, zone))
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise CalendarValidationError("Invalid recurrence dates or rule") from exc
+    occurrences = []
+    # Bound scanning too: an old high-frequency provider rule must not monopolize a request.
+    for index, candidate in enumerate(rules):
+        if index >= 100_000:
+            raise CalendarValidationError("Recurrence exceeds expansion scan limit")
+        if candidate >= query_end:
+            break
+        occurrence_end = candidate + duration
+        if (duration and occurrence_end <= query_start) or (not duration and candidate < query_start):
+            continue
+        occurrences.append(
+            RecurrenceOccurrence(
+                start_at=candidate.date() if all_day else candidate,
+                end_at=occurrence_end.date() if all_day else occurrence_end if end else None,
+                occurrence_index=len(occurrences),
+            )
+        )
+        if len(occurrences) >= MAX_EXPANDED_OCCURRENCES:
+            break
+    return occurrences
 
 
 def _expand_timed_recurrence(
@@ -330,7 +390,10 @@ def _coerce_datetime(value: TemporalValue | None, tz: ZoneInfo | timezone | None
     elif isinstance(value, date):
         parsed = datetime.combine(value, time.min)
     elif isinstance(value, str):
-        parsed = date_parser.isoparse(value)
+        try:
+            parsed = date_parser.isoparse(value)
+        except (TypeError, ValueError) as exc:
+            raise CalendarValidationError("Calendar time must be a valid ISO date or timestamp") from exc
     else:
         raise CalendarValidationError(f"Unsupported temporal value: {value!r}")
 
