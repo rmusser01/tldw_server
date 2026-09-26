@@ -126,7 +126,10 @@ test('keyless setup uses accessible Docker and privacy controls', async () => {
       document.querySelector('button').onclick = () => {
         document.body.innerHTML = '<h1>First-time setup</h1><button>Solo, Docker</button>'
         document.querySelector('button').onclick = () => {
-          document.body.innerHTML = '<button>Continue</button>'
+          document.body.innerHTML = '<h2>Privacy and security</h2><label><input type="checkbox">I understand local or remote setup access and provider secret storage.</label><button disabled>Continue</button>'
+          document.querySelector('input').onchange = event => {
+            document.querySelector('button').disabled = !event.currentTarget.checked
+          }
           document.querySelector('button').onclick = () => {
             document.body.innerHTML = '<h2>Chat provider</h2>'
           }
@@ -358,6 +361,7 @@ async function transportFixture(change = '', pairedIndex) {
   let uploadSeen = false
   let streamClosed = false
   let sessionActive = false
+  const setupMutations = []
   const sessionName = pairedIndex ? `session_${pairedIndex}` : 'fixture_session'
   const csrfName = `csrf_${pairedIndex}`
   const sessionValue = pairedIndex ? `public-fixture-session-${pairedIndex}` : 'public-fixture-session'
@@ -370,8 +374,37 @@ async function transportFixture(change = '', pairedIndex) {
     if (pairedIndex && path === '/setup') {
       res.setHeader('Content-Type', 'text/html')
       res.end(`<h1>Setup</h1><div id="controls"></div><script>
-        function provider() { controls.innerHTML = '<h1>Chat provider setup</h1>' }
-        function docker() { controls.innerHTML = '<h1>First-time setup</h1><button onclick="provider()">Continue</button>' }
+        const controls = document.getElementById('controls');
+        window.setupEvents = [];
+        async function save(step, data) {
+          const csrf = document.cookie.split('; ').find(value => value.startsWith('${csrfName}='))?.split('=')[1];
+          const response = await fetch('/api/v1/setup/first-run/state', {
+            method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+            body: JSON.stringify({ step, data })
+          });
+          await response.arrayBuffer();
+          if (!response.ok) { controls.insertAdjacentHTML('beforeend', '<p role="alert">Setup progress could not be saved.</p>'); return false; }
+          return true;
+        }
+        async function provider() {
+          const checkbox = controls.querySelector('input');
+          if (!checkbox?.checked) return;
+          window.setupEvents.push('continue');
+          controls.querySelector('button').disabled = true;
+          if (await save('privacy_security', { acknowledged: true, local_only: true, allow_remote_setup_access: false })) {
+            controls.innerHTML = '<h1>Chat provider setup</h1>';
+          }
+        }
+        async function docker() {
+          if (!await save('setup_path', { acknowledged: true, selected_path: 'docker_single_user', setup_path_key: 'docker_single_user', install_method: 'docker', deployment_mode: 'single_user' })) return;
+          controls.innerHTML = '<h2>Privacy and security</h2>${change === 'missing-acknowledgement' ? '' : `<label><input type="checkbox" ${change === 'disabled-acknowledgement' ? 'disabled' : ''}>I understand local or remote setup access and provider secret storage.</label>`}<button disabled onclick="provider()">Continue</button>';
+          window.setupEvents.push('privacy-unchecked-continue-disabled');
+          const checkbox = controls.querySelector('input');
+          if (checkbox) checkbox.onchange = () => {
+            window.setupEvents.push(checkbox.checked ? 'acknowledged' : 'unacknowledged');
+            controls.querySelector('button').disabled = !checkbox.checked;
+          };
+        }
         function wizard() { controls.innerHTML = '<h1>First-time setup</h1><button onclick="docker()">Solo, Docker</button>' }
         (async () => {
           const session = await fetch('/api/_tldw-webui/session', { method: 'POST' }); await session.arrayBuffer();
@@ -398,6 +431,25 @@ async function transportFixture(change = '', pairedIndex) {
       sessionActive = false
       res.setHeader('Set-Cookie', `${sessionName}=; Path=/api; Max-Age=0; HttpOnly; SameSite=Lax`)
       res.end('{}'); return
+    }
+    if (pairedIndex && path === '/api/v1/setup/first-run/state' && req.method === 'POST') {
+      if (!sessionActive || !req.headers.cookie?.includes(`${sessionName}=${sessionValue}`) ||
+          !req.headers.cookie?.includes(`${csrfName}=${csrfValue}`) || req.headers['x-csrf-token'] !== csrfValue) {
+        res.writeHead(403); res.end('{}'); return
+      }
+      let body = ''
+      req.on('data', chunk => { body += chunk })
+      req.on('end', () => {
+        const mutation = JSON.parse(body)
+        const expected = setupMutations.length === 0
+          ? { step: 'setup_path', data: { acknowledged: true, selected_path: 'docker_single_user', setup_path_key: 'docker_single_user', install_method: 'docker', deployment_mode: 'single_user' } }
+          : { step: 'privacy_security', data: { acknowledged: true, local_only: true, allow_remote_setup_access: false } }
+        setupMutations.push(mutation)
+        const status = JSON.stringify(mutation) !== JSON.stringify(expected) ? 400
+          : mutation.step === 'privacy_security' && change === 'privacy-refused' ? 403
+            : mutation.step === 'privacy_security' && change === 'privacy-server-error' ? 500 : 200
+        res.writeHead(status); res.end('{}')
+      }); return
     }
     if (path === '/api/documentation/manifest') { res.end(JSON.stringify({ docsBySource: { server: [{ source: 'server', relativePath: 'API-related/AuthNZ-API-Guide.md' }] } })); return }
     if (path === '/api/documentation/content') {
@@ -433,11 +485,75 @@ async function transportFixture(change = '', pairedIndex) {
   })
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
   const origin = `http://127.0.0.1:${server.address().port}`
-  return { origin, observed: () => ({ uploadSeen, streamClosed }), close: async () => {
+  return { origin, setupMutations, observed: () => ({ uploadSeen, streamClosed }), close: async () => {
     for (const socket of sockets) socket.destroy()
     server.closeAllConnections()
     await new Promise(resolve => server.close(resolve))
   } }
+}
+
+test('managed setup acknowledges privacy before successful cookie-CSRF writes', async () => {
+  const fixture = await transportFixture('', 1)
+  const { chromium } = await import('playwright')
+  const { inspectManagedSetup, createEvidence, createSetupResponseTracker, createNetworkTracker } = await load()
+  const browser = await chromium.launch({ headless: true })
+  try {
+    const page = await browser.newPage()
+    page.setDefaultTimeout(2_000)
+    const evidence = createEvidence()
+    const setup = createSetupResponseTracker(evidence, 1, fixture.origin)
+    const network = createNetworkTracker(page, fixture.origin)
+    page.on('response', response => setup.observe(response.url(), response.status()))
+    await page.goto(fixture.origin + '/setup')
+    await inspectManagedSetup(page)
+    assert.deepEqual(await page.evaluate(() => window.setupEvents), ['privacy-unchecked-continue-disabled', 'acknowledged', 'continue'])
+    assert.deepEqual(fixture.setupMutations, [
+      { step: 'setup_path', data: { acknowledged: true, selected_path: 'docker_single_user', setup_path_key: 'docker_single_user', install_method: 'docker', deployment_mode: 'single_user' } },
+      { step: 'privacy_security', data: { acknowledged: true, local_only: true, allow_remote_setup_access: false } },
+    ])
+    setup.assertSucceeded()
+    assert.equal(network.failed(), false)
+  } finally { await browser.close(); await fixture.close() }
+})
+
+for (const change of ['missing-acknowledgement', 'disabled-acknowledgement', 'privacy-refused', 'privacy-server-error']) {
+  test(`managed setup fails closed for ${change} despite later successful GET`, async () => {
+    const fixture = await transportFixture(change, 1)
+    const { chromium } = await import('playwright')
+    const { inspectManagedSetup, createEvidence, recordCheck, createSetupResponseTracker, createNetworkTracker, completeEvidence, REQUIRED_CHECKS } = await load()
+    const browser = await chromium.launch({ headless: true })
+    try {
+      const page = await browser.newPage()
+      page.setDefaultTimeout(1_000)
+      const evidence = createEvidence()
+      for (const name of REQUIRED_CHECKS) evidence.checks[name] = { passed: true }
+      const setup = createSetupResponseTracker(evidence, 1, fixture.origin)
+      const network = createNetworkTracker(page, fixture.origin, () => {
+        evidence.checks.live_errors_absent = { passed: false }
+        evidence.failure_code ||= 'live_errors_absent'
+        evidence.passed = false
+      })
+      page.on('response', response => setup.observe(response.url(), response.status()))
+      await page.goto(fixture.origin + '/setup')
+      await assert.rejects(recordCheck(evidence, 'setup_interaction_1', () => inspectManagedSetup(page)), { message: 'setup_interaction_1' })
+      assert.equal(await page.getByRole('heading', { name: 'Chat provider setup', exact: true }).isVisible(), false)
+      const laterSuccess = page.waitForResponse(response => response.url() === fixture.origin + '/api/v1/setup/first-run/state' && response.request().method() === 'GET')
+      await page.evaluate(() => fetch('/api/v1/setup/first-run/state').then(response => response.arrayBuffer()))
+      assert.equal((await laterSuccess).status(), 200)
+      assert.equal(evidence.checks.setup_interaction_1.passed, false)
+      if (change.startsWith('privacy-')) {
+        assert.deepEqual(fixture.setupMutations.map(mutation => mutation.step), ['setup_path', 'privacy_security'])
+        assert.throws(() => setup.assertSucceeded(), { message: 'setup_api_access_1' })
+        assert.equal(evidence.checks.setup_api_access_1.passed, false)
+      } else {
+        assert.deepEqual(fixture.setupMutations.map(mutation => mutation.step), ['setup_path'])
+      }
+      assert.equal(network.failed(), change === 'privacy-server-error')
+      assert.throws(() => completeEvidence(evidence), { message: 'required_checks_failed' })
+      assert.equal(evidence.passed, false)
+      if (change === 'privacy-server-error') assert.equal(evidence.checks.live_errors_absent.passed, false)
+    } finally { await browser.close(); await fixture.close() }
+  })
 }
 
 test('paired browser discovers API-scoped session cookies at setup, hostile checks and rebootstrap', async () => {
@@ -453,6 +569,9 @@ test('paired browser discovers API-scoped session cookies at setup, hostile chec
       assert.equal(evidence.checks[name].passed, true)
     }
     assert.equal(evidence.passed, true)
+    for (const fixture of [first, second]) {
+      assert.deepEqual(fixture.setupMutations.map(mutation => mutation.step), ['setup_path', 'privacy_security'])
+    }
     assert.ok(!JSON.stringify(evidence).includes('public-fixture-session'))
   } finally { await first.close(); await second.close(); rmSync(root, { recursive: true, force: true }) }
 })

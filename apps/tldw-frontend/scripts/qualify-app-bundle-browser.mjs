@@ -116,6 +116,8 @@ export async function inspectManagedSetup(page) {
   await start.click()
   await page.getByRole('heading', { name: 'First-time setup', exact: true }).waitFor()
   await page.getByRole('button', { name: /Solo, Docker/ }).click()
+  await page.getByRole('heading', { name: 'Privacy and security', exact: true }).waitFor()
+  await page.getByRole('checkbox', { name: 'I understand local or remote setup access and provider secret storage.', exact: true }).check()
   await page.getByRole('button', { name: 'Continue', exact: true }).click()
   // Initial wizard progression is partial setup, not complete G2 qualification.
   await page.getByRole('heading', { name: /chat provider|provider setup|choose.*provider/i }).first().waitFor()
