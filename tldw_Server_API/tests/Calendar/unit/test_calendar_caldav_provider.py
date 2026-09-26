@@ -3,14 +3,102 @@ from __future__ import annotations
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any
+import contextlib
 
+import httpx
 import pytest
+from loguru import logger
 
 from tldw_Server_API.app.core.Calendar.errors import CalendarValidationError
 from tldw_Server_API.app.core.Calendar.providers.caldav import CalDavProvider, sanitize_provider_metadata
 from tldw_Server_API.app.core.Calendar.providers import caldav as caldav_module
 
 pytestmark = pytest.mark.unit
+
+
+def test_provider_rejects_oversized_ics_before_parsing() -> None:
+    with pytest.raises(CalendarValidationError, match="byte limit"):
+        CalDavProvider(max_ics_bytes=32).parse_vevents("x" * 33)
+
+
+def test_provider_rejects_oversized_buffered_response() -> None:
+    client = _FakeHttpClient([_FakeResponse(text="x" * 33)])
+    with pytest.raises(CalendarValidationError, match="byte limit"):
+        CalDavProvider(http_client=client, max_response_bytes=32)._request(
+            "REPORT", "https://calendar.example.test/", username="user", password="secret"
+        )
+
+
+@pytest.mark.parametrize("content_length", [None, "1000"])
+def test_default_transport_bounds_stream_before_buffering(
+    monkeypatch: pytest.MonkeyPatch, content_length: str | None
+) -> None:
+    consumed: list[int] = []
+    closed: list[bool] = []
+
+    class Response:
+        headers = {"Content-Length": content_length} if content_length else {}
+        status_code = 207
+
+        def iter_bytes(self, chunk_size: int) -> Any:
+            for index in range(10):
+                consumed.append(index)
+                yield b"x" * 16
+
+    class Client:
+        def __enter__(self) -> Client:
+            return self
+
+        def __exit__(self, *_args: Any) -> None:
+            pass
+
+        @contextlib.contextmanager
+        def stream(self, *_args: Any, **_kwargs: Any) -> Any:
+            try:
+                yield Response()
+            finally:
+                closed.append(True)
+
+    monkeypatch.setattr(caldav_module, "create_client", lambda **kwargs: Client())
+    monkeypatch.setattr(caldav_module, "evaluate_url_policy", lambda *args, **kwargs: SimpleNamespace(
+        allowed=True, resolved_ips=("93.184.216.34",)
+    ))
+    with pytest.raises(CalendarValidationError, match="byte limit"):
+        CalDavProvider(max_response_bytes=32)._request(
+            "REPORT", "https://calendar.example.test/", username="user", password="secret"
+        )
+    assert len(consumed) == (0 if content_length else 3)
+    assert closed == [True]
+
+
+def test_verification_logs_safe_diagnostics_and_does_not_expose_credentials() -> None:
+    class Client:
+        def request(self, *_args: Any, **_kwargs: Any) -> Any:
+            raise httpx.ConnectError("password=private-secret https://host/?token=private-token")
+
+    messages: list[str] = []
+    sink = logger.add(messages.append, format="{message} {extra}")
+    try:
+        result = CalDavProvider(http_client=Client()).verify_account(
+            server_url="https://calendar.example.test/", username="user", password="private-secret"
+        )
+    finally:
+        logger.remove(sink)
+    assert result.error == "CalDAV verification failed (ConnectError)"
+    assert "verify_account" in "".join(messages)
+    assert "private-secret" not in repr(result) + "".join(messages)
+    assert "private-token" not in repr(result) + "".join(messages)
+
+
+def test_verification_does_not_swallow_programming_errors() -> None:
+    class Client:
+        def request(self, *_args: Any, **_kwargs: Any) -> Any:
+            raise TypeError("programming error")
+
+    with pytest.raises(TypeError, match="programming error"):
+        CalDavProvider(http_client=Client()).verify_account(
+            server_url="https://calendar.example.test/", username="user", password="secret"
+        )
 
 
 @dataclass
@@ -144,9 +232,10 @@ def test_default_transport_connects_to_vetted_ip_with_original_host_identity(
         def __exit__(self, *_args: Any) -> None:
             return None
 
-        def request(self, method: str, url: str, **kwargs: Any) -> _FakeResponse:
+        @contextlib.contextmanager
+        def stream(self, method: str, url: str, **kwargs: Any) -> Any:
             calls.append({"method": method, "url": url, **kwargs})
-            return _FakeResponse(status_code=200)
+            yield httpx.Response(200, content=b"")
 
     monkeypatch.setattr(caldav_module, "create_client", _Client)
     monkeypatch.setattr(
