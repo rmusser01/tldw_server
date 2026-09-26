@@ -69,6 +69,7 @@ from tldw_Server_API.app.core.Calendar.errors import (
 )
 from tldw_Server_API.app.core.Calendar.providers.caldav import CalDavProvider, sanitize_provider_metadata
 from tldw_Server_API.app.core.Calendar.secret_store import CalendarSecretStore
+from tldw_Server_API.app.core.Calendar.provider_operations import call_provider, resolve_caldav_credentials
 from tldw_Server_API.app.core.Calendar.view_service import (
     CalendarViewFilters,
     CalendarViewResult,
@@ -235,48 +236,6 @@ def _external_account_secret_payload(payload: ExternalCalendarAccountCreateReque
         if not payload.server_url or not payload.username:
             raise CalendarValidationError("CalDAV account credentials require server_url and username")
     return secret_payload if payload.password or payload.token else None
-
-
-def _resolve_caldav_credentials(
-    *,
-    db: CalendarDatabase,
-    current_user: User,
-    account_id: int,
-    payload: CalDavAccountVerifyRequest | None = None,
-) -> dict[str, str]:
-    account = db.get_external_account(account_id)
-    if account.provider.lower() != "caldav":
-        raise CalendarValidationError("External calendar account is not a CalDAV account")
-    if account.status != "active" or account.revoked_at or account.deleted_at:
-        raise CalendarValidationError("External calendar account is not active")
-
-    metadata = account.account_metadata_json
-    metadata_dict: dict[str, Any] = {}
-    if metadata:
-        try:
-            metadata_dict = json.loads(metadata)
-        except ValueError:
-            metadata_dict = {}
-
-    stored_secret: dict[str, Any] = {}
-    if account.secret_ref:
-        stored_secret = CalendarSecretStore(db=db, tenant_id=_tenant_id(current_user)).resolve_secret(
-            owner_user_id=_user_id(current_user),
-            secret_ref=account.secret_ref,
-        )
-
-    request_data = payload.model_dump(exclude_unset=True) if payload else {}
-    server_url = request_data.get("server_url") or stored_secret.get("server_url") or metadata_dict.get("server_url")
-    username = request_data.get("username") or stored_secret.get("username") or metadata_dict.get("username")
-    password = (
-        request_data.get("password")
-        or request_data.get("token")
-        or stored_secret.get("password")
-        or stored_secret.get("token")
-    )
-    if not server_url or not username or not password:
-        raise CalendarValidationError("CalDAV account verification requires server_url, username, and password/token")
-    return {"server_url": str(server_url), "username": str(username), "password": str(password)}
 
 
 def _upsert_recurrence_if_present(
@@ -791,13 +750,13 @@ async def verify_external_calendar_account(
 ) -> CalDavAccountVerifyResponse:
     try:
         _assert_external_account_owner(db, account_id=account_id, current_user=current_user)
-        credentials = _resolve_caldav_credentials(
+        credentials = resolve_caldav_credentials(
             db=db,
-            current_user=current_user,
+            actor_user_id=_user_id(current_user), tenant_id=_tenant_id(current_user),
             account_id=account_id,
-            payload=payload,
+            overrides=payload.model_dump(exclude_unset=True) if payload else None,
         )
-        verification = _provider_result_dict(provider.verify_account(**credentials))
+        verification = _provider_result_dict(await call_provider(provider.verify_account, **credentials))
     except (CalendarNotFound, CalendarPermissionDenied, CalendarValidationError) as exc:
         raise _map_calendar_error(exc) from exc
     return CalDavAccountVerifyResponse(
@@ -823,13 +782,13 @@ async def discover_external_calendars(
 ) -> ExternalCalendarDiscoveryResponse:
     try:
         _assert_external_account_owner(db, account_id=account_id, current_user=current_user)
-        credentials = _resolve_caldav_credentials(
+        credentials = resolve_caldav_credentials(
             db=db,
-            current_user=current_user,
+            actor_user_id=_user_id(current_user), tenant_id=_tenant_id(current_user),
             account_id=account_id,
-            payload=payload,
+            overrides=payload.model_dump(exclude_unset=True) if payload else None,
         )
-        discovered = provider.discover_calendars(**credentials)
+        discovered = await call_provider(provider.discover_calendars, **credentials)
     except (CalendarNotFound, CalendarPermissionDenied, CalendarValidationError) as exc:
         raise _map_calendar_error(exc) from exc
     items = []

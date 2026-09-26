@@ -14,14 +14,18 @@ from defusedxml import ElementTree
 from dateutil import parser as date_parser
 from dateutil import tz
 from icalendar import Calendar as ICalendar
+import httpx
 
 from tldw_Server_API.app.core.Calendar.errors import CalendarValidationError
+from tldw_Server_API.app.core.Calendar.provider_operations import log_calendar_failure
 from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
 from tldw_Server_API.app.core.http_client import _prepare_pinned_transport_target, create_client
 
 _DAV_NS = "DAV:"
 _CALDAV_NS = "urn:ietf:params:xml:ns:caldav"
 _CALSERVER_NS = "http://calendarserver.org/ns/"
+MAX_RESPONSE_BYTES = 8 * 1024 * 1024
+MAX_ICS_BYTES = 1024 * 1024
 _SECRET_METADATA_KEYS = {
     "authorization",
     "proxy-authorization",
@@ -65,9 +69,14 @@ class CalDavEvent:
 class CalDavProvider:
     """Minimal CalDAV client for account verification and read-only discovery."""
 
-    def __init__(self, *, http_client: Any | None = None, timeout_seconds: float = 10.0) -> None:
+    def __init__(
+        self, *, http_client: Any | None = None, timeout_seconds: float = 10.0,
+        max_response_bytes: int = MAX_RESPONSE_BYTES, max_ics_bytes: int = MAX_ICS_BYTES,
+    ) -> None:
         self.http_client = http_client
         self.timeout_seconds = timeout_seconds
+        self.max_response_bytes = max_response_bytes
+        self.max_ics_bytes = max_ics_bytes
 
     def verify_account(self, *, server_url: str, username: str, password: str) -> CalDavVerificationResult:
         safe_url = self._validate_http_url(server_url)
@@ -79,8 +88,11 @@ class CalDavProvider:
                 password=password,
             )
             self._raise_for_status(response)
-        except Exception as exc:
-            return CalDavVerificationResult(verified=False, status="error", error=str(exc))
+        except (httpx.HTTPError, OSError, CalendarValidationError) as exc:
+            log_calendar_failure("verify_account", exc)
+            return CalDavVerificationResult(
+                verified=False, status="error", error=f"CalDAV verification failed ({type(exc).__name__})"
+            )
         return CalDavVerificationResult(verified=True, status="ok", error=None)
 
     def discover_calendars(
@@ -152,6 +164,8 @@ class CalDavProvider:
         )
 
     def parse_vevents(self, ics_payload: str) -> list[CalDavEvent]:
+        if len(ics_payload.encode("utf-8")) > self.max_ics_bytes:
+            raise CalendarValidationError("iCalendar payload exceeds byte limit")
         try:
             calendar = ICalendar.from_ical(ics_payload)
         except ValueError as exc:
@@ -248,13 +262,19 @@ class CalDavProvider:
         safe_url = self._validate_http_url(url)
         content = body.encode("utf-8") if body is not None else None
         if self.http_client is not None:
-            return self.http_client.request(
+            response = self.http_client.request(
                 method,
                 safe_url,
                 headers=headers,
                 content=content,
                 timeout=self.timeout_seconds,
             )
+            raw = getattr(response, "content", None)
+            if raw is None:
+                raw = str(getattr(response, "text", "")).encode("utf-8")
+            if len(raw) > self.max_response_bytes:
+                raise CalendarValidationError("CalDAV response exceeds byte limit")
+            return response
         policy = evaluate_url_policy(safe_url, block_private_override=True)
         if not policy.allowed or not policy.resolved_ips:
             raise CalendarValidationError("CalDAV server URL is blocked by outbound network policy")
@@ -262,22 +282,32 @@ class CalDavProvider:
             safe_url, headers, tuple(policy.resolved_ips)
         )
         with create_client(timeout=self.timeout_seconds, trust_env=False) as client:
-            return client.request(
+            with client.stream(
                 method,
                 transport_url,
                 headers=transport_headers,
                 content=content,
                 extensions={"sni_hostname": sni_hostname} if sni_hostname else None,
                 follow_redirects=False,
-            )
+            ) as response:
+                self._raise_for_status(response)
+                declared_size = response.headers.get("Content-Length")
+                if declared_size and declared_size.isdigit() and int(declared_size) > self.max_response_bytes:
+                    raise CalendarValidationError("CalDAV response exceeds byte limit")
+                content_buffer = bytearray()
+                for chunk in response.iter_bytes(chunk_size=64 * 1024):
+                    if len(content_buffer) + len(chunk) > self.max_response_bytes:
+                        raise CalendarValidationError("CalDAV response exceeds byte limit")
+                    content_buffer.extend(chunk)
+                return httpx.Response(
+                    response.status_code, headers=response.headers, content=bytes(content_buffer),
+                    request=httpx.Request(method, safe_url),
+                )
 
     @staticmethod
     def _raise_for_status(response: Any) -> None:
-        if hasattr(response, "raise_for_status"):
-            response.raise_for_status()
-            return
         status_code = int(getattr(response, "status_code", 0) or 0)
-        if status_code >= 400:
+        if status_code >= 300:
             raise CalendarValidationError(f"CalDAV provider returned HTTP {status_code}")
 
     @staticmethod
@@ -287,6 +317,8 @@ class CalDavProvider:
         if raw_text is None:
             content = getattr(response, "content", b"")
             raw_text = content.decode("utf-8") if isinstance(content, bytes) else str(content)
+        if len(raw_text.encode("utf-8")) > MAX_RESPONSE_BYTES:
+            raise CalendarValidationError("CalDAV XML exceeds byte limit")
         try:
             return ElementTree.fromstring(raw_text)
         except ElementTree.ParseError as exc:
