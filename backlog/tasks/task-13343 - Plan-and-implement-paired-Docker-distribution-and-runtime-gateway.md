@@ -4,7 +4,7 @@ title: Plan and implement paired Docker distribution and runtime gateway
 status: In Progress
 assignee: []
 created_date: '2026-09-23 06:15'
-updated_date: '2026-09-26 09:30'
+updated_date: '2026-09-26 10:03'
 labels:
   - distribution
   - docker
@@ -121,6 +121,8 @@ Final combined fix wave commits17ce1a3e99/1d0bcb9b28 independently re-reviewed o
 Exact clean candidatebd0de93363 built all4armimages and passed builtMCP39/Setup60, then extracted first-start failed at lifecycle104. Ownedcleanuptrue, signaturesinvalidated/allgatesfalse; no browser/native qualification or push. Read-only cached reproduction proves verify/init/pull/all3healthy and actualruntime identity pass; gateway /internal/ready correctly404 because backend allowsloopbackonly. Existing authenticated /api/v1/health/ready requiresSYSTEM_LOGS and livecookie proof returns200/statusready (anon401); exactsessionDELETE200 then oldcookieprofile/readiness401. All owneddiagnostic containers/networks/volumes/registryremoved, sourceunchanged. Add narrowTask19 actualqualification correction: move backendreadiness to existingoperatorroute after ephemeralcookie profile, require200/statusready, retainfinallyrevoke and internalguard; no generalhop/keyinjection/newroute. FinalreviewI1-I4M1codefixes remain approved, this newactualintegration failure gets scopedTDD/review before newexactlocal/native acceptance.
 
 Task19 correction9e4f8fc620 (reportc63cb74bf4) scoped spec/quality approved; no Critical/Important findings,4baseline project testwarnings retained asMinor. Uses cookie-only existing /api/v1/health/ready after bootstrap/profile, requires200+JSON object statusready; unchangedfinallyexactDELETE/replayrefusal andtime/body/cleanup bounds. RealHTTPfixture mirrorsinternal404/operatorcookieguard and503/not_ready/malformed/nonobject/missingstatus/oversized/truncated/stalled failures withrevocation. Readiness/control52pass, Black/Ruff/diffclean, productionBandit0. Maintainedsource-mounted cachedactualprobe pass operator200/ready+DELETE200+revokedprofile/operator401, allownresourcesremoved/no registry/build; controlledactualnotready notinjected, coveredbyfixtureonly. Rootwillpreserve reportfacts inacceptance anduntrack accidentallycommittedscratchreport; no otherplans/workspaces touched. Next exactcleanlocal13lifecycle/38browser/signatureproof thenauthorizedbranchpush/nativeCI. Windowsruntime/G12/publication remainopen.
+
+Exact clean candidate284010040c878d6b749f9d5b1aa7db52024bc269 built4armroles and passed builtMCP39/Setup60 plus all13signed lifecyclechecks/ownedcleanup, then failed browser setup_api_access_1 and setup_interaction_1; allgatesfalse/signaturesinvalidated/no recovery, unrelatedPG preserved. Read-only unchanged cached Chromium diagnosis proves bootstrap200, setup GET state/metadata200 and cookieprofile200 before wizard POST /api/v1/setup/first-run/state403 with missing X-CSRF-Token; wizard save alert/provider heading absent. Exact observed POST body with browser expected CSRF returns200, exact DELETE200 then profile401, allownedcleanup. Root will plan narrowTask20 before source edits: preserve noAuth key/bearer omission while attaching runtime-instance CSRF for unsafe same-origin cookie transport, retaining cross-origin exclusions/strict browser latches/backend guards. Focused redgreen/security-boundary tests, scopedreview and fresh exactlocal/native proof required; G12/publication/Windowsruntime remainopen.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

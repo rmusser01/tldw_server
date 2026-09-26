@@ -674,3 +674,55 @@ Windows runtime remains explicitly unqualified and G12 false.
 - [ ] Commit scoped code/tests/report; review amended code, then retry Task13.
 
 Task19 implementation9e4f8fc620/reportc63cb74bf4 scoped review approves spec and quality with no Critical/Important findings. Readiness/control52 pass with4disclosed baseline warnings; Black/Ruff pass and production Bandit0. Actual maintained source-mounted cached probe proves operator200/ready, DELETE200 and revoked profile/operator401; ownedcleanup passes. Actual not_ready injection was not exercised; realHTTPfixture covers its cleanup. Fresh signedlocal/native artifact qualification is still pending.
+
+
+### Task 20: Preserve CSRF protection for managed noAuth setup mutations
+
+**Authority:** Approved credential-free managed setup contract and exact2840100
+candidate browser failure. Unchanged cached images show setup GETs200 and cookie
+profile200 after bootstrap, then first-run state POST403 without X-CSRF-Token;
+the same observed body with the browser instance token returns200. Task13 stays
+unqualified until fresh full artifact checks pass.
+
+**Files:** `apps/packages/ui/src/services/tldw/request-core.ts` and focused
+request-core cookie-transport tests. A narrow setup-onboarding integration test
+may use existing harnesses if required; no setup domain API rewrites, backend or
+gateway guard changes, cookie scope changes, dependencies or qualification latch
+exemptions. Read package and frontend instructions before edits.
+
+#### Stage 1: Reproduce noAuth cookie mutation and boundaries
+**Goal:** Capture the first-run request contract in behavioral regression tests.
+**Success Criteria:** The current client omits the required runtime CSRF token
+for noAuth unsafe requests in cookie transport; tests distinguish key/bearer
+omission from cookie-bound CSRF protection and prevent cross-origin leakage.
+**Tests:** Red on first-run POST noAuth with configured instance cookie;
+case-insensitive stale auth/CSRF headers replaced; safe requests omit CSRF;
+relative and same-page/configured-origin absolute requests receive only their
+instance token; allowlisted external and configured-but-not-page-origin requests
+receive no page CSRF; missing/foreign instance cookie supplies no fallback token.
+**Status:** Not Started
+- [ ] Add failing behavior tests using the existing request-core harness.
+
+#### Stage 2: Separate CSRF from key/bearer omission
+**Goal:** Allow the real managed wizard mutation without weakening server policy.
+**Success Criteria:** Unsafe same-origin cookie transport attaches only the
+runtime-configured CSRF token even when noAuth skips explicit authentication.
+Cookie transport continues stripping stale API key, bearer and CSRF headers;
+external destinations, safe requests, manual/hosted transports retain contracts.
+**Tests:** Focused request-core and affected setup/background-proxy suites;
+existing package lint/format checks and diff review. Bandit has no changed Python
+production scope; record the non-Python limitation explicitly.
+**Status:** Not Started
+- [ ] Make the minimal proven request-core correction, self-review and commit.
+
+#### Stage 3: Scoped review and actual qualification
+**Goal:** Resolve Task13 browser setup failure on fresh exact artifacts.
+**Success Criteria:** Independent task review approves spec and quality; actual
+changed-source browser reaches provider setup with setup requests200 and strict
+network/API latches preserved; temporary session revoke and owned cleanup pass.
+Full parent clean signed local and native13lifecycle/38browser checks remain
+mandatory, with G12 false and Windows runtime explicitly unqualified.
+**Tests:** Bounded changed-source managed production WebUI proof when feasible,
+then controller-owned exact full candidate and independent signatures.
+**Status:** Not Started
+- [ ] Report focused evidence/limitations; controller reviews and retries Task13.

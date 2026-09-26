@@ -80,3 +80,19 @@ cookie401. Section5 requires all readiness components before opening the browser
 and imposes no ordering that would require weakening the internal route.
 The operator payload is consumed privately under the existing time/body limits;
 its sanitized details are not logged or turned into a new public endpoint.
+
+
+## Actual managed setup CSRF correction (Task20)
+
+The exact2840100 candidate passes all13 signed lifecycle checks, but the initial
+wizard state mutation fails403. The noAuth flag suppresses explicit key/bearer
+authentication for local setup; it must not suppress CSRF protection for unsafe
+requests that already use the browser cookie session. Attach the existing
+runtime-instance token only within the existing same-origin cookie transport
+boundary. Continue stripping stale explicit authentication and CSRF headers,
+and never send page cookies/tokens to an external or mismatched origin. Safe
+methods and missing instance-token handling remain unchanged. Preserve backend
+CSRF/hop/remote policy and strict qualification refusal latches. Actual unchanged
+cached proof of missing-token403 and same-body expected-token200 establishes the
+cause; scoped tests/review and fresh exact artifact qualification establish the
+fix. This does not claim full provider setup or authorize publication.
