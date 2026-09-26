@@ -1,6 +1,55 @@
 # PR 3016 VN Durability Review Implementation Plan
 
-## Current Review Wave: Task 23
+## Current Review Wave: Task 24
+
+Full Qodo review5326031748 completed13:22:00Z on313c0e218f09e68adc8dd23a80ef12d404c7fcd0,
+ack5846612935. Request5846591205 fulfilled; no review pending. Finding4111488916/
+PRRT_kwDOL1aGf86mQ7Bo is verified test coupling, not a production defect.
+41threads1unresolved/prior40 preserved. AC5 reopened; dev a2826f unchanged.
+
+### Task 24: Exercise Public Integrity Contracts
+
+**Base:** 313c0e218f09e68adc8dd23a80ef12d404c7fcd0. **Tracking:** TASK-13369.
+**Scope:** affected integrity cases/helpers in test_vn_asset_packs_db.py and
+test_generation_jobs.py. Production, fixtures/globalconfig/Jobs/UI unchanged.
+Prior Tasks1-23 are frozen; this replaces only their cited behavioral probes.
+
+- [x] Remove private pool storage assertions and private connection/reconciliation
+  monkeypatches from Task23 integrity coverage, including its worker probes.
+  Use existing supported legacy-activity callback/public connection boundaries.
+  Do not add production hooks or mocks of the actual integrity SQL algorithm.
+- [x] Retain real SQLite commit/rollback, detached owned-handle closure and
+  caller-handle survival, cancellation, memory/active-caller fallback, actual
+  Jobs/context/inline/sibling and both worker missing-recipe responsiveness
+  coverage. Assert behavior, not pool structure or private call counts.
+- [x] Prove sensitivity with bounded named negative controls and GREEN tests.
+  Freeze public collection/tier/docs/type evidence; no permanent policy engine,
+  shared fixture rewrite or weakening assertions. Run affected modules once,
+  scoped test static/security checks with truthful baseline qualifications.
+- [ ] Independent SPEC/QUALITY/changed-contract review of frozen working delta;
+  controller normal scoped commit after review and applicable hooks.
+- [ ] Push, tested individual evidence reply/resolution, ONE full new-head review,
+  and actual required CI/current strict base/human summary gates before merge.
+
+**Ruling:** Use existing public connection and activity callback seams instead
+of adding a production injection API for tests. Preserve regression sensitivity
+with real transitions and named negative controls. Related old integrity
+rollback probe may migrate to the same supported callback if necessary; no
+unrelated test or production refactor. Cost if wrong: bounded test correction.
+
+Task24 Gauss/Jason CLOSED; independent SPEC/QUALITY/changed-test-contract PASS,
+no actionable findings. Two testfiles/67hashes verified; seven productionhashes
+unchanged,112unrelateddefinitions AST unchanged. Four named sensitivity controls
+detect inlineexecution, leakedhandle, brokenrollback, abandonedcancel; initial
+callback timing failure qualified/corrected before actualRED. Scoped15GREEN,
+149covering0failerrorsskips5warnings95.56s; public149collected/13revisedcases
+exactlyintegration only, collectionnotpasses. Mainfresh15passed134deselected
+0skips4warnings11.38s. InitialMainstrict-config invocationexit4 duebaselineunknown
+plugins/no testsrun, correctedsameexistingimportlib/strictmarkerflags, no config
+edit/testdisable. ScopedRuffclean/testBandit18exactbaselineB106/errors[]; Main
+Banditexactsame18/errors[]. Memory/activecaller synchronouslimitation retained.
+Normal five-filehooks/commit/push next; AC5open/AC6pending/no mergeattempt.
+## Historical Review Wave: Task 23
 
 Full Qodo review5325946065 completed12:45:31Z on88aefac2ba95c9f743d3e67b34fd55858479315a,
 acknowledgment5846379125. Request5846349629 fulfilled; no review pending.
@@ -27,7 +76,7 @@ No shared fixtures, global configuration, Jobs authority, storage or UI edits.
   call sites, owned resource closure/error propagation and compatibility modes.
   Run only affected covering modules once; exact-tier/doc/type metadata for all
   added tests/helpers. Use project venv and Bandit; qualify baseline warnings.
-- [ ] Freeze delta/report/evidence; independent spec/quality and scoped changed-
+- [x] Freeze delta/report/evidence; independent spec/quality and scoped changed-
   contract review. Controller normal commit after review; no hook bypass.
 - [ ] Push, individual tested reply/resolution and one full exact-new-head Qodo
   review. All seven CI/current strict dev/human summary gates precede merge.
@@ -49,6 +98,18 @@ semantics; owns and closes only its handle, drains cancellation through cleanup.
 Memory/active-caller fallback remains synchronous, no universalasync claim.
 Currentdev freshlya2826f unchanged; normal seven-file hooks/commit/push next.
 AC5open/AC6pending; no reply/resolution/newreview/mergeattempt yet.
+
+Task23 LOCALcomplete: normal seven-file commit/FFpush/GitHubverified head
+313c0e218f09e68adc8dd23a80ef12d404c7fcd0; currentdev unchangeda2826f.
+All62hashesmatch afterhooks/commit; applicableexplicitchecks passed, no-filehooks
+skipped/notpasses; normalcommit nohookoutput/no commitstageclaim/no bypass.
+Individual evidence reply4111478037 at13:17:32Z; verifiedthreadresolved.
+Paginated40threads0unresolved/no remainingpages,26conversationcommentschecked.
+Humanparagraph/othersections/Cubicfooter preserved/exactbody freshlyverified.
+ONEfullrequest5846591205 at13:18:45Z PENDING, busy5846592673 at13:18:58Z.
+Pushsummary5836873877 at13:17:16Z0bugs0rules25historicalomitted NOTcompleted
+newheadreview. AC5checked/AC6pending; OPEN/BLOCKED/no mergeattempt. No active
+taskneededagents/tests/shellsessions; onlylocalintegrationnotes remain.
 ## Historical Review Wave: Task 22
 
 Full Qodo review5325783656 completed11:35:55Z on exact head
