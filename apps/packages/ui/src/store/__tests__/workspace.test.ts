@@ -157,6 +157,7 @@ describe("workspace store snapshot persistence", () => {
     if (useWorkspaceStore.persist?.clearStorage) {
       await useWorkspaceStore.persist.clearStorage()
     }
+    await useWorkspaceStore.persist.rehydrate()
   })
 
   it("falls back to crypto.getRandomValues without using Math.random", () => {

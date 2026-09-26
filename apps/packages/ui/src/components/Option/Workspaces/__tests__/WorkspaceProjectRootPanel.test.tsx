@@ -1,11 +1,19 @@
 import React from "react"
-import { render, screen, waitFor, within } from "@testing-library/react"
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within
+} from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type {
   WorkspaceApiResponse,
   WorkspaceOperationResponse,
-  WorkspaceRootsResponse
+  WorkspaceRootsResponse,
+  WorkspaceSandboxRootProvisionResponse
 } from "@/services/tldw/domains/workspace-api"
 import type { WorkspaceManagerItem } from "../workspace-manager-models"
 
@@ -139,9 +147,19 @@ const renderPanel = (
     />
   )
 
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void
+  let reject!: (reason: unknown) => void
+  const promise = new Promise<T>((yes, no) => {
+    resolve = yes
+    reject = no
+  })
+  return { promise, resolve, reject }
+}
+
 describe("WorkspaceProjectRootPanel", () => {
   beforeEach(() => {
-    vi.clearAllMocks()
+    vi.resetAllMocks()
     vi.stubGlobal("crypto", {
       randomUUID: () => "sandbox-root-op-1"
     })
@@ -215,7 +233,9 @@ describe("WorkspaceProjectRootPanel", () => {
     await user.click(screen.getByRole("button", { name: "Host-local root" }))
     await user.type(screen.getByLabelText("Root path"), "/Users/alice/repo")
     await user.type(screen.getByLabelText("Display name"), "Policy repo")
-    await user.click(screen.getByRole("button", { name: "Attach host-local root" }))
+    await user.click(
+      screen.getByRole("button", { name: "Attach host-local root" })
+    )
 
     await waitFor(() => {
       expect(apiMocks.attachWorkspacePrimaryRoot).toHaveBeenCalledWith(
@@ -383,4 +403,169 @@ describe("WorkspaceProjectRootPanel", () => {
     )
     expect(within(passiveSummary).getByText("Path hidden")).toBeVisible()
   })
+
+  it.each(["success", "failure"])(
+    "ignores an old poll %s while paused and resumes fresh reads",
+    async (result) => {
+      const pending = deferred<WorkspaceOperationResponse>()
+      apiMocks.getWorkspaceOperation.mockReturnValueOnce(pending.promise)
+      const item = managerItem({ activeOperations: [operation()] })
+      vi.useFakeTimers()
+      try {
+        const { rerender } = renderPanel(item)
+        await act(async () => vi.advanceTimersByTimeAsync(750))
+        expect(apiMocks.getWorkspaceOperation).toHaveBeenCalledTimes(1)
+        rerender(<WorkspaceProjectRootPanel item={item} active={false} />)
+        await act(async () =>
+          result === "success"
+            ? pending.resolve(operation({ status: "failed" }))
+            : pending.reject(new Error("stale poll failure"))
+        )
+        expect(screen.queryByText("failed")).not.toBeInTheDocument()
+        expect(screen.queryByText("stale poll failure")).not.toBeInTheDocument()
+        await act(async () => vi.advanceTimersByTimeAsync(5000))
+        expect(apiMocks.getWorkspaceOperation).toHaveBeenCalledTimes(1)
+        apiMocks.getWorkspaceOperation.mockResolvedValue(
+          operation({ operation_id: "fresh-op", status: "succeeded" })
+        )
+        rerender(
+          <WorkspaceProjectRootPanel
+            item={{
+              ...item,
+              activeOperations: [operation({ operation_id: "fresh-op" })]
+            }}
+            active
+          />
+        )
+        await act(async () => vi.advanceTimersByTimeAsync(750))
+        expect(apiMocks.getWorkspaceOperation).toHaveBeenLastCalledWith(
+          "ws-project",
+          "fresh-op"
+        )
+        expect(
+          screen.queryByText("Provisioning sandbox root")
+        ).not.toBeInTheDocument()
+      } finally {
+        vi.useRealTimers()
+      }
+    }
+  )
+
+  it("cancels scheduled polling immediately when the directory signal aborts", async () => {
+    const controller = new AbortController()
+    vi.useFakeTimers()
+    try {
+      renderPanel(managerItem({ activeOperations: [operation()] }), {
+        signal: controller.signal
+      })
+      act(() => controller.abort())
+      await act(async () => vi.advanceTimersByTimeAsync(1000))
+      expect(apiMocks.getWorkspaceOperation).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it.each(["success", "failure"])(
+    "ignores a late provisioning %s after suspension",
+    async (result) => {
+      const pending = deferred<WorkspaceSandboxRootProvisionResponse>()
+      apiMocks.provisionWorkspaceSandboxRoot.mockReturnValueOnce(
+        pending.promise
+      )
+      const onRootsUpdated = vi.fn()
+      const item = managerItem()
+      const { rerender } = renderPanel(item, { onRootsUpdated })
+      await userEvent.click(
+        screen.getByRole("button", { name: "Sandbox-managed root" })
+      )
+      await userEvent.type(
+        screen.getByLabelText("Display name"),
+        "Draft sandbox"
+      )
+      await userEvent.click(
+        screen.getByRole("button", { name: "Provision sandbox root" })
+      )
+      rerender(
+        <WorkspaceProjectRootPanel
+          item={item}
+          active={false}
+          onRootsUpdated={onRootsUpdated}
+        />
+      )
+      await act(async () =>
+        result === "success"
+          ? pending.resolve({
+              workspace_id: item.id,
+              workspace_profile: "project",
+              operation: operation(),
+              primary_root: rootsResponse().primary_root
+            })
+          : pending.reject(new Error("stale provisioning failure"))
+      )
+      expect(onRootsUpdated).not.toHaveBeenCalled()
+      expect(apiMocks.getWorkspaceOperation).not.toHaveBeenCalled()
+      expect(
+        screen.queryByText("stale provisioning failure")
+      ).not.toBeInTheDocument()
+      expect(screen.getByLabelText("Display name")).toHaveValue("Draft sandbox")
+    }
+  )
+
+  it.each(["host", "sandbox"])(
+    "blocks paused %s submission without losing its controlled draft",
+    async (kind) => {
+      const item = managerItem()
+      const { rerender } = renderPanel(item)
+      await userEvent.click(
+        screen.getByRole("button", {
+          name: kind === "host" ? "Host-local root" : "Sandbox-managed root"
+        })
+      )
+      const label = kind === "host" ? "Root path" : "Display name"
+      const value = kind === "host" ? "/tmp/draft-root" : "Draft sandbox"
+      await userEvent.type(screen.getByLabelText(label), value)
+      const form = screen.getByLabelText(label).closest("form")!
+      rerender(<WorkspaceProjectRootPanel item={item} active={false} />)
+      fireEvent.submit(form)
+      expect(apiMocks.attachWorkspacePrimaryRoot).not.toHaveBeenCalled()
+      expect(apiMocks.provisionWorkspaceSandboxRoot).not.toHaveBeenCalled()
+      expect(screen.getByLabelText(label)).toHaveValue(value)
+      rerender(<WorkspaceProjectRootPanel item={item} active />)
+      expect(screen.getByLabelText(label)).toHaveValue(value)
+      expect(apiMocks.attachWorkspacePrimaryRoot).not.toHaveBeenCalled()
+      expect(apiMocks.provisionWorkspaceSandboxRoot).not.toHaveBeenCalled()
+      await userEvent.click(
+        screen.getByRole("button", {
+          name:
+            kind === "host"
+              ? "Attach host-local root"
+              : "Provision sandbox root"
+        })
+      )
+      expect(
+        kind === "host"
+          ? apiMocks.attachWorkspacePrimaryRoot
+          : apiMocks.provisionWorkspaceSandboxRoot
+      ).toHaveBeenCalledTimes(1)
+    }
+  )
+
+  it.each(["upgrade", "scan"])(
+    "blocks %s while verification is inactive",
+    async (kind) => {
+      const item = managerItem({
+        profile: kind === "upgrade" ? "research" : "project"
+      })
+      item.projectRoot.fileInventory.available = true
+      renderPanel(item, { active: false })
+      const button = screen.getByRole("button", {
+        name: kind === "upgrade" ? "Upgrade to Project Workspace" : "Scan files"
+      })
+      expect(button).toBeDisabled()
+      fireEvent.click(button)
+      expect(apiMocks.patchWorkspace).not.toHaveBeenCalled()
+      expect(apiMocks.queueWorkspaceFileInventoryScan).not.toHaveBeenCalled()
+    }
+  )
 })

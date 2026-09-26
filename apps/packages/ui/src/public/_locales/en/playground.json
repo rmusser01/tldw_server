@@ -1,4 +1,139 @@
 {
+  "workspace_ownedArchive_confirmMessage": {
+    "message": "Archive this workspace on the server? Your drafts will be retained locally in this browser. Restore the workspace from the Workspaces manager."
+  },
+  "workspace_ownedArchive_conflict": {
+    "message": "The workspace changed on the server. Your local drafts are intact. Check status before confirming archive again."
+  },
+  "workspace_ownedArchive_accountChanged": {
+    "message": "The workspace account changed. No archive was confirmed. Return to the original account and check status before continuing."
+  },
+  "workspace_ownedArchive_uncertain": {
+    "message": "The archive result is unknown. Your local drafts are intact. Check status before attempting another archive."
+  },
+  "workspace_ownedArchive_reviewFailed": {
+    "message": "Could not verify the current workspace status. Your local drafts are intact. Check status again when the connection is available."
+  },
+  "workspace_ownedArchive_storageUnavailable": {
+    "message": "Local draft storage is unavailable. Archiving was not sent. Free browser storage, then confirm archive again."
+  },
+  "workspace_ownedArchive_completionFailed": {
+    "message": "The server workspace is archived, but your latest drafts could not be saved safely. Editing is blocked. Keep this page open, free browser storage, then finish archiving. This will not send another archive request."
+  },
+  "workspace_ownedArchive_checkStatus": {
+    "message": "Check status"
+  },
+  "workspace_ownedArchive_reviewed": {
+    "message": "Latest server workspace: {{name}} (not archived). Confirm Archive to archive this reviewed version."
+  },
+  "workspace_ownedArchive_finish": {
+    "message": "Finish archiving"
+  },
+  "workspace_ownedBanner_conflict": {
+    "message": "The server banner changed. Review the latest text before saving."
+  },
+  "workspace_ownedBanner_accountChanged": {
+    "message": "Your account or server changed. Close this editor and reopen the workspace for the current account."
+  },
+  "workspace_ownedBanner_loadFailed": {
+    "message": "Could not load the banner. Review the latest banner to try again."
+  },
+  "workspace_ownedBanner_saveFailed": {
+    "message": "The save could not be confirmed. Your text is retained. Review the latest banner before trying again."
+  },
+  "workspace_ownedBanner_reviewFailed": {
+    "message": "Could not accept the latest banner. Your text is retained. Review it again."
+  },
+  "workspace_ownedBanner_storageUnavailable": {
+    "message": "Recovery storage is unavailable. Keep this page open to avoid losing your text."
+  },
+  "workspace_ownedBanner_imagesUnavailable": {
+    "message": "Images are not supported for server-owned banners. Existing banner color is preserved."
+  },
+  "workspace_ownedBanner_resetMessage": {
+    "message": "Clear the saved banner title and subtitle? The banner color will not change."
+  },
+  "workspace_ownedBanner_loading": {
+    "message": "Loading banner..."
+  },
+  "workspace_ownedBanner_review": {
+    "message": "Review latest banner"
+  },
+  "workspace_ownedBanner_latestText": {
+    "message": "Latest server banner"
+  },
+  "workspace_ownedBanner_emptyText": {
+    "message": "Not set"
+  },
+  "workspace_ownedBanner_useServer": {
+    "message": "Use server text"
+  },
+  "workspace_ownedBanner_keepMine": {
+    "message": "Keep my text"
+  },
+  "workspace_ownedAssistant_conflict": {
+    "message": "The default assistant changed on the server. Review it before saving again."
+  },
+  "workspace_ownedAssistant_accountChanged": {
+    "message": "The connected account changed. Reopen this workspace with the original account."
+  },
+  "workspace_ownedAssistant_loadFailed": {
+    "message": "Could not load default assistant settings. Review the latest default to try again."
+  },
+  "workspace_ownedAssistant_saveFailed": {
+    "message": "Could not confirm the save. Review the latest default before trying again."
+  },
+  "workspace_ownedAssistant_reviewFailed": {
+    "message": "Could not review the latest default. Your settings have been kept."
+  },
+  "workspace_ownedAssistant_catalogFailed": {
+    "message": "Could not load Personas. You can still clear the current default."
+  },
+  "workspace_ownedAssistant_storageUnavailable": {
+    "message": "These settings could not be stored for recovery. Keep this workspace open to avoid losing them."
+  },
+  "workspace_ownedAssistant_review": {
+    "message": "Review latest default"
+  },
+  "workspace_ownedAssistant_latestDefault": {
+    "message": "Latest server default"
+  },
+  "workspace_ownedAssistant_useServer": {
+    "message": "Use server default"
+  },
+  "workspace_ownedAssistant_keepMine": {
+    "message": "Keep my settings"
+  },
+  "workspace_ownedRename_pending": {
+    "message": "Waiting for workspace..."
+  },
+  "workspace_ownedRename_conflict": {
+    "message": "The workspace changed on the server. Your name draft is unchanged. Review the latest name before saving again."
+  },
+  "workspace_ownedRename_accountChanged": {
+    "message": "Workspace account changed. Reopen the workspace before saving. Your name draft is unchanged."
+  },
+  "workspace_ownedRename_saveFailed": {
+    "message": "Could not confirm the rename. Your name draft is unchanged. Review the latest name to check whether it saved, or try again."
+  },
+  "workspace_ownedRename_reviewFailed": {
+    "message": "Could not use the latest workspace name. Your name draft is unchanged. Review again or reopen the workspace."
+  },
+  "workspace_ownedRename_storageUnavailable": {
+    "message": "Draft storage is unavailable. Your name draft is kept in this session but may be lost on reload."
+  },
+  "workspace_ownedRename_review": {
+    "message": "Review latest name"
+  },
+  "workspace_ownedRename_latestName": {
+    "message": "Latest server name: {{name}}"
+  },
+  "workspace_ownedRename_useServer": {
+    "message": "Use server name"
+  },
+  "workspace_ownedRename_keepMine": {
+    "message": "Keep my name"
+  },
   "sharedWorkspace_unavailable": {
     "message": "This shared workspace isn't available."
   },
@@ -2431,6 +2566,33 @@
   },
   "studio_loadingOutputViewer": {
     "message": "Loading output viewer..."
+  },
+  "studio_ownedNotes_noteMissing": {
+    "message": "This note is no longer associated with the workspace."
+  },
+  "studio_ownedNotes_refreshFailed": {
+    "message": "Failed to refresh workspace notes. Your draft is unchanged."
+  },
+  "studio_ownedNotes_createUncertain": {
+    "message": "The save could not be confirmed and may have succeeded. This draft will not be created again. Refresh and inspect workspace notes before selecting a saved copy or starting a new note."
+  },
+  "studio_ownedNotes_refresh": {
+    "message": "Refresh notes"
+  },
+  "studio_ownedNotes_versionConflict": {
+    "message": "Note was modified elsewhere. Reload its latest version while keeping your local draft for review before saving again."
+  },
+  "studio_ownedNotes_reloadLatest": {
+    "message": "Reload latest"
+  },
+  "studio_ownedNotes_reloadFailed": {
+    "message": "Failed to load the latest note. Your draft is unchanged."
+  },
+  "studio_ownedNotes_accountChanged": {
+    "message": "Workspace account changed. Reopen the workspace before saving. Your local draft is unchanged."
+  },
+  "studio_ownedNotes_saveFailed": {
+    "message": "Failed to save note. Your local draft is unchanged."
   },
   "debug_title": {
     "message": "Debug Panel"

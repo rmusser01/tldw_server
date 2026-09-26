@@ -35,6 +35,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     User,
     get_request_user,
     rbac_rate_limit,
+    require_expected_user,
     require_permissions,
 )
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import try_get_job_manager
@@ -142,6 +143,7 @@ _RECIPIENT_CHAT_DEPENDENCIES = [
     Depends(rbac_rate_limit("sharing.read", detail=_RECIPIENT_CHAT_RATE_DETAIL)),
 ]
 _RECIPIENT_CLONE_DEPENDENCIES = [
+    Depends(require_expected_user),
     Depends(require_permissions("sharing.read", detail=_RECIPIENT_PERMISSION_DETAIL)),
     Depends(rbac_rate_limit("sharing.clone", detail=_RECIPIENT_CLONE_RATE_DETAIL)),
 ]
@@ -1760,7 +1762,7 @@ async def revoke_share(
 @router.get(
     "/shared-with-me",
     response_model=SharedWithMeResponse,
-    dependencies=[Depends(rbac_rate_limit("sharing.read"))],
+    dependencies=_RECIPIENT_READ_DEPENDENCIES,
     summary="List workspaces shared with the current user",
 )
 async def shared_with_me(
@@ -1998,6 +2000,7 @@ def _clone_conflict_http_error(exc: IdempotentOperationConflict) -> HTTPExceptio
     status_code=status.HTTP_202_ACCEPTED,
     responses={
         **_RECIPIENT_CLONE_ERROR_RESPONSES,
+        412: {"model": SharedWorkspaceErrorResponse, "description": "The authenticated account changed."},
         200: {
             "model": SharedWorkspaceCloneOperationResponse,
             "description": "An existing clone operation is terminal.",
@@ -2100,8 +2103,11 @@ async def clone_shared_workspace(
 @recipient_router.get(
     "/clone/{operation_id}",
     response_model=SharedWorkspaceCloneOperationResponse,
-    responses=_RECIPIENT_CLONE_ERROR_RESPONSES,
-    dependencies=_RECIPIENT_READ_DEPENDENCIES,
+    responses={
+        **_RECIPIENT_CLONE_ERROR_RESPONSES,
+        412: {"model": SharedWorkspaceErrorResponse, "description": "The authenticated account changed."},
+    },
+    dependencies=[Depends(require_expected_user), *_RECIPIENT_READ_DEPENDENCIES],
     summary="Read a shared workspace copy operation",
 )
 async def get_shared_workspace_clone_operation(

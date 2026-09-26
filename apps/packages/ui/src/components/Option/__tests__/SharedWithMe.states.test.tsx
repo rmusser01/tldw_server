@@ -1,5 +1,6 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import "./shared-with-me-i18n"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { useSharedWithMe as useSharedWithMeHook } from "@/hooks/useSharing"
@@ -8,6 +9,7 @@ import type {
   SharedWithMeResponse
 } from "@/types/sharing"
 import { SharedWithMe } from "../SharedWithMe"
+import { TldwApiError } from "@/services/tldw/api-error"
 
 type SharedWithMeHookState = Pick<
   ReturnType<typeof useSharedWithMeHook>,
@@ -37,14 +39,16 @@ const unknownAccessResponse = {
 
 const sharingMocks = vi.hoisted(() => ({
   useSharedWithMe: vi.fn<() => SharedWithMeHookState>(),
-  useCloneWorkspace: vi.fn(),
   mutate: vi.fn(),
   navigate: vi.fn()
 }))
 
 vi.mock("@/hooks/useSharing", () => ({
-  useSharedWithMe: () => sharingMocks.useSharedWithMe(),
-  useCloneWorkspace: () => sharingMocks.useCloneWorkspace()
+  useSharedWithMe: () => sharingMocks.useSharedWithMe()
+}))
+
+vi.mock("@/hooks/useSharedWorkspaceClones", () => ({
+  useSharedWorkspaceClones: () => ({ rows: [], scope: "scope", status: "ready", begin: sharingMocks.mutate, refresh: vi.fn() })
 }))
 
 vi.mock("react-router-dom", () => ({
@@ -60,11 +64,6 @@ describe("SharedWithMe states", () => {
       isLoading: false,
       error: null
     })
-    sharingMocks.useCloneWorkspace.mockReturnValue({
-      isPending: false,
-      variables: null,
-      mutate: sharingMocks.mutate
-    })
   })
 
   it("renders shares from the canonical response envelope", () => {
@@ -73,6 +72,25 @@ describe("SharedWithMe states", () => {
     expect(screen.getByText("Policy Deck")).toBeInTheDocument()
     expect(screen.getByText("Read-only")).toBeInTheDocument()
     expect(screen.getByText("Shared policy notes")).toBeInTheDocument()
+  })
+
+  it("explains missing permission and hides stale share actions", () => {
+    sharingMocks.useSharedWithMe.mockReturnValue({
+      data: canonicalResponse,
+      isLoading: false,
+      error: new TldwApiError("Permission required", 403, {
+        code: "sharing_permission_required"
+      })
+    })
+
+    render(<SharedWithMe />)
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Your account does not have permission to access shared workspaces. Ask your server administrator to grant sharing.read, then try again."
+    )
+    expect(screen.queryByText("Policy Deck")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Open Policy Deck" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Clone Policy Deck" })).not.toBeInTheDocument()
   })
 
   it("falls back to the workspace id when the API returns a null name", () => {
@@ -180,7 +198,7 @@ describe("SharedWithMe states", () => {
     render(<SharedWithMe />)
 
     expect(
-      screen.getByText("Could not load shared workspaces")
+      screen.getByText("Could not load shared workspaces.")
     ).toBeInTheDocument()
   })
 
@@ -196,28 +214,16 @@ describe("SharedWithMe states", () => {
     expect(screen.getByText("Policy Deck")).toBeInTheDocument()
     expect(screen.getByText("mystery_access")).toBeInTheDocument()
     expect(
-      screen.getByText("Shared by workspace owner (account 42)")
+      screen.getByText("Shared by workspace owner")
     ).toBeInTheDocument()
   })
 
-  it("shows clone failures from the mutation callback", async () => {
+  it("starts the durable clone lifecycle from the row action", () => {
     render(<SharedWithMe />)
 
     fireEvent.click(screen.getByRole("button", { name: "Clone Policy Deck" }))
 
     expect(sharingMocks.mutate).toHaveBeenCalledTimes(1)
-    const mutationOptions = sharingMocks.mutate.mock.calls[0]?.[1]
-    expect(mutationOptions).toEqual(
-      expect.objectContaining({
-        onSuccess: expect.any(Function),
-        onError: expect.any(Function)
-      })
-    )
-
-    mutationOptions?.onError?.(new Error("Clone failed"))
-
-    await waitFor(() => {
-      expect(screen.getByText("Clone failed")).toBeInTheDocument()
-    })
+    expect(sharingMocks.mutate).toHaveBeenCalledWith(7, "Policy Deck")
   })
 })

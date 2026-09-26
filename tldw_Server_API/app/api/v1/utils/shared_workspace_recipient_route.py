@@ -14,6 +14,11 @@ from tldw_Server_API.app.api.v1.schemas.shared_workspace_recipient_schemas impor
 )
 
 _ERRORS: dict[str, dict[str, Any]] = {
+    "request_config_scope_changed": {
+        "message": "The server or authenticated account changed before the request was sent.",
+        "retryable": False,
+        "recovery_action": "refresh",
+    },
     "authentication_required": {
         "message": "Authentication is required.",
         "retryable": False,
@@ -142,6 +147,16 @@ class SharedWorkspaceRecipientRoute(APIRoute):
                     content={"detail": recipient_error_detail(code)},
                 )
             except HTTPException as exc:
+                if (
+                    exc.status_code == 412
+                    and isinstance(exc.detail, dict)
+                    and exc.detail.get("code") == "request_config_scope_changed"
+                ):
+                    return JSONResponse(
+                        status_code=412,
+                        content={"detail": recipient_error_detail("request_config_scope_changed")},
+                        headers=exc.headers,
+                    )
                 if exc.status_code != 401:
                     raise
                 return JSONResponse(

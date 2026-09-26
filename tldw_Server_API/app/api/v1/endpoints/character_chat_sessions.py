@@ -4825,6 +4825,8 @@ async def create_chat_session(
     except InputError as e:
         logger.warning("Invalid chat-session creation input: {}", e)
         raise map_db_error_to_http(e) from e
+    except ConflictError as e:
+        raise map_db_error_to_http(e) from e
     except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Error creating chat session: {e}", exc_info=True)
         raise HTTPException(

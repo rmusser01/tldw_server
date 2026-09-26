@@ -46,6 +46,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     User,
     check_rate_limit,
     get_request_user,
+    require_expected_user,
     verify_jwt_and_fetch_user,
 )
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
@@ -7553,10 +7554,17 @@ async def test_persona_connection(
         raise _to_http_exception(exc, action="test persona connection") from exc
 
 
-@router.get("/catalog", response_model=list[PersonaInfo], tags=["persona"], status_code=status.HTTP_200_OK)
+@router.get(
+    "/catalog",
+    response_model=list[PersonaInfo],
+    tags=["persona"],
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_expected_user)],
+)
 async def persona_catalog(
     _current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    ensure_default: bool = Query(True, description="Create the default persona when the catalog is empty."),
 ) -> list[PersonaInfo]:
     """Return persona catalog backed by ChaCha profile records."""
     if not is_persona_enabled():
@@ -7564,7 +7572,7 @@ async def persona_catalog(
     user_id = _require_current_user_id(_current_user)
     try:
         profiles = db.list_persona_profiles(user_id=user_id, active_only=True, limit=200)
-        if not profiles:
+        if ensure_default and not profiles:
             profiles = [_ensure_default_persona_profile(db, user_id=user_id)]
         buddy_rows = _load_persona_buddy_rows_for_projection(db, profiles=profiles)
         catalog: list[PersonaInfo] = []

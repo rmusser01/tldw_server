@@ -226,20 +226,26 @@ const defaultWireState = (): WorkspaceSourceSavedViewStateV1 => {
   return serialized.state;
 };
 
+// operationScope is a stable opaque identity, compared with Object.is. It fences
+// this controller's lifetime; requests still target workspaceId, not this value.
 export const useSourceSavedViews = (
   workspaceId: string | null,
   workspaceExists: boolean,
   currentState: SourceListViewState,
   onApplyState: (state: SourceListViewState) => void,
+  operationScope: unknown = workspaceId,
 ) => {
-  const identityRef = React.useRef(workspaceId);
+  const identityRef = React.useRef({ workspaceId, workspaceExists, operationScope });
   const generationRef = React.useRef(0);
   const mountedRef = React.useRef(false);
   const lifecycleRef = React.useRef(0);
   const operationEpochRef = React.useRef(0);
   const mutationInFlightRef = React.useRef(false);
   const hasAuthoritativeViewsRef = React.useRef(false);
-  const identityPending = identityRef.current !== workspaceId;
+  const identityPending =
+    identityRef.current.workspaceId !== workspaceId ||
+    identityRef.current.workspaceExists !== workspaceExists ||
+    !Object.is(identityRef.current.operationScope, operationScope);
   const renderGeneration =
     generationRef.current + (identityPending ? 1 : 0);
 
@@ -251,17 +257,21 @@ export const useSourceSavedViews = (
 
   const isGenerationCurrent = React.useCallback(
     (generation: number) =>
-      mountedRef.current && generationRef.current === generation,
-    [],
+      mountedRef.current &&
+      !identityPending &&
+      workspaceId !== null &&
+      workspaceExists &&
+      generation === renderGeneration &&
+      generationRef.current === generation,
+    [identityPending, renderGeneration, workspaceExists, workspaceId],
   );
 
   const isOperationCurrent = React.useCallback(
     (token: OperationToken) =>
-      mountedRef.current &&
-      generationRef.current === token.generation &&
+      isGenerationCurrent(token.generation) &&
       lifecycleRef.current === token.lifecycle &&
       operationEpochRef.current === token.epoch,
-    [],
+    [isGenerationCurrent],
   );
 
   const beginOperation = React.useCallback(
@@ -418,9 +428,15 @@ export const useSourceSavedViews = (
     };
   }, []);
 
-  React.useLayoutEffect(() => {
-    if (identityRef.current !== workspaceId) {
-      identityRef.current = workspaceId;
+  // Invalidate retained handlers before child layout effects can invoke them.
+  // Commit-only ref updates preserve requests across abandoned/suspended renders.
+  React.useInsertionEffect(() => {
+    if (
+      identityRef.current.workspaceId !== workspaceId ||
+      identityRef.current.workspaceExists !== workspaceExists ||
+      !Object.is(identityRef.current.operationScope, operationScope)
+    ) {
+      identityRef.current = { workspaceId, workspaceExists, operationScope };
       generationRef.current += 1;
     }
     operationEpochRef.current += 1;
@@ -428,23 +444,26 @@ export const useSourceSavedViews = (
     hasAuthoritativeViewsRef.current = false;
     versionRetryRef.current = null;
     mutationRetryRef.current = null;
+  }, [operationScope, workspaceExists, workspaceId]);
+
+  React.useLayoutEffect(() => {
     setState(emptyState(generationRef.current));
-  }, [workspaceId]);
+  }, [operationScope, workspaceExists, workspaceId]);
 
   React.useEffect(() => {
     if (
       workspaceId === null ||
       !workspaceExists ||
-      identityRef.current !== workspaceId ||
+      identityRef.current.workspaceId !== workspaceId ||
       !mountedRef.current
     ) {
       return;
     }
     void load(generationRef.current, workspaceId);
-  }, [load, workspaceExists, workspaceId]);
+  }, [load, operationScope, workspaceExists, workspaceId]);
 
   const exposed =
-    !identityPending && state.generation === renderGeneration
+    workspaceExists && !identityPending && state.generation === renderGeneration
       ? state
       : emptyState(renderGeneration);
 
@@ -477,7 +496,7 @@ export const useSourceSavedViews = (
     if (
       workspaceId === null ||
       !workspaceExists ||
-      identityRef.current !== workspaceId ||
+      identityRef.current.workspaceId !== workspaceId ||
       mutationInFlightRef.current ||
       !isGenerationCurrent(renderGeneration)
     ) {
@@ -1047,7 +1066,7 @@ export const useSourceSavedViews = (
     (currentSignature === null || currentSignature !== exposed.activeSignature);
 
   return {
-    available: workspaceId !== null && workspaceExists,
+    available: workspaceId !== null && workspaceExists && !identityPending,
     generation: renderGeneration,
     views: exposed.views,
     loading: exposed.loading,

@@ -177,6 +177,69 @@ def _create_writer_identity_race_chat(db, *, with_message: bool = False):
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize("assistant_kind", ["persona", "character"])
+def test_workspace_chat_creation_conflicts_after_workspace_preflight(
+    test_client, auth_headers, character_db, monkeypatch, assistant_kind,
+):
+    from tldw_Server_API.app.core.Workspaces import assistant_defaults
+
+    character_db.upsert_workspace("deleting-workspace", "Workspace")
+    request = {
+        "title": "Late chat",
+        "scope_type": "workspace",
+        "workspace_id": "deleting-workspace",
+        "assistant_kind": assistant_kind,
+    }
+    if assistant_kind == "character":
+        request["character_id"] = character_db.add_character_card({
+            "name": "Research assistant", "first_message": "Ready to research.",
+        })
+    else:
+        character_db.create_persona_profile({
+            "id": "research-assistant", "user_id": "1", "name": "Research assistant",
+        })
+        request["assistant_id"] = "research-assistant"
+    resolve = assistant_defaults.resolve_new_conversation_assistant
+
+    def delete_after_preflight(db, **kwargs):
+        resolved = resolve(db, **kwargs)
+        assert db.delete_workspace("deleting-workspace", 1)
+        return resolved
+
+    monkeypatch.setattr(assistant_defaults, "resolve_new_conversation_assistant", delete_after_preflight)
+    response = test_client.post(
+        "/api/v1/chats/?seed_first_message=true", headers=auth_headers, json=request,
+    )
+    assert response.status_code == 409, response.text
+    assert character_db.execute_query("SELECT COUNT(*) FROM conversations").fetchone()[0] == 0
+    assert character_db.execute_query("SELECT COUNT(*) FROM messages").fetchone()[0] == 0
+    assert character_db.execute_query("SELECT COUNT(*) FROM conversation_settings").fetchone()[0] == 0
+
+
+@pytest.mark.integration
+def test_workspace_chat_restore_conflicts_after_workspace_deletion(
+    test_client, auth_headers, character_db,
+):
+    character_db.upsert_workspace("deleted-restore-workspace", "Workspace")
+    conversation_id = character_db.add_conversation({
+        "title": "Deleted workspace chat", "scope_type": "workspace",
+        "workspace_id": "deleted-restore-workspace",
+    })
+    assert character_db.delete_workspace("deleted-restore-workspace", 1)
+    before = character_db.get_conversation_by_id(conversation_id, include_deleted=True)
+    response = test_client.post(
+        f"/api/v1/chats/{conversation_id}/restore",
+        params={
+            "scope_type": "workspace", "workspace_id": "deleted-restore-workspace",
+            "expected_version": before["version"],
+        },
+        headers=auth_headers,
+    )
+    assert response.status_code == 409, response.text
+    assert character_db.get_conversation_by_id(conversation_id, include_deleted=True) == before
+
+
+@pytest.mark.integration
 def test_api_creation_captures_all_sources_and_redacts_snapshot_body(
     test_client,
     auth_headers,

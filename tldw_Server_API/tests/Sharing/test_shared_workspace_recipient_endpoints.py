@@ -271,6 +271,45 @@ def api_factory(monkeypatch, test_user, principal):
     return _build
 
 
+@pytest.mark.parametrize("method,suffix", [("POST", "/clone"), ("GET", "/clone/de305d54-75b4-431b-adb2-eb6b9e546014")])
+def test_clone_scope_mismatch_rejects_before_jobs_or_sharing_access(api_factory, method, suffix):
+    client, _service = api_factory()
+    accessed = []
+
+    def forbidden_access():
+        accessed.append(True)
+        raise AssertionError("Scope mismatch must reject before backend access")
+
+    client.app.dependency_overrides[sharing.try_get_job_manager] = forbidden_access
+    client.app.dependency_overrides[sharing.get_shared_workspace_access_service] = forbidden_access
+    response = client.request(
+        method, "/api/v1/sharing/shared-with-me/42" + suffix,
+        headers={"X-TLDW-Expected-User-ID": "8", "Idempotency-Key": "recipient-scope-check"},
+        json={"name": "Do not admit"} if method == "POST" else None,
+    )
+    assert response.status_code == 412, response.text
+    assert response.json()["detail"]["code"] == "request_config_scope_changed"
+    assert response.json()["detail"]["retryable"] is False
+    assert response.headers["cache-control"] == "no-store"
+    assert accessed == []
+
+
+@pytest.mark.parametrize("expected", [None, "9"])
+@pytest.mark.parametrize("method,suffix", [("POST", "/clone"), ("GET", "/clone/de305d54-75b4-431b-adb2-eb6b9e546014")])
+def test_clone_matching_or_omitted_scope_reaches_normal_jobs_check(api_factory, method, suffix, expected):
+    client, _service = api_factory()
+    client.app.dependency_overrides[sharing.try_get_job_manager] = lambda: None
+    headers = {"Idempotency-Key": "recipient-scope-check"}
+    if expected is not None:
+        headers["X-TLDW-Expected-User-ID"] = expected
+    response = client.request(
+        method, "/api/v1/sharing/shared-with-me/42" + suffix,
+        headers=headers, json={"name": "Normal admission"} if method == "POST" else None,
+    )
+    assert response.status_code == 503, response.text
+    assert response.json()["detail"]["code"] == "clone_operation_unavailable"
+
+
 def test_recipient_models_forbid_extras_and_enforce_projection_bounds() -> None:
     with pytest.raises(ValidationError, match="extra_forbidden"):
         SharedWorkspaceErrorDetail(
@@ -330,6 +369,35 @@ def test_recipient_models_reject_invalid_timestamps_and_non_finite_scores() -> N
                 quote="Bounded quote",
                 score=score,
             )
+
+
+def test_shared_list_denies_missing_read_permission_before_loading_shares(
+    api_factory, principal, monkeypatch
+) -> None:
+    def unexpected_repo():
+        pytest.fail("Denied recipient must not load shared metadata")
+
+    monkeypatch.setattr(sharing, "_get_repo", unexpected_repo)
+    client, _ = api_factory(auth_principal=principal.model_copy(update={"permissions": []}))
+
+    response = client.get("/api/v1/sharing/shared-with-me")
+
+    assert response.status_code == 403
+    assert response.json()["detail"]["code"] == "sharing_permission_required"
+
+
+def test_shared_list_accepts_explicit_read_permission(api_factory, monkeypatch) -> None:
+    class Repo:
+        async def list_active_shares_for_user(self, user_id):
+            return []
+
+    monkeypatch.setattr(sharing, "_get_repo", lambda: Repo())
+    client, _ = api_factory()
+
+    response = client.get("/api/v1/sharing/shared-with-me")
+
+    assert response.status_code == 200
+    assert response.json() == {"items": [], "total": 0}
 
 
 def test_route_scoped_authentication_error_is_typed(api_factory) -> None:

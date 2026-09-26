@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react"
 import type { MessageInstance } from "antd/es/message/interface"
 import type { TFunction } from "i18next"
+import { useWorkspaceStore } from "@/store/workspace"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { fetchTldwVoiceCatalog, type TldwVoice } from "@/services/tldw/audio-voices"
 import {
@@ -116,6 +117,9 @@ export interface UseAudioTtsSettingsDeps {
 
 export function useAudioTtsSettings(deps: UseAudioTtsSettingsDeps) {
   const { audioSettings, setAudioSettings, messageApi, t } = deps
+  const isOwnedWorkspace = useWorkspaceStore(
+    (state) => state.activeWorkspaceOrigin?.kind === "server-owned"
+  )
 
   const [showTtsSettings, setShowTtsSettings] = useState(false)
   const [tldwVoices, setTldwVoices] = useState<TldwVoice[]>([])
@@ -282,7 +286,8 @@ export function useAudioTtsSettings(deps: UseAudioTtsSettingsDeps) {
   ])
 
   useEffect(() => {
-    if (audioSettings.provider !== "tldw") {
+    // Catalog discovery must not rewrite canonical server-owned settings.
+    if (isOwnedWorkspace || audioSettings.provider !== "tldw") {
       return
     }
     const voiceOptions = getVoiceOptions()
@@ -298,6 +303,7 @@ export function useAudioTtsSettings(deps: UseAudioTtsSettingsDeps) {
     }
     setAudioSettings({ voice: voiceOptions[0].value })
   }, [
+    isOwnedWorkspace,
     audioSettings.provider,
     audioSettings.voice,
     getVoiceOptions,

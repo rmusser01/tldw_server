@@ -1,40 +1,13 @@
 import { describe, it, expect, vi } from "vitest"
 import {
-  hydrateWorkspaceFromServer,
-  optimisticWorkspaceUpdate,
+  mapServerSourceToLocal,
+  mapServerArtifactToLocal,
+  optimisticWorkspaceUpdate
 } from "../workspace-api"
 
 describe("workspace store API-first mutations", () => {
-  it("hydrates workspace state from server on workspace switch", async () => {
-    const mockFetch = vi.fn().mockResolvedValue({
-      id: "ws-1",
-      name: "Server WS",
-      sources: [{ id: "src-1", title: "Video", version: 1 }],
-      artifacts: [],
-      notes: [],
-      version: 3,
-    })
-    const state = await hydrateWorkspaceFromServer("ws-1", { fetch: mockFetch })
-    expect(state.name).toBe("Server WS")
-    expect(state.sources).toHaveLength(1)
-    expect(state.version).toBe(3)
-    expect(mockFetch).toHaveBeenCalledWith("ws-1")
-  })
-
-  it("hydrates with empty arrays when server returns no sub-resources", async () => {
-    const mockFetch = vi.fn().mockResolvedValue({
-      id: "ws-2",
-      name: "Empty WS",
-      version: 1,
-    })
-    const state = await hydrateWorkspaceFromServer("ws-2", { fetch: mockFetch })
-    expect(state.sources).toEqual([])
-    expect(state.artifacts).toEqual([])
-    expect(state.notes).toEqual([])
-  })
-
-  it("maps backend workspace source and artifact fields into local workspace state", async () => {
-    const mockFetch = vi.fn().mockResolvedValue({
+  it("maps backend workspace source and artifact fields into local workspace state", () => {
+    const server = {
       id: "ws-1",
       name: "Server WS",
       version: 2,
@@ -47,8 +20,9 @@ describe("workspace store API-first mutations", () => {
           source_type: "document",
           url: "https://example.test/doc",
           selected: true,
+          position: 0,
           added_at: "2026-05-06T12:00:00Z",
-          review_state: "reviewed",
+          review_state: "reviewed" as const,
           review_state_updated_at: "2026-05-07T12:00:00Z",
           reviewed_at: "2026-05-07T12:00:00Z",
           reviewed_by_user_id: "reviewer-7",
@@ -71,9 +45,11 @@ describe("workspace store API-first mutations", () => {
         }
       ],
       notes: []
-    })
-
-    const state = await hydrateWorkspaceFromServer("ws-1", { fetch: mockFetch })
+    }
+    const state = {
+      sources: server.sources.map(mapServerSourceToLocal),
+      artifacts: server.artifacts.map(mapServerArtifactToLocal)
+    }
 
     expect(state.sources[0]).toMatchObject({
       id: "src-1",
@@ -86,7 +62,6 @@ describe("workspace store API-first mutations", () => {
       reviewedAt: new Date("2026-05-07T12:00:00Z"),
       reviewedByUserId: "reviewer-7"
     })
-    expect(state.selectedSourceIds).toEqual(["src-1"])
     expect(state.artifacts[0]).toMatchObject({
       id: "art-1",
       type: "report",
@@ -110,8 +85,8 @@ describe("workspace store API-first mutations", () => {
     "archived"
   ])(
     "preserves server review status %s while deriving completed generation state",
-    async (reviewStatus) => {
-      const mockFetch = vi.fn().mockResolvedValue({
+    (reviewStatus) => {
+      const server = {
         id: `ws-${reviewStatus}`,
         name: "Review WS",
         version: 1,
@@ -132,11 +107,10 @@ describe("workspace store API-first mutations", () => {
           }
         ],
         notes: []
-      })
-
-      const state = await hydrateWorkspaceFromServer(`ws-${reviewStatus}`, {
-        fetch: mockFetch
-      })
+      }
+      const state = {
+        artifacts: server.artifacts.map(mapServerArtifactToLocal)
+      }
 
       expect(state.artifacts[0]).toMatchObject({
         id: `art-${reviewStatus}`,
@@ -146,8 +120,8 @@ describe("workspace store API-first mutations", () => {
     }
   )
 
-  it("maps traceable artifact contract fields into generated artifacts", async () => {
-    const mockFetch = vi.fn().mockResolvedValue({
+  it("maps traceable artifact contract fields into generated artifacts", () => {
+    const server = {
       id: "ws-traceable",
       name: "Traceable WS",
       version: 4,
@@ -214,11 +188,8 @@ describe("workspace store API-first mutations", () => {
         }
       ],
       notes: []
-    })
-
-    const state = await hydrateWorkspaceFromServer("ws-traceable", {
-      fetch: mockFetch
-    })
+    }
+    const state = { artifacts: server.artifacts.map(mapServerArtifactToLocal) }
 
     expect(state.artifacts[0]).toMatchObject({
       id: "art-traceable",
@@ -268,8 +239,8 @@ describe("workspace store API-first mutations", () => {
     })
   })
 
-  it("does not mark unknown backend artifact statuses as completed", async () => {
-    const mockFetch = vi.fn().mockResolvedValue({
+  it("does not mark unknown backend artifact statuses as completed", () => {
+    const server = {
       id: "ws-unknown-status",
       name: "Server WS",
       version: 1,
@@ -290,11 +261,8 @@ describe("workspace store API-first mutations", () => {
         }
       ],
       notes: []
-    })
-
-    const state = await hydrateWorkspaceFromServer("ws-unknown-status", {
-      fetch: mockFetch
-    })
+    }
+    const state = { artifacts: server.artifacts.map(mapServerArtifactToLocal) }
 
     expect(state.artifacts[0]).toMatchObject({
       id: "art-queued",
@@ -306,7 +274,7 @@ describe("workspace store API-first mutations", () => {
   it("performs optimistic update with rollback on 409", async () => {
     const mockUpdate = vi.fn().mockRejectedValue({
       status: 409,
-      body: { version: 5, name: "Server Name" },
+      body: { version: 5, name: "Server Name" }
     })
     const result = await optimisticWorkspaceUpdate(
       { id: "ws-1", name: "Local Name", version: 3 },
@@ -321,7 +289,7 @@ describe("workspace store API-first mutations", () => {
     const mockUpdate = vi.fn().mockResolvedValue({
       id: "ws-1",
       name: "New",
-      version: 4,
+      version: 4
     })
     const result = await optimisticWorkspaceUpdate(
       { id: "ws-1", name: "Old", version: 3 },

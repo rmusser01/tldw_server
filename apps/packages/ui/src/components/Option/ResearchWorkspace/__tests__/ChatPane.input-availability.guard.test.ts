@@ -12,7 +12,7 @@ describe("ChatPane input availability guard", () => {
       "disabled={isLoading || isPreparingContext || isChatUnavailable}"
     )
     expect(source).toMatch(
-      /disabled=\{\s*!value\.trim\(\)\s*\|\|\s*isPreparingContext\s*\|\|\s*isChatUnavailable\s*\|\|\s*isSendBlocked\s*\}/
+      /disabled=\{\s*!value\.trim\(\)\s*\|\|\s*submitting\s*\|\|\s*isPreparingContext\s*\|\|\s*isChatUnavailable\s*\|\|\s*isSendBlocked\s*\}/
     )
   })
 })

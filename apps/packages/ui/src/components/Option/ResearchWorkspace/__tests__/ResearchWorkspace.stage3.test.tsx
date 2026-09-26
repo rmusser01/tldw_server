@@ -1,8 +1,11 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import React from "react"
+import userEvent from "@testing-library/user-event"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import axe from "axe-core"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import type { OwnedWorkspaceBundle } from "@/store/workspace-api"
+import type { OwnedWorkspaceState } from "@/store/workspace-slices/owned-workspace-slice"
 import { ResearchWorkspace } from "../index"
 
 const {
@@ -22,6 +25,7 @@ const {
   mockRunResearchWorkspaceMigration,
   mockChatPaneProps,
   mockStatusBarProps,
+  mockConsumePrefill,
   mockBgRequest
 } = vi.hoisted(() => ({
   mockGetMediaDetails: vi.fn(),
@@ -49,7 +53,8 @@ const {
     }
     workspaceContextStatus?: unknown
   }>,
-  mockBgRequest: vi.fn()
+  mockBgRequest: vi.fn(),
+  mockConsumePrefill: vi.fn()
 }))
 
 const { mockScheduleWorkspaceUndoAction, mockUndoWorkspaceAction } = vi.hoisted(
@@ -67,6 +72,9 @@ const testState = {
   workspaceId: "workspace-1",
   workspaceName: "New Research",
   workspaceTag: "workspace:test",
+  activeWorkspaceOrigin: { kind: "legacy-local" } as OwnedWorkspaceState["activeWorkspaceOrigin"],
+  ownedWorkspaceBundle: null as OwnedWorkspaceBundle | null,
+  ownedWorkspaceAttempt: null as OwnedWorkspaceState["ownedWorkspaceAttempt"],
   initializeWorkspace: vi.fn(),
   createNewWorkspace: vi.fn(),
   addSources: vi.fn(),
@@ -162,7 +170,7 @@ vi.mock("@/store/workspace-migration", () => ({
 }))
 
 vi.mock("@/utils/research-workspace-prefill", () => ({
-  consumeResearchWorkspacePrefill: vi.fn().mockResolvedValue(null),
+  consumeResearchWorkspacePrefill: mockConsumePrefill,
   buildKnowledgeQaSeedNote: vi.fn().mockReturnValue("")
 }))
 
@@ -183,7 +191,12 @@ vi.mock("../SourcesPane", () => ({
 vi.mock("../ChatPane", () => ({
   ChatPane: (props: any) => {
     mockChatPaneProps.push(props)
-    return <div data-testid="workspace-chat-pane">Chat</div>
+    return (
+      <div data-testid="workspace-chat-pane">
+        Chat
+        <textarea aria-label="Workspace composer" />
+      </div>
+    )
   }
 }))
 
@@ -429,6 +442,10 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     testState.workspaceId = "workspace-1"
     testState.workspaceName = "New Research"
     testState.workspaceTag = "workspace:test"
+    testState.activeWorkspaceOrigin = { kind: "legacy-local" }
+    testState.ownedWorkspaceBundle = null
+    testState.ownedWorkspaceAttempt = null
+    mockConsumePrefill.mockReset().mockResolvedValue(null)
     testState.selectedSourceIds = []
     testState.generatedArtifacts = []
     testState.isGeneratingOutput = false
@@ -512,6 +529,263 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
       }
       return { notes: [] }
     })
+  })
+
+  const activateOwnedFixture = () => {
+    testState.activeWorkspaceOrigin = {
+      kind: "server-owned",
+      scope: {
+        serverBase: "https://research.example",
+        principalId: "3",
+        organizationId: null
+      }
+    }
+    testState.ownedWorkspaceBundle = {
+      workspace: {
+        id: "workspace-1",
+        name: "New Research",
+        version: 2,
+        archived: false,
+        deleted: false,
+        workspace_profile: "research",
+        study_materials_policy: "general",
+        banner_title: null,
+        banner_subtitle: null,
+        banner_color: null,
+        audio_provider: null,
+        audio_model: null,
+        audio_voice: null,
+        audio_speed: null,
+        created_at: "2026-09-13T12:00:00Z",
+        last_modified: "2026-09-13T12:00:00Z"
+      },
+      sources: [],
+      artifacts: [],
+      notes: [
+        {
+          id: 88,
+          workspace_id: "workspace-1",
+          title: "Canonical association note",
+          content: "Evidence without a workspace tag",
+          keywords_json: '["evidence"]',
+          version: 3,
+          created_at: "2026-09-13T12:00:00Z",
+          last_modified: "2026-09-13T12:00:00Z"
+        }
+      ]
+    }
+  }
+
+  it.each([false, true])(
+    "owned opening skips legacy writes and enables status reads (StrictMode=%s)",
+    async (strict) => {
+      activateOwnedFixture()
+      window.localStorage.setItem(
+        "tldw-workspace",
+        JSON.stringify({ state: { workspaceId: "workspace-1" } })
+      )
+      const page = <ResearchWorkspace />
+      render(strict ? <React.StrictMode>{page}</React.StrictMode> : page)
+      await waitFor(() =>
+        expect(mockGetWorkspaceSourcesStatus).toHaveBeenCalledWith("workspace-1")
+      )
+      expect(mockUpsertWorkspace).not.toHaveBeenCalled()
+      expect(mockAddWorkspaceSource).not.toHaveBeenCalled()
+      expect(mockUpdateWorkspaceSourceSelection).not.toHaveBeenCalled()
+      expect(mockRunResearchWorkspaceMigration).not.toHaveBeenCalled()
+      expect(mockConsumePrefill).not.toHaveBeenCalled()
+      expect(testState.initializeWorkspace).not.toHaveBeenCalled()
+    }
+  )
+
+  it("does not treat an owned target without a matching validated bundle as ready", async () => {
+    activateOwnedFixture()
+    testState.ownedWorkspaceBundle = null
+    render(<ResearchWorkspace />)
+    await act(async () => {})
+    expect(mockUpsertWorkspace).not.toHaveBeenCalled()
+    expect(mockGetWorkspaceSourcesStatus).not.toHaveBeenCalled()
+    expect(mockConsumePrefill).not.toHaveBeenCalled()
+  })
+
+  it("owned global search only loads associated notes without generic note requests", async () => {
+    activateOwnedFixture()
+    mockBgRequest.mockResolvedValue([
+      {
+        id: 99,
+        title: "Unrelated tag note",
+        content: "Unrelated",
+        keywords: ["workspace:test"]
+      }
+    ])
+    render(<ResearchWorkspace />)
+    fireEvent.keyDown(window, { key: "k", altKey: true })
+    const search = await screen.findByPlaceholderText(
+      "Search sources, chat, and notes..."
+    )
+    fireEvent.change(search, { target: { value: "Canonical association note" } })
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Canonical association note/ })
+    )
+    await waitFor(() =>
+      expect(testState.loadNote).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 88,
+          content: "Evidence without a workspace tag",
+          keywords: ["evidence"],
+          version: 3
+        })
+      )
+    )
+    expect(
+      mockBgRequest.mock.calls.filter(([request]) =>
+        String(request.path).includes("/notes")
+      )
+    ).toEqual([])
+    fireEvent.keyDown(window, { key: "k", altKey: true })
+    fireEvent.change(
+      await screen.findByPlaceholderText("Search sources, chat, and notes..."),
+      { target: { value: "Unrelated tag note" } }
+    )
+    expect(
+      screen.queryByRole("button", { name: /Unrelated tag note/ })
+    ).not.toBeInTheDocument()
+  })
+
+  it("does not load a selected owned note after its page unmounts", async () => {
+    activateOwnedFixture()
+    const view = render(<ResearchWorkspace />)
+    fireEvent.keyDown(window, { key: "k", altKey: true })
+    fireEvent.change(
+      await screen.findByPlaceholderText("Search sources, chat, and notes..."),
+      { target: { value: "Canonical association note" } }
+    )
+    fireEvent.click(await screen.findByRole("button", {
+      name: /Canonical association note/
+    }))
+    view.unmount()
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)) })
+    expect(testState.loadNote).not.toHaveBeenCalled()
+    expect(testState.focusWorkspaceNote).not.toHaveBeenCalled()
+  })
+
+  it("stops pending legacy reconciliation when the same ID becomes server-owned", async () => {
+    const upsert = createDeferred<Record<string, unknown>>()
+    mockUpsertWorkspace.mockReturnValueOnce(upsert.promise)
+    const { rerender } = render(<ResearchWorkspace />)
+    await waitFor(() => expect(mockUpsertWorkspace).toHaveBeenCalledTimes(1))
+    activateOwnedFixture()
+    rerender(<ResearchWorkspace />)
+    await act(async () => {
+      upsert.resolve({ id: "workspace-1" })
+    })
+    expect(mockGetWorkspaceSources).not.toHaveBeenCalled()
+    expect(mockAddWorkspaceSource).not.toHaveBeenCalled()
+    expect(mockUpdateWorkspaceSourceSelection).not.toHaveBeenCalled()
+  })
+
+  it("rejects migration callbacks after leaving their legacy view", async () => {
+    window.localStorage.setItem("tldw-workspace", "legacy data")
+    const { rerender } = render(<ResearchWorkspace />)
+    await waitFor(() =>
+      expect(mockRunResearchWorkspaceMigration).toHaveBeenCalledTimes(1)
+    )
+    const migration = mockRunResearchWorkspaceMigration.mock.calls[0][0]
+    activateOwnedFixture()
+    rerender(<ResearchWorkspace />)
+    expect(() => migration.api.createWorkspaceMigration({})).toThrow(
+      "Workspace changed"
+    )
+    expect(() =>
+      migration.api.putWorkspaceMigrationChunk("id", "chunk", {})
+    ).toThrow("Workspace changed")
+    expect(() => migration.api.finalizeWorkspaceMigration("id", {})).toThrow(
+      "Workspace changed"
+    )
+    expect(() =>
+      migration.api.ackWorkspaceMigrationClientDelete("id", {})
+    ).toThrow("Workspace changed")
+    expect(() => migration.deleteLocalStorageValue("tldw-workspace")).toThrow(
+      "Workspace changed"
+    )
+    expect(() =>
+      migration.writeLocalStorageValue("tldw-workspace", "replacement")
+    ).toThrow("Workspace changed")
+    expect(window.localStorage.getItem("tldw-workspace")).toBe("legacy data")
+    testState.activeWorkspaceOrigin = { kind: "legacy-local" }
+    testState.ownedWorkspaceBundle = null
+    rerender(<ResearchWorkspace />)
+    expect(() => migration.deleteLocalStorageValue("tldw-workspace")).toThrow(
+      "Workspace changed"
+    )
+  })
+
+  it("discards source status from another principal with the same workspace ID", async () => {
+    activateOwnedFixture()
+    const status = createDeferred<ReturnType<typeof makeStatusPayload>>()
+    mockGetWorkspaceSourcesStatus.mockReturnValueOnce(status.promise)
+    const { rerender } = render(<ResearchWorkspace />)
+    await waitFor(() =>
+      expect(mockGetWorkspaceSourcesStatus).toHaveBeenCalledTimes(1)
+    )
+    testState.activeWorkspaceOrigin = {
+      kind: "server-owned",
+      scope: {
+        serverBase: "https://research.example",
+        principalId: "4",
+        organizationId: null
+      }
+    }
+    rerender(<ResearchWorkspace />)
+    await act(async () => {
+      status.resolve(
+        makeStatusPayload({ sources: [makeStatusSource({ media_id: 987 })] })
+      )
+    })
+    expect(
+      testState.setSourceStatusByMediaId.mock.calls.some(([id]) => id === 987)
+    ).toBe(false)
+    expect(mockUpsertWorkspace).not.toHaveBeenCalled()
+  })
+
+  it("does not apply a late legacy prefill to an owned workspace", async () => {
+    const prefill = createDeferred<Record<string, unknown>>()
+    mockConsumePrefill.mockReturnValueOnce(prefill.promise)
+    const { rerender } = render(<ResearchWorkspace />)
+    await waitFor(() => expect(mockConsumePrefill).toHaveBeenCalledTimes(1))
+    activateOwnedFixture()
+    rerender(<ResearchWorkspace />)
+    await act(async () => {
+      prefill.resolve({
+        kind: "knowledge_qa_thread",
+        query: "old account",
+        sources: [{ mediaId: 9, title: "Old source", type: "pdf" }]
+      })
+    })
+    expect(testState.addSources).not.toHaveBeenCalled()
+    expect(testState.captureToCurrentNote).not.toHaveBeenCalled()
+  })
+
+  it("does not replace failed owned status reads with generic media readiness", async () => {
+    activateOwnedFixture()
+    testState.sources = [
+      {
+        id: "processing",
+        mediaId: 101,
+        title: "Processing",
+        type: "pdf",
+        addedAt: new Date(),
+        status: "processing"
+      }
+    ]
+    mockGetWorkspaceSourcesStatus.mockRejectedValue(
+      new Error("Status unavailable")
+    )
+    render(<ResearchWorkspace />)
+    await waitFor(() => expect(mockGetWorkspaceSourcesStatus).toHaveBeenCalled())
+    await act(async () => {})
+    expect(mockGetMediaDetails).not.toHaveBeenCalled()
+    expect(testState.setSourceStatusByMediaId).not.toHaveBeenCalled()
   })
 
   it("does not show a migration details action when there is no migration notice", async () => {
@@ -904,6 +1178,109 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     fireEvent.keyDown(window, { key: "N", altKey: true, shiftKey: true })
     expect(testState.createNewWorkspace).toHaveBeenCalledTimes(1)
   })
+
+  it("keeps focus out of the composer while owned archive completion recovery blocks editing", async () => {
+    activateOwnedFixture()
+    const user = userEvent.setup()
+    const view = render(
+      <>
+        <ResearchWorkspace />
+        <div data-workspace-blocking-recovery="workspace-1">
+          <button>Finish archiving</button>
+        </div>
+      </>
+    )
+    const recovery = screen.getByRole("button", { name: "Finish archiving" })
+    recovery.focus()
+    await user.keyboard("{Alt>}2{/Alt}")
+    expect(recovery).toHaveFocus()
+    expect(
+      screen.getByRole("textbox", { name: "Workspace composer" })
+    ).not.toHaveFocus()
+
+    view.rerender(
+      <>
+        <ResearchWorkspace />
+        <div />
+      </>
+    )
+    await user.keyboard("{Alt>}2{/Alt}")
+    expect(
+      screen.getByRole("textbox", { name: "Workspace composer" })
+    ).toHaveFocus()
+  })
+
+  it("blocks workspace creation and search behind active owned archive recovery", async () => {
+    activateOwnedFixture()
+    render(
+      <>
+        <ResearchWorkspace />
+        <div data-workspace-blocking-recovery="workspace-1">
+          <button>Finish archiving</button>
+        </div>
+      </>
+    )
+    const recovery = screen.getByRole("button", { name: "Finish archiving" })
+    recovery.focus()
+    fireEvent.keyDown(recovery, { key: "N", altKey: true, shiftKey: true })
+    fireEvent.keyDown(recovery, { key: "k", altKey: true })
+    expect(testState.createNewWorkspace).not.toHaveBeenCalled()
+    expect(
+      screen.queryByRole("dialog", { name: "Search workspace" })
+    ).not.toBeInTheDocument()
+    expect(recovery).toHaveFocus()
+  })
+
+  it("leaves Tab and Enter available to the recovery action", async () => {
+    activateOwnedFixture()
+    const finish = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <>
+        <ResearchWorkspace />
+        <div data-workspace-blocking-recovery="workspace-1">
+          <button>Recovery details</button>
+          <button onClick={finish}>Finish archiving</button>
+        </div>
+      </>
+    )
+    screen.getByRole("button", { name: "Recovery details" }).focus()
+    await user.tab()
+    expect(
+      screen.getByRole("button", { name: "Finish archiving" })
+    ).toHaveFocus()
+    await user.keyboard("{Enter}")
+    expect(finish).toHaveBeenCalledTimes(1)
+    expect(testState.createNewWorkspace).not.toHaveBeenCalled()
+  })
+
+  it.each(["legacy", "other-workspace", "inactive"])(
+    "does not block workspace shortcuts for a %s recovery marker",
+    async (kind) => {
+      if (kind !== "legacy") activateOwnedFixture()
+      const user = userEvent.setup()
+      render(
+        <>
+          <ResearchWorkspace />
+          <div
+            data-workspace-blocking-recovery={
+              kind === "inactive"
+                ? undefined
+                : kind === "other-workspace"
+                  ? "other"
+                  : "workspace-1"
+            }
+          />
+        </>
+      )
+      fireEvent.keyDown(window, { key: "N", altKey: true, shiftKey: true })
+      expect(testState.createNewWorkspace).toHaveBeenCalledTimes(1)
+      await user.keyboard("{Alt>}2{/Alt}")
+      expect(
+        screen.getByRole("textbox", { name: "Workspace composer" })
+      ).toHaveFocus()
+    }
+  )
 
   it("starts a new note draft with Alt+N", () => {
     testState.currentNote = {

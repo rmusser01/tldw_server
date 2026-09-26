@@ -1,4 +1,78 @@
 {
+  "sharedWithMe": {
+    "title": "Shared With Me",
+    "loading": "Loading shared workspaces",
+    "authRequired": "Your account or access could not be verified. Check your connection, sign-in, and workspace permissions, then try again.",
+    "recoveryConflict": "Copy recovery belongs to another account or server. Switch back to resume. Copies have not been canceled.",
+    "refresh": "Try again",
+    "loadError": "Could not load shared workspaces.",
+    "permissionRequired": "Your account does not have permission to access shared workspaces. Ask your server administrator to grant sharing.read, then try again.",
+    "empty": "No shared workspaces available yet.",
+    "list": "Shared workspaces",
+    "unavailable": "Shared workspace no longer available",
+    "unknownAccess": "Unknown access",
+    "owner": "Shared by {{name}}",
+    "ownerUnknown": "Shared by workspace owner",
+    "openLabel": "Open {{name}}",
+    "open": "Open",
+    "cloneLabel": "Clone {{name}}",
+    "cloneAction": "Clone",
+    "clone": {
+      "complete": "Copy ready.",
+      "partial": "Copy ready with omissions.",
+      "failed": "The copy could not be completed.",
+      "uncertain": "Copy status could not be confirmed. Checking again will recover the same operation.",
+      "recoveryFull": "The recovery list is full. No new copy was started; try again after older records expire.",
+      "rejected": "The copy request was not accepted. Refresh your access before trying again.",
+      "unavailable": "This copy's status is unavailable. No new copy has been started.",
+      "submitting": "Confirming the copy request...",
+      "progressLabel": "Copy progress for {{name}}",
+      "counts": "{{sources}} of {{totalSources}} sources copied; {{notes}} of {{totalNotes}} notes; {{artifacts}} of {{totalArtifacts}} saved outputs.",
+      "warning": "Some items need attention ({{count}}).",
+      "cleanupPending": "Temporary copy data is being cleaned up.",
+      "cleanupUnknown": "Cleanup could not be confirmed. Contact your server administrator.",
+      "storageUnavailable": "Reload recovery is unavailable in this browser. Keep this page open until the copy finishes.",
+      "openLabel": "Open copy of {{name}}",
+      "open": "Open copy",
+      "retryLabel": "Retry copy of {{name}}",
+      "retry": "Retry copy",
+      "checkLabel": "Check copy status for {{name}}",
+      "check": "Check status",
+      "phases": {
+        "queued": "Waiting to copy...",
+        "authorizing": "Checking access...",
+        "preparing": "Preparing the copy...",
+        "sources": "Copying sources...",
+        "notes": "Copying notes...",
+        "artifacts": "Copying saved outputs...",
+        "finalizing": "Finishing the copy..."
+      },
+      "textSearch": { "ready": "Text search ready.", "unavailable": "Text search unavailable." },
+      "citations": { "ready": "Citations ready.", "unavailable": "Citations unavailable." },
+      "vectorSearch": {
+        "ready": "Vector search ready.",
+        "needs_indexing": "Vector search needs indexing.",
+        "not_configured": "Vector search is not configured."
+      },
+      "warnings": {
+        "source_copy_failed": "Sources could not be copied ({{count}}).",
+        "note_copy_failed": "Notes could not be copied ({{count}}).",
+        "artifact_copy_failed": "Saved outputs could not be copied ({{count}}).",
+        "media_copy_failed": "Media could not be copied ({{count}}).",
+        "membership_skipped": "Unsupported workspace items were skipped ({{count}}).",
+        "vector_index_not_generated": "Vector indexes were not copied ({{count}})."
+      },
+      "errors": {
+        "clone_access_revoked": "Access ended before the copy completed.",
+        "clone_permission_removed": "The owner disabled copying before it completed.",
+        "clone_cancelled": "The copy was cancelled.",
+        "clone_interrupted": "The copy was interrupted.",
+        "lease_expired": "The copy was interrupted.",
+        "clone_persistence_failed": "The copy could not be saved.",
+        "source_snapshot_unavailable": "The source snapshot was unavailable."
+      }
+    }
+  },
   "pageAssist": "tldw Assistant",
   "titles": {
     "options": "tldw Assistant",

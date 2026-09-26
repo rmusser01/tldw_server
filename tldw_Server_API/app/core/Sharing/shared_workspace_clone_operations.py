@@ -323,11 +323,17 @@ def _mapping(value: Any) -> dict[str, Any]:
 
 
 def _timestamp(value: Any) -> str:
-    if isinstance(value, datetime):
-        value = value.isoformat()
-    if not isinstance(value, str) or not value or len(value) > 80:
+    if isinstance(value, str) and value and len(value) <= 80:
+        try:
+            value = datetime.fromisoformat(value)
+        except ValueError as exc:
+            raise CloneOperationUnavailable("clone operation timestamp is invalid") from exc
+    if not isinstance(value, datetime):
         raise CloneOperationUnavailable("clone operation timestamp is invalid")
-    return value
+    # SQLite Jobs timestamps are UTC without an offset; PostgreSQL returns datetimes.
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat()
 
 
 def _validate_job_scope(

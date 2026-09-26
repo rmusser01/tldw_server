@@ -624,6 +624,7 @@ export interface WorkspaceNote {
   keywords: string[]
   version?: number // For optimistic locking on updates
   isDirty: boolean // Has unsaved changes
+  createUncertain?: boolean // Owned draft: a create may have reached the server
 }
 
 export const DEFAULT_WORKSPACE_NOTE: WorkspaceNote = {

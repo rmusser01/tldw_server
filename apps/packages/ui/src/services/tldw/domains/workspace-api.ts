@@ -1038,7 +1038,7 @@ export const normalizeWorkspaceApiResponse = (
   )
 })
 
-const serializeWorkspacePatchRequest = (
+export const serializeWorkspacePatchRequest = (
   data: WorkspacePatchRequest
 ): WorkspacePatchRequest => {
   const body: WorkspacePatchRequest = { ...data }

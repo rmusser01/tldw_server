@@ -411,7 +411,7 @@ export const createSourcesSlice: WorkspaceSlice<SourcesActions> = (set, get) => 
       return {
         sources: nextSources,
         selectedSourceIds:
-          status === "error"
+          status === "error" && state.activeWorkspaceOrigin.kind === "legacy-local"
             ? state.selectedSourceIds.filter((id) => id !== sourceId)
             : state.selectedSourceIds
       }
@@ -446,7 +446,7 @@ export const createSourcesSlice: WorkspaceSlice<SourcesActions> = (set, get) => 
       return {
         sources: nextSources,
         selectedSourceIds:
-          status === "error"
+          status === "error" && state.activeWorkspaceOrigin.kind === "legacy-local"
             ? state.selectedSourceIds.filter((id) => id !== targetSource.id)
             : state.selectedSourceIds
       }

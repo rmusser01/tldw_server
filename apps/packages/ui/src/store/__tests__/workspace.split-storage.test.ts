@@ -27,13 +27,15 @@ describe("workspace split-key persistence storage adapter", () => {
   })
 
   afterEach(() => {
+    vi.restoreAllMocks()
     vi.unstubAllGlobals()
     localStorage.clear()
   })
 
   it("writes split index and only updates changed workspace keys", async () => {
     const storage = createWorkspaceStorage()
-    const setItemSpy = vi.spyOn(localStorage, "setItem")
+    // JSDOM stores instance method assignments as strings instead of replacing them.
+    const setItemSpy = vi.spyOn(Storage.prototype, "setItem")
 
     const baseState = {
       workspaceId: "workspace-a",

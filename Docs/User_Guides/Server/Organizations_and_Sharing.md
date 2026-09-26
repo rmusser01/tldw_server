@@ -187,10 +187,19 @@ experience and does not accept or redirect this recipient flow. If the share is
 unavailable, the recipient view fails closed instead of falling back to a local
 workspace.
 
-Recipient access requires `sharing.read` and an active, authoritative team
-membership. A missing permission returns `403`; a missing, revoked, or
-unauthorized share returns the same neutral `404` so callers cannot enumerate
-shares.
+Recipient access requires `sharing.read` and active, authoritative membership
+in the organization or team targeted by the share. A missing permission returns
+`403`; a missing, revoked, or unauthorized share returns the same neutral `404`
+so callers cannot enumerate shares.
+
+Registration and organization membership do not themselves grant `sharing.read`.
+On a new installation, an administrator must verify that each recipient has an
+appropriate role granting this permission. Use the administration role and
+permission controls to grant it to the intended recipients, preserving any
+custom restrictions. The Shared With Me list enforces the same permission as
+opening or cloning a share. If it reports that `sharing.read` is required, ask
+the administrator to correct the role assignment, then select **Try again**.
+Do not grant an administrator role merely to enable shared workspace access.
 
 ### Recipient Data Ownership and Scope
 

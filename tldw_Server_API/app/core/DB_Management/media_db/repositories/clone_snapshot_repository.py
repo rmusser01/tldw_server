@@ -1573,7 +1573,7 @@ class CloneSnapshotRepository:
             )
             if candidate is None:
                 return 0
-            self._verify_persisted_logical_copy(
+            projection = self._verify_persisted_logical_copy(
                 connection,
                 media_id=int(candidate["id"]),
                 operation_id=operation_id,
@@ -1611,6 +1611,12 @@ class CloneSnapshotRepository:
             )
             if cursor.rowcount != 1:
                 raise _operation_conflict()
+            self.session._update_fts_media(
+                connection,
+                media_id,
+                projection["media"]["title"],
+                projection["media"]["content"],
+            )
             return 1
 
     def read(self, media_ids: Sequence[int]) -> dict[int, MediaCloneSnapshot]:

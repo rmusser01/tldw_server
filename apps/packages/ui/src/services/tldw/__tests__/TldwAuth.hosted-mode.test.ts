@@ -129,11 +129,13 @@ describe("TldwAuthService hosted mode", () => {
       }
     })
     sessionStorage.setItem("unrelated", "keep")
+    window.localStorage.setItem("tldw:sharing:clone-operations:v1", "private clone command")
 
     await new TldwAuthService().logout()
 
     expect(loadSourceReviewHandoff(handoffToken, false)).toBeNull()
     expect(sessionStorage.getItem("unrelated")).toBe("keep")
+    expect(window.localStorage.getItem("tldw:sharing:clone-operations:v1")).toBeNull()
   })
 
   it("returns a stable unauthenticated discriminator for a logged-out hosted session", async () => {
