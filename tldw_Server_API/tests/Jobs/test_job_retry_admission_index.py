@@ -21,7 +21,9 @@ from tldw_Server_API.app.core.DB_Management.jobs_failed_requeue import (
 from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
 from tldw_Server_API.app.core.Jobs.pg_migrations import ensure_jobs_tables_pg
 
+pytest_plugins = ["tldw_Server_API.tests._plugins.authnz_full_fixtures"]
 pytestmark = pytest.mark.integration
+USE_SHARED_JOBS_POSTGRES = True
 INDEX_NAME = "idx_job_events_retry_admissions"
 NOW = datetime(2026, 9, 25, 12, tzinfo=timezone.utc)
 
@@ -53,7 +55,15 @@ class IndexDatabase:
 def database(request: pytest.FixtureRequest, tmp_path: Path) -> IndexDatabase:
     """Provision through the established migrations and official PG test fixture."""
     if request.param == "postgres":
-        return IndexDatabase("postgres", request.getfixturevalue("jobs_pg_dsn"))
+        result = IndexDatabase("postgres", request.getfixturevalue("jobs_pg_dsn"))
+        _, db_name = request.getfixturevalue("isolated_test_environment")
+        assert "pg_temp_db" not in request.fixturenames, "alternate pg_temp_db was requested"
+        with closing(result.connect()) as conn, conn:
+            assert conn.execute("SELECT current_database()").fetchone() == (db_name,)
+        assert conn.closed
+        return result
+    assert "pg_temp_db" not in request.fixturenames
+    assert "isolated_test_environment" not in request.fixturenames
     result = IndexDatabase("sqlite", tmp_path / "jobs.db")
     result.ensure()
     return result

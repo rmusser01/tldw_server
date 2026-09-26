@@ -457,7 +457,7 @@ silent approval regression or unnecessary shared-schema behavior change.
 
 - [x] Independent final review of only this fresh wave and its interaction
   boundaries; no duplicate whole-branch rediscovery of completed work.
-- [ ] Main affected verification, normal hooks, safe/current dev integration,
+- [x] Main affected verification, normal hooks, safe/current dev integration,
   commit/push, four individual evidence replies and verified resolution.
 - [ ] Request one full exact-head Qodo review, pass all required checks and
   human summary gate, authorized normal merge, truthful finalization/pause.
@@ -469,3 +469,87 @@ ownership boundaries and retained evidence, without duplicate suites. Excluded
 whole-branch/other platform matrices, global infrastructure logging, exhaustive
 historic PG versions and exactly-once model execution are unchanged qualified
 limits, not claims added by this fix. External gates remain pending.
+
+Integration: normal commit/push produced exact GitHub head
+83c6a451cc8f0c430e2f058d60c15c612c03a436 on unchanged dev59bd584503.
+All four new findings have individual tested fix/rebuttal replies and are
+resolved; paginated GraphQL verifies 27 threads, zero unresolved and no
+remaining review/thread/comment pages. Human summary remains verbatim and
+only Verification was updated. One full exact-head Qodo request5843969815
+posted at 06:38:50Z, pending. Edited summary06:36:16Z still showed one PG
+allegation after three resolved findings; it is not a completed review of
+this head. Actual55checkruns33queued22completed, no actionable failure;
+all seven required contexts absent. Skipped/cancelled runs are not passes.
+No merge attempt. Integration records stay local pending true finalization.
+
+## Full Qodo Review on 83c6a451cc
+
+Review5324956395 completed06:41:45Z. Prior findings cleared; one new fixture
+lifecycle rule finding4110480430/PRRT_kwDOL1aGf86mObdo remains. AC5 reopened.
+
+### Task 18: Shared PostgreSQL Isolation for Owned Jobs Tests
+
+**Base:** 83c6a451cc8f0c430e2f058d60c15c612c03a436.
+**Files:** tests/Jobs/conftest.py, test_job_retry_admission_index.py,
+test_failed_job_requeue_admission.py, narrowly scoped fixture regression tests.
+All production code and unrelated test modules are frozen.
+
+- [x] Verify both explicit jobs_pg_dsn and autouse _pg_jobs_db_url routes; add
+  failing isolation/identity guards that expose alternative allocation.
+- [x] Add the smallest opt-in Jobs adapter for the PR-owned modules delegating
+  database lifecycle to isolated_test_environment via the existing safe bridge.
+  Preserve legacy Jobs routes outside this opt-in, SQLite no-PG allocation,
+  actual migration and native transaction/error assertions. Do not add another
+  database creator, raw DSN from an unrelated environment or manual cleanup.
+- [x] Verify wrapper/connection database identity against the shared fixture,
+  real required PG absent-events and native callback/driver controls, plus the
+  two affected modules once, zero skips. Cover no alternate autouse allocation,
+  connection cleanup and legacy path preservation without broad unrelated suites.
+- [x] Run scoped Ruff/compileall/Bandit/diff checks and self-review. All new
+  fixtures/helpers are typed and documented, accepted test tiers preserved.
+- [x] Independent spec/quality and final scoped interaction review of fixture
+  ordering/lifecycle/global selection, with no actionable findings. No duplicate
+  review of the unchanged production branch or already completed VN matrix.
+- [ ] Main integration verification, normal commit/push, individual tested
+  reply/resolution, one full exact-head Qodo request, required CI/current-dev/
+  human gates, authorized normal merge and truthful task finalization/pause.
+
+**Ruling:** The existing Jobs fixture is per-test but does not satisfy the
+required shared AuthNZ lifecycle. Correct only this PR-owned fixture chain,
+including autouse routing, rather than migrating the entire Jobs suite.
+Cost if wrong: a small fixture adapter correction, not production or global
+test lifecycle changes. Prior verification remains real evidence for its old
+fixture, not proof that the shared lifecycle was used.
+
+Task 18 implementation is frozen. The substantive affected matrix passed 96
+cases without skips, including 54 shared-fixture database create/drop pairs;
+three historical-route controls retain the old lifecycle. A subsequent
+module-local registration-only correction is proven unchanged by whole-module
+AST comparison apart from pytest_plugins. Each owned module then passed its
+standalone default-invocation PG control without an extra plugin flag; six
+unchanged Logging isolation controls also passed. Main's final combined normal
+invocation passed 15 cases, zero skips, 46 warnings, 35.09s. The earlier 96
+matrix is substantive evidence, not a byte-identical final-file matrix.
+
+All applicable normal seven-file hooks passed; inapplicable hooks were skipped.
+The final 16-file manifest matches, with no production/shared-fixture/global
+configuration change. Scoped Ruff retains exactly five verified baseline
+Jobs-conftest diagnostics. Test-scope Bandit retains one verified baseline B608
+and no errors or new findings; no zero-total or warning-free claim is made.
+The one failed early probe's fixture-owned disposable database was cleaned
+through the existing official helper and verified absent, with evidence retained.
+Independent fixture spec/quality/final-interaction review and external gates
+remain pending; no new push, thread resolution or merge is claimed yet.
+
+Task 18 is locally approved after one scoped fix round. Independent review
+found historical PG controls bypassed the Jobs-disabled collection gate; a
+function-local jobs marker now preserves that gate without early shared
+allocation. Actual selection RED/GREEN, deliberate default-gate skips before
+fixture setup, and enabled native historical PG3 passed without skips cover
+the change. Main reverified the disabled gate and applicable changed-file
+hooks. Changed-guard Ruff/Bandit are clean; other test-file baselines remain
+qualified. The prior matrix/default probes are pre-marker evidence, preserved
+by whole-module AST comparison apart from the decorator. All 16 freeze hashes
+match. Anscombe's scoped re-review approves spec, quality and final fixture
+interaction with no new actionable finding. Production behavior and previous
+branch reviews are unchanged; external integration gates remain pending.

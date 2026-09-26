@@ -18,19 +18,30 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import CreateJobCommand
 from tldw_Server_API.app.core.Jobs.operations.postgres import admission as pg_admission
 from tldw_Server_API.app.core.Jobs.operations.sqlite import admission as sqlite_admission
 
+pytest_plugins = ["tldw_Server_API.tests._plugins.authnz_full_fixtures"]
 pytestmark = pytest.mark.integration
+USE_SHARED_JOBS_POSTGRES = True
 
 
 @pytest.fixture(params=["sqlite", pytest.param("postgres", marks=pytest.mark.pg_jobs)])
 def jobs(request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> JobManager:
-    """Use real SQLite or the official Jobs per-test PostgreSQL database."""
+    """Use native SQLite or the existing shared isolated PostgreSQL lifecycle."""
     monkeypatch.setenv("JOBS_COUNTERS_ENABLED", "true")
     monkeypatch.setenv("JOBS_ALLOWED_QUEUES", "default,generation")
-    monkeypatch.delenv("JOBS_DB_URL", raising=False)
     JobManager.set_acquire_gate(False)
     if request.param == "postgres":
         dsn = request.getfixturevalue("jobs_pg_dsn")
-        return JobManager(backend="postgres", db_url=dsn)
+        result = JobManager(backend="postgres", db_url=dsn)
+        _, db_name = request.getfixturevalue("isolated_test_environment")
+        assert "pg_temp_db" not in request.fixturenames, "alternate pg_temp_db was requested"
+        with closing(result._connect()) as conn, conn, result._pg_cursor(conn) as cur:
+            cur.execute("SELECT current_database() AS name")
+            assert cur.fetchone()["name"] == db_name
+        assert conn.closed
+        return result
+    assert "pg_temp_db" not in request.fixturenames
+    assert "isolated_test_environment" not in request.fixturenames
+    monkeypatch.delenv("JOBS_DB_URL", raising=False)
     return JobManager(db_path=tmp_path / "jobs.db")
 
 

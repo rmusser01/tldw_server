@@ -130,10 +130,11 @@ def route_debugger():
 
 
 @pytest.fixture(scope="function")
-def jobs_pg_dsn(pg_temp_db, monkeypatch):
-    """Function-scoped DSN for Jobs tests using a temp Postgres DB.
+def jobs_pg_dsn(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> str:
+    """Initialize Jobs on the selected fixture-owned per-test PostgreSQL DB.
 
-    - Allocates a per-test database via the unified pg_temp_db fixture.
+    - Opted-in modules delegate lifecycle to isolated_test_environment.
+    - Historical modules retain the unified pg_temp_db fixture.
     - Ensures Jobs schema exists on that DB.
     - Sets JOBS_DB_URL for the duration of the test.
     """
@@ -146,8 +147,14 @@ def jobs_pg_dsn(pg_temp_db, monkeypatch):
     if "jobs" not in parts:
         parts.append("jobs")
     monkeypatch.setenv("ROUTES_ENABLE", ",".join(parts))
-    # Resolve a fresh temp database
-    dsn = str(pg_temp_db["dsn"])  # type: ignore[index]
+    if getattr(request.module, "USE_SHARED_JOBS_POSTGRES", False):
+        from psycopg.conninfo import conninfo_to_dict
+
+        _, db_name = request.getfixturevalue("isolated_test_environment")
+        dsn = os.environ["TEST_DATABASE_URL"]
+        assert conninfo_to_dict(dsn)["dbname"] == db_name, "DSN must belong to the shared fixture"
+    else:
+        dsn = str(request.getfixturevalue("pg_temp_db")["dsn"])
     # Initialize Jobs schema
     from tldw_Server_API.app.core.Jobs.pg_migrations import ensure_jobs_tables_pg, ensure_job_counters_pg
     ensure_jobs_tables_pg(dsn)
@@ -164,12 +171,15 @@ def jobs_pg_dsn(pg_temp_db, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _pg_jobs_db_url(request, monkeypatch):
-    """Provide JOBS_DB_URL for pg_jobs tests that don't request jobs_pg_dsn."""
+def _pg_jobs_db_url(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bind pg_jobs to the opted-in shared lifecycle or the historical route."""
     try:
         if "pg_jobs" not in request.keywords:
             return
     except Exception:
+        return
+    if getattr(request.module, "USE_SHARED_JOBS_POSTGRES", False):
+        monkeypatch.setenv("JOBS_DB_URL", request.getfixturevalue("jobs_pg_dsn"))
         return
     # Default to the per-test temp DB for pg_jobs, unless explicitly overridden.
     if _truthy(os.getenv("JOBS_PG_USE_ENV_DB")) and os.getenv("JOBS_DB_URL", "").startswith("postgres"):
