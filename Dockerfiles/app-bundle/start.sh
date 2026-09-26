@@ -17,6 +17,20 @@ if ! command -v docker >/dev/null 2>&1; then
   echo 'Docker is required to start this bundle.' >&2
   exit 1
 fi
+# The browser URL belongs to this host. A remote daemon's loopback publication
+# cannot establish readiness here, even when its bind-mount paths happen to match.
+if [ -n "${DOCKER_CONTEXT:-}" ]; then
+  docker_endpoint=$(docker context inspect --format '{{.Endpoints.docker.Host}}' "$DOCKER_CONTEXT") || exit 1
+elif [ -n "${DOCKER_HOST:-}" ]; then
+  docker_endpoint=$DOCKER_HOST
+else
+  docker_context=$(docker context show) || exit 1
+  docker_endpoint=$(docker context inspect --format '{{.Endpoints.docker.Host}}' "$docker_context") || exit 1
+fi
+case "$docker_endpoint" in
+  unix:///*|npipe:////./pipe/*) ;;
+  *) echo 'This bundle requires local Docker through a Unix socket or Windows named pipe; remote/TCP daemons cannot serve its local browser URL.' >&2; exit 1 ;;
+esac
 architecture=$(docker info --format '{{.Architecture}}') || {
   echo 'Docker daemon is unavailable.' >&2
   exit 1

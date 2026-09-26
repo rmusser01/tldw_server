@@ -355,7 +355,27 @@ exit "$2"
 
 
 @pytest.mark.parametrize(
-    "change", ["", "missing", "false", "source", "platform", "schema", "lifecycle", "cleanup", "readiness", "port"]
+    "change",
+    [
+        "",
+        "missing",
+        "false",
+        "source",
+        "platform",
+        "schema",
+        "lifecycle",
+        "cleanup",
+        "readiness",
+        "port",
+        "measurement_missing",
+        "measurement_source",
+        "measurement_role",
+        "measurement_zero",
+        "measurement_schema",
+        "startup_zero",
+        "storage_source",
+        "storage_zero",
+    ],
 )
 def test_candidate_gate_requires_complete_matching_cleaned_fixture_evidence(
     tmp_path: Path,
@@ -439,6 +459,50 @@ def test_candidate_gate_requires_complete_matching_cleaned_fixture_evidence(
         lifecycle["owned_resources_removed"] = False
     (tmp_path / "browser-evidence.json").write_text(json.dumps(browser))
     (tmp_path / "lifecycle-evidence.json").write_text(json.dumps(lifecycle))
+    measurements = {
+        "schema_version": 1,
+        "source_commit": "a" * 40,
+        "platform": "linux/arm64",
+        "download_unique_image_payload_bytes": 2048,
+        "roles": {
+            role: {"compressed_download_payload_bytes": 1024, "rootfs_allocated_bytes": 8192}
+            for role in ("backend", "webui", "gateway", "control")
+        },
+    }
+    startup = {
+        "schema_version": 1,
+        "source_commit": "a" * 40,
+        "platform": "linux/arm64",
+        "first_start_ms": 40000,
+        "repeat_start_ms": 30000,
+    }
+    storage = {
+        "schema_version": 1,
+        "source_commit": "a" * 40,
+        "platform": "linux/arm64",
+        "backend_data_allocated_bytes": 4096,
+        "backend_config_allocated_bytes": 4096,
+        "helper_state_allocated_bytes": 4096,
+        "helper_state_logical_file_bytes": 1024,
+    }
+    if change == "measurement_source":
+        measurements["source_commit"] = "b" * 40
+    if change == "measurement_role":
+        del measurements["roles"]["backend"]
+    if change == "measurement_zero":
+        measurements["roles"]["backend"]["rootfs_allocated_bytes"] = 0
+    if change == "measurement_schema":
+        measurements["schema_version"] = 2
+    if change == "startup_zero":
+        startup["first_start_ms"] = 0
+    if change == "storage_source":
+        storage["source_commit"] = "b" * 40
+    if change == "storage_zero":
+        storage["backend_data_allocated_bytes"] = 0
+    if change != "measurement_missing":
+        (tmp_path / "measurements.json").write_text(json.dumps(measurements))
+    (tmp_path / "startup-measurements.json").write_text(json.dumps(startup))
+    (tmp_path / "fresh-state-measurements.json").write_text(json.dumps(storage))
     (tmp_path / "evidence.json").write_text(
         json.dumps(
             {

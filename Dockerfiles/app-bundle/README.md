@@ -14,6 +14,9 @@ G2 Docker setup and G4 networking checks in bounded evidence. G12 release policy
 remains open. No public paired Docker release is available from these files yet.
 
 An extracted candidate needs Docker Desktop or Docker Engine with Compose v2.
+The daemon must use a local Unix socket or Windows named pipe. Remote and TCP
+Docker endpoints are refused before creating application state, because the
+browser URL is always on the machine running the helper.
 The host does not need Python, Node, Bun, a source checkout, PostgreSQL, or
 Redis. Keep the extracted files together, including `manifest.json` and its
 detached `manifest.sig`.

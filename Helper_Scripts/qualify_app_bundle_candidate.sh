@@ -236,6 +236,9 @@ echo 'Focused built-backend MCP and setup qualification passed with owned cleanu
 
 export TLDW_CANDIDATE_PYTHON_VERSION="$python_version"
 export TLDW_CANDIDATE_NODE_VERSION="$node_version"
+python Helper_Scripts/measure_app_bundle.py images --images "$output_dir/images.tsv" \
+  --platform "$platform" --source-commit "$source_commit" \
+  --output "$output_dir/measurements.json"
 python - "$output_dir" "$platform" "$evidence_url" <<'PY'
 import datetime
 import hashlib
@@ -248,6 +251,9 @@ from pathlib import Path
 root, platform, link = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
 commit = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
 arch = platform.split("/")[1]
+measurements = json.loads((root / "measurements.json").read_text())
+if measurements["source_commit"] != commit or measurements["platform"] != platform:
+    sys.exit("Image measurement source/platform differs.")
 images = []
 for line in (root / "images.tsv").read_text().splitlines():
     role, ref, size = line.split("\t")
@@ -256,7 +262,8 @@ for line in (root / "images.tsv").read_text().splitlines():
         "id": f"{role}-{arch}", "kind": "oci", "role": role,
         "platform": platform, "source_commit": commit,
         "location": ref, "image_digest": f"sha256:{digest}", "sha256": digest,
-        "size_bytes": int(size), "installed_size_bytes": int(size),
+        "size_bytes": measurements["roles"][role]["compressed_download_payload_bytes"],
+        "installed_size_bytes": measurements["roles"][role]["rootfs_allocated_bytes"],
     })
 control = next(image["location"] for image in images if image["role"] == "control")
 inventory = {
@@ -310,6 +317,21 @@ const path = join(root, 'evidence.json')
 try {
   const browser = JSON.parse(readFileSync(join(root, 'browser-evidence.json'), 'utf8'))
   const lifecycle = JSON.parse(readFileSync(join(root, 'lifecycle-evidence.json'), 'utf8'))
+  const measurements = JSON.parse(readFileSync(join(root, 'measurements.json'), 'utf8'))
+  const startup = JSON.parse(readFileSync(join(root, 'startup-measurements.json'), 'utf8'))
+  const storage = JSON.parse(readFileSync(join(root, 'fresh-state-measurements.json'), 'utf8'))
+  const positiveBytes = value => Number.isSafeInteger(value) && value > 0
+  if ([measurements, startup, storage].some(item => item.schema_version !== 1 || item.source_commit !== commit || item.platform !== platform) ||
+      !Number.isFinite(startup.first_start_ms) || startup.first_start_ms <= 0 ||
+      !Number.isFinite(startup.repeat_start_ms) || startup.repeat_start_ms <= 0 ||
+      !positiveBytes(measurements.download_unique_image_payload_bytes) ||
+      Object.keys(measurements.roles).sort().join() !== 'backend,control,gateway,webui' ||
+      Object.values(measurements.roles).some(role => !positiveBytes(role.compressed_download_payload_bytes) || !positiveBytes(role.rootfs_allocated_bytes)) ||
+      ['backend_data_allocated_bytes', 'backend_config_allocated_bytes', 'helper_state_allocated_bytes', 'helper_state_logical_file_bytes']
+        .some(name => !positiveBytes(storage[name]))) throw new Error('missing_measurements')
+  measurements.startup = startup
+  measurements.fresh_persistent_storage = storage
+  writeFileSync(join(root, 'measurements.json'), JSON.stringify(measurements, null, 2) + '\n')
   for (const item of [browser, lifecycle]) {
     if (item.schema_version !== 1 || item.source_commit !== commit || item.platform !== platform || item.passed !== true) throw new Error('fixture_evidence')
   }
@@ -379,5 +401,23 @@ try:
 except Exception:
     sys.exit("Final candidate artifact trust failed (private details suppressed).")
 PY_FINAL_TRUST
+python - "$output_dir" <<'PY_MEASURED_ARCHIVE'
+import hashlib
+import json
+import sys
+import tarfile
+from pathlib import Path
+root = Path(sys.argv[1])
+archive = root / "bundle.tar.gz"
+with tarfile.open(archive, "w:gz") as package:
+    for name in ("compose.yaml", "README.md", "start.sh", "stop.sh", "status.sh",
+                 "start.ps1", "stop.ps1", "status.ps1", "manifest.json", "manifest.sig"):
+        package.add(root / "bundle" / name, arcname=name, recursive=False)
+report = json.loads((root / "measurements.json").read_text())
+report["helper_bundle_download_bytes"] = archive.stat().st_size
+report["helper_bundle_sha256"] = hashlib.sha256(archive.read_bytes()).hexdigest()
+report["total_unique_download_payload_bytes"] = report["download_unique_image_payload_bytes"] + archive.stat().st_size
+(root / "measurements.json").write_text(json.dumps(report, indent=2) + "\n")
+PY_MEASURED_ARCHIVE
 rm "$output_dir/signing.key"
 echo "Built provisional local $platform candidate in $output_dir/bundle; G2/G4 passed bounded qualification; G12 remains open."

@@ -206,7 +206,7 @@ The code paths above are the planned ownership boundaries. If an existing helper
 **Goal:** Make WP1 evidence reproducible without treating an incomplete or frozen publication as available to users.
 **Success Criteria:** CI tests the exact extractable candidate using an ephemeral job-local registry; manifest qualification refuses missing artifacts/gates; documentation states current availability accurately.
 **Tests:** Fresh extracted-bundle G2; routing/auth G4; tampered/missing artifact G10; supported runtime and policy G12 checks.
-**Status:** Complete
+**Status:** In Progress
 
 ### Task 7: Build candidate qualification and promotion gate
 
@@ -234,7 +234,7 @@ The code paths above are the planned ownership boundaries. If an existing helper
 
 - [x] **Step 1: Check** every WP1 requirement in spec sections 5, 10, 11, and the applicable section 12 gates against a test or a clearly recorded deferred WP4/WP5 boundary. The review record at `Docs/superpowers/reviews/2026-09-25-complete-app-wp1-acceptance.md` records the initial live gaps and final exact local/nativeG2/G4/G10 proof; G12 remains false and unsupported release behavior is explicitly deferred.
 - [x] **Step 2: Run** full targeted frontend/backend/gateway suites and the candidate smoke once more only if Task 7 changed artifacts; otherwise cite its immutable evidence. Run `git diff --check`, scoped lint, and Bandit, and inspect the exact staged diff for secrets or unrelated files.
-- [x] **Step 3: Record** tested Linux platforms, signed identities, exact runtime patches, Docker image Size metadata, CI build/qualification durations, and unsupported behavior. Actual download/installed footprints and startup benchmarks remain explicitly deferred to G12 release work; these metadata/durations do not substitute for them. TASK-13343 closes after its fresh extracted setup/networking/security criteria and local/native mapped checks pass; publication remains separately gated.
+- [ ] **Step 3: Record** measured download/installed sizes, startup times, tested platforms, and any unsupported behavior in the candidate evidence. Mark TASK-13343 complete only when its criteria and local/CI gates pass; note that public publication remains separately gated. The September 26 deferral and task closure were withdrawn at the user's instruction; Docker image metadata and CI build duration are not substitutes for these measurements.
 - [x] **Step 4: Commit** final task/doc/evidence updates with `docs: record provisional Docker candidate review (TASK-13343)`; the record explicitly states that qualification remains open.
 
 ### Task 9: Qualify live browser setup and two isolated instances
@@ -910,7 +910,7 @@ Bandit inapplicable MJS-only. Scoped Sol-high review approves spec/quality with
 no findings; final exactba124 local/native13/38/signatures/eightfiles proof below completes qualification.
 Existing Git housekeeping warnings remain disclosed without manualGC/prune.
 
-## Final WP1 qualification (2026-09-26)
+## Historical WP1 artifact qualification (2026-09-26)
 
 Exact built source `ba12489e0d7b7219140394784d1556cd0bfc0fe5` passes fresh local
 arm64 and native amd64/arm64 CI 36244097597. Each candidate passes all 13 lifecycle
@@ -921,9 +921,42 @@ and promotion refusal remain required. Final branch review and one combined fix
 wave were completed earlier; Tasks19–23 actual integration repairs each have
 scoped independent approval. No second broad branch review or public release.
 Acceptance record contains all three immutable manifest hashes and limitations.
-Task8 footprint/startup measurements are deferred release work per recorded
-ruling; Windows helper parsing supplies no Windows runtime qualification.
+The Task8 measurement deferral and task closure were withdrawn at the user’s
+instruction. Download/installed footprints and startup times remain required.
+Windows helper parsing supplies no Windows runtime qualification.
 The full frontend baseline of 93 diagnostics and Task20 persistence baseline of
 10 failures remain
 reported as failures, not passing tests. Final documentation-only commit is
 not the built source and requires no artifact requalification claim.
+
+## User-approved review corrections (2026-09-26)
+
+The user explicitly instructed implementation of the review recommendations.
+TASK-13343 is reopened; no requirement is waived by this correction.
+
+### Stage A: Restore acceptance and fix reviewed regressions
+**Goal:** Restore Task8, correct Docker public-origin readiness, CI trigger coverage
+and absolute adversarial-request deadlines using the existing interfaces.
+**Success Criteria:** Remote/public-origin false readiness cannot succeed; relevant
+runtime/dependency changes trigger paired qualification; trickling HTTP responses
+fail within an absolute deadline. Historical evidence is labeled accurately.
+**Tests:** Real helper invocations, workflow path matching and real HTTP regressions.
+**Status:** In Progress
+
+### Stage B: Measure and qualify exact candidates
+**Goal:** Record actual compressed image downloads, unpacked image bytes, fresh
+writable-state footprint, and first/repeat startup-to-readiness times on both Linux
+targets, with raw measurement provenance and owned cleanup.
+**Success Criteria:** Fresh extracted signed candidates pass required lifecycle
+and browser checks; measurements are not inferred from build duration or .Size.
+**Tests:** Measurement calculation/refusal tests; local arm64 and native amd64/arm64
+qualification; independent signed-artifact verification.
+**Status:** Not Started
+
+### Stage C: Review and record the corrected outcome
+**Goal:** Review amended scope, run targeted tests/lint/Bandit, and update task/docs
+from actual evidence without waiving missing provider/document acceptance.
+**Success Criteria:** Reviewed fixes and measurements are recorded; remaining
+product checkpoints are explicit; task closure meets the original criteria.
+**Tests:** Scoped review and fresh verification evidence.
+**Status:** Not Started

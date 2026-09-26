@@ -4,9 +4,19 @@ This records development qualification for TASK-13343 on `codex/complete-app-wp1
 Protected frontend publication remains frozen. No public image, installer,
 catalog entry, PR or merge is approved by this record.
 
-## Current evidence (2026-09-26)
+## Correction at the user’s instruction (2026-09-26)
 
-WP1 Linux Docker development qualification is complete for exact built source `ba12489e0d7b7219140394784d1556cd0bfc0fe5`. Fresh local arm64 and native amd64/arm64 [CI 36244097597](https://github.com/rmusser01/tldw_server/actions/runs/36244097597) each built four roles and passed the built-backend MCP and setup tests, all 13 lifecycle checks, all 38 browser checks, and owned cleanup. All three candidate raw Ed25519 signatures, production verification, source/platform identities and eight helper hashes independently verify. Both native jobs, required-both job, and Windows helper parser pass. The final review fix wave and Tasks19–23 have scoped independent approval. G2/G4/G10 are true for managed connection and initial wizard progression only; planned_setup_complete remains false, G12 false and promotion refused. Superseded failed/cancelled candidates supply no current acceptance. The two corrected local installs complete without a stall; prior intermittent dependency waiting has no established cause/fix. A later documentation-only branch commit is not the built revision; artifact evidence always names `ba12489e0d`.
+TASK-13343 is reopened. The original Task8 requirement to measure download and
+installed sizes and startup times is restored. The prior closure was premature.
+The reviewed readiness, CI trigger and probe deadline defects require corrections
+and fresh qualification. The provider-and-document walkthrough remains an
+explicit product acceptance checkpoint; initial wizard progression does not prove
+it. Existing signed candidates below are historical evidence for their exact
+source, not evidence that these corrections are complete.
+
+## Historical candidate evidence (2026-09-26)
+
+Historical Linux Docker development qualification passed for exact built source `ba12489e0d7b7219140394784d1556cd0bfc0fe5`. Fresh local arm64 and native amd64/arm64 [CI 36244097597](https://github.com/rmusser01/tldw_server/actions/runs/36244097597) each built four roles and passed the built-backend MCP and setup tests, all 13 lifecycle checks, all 38 browser checks, and owned cleanup. All three candidate raw Ed25519 signatures, production verification, source/platform identities and eight helper hashes independently verify. Both native jobs, required-both job, and Windows helper parser pass. The final review fix wave and Tasks19–23 have scoped independent approval. G2/G4/G10 are true for managed connection and initial wizard progression only; planned_setup_complete remains false, G12 false and promotion refused. Superseded failed/cancelled candidates supply no current acceptance. The two corrected local installs complete without a stall; prior intermittent dependency waiting has no established cause/fix. A later documentation-only branch commit is not the built revision; artifact evidence always names `ba12489e0d`.
 
 | Contract | Current evidence | Status |
 | --- | --- | --- |
@@ -40,8 +50,8 @@ not startup benchmarks. Docker image Size metadata bytes are:
 
 These values are Docker image metadata from their respective stores. They are
 not measured download or installed footprints and must not be used to claim
-cross-platform compression savings. Footprints and startup benchmarks remain
-separate G12 release work. No registry/release/catalog publication is eligible.
+cross-platform compression savings. Measured download/installed footprints and
+startup times remain mandatory open Task8 work. No registry/release/catalog publication is eligible.
 
 PowerShell helpers are provisional. Windows parsing does not prove real Docker startup, ACL/private-state handling, port recovery, readiness, or stop/status. Docker image Size metadata does not measure download or installed footprint. The 93 untouched whole-frontend typecheck diagnostics remain a disclosed failing baseline.
 
@@ -182,7 +192,7 @@ lint/diff clean and MJS-only Bandit inapplicable. Fresh exact proof is pending.
 
 - Ruling: Cancel the superseded own-branchff3 native CI after actual local failure diagnosis and reviewed Task23 correction, then qualify a fresh exact source — the old probe contaminates its browser cookie jar and cannot supply eligible acceptance, while duplicate jobs consume the same qualification resources. Cost if wrong: old-source native failure telemetry is lost and cross-platform confirmation must come from the corrected exact run; cancellation supplies no pass, no borrowed artifacts or release permission.
 
-- Ruling: Close the WP1 Linux Docker implementation/qualification slice with G12 false and defer full download/installed footprints and startup benchmarks to the separate release gate — TASK-13343 acceptance requires fresh extracted setup and networking/security proof, now passed locally and on both native architectures; Docker image Size metadata and CI build duration cannot stand in for those measurements. Cost if wrong: reopen WP1 and measure the missing footprints/benchmarks before closure; no publication, Windows runtime, full provider setup or release readiness is implied.
+- Withdrawn ruling (user correction): Close the WP1 Linux Docker implementation/qualification slice with G12 false and defer full download/installed footprints and startup benchmarks to the separate release gate — TASK-13343 acceptance requires fresh extracted setup and networking/security proof, now passed locally and on both native architectures; Docker image Size metadata and CI build duration cannot stand in for those measurements. Cost if wrong: reopen WP1 and measure the missing footprints/benchmarks before closure; no publication, Windows runtime, full provider setup or release readiness is implied.
 
 ## Historical evidence through September25 and superseded follow-ups
 
@@ -358,12 +368,14 @@ multi-platform signed candidate, and record its immutable manifest plus
 measured sizes and startup times. Public promotion remains a separate
 authorized release action.
 
-## Task closure and known limits
+## Open task and known limits
 
-TASK-13343 closes as the Linux Docker implementation/qualification slice.
-The full product/release work in TASK-13265 remains separate: full provider
-setup, Windows runtime/private ACL/port/recovery/stop-status tests, download and
-installed footprints, startup benchmarks, full release policy and publication.
+TASK-13343 is In Progress. Its original measured download/installed footprints
+and startup times are required before closure, together with reviewed technical
+corrections and fresh exact-source qualification. TASK-13265 is the completed
+design record. Open TASK-13376 tracks complete provider/document onboarding;
+Windows runtime qualification, the remaining WP2–WP5 product work, full release
+policy and authorized publication remain separate requirements in that design.
 Every candidate browser evidence file records G2 scope
 `managed_connection_and_initial_wizard_only` and `planned_setup_complete=false`.
 The signed manifests keep G12 false. The whole-frontend baseline of 93 diagnostics
@@ -372,6 +384,7 @@ explicitly failing; affected passing checks do not make those suites green.
 Task22 final 20 gateway/route tests and Task23 final 58 maintained probe tests/lint
 are warning-free. Earlier project test warnings and Git gc/unreachable-object
 housekeeping warnings are disclosed in their scoped evidence; no manual GC/prune.
-New MJS-only corrections require no Bandit run; amended production Python had
-zero new findings in the recorded scoped checks and native workflow checks pass.
+The current corrections include production Python measurement code and require
+fresh scoped Bandit checks as well as native workflow qualification. Historical
+passing checks do not qualify the corrected source.
 Branch/worktree preserved; no PR, merge or protected publication performed.

@@ -186,7 +186,10 @@ async function hostileRequest(url, headers, method = 'GET', upgrade = false) {
       res.on('error', () => reject(new Error('hostile_inputs')))
     })
     req.on('upgrade', (_res, socket) => { socket.destroy(); resolve({ status: 101, cookie: false }) })
-    req.setTimeout(10_000, () => req.destroy(new Error('hostile_inputs')))
+    // Socket inactivity resets on every chunk; qualification needs an absolute
+    // deadline spanning connection, response headers and the complete body.
+    const deadline = setTimeout(() => req.destroy(new Error('hostile_inputs')), 10_000)
+    req.once('close', () => clearTimeout(deadline))
     req.on('error', () => reject(new Error('hostile_inputs')))
     if (upgrade) req.setHeader('Connection', 'Upgrade')
     req.end()

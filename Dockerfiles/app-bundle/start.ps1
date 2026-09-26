@@ -13,6 +13,21 @@ if ($controlImage.Contains('__') -or $trustedKeyId.Contains('__')) {
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     throw 'Docker is required to start this bundle.'
 }
+# The helper opens this machine's loopback URL, never a remote daemon's listener.
+if ($env:DOCKER_CONTEXT) {
+    $dockerEndpoint = (& docker context inspect --format '{{.Endpoints.docker.Host}}' $env:DOCKER_CONTEXT 2>$null | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect the selected Docker context.' }
+} elseif ($env:DOCKER_HOST) {
+    $dockerEndpoint = $env:DOCKER_HOST
+} else {
+    $dockerContext = (& docker context show 2>$null | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to determine the selected Docker context.' }
+    $dockerEndpoint = (& docker context inspect --format '{{.Endpoints.docker.Host}}' $dockerContext 2>$null | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect the selected Docker context.' }
+}
+if ($dockerEndpoint -notmatch '^unix:///[^\r\n]+$' -and $dockerEndpoint -notmatch '^npipe:////\./pipe/[^\r\n/]+$') {
+    throw 'This bundle requires local Docker through a Unix socket or Windows named pipe; remote/TCP daemons cannot serve its local browser URL.'
+}
 $architecture = (& docker info --format '{{.Architecture}}' 2>$null | Out-String).Trim()
 if ($LASTEXITCODE -ne 0) { throw 'Docker daemon is unavailable.' }
 & docker compose version *> $null

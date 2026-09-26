@@ -1,10 +1,10 @@
 ---
 id: TASK-13343
 title: Plan and implement paired Docker distribution and runtime gateway
-status: Done
+status: In Progress
 assignee: []
 created_date: '2026-09-23 06:15'
-updated_date: '2026-09-26 13:49'
+updated_date: '2026-09-26 16:56'
 labels:
   - distribution
   - docker
@@ -28,7 +28,9 @@ WP1 of TASK-13265: establish the shared manifest/artifact contract, runtime gate
 - [x] #1 Write an executable WP1 plan with exact file responsibilities, test cycles, and G2/G4/G10/G12 coverage.
 - [x] #2 Create a runtime-configured gateway and managed WebUI build with authenticated routing and same-origin behavior.
 - [x] #3 Build a paired Docker bundle with pinned artifacts, idempotent initialization, and Docker-only host helpers.
-- [x] #4 Verify a fresh Docker setup and networking/security paths outside a repository checkout before publication.
+- [ ] #4 Verify a fresh Docker setup and networking/security paths outside a repository checkout before publication.
+- [ ] #5 Record measured compressed download bytes, unpacked image sizes, fresh writable-state footprint, and cold/repeat startup-to-authenticated-readiness times for each Linux Docker target; do not substitute Docker image metadata or build duration.
+- [ ] #6 Verify public-browser readiness or reject unsupported remote Docker daemons before initialization, trigger paired CI for runtime and dependency changes, and enforce absolute adversarial-request deadlines.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -145,20 +147,18 @@ Task23 ae980cead7 scoped Sol-high review approves spec/quality with no findings.
 Exactclean ba12489e0d7b7219140394784d1556cd0bfc0fe5 localarmcandidate EXIT0: all4built/MCPSetup/all13lifecycle/all38browser/ownedcleanup pass. IndependentrawEd25519+productionverification+8helperSHA pass; manifest07895ec93e2b199e5ebf428b119ff725a328f1e33f00a57f5ef3ae9464db97a8. G2G4G10true/G12false/promotionrefused/managedconnection_initialwizard_only/plannedsetupfalse. Python3.12.14Node24.21.0, no recoverymarkers/only2unrelatedPG. Native36244097597 sameSHA stillinprogress, bothfocusednativechecks/Windowssyntaxpass, closurependingnativeartifacts. Priorff3nativeconfirmedcancelled/noacceptance. Docs/task-only statusupdate afterlocalcomplete leavesexecutables/remoteimmutableSHA unchanged.
 
 Finalexact builtba12489e0d7b7219140394784d1556cd0bfc0fe5 qualifies localarm and BOTHnativeamd/arm CI36244097597 success. Eachpassesall13lifecycle/all38browser/cleanup; independentrawEd25519+productionverify+8helperSHA/sourceplatform/gatematch pass. Manifests local07895ec93e2b199e5ebf428b119ff725a328f1e33f00a57f5ef3ae9464db97a8 AMDfd3d2aa98440c40b7fcb50133e463d2190b77554f1ffba2af7908f92d221fe2e ARM78434549ee544e1b2e4955850e3c4747b625c22e16fe60c05baa896f36834f63. G2G4G10true scopedmanagedconnection_initialwizard_only/plannedsetupfalse, G12false/promotionrefused. RuntimePython3.12.14Node24.21.0. Native build+qualification1769s/1563s notstartupbenchmarks; Docker.Size metadata recorded notdownload/installfootprints. Allreviewfixesapproved andnewMJSchecks warningfree20gateway/58probe; BanditN/A newMJS, previousamendedPython0newfindings/nativeworkflowrequiredchecks pass. Knownfullfrontend93diagnostic andTask20persist10failurebaselines remainfailing. Footprints/startupbenchmarks/fullprovider/Windowsruntime/fullrelease/publication deferredG12/TASK13265. NoPRmergepub; branch/worktreepreserved, finaldoconlyHEADnotbuiltba. All27rulingspersistedacceptance.
+
+Reopened at the user’s explicit instruction after review: the closure at bff2bb5581 improperly deferred the original Task8 measurement requirement. Prior ba124 Linux proofs remain historical evidence only. Correct the three reviewed technical defects test-first, restore the original requirement, record real measurements and fresh exact-source qualification, and retain full provider/document onboarding as an explicit acceptance checkpoint. No release, merge, publication or changed product scope is authorized.
+
+User-approved corrections restored Task8 measurements and reopened acceptance. Remote/TCP Docker contexts are refused before state initialization with Docker context precedence preserved; paired CI now follows runtime/dependency inputs; hostile browser requests use a 10-second absolute deadline. Measurement records count SHA256-verified local-registry response bytes, per-image filesystem allocation and fresh owned-volume/helper state, plus signed-helper first/repeat authenticated startup with prefetched images. Missing/mismatched/zero records fail the candidate gate. TDD reproduced and fixed a measurement body reader that hid its elapsed bound until EOF. Current Release suite: 226 passed; measurement suite 15 passed; Python Black/Ruff, shell syntax, diff check and production measurement Bandit (zero findings) pass. Full provider/document workflow is explicitly open TASK-13376; TASK-13265 is the completed design. Windows regression execution and fresh exact-source local/native qualification remain required; no closure or publication.
 <!-- SECTION:NOTES:END -->
-
-## Final Summary
-
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Completed the WP1 paired Linux Docker foundation: a managed browser origin, private API and Next services, runtime cookie bootstrap, signed manifests and Docker-only host helpers. Exact built source ba12489e0d7b7219140394784d1556cd0bfc0fe5 passes all 13 extracted-bundle lifecycle checks and all 38 two-instance browser checks locally and on native amd64/arm64 CI 36244097597. Signatures, all eight helper hashes and cleanup independently verify. Actual integration defects were repaired through scoped TDD and reviews while retaining authentication, CSRF, private-hop policy and strict failure checks. G2/G4/G10 are true for managed connection and initial wizard progression only; G12 remains false and promotion is refused. Full provider setup, Windows runtime, footprints, startup benchmarks and public release remain separate work in TASK-13265. Existing failing typecheck and persistence-test baselines are documented. Branch and worktree are preserved; no PR, merge or publication occurred. The final documentation commit is not the built revision.
-<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [x] #1 Acceptance criteria completed
-- [x] #2 Tests or verification recorded
-- [x] #3 Documentation updated when relevant
-- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [x] #5 Final summary added
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

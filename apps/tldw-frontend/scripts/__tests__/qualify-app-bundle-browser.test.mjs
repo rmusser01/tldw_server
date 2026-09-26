@@ -361,6 +361,7 @@ async function transportFixture(change = '', pairedIndex) {
   let uploadSeen = false
   let streamClosed = false
   let sessionActive = false
+  let slowRequestSeen = false
   const setupMutations = []
   const foreignSessionRequests = []
   const logoutRequests = []
@@ -372,6 +373,14 @@ async function transportFixture(change = '', pairedIndex) {
   const server = createServer((req, res) => {
     const path = new URL(req.url, 'http://fixture').pathname
     if (req.headers.host === 'hostile.invalid' || (req.headers.origin && req.headers.origin !== origin)) {
+      if (change === 'slow-drip' && !slowRequestSeen) {
+        slowRequestSeen = true
+        res.writeHead(403); res.write('x')
+        const trickle = setInterval(() => res.write('x'), 200)
+        const finish = setTimeout(() => res.end('x'), 11_200)
+        res.on('close', () => { clearInterval(trickle); clearTimeout(finish) })
+        return
+      }
       res.writeHead(403); res.end(); return
     }
     if (pairedIndex && path === '/setup') {
@@ -613,7 +622,7 @@ test('paired browser preserves session and CSRF cookies despite foreign-session 
   } finally { await first.close(); await second.close(); rmSync(root, { recursive: true, force: true }) }
 })
 
-for (const change of ['', 'content', 'ws', 'reflect']) {
+for (const change of ['', 'content', 'ws', 'reflect', 'slow-drip']) {
   test(`real browser transports ${change ? 'reject ' + change + ' contract loss' : 'verify content, cancellation and cookie MCP roundtrip'}`, async () => {
     const fixture = await transportFixture(change)
     const { chromium } = await import('playwright')

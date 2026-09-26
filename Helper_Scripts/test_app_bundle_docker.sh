@@ -8,6 +8,7 @@ if [[ $# -ne 1 ]]; then
   exit 2
 fi
 bundle_dir=$(cd "$1" && pwd -P)
+repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 test_root=$(mktemp -d)
 export TLDW_APP_STATE_DIR="$test_root/instance-data"
 export TLDW_APP_NO_BROWSER=1
@@ -101,7 +102,9 @@ fi
 docker rm -f "$port_fixture_id" >/dev/null
 port_fixture_id=""
 # The explicit alternate retry must complete authenticated readiness and revocation.
+first_started_ns=$(python -c 'import time; print(time.monotonic_ns())')
 "$bundle_dir/start.sh" >"$test_root/first-start.log" 2>&1
+first_ready_ns=$(python -c 'import time; print(time.monotonic_ns())')
 grep -q '^ready complete for ' "$test_root/first-start.log"
 source_commit=$(python - "$bundle_dir/manifest.json" <<'PY_COMMIT'
 import json
@@ -124,6 +127,10 @@ fi
 [[ "$first_config_hash" == "$(sha256sum "$env_file" | awk '{print $1}')" ]]
 
 project_id=$(sed -n 's/^TLDW_PROJECT_ID=//p' "$env_file")
+python "$repo_root/Helper_Scripts/measure_app_bundle.py" state \
+  --control-image "$control_image" --project-id "$project_id" --state-dir "$TLDW_APP_STATE_DIR" \
+  --source-commit "$source_commit" --platform "$platform" \
+  --output "$(dirname "$evidence_path")/fresh-state-measurements.json"
 session_cookie_name=$(sed -n 's/^SINGLE_USER_SESSION_COOKIE_NAME=//p' "$env_file")
 csrf_cookie_name=$(sed -n 's/^CSRF_COOKIE_NAME=//p' "$env_file")
 [[ -n "$session_cookie_name" && -n "$csrf_cookie_name" ]]
@@ -235,7 +242,9 @@ docker compose --project-name "$project_id" --env-file "$env_file" \
   -f "$bundle_dir/compose.yaml" exec -T app sh -c \
   'printf durable > /app/Databases/wp1-candidate-sentinel'
 (cd /tmp && "$bundle_dir/stop.sh")
+repeat_started_ns=$(python -c 'import time; print(time.monotonic_ns())')
 "$bundle_dir/start.sh"
+repeat_ready_ns=$(python -c 'import time; print(time.monotonic_ns())')
 second_config_hash=$(sha256sum "$env_file" | awk '{print $1}')
 [[ "$first_config_hash" == "$second_config_hash" ]]
 docker compose --project-name "$project_id" --env-file "$env_file" \
@@ -252,4 +261,18 @@ if "$bad_bundle/start.sh" >"$test_root/tampered-stdout" 2>"$test_root/tampered-s
 fi
 [[ ! -e "$TLDW_APP_STATE_DIR/instance" ]]
 
+python - "$(dirname "$evidence_path")/startup-measurements.json" "$source_commit" "$platform" \
+  "$first_started_ns" "$first_ready_ns" "$repeat_started_ns" "$repeat_ready_ns" <<'PY_STARTUP'
+import json
+import sys
+from pathlib import Path
+output, source, platform, first, first_ready, repeat, repeat_ready = sys.argv[1:]
+Path(output).write_text(json.dumps({
+    "schema_version": 1, "source_commit": source, "platform": platform,
+    "first_start_ms": (int(first_ready) - int(first)) / 1_000_000,
+    "repeat_start_ms": (int(repeat_ready) - int(repeat)) / 1_000_000,
+    "method": "host monotonic time around signed helper, through authenticated readiness and probe revocation",
+    "first_state": "empty", "repeat_state": "retained", "image_cache": "prefetched",
+}, indent=2) + "\n")
+PY_STARTUP
 lifecycle_passed=1

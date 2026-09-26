@@ -37,6 +37,10 @@ def installed_bundle(tmp_path: Path) -> tuple[Path, Path, Path]:
         "import json, os, pathlib, sys\n"
         "args = sys.argv[1:]\n"
         "with open(os.environ['FAKE_DOCKER_LOG'], 'a') as log: log.write(json.dumps(args) + '\\n')\n"
+        "if args[:2] == ['context', 'show']: print(os.environ.get('DOCKER_CONTEXT', 'fixture-local'))\n"
+        "if args[:2] == ['context', 'inspect']:\n"
+        "  if os.environ.get('FAKE_DOCKER_FAIL_CONTEXT') == '1': sys.exit(1)\n"
+        "  print(os.environ.get('FAKE_DOCKER_ENDPOINT', 'unix:///fixture/docker.sock'))\n"
         "if args and args[0] == 'info' and os.environ.get('FAKE_DOCKER_FAIL_INFO') == '1': sys.exit(1)\n"
         "if args[:2] == ['compose', 'version'] and os.environ.get('FAKE_DOCKER_FAIL_COMPOSE') == '1': sys.exit(1)\n"
         "if args and args[0] == 'compose' and 'up' in args and os.environ.get('FAKE_DOCKER_FAIL_UP') == '1': sys.exit(1)\n"
@@ -114,6 +118,50 @@ def test_first_start_verifies_before_init_and_compose(
     assert "--wait" in calls[up] and "600" in calls[up]
     assert "tldw_test" in calls[up]
     assert "registry.invalid/tldw/control@sha256:" + "a" * 64 in calls[verify]
+
+
+@pytest.mark.parametrize("endpoint", ["ssh://remote.invalid", "tcp://remote.invalid:2376", "tcp://127.0.0.1:2375"])
+@pytest.mark.parametrize("selection", ["context", "host"])
+def test_non_socket_daemon_is_refused_before_state_or_container_creation(
+    installed_bundle: tuple[Path, Path, Path], endpoint: str, selection: str
+) -> None:
+    env = {"DOCKER_CONTEXT": "", "DOCKER_HOST": ""}
+    if selection == "context":
+        env.update({"DOCKER_CONTEXT": "remote-fixture", "FAKE_DOCKER_ENDPOINT": endpoint})
+    else:
+        env["DOCKER_HOST"] = endpoint
+    result, calls = run_helper("start.sh", installed_bundle, extra_env=env)
+    assert result.returncode != 0
+    assert "local Docker" in result.stderr
+    assert "Open http" not in result.stdout
+    assert not installed_bundle[2].exists()
+    assert not any(call[0] in ("run", "create", "start", "compose") for call in calls)
+
+
+def test_unknown_context_is_refused_before_state_or_container_creation(
+    installed_bundle: tuple[Path, Path, Path],
+) -> None:
+    result, calls = run_helper(
+        "start.sh",
+        installed_bundle,
+        extra_env={"DOCKER_CONTEXT": "unknown", "DOCKER_HOST": "", "FAKE_DOCKER_FAIL_CONTEXT": "1"},
+    )
+    assert result.returncode != 0
+    assert not installed_bundle[2].exists()
+    assert not any(call[0] in ("run", "create", "start", "compose") for call in calls)
+
+
+def test_selected_local_context_overrides_remote_docker_host(installed_bundle: tuple[Path, Path, Path]) -> None:
+    result, _calls = run_helper(
+        "start.sh",
+        installed_bundle,
+        extra_env={
+            "DOCKER_CONTEXT": "local-choice",
+            "DOCKER_HOST": "ssh://unused.invalid",
+            "FAKE_DOCKER_ENDPOINT": "unix:///fixture/docker.sock",
+        },
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_repeat_start_reuses_state_and_project(
