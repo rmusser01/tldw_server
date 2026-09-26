@@ -21,7 +21,7 @@ from tldw_Server_API.app.core.DB_Management.jobs_failed_requeue import (
 from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
 from tldw_Server_API.app.core.Jobs.pg_migrations import ensure_jobs_tables_pg
 
-pytest_plugins = ["tldw_Server_API.tests._plugins.authnz_full_fixtures"]
+pytest_plugins = ["tldw_Server_API.tests._plugins.authnz_isolated_fixtures"]
 pytestmark = pytest.mark.integration
 USE_SHARED_JOBS_POSTGRES = True
 INDEX_NAME = "idx_job_events_retry_admissions"

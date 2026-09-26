@@ -553,3 +553,70 @@ by whole-module AST comparison apart from the decorator. All 16 freeze hashes
 match. Anscombe's scoped re-review approves spec, quality and final fixture
 interaction with no new actionable finding. Production behavior and previous
 branch reviews are unchanged; external integration gates remain pending.
+
+Task 18 integration: normal commit/push bf319f48e4513b15958316c06dc96eb5d8e9ffe8
+on unchanged dev59bd584503; all16 freeze hashes verified after commit. Individual
+evidence reply4110596431 posted07:35:49Z and finding4110480430 resolved.
+Paginated GraphQL28 threads0unresolved with no remaining pages. Edited Qodo
+summary07:35:26Z says0bugs0rules after replies, with13 historical omissions;
+this is not a completed full new-head review. One full /agentic_review request
+5844316017 at07:37:42Z is pending. Human summary remains verbatim; only the
+Verification section was updated. Exact-head55 checks33queued22completed,
+no actionable failure; seven required contexts absent, skipped/cancelled not
+passes. PR OPEN/BLOCKED, no merge attempted. AC5 checked; AC6/finalization pending.
+
+## Full Qodo Review on bf319f48e4
+
+Review5325085624 completed07:41:07Z with three new test-only findings;
+prior28 threads remain resolved, AC5 reopened, no review request pending.
+
+### Task 19: Narrow Shared Fixture Registration
+
+**Base:** bf319f48e4513b15958316c06dc96eb5d8e9ffe8.
+**Files:** the three owned Jobs modules, a narrow test-only fixture bridge,
+and bounded registration/routing regression controls. Production, Jobs conftest,
+AuthNZ conftest, existing full bridge and global config are frozen.
+
+- [x] Reproduce full-plugin autouse leakage in actual fixture selection before
+  the fix; verify shared fixture identity and its explicit dependencies.
+- [x] Export only the original isolated_test_environment fixture through a
+  narrow bridge and update all three module registrations. Do not duplicate
+  lifecycle, register AuthNZ conftest or globally change existing plugins.
+- [x] Convert the three historical routes to typed database-free unit controls
+  exercising the existing fixture bodies with sentinel resolution. Prove no
+  alternative/shared database is instantiated; preserve explicit, autouse and
+  environment-override selection assertions. Remove redundant print diagnostics.
+- [x] Verify standalone normal invocation, native shared-PG identities and
+  cleanup, SQLite non-allocation, unrelated Jobs fixture selection and coexistence
+  with normal AuthNZ collection. Run the affected fixture/Jobs scope once under
+  required PG, plus bounded defaults; no repeated VN/storage/frontend matrices.
+- [x] Scoped checks and independent spec/quality/final fixture interaction review.
+- [ ] Normal integration, three individual evidence replies/resolutions and one full
+  exact-head Qodo request; CI/current-dev/human gates and merge still required.
+
+**Ruling:** The Task18 full bridge is discovery-safe but not selection-neutral.
+Replace only its new registrations with the narrow original-fixture export.
+Historical native controls were valid evidence, but the new route-selection
+tests must no longer allocate the alternate lifecycle; unit sentinels suffice
+for that boundary while owned SQL assertions remain real shared-PG tests.
+Cost if wrong: a bounded fixture-export or unit-test correction, not production
+changes or weakening of native migration/transaction coverage.
+
+Task19 is locally approved: actual leakage RED1failed2passed; the one affected
+required-PG run99passed1namespace-harness-failure remains explicitly not fully
+green. Correcting that new assertion to inspect actual fixture markers passed
+five covering cases in each import order, without repeating the99 passing
+cases. Final standalone nativePG3, disabled units8 and coexistence7 passed;
+54 matrix plus3 standalone fixture database names had matching drops and were
+verified absent. Main final normal-default combined integration15passed,
+zero skips,14warnings33.71s. The57-name catalog observation does not include
+Main's additional combined-run names; normal fixture teardown applies there.
+
+Ramanujan independently approved spec, quality and final scoped fixture
+interactions. Original native bodies/shared fixtures/config remain unchanged;
+all63 source/evidence hashes match after Main's verification. Applicable normal
+eight-file hooks passed, scoped Ruff5files clean, Bandit retains only the
+byte-identical B608 baseline and no errors/new findings. Warning noise and
+broader collection/version permutations remain qualified, not pristine or
+whole-suite claims. Both agents and all covering sessions are closed. Normal
+commit/push and individual external evidence replies are next; merge gates pending.
