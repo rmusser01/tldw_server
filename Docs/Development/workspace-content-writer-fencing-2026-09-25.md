@@ -452,3 +452,61 @@ versions/timestamps), the final focused HTTP rerun passes both cases:
 `/tmp/workspace-settings-identity-auth-final.log`, `.xml` (seven warnings).
 The reviewer confirms the full-row assertion closes that coverage gap; no
 additional defect was identified. All verification processes have finished.
+
+## Message Edit And Pin Admission
+
+The September 26 follow-up fences the primary `edit_message` endpoint. Workspace
+parent admission precedes message, optional metadata and conversation locks.
+The locked message must still belong to the preflight conversation; the locked
+conversation must retain the requested owner/scope. Scope changes, including a
+global chat moved into a workspace, are rejected without taking a late parent
+lock. Already-deleted messages preserve their existing 409 response.
+
+Message content, pinned metadata/settings, conversation metadata and response
+construction share one transaction. Pin settings advance the conversation
+version, so a combined content/pin update rereads that version before the
+additional metadata bump. Message/history and settings fences retain their
+existing once-per-write semantics. Parent metadata is not changed.
+
+Independent review identified two additional gaps, both addressed: combined
+content/pin version assertions, and response hydration that swallowed SQL errors.
+The endpoint now uses strict attachment reads and propagating connection-owned
+metadata reads. Legacy non-transactional metadata reads retain their nullable
+fallback. Real failing response SQL statements must produce an error and roll
+back every edit, rather than returning success after PostgreSQL rolls back an
+aborted transaction. The second review found no remaining actionable issue.
+
+Verification:
+- Initial RED: 14 failed and 2 passed across both backends. Failures show missing
+  parent/scope/message-identity admission and post-commit write/response failures.
+  `/tmp/workspace-message-edit-red.log`.
+- Review SQL-failure RED: four failures, all DID NOT RAISE, with actual bad SQL
+  executed during response hydration after the writes.
+  `/tmp/workspace-message-edit-sql-red-response.log`.
+- Final real-backend message/settings/metadata boundary run: 105 passed, no
+  skips, four warnings, exit 0 in 167.36 seconds.
+  `/tmp/workspace-message-edit-reviewed.log`, `.xml`.
+- Final affected message-store/settings/error-mapping and edit/pin HTTP run:
+  192 passed, no skips, ten warnings, exit 0 in 158.93 seconds.
+  `/tmp/workspace-message-edit-final-regression.log`, `.xml`. This includes two
+  real API-key HTTP tests using isolated AuthNZ bootstrap and only a product DB
+  override: missing-key 401 and deleted-parent 409 leave full product rows
+  unchanged. Credential cases are SQLite-only; the other HTTP cases use the
+  established fixture-auth client.
+- Broader full behavior-snapshot HTTP suite: 147 passed, no skips, fifteen
+  warnings, exit 0 in 1877.40 seconds. `/tmp/workspace-message-edit-http-final.log`,
+  `.xml`. This invocation started before the last strict response-read change;
+  it is broader regression evidence, not final-head hydration verification.
+  The final 105/192 runs above cover that hardening. Counts overlap and should
+  not be added as unique tests.
+- Touched production and tests pass Ruff and Python compilation; diff whitespace
+  passes. Bandit reports zero findings/errors in both production modules.
+  `/tmp/workspace-message-edit-reviewed-bandit.json`.
+- Independent review's two findings are closed. Review was read-only and did not
+  execute tests itself.
+
+The Backlog task remains In Progress; owned routes remain disabled. Send/completion,
+direct Sync, generic message writers, other settings/runtime/root/inventory/
+membership/study/migration writers and durable sharing cleanup are not certified
+by this edit-only slice. No WebUI/CDP or full-project acceptance is claimed.
+All verification processes and the reviewer have finished.

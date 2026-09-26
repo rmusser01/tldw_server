@@ -1743,9 +1743,10 @@ class MessageStore:
         *,
         conn: Any | None = None,
     ) -> dict[str, Any] | None:
-        """Fetch metadata for a message if present."""
+        """Fetch metadata; caller-owned transactions must not hide read failures."""
         try:
-            self._db._ensure_message_metadata_table()
+            if conn is None:
+                self._db._ensure_message_metadata_table()
             if conn is not None:
                 cursor = conn.execute(
                     "SELECT tool_calls_json, extra_json, last_modified "
@@ -1769,7 +1770,9 @@ class MessageStore:
                 "extra": self._metadata_json_value(ex) if ex is not None else None,
                 "last_modified": lm,
             }
-        except _CHACHA_NONCRITICAL_EXCEPTIONS:
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
+            if conn is not None:
+                raise CharactersRAGDBError("Failed to read transactional message metadata") from exc
             return None
 
     def get_message_metadata_map(self, message_ids: list[str]) -> dict[str, dict[str, Any]]:

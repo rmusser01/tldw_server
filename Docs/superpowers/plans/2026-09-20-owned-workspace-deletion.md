@@ -161,7 +161,8 @@ PostgreSQL parent-before-child deadlock test. The error-mapping plus FastAPI HTT
 regression (fixture authentication) passes 130 cases. Review-driven tests additionally cover version
 races, empty updates, and response-failure rollback. See the fencing report for evidence and
 review disposition. This is not generic `update_conversation` certification:
-message edit/enrichment and direct Sync callers remain outstanding.
+message edit/enrichment and direct Sync callers remained outstanding at that
+checkpoint; the edit-only follow-up below closes the primary edit endpoint.
 
 Remaining chat implementation inventory (not covered by creation/restore):
 - `ConversationStore.upsert_conversation_from_sync` can insert, resurrect, and
@@ -183,14 +184,17 @@ Remaining chat implementation inventory (not covered by creation/restore):
   state before persistence. Parent admission must precede these locks, not be
   added only inside the final update. Preserve global and recipient-owned shared
   chat behavior, which must not require a local owner workspace row.
-- Next bounded implementation is `character_messages.edit_message`: admit the
-  requested parent before message/metadata locks; reread the locked message's
-  conversation identity and verify transactional owner/scope; reject reparenting
-  rather than acquiring another parent after child locks. Its current post-commit
-  conversation metadata bump is also a writer and must move under the admitted
-  transaction. Keep response reads coherent, preserve global behavior and test
-  content/pin/no-op, version conflicts, both deletion orderings and rollback on
-  SQLite/PostgreSQL. Do not certify send/completion/Sync via this edit-only slice.
+- September 26 edit-only follow-up implements `character_messages.edit_message`
+  admission before message/metadata locks, locked message identity reread and
+  transactional owner/scope validation. Reparenting is rejected instead of
+  taking a new parent lock below child locks. Conversation metadata bump and
+  response reads now share the admitted transaction. Strict attachment reads
+  and connection-owned metadata errors propagate rather than returning false
+  success after an aborted PostgreSQL transaction. Preserve the existing pin
+  settings version increment separately from the content metadata bump.
+  Real SQLite/PostgreSQL tests cover content/pin/no-op, both deletion orderings,
+  rollback and SQL-level response failures. See the fencing report for final
+  evidence. This does not certify send/completion/Sync or the generic DB writers.
 - Verify losing operations leave history versions, search/sync projections and
   settings unchanged, including caller-owned transactions and failures. Reuse
   real PostgreSQL concurrency fixtures rather than mocked lock-call assertions.

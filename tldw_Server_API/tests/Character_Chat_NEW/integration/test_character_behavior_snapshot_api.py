@@ -332,6 +332,45 @@ def test_chat_settings_identity_loss_returns_404_over_http(
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize("pinned", [None, True])
+def test_workspace_message_edit_rejects_deleted_parent_with_real_auth(
+    single_user_client, character_db, monkeypatch, pinned,
+):
+    from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+    from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+
+    client, _, api_key = single_user_client
+    monkeypatch.setattr(character_db, "client_id", str(get_settings().SINGLE_USER_FIXED_ID))
+    monkeypatch.setitem(client.app.dependency_overrides, get_chacha_db_for_user, lambda: character_db)
+    character_db.upsert_workspace("deleted-edit-workspace", "Workspace")
+    conversation_id = character_db.add_conversation({
+        "title": "Chat", "scope_type": "workspace", "workspace_id": "deleted-edit-workspace",
+    })
+    assert character_db.delete_workspace("deleted-edit-workspace", 1)
+    assert character_db.upsert_conversation_from_sync(
+        conversation_id=conversation_id, title="Retained", sync_client_id=character_db.client_id,
+        object_revision=5, object_hash="retained", scope_type="workspace", workspace_id="deleted-edit-workspace",
+    )
+    message_id = character_db.add_message({"conversation_id": conversation_id, "sender": "user", "content": "Original"})
+
+    def snapshot():
+        return {
+            table: [dict(row) for row in character_db.execute_query(f"SELECT * FROM {table}").fetchall()]
+            for table in ("workspaces", "conversations", "messages", "message_metadata", "conversation_settings", "sync_log")
+        }
+
+    before = snapshot()
+    params = {"expected_version": 1, "scope_type": "workspace", "workspace_id": "deleted-edit-workspace"}
+    payload = {"content": "Must not persist", "pinned": pinned}
+    unauthenticated = client.put(f"/api/v1/messages/{message_id}", params=params, json=payload)
+    assert unauthenticated.status_code == 401, unauthenticated.text
+    assert snapshot() == before
+    response = client.put(f"/api/v1/messages/{message_id}", params=params, json=payload, headers={"X-API-KEY": api_key})
+    assert response.status_code == 409, response.text
+    assert snapshot() == before
+
+
+@pytest.mark.integration
 def test_workspace_chat_metadata_rejects_deleted_parent_over_http(
     test_client, auth_headers, character_db,
 ):

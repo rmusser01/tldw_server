@@ -1084,7 +1084,16 @@ async def edit_message(
                 detail=f"Chat session {message['conversation_id']} not found",
             )
         with db.transaction() as conn:
+            # Admit the parent before taking any child locks to match deletion ordering.
+            if scope.scope_type == "workspace":
+                db._lock_workspace_for_content_write(conn, scope.workspace_id)
             db.lock_message_for_edit(message_id, conn=conn)
+            locked_message = db.get_message_by_id(message_id, include_deleted=True, strict_images=True)
+            if not locked_message or locked_message["conversation_id"] != message["conversation_id"]:
+                raise HTTPException(status_code=404, detail=f"Message {message_id} not found")
+            if locked_message.get("deleted"):
+                raise ConflictError("Cannot edit a deleted message.", entity="messages", entity_id=message_id)
+            message = locked_message
             if metadata_updated:
                 db.lock_message_metadata_for_edit(message_id, conn=conn)
             resume_state = db.get_roleplay_resume_state(
@@ -1096,6 +1105,15 @@ async def edit_message(
             conversation = resume_state.get("conversation")
             if not isinstance(conversation, Mapping):
                 raise InputError("Conversation resume state is incomplete")
+            if (
+                str(conversation.get("client_id", "")).strip() != str(current_user.id).strip()
+                or (conversation.get("scope_type") or "global") != scope.scope_type
+                or (
+                    scope.scope_type == "workspace"
+                    and conversation.get("workspace_id") != scope.workspace_id
+                )
+            ):
+                raise HTTPException(status_code=404, detail=f"Chat session {message['conversation_id']} not found")
             update_payload = {
                 "content": (
                     update_data.content
@@ -1169,49 +1187,40 @@ async def edit_message(
                 ):
                     raise InputError("Failed to update resumable chat settings")
 
-        # Update conversation metadata (last_modified/version) via DB abstraction
-        conv = db.get_conversation_by_id(message["conversation_id"])
-        if conv and content_updated:
-            try:
-                db.update_conversation(
+            if content_updated:
+                # Pin settings can advance the conversation version within this transaction.
+                conversation = db.get_conversation_by_id(message["conversation_id"])
+                if not conversation:
+                    raise NotFoundError("Conversation not found.")
+                if not db.update_conversation(
                     message["conversation_id"],
                     {},
-                    conv.get("version", 1),
-                )
-            except (ConflictError, CharactersRAGDBError) as e:
-                logger.warning(
-                    "Non-fatal: failed to bump conversation metadata for {}: {}",
-                    message["conversation_id"],
-                    e,
-                    exc_info=True,
-                )
+                    conversation["version"],
+                ):
+                    raise InputError("Failed to update conversation metadata")
 
-        # Get character details for placeholders
-        conversation = db.get_conversation_by_id(message['conversation_id'])
-        character_id = conversation.get('character_id') if conversation else None
-        character = db.get_character_card_by_id(character_id) if character_id else None
-        character_name = character.get('name', 'Assistant') if character else 'Assistant'
-        user_name = conversation.get('user_name', 'User') if conversation else 'User'
+            # Build the response before releasing the admitted parent and child locks.
+            conversation = db.get_conversation_by_id(message['conversation_id'])
+            character_id = conversation.get('character_id') if conversation else None
+            character = db.get_character_card_by_id(character_id) if character_id else None
+            character_name = character.get('name', 'Assistant') if character else 'Assistant'
+            user_name = conversation.get('user_name', 'User') if conversation else 'User'
 
-        # Retrieve updated message with placeholder parameters
-        updated_msg = retrieve_message_details(db, message_id, character_name, user_name)
+            updated_msg = db.get_message_by_id(message_id, strict_images=True)
+            if not updated_msg:
+                raise NotFoundError("Message not found.")
+            if isinstance(updated_msg.get("content"), str):
+                updated_msg["content"] = replace_placeholders(updated_msg["content"], character_name, user_name)
+            response_payload = _convert_db_message_to_response(updated_msg)
 
-        logger.info(f"Updated message {message_id} by user {current_user.id}")
-        response_payload = _convert_db_message_to_response(updated_msg)
-        if metadata_updated:
-            try:
-                metadata = db.get_message_metadata(message_id) or {}
+            if metadata_updated:
+                metadata = db.get_message_metadata(message_id, conn=conn) or {}
                 extra = metadata.get("extra")
                 if isinstance(extra, dict):
                     response_payload = response_payload.model_copy(
                         update={"metadata_extra": extra}
                     )
-            except _CHARACTER_MESSAGES_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(
-                    "Non-fatal: failed to include metadata in edit response for message {}: {}",
-                    message_id,
-                    exc,
-                )
+        logger.info(f"Updated message {message_id} by user {current_user.id}")
         return response_payload
 
     except HTTPException:

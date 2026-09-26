@@ -612,6 +612,333 @@ def test_workspace_chat_metadata_does_not_lock_child_before_parent(deletion_db, 
     assert db.get_conversation_by_id(conversation_id) is None
 
 
+def _edit_workspace_message(db, message_id, *, pinned=None, content="Edited", workspace_scoped=True):
+    from tldw_Server_API.app.api.v1.endpoints.character_messages import edit_message
+    from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import MessageUpdate
+
+    return asyncio.run(edit_message(
+        update_data=MessageUpdate(content=content, pinned=pinned), message_id=message_id,
+        expected_version=1, scope_type="workspace" if workspace_scoped else "global",
+        workspace_id="ws-delete" if workspace_scoped else None,
+        db=db, current_user=SimpleNamespace(id=db.client_id),
+    ))
+
+
+def _message_edit_snapshot(db):
+    return {
+        "graph": _deletion_snapshot(db),
+        "settings": [dict(row) for row in db.execute_query("SELECT * FROM conversation_settings").fetchall()],
+        "metadata": [dict(row) for row in db.execute_query("SELECT * FROM message_metadata").fetchall()],
+    }
+
+
+@pytest.fixture
+def message_edit_limiter(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import character_messages
+
+    async def allow(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(character_messages, "get_character_rate_limiter", lambda: SimpleNamespace(check_rate_limit=allow))
+
+
+@pytest.mark.parametrize("pinned", [None, True])
+def test_message_edit_rejects_deleted_workspace_parent(deletion_db, message_edit_limiter, pinned):
+    db = deletion_db
+    conversation_id, *_ = _seed_deletion_graph(db)
+    assert db.delete_workspace("ws-delete", 1)
+    assert db.upsert_conversation_from_sync(
+        conversation_id=conversation_id, title="Retained", sync_client_id=db.client_id,
+        object_revision=5, object_hash="retained", scope_type="workspace", workspace_id="ws-delete",
+    )
+    message_id = db.add_message({"conversation_id": conversation_id, "sender": "user", "content": "Retained"})
+    before = _message_edit_snapshot(db)
+    with pytest.raises(HTTPException) as exc:
+        _edit_workspace_message(db, message_id, pinned=pinned)
+    assert exc.value.status_code == 409
+    assert _message_edit_snapshot(db) == before
+
+
+@pytest.mark.parametrize("new_identity", ["global", "other_workspace", "other_owner", "message_reparent", "global_to_workspace"])
+def test_message_edit_rechecks_locked_identity(deletion_db, monkeypatch, message_edit_limiter, new_identity):
+    from tldw_Server_API.app.api.v1.endpoints import character_messages
+
+    db = deletion_db
+    conversation_id, message_ids, *_ = _seed_deletion_graph(db)
+    if new_identity == "global_to_workspace":
+        conversation_id = db.add_conversation({"title": "Global"})
+        message_ids = [db.add_message({"conversation_id": conversation_id, "sender": "user", "content": "Original"})]
+    db.upsert_workspace("ws-other", "Other")
+    destination = db.add_conversation({"title": "Destination", "scope_type": "workspace", "workspace_id": "ws-other"})
+    verify = character_messages._verify_message_access
+    after_move = {}
+
+    def move_after_preflight(*args, **kwargs):
+        message = verify(*args, **kwargs)
+        if new_identity == "message_reparent":
+            with db.transaction() as conn:
+                conn.execute("UPDATE messages SET conversation_id = ? WHERE id = ?", (destination, message_ids[0]))
+        else:
+            assert db.upsert_conversation_from_sync(
+                conversation_id=conversation_id, title="Moved", object_revision=1, object_hash="moved",
+                sync_client_id="other-owner" if new_identity == "other_owner" else db.client_id,
+                scope_type="global" if new_identity == "global" else "workspace",
+                workspace_id=None if new_identity == "global" else "ws-other" if new_identity == "other_workspace" else "ws-delete",
+            )
+        after_move.update(_message_edit_snapshot(db))
+        return message
+
+    monkeypatch.setattr(character_messages, "_verify_message_access", move_after_preflight)
+    with pytest.raises(HTTPException) as exc:
+        _edit_workspace_message(db, message_ids[0], pinned=True, workspace_scoped=new_identity != "global_to_workspace")
+    assert exc.value.status_code == 404
+    assert _message_edit_snapshot(db) == after_move
+
+
+@pytest.mark.parametrize("failure", ["metadata_bump", "response", "response_metadata"])
+def test_message_edit_failure_rolls_back_all_writes(deletion_db, monkeypatch, message_edit_limiter, failure):
+    from tldw_Server_API.app.api.v1.endpoints import character_messages
+
+    db = deletion_db
+    _, message_ids, *_ = _seed_deletion_graph(db)
+    before = _message_edit_snapshot(db)
+
+    def fail(*args, **kwargs):
+        raise CharactersRAGDBError("injected edit failure")
+
+    if failure == "metadata_bump":
+        monkeypatch.setattr(db, "update_conversation", fail)
+    elif failure == "response":
+        monkeypatch.setattr(character_messages, "_convert_db_message_to_response", fail)
+    else:
+        monkeypatch.setattr(db, "get_message_metadata", fail)
+    with pytest.raises(HTTPException) as exc:
+        _edit_workspace_message(db, message_ids[0], pinned=True)
+    assert exc.value.status_code == 500
+    assert _message_edit_snapshot(db) == before
+
+
+@pytest.mark.parametrize("commit_delete", [False, True])
+def test_message_edit_waits_for_workspace_deletion(deletion_db, monkeypatch, message_edit_limiter, commit_delete):
+    from tldw_Server_API.app.api.v1.endpoints import character_messages
+
+    db = deletion_db
+    _, message_ids, *_ = _seed_deletion_graph(db)
+    preflight, proceed, attempting = threading.Event(), threading.Event(), threading.Event()
+    verify = character_messages._verify_message_access
+
+    def pause_after_preflight(*args, **kwargs):
+        message = verify(*args, **kwargs)
+        preflight.set()
+        assert proceed.wait(10)
+        attempting.set()
+        return message
+
+    def edit():
+        try:
+            return _edit_workspace_message(db, message_ids[0], pinned=True)
+        finally:
+            db.close_connection()
+
+    class AbortDeletion(Exception):
+        pass
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        monkeypatch.setattr(character_messages, "_verify_message_access", pause_after_preflight)
+        future = executor.submit(edit)
+        try:
+            assert preflight.wait(10)
+            try:
+                with db.transaction():
+                    assert db.delete_workspace("ws-delete", 1)
+                    after_delete = _message_edit_snapshot(db)
+                    proceed.set()
+                    assert attempting.wait(10)
+                    with pytest.raises(FutureTimeout):
+                        future.result(timeout=0.2)
+                    if not commit_delete:
+                        raise AbortDeletion
+            except AbortDeletion:
+                pass
+        finally:
+            proceed.set()
+        if commit_delete:
+            with pytest.raises(HTTPException) as exc:
+                future.result(timeout=10)
+            assert exc.value.status_code == 409
+            assert _message_edit_snapshot(db) == after_delete
+        else:
+            assert future.result(timeout=10).content == "Edited"
+            assert db.get_message_metadata(message_ids[0])["extra"]["pinned"] is True
+
+
+@pytest.mark.parametrize("commit_edit", [False, True])
+def test_workspace_deletion_waits_for_message_edit(deletion_db, message_edit_limiter, commit_edit):
+    db = deletion_db
+    conversation_id, message_ids, *_ = _seed_deletion_graph(db)
+    attempting = threading.Event()
+
+    def delete():
+        try:
+            attempting.set()
+            return db.delete_workspace("ws-delete", 1)
+        finally:
+            db.close_connection()
+
+    class AbortEdit(Exception):
+        pass
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        try:
+            with db.transaction():
+                assert _edit_workspace_message(db, message_ids[0], pinned=True).content == "Edited"
+                future = executor.submit(delete)
+                assert attempting.wait(10)
+                with pytest.raises(FutureTimeout):
+                    future.result(timeout=0.2)
+                if not commit_edit:
+                    raise AbortEdit
+        except AbortEdit:
+            pass
+        assert future.result(timeout=10)
+    retained = db.get_message_by_id(message_ids[0], include_deleted=True)
+    assert retained["content"] == ("Edited" if commit_edit else "deletionneedle")
+    assert bool(retained["deleted"]) is True
+    metadata = db.get_message_metadata(message_ids[0])
+    assert (metadata or {}).get("extra", {}).get("pinned", False) is commit_edit
+    settings = db.get_conversation_settings(conversation_id)
+    assert bool(settings and message_ids[0] in settings["settings"]["pinnedMessageIds"]) is commit_edit
+
+
+@pytest.mark.parametrize("deletion_db", ["postgresql"], indirect=True)
+def test_message_edit_claims_parent_before_child_locks(deletion_db, monkeypatch, message_edit_limiter):
+    db = deletion_db
+    _, message_ids, *_ = _seed_deletion_graph(db)
+    parent_claimed, finish_delete, attempting = threading.Event(), threading.Event(), threading.Event()
+    get_messages = db.get_messages_for_conversation
+    lock_parent = db._lock_workspace_for_content_write
+
+    def pause_before_children(*args, **kwargs):
+        parent_claimed.set()
+        assert finish_delete.wait(10)
+        return get_messages(*args, **kwargs)
+
+    def observe_parent(conn, workspace_id):
+        attempting.set()
+        return lock_parent(conn, workspace_id)
+
+    def delete():
+        try:
+            return db.delete_workspace("ws-delete", 1)
+        finally:
+            db.close_connection()
+
+    def edit():
+        try:
+            return _edit_workspace_message(db, message_ids[0], pinned=True)
+        finally:
+            db.close_connection()
+
+    monkeypatch.setattr(db, "get_messages_for_conversation", pause_before_children)
+    monkeypatch.setattr(db, "_lock_workspace_for_content_write", observe_parent)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        deleting = executor.submit(delete)
+        try:
+            assert parent_claimed.wait(10)
+            editing = executor.submit(edit)
+            assert attempting.wait(10)
+            with pytest.raises(FutureTimeout):
+                editing.result(timeout=0.2)
+        finally:
+            finish_delete.set()
+        assert deleting.result(timeout=10)
+        with pytest.raises(HTTPException) as exc:
+            editing.result(timeout=10)
+        assert exc.value.status_code == 409
+
+
+@pytest.mark.parametrize("workspace_scoped", [False, True])
+@pytest.mark.parametrize("content,pinned", [("Edited", None), (None, True), (None, False), ("deletionneedle", None), ("Edited", True)])
+def test_message_edit_preserves_global_and_workspace_behavior(deletion_db, message_edit_limiter, workspace_scoped, content, pinned):
+    db = deletion_db
+    if workspace_scoped:
+        conversation_id, message_ids, *_ = _seed_deletion_graph(db)
+        message_id = message_ids[0]
+    else:
+        conversation_id = db.add_conversation({"title": "Global"})
+        message_id = db.add_message({"conversation_id": conversation_id, "sender": "user", "content": "deletionneedle"})
+    before_parent = db.get_workspace("ws-delete")
+    before_history = db.get_conversation_by_id(conversation_id)["history_version"]
+    response = _edit_workspace_message(db, message_id, content=content, pinned=pinned, workspace_scoped=workspace_scoped)
+    assert response.content == (content or "deletionneedle")
+    assert response.version == 2
+    conversation = db.get_conversation_by_id(conversation_id)
+    assert conversation["version"] == 1 + bool(content) + (pinned is not None)
+    assert conversation["history_version"] == before_history + 1
+    if pinned is not None:
+        assert response.metadata_extra["pinned"] is pinned
+        settings = db.get_conversation_settings(conversation_id)
+        assert settings["settings_version"] == 1
+        assert (message_id in settings["settings"]["pinnedMessageIds"]) is pinned
+    assert db.get_workspace("ws-delete") == before_parent
+
+
+@pytest.mark.parametrize("read_kind", ["images", "metadata"])
+def test_message_edit_response_sql_failure_is_not_reported_as_success(
+    deletion_db, monkeypatch, message_edit_limiter, read_kind,
+):
+    db = deletion_db
+    _, message_ids, *_ = _seed_deletion_graph(db)
+    before = _message_edit_snapshot(db)
+    execute_query = db.execute_query
+    update_conversation = db.update_conversation
+    ready = False
+
+    def mark_updated(*args, **kwargs):
+        nonlocal ready
+        result = update_conversation(*args, **kwargs)
+        ready = True
+        return result
+
+    def fail_sql(query, *args, **kwargs):
+        # Execute a real bad statement on the current transaction, not a getter mock.
+        if ready and (
+            (read_kind == "images" and "FROM message_images" in query)
+            or (read_kind == "metadata" and "SELECT tool_calls_json, extra_json, last_modified" in query)
+        ):
+            return execute_query("SELECT * FROM missing_edit_response_table")
+        return execute_query(query, *args, **kwargs)
+
+    monkeypatch.setattr(db, "update_conversation", mark_updated)
+    monkeypatch.setattr(db, "execute_query", fail_sql)
+    # Metadata's conn-owned path executes directly on the same connection.
+    transaction = db.transaction
+
+    class FaultConnection:
+        def __init__(self, conn):
+            self.conn = conn
+
+        def __getattr__(self, name):
+            return getattr(self.conn, name)
+
+        def execute(self, query, *args, **kwargs):
+            if ready and read_kind == "metadata" and "SELECT tool_calls_json, extra_json, last_modified" in query:
+                return self.conn.execute("SELECT * FROM missing_edit_response_table")
+            return self.conn.execute(query, *args, **kwargs)
+
+    @contextmanager
+    def faulty_transaction():
+        with transaction() as conn:
+            yield FaultConnection(conn)
+
+    monkeypatch.setattr(db, "transaction", faulty_transaction)
+    with pytest.raises(HTTPException) as exc:
+        _edit_workspace_message(db, message_ids[0], pinned=True)
+    assert exc.value.status_code == 500
+    monkeypatch.undo()
+    assert _message_edit_snapshot(db) == before
+
+
 def _update_workspace_chat_settings(db, conversation_id, *, workspace_scoped=True):
     from tldw_Server_API.app.api.v1.endpoints.character_chat_sessions import update_chat_settings
     from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import ChatSettingsUpdate
