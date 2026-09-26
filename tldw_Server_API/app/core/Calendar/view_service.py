@@ -333,6 +333,7 @@ class CalendarViewService:
         master_start = item.start_at or item.due_at
         if master_start is None:
             return []
+        provider_metadata = json.loads(item.source_payload_json or "{}")
         occurrences = expand_recurrence_set(
             master_start=master_start,
             master_end=item.end_at,
@@ -345,7 +346,8 @@ class CalendarViewService:
             all_day=item.all_day,
             provider_rule=item.source_owner == CALENDAR_SOURCE_OWNER_PROVIDER,
             warnings=warnings,
-            duration_text=json.loads(item.source_payload_json or "{}").get("duration"),
+            duration_text=provider_metadata.get("duration"),
+            vtimezone_text=provider_metadata.get("vtimezone"),
         )
         return [
             _view_item_from_occurrence(

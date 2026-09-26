@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 import ipaddress
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, tzinfo
 from html import escape as html_escape
 from typing import Any
 from urllib.parse import urljoin, urlparse
@@ -19,6 +19,7 @@ from icalendar.parser import Contentlines
 
 from tldw_Server_API.app.core.Calendar.errors import CalendarValidationError
 from tldw_Server_API.app.core.Calendar.provider_operations import log_calendar_failure
+from tldw_Server_API.app.core.Calendar.recurrence import validate_provider_timezones
 from tldw_Server_API.app.core.Calendar.temporal import add_ical_duration
 from tldw_Server_API.app.core.http_client import _prepare_pinned_transport_target, create_client
 from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
@@ -180,9 +181,16 @@ class CalDavProvider:
         if len(ics_payload.encode("utf-8")) > self.max_ics_bytes:
             raise CalendarValidationError("iCalendar payload exceeds byte limit")
         try:
+            validate_provider_timezones(ics_payload)
             calendar = ICalendar.from_ical(ics_payload)
             duration_texts = _event_duration_texts(ics_payload)
-        except ValueError as exc:
+            timezone_components = {str(component.get("TZID")): component for component in calendar.walk("VTIMEZONE")}
+            # Embedded definitions are payload-scoped, unlike icalendar's global custom TZID cache.
+            resolved_timezones = {
+                name: component.to_tz(lookup_tzid=False) for name, component in timezone_components.items()
+            }
+            timezone_texts = {name: component.to_ical().decode("utf-8") for name, component in timezone_components.items()}
+        except (TypeError, ValueError, KeyError, IndexError, OverflowError) as exc:
             raise CalendarValidationError("Invalid iCalendar payload") from exc
 
         events: list[CalDavEvent] = []
@@ -197,13 +205,16 @@ class CalDavProvider:
                 if component.get("DTSTART")
                 else (component.decoded("RECURRENCE-ID") if component.get("RECURRENCE-ID") else None)
             )
-            recurrence_id = self._component_datetime_iso(component, "RECURRENCE-ID")
+            start_property = component.get("DTSTART") or component.get("RECURRENCE-ID")
+            tzid = start_property.params.get("TZID") if start_property else None
+            if isinstance(start_value, datetime) and tzid in resolved_timezones:
+                start_value = start_value.replace(tzinfo=resolved_timezones[tzid])
+            recurrence_id = self._component_datetime_iso(component, "RECURRENCE-ID", resolved_timezones)
             rule = component.get("RRULE")
             rule_text = rule.to_ical().decode("utf-8") if rule else None
-            rdates = self._component_dates(component, "RDATE")
-            exdates = self._component_dates(component, "EXDATE")
-            tzid = component.get("DTSTART").params.get("TZID") if component.get("DTSTART") else None
-            end_at = self._component_datetime_iso(component, "DTEND")
+            rdates = self._component_dates(component, "RDATE", resolved_timezones)
+            exdates = self._component_dates(component, "EXDATE", resolved_timezones)
+            end_at = self._component_datetime_iso(component, "DTEND", resolved_timezones)
             if component.get("DURATION") is not None:
                 if end_at is not None:
                     raise CalendarValidationError("VEVENT cannot specify both DTEND and DURATION")
@@ -215,7 +226,7 @@ class CalDavProvider:
                 CalDavEvent(
                     uid=uid,
                     title=str(component.get("SUMMARY") or "Untitled event"),
-                    start_at=self._component_datetime_iso(component, "DTSTART") or recurrence_id,
+                    start_at=self._component_datetime_iso(component, "DTSTART", resolved_timezones) or recurrence_id,
                     end_at=end_at,
                     location=str(component.get("LOCATION") or "") or None,
                     description=str(component.get("DESCRIPTION") or "") or None,
@@ -235,6 +246,7 @@ class CalDavProvider:
                             "exdate": exdates,
                             "recurrence_id": recurrence_id,
                             "duration": duration_texts[event_index],
+                            "vtimezone": timezone_texts.get(str(tzid)),
                         }
                     ),
                 )
@@ -428,7 +440,9 @@ class CalDavProvider:
         return calendars
 
     @staticmethod
-    def _component_datetime_iso(component: Any, name: str) -> str | None:
+    def _component_datetime_iso(
+        component: Any, name: str, resolved_timezones: dict[str, tzinfo] | None = None,
+    ) -> str | None:
         if component.get(name) is None:
             return None
         raw_value = component.decoded(name)
@@ -443,14 +457,18 @@ class CalDavProvider:
             return raw_value.isoformat()
         else:
             value = date_parser.parse(str(raw_value))
-        if value.tzinfo is None:
+        if tzid and resolved_timezones and str(tzid) in resolved_timezones:
+            value = value.replace(tzinfo=resolved_timezones[str(tzid)])
+        elif value.tzinfo is None:
             value = value.replace(tzinfo=tz.gettz(str(tzid)) or timezone.utc)
         if name == "RECURRENCE-ID":
             value = value.astimezone(timezone.utc)
         return value.isoformat()
 
     @staticmethod
-    def _component_dates(component: Any, name: str) -> list[str]:
+    def _component_dates(
+        component: Any, name: str, resolved_timezones: dict[str, tzinfo] | None = None,
+    ) -> list[str]:
         properties = component.get(name)
         if properties is None:
             return []
@@ -458,8 +476,12 @@ class CalDavProvider:
         for prop in properties if isinstance(properties, list) else [properties]:
             for entry in prop.dts:
                 value = entry.dt
-                if isinstance(value, datetime) and value.tzinfo is None:
-                    value = value.replace(tzinfo=tz.gettz(str(prop.params.get("TZID"))) or timezone.utc)
+                tzid = str(prop.params.get("TZID"))
+                if isinstance(value, datetime):
+                    if resolved_timezones and tzid in resolved_timezones:
+                        value = value.replace(tzinfo=resolved_timezones[tzid])
+                    elif value.tzinfo is None:
+                        value = value.replace(tzinfo=tz.gettz(tzid) or timezone.utc)
                 if not isinstance(value, (date, datetime)):
                     raise CalendarValidationError("CalDAV recurrence periods are not supported")
                 dates.append(value.isoformat())
