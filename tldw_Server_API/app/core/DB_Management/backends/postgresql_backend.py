@@ -1286,6 +1286,8 @@ class PostgreSQLBackend(DatabaseBackend):
                 UPDATE {source_table_ident}
                 SET {fts_column_ident} =
                     to_tsvector('english', {columns_concat_set})
+                WHERE {fts_column_ident} IS DISTINCT FROM
+                    to_tsvector('english', {columns_concat_set})
             """  # nosec B608
             cursor.execute(refresh_tsv_sql)
 
