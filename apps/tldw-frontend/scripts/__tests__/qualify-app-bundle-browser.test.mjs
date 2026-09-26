@@ -362,6 +362,9 @@ async function transportFixture(change = '', pairedIndex) {
   let streamClosed = false
   let sessionActive = false
   const setupMutations = []
+  const foreignSessionRequests = []
+  const logoutRequests = []
+  const profilesAfterForeignSession = []
   const sessionName = pairedIndex ? `session_${pairedIndex}` : 'fixture_session'
   const csrfName = `csrf_${pairedIndex}`
   const sessionValue = pairedIndex ? `public-fixture-session-${pairedIndex}` : 'public-fixture-session'
@@ -423,11 +426,32 @@ async function transportFixture(change = '', pairedIndex) {
       res.end(); return
     }
     if (pairedIndex && path === '/api/v1/users/me/profile') {
-      res.writeHead(sessionActive && req.headers.cookie?.includes(`${sessionName}=${sessionValue}`) ? 200 : 401)
+      const requestCookies = Object.fromEntries((req.headers.cookie || '').split('; ').map(cookie => cookie.split('=')))
+      const status = sessionActive && requestCookies[sessionName] === sessionValue ? 200 : 401
+      // Actual CSRF middleware also issues this cookie on a refused profile GET.
+      if (!requestCookies[csrfName]) {
+        res.setHeader('Set-Cookie', `${csrfName}=public-fixture-replacement-csrf-${pairedIndex}; Path=/; SameSite=Lax`)
+      }
+      if (requestCookies[sessionName] === `public-fixture-session-${3 - pairedIndex}`) {
+        foreignSessionRequests.push({ cookie: req.headers.cookie, csrfIssued: !requestCookies[csrfName], status })
+      } else if (foreignSessionRequests.length) {
+        profilesAfterForeignSession.push({
+          sessionUnchanged: requestCookies[sessionName] === sessionValue,
+          csrfUnchanged: requestCookies[csrfName] === csrfValue, status,
+        })
+      }
+      res.writeHead(status)
       res.end('{}'); return
     }
     if (pairedIndex && path === '/api/v1/auth/single-user/session' && req.method === 'DELETE') {
-      if (req.headers['x-csrf-token'] !== csrfValue) { res.writeHead(403); res.end(); return }
+      const requestCookies = Object.fromEntries((req.headers.cookie || '').split('; ').map(cookie => cookie.split('=')))
+      const status = req.headers['x-csrf-token'] && req.headers['x-csrf-token'] === requestCookies[csrfName] ? 200 : 403
+      logoutRequests.push({
+        sessionUnchanged: requestCookies[sessionName] === sessionValue,
+        csrfUnchanged: requestCookies[csrfName] === csrfValue,
+        capturedToken: req.headers['x-csrf-token'] === csrfValue, status,
+      })
+      if (status !== 200) { res.writeHead(status); res.end(); return }
       sessionActive = false
       res.setHeader('Set-Cookie', `${sessionName}=; Path=/api; Max-Age=0; HttpOnly; SameSite=Lax`)
       res.end('{}'); return
@@ -485,7 +509,8 @@ async function transportFixture(change = '', pairedIndex) {
   })
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
   const origin = `http://127.0.0.1:${server.address().port}`
-  return { origin, setupMutations, observed: () => ({ uploadSeen, streamClosed }), close: async () => {
+  return { origin, setupMutations, foreignSessionRequests, logoutRequests, profilesAfterForeignSession,
+    observed: () => ({ uploadSeen, streamClosed }), close: async () => {
     for (const socket of sockets) socket.destroy()
     server.closeAllConnections()
     await new Promise(resolve => server.close(resolve))
@@ -556,7 +581,7 @@ for (const change of ['missing-acknowledgement', 'disabled-acknowledgement', 'pr
   })
 }
 
-test('paired browser discovers API-scoped session cookies at setup, hostile checks and rebootstrap', async () => {
+test('paired browser preserves session and CSRF cookies despite foreign-session Set-Cookie through logout and rebootstrap', async () => {
   const first = await transportFixture('', 1)
   const second = await transportFixture('', 2)
   const root = mkdtempSync(join(tmpdir(), 'wp1-cookie-path-'))
@@ -565,13 +590,25 @@ test('paired browser discovers API-scoped session cookies at setup, hostile chec
     const evidence = await qualify({ instances: [first, second].map((fixture, index) => ({
       publicUrl: fixture.origin, sessionCookieName: `session_${index + 1}`, csrfCookieName: `csrf_${index + 1}`,
     })) }, join(root, 'evidence.json'))
-    for (const name of ['cookie_attributes_1', 'cookie_attributes_2', 'hostile_inputs_1', 'hostile_inputs_2', 'rebootstrap']) {
+    for (const name of ['cookie_attributes_1', 'cookie_attributes_2', 'hostile_inputs_1', 'hostile_inputs_2', 'foreign_session_refused', 'logout_isolated', 'rebootstrap']) {
       assert.equal(evidence.checks[name].passed, true)
     }
     assert.equal(evidence.passed, true)
-    for (const fixture of [first, second]) {
+    for (const [index, fixture] of [first, second].entries()) {
       assert.deepEqual(fixture.setupMutations.map(mutation => mutation.step), ['setup_path', 'privacy_security'])
+      assert.deepEqual(fixture.foreignSessionRequests, [{
+        cookie: `session_${index + 1}=public-fixture-session-${2 - index}`, csrfIssued: true, status: 401,
+      }])
     }
+    assert.deepEqual(first.logoutRequests.at(-1), { sessionUnchanged: true, csrfUnchanged: true, capturedToken: true, status: 200 })
+    assert.deepEqual(first.profilesAfterForeignSession, [
+      { sessionUnchanged: false, csrfUnchanged: true, status: 401 },
+      { sessionUnchanged: true, csrfUnchanged: true, status: 200 },
+    ])
+    assert.deepEqual(second.profilesAfterForeignSession, [
+      { sessionUnchanged: true, csrfUnchanged: true, status: 200 },
+      { sessionUnchanged: true, csrfUnchanged: true, status: 200 },
+    ])
     assert.ok(!JSON.stringify(evidence).includes('public-fixture-session'))
   } finally { await first.close(); await second.close(); rmSync(root, { recursive: true, force: true }) }
 })

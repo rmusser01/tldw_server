@@ -371,10 +371,11 @@ export async function qualify(input, outputPath) {
     await check('foreign_session_refused', async () => {
       for (let i = 0; i < 2; i++) {
         // Forge only the hostile request; never preseed or mutate browser storage.
-        const response = await context.request.get(instances[i].publicUrl + PROFILE, {
-          headers: { Cookie: `${instances[i].sessionCookieName}=${sessions[1 - i]}` },
+        // Native response cookies cannot replace the live browser's CSRF cookie.
+        const response = await hostileRequest(instances[i].publicUrl + PROFILE, {
+          Cookie: `${instances[i].sessionCookieName}=${sessions[1 - i]}`,
         })
-        assert.ok([401, 403].includes(response.status()))
+        assert.ok([401, 403].includes(response.status))
       }
     })
     await check('logout_isolated', async () => {
