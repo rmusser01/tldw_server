@@ -40,3 +40,12 @@
 - An initial typecheck environment failure was resolved by linking the existing monorepo dependency installation into the isolated worktree; no tracked dependency or configuration change was needed.
 - Qodo and CodeRabbit had no unresolved findings before this push. Current-head re-review and all required remote gates remain prerequisites to merge.
 - Merge method is `merge`, as required by the `dev` ruleset; no admin bypass or alternative merge method is permitted.
+
+### Current-Head CI Diagnosis (2026-09-26 UTC)
+
+- `backend-required` passed compilation, changed-module type checks, unit smoke, timestamp-sensitive tests, and startup smoke, then failed OpenAPI drift on head `440803c2a5`.
+- The shared local environment used Pydantic 2.11.7, outside the declared `>=2.13.5,<2.14.0` range. A temporary dependency overlay using CI's Pydantic 2.13.5 reproduced its exact schema hash `f9cc19147feb9dc2bc438d19f4b7d5c8a2c9946596f715a47bff7fa69b4ddfe1`.
+- Schema comparison found unchanged paths and VN schemas. The difference is Pydantic merging the equivalent OSCE patient-context input/output schemas and updating three references. Refresh the generated fingerprint and frontend types using the declared dependencies; no application-code or dependency-policy change is needed.
+- Rebased onto `origin/dev` at `a2826f103f` without conflicts. `git range-diff` confirms all six PR patches unchanged. Only this task's new diagnosis notes were temporarily stashed and restored; unrelated stashes and work remain untouched.
+- Refreshed the fingerprint and regenerated ignored frontend types. Fresh rebased-tree verification: 312 VN backend tests passed using CI-aligned schema libraries; 37 frontend VN tests, frontend typecheck, OpenAPI drift, scoped Ruff with documented exclusions, and diff check passed. Bandit returned zero findings/errors. The temporary shared-UI dependency link was removed after verification.
+- Current-head Qodo/CodeRabbit review and all remote gates remain required after the generated-artifact update. Stage 4 stays In Progress until all ruleset gates pass and the merge is verified.
