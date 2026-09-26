@@ -15,7 +15,7 @@ priority: high
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Blocks gating `app/core/MCP_unified/tests` in CI (TASK-13291). The tree is **13 failed / 3325 passed / 13 skipped** after the two fixes shipped with the triage; 5 of the 13 are covered by TASK-13356 (licensing) and TASK-13357 (publish workflow). These are the other 8.
+Blocks gating `app/core/MCP_unified/tests` in CI (TASK-13291). The tree is **13 failed / 3325 passed / 13 skipped** after the two fixes shipped with the triage; 5 of the 13 are covered by TASK-13375 (licensing) and TASK-13374 (publish workflow). These are the other 8.
 
 They share one root cause -- the tree has never run in a CI job, so drift accumulated unseen. Each still needs its own verdict: **product defect**, **stale test assertion**, or **environment**. Do not xfail them as a batch; that reproduces the invisibility this task exists to end.
 

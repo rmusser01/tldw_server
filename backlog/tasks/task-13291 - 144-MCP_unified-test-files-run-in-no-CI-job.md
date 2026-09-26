@@ -10,8 +10,8 @@ labels:
   - mcp
   - testing
 dependencies:
-  - TASK-13356
-  - TASK-13357
+  - TASK-13375
+  - TASK-13374
   - TASK-13358
 references:
   - '.github/workflows/ci.yml:1759'
@@ -72,19 +72,19 @@ through Path.stat(follow_symlinks=False), the same call the size block guards. O
 unreadable entry aborted the whole fs.glob. Probed: removing the guard turns it red again.
 
 TWO SECURITY/LICENSING FINDINGS, both invisible because of exactly this gap:
-- TASK-13357 (high, supply-chain): mcp-unified-publish.yml's publish-pypi job has a
+- TASK-13374 (high, supply-chain): mcp-unified-publish.yml's publish-pypi job has a
   `github.event_name == 'push'` branch requiring neither target == 'pypi' nor the
   confirm_publish typed string the manual path requires, the pypi environment has
   protection_rules: [] (no reviewers), and publish-testpypi has no push branch. So a
   merge to main that bumps apps/mcp-unified/pyproject.toml publishes to production PyPI
   with no confirmation and without staging to TestPyPI.
   test_mcp_unified_publish_workflow_is_manual_and_gated exists to prevent this and is red.
-- TASK-13356 (high, licensing): apps/mcp-unified/LICENSE ships full GPL-3.0 text. The
+- TASK-13375 (high, licensing): apps/mcp-unified/LICENSE ships full GPL-3.0 text. The
   project is GPL-2.0 (9a34da262a) and the root LICENSE became a licensing-boundary
   document in da0ec87d7d (TASK-12976), so the shipped file matches neither.
 
 REMAINING 13, all filed:
-- 5 in test_runtime_package_boundary: 1 -> TASK-13356, 4 -> TASK-13357.
+- 5 in test_runtime_package_boundary: 1 -> TASK-13375, 4 -> TASK-13374.
 - 8 others -> TASK-13358, with a per-test triage table. Flagged first:
   test_flashcards_export_rejects_cross_workspace_card_in_apkg_path fails with
   KeyError 'rows' before reaching its isolation check, so that cross-workspace property
@@ -94,7 +94,7 @@ THE SHARD CHANGE IS NOT IN THIS PR. Gating the tree requires the 13 resolved, an
 them are owner decisions (what licence the published artifact carries; whether a
 version-bump push is meant to publish). Adding the shard now would mean either a red
 required gate or 13 xfails -- and batch-xfailing them would reproduce the invisibility
-this task exists to end. Blocked on TASK-13356, TASK-13357, TASK-13358.
+this task exists to end. Blocked on TASK-13375, TASK-13374, TASK-13358.
 
 THE REPO ALREADY HAS THE RATCHET THIS TASK NEEDS, AND IT CANNOT SEE THIS TREE.
 
