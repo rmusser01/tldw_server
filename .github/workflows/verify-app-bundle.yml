@@ -41,7 +41,7 @@ jobs:
           python -m venv .venv
           source .venv/bin/activate
           python -m pip install --upgrade pip
-          python -m pip install cryptography==45.0.6 pytest PyYAML bandit black
+          python -m pip install cryptography==45.0.6 pytest PyYAML bandit black==25.1.0
 
       - name: Verify release, control, and helper contracts
         run: |
