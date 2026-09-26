@@ -4,7 +4,7 @@ title: Implement Chat Macros v1.1 authoring and output profiles
 status: In Progress
 assignee: []
 created_date: 2026-08-24 04:15
-updated_date: 2026-09-25 16:46
+updated_date: 2026-09-26 00:32
 labels:
 - chat-macros
 - frontend
@@ -71,6 +71,9 @@ Latest-dev closeout: rebased conflict-free onto origin/dev 21aed4cc0d after it a
 Independent review found two additional issues, now fixed with regression-first coverage: previously valid empty stored profiles use read-only normalization (strict new-input validation retained), and profile editor remains mounted through refresh/failure/retry. Backend full macro suite: 158 passed; Jobs startup: 6 passed; final service suite: 26 passed including two added compatibility tests. Frontend: 95 passed plus two added refresh regressions (41 editor/profile tests passed after fix). TypeScript package-wide now passes. Final Bandit: zero findings/errors, 3643 lines. Independent reviewer found no remaining backend issues. Awaiting PR CI/Qodo rerun and human v1.1 Change summary.
 2026-09-25 follow-up Qodo reviewer guide (comment5835803913) flags multiline/control-character headings and empty-string legacy compatibility. Empty strings were rejected before the review-fix commit, so that compatibility claim is not a previously-valid-data regression. Tightening new heading inputs to single-line/control-free text, repairing previously accepted stored multiline/control headings on read, and checking downstream Markdown safety. CI remains queued; human summary still pending.
 Heading follow-up verified: 16 new validation/legacy-read regressions failed before fix. After fix, service+executor 83 passed, both settings API validation paths 6 passed, chat-rich-text sanitization 6 passed. Ruff/diff checks clean; touched-scope Bandit zero findings/errors across210 lines. Standard ReactMarkdown path has no raw-HTML plugin; ST compatibility path calls DOMPurify via sanitizeChatRichHtml. Empty-string title compatibility claim is not applicable: pre-fix23c6b756 output_profiles.py already rejects not title. New /agentic_review command is preferred by Qodo over deprecated /review.
+2026-09-26 CI blocker investigation: backend-required run36162910088 failed only OpenAPI contract drift. Checked-in812c35ad has2098 paths/3211 schemas; CI7a9fc914 has2098 paths/3210 schemas. CI installs Pydantic2.13.5/pydantic-core2.46.5/pydantic-settings2.15.0/Starlette1.7.0; local shared venv uses Pydantic2.11.7/Starlette1.2.1. Regenerating in isolated temp dependency overlay matching CI and inspecting schema differences before snapshot update. Human Change summary received and published verbatim; merge gate satisfied on that requirement.
+Root cause confirmed: isolated CI dependency overlay reproduces CI fingerprint7a9fc91443c4cfca4e929fafb9c54cc5daab78d00cea3b1085011a39bc60e83e exactly. Schema diff has no changed paths or Chat Macros schemas; Pydantic2.13.5 combines equivalent OscePatientContext-Input/-Output into OscePatientContext, updating references in three OSCE models. Updating only generated fingerprint (types regenerated locally, gitignored). No backend behavior change or shared-venv modification.
+Fingerprint correction verification: regenerated OpenAPI JSON+TypeScript using CI-matched dependency overlay; a separate fresh exporter --check passes with expected7a9fc914 fingerprint. Package-wide bun run typecheck exits0; git diff --check passes. Only tracked changes are fingerprint and task record, no application code; prior security scan remains applicable.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
