@@ -22,7 +22,106 @@ from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
 pytestmark = pytest.mark.integration
 
 
-def test_recurrence_null_removes_rule_and_omission_preserves_it(calendar_api_client) -> None:
+@pytest.mark.parametrize("kind", ["event", "todo"])
+def test_native_item_delete_soft_deletes_and_hides_from_views(
+    calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub], kind: str,
+) -> None:
+    """Owners can soft-delete events/todos; other users cannot and deleted rows leave views."""
+    client, db, _reminders = calendar_api_client
+    calendar = _create_calendar(client)
+    item = _create_event(client, calendar["id"], kind=kind, due_at="2026-06-05T17:00:00Z")
+    _set_user(client, 2)
+    assert client.delete(f"/api/v1/calendar/items/{item['id']}").status_code == 403
+    _set_user(client, 1)
+    response = client.delete(f"/api/v1/calendar/items/{item['id']}")
+    assert response.status_code == 200, response.text
+    assert response.json() == {"deleted": True}
+    assert db.get_item(item["id"], include_deleted=True).deleted_at is not None
+    agenda = client.get("/api/v1/calendar/views/agenda", params={
+        "start_at": "2026-06-05T00:00:00Z", "end_at": "2026-06-06T00:00:00Z",
+        "include_scheduled_tasks": False,
+    })
+    assert agenda.json()["items"] == []
+    assert client.delete(f"/api/v1/calendar/items/{item['id']}").status_code == 404
+
+
+def test_delete_rejects_provider_owned_items(
+    calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
+) -> None:
+    """The native delete API preserves provider-owned records."""
+    client, db, _reminders = calendar_api_client
+    _calendar, item = _create_provider_item(db)
+    assert client.delete(f"/api/v1/calendar/items/{item.id}").status_code == 409
+    assert db.get_item(item.id).deleted_at is None
+
+
+def test_nonrecurring_views_honor_item_timezone_and_return_offsets(
+    calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
+) -> None:
+    """Naive item times use their IANA zone and render as explicit-offset instants."""
+    client, _db, _reminders = calendar_api_client
+    calendar = _create_calendar(client)
+    item = _create_event(client, calendar["id"], start_at="2026-06-05T09:00:00",
+                         end_at="2026-06-05T10:00:00", timezone="America/Los_Angeles")
+    response = client.get("/api/v1/calendar/views/agenda", params={
+        "start_at": "2026-06-05T15:00:00Z", "end_at": "2026-06-05T18:00:00Z",
+        "include_scheduled_tasks": False,
+    })
+    rows = response.json()["items"]
+    assert [row["calendar_item_id"] for row in rows] == [item["id"]]
+    assert rows[0]["start_at"] == "2026-06-05T09:00:00-07:00"
+    assert rows[0]["metadata"]["timezone"] == "America/Los_Angeles"
+    early = client.get("/api/v1/calendar/views/agenda", params={
+        "start_at": "2026-06-05T08:00:00Z", "end_at": "2026-06-05T11:00:00Z",
+        "include_scheduled_tasks": False,
+    })
+    assert early.json()["items"] == []
+
+
+def test_provider_occurrence_limit_marks_agenda_partial(
+    calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
+) -> None:
+    """Capped provider recurrence returns retained occurrences and an incompleteness warning."""
+    from tldw_Server_API.app.core.Calendar.constants import MAX_EXPANDED_OCCURRENCES
+
+    client, db, _reminders = calendar_api_client
+    _calendar, item = _create_provider_item(db)
+    db.upsert_provider_item(calendar_id=item.calendar_id, external_binding_id=item.external_binding_id,
+                            source_uid=item.source_uid, title=item.title,
+                            start_at="2026-06-05T00:00:00Z", end_at=None, provider_payload_json={})
+    db.upsert_recurrence(calendar_item_id=item.id, rrule="FREQ=MINUTELY")
+    response = client.get("/api/v1/calendar/views/agenda", params={
+        "start_at": "2026-06-05T00:00:00Z", "end_at": "2026-06-12T00:00:00Z",
+        "include_scheduled_tasks": False,
+    })
+    assert response.status_code == 200, response.text
+    assert len(response.json()["items"]) == MAX_EXPANDED_OCCURRENCES
+    assert response.json()["partial"] is True
+    assert response.json()["warnings"]
+
+
+def test_explicit_provider_offsets_do_not_require_iana_tzid(
+    calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
+) -> None:
+    """Resolved VTIMEZONE offsets remain usable even when their custom TZID is not IANA."""
+    client, db, _reminders = calendar_api_client
+    _calendar, item = _create_provider_item(db)
+    db.upsert_provider_item(calendar_id=item.calendar_id, external_binding_id=item.external_binding_id,
+                            source_uid=item.source_uid, title=item.title,
+                            start_at="2026-06-05T09:00:00-05:00", end_at="2026-06-05T10:00:00-05:00",
+                            timezone="Custom/FixedEastern", provider_payload_json={})
+    response = client.get("/api/v1/calendar/views/agenda", params={
+        "start_at": "2026-06-05T14:00:00Z", "end_at": "2026-06-05T15:00:00Z",
+        "include_scheduled_tasks": False,
+    })
+    assert response.status_code == 200, response.text
+    assert response.json()["items"][0]["start_at"] == "2026-06-05T09:00:00-05:00"
+
+
+def test_recurrence_null_removes_rule_and_omission_preserves_it(
+    calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
+) -> None:
+    """Using the API fixture, omission retains recurrence while explicit null removes its persisted row."""
     client, db, _reminders = calendar_api_client
     calendar = _create_calendar(client)
     item = _create_event(client, calendar["id"], recurrence={"rrule": "FREQ=DAILY;COUNT=3"})

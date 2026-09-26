@@ -47,12 +47,32 @@
 **Steps:** Self-review complete diff; verify and push; reply to Qodo threads; request fresh review; inspect CI and latest dev; rebase/reverify if required; merge only when allowed; update Backlog with PR/verification/final state.
 **Status:** In Progress
 
+### Follow-Up Review Fixes
+
+- Bound provider recurrence before entering dateutil, including rules that never yield; report occurrence truncation as partial rather than complete.
+- Preserve master timestamps when editing occurrence text and preserve offsets on unchanged temporal fields; disable unsupported occurrence time editing.
+- Add authorized native-item soft deletion using the existing service/repository operation.
+- Apply item timezone to nonrecurring overlap and serialize timed views with offsets.
+- Treat date-only all-day values as civil dates in agenda/week rendering.
+- Derive exclusive provider ends from valid VEVENT DURATION when DTEND is absent.
+- Add failing regressions first, run focused/full checks, and obtain a scoped independent re-review before publishing.
+- Ownership: controller owns backend changes; a frontend implementer owns only Calendar drawer/agenda/week and their frontend regression tests. No overlapping edits or concurrent commits.
+
 ## Decisions and Evidence
 
 - 2026-09-26: Rebase onto dev `59bd584503` completed; original three commits unchanged by range-diff. Published head `6602a4c5956e99be6ed5d11fef879102d4732a36`.
 - Baseline on rebased head: Calendar backend 112 passing, frontend 30 passing, shared-UI route tests 3 passing, TypeScript clean, Bandit zero findings, shard guard zero new uncovered files.
 - Qodo review posted 21 findings. Finding 21 was omitted from the initial summary and was supplied in issue comment 5843301983: endpoint docstrings.
 - External provider smoke remains unrun without credentials. Preserve the requester-authored Change summary verbatim; do not manufacture human rationale.
+- Follow-up Qodo review on a4c76e9c00 resolved the original findings and raised four new findings: typed recurrence property helper, recurrence regression docstring, explicit truncation warning, and old high-frequency recurrence seeking. These are included in Stage 4 fixes.
+- Ruling: Expand only productive provider rules (frequency/interval/count/until, weekly weekday selection, week start); preserve complex BYxxx rules verbatim with partial-result warnings rather than evaluating potentially non-yielding dateutil generators. This follows the spec's pragmatic recurrence/preserve-complex-provider-data boundary.
+- Ruling: Seek second/minute/hour rules arithmetically before dateutil, preserving interval phase, COUNT, UNTIL, and duration-adjusted overlap. Dateutil between() itself still scans from DTSTART and does not provide a work bound.
 - Remediation verification: 152 Calendar backend tests; 34 frontend tests; 3 route tests from the shared-UI cwd; TypeScript and full Calendar-source Ruff pass; touched-scope Bandit has zero findings/errors; pre-commit and shard coverage guard pass.
 - Additional regression: provider all-day RRULE UNTIL dates are normalized for aware recurrence expansion while raw provider metadata remains unchanged.
 - Refetched dev remains `59bd5845038342013a2d84d0130f6164f14b54fd`. Desktop/mobile Calendar drawer screenshots use isolated, nonsecret API fixtures, not a live provider connection.
+- Final follow-up verification: 173 backend tests and 58 Calendar frontend tests pass; TypeScript passes. Scoped reviewers identified and prompted fixes for DST duration arithmetic, custom VTIMEZONE offsets, agenda window clamping, and DST-crossing edits. Added regressions failed before fixes.
+- DURATION uses structured icalendar content-line parsing to retain P1D versus PT24H, then shared nominal-day/elapsed-hour arithmetic. Raw duration is preserved and reapplied to each recurrence instance. See RFC 5545 section 3.3.6.
+- CalendarPage tests now pin Date to their June fixture window without faking async timers; previously they displayed mocked out-of-window records using the current date.
+- Scoped frontend review approved after an additional overnight-window regression failed and was fixed; final frontend suite has 59 passing tests. Midnight-exclusive boundaries retain correct placement.
+- Final backend fold regressions: compare recurrence durations and window overlap as UTC instants; normalize recurrence-set candidates/additions/exclusions before ordering so repeated local hours remain distinct. Zero nominal-day duration additions preserve fold. Both regressions failed first; full Calendar backend now has 175 passing tests.
+- Independent scoped re-reviews are clear: frontend spec/quality approved; backend reports no remaining P1/P2 and seven targeted fold/exclusion/all-day checks pass. Required hosted CI and live-provider/human-summary gates remain external prerequisites.

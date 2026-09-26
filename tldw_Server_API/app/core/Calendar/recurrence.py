@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Literal
+from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dateutil import parser as date_parser
@@ -15,6 +16,7 @@ from tldw_Server_API.app.core.Calendar.constants import (
     MAX_QUERY_WINDOW_DAYS,
 )
 from tldw_Server_API.app.core.Calendar.errors import CalendarValidationError
+from tldw_Server_API.app.core.Calendar.temporal import add_ical_duration
 
 RecurrenceFrequency = Literal["daily", "weekly", "monthly"]
 TemporalValue = date | datetime | str
@@ -211,37 +213,41 @@ def expand_recurrence_set(
     timezone_name: str | None = None,
     all_day: bool = False,
     provider_rule: bool = False,
+    warnings: list[str] | None = None,
+    duration_text: str | None = None,
 ) -> list[RecurrenceOccurrence]:
     """Expand DTSTART/RRULE/RDATE minus EXDATE with bounded iteration and exclusive dates."""
     validate_query_window(window_start, window_end)
     zone = _zoneinfo(timezone_name)
     start = _coerce_datetime(master_start, zone)
     end = _coerce_datetime(master_end, zone) if master_end else None
-    duration = end - start if end else timedelta(days=1) if all_day else timedelta(0)
+    duration = (
+        (end - start if all_day else end.astimezone(timezone.utc) - start.astimezone(timezone.utc))
+        if end else timedelta(days=1) if all_day else timedelta(0)
+    )
     if duration < timedelta(0):
         raise CalendarValidationError("Recurrence end must not precede start")
     query_start = _coerce_datetime(window_start, zone)
     query_end = _coerce_datetime(window_end, zone)
+    query_start_utc = query_start.astimezone(timezone.utc)
+    query_end_utc = query_end.astimezone(timezone.utc)
     rules = rrule.rruleset()
-    rules.rdate(start)
+    rules.rdate(start.astimezone(timezone.utc))
     try:
         if rrule_text:
             if provider_rule:
-                fields = dict(part.split("=", 1) for part in rrule_text.removeprefix("RRULE:").split(";"))
-                if int(fields.get("INTERVAL", "1")) < 1 or int(fields.get("COUNT", "1")) < 1:
-                    raise ValueError("Recurrence interval/count must be positive")
-                until = fields.get("UNTIL")
-                if all_day and until and len(until) == 8 and until.isdigit():
-                    cutoff = _coerce_until(datetime.strptime(until, "%Y%m%d").date(), start)
-                    fields["UNTIL"] = cutoff.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-                normalized_rule = ";".join(f"{key}={value}" for key, value in fields.items())
-                rules.rrule(rrule.rrulestr(normalized_rule, dtstart=start))
+                provider_recurrence = _provider_dateutil_rule(
+                    rrule_text, dtstart=start,
+                    search_start=query_start - duration - (timedelta(days=1) if duration_text else timedelta(0)),
+                )
+                if provider_recurrence is not None:
+                    rules.rrule(_utc_candidates(provider_recurrence))
             else:
-                rules.rrule(_dateutil_rule(LocalRecurrenceRule.from_rrule(rrule_text), dtstart=start))
+                rules.rrule(_utc_candidates(_dateutil_rule(LocalRecurrenceRule.from_rrule(rrule_text), dtstart=start)))
         for value in rdates:
-            rules.rdate(_coerce_datetime(value, zone))
+            rules.rdate(_coerce_datetime(value, zone).astimezone(timezone.utc))
         for value in exdates:
-            rules.exdate(_coerce_datetime(value, zone))
+            rules.exdate(_coerce_datetime(value, zone).astimezone(timezone.utc))
     except (TypeError, ValueError, OverflowError) as exc:
         raise CalendarValidationError("Invalid recurrence dates or rule") from exc
     occurrences = []
@@ -249,21 +255,87 @@ def expand_recurrence_set(
     for index, candidate in enumerate(rules):
         if index >= 100_000:
             raise CalendarValidationError("Recurrence exceeds expansion scan limit")
-        if candidate >= query_end:
+        if candidate >= query_end_utc:
             break
-        occurrence_end = candidate + duration
-        if (duration and occurrence_end <= query_start) or (not duration and candidate < query_start):
+        local_candidate = candidate.astimezone(zone)
+        occurrence_end = (
+            add_ical_duration(local_candidate, duration_text) if duration_text
+            else local_candidate + duration if all_day else (candidate + duration).astimezone(zone)
+        )
+        if (duration and occurrence_end.astimezone(timezone.utc) <= query_start_utc) or (
+            not duration and candidate < query_start_utc
+        ):
             continue
+        if len(occurrences) >= MAX_EXPANDED_OCCURRENCES:
+            if warnings is not None:
+                warnings.append("Recurrence occurrence limit reached; results are incomplete")
+            break
         occurrences.append(
             RecurrenceOccurrence(
-                start_at=candidate.date() if all_day else candidate,
+                start_at=local_candidate.date() if all_day else local_candidate,
                 end_at=occurrence_end.date() if all_day else occurrence_end if end else None,
                 occurrence_index=len(occurrences),
             )
         )
-        if len(occurrences) >= MAX_EXPANDED_OCCURRENCES:
-            break
     return occurrences
+
+
+def _utc_candidates(values: Iterable[datetime]) -> Iterator[datetime]:
+    """Normalize before set ordering/deduplication so repeated local clock hours stay distinct."""
+    for value in values:
+        yield value.astimezone(timezone.utc)
+
+
+def _provider_dateutil_rule(value: str, *, dtstart: datetime, search_start: datetime) -> rrule.rrule | None:
+    """Expand only productive provider rules; preserve complex rules without evaluating them.
+
+    Dateutil can scan to year 9999 without yielding for impossible BYxxx sets, so
+    a guard around yielded occurrences cannot bound those rules.
+    """
+    text = value.upper().removeprefix("RRULE:")
+    fields: dict[str, str] = {}
+    for part in text.split(";"):
+        key, raw = part.split("=", 1)
+        if key not in _SUPPORTED_RRULE_KEYS | {"WKST"} or key in fields:
+            raise CalendarValidationError("Provider recurrence requires unsupported rule expansion")
+        fields[key] = raw
+    frequencies = {
+        "SECONDLY": rrule.SECONDLY, "MINUTELY": rrule.MINUTELY, "HOURLY": rrule.HOURLY,
+        "DAILY": rrule.DAILY, "WEEKLY": rrule.WEEKLY, "MONTHLY": rrule.MONTHLY, "YEARLY": rrule.YEARLY,
+    }
+    frequency = fields.get("FREQ", "")
+    if frequency not in frequencies:
+        raise CalendarValidationError("Unsupported provider recurrence frequency")
+    interval = int(fields.get("INTERVAL", "1"))
+    count = int(fields["COUNT"]) if "COUNT" in fields else None
+    if interval < 1 or (count is not None and count < 1):
+        raise CalendarValidationError("Recurrence interval/count must be positive")
+    seek_seconds = {"SECONDLY": 1, "MINUTELY": 60, "HOURLY": 3600}
+    rule_start = dtstart
+    if frequency in seek_seconds and search_start > dtstart:
+        # This subset has no BYxxx filters; arithmetic seeking preserves phase and COUNT.
+        step = timedelta(seconds=seek_seconds[frequency] * interval)
+        skipped = (search_start - dtstart) // step
+        rule_start = dtstart + skipped * step
+        if count is not None:
+            count -= skipped
+            if count <= 0:
+                return None
+    kwargs: dict[str, Any] = {"freq": frequencies[frequency], "dtstart": rule_start, "interval": interval}
+    if count is not None:
+        kwargs["count"] = count
+    if "UNTIL" in fields:
+        kwargs["until"] = _coerce_until(_parse_until(fields["UNTIL"]), dtstart)
+    if "WKST" in fields:
+        if fields["WKST"] not in _WEEKDAYS:
+            raise CalendarValidationError("Unsupported recurrence week start")
+        kwargs["wkst"] = _WEEKDAYS[fields["WKST"]]
+    if "BYDAY" in fields:
+        days = fields["BYDAY"].split(",")
+        if frequency != "WEEKLY" or len(days) > 7 or any(day not in _WEEKDAYS for day in days):
+            raise CalendarValidationError("Unsupported provider weekday recurrence")
+        kwargs["byweekday"] = tuple(_WEEKDAYS[day] for day in days)
+    return rrule.rrule(**kwargs)
 
 
 def _expand_timed_recurrence(
