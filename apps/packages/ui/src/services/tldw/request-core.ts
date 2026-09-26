@@ -430,7 +430,7 @@ const performTldwRequest = async (
         delete h[k]
       }
     }
-    if (!shouldSkipAuth && isUnsafeMethod(method)) {
+    if (isUnsafeMethod(method)) {
       const csrfToken = readBrowserCookie(getRuntimeCsrfCookieName())
       if (csrfToken) h["X-CSRF-Token"] = csrfToken
     }

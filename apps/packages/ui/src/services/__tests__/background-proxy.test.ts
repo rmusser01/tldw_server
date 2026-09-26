@@ -1744,6 +1744,83 @@ describe("background proxy fallback safety", () => {
     }
   })
 
+  it("sends instance CSRF through the real noAuth first-run setup mutation", async () => {
+    const previousMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "managed"
+    mocks.runtimeId = null
+    vi.spyOn(document, "cookie", "get").mockReturnValue(
+      "tldw_csrf_setup=setup-instance-token; csrf_token=legacy-token"
+    )
+    mocks.storageGet.mockImplementation(async (key) =>
+      key === "tldwCookieSessionConfig"
+        ? {
+            serverUrl: window.location.origin,
+            authMode: "single-user",
+            authSource: "cookie-session"
+          }
+        : null
+    )
+    const actual = await vi.importActual<
+      typeof import("@/services/tldw/request-core")
+    >("@/services/tldw/request-core")
+    mocks.tldwRequest.mockImplementation(actual.tldwRequest)
+    const payload = {
+      step: "setup_path",
+      data: {
+        acknowledged: true,
+        selected_path: "docker_single_user",
+        setup_path_key: "docker_single_user",
+        install_method: "docker",
+        deployment_mode: "single_user"
+      }
+    }
+    const savedState = {
+      status: "in_progress",
+      current_step: "privacy_security",
+      completed_steps: ["setup_path"],
+      skipped_steps: [],
+      step_data: { setup_path: payload.data },
+      first_chat: { completed: false },
+      acknowledged_steps: []
+    }
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify(savedState), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    )
+    vi.stubGlobal("fetch", fetchMock)
+    const runtimeAuth = await import("@/services/tldw/runtime-auth-override")
+    const previousCookieName = runtimeAuth.getRuntimeCsrfCookieName()
+
+    try {
+      runtimeAuth.setRuntimeCsrfCookieName("tldw_csrf_setup")
+      const { setupOnboardingMethods } =
+        await import("@/services/tldw/domains/setup-onboarding")
+      const result = await setupOnboardingMethods.updateFirstRunState(payload)
+
+      expect(result).toEqual(savedState)
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      const [url, init] = fetchMock.mock.calls[0]
+      const headers = new Headers(init?.headers)
+      expect(url).toBe("/api/v1/setup/first-run/state")
+      expect(init?.method).toBe("POST")
+      expect(init?.body).toBe(JSON.stringify(payload))
+      expect(init?.credentials).toBe("same-origin")
+      expect(headers.get("X-CSRF-Token")).toBe("setup-instance-token")
+      expect(headers.get("X-API-KEY")).toBeNull()
+      expect(headers.get("Authorization")).toBeNull()
+    } finally {
+      runtimeAuth.setRuntimeCsrfCookieName(previousCookieName)
+      vi.unstubAllGlobals()
+      if (previousMode === undefined) {
+        delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
+      } else {
+        process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = previousMode
+      }
+    }
+  })
+
   it.each(["POST", "PATCH"])(
     "uses cookie auth with current CSRF for direct %s streams",
     async (method) => {

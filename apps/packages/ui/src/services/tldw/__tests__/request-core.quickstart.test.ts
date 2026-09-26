@@ -156,6 +156,252 @@ describe("tldwRequest quickstart and advanced transport", () => {
     expect(requestHeaders.get("X-API-KEY")).toBeNull()
   })
 
+  describe("managed noAuth setup mutations", () => {
+    const setupPath = "/api/v1/setup/first-run/state"
+    const pageOrigin = "https://webui.example.test"
+    const instanceCookies =
+      "tldw_csrf_a1=instance-a; tldw_csrf_b2=instance-b; csrf_token=legacy-token"
+
+    it.each([
+      {
+        label: "relative POST",
+        method: "POST",
+        path: setupPath,
+        cookieName: "tldw_csrf_a1",
+        token: "instance-a"
+      },
+      {
+        label: "relative PATCH",
+        method: "PATCH",
+        path: setupPath,
+        cookieName: "tldw_csrf_a1",
+        token: "instance-a"
+      },
+      {
+        label: "relative PUT",
+        method: "PUT",
+        path: setupPath,
+        cookieName: "tldw_csrf_a1",
+        token: "instance-a"
+      },
+      {
+        label: "relative DELETE",
+        method: "DELETE",
+        path: setupPath,
+        cookieName: "tldw_csrf_a1",
+        token: "instance-a"
+      },
+      {
+        label: "configured page-origin absolute POST",
+        method: "POST",
+        path: `${pageOrigin}${setupPath}`,
+        cookieName: "tldw_csrf_b2",
+        token: "instance-b"
+      },
+      {
+        label: "safe GET",
+        method: "GET",
+        path: setupPath,
+        cookieName: "tldw_csrf_a1",
+        token: null
+      },
+      {
+        label: "safe HEAD",
+        method: "HEAD",
+        path: setupPath,
+        cookieName: "tldw_csrf_a1",
+        token: null
+      },
+      {
+        label: "safe OPTIONS",
+        method: "OPTIONS",
+        path: setupPath,
+        cookieName: "tldw_csrf_a1",
+        token: null
+      },
+      {
+        label: "safe TRACE",
+        method: "TRACE",
+        path: setupPath,
+        cookieName: "tldw_csrf_a1",
+        token: null
+      },
+      {
+        label: "missing instance cookie",
+        method: "POST",
+        path: setupPath,
+        cookieName: "tldw_csrf_missing",
+        cookies: "",
+        token: null
+      },
+      {
+        label: "foreign and legacy cookies only",
+        method: "POST",
+        path: setupPath,
+        cookieName: "tldw_csrf_missing",
+        token: null
+      }
+    ])(
+      "uses only the expected instance CSRF for $label",
+      async ({ method, path, cookieName, cookies, token }) => {
+        process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "managed"
+        vi.spyOn(document, "cookie", "get").mockReturnValue(
+          cookies ?? instanceCookies
+        )
+        const { setRuntimeCsrfCookieName } =
+          await import("@/services/tldw/runtime-auth-override")
+        setRuntimeCsrfCookieName(cookieName)
+        const fetchMock = vi
+          .fn<typeof fetch>()
+          .mockResolvedValue(new Response("{}", { status: 200 }))
+        const { tldwRequest } = await import("@/services/tldw/request-core")
+
+        const result = await tldwRequest(
+          {
+            path,
+            method,
+            noAuth: true,
+            headers: {
+              aUtHoRiZaTiOn: "Bearer stale-token",
+              "x-aPi-KeY": "stale-key",
+              "x-CsRf-ToKeN": "stale-csrf"
+            }
+          },
+          {
+            getConfig: async () => ({
+              serverUrl: pageOrigin,
+              authMode: "single-user",
+              authSource: "cookie-session",
+              apiKey: "configured-key",
+              accessToken: "configured-bearer"
+            }),
+            fetchFn: fetchMock
+          }
+        )
+
+        expect(result.ok).toBe(true)
+        const [url, init] = fetchMock.mock.calls[0]
+        const requestHeaders = new Headers(init?.headers)
+        expect(url).toBe(path)
+        expect(init?.credentials).toBe("same-origin")
+        expect(requestHeaders.get("X-CSRF-Token")).toBe(token)
+        expect(requestHeaders.get("X-API-KEY")).toBeNull()
+        expect(requestHeaders.get("Authorization")).toBeNull()
+      }
+    )
+
+    it.each([
+      {
+        label: "allowlisted external origin",
+        serverUrl: pageOrigin,
+        path: `https://external.example.test${setupPath}`
+      },
+      {
+        label: "configured origin different from the page",
+        serverUrl: "https://api.example.test",
+        path: `https://api.example.test${setupPath}`
+      },
+      {
+        label: "page origin different from configured origin",
+        serverUrl: "https://api.example.test",
+        path: `${pageOrigin}${setupPath}`
+      }
+    ])("does not send page CSRF to $label", async ({ serverUrl, path }) => {
+      process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "managed"
+      vi.spyOn(document, "cookie", "get").mockReturnValue(instanceCookies)
+      const { setRuntimeCsrfCookieName } =
+        await import("@/services/tldw/runtime-auth-override")
+      setRuntimeCsrfCookieName("tldw_csrf_a1")
+      const fetchMock = vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(new Response("{}", { status: 200 }))
+      const { tldwRequest } = await import("@/services/tldw/request-core")
+
+      const result = await tldwRequest(
+        { path, method: "POST", noAuth: true },
+        {
+          getConfig: async () => ({
+            serverUrl,
+            authMode: "single-user",
+            authSource: "cookie-session",
+            apiKey: "configured-key",
+            accessToken: "configured-bearer",
+            absoluteUrlAllowlist: [pageOrigin, "https://external.example.test"]
+          }),
+          fetchFn: fetchMock
+        }
+      )
+
+      expect(result.ok).toBe(true)
+      const [url, init] = fetchMock.mock.calls[0]
+      const requestHeaders = new Headers(init?.headers)
+      expect(url).toBe(path)
+      expect(init?.credentials).toBeUndefined()
+      expect(requestHeaders.get("X-CSRF-Token")).toBeNull()
+      expect(requestHeaders.get("X-API-KEY")).toBeNull()
+      expect(requestHeaders.get("Authorization")).toBeNull()
+    })
+    it.each([
+      {
+        label: "manual WebUI",
+        mode: "managed",
+        protocol: "https:",
+        authSource: "manual",
+        url: setupPath
+      },
+      {
+        label: "hosted WebUI",
+        mode: "hosted",
+        protocol: "https:",
+        authSource: "cookie-session",
+        url: "/api/proxy/setup/first-run/state"
+      },
+      {
+        label: "extension",
+        mode: "managed",
+        protocol: "chrome-extension:",
+        authSource: "cookie-session",
+        url: `${pageOrigin}${setupPath}`
+      }
+    ])(
+      "preserves credential-free noAuth for $label",
+      async ({ mode, protocol, authSource, url }) => {
+        process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = mode
+        window.location.protocol = protocol
+        vi.spyOn(document, "cookie", "get").mockReturnValue(instanceCookies)
+        const { setRuntimeCsrfCookieName } =
+          await import("@/services/tldw/runtime-auth-override")
+        setRuntimeCsrfCookieName("tldw_csrf_a1")
+        const fetchMock = vi
+          .fn<typeof fetch>()
+          .mockResolvedValue(new Response("{}", { status: 200 }))
+        const { tldwRequest } = await import("@/services/tldw/request-core")
+
+        const result = await tldwRequest(
+          { path: setupPath, method: "POST", noAuth: true },
+          {
+            getConfig: async () => ({
+              serverUrl: pageOrigin,
+              authMode: "single-user",
+              authSource,
+              apiKey: "configured-key"
+            }),
+            fetchFn: fetchMock
+          }
+        )
+
+        expect(result.ok).toBe(true)
+        const [requestUrl, init] = fetchMock.mock.calls[0]
+        const requestHeaders = new Headers(init?.headers)
+        expect(requestUrl).toBe(url)
+        expect(init?.credentials).toBeUndefined()
+        expect(requestHeaders.get("X-CSRF-Token")).toBeNull()
+        expect(requestHeaders.get("X-API-KEY")).toBeNull()
+        expect(requestHeaders.get("Authorization")).toBeNull()
+      }
+    )
+  })
+
   it("uses same-origin quickstart requests with self-host auth headers", async () => {
     process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
 
