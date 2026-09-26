@@ -30,7 +30,7 @@
 **Tests:** Extend provider parsing/import tests, `test_calendar_recurrence.py`, `test_calendar_service.py`, `test_calendar_db.py`, and API tests with recurrence-only dates, exclusions, detached exceptions, date-only DTSTART/DTEND, invalid updates, all-day noon queries, null/omitted recurrence, and injected write failures. Extend recurrence property coverage where applicable.
 **Files:** `core/Calendar/recurrence.py`, `view_service.py`, `calendar_service.py`, CalDAV provider/worker, `core/DB_Management/Calendar_DB.py`, schemas/endpoints, and corresponding tests.
 **Steps:** Write regressions and observe failures; use dateutil recurrence sets and bounded iteration; preserve provider metadata and instance identities; implement nested repository transactions and deletion; validate merged item state; run Calendar unit/integration/property suite; run Bandit and pre-commit; commit with TASK-13356.
-**Status:** In Progress
+**Status:** Complete
 
 ## Stage 3: Permissions, Links, and Review Hygiene
 **Goal:** Fix findings 4, 8, 9, 17, 18, 20, and 21.
@@ -38,7 +38,7 @@
 **Tests:** API role member/nonmember/wrong-org and revoked membership tests; authorized link list/delete and refresh tests; drawer calendar-selector and persisted-link tests; exception export identity and endpoint docstring checks.
 **Files:** Calendar API/schemas, permission tests, shared exception modules, `apps/packages/ui/src/services/calendar.ts`, Calendar drawer/types/tests, and backend integration tests.
 **Steps:** Write failing tests; wire existing AuthNZ membership APIs; add link GET/DELETE and UI retrieval; disable only the unsupported move control; centralize exception definitions using existing lightweight export pattern; document API functions; run backend/frontend tests and typecheck; run security/format checks; commit with TASK-13356.
-**Status:** Not Started
+**Status:** In Progress
 
 ## Stage 4: Re-review and Integration
 **Goal:** Publish verified fixes, address follow-up review, and satisfy merge gates.

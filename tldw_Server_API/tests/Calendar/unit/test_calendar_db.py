@@ -8,6 +8,24 @@ from tldw_Server_API.app.core.DB_Management.Calendar_DB import CalendarDatabase
 from tldw_Server_API.app.core.Calendar.errors import CalendarReadOnlyError, CalendarValidationError
 
 
+def test_outer_transaction_rolls_back_nested_item_and_recurrence(calendar_db):
+    calendar = _create_calendar(calendar_db)
+    with pytest.raises(RuntimeError):
+        with calendar_db.transaction():
+            item = calendar_db.create_item(
+                calendar_id=calendar.id, kind="event", title="Rollback", start_at="2026-06-05T09:00:00Z"
+            )
+            calendar_db.upsert_recurrence(calendar_item_id=item.id, rrule="FREQ=DAILY;COUNT=2")
+            assert calendar_db.get_item(item.id).title == "Rollback"
+            raise RuntimeError("rollback outer unit")
+    assert (
+        calendar_db.list_items_for_expansion(
+            calendar_ids=[calendar.id], window_start="2026-06-01", window_end="2026-06-08"
+        )
+        == []
+    )
+
+
 @pytest.fixture
 def calendar_db(tmp_path):
     db = CalendarDatabase(db_path=tmp_path / "calendar.db")
@@ -406,9 +424,7 @@ def test_due_scan_excludes_non_active_accounts(calendar_db, account_state):
                 (account.id,),
             )
 
-    due_bindings = calendar_db.list_sync_enabled_bindings_due_for_scan(
-        now_iso="2026-06-05T18:00:00+00:00"
-    )
+    due_bindings = calendar_db.list_sync_enabled_bindings_due_for_scan(now_iso="2026-06-05T18:00:00+00:00")
 
     assert binding.id not in {due_binding.id for due_binding in due_bindings}
 

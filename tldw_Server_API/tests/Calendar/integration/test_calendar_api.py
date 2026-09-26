@@ -22,18 +22,88 @@ from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
 pytestmark = pytest.mark.integration
 
 
+def test_recurrence_null_removes_rule_and_omission_preserves_it(calendar_api_client) -> None:
+    client, db, _reminders = calendar_api_client
+    calendar = _create_calendar(client)
+    item = _create_event(client, calendar["id"], recurrence={"rrule": "FREQ=DAILY;COUNT=3"})
+    changed = client.patch(f"/api/v1/calendar/items/{item['id']}", json={"title": "Still recurring"})
+    assert changed.json()["recurrence"]["rrule"] == "FREQ=DAILY;COUNT=3"
+    cleared = client.patch(f"/api/v1/calendar/items/{item['id']}", json={"recurrence": None})
+    assert cleared.status_code == 200
+    assert cleared.json()["recurrence"] is None
+    assert db.list_recurrences_for_items([item["id"]]) == {}
+
+
+@pytest.mark.parametrize("operation", ["create", "update"])
+def test_recurrence_write_failure_rolls_back_item_mutation(calendar_api_client, monkeypatch, operation) -> None:
+    client, db, _reminders = calendar_api_client
+    calendar = _create_calendar(client)
+    item = _create_event(client, calendar["id"])
+
+    def fail(**_kwargs: Any) -> None:
+        raise RuntimeError("injected recurrence write failure")
+
+    monkeypatch.setattr(db, "upsert_recurrence", fail)
+    if operation == "create":
+        response = client.post(
+            "/api/v1/calendar/items",
+            json={
+                "calendar_id": calendar["id"],
+                "kind": "event",
+                "title": "Must roll back",
+                "start_at": "2026-06-05T09:00:00Z",
+                "recurrence": {"rrule": "FREQ=DAILY;COUNT=2"},
+            },
+        )
+    else:
+        response = client.patch(
+            f"/api/v1/calendar/items/{item['id']}",
+            json={
+                "title": "Must roll back",
+                "recurrence": {"rrule": "FREQ=DAILY;COUNT=2"},
+            },
+        )
+    assert response.status_code == 500
+    rows = db.list_items_for_expansion(
+        calendar_ids=[calendar["id"]], window_start="2026-06-01", window_end="2026-06-08"
+    )
+    assert [(row.id, row.title) for row in rows] == [(item["id"], "Planning")]
+
+
+@pytest.mark.parametrize("field", ["rdate", "exdate"])
+def test_recurrence_rejects_malformed_dates_before_persistence(calendar_api_client, field) -> None:
+    client, _db, _reminders = calendar_api_client
+    calendar = _create_calendar(client)
+    response = client.post(
+        "/api/v1/calendar/items",
+        json={
+            "calendar_id": calendar["id"],
+            "kind": "event",
+            "title": "Invalid",
+            "start_at": "2026-06-05T09:00:00Z",
+            "recurrence": {field: ["not-a-date"]},
+        },
+    )
+    assert response.status_code in {400, 422}
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("operation", ["verify", "discover"])
 async def test_caldav_api_provider_calls_run_off_event_loop(
     calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
-    monkeypatch: pytest.MonkeyPatch, operation: str,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
 ) -> None:
     from tldw_Server_API.app.api.v1.endpoints import calendar as endpoint
     from tldw_Server_API.app.api.v1.schemas.calendar_schemas import CalDavAccountVerifyRequest
 
     _client, db, _reminders = calendar_api_client
     account = db.create_external_account(
-        tenant_id="default", user_id=1, provider="caldav", display_name="Work", secret_ref=None,
+        tenant_id="default",
+        user_id=1,
+        provider="caldav",
+        display_name="Work",
+        secret_ref=None,
     )
     calls: list[int] = []
 
@@ -47,10 +117,18 @@ async def test_caldav_api_provider_calls_run_off_event_loop(
             return []
 
     user = User(id=1, username="owner", is_active=True)
-    handler = endpoint.verify_external_calendar_account if operation == "verify" else endpoint.discover_external_calendars
+    handler = (
+        endpoint.verify_external_calendar_account if operation == "verify" else endpoint.discover_external_calendars
+    )
     await handler(
-        payload=CalDavAccountVerifyRequest(server_url="https://calendar.example.test/", username="user", password="secret"),
-        account_id=account.id, current_user=user, _principal=None, db=db, provider=Provider(),
+        payload=CalDavAccountVerifyRequest(
+            server_url="https://calendar.example.test/", username="user", password="secret"
+        ),
+        account_id=account.id,
+        current_user=user,
+        _principal=None,
+        db=db,
+        provider=Provider(),
     )
     assert calls and calls[0] != threading.get_ident()
 
@@ -270,9 +348,7 @@ def test_membership_add_list_remove_and_owner_only_management(
     listed = client.get(f"/api/v1/calendar/calendars/{calendar['id']}/memberships")
     assert listed.status_code == 200, listed.text
     listed_roles = {
-        row["principal_id"]: row["role"]
-        for row in listed.json()["items"]
-        if row["principal_id"] in role_by_principal
+        row["principal_id"]: row["role"] for row in listed.json()["items"] if row["principal_id"] in role_by_principal
     }
     assert listed_roles == role_by_principal
 

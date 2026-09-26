@@ -5,8 +5,8 @@ from __future__ import annotations
 import base64
 from html import escape as html_escape
 import ipaddress
-from dataclasses import dataclass
-from datetime import date, datetime, time, timezone
+from dataclasses import dataclass, field
+from datetime import date, datetime, timezone
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
@@ -64,14 +64,25 @@ class CalDavEvent:
     description: str | None
     source_updated_at: str | None = None
     provider_payload: dict[str, Any] | None = None
+    all_day: bool = False
+    timezone: str | None = None
+    status: str = "confirmed"
+    rrule: str | None = None
+    rdate: list[str] = field(default_factory=list)
+    exdate: list[str] = field(default_factory=list)
+    recurrence_id: str | None = None
 
 
 class CalDavProvider:
     """Minimal CalDAV client for account verification and read-only discovery."""
 
     def __init__(
-        self, *, http_client: Any | None = None, timeout_seconds: float = 10.0,
-        max_response_bytes: int = MAX_RESPONSE_BYTES, max_ics_bytes: int = MAX_ICS_BYTES,
+        self,
+        *,
+        http_client: Any | None = None,
+        timeout_seconds: float = 10.0,
+        max_response_bytes: int = MAX_RESPONSE_BYTES,
+        max_ics_bytes: int = MAX_ICS_BYTES,
     ) -> None:
         self.http_client = http_client
         self.timeout_seconds = timeout_seconds
@@ -176,16 +187,44 @@ class CalDavProvider:
             uid = str(component.get("UID") or "").strip()
             if not uid:
                 continue
+            if "\x00" in uid:
+                raise CalendarValidationError("CalDAV UID cannot contain a NUL character")
+            start_value = (
+                component.decoded("DTSTART")
+                if component.get("DTSTART")
+                else (component.decoded("RECURRENCE-ID") if component.get("RECURRENCE-ID") else None)
+            )
+            recurrence_id = self._component_datetime_iso(component, "RECURRENCE-ID")
+            rule = component.get("RRULE")
+            rule_text = rule.to_ical().decode("utf-8") if rule else None
+            rdates = self._component_dates(component, "RDATE")
+            exdates = self._component_dates(component, "EXDATE")
+            tzid = component.get("DTSTART").params.get("TZID") if component.get("DTSTART") else None
             events.append(
                 CalDavEvent(
                     uid=uid,
                     title=str(component.get("SUMMARY") or "Untitled event"),
-                    start_at=self._component_datetime_iso(component, "DTSTART"),
+                    start_at=self._component_datetime_iso(component, "DTSTART") or recurrence_id,
                     end_at=self._component_datetime_iso(component, "DTEND"),
                     location=str(component.get("LOCATION") or "") or None,
                     description=str(component.get("DESCRIPTION") or "") or None,
                     source_updated_at=self._component_datetime_iso(component, "LAST-MODIFIED"),
-                    provider_payload=sanitize_provider_metadata({"uid": uid}),
+                    all_day=isinstance(start_value, date) and not isinstance(start_value, datetime),
+                    timezone=str(tzid) if tzid else None,
+                    status=str(component.get("STATUS") or "confirmed").lower(),
+                    rrule=rule_text,
+                    rdate=rdates,
+                    exdate=exdates,
+                    recurrence_id=recurrence_id,
+                    provider_payload=sanitize_provider_metadata(
+                        {
+                            "uid": uid,
+                            "rrule": rule_text,
+                            "rdate": rdates,
+                            "exdate": exdates,
+                            "recurrence_id": recurrence_id,
+                        }
+                    ),
                 )
             )
         return events
@@ -300,7 +339,9 @@ class CalDavProvider:
                         raise CalendarValidationError("CalDAV response exceeds byte limit")
                     content_buffer.extend(chunk)
                 return httpx.Response(
-                    response.status_code, headers=response.headers, content=bytes(content_buffer),
+                    response.status_code,
+                    headers=response.headers,
+                    content=bytes(content_buffer),
                     request=httpx.Request(method, safe_url),
                 )
 
@@ -352,8 +393,7 @@ class CalDavProvider:
             ctag = _element_text(prop.find(f"{{{_CALSERVER_NS}}}getctag"))
             sync_token = _element_text(prop.find(f"{{{_DAV_NS}}}sync-token"))
             component_names = {
-                str(component.attrib.get("name", "")).upper()
-                for component in prop.findall(f".//{{{_CALDAV_NS}}}comp")
+                str(component.attrib.get("name", "")).upper() for component in prop.findall(f".//{{{_CALDAV_NS}}}comp")
             }
             supports_sync_token = bool(server_supports_sync and sync_token)
             capabilities = sanitize_provider_metadata(
@@ -388,12 +428,30 @@ class CalDavProvider:
         if isinstance(raw_value, datetime):
             value = raw_value
         elif isinstance(raw_value, date):
-            value = datetime.combine(raw_value, time.min)
+            return raw_value.isoformat()
         else:
             value = date_parser.parse(str(raw_value))
         if value.tzinfo is None:
             value = value.replace(tzinfo=tz.gettz(str(tzid)) or timezone.utc)
+        if name == "RECURRENCE-ID":
+            value = value.astimezone(timezone.utc)
         return value.isoformat()
+
+    @staticmethod
+    def _component_dates(component: Any, name: str) -> list[str]:
+        properties = component.get(name)
+        if properties is None:
+            return []
+        dates = []
+        for prop in properties if isinstance(properties, list) else [properties]:
+            for entry in prop.dts:
+                value = entry.dt
+                if isinstance(value, datetime) and value.tzinfo is None:
+                    value = value.replace(tzinfo=tz.gettz(str(prop.params.get("TZID"))) or timezone.utc)
+                if not isinstance(value, (date, datetime)):
+                    raise CalendarValidationError("CalDAV recurrence periods are not supported")
+                dates.append(value.isoformat())
+        return dates
 
     @staticmethod
     def _validate_http_url(url: str) -> str:

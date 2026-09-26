@@ -19,6 +19,85 @@ from tldw_Server_API.app.core.Calendar.errors import (
 from tldw_Server_API.app.core.DB_Management.Calendar_DB import CalendarDatabase
 
 
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"start_at": "garbage"},
+        {"end_at": "garbage"},
+        {"due_at": "garbage"},
+        {"end_at": "2026-06-05T08:00:00Z"},
+        {"timezone": "No/SuchZone"},
+    ],
+)
+def test_service_rejects_invalid_temporal_values_on_create_and_update(calendar_db, values):
+    service = CalendarService(db=calendar_db)
+    calendar = service.create_calendar(actor_user_id=1, name="Times", timezone="UTC")
+    base = {"kind": "event", "title": "Event", "start_at": "2026-06-05T09:00:00Z"}
+    with pytest.raises(CalendarValidationError):
+        service.create_item(actor_user_id=1, calendar_id=calendar.id, **(base | values))
+    item = service.create_item(actor_user_id=1, calendar_id=calendar.id, **base)
+    with pytest.raises(CalendarValidationError):
+        service.update_item(actor_user_id=1, item_id=item.id, **values)
+    assert calendar_db.get_item(item.id).start_at == base["start_at"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rrule", [None, "FREQ=DAILY;COUNT=3"])
+async def test_agenda_applies_recurrence_additions_and_exclusions(calendar_db, rrule):
+    from tldw_Server_API.app.core.Calendar.view_service import CalendarViewService
+
+    service = CalendarService(db=calendar_db)
+    calendar = service.create_calendar(actor_user_id=1, name="Dates", timezone="UTC")
+    item = service.create_item(
+        actor_user_id=1, calendar_id=calendar.id, kind="event", title="Dates", start_at="2026-06-05T09:00:00Z"
+    )
+    calendar_db.upsert_recurrence(
+        calendar_item_id=item.id, rrule=rrule, rdate_json=["2026-06-10T09:00:00Z"], exdate_json=["2026-06-06T09:00:00Z"]
+    )
+    result = await CalendarViewService(calendar_service=service).agenda(
+        actor_user_id=1, start_at="2026-06-01T00:00:00Z", end_at="2026-06-12T00:00:00Z"
+    )
+    assert [entry.start_at[:10] for entry in result.items] == (
+        ["2026-06-05", "2026-06-07", "2026-06-10"] if rrule else ["2026-06-05", "2026-06-10"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_all_day_without_end_overlaps_afternoon_but_not_next_day(calendar_db):
+    from tldw_Server_API.app.core.Calendar.view_service import CalendarViewService
+
+    service = CalendarService(db=calendar_db)
+    calendar = service.create_calendar(actor_user_id=1, name="Dates", timezone="UTC")
+    service.create_item(
+        actor_user_id=1, calendar_id=calendar.id, kind="event", title="Holiday", start_at="2026-06-05", all_day=True
+    )
+    view = CalendarViewService(calendar_service=service)
+    afternoon = await view.agenda(actor_user_id=1, start_at="2026-06-05T12:00:00Z", end_at="2026-06-05T18:00:00Z")
+    tomorrow = await view.agenda(actor_user_id=1, start_at="2026-06-06T00:00:00Z", end_at="2026-06-07T00:00:00Z")
+    assert [item.title for item in afternoon.items] == ["Holiday"]
+    assert tomorrow.items == []
+
+
+@pytest.mark.asyncio
+async def test_rdate_before_master_is_not_lost_by_database_prefilter(calendar_db):
+    from tldw_Server_API.app.core.Calendar.view_service import CalendarViewService
+
+    service = CalendarService(db=calendar_db)
+    calendar = service.create_calendar(actor_user_id=1, name="Dates", timezone="UTC")
+    item = service.create_item(
+        actor_user_id=1,
+        calendar_id=calendar.id,
+        kind="event",
+        title="Earlier addition",
+        start_at="2026-07-05T09:00:00Z",
+    )
+    calendar_db.upsert_recurrence(calendar_item_id=item.id, rrule=None, rdate_json=["2026-06-05T09:00:00Z"])
+    result = await CalendarViewService(calendar_service=service).agenda(
+        actor_user_id=1, start_at="2026-06-01T00:00:00Z", end_at="2026-06-08T00:00:00Z"
+    )
+    assert [entry.title for entry in result.items] == ["Earlier addition"]
+
+
 @pytest.fixture
 def calendar_db(tmp_path):
     db = CalendarDatabase(db_path=tmp_path / "calendar.db")
