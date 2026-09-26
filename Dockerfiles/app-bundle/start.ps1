@@ -1,4 +1,9 @@
+param([switch]$VerifyOnly)
 $ErrorActionPreference = 'Stop'
+# Compose inherits the process environment ahead of --env-file.
+foreach ($name in @('TLDW_PROJECT_ID', 'TLDW_PUBLIC_PORT', 'SINGLE_USER_API_KEY', 'TLDW_GATEWAY_HOP_SECRET', 'SINGLE_USER_SESSION_COOKIE_NAME', 'CSRF_COOKIE_NAME', 'TLDW_BACKEND_IMAGE', 'TLDW_WEBUI_IMAGE', 'TLDW_GATEWAY_IMAGE')) {
+    [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+}
 $bundleDir = $PSScriptRoot
 $controlImage = '__CONTROL_IMAGE_DIGEST__'
 $trustedKeyId = '__TRUSTED_KEY_ID__'
@@ -48,6 +53,7 @@ $controlArgs = @(
 
 & docker @runArgs 'verify' @controlArgs
 if ($LASTEXITCODE -ne 0) { throw 'Bundle verification failed; no application containers were started.' }
+if ($VerifyOnly) { return }
 & docker @runArgs 'init' @controlArgs
 if ($LASTEXITCODE -ne 0) { throw 'Instance initialization failed; no application containers were started.' }
 

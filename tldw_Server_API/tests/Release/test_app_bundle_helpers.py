@@ -49,6 +49,8 @@ def installed_bundle(tmp_path: Path) -> tuple[Path, Path, Path]:
         "    state.mkdir(exist_ok=True)\n"
         "    (state / 'config.env').write_text('TLDW_PROJECT_ID=tldw_test\\nTLDW_PUBLIC_PORT=18080\\n')\n"
         "if args and args[0] == 'compose' and 'ps' in args: print('')\n"
+        "if args and args[0] == 'compose' and '--env-file' in args:\n"
+        "  with open(os.environ['FAKE_DOCKER_LOG'] + '.env', 'a') as log: log.write(json.dumps(dict(os.environ)) + '\\n')\n"
     )
     fake_docker.chmod(0o755)
     fake_lsof = binary / "lsof"
@@ -160,7 +162,7 @@ def test_stop_uses_persisted_identity_from_other_directory(
 
     assert start.returncode == stopped.returncode == 0
     assert any("down" in call and "tldw_test" in call for call in calls)
-    assert not any("-v" in call or "--volumes" in call for call in calls)
+    assert not any("-v" in call or "--volumes" in call for call in calls if call[0] == "compose")
 
 
 @pytest.mark.parametrize("failure", ["FAKE_DOCKER_FAIL_INFO", "FAKE_DOCKER_FAIL_COMPOSE"])
@@ -236,3 +238,30 @@ def test_compose_binds_managed_setup_and_cookie_origins_to_persisted_public_port
     assert backend.get("ALLOWED_ORIGINS") == backend["TLDW_MANAGED_PUBLIC_ORIGIN"]
     assert "TLDW_SETUP_ALLOW_REMOTE" not in backend
     assert "FORWARDED_ALLOW_IPS" not in backend
+
+
+@pytest.mark.parametrize("helper", ["start.sh", "stop.sh", "status.sh"])
+def test_helpers_remove_inherited_managed_values_but_preserve_docker_connection(installed_bundle, helper):
+    result, _ = run_helper("start.sh", installed_bundle)
+    assert result.returncode == 0
+    poisoned = dict.fromkeys(
+        (
+            "TLDW_BACKEND_IMAGE",
+            "TLDW_WEBUI_IMAGE",
+            "TLDW_GATEWAY_IMAGE",
+            "TLDW_PUBLIC_PORT",
+            "SINGLE_USER_API_KEY",
+            "TLDW_GATEWAY_HOP_SECRET",
+            "SINGLE_USER_SESSION_COOKIE_NAME",
+            "CSRF_COOKIE_NAME",
+            "TLDW_PROJECT_ID",
+        ),
+        "inherited-untrusted",
+    )
+    poisoned["DOCKER_CONTEXT"] = "chosen-connection"
+    result, calls = run_helper(helper, installed_bundle, extra_env=poisoned)
+    assert result.returncode == 0, result.stderr
+    child = json.loads((installed_bundle[0].parent / "docker-calls.jsonl.env").read_text().splitlines()[-1])
+    assert all(key not in child for key in poisoned if key != "DOCKER_CONTEXT")
+    assert child["DOCKER_CONTEXT"] == "chosen-connection"
+    assert any("verify" in call for call in calls)

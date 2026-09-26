@@ -1,6 +1,9 @@
 #!/bin/sh
 set -eu
 
+# Compose shell values outrank --env-file; only verified persisted values may resolve.
+unset TLDW_PROJECT_ID TLDW_PUBLIC_PORT SINGLE_USER_API_KEY TLDW_GATEWAY_HOP_SECRET SINGLE_USER_SESSION_COOKIE_NAME CSRF_COOKIE_NAME TLDW_BACKEND_IMAGE TLDW_WEBUI_IMAGE TLDW_GATEWAY_IMAGE
+
 bundle_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 control_image='__CONTROL_IMAGE_DIGEST__'
 trusted_key_id='__TRUSTED_KEY_ID__'
@@ -38,6 +41,8 @@ fi
 mkdir -p "$state_root"
 chmod 700 "$state_root"
 
+verify_only=0
+if [ "${1:-}" = --verify-only ]; then verify_only=1; fi
 set --
 if [ -n "${TLDW_APP_PUBLIC_PORT:-}" ]; then
   case "$TLDW_APP_PUBLIC_PORT" in
@@ -62,6 +67,7 @@ control verify "$@" || {
   echo 'Bundle verification failed; no application containers were started.' >&2
   exit 1
 }
+if [ "${verify_only:-0}" = 1 ]; then exit 0; fi
 control init "$@" || {
   echo 'Instance initialization failed; no application containers were started.' >&2
   exit 1

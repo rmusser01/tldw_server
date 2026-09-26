@@ -12,23 +12,23 @@ import secrets
 import stat
 import sys
 import tempfile
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping
 
-from tldw_Server_API.app.core.Release.manifest import (
-    ManifestError,
-    ReleaseManifest,
-    verify_artifact,
-    verify_manifest,
-)
 from tldw_Server_API.app.core.AuthNZ.api_key_crypto import (
     format_api_key,
     generate_api_key_id,
     generate_api_key_secret,
     parse_api_key,
 )
-
+from tldw_Server_API.app.core.Release import require_paired_inventory
+from tldw_Server_API.app.core.Release.manifest import (
+    ManifestError,
+    ReleaseManifest,
+    verify_artifact,
+    verify_manifest,
+)
 
 CONTROL_VERSION = (0, 1, 0)
 REQUIRED_IMAGE_ROLES = ("backend", "webui", "gateway")
@@ -102,6 +102,7 @@ def verify_bundle(
         if _version_tuple(compatibility["node_version"])[0] != 24:
             raise BundleControlError("bundle requires an unsupported Node runtime")
         selected = [artifact for artifact in manifest.artifacts if artifact.platform == platform]
+        require_paired_inventory(selected)
         images: dict[str, str] = {}
         for artifact in selected:
             if artifact.kind == "file":

@@ -5,15 +5,16 @@ from __future__ import annotations
 import argparse
 import json
 import re
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any
 
+from tldw_Server_API.app.core.Release import require_paired_inventory
 from tldw_Server_API.app.core.Release.manifest import (
     ManifestError,
     verify_artifact,
     verify_manifest,
 )
-
 
 REQUIRED_ROLES = {"backend", "webui", "gateway", "control"}
 REQUIRED_GATES = ("G2", "G4", "G10", "G12")
@@ -60,6 +61,7 @@ def candidate_is_promotable(
             ):
                 return False
             selected = [artifact for artifact in manifest.artifacts if artifact.platform == platform]
+            require_paired_inventory(selected)
             roles = [artifact.role for artifact in selected if artifact.kind == "oci"]
             if len(roles) != len(REQUIRED_ROLES) or set(roles) != REQUIRED_ROLES:
                 return False

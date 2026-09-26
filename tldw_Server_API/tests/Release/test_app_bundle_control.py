@@ -39,6 +39,18 @@ def release(tmp_path: Path) -> tuple[Path, Path, Path, dict[str, bytes]]:
             "sha256": hashlib.sha256(payload).hexdigest(),
         }
     ]
+    for name in (
+        "README.md",
+        "compose.yaml",
+        "start.sh",
+        "stop.sh",
+        "status.sh",
+        "start.ps1",
+        "stop.ps1",
+        "status.ps1",
+    ):
+        (bundle / name).write_bytes(payload)
+        artifacts.append({**artifacts[0], "id": name, "role": "bundle-helper", "path": name})
     for role, digest in (("backend", "a"), ("webui", "b"), ("gateway", "c")):
         artifacts.append(
             {
@@ -314,7 +326,7 @@ def test_signed_image_location_cannot_inject_instance_env(
 ) -> None:
     bundle, manifest_path, signature_path, keys = release
     changed = json.loads(manifest_path.read_text())
-    changed["artifacts"][1]["location"] = (
+    next(a for a in changed["artifacts"] if a["role"] == "backend")["location"] = (
         "registry.invalid/tldw/backend\nSINGLE_USER_API_KEY=override@sha256:" + "a" * 64
     )
     key = Ed25519PrivateKey.from_private_bytes(bytes(range(32)))

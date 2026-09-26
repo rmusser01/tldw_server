@@ -7,26 +7,18 @@ import hashlib
 import json
 import re
 import shutil
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
+from tldw_Server_API.app.core.Release import PAIRED_BUNDLE_FILES
 from tldw_Server_API.app.core.Release.manifest import verify_manifest
 
-
 BUNDLE_TEMPLATE = Path(__file__).resolve().parents[1] / "Dockerfiles" / "app-bundle"
-BUNDLE_FILES = (
-    "README.md",
-    "compose.yaml",
-    "start.sh",
-    "stop.sh",
-    "status.sh",
-    "start.ps1",
-    "stop.ps1",
-    "status.ps1",
-)
+BUNDLE_FILES = PAIRED_BUNDLE_FILES
 REQUIRED_GATES = ("G2", "G4", "G10", "G12")
 _IMAGE_REF = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._:/-]*@sha256:[0-9a-f]{64}\Z")
 _KEY_ID = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}\Z")

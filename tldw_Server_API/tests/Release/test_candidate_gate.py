@@ -752,14 +752,21 @@ def test_control_public_trust_directory_is_precreated_traversable(tmp_path: Path
     assert stat.S_IMODE(destination.stat().st_mode) == 0o755
 
 
-@pytest.mark.parametrize("key_mode, key_size, private_present, expected", [
-    (0o444, 32, False, 0),
-    (0o000, 32, False, 1),
-    (0o444, 0, False, 1),
-    (0o444, 32, True, 1),
-])
+@pytest.mark.parametrize(
+    "key_mode, key_size, private_present, expected",
+    [
+        (0o444, 32, False, 0),
+        (0o000, 32, False, 1),
+        (0o444, 0, False, 1),
+        (0o444, 32, True, 1),
+    ],
+)
 def test_control_content_guard_executes_as_isolated_host_caller(
-    tmp_path: Path, key_mode: int, key_size: int, private_present: bool, expected: int,
+    tmp_path: Path,
+    key_mode: int,
+    key_size: int,
+    private_present: bool,
+    expected: int,
 ) -> None:
     """Root's size check must not accept trust unreadable by the helper caller."""
     import os
@@ -768,8 +775,9 @@ def test_control_content_guard_executes_as_isolated_host_caller(
     root = Path(__file__).resolve().parents[3]
     shell = (root / "Helper_Scripts/qualify_app_bundle_candidate.sh").read_text()
     block = shell[
-        shell.index('docker run --rm --platform "$platform" --entrypoint', shell.index("grep -q")):
-        shell.index("# Exercise focused security tests")
+        shell.index('docker run --rm --platform "$platform" --entrypoint', shell.index("grep -q")) : shell.index(
+            "# Exercise focused security tests"
+        )
     ]
     image = tmp_path / "control"
     trust = image / "trusted-keys"
@@ -780,7 +788,8 @@ def test_control_content_guard_executes_as_isolated_host_caller(
     if private_present:
         (image / "signing.key").write_bytes(b"private-fixture")
     docker = tmp_path / "docker"
-    docker.write_text(f'''#!{os.sys.executable}
+    docker.write_text(
+        f"""#!{os.sys.executable}
 import os, subprocess, sys
 args = sys.argv[1:]
 if '--user' not in args or args[args.index('--user') + 1] != f'{{os.getuid()}}:{{os.getgid()}}':
@@ -792,16 +801,51 @@ if '--cap-drop' not in args or args[args.index('--cap-drop') + 1] != 'ALL' or '-
 entrypoint = args[args.index('--entrypoint') + 1]
 command = args[args.index('-c') + 1].replace('/opt/tldw', {str(image)!r})
 sys.exit(subprocess.run([entrypoint, '-c', command], capture_output=True).returncode)
-''')
+"""
+    )
     docker.chmod(0o700)
     harness = tmp_path / "guard.sh"
-    harness.write_text('set -eu\nplatform=linux/arm64\ncontrol_tag=scoped-control\n' + block)
+    harness.write_text("set -eu\nplatform=linux/arm64\ncontrol_tag=scoped-control\n" + block)
     try:
         result = subprocess.run(
             ["bash", str(harness)],
             env={**os.environ, "PATH": str(tmp_path) + ":" + os.environ["PATH"]},
-            capture_output=True, check=False,
+            capture_output=True,
+            check=False,
         )
         assert result.returncode == expected
     finally:
         public.chmod(0o600)
+
+
+@pytest.mark.parametrize(
+    "name", ["compose.yaml", "README.md", "start.sh", "stop.sh", "status.sh", "start.ps1", "stop.ps1", "status.ps1"]
+)
+@pytest.mark.parametrize("damage", ["omitted", "missing", "wrong-platform", "tampered"])
+def test_paired_consumers_refuse_incomplete_required_inventory(
+    tmp_path, inventory, evidence, signing_key, name, damage
+):
+    """A valid signature cannot authorize an unsigned or unavailable helper."""
+    import json
+
+    from tldw_Server_API.scripts.app_bundle_control import BundleControlError, verify_bundle
+
+    output, keys = _build(tmp_path, inventory, evidence, signing_key)
+    manifest_path = output / "manifest.json"
+    manifest = json.loads(manifest_path.read_bytes())
+    if damage == "omitted":
+        manifest["artifacts"] = [a for a in manifest["artifacts"] if a.get("path") != name]
+    elif damage == "wrong-platform":
+        manifest["artifacts"] = [
+            a for a in manifest["artifacts"] if not (a.get("path") == name and a["platform"] == "linux/amd64")
+        ]
+    elif damage == "missing":
+        (output / name).unlink()
+    else:
+        (output / name).write_bytes(b"tampered helper")
+    raw = json.dumps(manifest).encode()
+    manifest_path.write_bytes(raw)
+    (output / "manifest.sig").write_bytes(signing_key.sign(raw))
+    assert not candidate_is_promotable(output, keys, evidence, required_platforms=PLATFORMS)
+    with pytest.raises(BundleControlError):
+        verify_bundle(manifest_path, output / "manifest.sig", keys, platform="linux/amd64", bundle_root=output)
