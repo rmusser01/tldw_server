@@ -924,6 +924,24 @@ def build_chacha_rls_sql() -> list[str]:
     stmts.extend(build_source_review_rls_sql())
     stmts.extend(build_workspace_source_saved_view_rls_sql())
     stmts.extend(build_shared_workspace_chat_rls_sql())
+    from ..chacha.native_fork_schema import NATIVE_CHAT_TABLES
+
+    for table in NATIVE_CHAT_TABLES:
+        add(f"""
+            DO $native_chat_rls$
+            BEGIN
+              IF to_regclass('{table}') IS NULL THEN RETURN; END IF;
+              EXECUTE 'ALTER TABLE {table} ENABLE ROW LEVEL SECURITY';
+              EXECUTE 'ALTER TABLE {table} FORCE ROW LEVEL SECURITY';
+              EXECUTE 'DROP POLICY IF EXISTS {table}_owner ON {table}';
+              EXECUTE $policy$
+                CREATE POLICY {table}_owner ON {table}
+                USING (client_id = current_setting('app.current_user_id', true))
+                WITH CHECK (client_id = current_setting('app.current_user_id', true))
+              $policy$;
+            END
+            $native_chat_rls$;
+        """)
     add("""
         DO $history_projection_rls$
         BEGIN

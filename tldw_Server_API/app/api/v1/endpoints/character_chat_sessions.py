@@ -3892,7 +3892,6 @@ def _maybe_trigger_character_memory_extraction(
 
     def _run_extraction() -> None:
         from tldw_Server_API.app.api.v1.endpoints.character_memory import (
-            _persona_id_for_character,
             get_or_create_character_persona_profile,
         )
         from tldw_Server_API.app.core.Character_Chat.modules.character_memory_extraction import (
@@ -7907,6 +7906,11 @@ async def restore_chat_session(
 
         # Already active: return current state as idempotent success.
         if not conversation.get("deleted"):
+            db.restore_conversation(
+                chat_id,
+                expected_version if expected_version is not None else conversation.get("version", 1),
+                require_already_active=True,
+            )
             try:
                 conversation['message_count'] = db.count_messages_for_conversation(chat_id)
             except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS:

@@ -173,7 +173,10 @@ def test_colliding_v68_lineages_upgrade_without_losing_history(
                 version = db.execute_query(
                     "SELECT version FROM db_schema_version WHERE schema_name = ?", (db._SCHEMA_NAME,),
                 ).fetchone()["version"]
-                assert version == (73 if backend_name == "postgres" else 69)
+                assert version == (
+                    CharactersRAGDB._POSTGRES_SCHEMA_VERSION
+                    if backend_name == "postgres" else CharactersRAGDB._CURRENT_SCHEMA_VERSION
+                )
                 if backend_name == "postgres":
                     constraints = db.execute_query(
                         "SELECT conname FROM pg_constraint WHERE conname IN "

@@ -586,6 +586,10 @@ class ConversationStore:
                 deleted = excluded.deleted,
                 scope_type = excluded.scope_type,
                 workspace_id = excluded.workspace_id
+            WHERE conversations.required_projection_version IS NULL
+              AND conversations.native_bundle_json IS NULL
+              AND conversations.native_creation_operation_kind IS NULL
+              AND conversations.native_creation_operation_id IS NULL
         """
         params = (
             normalized_id,
@@ -611,7 +615,11 @@ class ConversationStore:
         )
         try:
             with self._db.transaction() as conn:
-                conn.execute(query, params)
+                cursor = conn.execute(query, params)
+                if cursor.rowcount == 0:
+                    raise ConflictError(
+                        "native_conversation_sync_unsupported", entity="conversations", entity_id=normalized_id
+                    )
             logger.info("Upserted conversation projection from Sync v2 for ID: {}.", normalized_id)
             return True
         except sqlite3.IntegrityError as exc:
@@ -647,11 +655,25 @@ class ConversationStore:
                    version = ?,
                    client_id = ?
              WHERE id = ?
+               AND required_projection_version IS NULL
+               AND native_bundle_json IS NULL
+               AND native_creation_operation_kind IS NULL
+               AND native_creation_operation_id IS NULL
         """
         try:
             with self._db.transaction() as conn:
                 cursor = conn.execute(query, (True, now, object_revision, sync_client_id, normalized_id))
                 if cursor.rowcount == 0:
+                    protected = conn.execute(
+                        "SELECT id FROM conversations WHERE id = ? AND "
+                        "(required_projection_version IS NOT NULL OR native_bundle_json IS NOT NULL "
+                        "OR native_creation_operation_kind IS NOT NULL OR native_creation_operation_id IS NOT NULL)",
+                        (normalized_id,),
+                    ).fetchone()
+                    if protected is not None:
+                        raise ConflictError(
+                            "native_conversation_sync_unsupported", entity="conversations", entity_id=normalized_id
+                        )
                     raise ConflictError(  # noqa: TRY003
                         "Conversation not found for Sync v2 tombstone.",
                         entity="conversations",
@@ -1060,7 +1082,9 @@ class ConversationStore:
             with self._db.transaction() as conn:
                 current_state = conn.execute(
                     """
-                    SELECT title, version, deleted, character_id, assistant_kind, assistant_id, persona_memory_mode
+                    SELECT title, version, deleted, character_id, assistant_kind, assistant_id, persona_memory_mode,
+                           required_projection_version, native_bundle_json,
+                           native_creation_operation_kind, native_creation_operation_id
                     FROM conversations
                     WHERE id = ?
                     """,
@@ -1086,6 +1110,20 @@ class ConversationStore:
                     field in update_data
                     for field in ("assistant_kind", "assistant_id", "character_id", "persona_memory_mode")
                 )
+                if assistant_update_requested and any(
+                    current_state[field] is not None
+                    for field in (
+                        "required_projection_version",
+                        "native_bundle_json",
+                        "native_creation_operation_kind",
+                        "native_creation_operation_id",
+                    )
+                ):
+                    raise ConflictError(
+                        "native_assistant_identity_locked",
+                        entity="conversations",
+                        entity_id=conversation_id,
+                    )
                 normalized_assistant_kind = current_state["assistant_kind"]
                 normalized_assistant_id = current_state["assistant_id"]
                 normalized_character_id = current_state["character_id"]
@@ -1191,6 +1229,12 @@ class ConversationStore:
                     )
                     main_update_params = tuple(final_set_values + [conversation_id, expected_version])
 
+                if assistant_update_requested:
+                    main_update_query += (
+                        " AND required_projection_version IS NULL AND native_bundle_json IS NULL"
+                        " AND native_creation_operation_kind IS NULL AND native_creation_operation_id IS NULL"
+                    )
+
                 cursor_main = conn.execute(main_update_query, main_update_params)
                 if cursor_main.rowcount == 0:
                     final_state = conn.execute(
@@ -1259,6 +1303,7 @@ class ConversationStore:
 
         try:
             with self._db.transaction() as conn:
+                self._db.native_forks.mark_child_gone(self._db.client_id, conversation_id, conn=conn)
                 try:
                     current_db_version = self._db._get_current_db_version(
                         conn,
@@ -1318,7 +1363,9 @@ class ConversationStore:
         except CharactersRAGDBError:
             raise
 
-    def restore_conversation(self, conversation_id: str, expected_version: int) -> bool | None:
+    def restore_conversation(
+        self, conversation_id: str, expected_version: int, *, require_already_active: bool = False
+    ) -> bool | None:
         now = self._db._get_current_utc_timestamp_iso()
         next_version_val = expected_version + 1
         query = (
@@ -1330,8 +1377,43 @@ class ConversationStore:
 
         try:
             with self._db.transaction() as conn:
+                restore_columns = (
+                    "deleted, version, client_id, scope_type, workspace_id, "
+                    "required_projection_version, native_bundle_json, "
+                    "native_creation_operation_kind, native_creation_operation_id"
+                )
+                preflight = conn.execute(
+                    f"SELECT {restore_columns} FROM conversations WHERE id = ?",  # nosec B608 - fixed column list.
+                    (conversation_id,),
+                ).fetchone()
+                if not preflight:
+                    raise ConflictError(
+                        f"Conversation ID {conversation_id} not found.",
+                        entity="conversations",
+                        entity_id=conversation_id,
+                    )
+                protected_columns = (
+                    "required_projection_version", "native_bundle_json",
+                    "native_creation_operation_kind", "native_creation_operation_id",
+                )
+                protected = any(preflight[column] is not None for column in protected_columns)
+                if protected:
+                    if preflight["client_id"] != self._db.client_id:
+                        raise ConflictError("native_conversation_owner_mismatch", entity="conversations", entity_id=conversation_id)
+                    if preflight["scope_type"] == "workspace":
+                        workspace_lock = " FOR UPDATE" if self._db.backend_type == BackendType.POSTGRESQL else ""
+                        workspace = conn.execute(
+                            "SELECT id FROM workspaces WHERE id = ? AND client_id = ? AND deleted = ? "
+                            "AND system_operation_state IS NULL AND native_chat_admission_closed = ?" + workspace_lock,  # nosec B608 - fixed backend-only lock suffix.
+                            (preflight["workspace_id"], self._db.client_id, False, False),
+                        ).fetchone()
+                        if workspace is None:
+                            raise ConflictError("workspace_native_unavailable", entity="workspaces", entity_id=preflight["workspace_id"])
+                    elif preflight["scope_type"] != "global":
+                        raise ConflictError("native_conversation_scope_invalid", entity="conversations", entity_id=conversation_id)
+                conversation_lock = " FOR UPDATE" if self._db.backend_type == BackendType.POSTGRESQL else ""
                 record_status = conn.execute(
-                    "SELECT deleted, version FROM conversations WHERE id = ?",
+                    f"SELECT {restore_columns} FROM conversations WHERE id = ?{conversation_lock}",  # nosec B608 - fixed column list and backend-only lock suffix.
                     (conversation_id,),
                 ).fetchone()
                 if not record_status:
@@ -1340,11 +1422,23 @@ class ConversationStore:
                         entity="conversations",
                         entity_id=conversation_id,
                     )
+                if protected:
+                    if (
+                        record_status["client_id"] != preflight["client_id"]
+                        or record_status["scope_type"] != preflight["scope_type"]
+                        or record_status["workspace_id"] != preflight["workspace_id"]
+                        or any(record_status[column] != preflight[column] for column in protected_columns)
+                    ):
+                        raise ConflictError("native_conversation_scope_changed", entity="conversations", entity_id=conversation_id)
+                elif any(record_status[column] is not None for column in protected_columns):
+                    raise ConflictError("native_conversation_scope_changed", entity="conversations", entity_id=conversation_id)
                 if not record_status["deleted"]:
                     logger.info(
                         f"Conversation ID {conversation_id} already active. Restore successful (idempotent)."
                     )
                     return True
+                if require_already_active:
+                    raise ConflictError("chat_restore_state_changed", entity="conversations", entity_id=conversation_id)
 
                 current_db_version = record_status["version"]
                 if current_db_version != expected_version:
@@ -1392,6 +1486,7 @@ class ConversationStore:
     def hard_delete_conversation(self, conversation_id: str) -> bool:
         try:
             with self._db.transaction() as conn:
+                self._db.native_forks.mark_child_gone(self._db.client_id, conversation_id, conn=conn)
                 rowcount = conn.execute(
                     "DELETE FROM conversations WHERE id = ?",
                     (conversation_id,),
