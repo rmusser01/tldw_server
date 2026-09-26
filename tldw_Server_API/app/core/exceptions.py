@@ -70,6 +70,25 @@ class VNAssetGenerationError(ValueError):
         super().__init__(code)
 
 
+class LegacyDisplayReconciliationError(RuntimeError):
+    """Safe VN display rollback error, not a generation or SDK retry outcome.
+
+    Construct with the original reconciliation Exception. The public message
+    is always ``VN legacy display reconciliation failed``; ``error_type`` and
+    ``error_traceback`` retain its class and traceback for internal frame-only
+    diagnostics. Traceback frames may retain sensitive locals/source: never
+    format or publish them, or the original chained exception. Construction
+    does not log or change generation disposition; the repository raises this
+    wrapper with ``from None`` and the worker logs only frame metadata.
+    """
+
+    def __init__(self, error: Exception) -> None:
+        """Retain no original message; callers must not format traceback source/locals."""
+        super().__init__("VN legacy display reconciliation failed")
+        self.error_type = type(error)
+        self.error_traceback = error.__traceback__
+
+
 class BuddyPublicationRevokedError(RuntimeError):
     """An accepted Buddy turn no longer has permission to publish messages."""
 

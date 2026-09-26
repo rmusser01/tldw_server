@@ -137,6 +137,32 @@ def test_fresh_schema_has_partial_retry_admission_index(database: IndexDatabase)
     index_definition(database)
 
 
+@pytest.mark.pg_jobs
+def test_pre_events_jobs_upgrade_creates_events_before_retry_index(jobs_pg_dsn: str) -> None:
+    """Current production ensure upgrades existing Jobs with no events table."""
+    import psycopg
+
+    database = IndexDatabase("postgres", jobs_pg_dsn)
+    with psycopg.connect(jobs_pg_dsn) as conn:
+        row = conn.execute(
+            """INSERT INTO jobs(domain,queue,job_type,payload,status,owner_user_id)
+                VALUES('vn_assets','default','legacy','{}','failed','42') RETURNING id""",
+        ).fetchone()
+        assert row is not None
+        job_id = row[0]
+        conn.execute("DROP TABLE job_events")
+        assert conn.execute("SELECT to_regclass('jobs'),to_regclass('job_events')").fetchone() == ("jobs", None)
+
+    # Do not patch current DDL or invoke ensure_job_events_pg separately.
+    assert ensure_jobs_tables_pg(jobs_pg_dsn) == jobs_pg_dsn
+    first = index_definition(database)
+    assert ensure_jobs_tables_pg(jobs_pg_dsn) == jobs_pg_dsn
+    assert index_definition(database) == first
+    with psycopg.connect(jobs_pg_dsn) as conn:
+        assert conn.execute("SELECT status,owner_user_id FROM jobs WHERE id=%s", (job_id,)).fetchone() == ("failed", "42")
+        assert conn.execute("SELECT COUNT(*) FROM job_events").fetchone() == (0,)
+
+
 def test_existing_event_history_upgrade_is_idempotent(database: IndexDatabase) -> None:
     """Existing installations gain the index without losing events or rebuilding it."""
     with closing(database.connect()) as conn, conn:

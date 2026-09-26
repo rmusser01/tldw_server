@@ -9,22 +9,12 @@ from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
-from tldw_Server_API.app.core.exceptions import VNAssetGenerationError
+from tldw_Server_API.app.core.exceptions import LegacyDisplayReconciliationError, VNAssetGenerationError
 from tldw_Server_API.app.core.VN_Assets.state import derive_slot_status
 
 LegacyActivityReader = Callable[
     [int, int, int, Mapping[int, str], set[tuple[int, int, str]], tuple[int, str] | None], tuple[bool, bool]
 ]
-
-
-class LegacyDisplayReconciliationError(RuntimeError):
-    """Safe rollback message with original type/frames for display diagnostics only."""
-
-    def __init__(self, error: Exception) -> None:
-        """Retain no original message; callers must not format traceback source/locals."""
-        super().__init__("VN legacy display reconciliation failed")
-        self.error_type = type(error)
-        self.error_traceback = error.__traceback__
 
 
 VN_ASSET_SCHEMA_SQL = """
@@ -1962,7 +1952,9 @@ class VNAssetPacksRepository:
 
         Legacy outcome/counter writes remain with the worker. Without V1
         history keep its terminal display; on coroutine cancellation derive a
-        non-sticky display. Body errors propagate with a safe rollback message.
+        non-sticky display. Body errors raise LegacyDisplayReconciliationError
+        with a safe rollback message and internal original type/traceback.
+        Transaction entry/exit errors propagate unchanged.
         Local cleanup occurs even if reconciliation fails; it creates no
         persisted claim or fence.
         Exclude only this exact finishing Jobs ID/lease during SDK handoff;
@@ -2848,6 +2840,8 @@ def _refresh_slot_generation_status(
     Existing review precedence applies after work ends; failures with no
     published candidates are failed, even alongside cancellations. Historical
     completed recipes without items do not manufacture review readiness.
+    A legacy terminal fallback fills only planned/cancelled display, never
+    overriding review, skipped, active/queued work or a derived failure.
     Missing slots are a no-op; SQL errors propagate and roll back the caller's
     outcome transition. This repository does not support row-lock backends.
     """
@@ -2895,7 +2889,7 @@ def _refresh_slot_generation_status(
         review_statuses=statuses,
         required_for_runtime=bool(slot["required_for_runtime"]),
     )
-    if fallback_status is not None and not active and not queued:
+    if fallback_status is not None and status in {"planned", "cancelled"}:
         status = fallback_status
     conn.execute(
         "UPDATE vn_asset_slots SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
