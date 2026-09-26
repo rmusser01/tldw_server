@@ -879,8 +879,8 @@ context poisons the live token and fails the strict logout sequence before repai
 The fixture confirms each hostile request reached the target and the real browser
 session/CSRF state survives after the isolated native request. Keep401/403 strict.
 **Tests:** Focused behavioral expected red against unchanged probe; no product bypass.
-**Status:** Not Started
-- [ ] Add the real-shaped response fixture and witness strict logout failure.
+**Status:** Complete
+- [x] Add the real-shaped response fixture and witness strict logout failure.
 
 #### Stage 2: Isolate the hostile request
 **Goal:** Forge only the request rather than browser storage.
@@ -889,8 +889,8 @@ refusal, original legitimate browser state, captured-token logout200, revoked
 profile refusal and other instanceprofile200, rebootstrap and all latches.
 **Tests:** Focused green, full maintained probe test file once after final code,
 scoped ESLint/diff, Bandit inapplicable to MJS-only edits; disclose all warnings.
-**Status:** Not Started
-- [ ] Implement, self-review and commit the two-file correction for TASK-13343.
+**Status:** Complete
+- [x] Implement, self-review and commit ae980cead7 for TASK-13343.
 
 #### Stage 3: Independent review and fresh exact proof
 **Goal:** Complete the actual matrix without weakening its requirements.
@@ -900,5 +900,12 @@ eight signed helper files and owned cleanup. Failedff3 artifacts remain invalid;
 diagnostic unsigned setup cannot qualify them. Windowsruntime unqualified/G12false,
 frontend publication frozen; no second broad branch review or public release.
 **Tests:** Parent-owned exact candidate and independent artifact verification.
-**Status:** Not Started
+**Status:** In Progress
 - [ ] Report results and limits; controller reviews and resumes Task13 acceptance.
+
+Task23 ae980cead7 changes only the native forged-session GET and its existing
+paired fixture/regression. Expectedredlogout_isolated, focusedgreen1/1 and final
+maintainedfile58/58 pass once; scoped ESLint/diff clean, no test/lint warnings,
+Bandit inapplicable MJS-only. Scoped Sol-high review approves spec/quality with
+no findings; actual exact local/native13/38/signatures/eightfiles remain pending.
+Existing Git housekeeping warnings remain disclosed without manualGC/prune.

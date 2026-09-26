@@ -4,7 +4,7 @@ title: Plan and implement paired Docker distribution and runtime gateway
 status: In Progress
 assignee: []
 created_date: '2026-09-23 06:15'
-updated_date: '2026-09-26 12:59'
+updated_date: '2026-09-26 13:06'
 labels:
   - distribution
   - docker
@@ -139,6 +139,8 @@ Task22 source9722148d6f and fixd0afab1daf implement constant403 absolute1000ms u
 Task22 scoped Astra fixround1 rereview972..d0af approves: peer-reset finding addressed, actual gateway regression addressed, no new breakage/out-of-scope findings. Root read fullreport; implementation complete, exact qualification pending. Freeze clean trackingHEAD and build fresh corrected localarm candidate plus same exact ownbranch native CI under existing authorization/Ruling19; no publication/PR/merge or Windows/G12 qualification.
 
 Exactff3 local builtall4/MCPSetup/all13lifecyclepass and35browserchecks; ONLYlogout_isolatedfalse, bothhostileinputsnowpass. Actualexactff diagnostic proves sharedcontext foreignsessionGET401 installsreplacementCSRFcookie -> capturedlogout403, samecurrenttokenlogout200/profile401200; sessionsunchanged/explicitbothstaleCookie401/cleanup/PGpreserved. Unsigneddiagnosticinitializer suppliesno qualification. PlanTask23 beforeedits: existingnativehostileRequest forforgedGET, sameforeigncookie/strict401403/capturedlogout/latches unchanged, fixturemiddlewareSetCookie regression TDD/scopedreview/freshexactlocalnative13/38/signatures/eightfiles. Native36242386644 stillinprogress; failedcandidategatesfalse/signaturesinvalidated. Windows/G12/publicationremainopen.
+
+Task23 ae980cead7 scoped Sol-high review approves spec/quality with no findings. IsolatednativeforgedGET keeps strictrefusal/capturedlogout/rebootstrap/latches andbrowserstate; fixture catchesactualCSRFSetCookie. Expectedredlogout_isolated→focusedgreen/full58pass once, lint/diff clean/no warnings/BanditN/A. Fresh exact local/native13/38/signature/eightfile/cleanup proof pending. Supersededff3 ownbranchnative36242386644 cancellationrequested tofreequalificationresources after provenfailedlocalprobe; supplies no nativeacceptance. All26rulingspersisted; Windows/G12/publicationremainopen.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

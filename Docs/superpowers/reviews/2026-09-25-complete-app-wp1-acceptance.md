@@ -6,7 +6,7 @@ catalog entry, PR or merge is approved by this record.
 
 ## Current evidence (2026-09-26)
 
-The final code review fix wave and Tasks19/20/21/22 pass scoped spec/quality review. Exact clean source `ff3becc70a387768a129dd66b8dd297aa396eee9` local arm64 builds all four images and passes builtMCPSetup/all13 lifecycle checks. It passes35 browser checks, including both hostile upgrades, then fails onlylogout_isolated. Actual exact-image two-instance diagnosis proves the forged foreign-session probe installs a replacement CSRF cookie through Playwright's shared request context; captured-token logout403 versus current-token logout200 and profiles401/200 establish probe contamination. Task23 is planned. Cleanup passed, signatures are invalidated and all gates remain false. Same-source native CI [36242386644](https://github.com/rmusser01/tldw_server/actions/runs/36242386644) remains in progress. The earlier failed13d9 native run is historical. Local dependency installation completed this time; prior intermittent waiting still has no established cause/fix. Fresh corrected local/native qualification remains pending.
+The final code review fix wave and Tasks19/20/21/22/23 pass scoped spec/quality review. Exact clean source `ff3becc70a387768a129dd66b8dd297aa396eee9` local arm64 builds all four images and passes builtMCPSetup/all13 lifecycle checks. It passes35 browser checks, including both hostile upgrades, then fails onlylogout_isolated. Actual exact-image two-instance diagnosis proves the forged foreign-session probe installs a replacement CSRF cookie through Playwright's shared request context; captured-token logout403 versus current-token logout200 and profiles401/200 establish probe contamination. Task23 ae980cead7 is implemented and independently approved; fresh exact proof is pending. Cleanup passed, signatures are invalidated and all gates remain false. Same-source native CI [36242386644](https://github.com/rmusser01/tldw_server/actions/runs/36242386644) was superseded after the reproduced local failure and its cancellation was requested. It supplies no native acceptance. The earlier failed13d9 native run is historical. Local dependency installation completed this time; prior intermittent waiting still has no established cause/fix. Fresh corrected local/native qualification remains pending.
 
 | Contract | Current evidence | Status |
 | --- | --- | --- |
@@ -112,8 +112,10 @@ logout403 leaves both profiles200. Same-session current-token logout200 yields
 401/200 profiles, and both explicitly captured stale-session replays return401
 after valid revocation. Chromium and all owned resources close; unrelated PG
 identities/states stay unchanged. Initialization was unsigned source/inventory
-metadata, supplying no signed-helper or Docker-only qualification. Task23 will
-isolate the hostile GET and strengthen its response fixture.
+metadata, supplying no signed-helper or Docker-only qualification. Task23 isolates the hostile GET through the existing native helper and
+strengthens the response fixture. Expectedredlogout_isolated then focusedgreen
+and final58/58 maintained tests pass; scoped review approves without findings,
+lint/diff clean and MJS-only Bandit inapplicable. Fresh exact proof is pending.
 
 ## Rulings I made
 
@@ -147,6 +149,8 @@ isolate the hostile GET and strengthen its response fixture.
 
 - Ruling: Initialize fresh unsigned private diagnostic state with the existing initializer source and exactff inventory-derived in-memory release metadata, after verifying all cached role digests/platform/revision — failed-candidate signatures are deliberately absent and must not be restored, while the logout subrequest needs two actual fresh instances to trace cookie state. Cost if wrong: diagnostic initialization and reproduction must repeat using independently eligible artifacts; no signature, Docker-only helper or candidate qualification follows from metadata-class names, and no failed gates or public artifacts may be repaired.
 - Ruling: Send forged foreign-session probes through the existing bounded native request helper, preserving captured-token logout assertions and browser state — actual shared Playwright requests install401 CSRF cookies and contaminate the legitimate session test. Cost if wrong: probe isolation/fixture response behavior must be reworked and fresh exact local/native13lifecycle38browser signatures repeated; no backend CSRF/logout policy, token refresh workaround or failure-latch weakening is authorized.
+
+- Ruling: Cancel the superseded own-branchff3 native CI after actual local failure diagnosis and reviewed Task23 correction, then qualify a fresh exact source — the old probe contaminates its browser cookie jar and cannot supply eligible acceptance, while duplicate jobs consume the same qualification resources. Cost if wrong: old-source native failure telemetry is lost and cross-platform confirmation must come from the corrected exact run; cancellation supplies no pass, no borrowed artifacts or release permission.
 
 ## Historical evidence through September25 and superseded follow-ups
 
