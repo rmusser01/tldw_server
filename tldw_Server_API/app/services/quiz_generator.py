@@ -1332,9 +1332,34 @@ def _validate_strict_provenance(questions: Sequence[dict[str, Any]], selected_so
                 )
 
 
+def _canonicalize_selected_source_citations(
+    questions: Sequence[dict[str, Any]], selected_sources: Sequence[dict[str, str]]
+) -> None:
+    """Canonicalize qualified IDs only when they match an explicitly selected source."""
+    allowed_sources = {(source["source_type"], source["source_id"]) for source in selected_sources}
+    for question in questions:
+        for citation in question.get("source_citations") or []:
+            if not isinstance(citation, dict):
+                continue
+            source_type = str(citation.get("source_type") or "").strip()
+            source_id = str(citation.get("source_id") or "").strip()
+            prefix = f"{source_type}:"
+            if (source_type, source_id) in allowed_sources or not source_id.startswith(prefix):
+                continue
+            canonical_id = source_id[len(prefix) :]
+            if (source_type, canonical_id) in allowed_sources:
+                citation["source_id"] = canonical_id
+                if source_type == "media" and canonical_id.isdecimal():
+                    citation["media_id"] = int(canonical_id)
+
+
 def _build_source_contract(selected_sources: Sequence[dict[str, str]]) -> str:
-    source_refs = ", ".join(f"{s['source_type']}:{s['source_id']}" for s in selected_sources)
-    return f"- Allowed sources for source_citations.source_type/source_id: {source_refs}"
+    source_refs = ", ".join(json.dumps(source) for source in selected_sources)
+    return (
+        "- Allowed citation pairs (copy these exact separate field values; "
+        "do not prepend source_type; preserve source_id exactly, including existing colons or prefixes): "
+        f"{source_refs}"
+    )
 
 
 def _truncate_quiz_evidence(text: str, limit: int = 120) -> str:
@@ -2025,6 +2050,11 @@ async def generate_quiz_from_sources(
         metrics.phase = "provider"
         raw_response = await _call_quiz_generation_llm(**llm_kwargs)
         metrics.phase = "validation"
+        if isinstance(raw_response, dict):
+            choices = raw_response.get("choices")
+            if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+                if choices[0].get("finish_reason") == "length":
+                    raise QuizMalformedOutputError("Quiz generation exceeded max_tokens before completing JSON")
         content_text = extract_response_content(raw_response)
         payload = _extract_json_payload(content_text if content_text is not None else raw_response)
         raw_questions = payload.get("questions") if isinstance(payload, dict) else payload
@@ -2065,6 +2095,7 @@ async def generate_quiz_from_sources(
             raise ValueError("No valid questions generated")
         if normalized_profile == "emq":
             _validate_emq_groups(questions)
+        _canonicalize_selected_source_citations(questions, normalized_sources)
         _validate_strict_provenance(questions, normalized_sources)
         if normalized_profile == ASSERTION_REASONING_TAG:
             _validate_assertion_reasoning_questions(questions)

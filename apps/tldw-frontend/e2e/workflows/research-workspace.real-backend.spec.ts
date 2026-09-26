@@ -1507,10 +1507,23 @@ test.describe("Research Workspace Workflow (Real Backend)", () => {
       expect(workspaceId).toBeTruthy()
 
       const quizQuestions = await fetchJsonWithApiKey<{
-        items: Array<{ id: number; question_type: string }>
+        items: Array<{
+          id: number
+          question_type: string
+          source_citations: Array<{ source_type: string; source_id: string; media_id: number }>
+        }>
       }>(`/api/v1/quizzes/${quizId}/questions?include_answers=true&limit=100&offset=0`)
       expect(quizQuestions.items.length).toBeGreaterThan(0)
       expect(quizQuestions.items.every((question) => requestedQuestionTypes.includes(question.question_type))).toBe(true)
+      const selectedMediaIds = [String(selectedSource.mediaId), String(companionSource.mediaId)]
+      for (const question of quizQuestions.items) {
+        expect(question.source_citations.length).toBeGreaterThan(0)
+        for (const citation of question.source_citations) {
+          expect(citation.source_type).toBe("media")
+          expect(selectedMediaIds).toContain(citation.source_id)
+          expect(citation.media_id).toBe(Number(citation.source_id))
+        }
+      }
 
       const persistedQuizList = await listQuizRecords({
         include_workspace_items: true,

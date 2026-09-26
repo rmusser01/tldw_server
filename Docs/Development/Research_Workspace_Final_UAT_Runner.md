@@ -41,6 +41,23 @@ TLDW_SANDBOX_DOCKER_FAKE_EXEC=0 \
 python -m uvicorn tldw_Server_API.app.main:app --host 127.0.0.1 --port 8000
 ```
 
+### Local llama.cpp Generation
+
+For JSON-generation UAT with a reasoning-capable model, explicitly select the
+server's non-reasoning mode when that is the intended validation configuration:
+
+```bash
+llama-server -m /path/to/model.gguf --host 127.0.0.1 --port 9099 \
+  --ctx-size 8192 --reasoning off
+```
+
+`LLAMA_ARG_REASONING=off` is the equivalent llama.cpp server environment setting.
+Setting `LLAMA_CPP_ENABLE_THINKING=false` on the backend does not configure the
+server's reasoning mode. If reasoning is intentionally enabled, its tokens also
+consume the completion budget. A response with `finish_reason=length` is not
+valid generation evidence; quiz generation reports a `max_tokens` exhaustion
+error instead of treating empty or truncated JSON as successful output.
+
 ## Command
 
 From `apps/tldw-frontend`:
