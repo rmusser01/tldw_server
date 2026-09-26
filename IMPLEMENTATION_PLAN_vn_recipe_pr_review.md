@@ -21,3 +21,14 @@
 **Success Criteria**: No unresolved actionable review finding, green relevant checks, clean branch, and PR policy satisfied.
 **Tests**: VN backend suite, frontend VN tests and typecheck, OpenAPI drift, Ruff, Bandit, and PR checks.
 **Status**: In Progress
+
+### Incremental Review Follow-Up (2026-09-25)
+
+- Rebased on the latest `origin/dev` without conflicts. The rebased OpenAPI fingerprint passes the drift check.
+- Record rejected parent enqueue outcomes atomically on the batch and its still-owned slots. Ignore late enqueue failures after the batch has advanced.
+- Recover slot state when a persisted parent job resumes after a lost response, including children that already completed before fanout replay.
+- Defer final slot/batch failure while a variant job has retries remaining. Record an exhausted failure atomically so fanout recovery cannot clear a real variant failure.
+- Added seven regression tests; observed the failing enqueue, retry, and lost-response scenarios before applying fixes.
+- Verification: the 312-test VN run had 308 passes, zero assertion failures, and four setup errors from disk exhaustion. All four passed on rerun in the approved temporary root. Final scoped Ruff passed and Bandit returned zero findings; prior frontend VN tests/typecheck remain applicable because this follow-up is backend-only.
+- Tracking blocker: rebasing introduced an unrelated ADR task with the same TASK-13356 ID as the VN recipe task. The CLI cannot disambiguate or renumber the VN record; user approval has been requested for a manual, VN-only renumber. No task record was changed.
+- ADR check: ADR required: no for these correctness fixes. `Docs/ADR/003-jobs-vs-scheduler-default.md` continues to govern Jobs ownership; no new worker, persistence, or public API rule is introduced by this review follow-up.

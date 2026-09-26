@@ -207,11 +207,12 @@ class VNAssetGenerationWorker:
                 job=job,
             )
         except Exception as exc:
-            self._record_generation_failure(
-                batch_id=batch_id,
-                slot_id=slot_id,
-                error=str(exc),
-            )
+            if not _job_has_retry_remaining(job):
+                self._record_generation_failure(
+                    batch_id=batch_id,
+                    slot_id=slot_id,
+                    error=str(exc),
+                )
             raise
 
     def handle_job(self, job: Mapping[str, Any]) -> dict[str, Any]:
@@ -788,8 +789,7 @@ class VNAssetGenerationWorker:
 
     def _record_generation_failure(self, *, batch_id: int, slot_id: int, error: str) -> None:
         """Record an applicable slot failure and mark the batch failed."""
-        self.repo.mark_slot_generation_failed(slot_id, batch_id, error)
-        self.repo.record_batch_variant_failure(batch_id)
+        self.repo.record_batch_variant_failure(batch_id, slot_id=slot_id, error=error)
 
     def _cancel_terminal_batch_jobs(
         self,
@@ -856,6 +856,16 @@ def _retryable_fanout_failure(batch: Mapping[str, Any]) -> bool:
         and batch.get("enqueue_error") is not None
         and int(batch["failed_count"] or 0) == 0
     )
+
+
+def _job_has_retry_remaining(job: Mapping[str, Any] | None) -> bool:
+    """Leave retryable attempts active until the Jobs retry budget is exhausted."""
+    if job is None:
+        return False
+    try:
+        return int(job.get("retry_count") or 0) < int(job.get("max_retries") or 0)
+    except (TypeError, ValueError):
+        return False
 
 
 def _loads_json(value: Any, default: Any) -> Any:
