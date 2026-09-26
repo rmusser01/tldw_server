@@ -384,6 +384,13 @@ def recover_enqueue_batch_job(
         return row
 
     parent = read_parent(job_batch_id) if job_batch_id else None
+    if parent is None and fanout_complete:
+        recovered = jobs_manager.get_job_or_archived_by_idempotency_key(
+            idempotency_key=key, domain=VN_ASSETS_DOMAIN, queue=queue,
+            job_type=VN_ASSET_ENQUEUE_BATCH_JOB_TYPE, owner_user_id=str(user_id),
+        )
+        if recovered is not None:
+            parent = read_parent(recovered.get("id"))
     if parent is None:
         if fanout_complete:
             raise pending()

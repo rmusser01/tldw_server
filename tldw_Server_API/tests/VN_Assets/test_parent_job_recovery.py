@@ -236,6 +236,114 @@ def test_completed_parent_only_replays_full_fanout(case: RecoveryCase, full_fano
     ))
 
 
+@pytest.mark.parametrize("saved_id", [None, "999999"])
+@pytest.mark.parametrize("status", ["queued", "processing", "completed", "failed"])
+def test_full_fanout_recovers_unsaved_parent_without_queue_mutation(
+    case: RecoveryCase, monkeypatch: pytest.MonkeyPatch, saved_id: str | None, status: str,
+) -> None:
+    """An interrupted parent-ID save must not strand the original fully enqueued receipt."""
+    parent = create_enqueue_batch_job(case.jobs, pack_id=case.pack_id, batch_id=case.batch_id, user_id=42)
+    parent = case.jobs.get_job(parent["id"], owner_user_id="42")
+    assert parent is not None
+    VNAssetGenerationWorker(repo=case.service.repo, jobs_manager=case.jobs).handle_enqueue_batch(parent["payload"])
+    if status != "queued":
+        acquired = case.jobs.acquire_next_job(
+            domain="vn_assets", queue="default", job_type="vn_asset_enqueue_batch",
+            owner_user_id="42", worker_id="unsaved-parent", lease_seconds=60,
+        )
+        assert acquired is not None
+        if status == "completed":
+            assert case.jobs.complete_job(parent["id"], worker_id=acquired["worker_id"], lease_id=acquired["lease_id"])
+        elif status == "failed":
+            assert case.jobs.fail_job(
+                parent["id"], error="interrupted response", retryable=False,
+                worker_id=acquired["worker_id"], lease_id=acquired["lease_id"],
+            )
+    case.service.repo.update_batch(case.batch_id, {"job_batch_id": saved_id})
+    recipes = case.service.repo.list_batch_recipes(case.batch_id)
+    jobs = case.jobs.list_jobs(domain="vn_assets")
+    before = case.service.repo.get_batch(case.batch_id)
+
+    def no_queue_mutation(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        """Completed fanout is read-only even when the parent link was never saved."""
+        pytest.fail("full fanout attempted Jobs creation or retry admission")
+
+    monkeypatch.setattr(case.jobs, "create_job", no_queue_mutation)
+    monkeypatch.setattr(case.jobs, "retry_failed_job_admission", no_queue_mutation)
+    recovered = case.replay()
+    assert recovered["job_batch_id"] == str(parent["id"])
+    assert recovered["batch_id"] == case.batch_id
+    assert recovered["enqueue_error"] is None
+    assert case.record()["status"] == "completed"
+    assert case.replay() == recovered
+    assert case.service.repo.list_batch_recipes(case.batch_id) == recipes
+    assert case.jobs.list_jobs(domain="vn_assets") == jobs
+    after = case.service.repo.get_batch(case.batch_id)
+    for field in ("status", "planned_count", "enqueued_count", "completed_count", "failed_count", "cancelled_count"):
+        assert after[field] == before[field]
+
+
+@pytest.mark.parametrize("status", ["cancelled", "cancel_requested"])
+def test_full_fanout_unsaved_cancelled_parent_stays_pending(case: RecoveryCase, status: str) -> None:
+    """Canonical lookup must not bypass terminal or in-flight administrative cancellation."""
+    parent = create_enqueue_batch_job(case.jobs, pack_id=case.pack_id, batch_id=case.batch_id, user_id=42)
+    parent = case.jobs.get_job(parent["id"], owner_user_id="42")
+    assert parent is not None
+    VNAssetGenerationWorker(repo=case.service.repo, jobs_manager=case.jobs).handle_enqueue_batch(parent["payload"])
+    if status == "cancel_requested":
+        assert case.jobs.acquire_next_job(
+            domain="vn_assets", queue="default", job_type="vn_asset_enqueue_batch",
+            owner_user_id="42", worker_id="cancel-unsaved", lease_seconds=60,
+        ) is not None
+    assert case.jobs.cancel_job(parent["id"], reason="admin request")
+    before = case.jobs.get_job(parent["id"], owner_user_id="42")
+    assert case.service.repo.get_batch(case.batch_id)["job_batch_id"] is None
+    with pytest.raises(VNAssetGenerationError, match="^idempotency_key_in_progress$"):
+        case.replay()
+    assert case.record()["status"] == "in_progress"
+    assert case.service.repo.get_batch(case.batch_id)["job_batch_id"] is None
+    assert case.jobs.get_job(parent["id"], owner_user_id="42") == before
+
+
+@pytest.mark.parametrize("mismatch", ["owner", "domain", "queue", "type", "payload", "key"])
+def test_full_fanout_unsaved_foreign_parent_stays_pending(case: RecoveryCase, mismatch: str) -> None:
+    """A full fanout cannot invent parent authority from a foreign or mismatched canonical row."""
+    payload = {"pack_id": case.pack_id, "batch_id": case.batch_id, "user_id": 42}
+    VNAssetGenerationWorker(repo=case.service.repo, jobs_manager=case.jobs).handle_enqueue_batch(payload)
+    facts: dict[str, Any] = {
+        "domain": "vn_assets", "queue": "default", "job_type": "vn_asset_enqueue_batch",
+        "owner_user_id": "42", "payload": payload,
+        "idempotency_key": f"vn_assets:user:42:pack:{case.pack_id}:batch:{case.batch_id}:enqueue",
+    }
+    field, value = {
+        "owner": ("owner_user_id", "43"), "domain": ("domain", "other"),
+        "queue": ("queue", "generation"), "type": ("job_type", "vn_asset_generate_variant"),
+        "payload": ("payload", {**payload, "batch_id": case.batch_id + 1}),
+        "key": ("idempotency_key", "unrelated"),
+    }[mismatch]
+    facts[field] = value
+    parent = case.jobs.create_job(**facts)
+    jobs = case.jobs.list_jobs()
+    with pytest.raises(VNAssetGenerationError, match="^idempotency_key_in_progress$"):
+        case.replay()
+    assert case.record()["status"] == "in_progress"
+    assert case.service.repo.get_batch(case.batch_id)["job_batch_id"] is None
+    assert case.jobs.list_jobs() == jobs
+    assert case.jobs.get_job(parent["id"])["status"] == "queued"
+
+
+def test_full_fanout_without_any_parent_stays_pending(case: RecoveryCase) -> None:
+    """A complete ledger alone cannot authorize creating a replacement parent."""
+    VNAssetGenerationWorker(repo=case.service.repo, jobs_manager=case.jobs).handle_enqueue_batch(
+        {"pack_id": case.pack_id, "batch_id": case.batch_id, "user_id": 42}
+    )
+    jobs = case.jobs.list_jobs(domain="vn_assets")
+    with pytest.raises(VNAssetGenerationError, match="^idempotency_key_in_progress$"):
+        case.replay()
+    assert case.record()["status"] == "in_progress"
+    assert case.jobs.list_jobs(domain="vn_assets") == jobs
+
+
 def test_admin_cancelled_parent_is_not_resumed(case: RecoveryCase) -> None:
     """An explicit client retry cannot override deliberate admin cancellation."""
     parent = create_enqueue_batch_job(case.jobs, pack_id=case.pack_id, batch_id=case.batch_id, user_id=42)

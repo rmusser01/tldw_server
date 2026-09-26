@@ -1,5 +1,76 @@
 # PR 3016 VN Durability Review Implementation Plan
 
+## Current Review Wave: Tasks 28 To 30
+
+**Exact head:** ebb20e907e53788ba605271d30ec06daab1bdf81.
+**Live dev:** f5fa1f3a41855aa02871d8b76d0ec0cebbaf9e07, unchanged.
+**Spec:** Docs/Design/2026-09-25-vn-pr-3016-review.md. **Tracking:** TASK-13369.
+Full request5850501683 completed with review5327881672 and terminal5850660732
+at22:55:13/16Z; busy5850503253 removed/fresh404. Four new threads unresolved,
+58reviews48threads34comments, all outer/nested pages exhausted. AC5 reopened.
+Tasks1-27 frozen/closed; their historical records below are not pending work.
+
+### Task 28: Recover Missing Parent Identity After Full Fanout
+**Owner:** controller, immediate critical-path TDD.
+**Files:** VN_Assets/jobs.py, tests/VN_Assets/test_parent_job_recovery.py.
+- [x] Prove public same-key receipt recovery fails after real complete fanout
+  with an existing parent but no saved job_batch_id.
+- [x] Use existing owner/domain/queue/type/key scoped Jobs lookup, then retain
+  authoritative parent identity/payload/cancellation/lease validation. Never
+  create or retry a parent once fanout is complete. No Jobs manager/SQL change.
+- [x] Focused real SQLite recovery and bounded affected recovery modules once;
+  compile, scoped Ruff/Bandit with baseline, immutable evidence/report.
+
+### Task 29: Public Ownership Regression And Test Docstrings
+**Owner:** fresh disjoint backend-test sidecar.
+**Files:** tests/VN_Assets/test_generation_jobs.py only.
+- [x] Audit actual PR-added missing immediate docstrings; concise documentation
+  only for missing definitions, preserving test behavior and accepted tiers.
+- [x] Replace the cited direct private replay call with the public worker entry
+  point; preserve foreign-owner rejection, nonretryable disposition and untouched
+  item registration. Prove sensitivity with an isolated negative control.
+- [x] Narrow regressions/AST preservation/scoped static baseline and frozen report;
+  no production/shared fixture/config changes or repeat of the 97-case suite.
+
+### Task 30: Diagnose Persisted Receipt Failures Without Breaking Fallback
+**Owner:** fresh disjoint frontend sidecar.
+**Files:** lib/vnAssetIdempotency.ts and existing receipt test module only.
+- [x] Verify recommendation against approved storage-unavailable nonthrowing
+  behavior and public reload flow; separate malformed receipt and storage errors.
+- [x] Minimal sanitized diagnostics/removal with sensitive RED/GREEN if justified;
+  preserve in-memory retries, owner/pack keys, valid receipts and nonthrowing
+  storage fallback. No keys/payload/raw storage errors in diagnostics.
+- [x] Narrow receipt tests, owned TypeScript/scoped ESLint, frozen report with
+  warnings/skips qualified; no browser or whole frontend rerun.
+
+### Integration Gate
+- [x] Fresh independent SPEC/QUALITY/final changed-contract review.
+- [x] Narrow controller verification on matching frozen bytes.
+- [ ] Normal applicable hooks and scoped commit/push.
+- [ ] Individual tested or reasoned replies; resolve only verified. ONE full
+  exact new-head review after actual code push, no duplicate unchanged-head run.
+- [ ] Seven required contexts passing/current strict base/human summary before
+  normal merge; verify MERGED, then official Backlog finalization/heartbeat pause.
+
+Ruling: repair authorized recovery/test/diagnostic contracts, not new features.
+The existing supported Jobs read API avoids queue mutation and new abstractions.
+Storage-blocked browsers cannot supply a saved key; propagating storage failure
+would violate approved fallback. Diagnose safely without changing that contract.
+Main owns Task28; sidecars have disjoint write sets and fresh independent review.
+
+Zeno independent Tasks28/29/30 SPEC/QUALITY/final changed-contract PASS, no
+actionable findings; source/controlflow/frozen evidence audits and in-memory
+compile only, no independent fresh regression/scanner run. Review is local
+integration approval, not external/CI/merge readiness. Reviewed19/72/36 hashes
+and five live source/test files match; old Task26/27 live source hashes are
+historical after these authorized edits, frozen artifacts remain preserved.
+Controller final narrow7backend passed0errors/skips6warnings6.49s/XML7time5.872;
+14frontend passed36filter-skips1.24s/XML50skipped36time0.0144455. No counts summed.
+Controller scoped Bandit matches exactly six baseline testB106/errors[], only
+B101 excluded, zero production findings; compile/diff and scoped statics passed
+with previously qualified unchanged worker BLE001. No broad suites repeated.
+
+
 ## Current Review Wave: Tasks 26 And 27
 
 **Exact base:** e7e76cbedda150ff54c88cf3e030b19faa9d804f.
@@ -47,7 +118,7 @@ passed21filter-skips758ms; no broad covering repetition or summed count.
 
 - [x] Independent SPEC/QUALITY and final changed-contract review of both tasks;
   preserve frozen Tasks1-25 evidence, all backups/already-applied stashes.
-- [ ] Controller scoped normal hooks/commit/push; individual tested replies and
+- [x] Controller scoped normal hooks/commit/push; individual tested replies and
   resolve only verified findings; ONE full new-head Qodo review after push.
 - [ ] All seven actual required CI contexts, current strict base and requester
   human summary gate before normal merge; verify MERGED before finalization.
@@ -56,6 +127,20 @@ Ruling: these are bounded repairs of the already-authorized cancellation and
 API-valid receipt contracts, not new feature design. Use the existing predicate
 and parser, not shared Jobs or schema changes; cost if wrong is scoped rework.
 No source/frozen evidence redispatch outside these new findings.
+
+Task26/27 integration head ebb20e907e53788ba605271d30ec06daab1bdf81:
+normal seven-file commit and FF push/GitHub exacthead verified; live devf5
+unchanged/no rebase. Normal commit emitted no hook output, no commit-stage
+execution claim or bypass. All24/42/103 frozen hashes match aftercommit.
+Individual evidence replies4113047126/4113047226 and both resolutions verified;
+fresh57reviews44threads0unresolved32comments/allouter+nestedpages exhausted,
+no new actionable feedback. ONE full newhead request5850501683 at22:34:18Z
+PENDING; edited push-summary0bugs0rules29omissions/exactfooter NOT completion.
+Actual54newheadchecks33queued21completed/no actionablefailure; allsevenrequired
+absent, commitstatus CodeRabbit success only. Initial un-escalated CI read
+pipelines had connection failures and produced empty jq output, NOT real zero
+checks; corrected pipefail/escalated paginated reads succeeded. AC5 addressed,
+AC6/normalmerge/finalization pending; no tracking-only push while review pending.
 
 ## Current Integration: Rebased Onto Advanced Dev
 

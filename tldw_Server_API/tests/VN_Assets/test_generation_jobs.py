@@ -474,6 +474,7 @@ async def test_duplicate_delivery_with_same_lease_does_not_call_adapter_twice(
     service: VNAssetPackService,
     pack_with_slots: SimpleNamespace,
 ) -> None:
+    """A duplicate live delivery cannot generate or store the same variant twice."""
     from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
 
     slot = pack_with_slots.slots[0]
@@ -516,6 +517,7 @@ async def test_stale_lease_cannot_publish_after_new_lease_takes_claim(
     service: VNAssetPackService,
     pack_with_slots: SimpleNamespace,
 ) -> None:
+    """A replaced lease cannot publish after the new delivery takes its claim."""
     from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
 
     slot = pack_with_slots.slots[0]
@@ -560,6 +562,7 @@ async def test_cancellation_during_adapter_does_not_register_asset(
     service: VNAssetPackService,
     pack_with_slots: SimpleNamespace,
 ) -> None:
+    """Cancellation while the model runs prevents asset registration."""
     from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
 
     slot = pack_with_slots.slots[0]
@@ -594,6 +597,7 @@ async def test_cancellation_during_adapter_does_not_register_asset(
 async def test_takeover_backend_contention_is_retryable_until_stale_adapter_exits(
     service: VNAssetPackService, pack_with_slots: SimpleNamespace, tmp_path: Path,
 ) -> None:
+    """A takeover retries backend contention until the stale model call exits."""
     from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
 
     slot = pack_with_slots.slots[0]
@@ -658,6 +662,7 @@ async def test_takeover_backend_contention_is_retryable_until_stale_adapter_exit
 async def test_legacy_backend_contention_keeps_failure_behavior(
     fake_jobs: FakeJobs, service: VNAssetPackService, pack_with_slots: SimpleNamespace,
 ) -> None:
+    """Legacy generation retains its terminal backend-contention behavior."""
     from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
 
     slot = pack_with_slots.slots[0]
@@ -684,6 +689,7 @@ async def test_legacy_backend_contention_keeps_failure_behavior(
 async def test_expired_job_lease_cannot_claim_a_variant(
     fake_jobs: FakeJobs, service: VNAssetPackService, pack_with_slots: SimpleNamespace,
 ) -> None:
+    """An expired Jobs lease cannot reserve a versioned variant."""
     from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
 
     slot = pack_with_slots.slots[0]
@@ -796,6 +802,7 @@ async def test_lease_loss_after_storage_attachment_blocks_publication(
     service: VNAssetPackService, pack_with_slots: SimpleNamespace,
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lease_loss: str,
 ) -> None:
+    """Lease loss after storage attachment still fences variant publication."""
     from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
 
     slot = pack_with_slots.slots[0]
@@ -861,6 +868,7 @@ async def test_delayed_jobs_validation_cannot_replace_new_claim(
     service: VNAssetPackService, pack_with_slots: SimpleNamespace,
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Delayed authority validation cannot overwrite a newer variant claim."""
     from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
 
     slot = pack_with_slots.slots[0]
@@ -1020,6 +1028,7 @@ def chacha_db(tmp_path: Path) -> Generator[CharactersRAGDB, None, None]:
 async def test_cancelled_legacy_reservation_is_reconciled_on_redelivery(
     fake_jobs: FakeJobs, service: VNAssetPackService, pack_with_slots: SimpleNamespace,
 ) -> None:
+    """Redelivery releases a cancelled legacy reservation without generating."""
     from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
 
     slot = pack_with_slots.slots[0]
@@ -1049,6 +1058,7 @@ async def test_cancelled_legacy_reservation_is_reconciled_on_redelivery(
 async def test_adapter_failure_after_jobs_cancellation_keeps_variant_planned(
     service: VNAssetPackService, pack_with_slots: SimpleNamespace, tmp_path: Path,
 ) -> None:
+    """Model failure after Jobs cancellation cannot terminalize the stale claim."""
     from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
 
     slot = pack_with_slots.slots[0]
@@ -1206,6 +1216,7 @@ def test_generation_retries_original_batch_when_parent_enqueue_is_rejected(
     service: VNAssetPackService,
     pack_with_slots: SimpleNamespace,
 ) -> None:
+    """Receipt recovery retries the original batch after parent admission fails."""
     receipt = {
         "scope": "vn_asset_generate",
         "resource_id": f"pack:{pack_with_slots.id}",
@@ -1274,6 +1285,7 @@ def test_unpublished_reserved_item_cannot_be_read_or_reviewed(
     service: VNAssetPackService,
     pack_with_slots: SimpleNamespace,
 ) -> None:
+    """An unpublished reservation is excluded from public reads and reviews."""
     slot = pack_with_slots.slots[0]
     batch = service.start_generation(
         pack_with_slots.id, user_id=1,
@@ -1302,6 +1314,7 @@ def test_active_batch_prevents_deleting_frozen_slot(
     service: VNAssetPackService,
     character_id: int,
 ) -> None:
+    """Active generation prevents deletion of a recipe's frozen slot."""
     pack = service.create_pack(
         VNAssetPackCreate(title="Deletion Pack", primary_character_id=character_id)
     )
@@ -1360,6 +1373,7 @@ def test_fanout_uses_original_variants_after_slot_edit(
     service: VNAssetPackService,
     batch_with_slots: SimpleNamespace,
 ) -> None:
+    """Fanout retains the frozen variant count after the slot changes."""
     from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
 
     first_slot = batch_with_slots.slots[0]
@@ -1379,6 +1393,7 @@ def test_fanout_does_not_regress_a_batch_completed_by_fast_children(
     batch_with_slots: SimpleNamespace,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Late fanout completion cannot regress a batch settled by its children."""
     from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
 
     original_create = fake_jobs.create_job
@@ -1481,6 +1496,7 @@ async def test_generation_uses_original_recipe_after_source_edits(
     pack_with_slots: SimpleNamespace,
     chacha_db: CharactersRAGDB,
 ) -> None:
+    """Generation uses frozen recipe inputs rather than edited live sources."""
     from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
 
     slot = pack_with_slots.slots[0]
@@ -1541,6 +1557,7 @@ async def test_versioned_batch_with_missing_recipe_fails_closed(
     service: VNAssetPackService,
     pack_with_slots: SimpleNamespace,
 ) -> None:
+    """A missing versioned recipe rejects generation instead of using live inputs."""
     from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
 
     slot = pack_with_slots.slots[0]
@@ -1586,6 +1603,7 @@ async def test_unknown_recipe_version_never_uses_mutable_sources(
     service: VNAssetPackService,
     pack_with_slots: SimpleNamespace,
 ) -> None:
+    """An unsupported recipe version cannot fall back to mutable sources."""
     from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
 
     slot = pack_with_slots.slots[0]
@@ -1625,6 +1643,7 @@ async def test_completed_variant_redelivery_reuses_item_without_generating_again
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Completed redelivery replays its item without another model call."""
     from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
     from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
 
@@ -1673,6 +1692,7 @@ async def test_cancelled_batch_does_not_publish_reserved_variant(
     service: VNAssetPackService,
     pack_with_slots: SimpleNamespace,
 ) -> None:
+    """Cancelled generation cannot publish a reserved variant on redelivery."""
     from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
 
     slot = pack_with_slots.slots[0]
@@ -1703,6 +1723,7 @@ def test_cancellation_before_publication_rejects_reserved_variant(
     service: VNAssetPackService,
     pack_with_slots: SimpleNamespace,
 ) -> None:
+    """Cancellation fences publication of an already reserved variant."""
     slot = pack_with_slots.slots[0]
     batch = service.start_generation(
         pack_with_slots.id, user_id=1,
@@ -1731,6 +1752,7 @@ async def test_failed_variant_does_not_strand_queued_sibling(
     service: VNAssetPackService,
     pack_with_slots: SimpleNamespace,
 ) -> None:
+    """One failed variant leaves its queued sibling able to complete."""
     from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
 
     class FailOnceAdapter(FakeImageAdapter):
@@ -1776,6 +1798,7 @@ async def test_late_failure_does_not_regress_completed_variant(
     service: VNAssetPackService,
     pack_with_slots: SimpleNamespace,
 ) -> None:
+    """A late failure cannot regress a completed variant or its slot."""
     from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
 
     slot = pack_with_slots.slots[0]
@@ -1818,6 +1841,7 @@ async def test_retry_recovers_registered_file_after_worker_interruption(
     tmp_path: Path,
     interruption: type[BaseException],
 ) -> None:
+    """Retry recovers registered bytes off-loop without another model call."""
     from tldw_Server_API.app.core.VN_Assets import worker as worker_module
     from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
 
@@ -1908,7 +1932,11 @@ async def test_replay_rejects_registered_file_owned_by_another_user(
     fake_jobs: FakeJobs,
     service: VNAssetPackService,
     pack_with_slots: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
+    """Public replay rejects foreign bytes without generation or storage effects."""
+    from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
     from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
 
     slot = pack_with_slots.slots[0]
@@ -1923,6 +1951,10 @@ async def test_replay_rejects_registered_file_owned_by_another_user(
         variant_index=0,
         item_fields={"pack_id": pack_with_slots.id},
     )
+    before = service.repo.get_item(item["id"])
+    image_bytes = b"12345678"
+    (tmp_path / "foreign.png").write_bytes(image_bytes)
+    monkeypatch.setattr(DatabasePaths, "get_user_outputs_dir", staticmethod(lambda _user_id: tmp_path))
 
     class ForeignFiles:
         """Expose an invalid cross-owner record to the replay boundary."""
@@ -1936,20 +1968,38 @@ async def test_replay_rejects_registered_file_owned_by_another_user(
                 "source_feature": source_feature,
                 "source_ref": source_ref,
                 "is_deleted": False,
+                "storage_path": "foreign.png",
+                "file_size_bytes": len(image_bytes),
+                "mime_type": "image/png",
+                "checksum": hashlib.sha256(image_bytes).hexdigest(),
             }
 
+    adapter = FakeImageAdapter()
+    gate = FakeGenerationGate()
+    saver = RecordingVNSaver()
     worker = VNAssetGenerationWorker(
         repo=service.repo,
         jobs_manager=fake_jobs,
         generated_files_repo=ForeignFiles(),
+        image_registry=FakeImageRegistry(adapter),
+        backend_gate=gate,
+        save_vn_asset_image=saver,
     )
-    with pytest.raises(VNAssetGenerationError) as raised:
-        await worker._replay_variant(
-            batch_id=batch.batch_id, slot_id=slot.id, variant_index=0,
-            user_id=1, pack_id=pack_with_slots.id,
-        )
+    with pytest.raises(VNAssetGenerationError, match="vn_asset_item_storage_missing") as raised:
+        await worker.handle_generate_variant({
+            "batch_id": batch.batch_id, "slot_id": slot.id, "variant_index": 0,
+            "user_id": 1, "pack_id": pack_with_slots.id,
+        })
     assert raised.value.retryable is False
-    assert service.repo.get_item(item["id"])["generated_file_id"] is None
+    after = service.repo.get_item(item["id"])
+    assert after["generated_file_id"] is None
+    registration_fields = ("generated_file_id", "storage_ref", "mime_type", "width", "height", "bytes")
+    assert {key: after[key] for key in registration_fields} == {key: before[key] for key in registration_fields}
+    assert service.repo.get_batch(batch.batch_id)["completed_count"] == 0
+    assert service.repo.list_items(pack_with_slots.id) == []
+    assert adapter.requests == []
+    assert gate.requests == []
+    assert saver.calls == []
 
 
 @pytest.mark.integration
@@ -1962,6 +2012,7 @@ async def test_planned_replay_rejects_invalid_storage_without_generation_or_publ
     fake_jobs: FakeJobs, service: VNAssetPackService, pack_with_slots: SimpleNamespace,
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, attached: bool, invalid: str,
 ) -> None:
+    """Invalid planned storage fails once without generation or publication."""
     from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
     from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
 
@@ -2043,6 +2094,7 @@ async def test_completed_replay_validates_bytes_without_changing_approved_review
     fake_jobs: FakeJobs, service: VNAssetPackService, pack_with_slots: SimpleNamespace,
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, invalid: str,
 ) -> None:
+    """Completed replay validates bytes while preserving approved history."""
     from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
     from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
 
@@ -2161,6 +2213,7 @@ async def test_failed_variant_redelivery_does_not_increment_failure_count(
     service: VNAssetPackService,
     pack_with_slots: SimpleNamespace,
 ) -> None:
+    """Redelivery of a failed variant cannot charge its failure count twice."""
     from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
 
     class FailingAdapter:
@@ -2208,6 +2261,7 @@ async def test_versioned_batch_counts_only_committed_variants(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Versioned batch counters include only committed variant outcomes."""
     from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
     from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
 
@@ -2786,6 +2840,7 @@ def test_generation_api_recovers_unfinished_response_receipt(
     fake_jobs: FakeJobs,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """The API recovers a committed batch after its receipt response is lost."""
     service = VNAssetPackService(chacha_db, owner_user_id=1, jobs_manager=fake_jobs)
     pack = service.create_pack(VNAssetPackCreate(title="Receipt Pack", primary_character_id=character_id))
     service.apply_matrix(pack.id, "starter", {"variant_count": 1})
@@ -2830,6 +2885,7 @@ def test_generation_receipt_recovers_parent_job_after_interruption(
     fake_jobs: FakeJobs,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Receipt recovery creates one original parent after interrupted enqueue."""
     from tldw_Server_API.app.core.VN_Assets import service as service_module
 
     service = VNAssetPackService(chacha_db, owner_user_id=1, jobs_manager=fake_jobs)

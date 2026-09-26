@@ -14,14 +14,23 @@ function generationStorageKey(ownerUserId: number | undefined, packId: number): 
   return `vn-assets:pending-generation:v1:${ownerUserId}:${packId}`;
 }
 
+/** Read an owner/pack receipt without interrupting retries when tab storage fails. */
 export function readPendingVNAssetGeneration(
   ownerUserId: number | undefined, packId: number
 ): PendingVNAssetGeneration | null {
   const storageKey = generationStorageKey(ownerUserId, packId);
   if (!storageKey || typeof window === 'undefined') return null;
+  let storage: Storage;
+  let raw: string | null;
   try {
-    const raw = window.sessionStorage.getItem(storageKey);
-    if (!raw) return null;
+    storage = window.sessionStorage;
+    raw = storage.getItem(storageKey);
+  } catch {
+    console.warn('[vn-assets] Could not read pending generation receipt: session storage unavailable.');
+    return null;
+  }
+  if (raw === null) return null;
+  try {
     const value: unknown = JSON.parse(raw);
     if (typeof value === 'object' && value !== null && 'kind' in value && 'key' in value) {
       const pending = value as Record<string, unknown>;
@@ -33,9 +42,14 @@ export function readPendingVNAssetGeneration(
         )
       )) return pending as unknown as PendingVNAssetGeneration;
     }
-    window.sessionStorage.removeItem(storageKey);
+    console.warn('[vn-assets] Ignoring invalid pending generation receipt.');
   } catch {
-    return null;
+    console.warn('[vn-assets] Ignoring malformed pending generation receipt JSON.');
+  }
+  try {
+    storage.removeItem(storageKey);
+  } catch {
+    console.warn('[vn-assets] Could not remove invalid pending generation receipt: session storage unavailable.');
   }
   return null;
 }
