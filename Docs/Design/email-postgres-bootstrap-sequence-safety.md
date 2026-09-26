@@ -20,8 +20,8 @@ cross-user isolation assertions. Keep the throughput gate open if correctness
 passes but measured upload speed is below 50 messages/sec.
 
 Validation: the unit boundary regression and real PostgreSQL repeated-handle
-test failed before the change. Afterward, 75 schema unit tests and three real
-PostgreSQL sequence/FTS tests passed. The full authenticated archive probe
+test failed before the change. Afterward, 75 schema unit tests and three
+sequence/FTS regression cases (two using live PostgreSQL) passed. The full authenticated archive probe
 stored all 300 messages, preserved their IDs on a 100-message rerun, and
 confirmed owner rows 300 versus other-user rows 0 under forced RLS with a
 non-superuser/non-bypass role. Model and outbound guards observed zero attempts.

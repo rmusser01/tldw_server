@@ -4,7 +4,7 @@ title: Stop routine PostgreSQL Media bootstrap from rewinding scoped sequences
 status: Done
 assignee: []
 created_date: '2026-09-26 01:58'
-updated_date: '2026-09-26 02:07'
+updated_date: '2026-09-26 02:13'
 labels: []
 dependencies: []
 ---
@@ -26,15 +26,13 @@ Synthetic authenticated 100-message MBOX ingestion stored only the first message
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-TDD red: routine bootstrap regression failed on sequence call; new real PostgreSQL test failed on second scoped insert after unscoped handle construction. Green after removing routine sync: 75 schema unit tests passed (21 integration deselected), 3 real PostgreSQL sequence/FTS tests passed. v18 migration sequence test remains green. Full authenticated archive rerun is running on fresh isolated databases. Design Docs/Design/email-postgres-bootstrap-sequence-safety.md; plan IMPLEMENTATION_PLAN_email_postgres_sequences_13372.md.
-
-Full loopback PostgreSQL archive probe passed after the fix: 300 distinct messages, 100-message rerun preserves IDs, owner native search/detail pass, other user search 0/detail 404, direct forced RLS owner rows 300/other 0, role superuser=false/bypass=false, zero model/external attempts. Throughput is still below target (aggregate 5.03 messages/sec); tracked separately in TASK-13371. Ruff check/format passed on touched implementation and new integration test; implementation Bandit 0 findings/errors, new test Bandit 0 with B101 excluded for assertions. Review confirms explicit v18 migration path unchanged. Plan completed and removed.
+TDD red: routine bootstrap unit boundary failed on sequence call; real PostgreSQL repeated-handle test failed on second insert. Removed routine post-core sequence synchronization and obsolete protocol requirement; retained explicit v18 migration maintenance. Green: 75 schema unit tests and 3 sequence/FTS cases (2 live PostgreSQL, 1 unit) passed. Full authenticated MBOX probes persisted all 300 IDs, preserved IDs on 100-message retry, passed cross-user API isolation and direct forced-RLS owner 300/other 0 with a non-superuser/non-bypass role, zero model/external attempts. Ruff and Bandit clean across implementation/new test and touched existing test (B101 excluded only for test assertions). Review confirms v18 maintenance unchanged. Commit 41684adbe3. Design Docs/Design/email-postgres-bootstrap-sequence-safety.md; completed own plan removed. Throughput evidence/follow-up separate in TASK-13371.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Removed sequence synchronization from routine PostgreSQL post-core bootstrap, preserving allocated IDs when unscoped handles cannot see existing rows under forced RLS. Explicit v18 migration sequence repair retained. 75 unit tests and 3 live PostgreSQL tests passed; authenticated 300-message MBOX upload, retry identity and cross-user RLS passed. Throughput optimization remains separate.
+Routine PostgreSQL Media bootstrap no longer rewinds global sequences from RLS-limited row maxima; explicit v18 migration repair retained. 75 schema unit tests plus 3 sequence/FTS cases (2 live PostgreSQL) passed. Full authenticated 300-message MBOX persistence, retry and isolation passed. Commit 41684adbe3; throughput remains separate.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

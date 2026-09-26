@@ -4,7 +4,7 @@ title: Benchmark scoped PostgreSQL email search with synthetic load
 status: Done
 assignee: []
 created_date: '2026-09-26 00:55'
-updated_date: '2026-09-26 01:52'
+updated_date: '2026-09-26 02:08'
 labels: []
 dependencies: []
 ---
@@ -26,18 +26,13 @@ Extend the existing reproducible email search benchmark to run against an explic
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Implemented explicit backend selection, positive numeric PostgreSQL scope, backend mismatch rejection, credential-free backend reporting, ISO date bounds, and an explicit NFR size/operator gate. Design: Docs/Design/email-search-postgresql-benchmark.md. Plan: IMPLEMENTATION_PLAN_email_postgres_benchmark_13369.md. Final combined focused tests: 32 passed, 2 integration tests deselected after separate real PostgreSQL verification; Ruff check/format passed on benchmark files and Bandit implementation scopes had 0 findings/errors. SQLite 100-message smoke also passed. Final PostgreSQL dataset: 10,000 messages, 2,487 attachment rows, 23 labels. Default mix: 150 warm samples p50 33.39 ms/p95 106.86 ms. Required six operators: 90 warm samples p50 29.90 ms/p95 96.85 ms, all positive matches; NFR gate false at 1% of required mailbox scale. Direct RLS: role superuser=false/bypass=false, media RLS enabled/forced, owner rows/search 10000, other user rows/search 0 even with explicit owner tenant. Both final socket guards recorded 0 non-loopback attempts. Reports saved under Docs/Operations; no personal mail or Gmail was accessed. First 10k query pass failed on WAL fsync after host disk reached 119 MiB free; Docker recovery allowed valid query-only reruns after TASK-13370. Storage became unstable again while saving evidence, and final cleanup failed at Docker inspection before connecting. Keep task In Progress until cleanup confirmed. Private manifest /tmp/email_pg_manifest_13364.json and cleanup script /tmp/email_pg_databases_13364.py remain outside repo. Do not start another large fixture until host/Docker storage is stable. Report: Docs/Operations/Email_PostgreSQL_Search_Performance_2026-09-25.md.
-Final self-review removed duplicate schema initialization because the Media factory already initializes each handle; the regression rejects a second initialization call. Final verification after that change: 32 passed, 2 deselected; Ruff check/format passed; benchmark Bandit 0 findings/errors. Both saved 10k JSON files exactly match their successful run artifacts and contain no disposable database password. Cleanup remains unconfirmed; task remains In Progress.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
-Recovery follow-up: host has 237 GiB free. Docker Desktop desktop-linux has no containers or volumes; old test container absent and port 5434 closed. Prior synthetic databases/role no longer exist in the removed Docker test store; this is not a SQL DROP claim. Private manifest will be removed. No unrelated Docker resources deleted by this follow-up.
+Scoped PostgreSQL benchmark and 10k search/RLS evidence are committed in 638066dd0b; conditional FTS refresh in 6204632094. Focused checks: 32 passed and 2 live PostgreSQL cases separately passed; Ruff/Bandit clean. Dataset 10k messages/2487 attachments/23 labels; six-operator warm p50 29.90 ms/p95 96.85 ms, forced RLS owner 10000/other 0, zero model/external attempts. These bounded results do not certify 1M scale. Cleanup initially failed on host/Docker I/O errors. Follow-up confirmed 237 GiB free, empty Docker container/volume inventories, prior container absent and old port closed: previous disposable store and resources no longer exist. Old credential manifest was removed. Task closed; own completed plan removed. Report Docs/Operations/Email_PostgreSQL_Search_Performance_2026-09-25.md. Later archive measurements/fix are separate TASK-13371/TASK-13372.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Scoped PostgreSQL benchmark and 10k performance/RLS evidence committed in 638066dd0b; unchanged FTS writes fixed in 6204632094. Prior resources are confirmed absent after Docker test-store removal: no containers or volumes and old port closed. Obsolete credential manifest removed. 1M search scale, archive throughput and production topology remain open.
+10k scoped PostgreSQL benchmark and RLS evidence committed; previous disposable resources confirmed absent after Docker test-store removal, obsolete credential manifest removed. 1M search scale, throughput and production topology remain open.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
