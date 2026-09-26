@@ -4,7 +4,7 @@ title: Plan and implement paired Docker distribution and runtime gateway
 status: In Progress
 assignee: []
 created_date: '2026-09-23 06:15'
-updated_date: '2026-09-26 01:40'
+updated_date: '2026-09-26 01:52'
 labels:
   - distribution
   - docker
@@ -67,6 +67,8 @@ Docker Desktop recovered for a local linux/arm64 run. Four images built and a si
 User authorized branch push and native CI. Branch-only workflow trigger bootstraps the new lane; pinned Black 25.1.0 fixes the first CI formatter drift. Run 36206663211 at 754c9dd521 passed focused release/browser/gateway checks and Windows syntax, built all four native amd64/arm64 images, verified/init extracted signed bundles, and reached healthy backend/WebUI/gateway services. Both then exited 22 on a silent HTTP request. Found missing WebUI AUTH_MODE in Compose: regression red, real standalone Next/gateway returns 503 omitted versus 204/two cookies with single_user. Fixed configuration; 47 release tests, shell/Compose checks, production Bandit zero findings pass. Added HTTP error line/status and failure-evidence upload excluding private key. Corrected CI smoke pending; G2/G4/G10/G12 remain open. Local Docker content-store I/O error and 4.5 GiB host free prevent further local builds.
 
 Further G4 review found /setup routed to legacy FastAPI setup rather than the Next wizard, and backend docs-static/favicon routed to Next. Real-socket regression red; corrected route ownership passes 13 gateway tests and lint; actual standalone Next /setup returns 200 with Next assets through gateway. Added container smoke checks for setup and concrete docs assets; exact follow-up candidate run still required. Official upstream checks confirm Python 3.12 security support through October 2028 and current patch 3.12.14; Node 24 LTS through April 2028/current patch 24.21.0 with GNU/Linux x64/arm64 Tier 1. Sources are linked in the acceptance record; full G12 stays open.
+
+Run 36208320371 at dbc1100323: complete arm64 extracted smoke passes assets/session cookies/host rejection/private ports/repeat persisted config-data/tamper rejection. Downloaded all 8 helper hashes match manifest SHA256 1b7201d4730e230ef59661878e532b5ff87e3ed48a9b39500354ecc054e806db. Actual Python 3.12.14/Node 24.21.0; G10 true, provisional G2/G4/G12 false and promotion rejected as intended. amd64 pending. Setup/docs routing fix committed 9755c7eaaf needs exact candidate run; next CI evidence upload adds public key for independent signature verification, never private key.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

@@ -95,6 +95,23 @@ lists GNU/Linux x64 and arm64 as Tier 1 with kernel >=4.18 and glibc >=2.28.
 This establishes upstream eligibility of the observed runtime families/patches;
 it does not replace image dependency/security review or the complete G12 gate.
 
+The [auth-mode follow-up run](https://github.com/rmusser01/tldw_server/actions/runs/36208320371)
+at `dbc1100323` passes the complete arm64 extracted smoke: assets, session
+cookies, hostile Host rejection, private ports, persisted credentials/data
+across stop/start from another directory, and manifest tampering. Its inventory
+records Python 3.12.14 and Node 24.21.0; all eight downloaded bundle file hashes
+match manifest `1b7201d4730e230ef59661878e532b5ff87e3ed48a9b39500354ecc054e806db`.
+G10 is true in its arm64 evidence; G2/G4/G12 remain false by the provisional
+lane's policy. The promotion verifier rejects it as required. The runner's
+Docker `.Size` values are 8,515,093,284 backend, 534,186,910 WebUI, 249,104,975
+gateway, and 164,181,011 control bytes; these metadata values are not a measured
+download/installation footprint and are not compared with Docker Desktop's
+earlier values. The amd64 result is still pending. The setup/docs source fix is
+committed separately at `9755c7eaaf` and is not covered by this candidate. Future
+evidence uploads include the ephemeral public verification key, allowing the
+downloaded provisional manifest signature to be checked independently; the
+private signing key remains excluded.
+
 The manual `verify-app-bundle.yml` lane builds separate job-local candidates
 for linux/amd64 and linux/arm64 and leaves G2/G4/G12 false. Its required-both
 status job confirms both provisional runs were exercised; it does not

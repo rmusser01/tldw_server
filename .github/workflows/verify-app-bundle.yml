@@ -113,6 +113,7 @@ jobs:
             ${{ runner.temp }}/app-candidate-${{ matrix.arch }}/inventory.json
             ${{ runner.temp }}/app-candidate-${{ matrix.arch }}/evidence.json
             ${{ runner.temp }}/app-candidate-${{ matrix.arch }}/images.tsv
+            ${{ runner.temp }}/app-candidate-${{ matrix.arch }}/trust/ci-test.pub
 
   powershell-syntax:
     name: Windows helper syntax
