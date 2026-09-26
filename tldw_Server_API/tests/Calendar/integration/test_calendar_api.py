@@ -3,8 +3,8 @@ from __future__ import annotations
 import base64
 import importlib
 import json
+import threading
 from collections.abc import Generator
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +20,39 @@ from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
 
 pytestmark = pytest.mark.integration
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["verify", "discover"])
+async def test_caldav_api_provider_calls_run_off_event_loop(
+    calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
+    monkeypatch: pytest.MonkeyPatch, operation: str,
+) -> None:
+    from tldw_Server_API.app.api.v1.endpoints import calendar as endpoint
+    from tldw_Server_API.app.api.v1.schemas.calendar_schemas import CalDavAccountVerifyRequest
+
+    _client, db, _reminders = calendar_api_client
+    account = db.create_external_account(
+        tenant_id="default", user_id=1, provider="caldav", display_name="Work", secret_ref=None,
+    )
+    calls: list[int] = []
+
+    class Provider:
+        def verify_account(self, **_kwargs: Any) -> dict[str, Any]:
+            calls.append(threading.get_ident())
+            return {"verified": True, "status": "ok"}
+
+        def discover_calendars(self, **_kwargs: Any) -> list[Any]:
+            calls.append(threading.get_ident())
+            return []
+
+    user = User(id=1, username="owner", is_active=True)
+    handler = endpoint.verify_external_calendar_account if operation == "verify" else endpoint.discover_external_calendars
+    await handler(
+        payload=CalDavAccountVerifyRequest(server_url="https://calendar.example.test/", username="user", password="secret"),
+        account_id=account.id, current_user=user, _principal=None, db=db, provider=Provider(),
+    )
+    assert calls and calls[0] != threading.get_ident()
 
 
 class _ReminderServiceStub:

@@ -6,13 +6,12 @@ import asyncio
 import os
 from datetime import datetime, timedelta, timezone
 
-from loguru import logger
-
 from tldw_Server_API.app.core.Calendar.calendar_sync_worker import (
     CalendarSyncJobResponse,
     queue_calendar_binding_sync,
 )
-from tldw_Server_API.app.core.Calendar.errors import CalendarValidationError
+from tldw_Server_API.app.core.Calendar.errors import CalendarError
+from tldw_Server_API.app.core.Calendar.provider_operations import log_calendar_failure
 from tldw_Server_API.app.core.DB_Management.Calendar_DB import CalendarDatabase
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 
@@ -60,10 +59,10 @@ async def queue_due_calendar_sync_jobs(
                     window_end=(scan_at + timedelta(days=int(binding.lookahead_days))).isoformat(),
                 )
             )
-        except CalendarValidationError as exc:
-            logger.warning("Calendar sync scheduler skipped binding {}: {}", binding.id, exc)
+        except CalendarError as exc:
+            log_calendar_failure("queue_binding", exc, binding_id=binding.id, account_id=binding.account_id)
         except _SCHEDULER_GUARD_EXCEPTIONS as exc:
-            logger.warning("Calendar sync scheduler failed to queue binding {}: {}", binding.id, exc)
+            log_calendar_failure("queue_binding", exc, binding_id=binding.id, account_id=binding.account_id)
     return queued
 
 
@@ -78,7 +77,10 @@ async def run_calendar_sync_scheduler(
     while True:
         if stop_event is not None and stop_event.is_set():
             return
-        await queue_due_calendar_sync_jobs(db=db, job_manager=job_manager)
+        try:
+            await queue_due_calendar_sync_jobs(db=db, job_manager=job_manager)
+        except Exception as exc:
+            log_calendar_failure("scan_due_bindings", exc)
         if stop_event is None:
             await asyncio.sleep(interval)
             continue

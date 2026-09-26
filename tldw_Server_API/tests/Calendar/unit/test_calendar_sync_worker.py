@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import base64
 import json
+import asyncio
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,6 +12,7 @@ import pytest
 
 from tldw_Server_API.app.core.Calendar.calendar_service import CalendarService
 from tldw_Server_API.app.core.Calendar.errors import CalendarValidationError
+from tldw_Server_API.app.core.Calendar.errors import CalendarNotFound
 from tldw_Server_API.app.core.Calendar.providers.caldav import CalDavEvent
 from tldw_Server_API.app.core.Calendar.secret_store import CalendarSecretStore
 from tldw_Server_API.app.core.DB_Management.Calendar_DB import CalendarDatabase
@@ -17,6 +20,85 @@ from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.mark.asyncio
+async def test_sync_provider_runs_off_event_loop(
+    calendar_db: CalendarDatabase, jobs_manager: JobManager
+) -> None:
+    from tldw_Server_API.app.core.Calendar.calendar_sync_worker import handle_calendar_sync_job
+
+    fixture = _create_sync_fixture(calendar_db)
+    queued = CalendarService(db=calendar_db, job_manager=jobs_manager).queue_binding_sync(
+        actor_user_id=1, binding_id=fixture.binding_id, reason="manual",
+        window_start="2026-06-01T00:00:00Z", window_end="2026-06-08T00:00:00Z",
+    )
+    call_threads: list[int] = []
+
+    class Provider:
+        def fetch_vevents(self, **_kwargs: object) -> list[CalDavEvent]:
+            call_threads.append(threading.get_ident())
+            return []
+
+    await handle_calendar_sync_job(jobs_manager.get_job(queued.job_id), db=calendar_db, provider=Provider())
+    assert call_threads and call_threads[0] != threading.get_ident()
+
+
+@pytest.mark.asyncio
+async def test_scheduler_skips_disappeared_account_and_continues(
+    calendar_db: CalendarDatabase, jobs_manager: JobManager, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tldw_Server_API.app.services.calendar_sync_scheduler import queue_due_calendar_sync_jobs
+
+    missing = _create_sync_fixture(calendar_db)
+    healthy = _create_sync_fixture(calendar_db)
+    original = calendar_db.get_external_account
+
+    def get_account(account_id: int, **kwargs: object) -> object:
+        if account_id == missing.account_id:
+            raise CalendarNotFound("account deleted during scan")
+        return original(account_id, **kwargs)
+
+    monkeypatch.setattr(calendar_db, "get_external_account", get_account)
+    queued = await queue_due_calendar_sync_jobs(db=calendar_db, job_manager=jobs_manager)
+    assert [item.binding_id for item in queued] == [healthy.binding_id]
+
+
+@pytest.mark.asyncio
+async def test_scheduler_retries_after_scan_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.services import calendar_sync_scheduler as scheduler
+
+    stop = asyncio.Event()
+    scans: list[int] = []
+
+    async def scan(**_kwargs: object) -> list[object]:
+        scans.append(1)
+        if len(scans) == 1:
+            raise RuntimeError("database temporarily unavailable")
+        stop.set()
+        return []
+
+    monkeypatch.setattr(scheduler, "queue_due_calendar_sync_jobs", scan)
+    await scheduler.run_calendar_sync_scheduler(stop, interval_seconds=0.001)
+    assert len(scans) == 2
+
+
+def test_shared_credentials_enforce_scope_and_override_precedence(calendar_db: CalendarDatabase) -> None:
+    from tldw_Server_API.app.core.Calendar.provider_operations import resolve_caldav_credentials
+    from tldw_Server_API.app.core.Calendar.errors import CalendarPermissionDenied
+
+    fixture = _create_sync_fixture(calendar_db)
+    with pytest.raises(CalendarPermissionDenied):
+        resolve_caldav_credentials(calendar_db, account_id=fixture.account_id, actor_user_id=2, tenant_id="default")
+    with pytest.raises(CalendarPermissionDenied):
+        resolve_caldav_credentials(calendar_db, account_id=fixture.account_id, actor_user_id=1, tenant_id="other")
+    credentials = resolve_caldav_credentials(
+        calendar_db, account_id=fixture.account_id, actor_user_id=1, tenant_id="default",
+        overrides={"username": "override-user", "token": "override-token"},
+    )
+    assert credentials == {
+        "server_url": "https://caldav.example.test/dav/", "username": "override-user", "password": "override-token",
+    }
 
 
 @pytest.fixture
