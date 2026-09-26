@@ -13,7 +13,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing import persistence
 pytestmark = [pytest.mark.unit, pytest.mark.asyncio]
 
 
-async def persist_archive(db_path, *, owner=42):
+async def persist_archive(db_path, *, owner=42, payload_suffix=""):
     """Persist three synthetic archive children without chunking or model work."""
     result = {
         "status": "Success",
@@ -22,11 +22,11 @@ async def persist_archive(db_path, *, owner=42):
         "children": [
             {
                 "status": "Success",
-                "content": f"Body {i}",
+                "content": f"Body {i}{payload_suffix}",
                 "metadata": {
-                    "title": f"Subject {i}",
+                    "title": f"Subject {i}{payload_suffix}",
                     "filename": f"child-{i}.eml",
-                    "email": {"message_id": f"<child-{i}@example.test>", "subject": f"Subject {i}"},
+                    "email": {"message_id": f"<child-{i}@example.test>", "subject": f"Subject {i}{payload_suffix}"},
                 },
             }
             for i in range(3)
@@ -259,3 +259,63 @@ async def test_second_cancellation_does_not_block_event_loop_during_cleanup(tmp_
         assert closed.is_set()
     finally:
         release.set()
+
+
+async def test_archive_native_read_and_graph_share_one_connection(tmp_path, monkeypatch):
+    read_connections, graph_connections = [], []
+    real_read = persistence.read_persisted_email_content
+    real_graph = MediaDatabase.upsert_email_message_graph
+
+    def read(db, *args, **kwargs):
+        read_connections.append(db._get_txn_conn())
+        return real_read(db, *args, **kwargs)
+
+    def graph(db, *args, **kwargs):
+        graph_connections.append(db._get_txn_conn())
+        return real_graph(db, *args, **kwargs)
+
+    monkeypatch.setattr(persistence, "_is_email_native_persist_enabled", lambda: True)
+    monkeypatch.setattr(persistence, "read_persisted_email_content", read)
+    monkeypatch.setattr(MediaDatabase, "upsert_email_message_graph", graph)
+    result = await persist_archive(tmp_path / "native-connection.db")
+    assert len(result["child_db_results"]) == 3
+    assert len(read_connections) == len(graph_connections) == 3
+    assert all(conn is not None for conn in read_connections)
+    assert all(read is graph for read, graph in zip(read_connections, graph_connections))
+
+
+async def test_late_native_failure_rolls_back_graph_and_preserves_media(tmp_path, monkeypatch):
+    real_graph = MediaDatabase.upsert_email_message_graph
+
+    def late_failure(db, *args, **kwargs):
+        real_graph(db, *args, **kwargs)
+        raise ValueError("synthetic failure after nested graph writes")
+
+    monkeypatch.setattr(persistence, "_is_email_native_persist_enabled", lambda: True)
+    monkeypatch.setattr(MediaDatabase, "upsert_email_message_graph", late_failure)
+    path = tmp_path / "late-native-failure.db"
+    result = await persist_archive(path)
+    assert len(result["child_db_results"]) == 3
+    db = MediaDatabase(db_path=str(path), client_id="verify")
+    try:
+        assert db.execute_query("SELECT COUNT(*) FROM Media").fetchone()[0] == 3
+        assert db.execute_query("SELECT COUNT(*) FROM email_messages").fetchone()[0] == 0
+        assert db.execute_query("SELECT COUNT(*) FROM email_sources").fetchone()[0] == 0
+    finally:
+        db.close_connection()
+
+
+async def test_archive_declined_overwrite_retains_saved_native_payload(tmp_path, monkeypatch):
+    monkeypatch.setattr(persistence, "_is_email_native_persist_enabled", lambda: True)
+    path = tmp_path / "accepted-payload.db"
+    original = await persist_archive(path)
+    retry = await persist_archive(path, payload_suffix=" Incoming changed payload")
+    assert [item["db_id"] for item in retry["child_db_results"]] == [
+        item["db_id"] for item in original["child_db_results"]
+    ]
+    db = MediaDatabase(db_path=str(path), client_id="verify")
+    try:
+        rows = db.execute_query("SELECT subject, body_text FROM email_messages ORDER BY media_id").fetchall()
+        assert [(row["subject"], row["body_text"]) for row in rows] == [(f"Subject {i}", f"Body {i}") for i in range(3)]
+    finally:
+        db.close_connection()

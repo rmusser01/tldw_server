@@ -6337,17 +6337,18 @@ async def persist_doc_item_and_children(
                                             if media_type_local == "email" and child_id_local:
                                                 if _is_email_native_persist_enabled():
                                                     try:
-                                                        saved_metadata, saved_body = read_persisted_email_content(
-                                                            worker_db, int(child_id_local), tenant_id=resolved_email_tenant_id,
-                                                        )
-                                                        child_email_graph_local = worker_db.upsert_email_message_graph(
-                                                            media_id=int(child_id_local),
-                                                            metadata=saved_metadata,
-                                                            body_text=saved_body,
-                                                            tenant_id=resolved_email_tenant_id,
-                                                            provider="upload",
-                                                            source_key=str(child_url_local),
-                                                        )
+                                                        with worker_db.transaction():
+                                                            saved_metadata, saved_body = read_persisted_email_content(
+                                                                worker_db, int(child_id_local), tenant_id=resolved_email_tenant_id,
+                                                            )
+                                                            child_email_graph_local = worker_db.upsert_email_message_graph(
+                                                                media_id=int(child_id_local),
+                                                                metadata=saved_metadata,
+                                                                body_text=saved_body,
+                                                                tenant_id=resolved_email_tenant_id,
+                                                                provider="upload",
+                                                                source_key=str(child_url_local),
+                                                            )
                                                         _emit_email_native_persist_metric(
                                                             path_kind="archive_child",
                                                             outcome=(

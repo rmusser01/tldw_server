@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from contextlib import nullcontext
 from types import SimpleNamespace
 from typing import Any
 
@@ -11,7 +12,6 @@ import tldw_Server_API.app.core.Metrics.metrics_manager as metrics_manager
 from tldw_Server_API.app.core.Ingestion_Media_Processing import (
     persistence as ingestion_persistence,
 )
-
 
 pytestmark = pytest.mark.unit
 
@@ -33,7 +33,7 @@ class _MetricsCapture:
 
 
 class _RepoBackedWorkerDB:
-    instances: list["_RepoBackedWorkerDB"] = []
+    instances: list[_RepoBackedWorkerDB] = []
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         self.backend = "sqlite"
@@ -43,6 +43,10 @@ class _RepoBackedWorkerDB:
 
     def close_connection(self) -> None:
         self.closed = True
+
+    def transaction(self) -> nullcontext[None]:
+        """Provide the transaction context required by these routing-only tests."""
+        return nullcontext()
 
     def upsert_email_message_graph(self, **kwargs: Any) -> dict[str, Any]:
         self.upsert_calls.append(kwargs)
