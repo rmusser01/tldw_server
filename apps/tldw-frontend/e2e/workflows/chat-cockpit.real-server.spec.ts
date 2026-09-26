@@ -12,6 +12,7 @@ import {
   type APIResponse,
   type Locator,
   type Page,
+  type Request,
   type Response,
 } from '@playwright/test';
 import { captureAllApiCalls, type CapturedApiCall } from '../utils/api-assertions';
@@ -1062,21 +1063,22 @@ const assertHealthResponse = (health: { status: number; body: any }) => {
   expect(['ok', 'healthy', 'degraded']).toContain(health.body?.status);
 };
 
-const waitForChatCompletionAttempt = (page: Page, timeout = 15_000) => {
+const isChatCompletionRequest = (page: Page, request: Request) => {
   const backendOrigin = new URL(serverUrl).origin;
   const pageOrigin = new URL(page.url()).origin;
+  const url = new URL(request.url());
+  if (url.origin !== backendOrigin && url.origin !== pageOrigin) return false;
+  return (
+    (url.pathname === '/api/v1/chat/completions' ||
+      /^\/api\/v1\/chats\/[^/]+\/complete-v2$/.test(url.pathname) ||
+      /^\/api\/v1\/chats\/[^/]+\/completions$/.test(url.pathname)) &&
+    request.method() === 'POST'
+  );
+};
 
+const waitForChatCompletionAttempt = (page: Page, timeout = 15_000) => {
   return page.waitForResponse(
-    (response) => {
-      const url = new URL(response.url());
-      if (url.origin !== backendOrigin && url.origin !== pageOrigin) return false;
-      return (
-        (url.pathname === '/api/v1/chat/completions' ||
-          /^\/api\/v1\/chats\/[^/]+\/complete-v2$/.test(url.pathname) ||
-          /^\/api\/v1\/chats\/[^/]+\/completions$/.test(url.pathname)) &&
-        response.request().method() === 'POST'
-      );
-    },
+    (response) => isChatCompletionRequest(page, response.request()),
     { timeout }
   );
 };
@@ -1162,8 +1164,9 @@ const assertChatCompletionRenderedOrRecoverable = async (
   });
 };
 
-const assertProviderQualifiedPayload = async (page: Page, response: Response) => {
-  const payload = response.request().postDataJSON() as any;
+const assertProviderQualifiedPayload = async (page: Page, responseOrRequest: Response | Request) => {
+  const request = 'request' in responseOrRequest ? responseOrRequest.request() : responseOrRequest;
+  const payload = request.postDataJSON() as any;
   expect(payload).toBeTruthy();
   expect(typeof payload.model).toBe('string');
   expect(payload.model.trim().length).toBeGreaterThan(0);
@@ -3044,12 +3047,15 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(regenerateControl).toBeDisabled();
 
     const prompt = `Cockpit streaming controls proof ${Date.now()}: reply with a concise numbered list.`;
-    const completionAttempt = waitForChatCompletionAttempt(page, 90_000).catch(() => null);
+    const completionAttempt = page.waitForRequest(
+      (request) => isChatCompletionRequest(page, request),
+      { timeout: 90_000 }
+    );
 
     await page.getByTestId('chat-input').fill(prompt);
     await page.getByRole('button', { name: /send message/i }).click();
-    const completionResponse = await completionAttempt;
-    expect(completionResponse).toBeTruthy();
+    const completionRequest = await completionAttempt;
+    await assertProviderQualifiedPayload(page, completionRequest);
 
     const runtimeStop = runtimeInspector.getByRole('button', { name: 'Stop generation' });
     const messageStop = page.getByRole('button', { name: /Stop streaming response/i }).first();
@@ -3069,7 +3075,7 @@ test.describe('/chat cockpit real-server parity', () => {
       if (expectStreamingControlEvidence) {
         throw new Error(note);
       }
-      await assertChatCompletionRenderedOrRecoverable(page, completionResponse);
+      await assertChatCompletionRenderedOrRecoverable(page);
     } else {
       const clickedStopControl =
         (await clickFirstAvailableControl([stopControl, ...stopCandidates])) ?? null;
@@ -3085,10 +3091,27 @@ test.describe('/chat cockpit real-server parity', () => {
       await expect(runtimeStop).toBeDisabled({ timeout: 30_000 });
     }
 
-    if (completionResponse) {
-      await assertProviderQualifiedPayload(page, completionResponse);
+    await expect(runtimeStop).toBeDisabled({ timeout: 30_000 });
+    await expect(messageStop).toBeHidden({ timeout: 30_000 });
+    const assistantMessages = page
+      .getByRole('log', { name: /chat messages/i })
+      .locator("article[aria-label*='Assistant message']");
+    if ((await assistantMessages.count()) === 0) {
+      // Stopping before the first token correctly removes the empty assistant
+      // stub. Complete another turn so the history gate has a response to gate.
+      await expect(regenerateControl).toBeDisabled();
+      await expect(
+        runtimeInspector.getByText('Regenerate becomes available after an assistant response.')
+      ).toBeVisible();
+      const followUpCompletion = waitForChatCompletionAttempt(page, 90_000);
+      await page.getByTestId('chat-input').fill('Reply with one short sentence to verify the saved-history regeneration gate.');
+      await page.getByRole('button', { name: /send message/i }).click();
+      const followUpResponse = await followUpCompletion;
+      expect(followUpResponse.status()).toBeLessThan(400);
+      await assertProviderQualifiedPayload(page, followUpResponse);
+      await waitForStreamComplete(page, 60_000);
     }
-
+    await expect(assistantMessages.last()).toBeVisible();
     await expect(regenerateControl).toBeDisabled({ timeout: 30_000 });
     await expect(runtimeInspector.getByText('Regeneration is unavailable for selected history.')).toBeVisible();
     await page.screenshot({

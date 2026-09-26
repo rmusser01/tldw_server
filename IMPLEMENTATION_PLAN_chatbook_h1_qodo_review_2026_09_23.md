@@ -77,3 +77,28 @@ The owner identity now excludes that unavailable variant, allowing its review
 state to reset. The same full typecheck passed with CI's 8 GB Node heap;
 14 focused review tests and `git diff --check` pass. The required remote gate
 must rerun on the repaired head.
+
+On 2026-09-26 the UX smoke artifact showed an early abort before the first
+assistant token: only the user message remained, and regeneration correctly
+reported that an assistant response is required. The test's unconditional
+selected-history explanation was therefore timing-dependent. Keep the product
+behavior and strict no-flaky gate. The test now verifies early-stop cleanup,
+completes a real follow-up when needed, and always requires a visible assistant
+message before asserting the selected-history regeneration boundary.
+Local strict Stop verification also showed that awaiting response delivery can
+let the request finish before Stop is clicked. After comparing existing
+request-dispatch waits in the real-backend suites, this gate now waits for
+the outbound request and validates its payload even when aborted before headers.
+Three runs against the fresh production build pass with Stop evidence required,
+retries disabled, and zero skips or flaky outcomes.
+
+The 2026-09-26 rebase onto server dev `f5fa1f3a41` preserves all production and
+test patches. Dev's Sync upload-expiry ADR now owns number 048, so this PR's
+history ADR is renumbered to 049 with its accepted body unchanged. Both indexes
+retain the upstream decision and the published mirror matches. The 21 new
+Sync expiry tests, 14 history-review tests and updated 4800-file shard guard
+pass. Fresh remote checks must qualify the rebased head.
+
+2026-09-27: all seven required gates passed on H1 b789d5567d. Server dev advanced through MCP filesystem/build/license repairs and the license-audit checkout-depth fix to a6e51f60d5. Rebased cleanly; all 13 H1 patches are identical by range-diff. Fresh verification: 14 history-review Vitest cases pass; shard coverage passes with 811 shards, 4800 files and no new uncovered files; diff check passes. No H1 production or test source changed, so prior scoped security and real-server/browser qualification remain applicable. Fresh required CI must qualify the new latest-dev head before merge.
+
+2026-09-27 08:04 integration: all seven required gates passed on dd03c1cc13. Server dev advanced to 8b25dc729c with license-first workflow ordering and negative license verdict propagation. H1 rebased cleanly; all 13 prior patches are identical by range-diff. Fresh history-review tests passed 14 cases and shard coverage passed with 811 shards, 4800 files and zero new uncovered files. Diff check passes. Only inherited CI changed; prior source/security/browser qualification remains applicable. Fresh required CI must qualify the latest-dev head before merge.
