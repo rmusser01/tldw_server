@@ -4,7 +4,7 @@ title: Plan and implement paired Docker distribution and runtime gateway
 status: In Progress
 assignee: []
 created_date: '2026-09-23 06:15'
-updated_date: '2026-09-26 11:24'
+updated_date: '2026-09-26 12:18'
 labels:
   - distribution
   - docker
@@ -131,6 +131,8 @@ Exact69e60575c8bf1c7db9139c8fb7e8bb0e245fd8d3 retry1 builtall4/builtMCPSetup/all
 Task21 probe correction a7e246c38c changes only two MJS files: normal required privacy heading/checkbox action, async cookie-CSRF setup saves in fixture, refusal gates stay sticky. Expected red disabled Continue; focused6/6 and full maintained file58/58 pass, scoped ESLint/diff clean. Bandit inapplicable MJS-only. Independent scoped review pending; exact compiled local/native13lifecycle38browser signatures still mandatory, Windowsruntime/G12/publication remainopen.
 
 Task21 independent Sol-high review approves spec compliance and quality; no Critical/Important/Minor findings. Sourcea7e246c38c scoped two-file correction; parent will freeze clean tracking HEAD and run full exact arm64 candidate, then same tested revision native CI. Reviewer cannot verify cross-task actual contracts; parent retains13lifecycle/38browser/signature/8files/ownedcleanup and stale-token checks. No publication or Windowsruntime claim.
+
+Exact13d9native run36239373229 completedfailure BOTH linuxamd64/arm64: all4roles built/MCPSetup/all13signedlifecycle/25browserchecks pass thenonlyhostile_inputs_1false; cleanuptrue/allgatesfalse/manisiginvalidated. BothwizardAPI/privacyprogress pass, provingTask21actualfix. Localordinary13d9 andretryquiet afterresolved256 interruptedonlyverifiedownbuild after972s/924s, cleanup/no sig; boundedproc diagnostic timedout302s, identityprobe completed90s, sameasBun/unclassifiedscripts/norootcause/no versionfix. Nativebothbuildspass. Actualcached69runtime productunchanged13 diagnosis isolates fifth hostileOrigin+validcookieMCPupgrade ECONNRESET/noHTTP duegateway socket.destroy; firstfourcasespass, exactDELETE200/capturedstaleCookie401/allowncleanup. Plan narrowTask22 constant bounded403 forbiddenupgrade response +realgateway regression, preservestrictprobe/guards/source/dep policies. Missingunused69control image limitsdiagnostic signed-helper claims; noqualifiedcandidate yet.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

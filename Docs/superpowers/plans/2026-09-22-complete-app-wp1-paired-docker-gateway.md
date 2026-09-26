@@ -785,3 +785,56 @@ its own actual revocation contract.
 - [ ] Report scoped tests/limits; controller reviews and resumes Task13 acceptance.
 
 Task21 `a7e246c38c` scoped review approves spec/quality with no findings. Expected red reproduces disabled Continue; focused6/6 and complete maintained browser-probe file58/58 pass, scoped ESLint/diff clean. Only two MJS files changed; Bandit inapplicable. Stage3 exact compiled local/native proof remains pending.
+
+### Task 22: Return a bounded HTTP refusal for unauthorized WebSocket upgrades
+
+**Authority:** Exact13d9 native amd64/arm64 both pass all13 signed lifecycle checks
+and normal setup on both instances, then fail only hostile_inputs_1. One actual
+cached69 runtime reproduction (unchanged product source against13d9) isolates the
+fifth request: hostile Origin with a valid cookie produces ECONNRESET/no HTTP
+because gateway upgrade authorization calls socket.destroy(). First four hostile
+cases pass. This is refusal transport inconsistency, not observed auth acceptance.
+
+**Files:** `apps/tldw-frontend/gateway/server.mjs` and
+`apps/tldw-frontend/gateway/__tests__/server.test.mjs` only. Preserve Host/Origin
+allowlists, authentication/private-hop normalization, ready-phase and invalid-path
+behavior, HTTP routes, successful upgrades and strict maintained probe. No backend,
+UI, cookie/CSRF, dependency/image, helper, schema or tracker changes. This is a
+bounded repair inside the already approved gateway refusal design and ongoing
+user authorization to complete WP1.
+
+#### Stage 1: Reproduce real refusal transport
+**Goal:** Test the actual gateway rather than a synthetic403 fixture.
+**Success Criteria:** Native HTTP upgrade with hostile Origin plus a cookie, and
+hostile Host, receive403 with no101, Set-Cookie, auth/hop headers or reflected input;
+neither backend nor Next receives the upgrade. Same legitimate cookie/origin upgrade
+continues to proxy. Baseline reset must fail the new behavioral regression.
+**Tests:** Focused real-socket expected red, no broad test or policy bypass.
+**Status:** Not Started
+- [ ] Add real-gateway forbidden-upgrade regression and witness red.
+
+#### Stage 2: Provide a bounded protocol refusal
+**Goal:** Preserve rejection while supplying a deterministic HTTP response.
+**Success Criteria:** Split authorization failure from existing other upgrade
+refusals. Send only a small constant HTTP403 handshake response then end the socket;
+use an absolute1000ms destruction backstop for a non-cooperative peer, cleared on
+close and unreferenced so it cannot retain process shutdown. Never proxy or reflect
+request material. Existing invalid-path, not-ready and managed-route behavior stays
+unchanged. Do not broaden helpers or weaken hostile-request failure checks.
+**Tests:** Focused green, complete gateway real-socket test file once and route tests,
+non-cooperative socket/cleanup behavior, scoped ESLint/diff. Bandit inapplicable to
+MJS-only edits; disclose any baseline warnings precisely rather than suppressing them.
+**Status:** Not Started
+- [ ] Make minimal gateway correction, self-review and scoped TASK-13343 commit.
+
+#### Stage 3: Independent review and exact proof
+**Goal:** Resolve the newly reproduced actual-candidate gate before acceptance.
+**Success Criteria:** Scoped independent spec/quality review approves; parent rebuilds
+fresh exact local and native Linux candidates requiring all13lifecycle/all38browser
+checks, independent signature/eight-file verification and owned cleanup. Windows
+runtime remains unqualified, G12 false, frontend publication frozen. No second broad
+whole-branch review or release/push of protected images.
+**Tests:** Parent-owned exact candidate/checklist/signature verification. Previous
+failed candidates and diagnostic images cannot supply successful qualification.
+**Status:** Not Started
+- [ ] Report tests/limits; controller reviews and resumes Task13 acceptance.

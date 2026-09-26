@@ -6,14 +6,14 @@ catalog entry, PR or merge is approved by this record.
 
 ## Current evidence (2026-09-26)
 
-The final code review fix wave and Tasks19/20/21 pass scoped spec/quality review. Exact clean candidate `69e60575c8bf1c7db9139c8fb7e8bb0e245fd8d3` retry1 built all four arm64 images, passed built-backend MCP/setup and all13 signed lifecycle checks. Browser setup API access passes, confirming the CSRF correction, but wizard progression fails because the probe skips the required privacy acknowledgement checkbox. Unchanged compiled diagnosis proves normal acknowledgement and Continue reach provider setup with successful setup writes and clean strict trackers. Task21 correction `a7e246c38c` now follows the normal required acknowledgement; its realistic async cookie/CSRF fixture passes58 tests and scoped review has no findings. Cleanup passed; signatures are invalidated and all candidate gates remain false. Full local/native artifact qualification is pending; historical runs do not qualify this source.
+The final code review fix wave and Tasks19/20/21 pass scoped spec/quality review. Exact clean candidate `13d9a0d29cffffc282647ac9b72585af1c15eb8a` native CI [36239373229](https://github.com/rmusser01/tldw_server/actions/runs/36239373229) built all four images on both Linux architectures, passed built-backend MCP/setup and all13 signed lifecycle checks. Both candidates pass25 browser checks including normal wizard/privacy progression on both instances, then fail only hostile_inputs_1. Actual same-product cached diagnosis isolates a foreign-Origin cookie WebSocket upgrade reset instead of the required HTTP refusal; Task22 is planned. Owned cleanup passed; signatures are invalidated and all candidate gates remain false. Local dependency installation stalled twice; bounded diagnostics establish intermittent waiting but no cause/fix, and native builds completed. Full corrected local/native qualification remains pending.
 
 | Contract | Current evidence | Status |
 | --- | --- | --- |
-| Sections5/10: Docker-only startup, stable identity, gateway readiness and private ports | Reviewed fixes and scoped Docker fixtures cover signed identities, gateway cookie auth/revoke, first-port conflict/retry, authoritative persisted inputs and owned cleanup. | Exact69e605 retry1 signed lifecycle13 passes; browser progression still fails. Windows runtime unqualified. |
-| Section11 / G10: required signed artifacts | Both consumers now require all eight signed paths for the selected platform; omitted/missing/wrong-platform/tampered cases pass. | Exact final manifest/signature/helper bytes pending independent verification. |
-| G2: credential-free managed connection and initial wizard | Implementation/probe tests exist; authenticated installer readiness is now required before browser success. | Exact69e605 setup API access passes; probe omits privacy acknowledgement. Task21 correction reviewed; fresh exact artifact evidence pending. |
-| G4: two-instance networking/auth | Full browser checklist remains strict and uses the same managed WebUI artifact against two private target configurations. | Pending exact local and native amd64/arm64 evidence. |
+| Sections5/10: Docker-only startup, stable identity, gateway readiness and private ports | Reviewed fixes and scoped Docker fixtures cover signed identities, gateway cookie auth/revoke, first-port conflict/retry, authoritative persisted inputs and owned cleanup. | Exact13d9 both native signed lifecycle13 passes; hostile upgrade check fails. Windows runtime unqualified. |
+| Section11 / G10: required signed artifacts | Both consumers now require all eight signed paths for the selected platform; omitted/missing/wrong-platform/tampered cases pass. | Failed13d9 signatures invalidated; corrected exact signed bytes pending. |
+| G2: credential-free managed connection and initial wizard | Implementation/probe tests exist; authenticated installer readiness is now required before browser success. | Exact13d9 both native managed setup/privacy progression passes; full browser gate remains failed. |
+| G4: two-instance networking/auth | Full browser checklist remains strict and uses the same managed WebUI artifact against two private target configurations. | Exact13d9 both native stops at hostile_inputs_1; corrected full evidence pending. |
 | G12: release policy | Python3.12 and Node24 upstream eligibility rechecked September26; exact patches will be recorded from built images. | False/open: full matrix, Windows runtime, dependency/security/footprints and protected publication remain separate. |
 
 PowerShell helpers are provisional. Windows parsing does not prove real Docker startup, ACL/private-state handling, port recovery, readiness, or stop/status. Docker image Size metadata does not measure download or installed footprint. The 93 untouched whole-frontend typecheck diagnostics remain a disclosed failing baseline.
@@ -78,6 +78,25 @@ cleared browser cookies, so it is anonymous refusal, not explicit stale-token
 replay. All owned containers/network/backend volumes were removed and unrelated
 PostgreSQL preserved. Parent lifecycle/browser revocation evidence remains required.
 
+Exact13d9 local builds were interrupted only at verified owned quiet-install
+bounds (972s and924s), and cleanup removed the registry without recovery markers
+or signatures. One proc-counter diagnostic timed out302s with idle Bun and a
+persistent process named node; a separately scoped identity diagnostic completed
+90s and established those successful-run children were Bun, with scripts still
+unclassified. Neither diagnoses the stalled script or a root cause. Both native
+13d9 builds complete, so no Bun version/verbosity/dependency fix is claimed.
+Diagnostic images were absent/removed by verified ownership; no pruning occurred.
+
+Both native13d9 candidates pass all13 lifecycle and25 browser checks, then fail
+hostile_inputs_1; the full38-check matrix is not completed. One cached69 runtime
+stack proves the fifth subrequest resets in1ms, while the first four return
+200/403/403/403 without reflection. Product runtime code is unchanged69..13;
+the missing unused cached69 control image required local initializer source for
+diagnostic state, so this is not Docker-only/signed-helper qualification.
+DELETE200 and explicit captured stale-cookie replay401 pass, all owned volumes/
+network/containers removed, unrelated PostgreSQL identities/states preserved.
+Task22 will correct the actual gateway refusal response, retaining strict probe.
+
 ## Rulings I made
 
 - Ruling: Correct the design route table to put `/setup` in Next and backend docs assets in FastAPI — this records the user-approved routing correction already committed/tested at 9755c7eaaf/e759322854, rather than reverting to the legacy backend page. Cost if wrong: route ownership and novice setup need rework; API setup paths remain available.
@@ -100,6 +119,13 @@ PostgreSQL preserved. Parent lifecycle/browser revocation evidence remains requi
 
 - Ruling: Bound recovery from the unusually quiet dependency install by stopping only the verified owned build after more than30 minutes and retrying the unchanged exact candidate once, after current-source verbose dependency proof85seconds — this preserves the production lockfile/Bun/Dockerfile and avoids claiming an unproven workaround fixes the installer. Cost if wrong: a legitimate long install is interrupted and exact artifact qualification must be repeated; never substitute diagnostic image layers, prune unknown resources or weaken acceptance.
 - Ruling: Make the browser probe follow the product's normal required privacy acknowledgement before Continue and model that gate plus real setup writes in its fixture — unchanged compiled UI proves the existing product correctly disables Continue until acknowledgement, then reaches provider setup with200 writes. Cost if wrong: probe flow/scope and fixture semantics must be reworked and exact local/native evidence repeated; no forced click, user acknowledgement bypass, product guard change or success-latch relaxation is authorized.
+
+- Ruling: Run the already-authorized own-branch native CI on the same exact reviewed/tested source13d9a0d29c alongside the recurring quiet local dependency install, rather than waiting serially for unproven local recovery — unchanged Dockerfile/lock/manifests plus prior ordinary86.5s success leave environment/timing unresolved; independent native builds add evidence without relaxing local or candidate acceptance. Cost if wrong: CI compute is spent on a source that may need correction and exact native qualification must repeat; no candidate acceptance, publication, PR or merge is authorized by the push.
+- Ruling: Bound the recurring current-source quiet install after fifteen minutes of unchanged resolved256/no completion, interrupt only verified own Buildx process, then take one300s instrumented dependency-only diagnostic before considering one unchanged retry — prior quiet>30min versus successful86.5s and unchanged inputs make another serial30min wait uninformative, while own-RUN CPU/I/O/wait categories can distinguish activity from waiting. Cost if wrong: a legitimate slow install is interrupted and local qualification repeated; diagnostic images cannot substitute for product artifacts, no version/dependency/verbosity fix or pruning is authorized.
+- Ruling: Stop the repeated ordinary-install path at the current retry bound and, if it remains quiet, measure all-thread executable identity plus strict known-workspace script identity once — exact Bun image node is a symlink to Bun, so processcomm cannot establish nativeNode or the cause; prior probe omitted thread children and deleted raw lifecycle evidence. Cost if wrong: five minutes of isolated diagnostic compute yields insufficient identity and requires a separately scoped investigation; no fourth blind retry, source/dependency/runtime change or diagnostic image acceptance follows from this ruling.
+- Ruling: Diagnose the hostile-input runtime failure using verified cached69 backend/WebUI/gateway and unchanged control source to initialize fresh private diagnostic state when the unused cached69 control image is missing — native13 already independently passed all signed-control/lifecycle checks, and69..13 product runtime source is unchanged. Cost if wrong: the runtime reproduction must be repeated with exact current artifacts; local Python initialization supplies no Docker-only/signed-helper qualification, and no mixed runtime image/source acceptance or image pull/build is authorized.
+
+- Ruling: Return a small bounded constant HTTP403 for gateway Host/Origin-denied upgrades, preserving exact authorization and strict probe, rather than accepting arbitrary connection errors as a security pass — actual foreign-Origin rejection resets while ordinary refusal and synthetic fixture express403. Cost if wrong: upgrade refusal framing/cleanup must be reworked and exact local/native security checks repeated; no auth/private-hop/Origin relaxation or reflected credential material is authorized.
 
 ## Historical evidence through September25 and superseded follow-ups
 

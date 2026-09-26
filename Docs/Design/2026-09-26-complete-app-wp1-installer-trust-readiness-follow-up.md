@@ -96,3 +96,16 @@ CSRF/hop/remote policy and strict qualification refusal latches. Actual unchange
 cached proof of missing-token403 and same-body expected-token200 establishes the
 cause; scoped tests/review and fresh exact artifact qualification establish the
 fix. This does not claim full provider setup or authorize publication.
+
+
+## Actual forbidden-upgrade response correction (Task22)
+
+Both exact13d9 native architectures pass signed lifecycle and normal wizard,
+then fail the hostile-Origin cookie WebSocket refusal because gateway socket
+reset supplies no HTTP status. Keep exact authorization and strict probe unchanged.
+Send a small constant403 handshake refusal without cookie, reflected input or
+proxy dispatch for unauthorized upgrades, then end the socket with an absolute
+1000ms destruction backstop cleared on close/unreferenced. Other invalid-path,
+phase and managed-route refusals retain existing behavior. Real-gateway negative
+and successful-upgrade regressions plus exact local/native artifacts are required.
+This does not imply an accepted hostile connection or authorize publication.
