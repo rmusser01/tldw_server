@@ -924,18 +924,23 @@ def build_chacha_rls_sql() -> list[str]:
     stmts.extend(build_source_review_rls_sql())
     stmts.extend(build_workspace_source_saved_view_rls_sql())
     stmts.extend(build_shared_workspace_chat_rls_sql())
-    from ..chacha.native_fork_schema import NATIVE_CHAT_TABLES
-
-    for table in NATIVE_CHAT_TABLES:
+    # Keep the table-specific DDL visible to the static RLS coverage gate.
+    for table, enable_sql, force_sql, policy_sql in (
+        ("native_chat_operations", "ALTER TABLE native_chat_operations ENABLE ROW LEVEL SECURITY", "ALTER TABLE native_chat_operations FORCE ROW LEVEL SECURITY", "CREATE POLICY native_chat_operations_owner ON native_chat_operations"),
+        ("native_chat_quota_intents", "ALTER TABLE native_chat_quota_intents ENABLE ROW LEVEL SECURITY", "ALTER TABLE native_chat_quota_intents FORCE ROW LEVEL SECURITY", "CREATE POLICY native_chat_quota_intents_owner ON native_chat_quota_intents"),
+        ("native_chat_asset_candidates", "ALTER TABLE native_chat_asset_candidates ENABLE ROW LEVEL SECURITY", "ALTER TABLE native_chat_asset_candidates FORCE ROW LEVEL SECURITY", "CREATE POLICY native_chat_asset_candidates_owner ON native_chat_asset_candidates"),
+        ("native_chat_asset_claims", "ALTER TABLE native_chat_asset_claims ENABLE ROW LEVEL SECURITY", "ALTER TABLE native_chat_asset_claims FORCE ROW LEVEL SECURITY", "CREATE POLICY native_chat_asset_claims_owner ON native_chat_asset_claims"),
+        ("native_chat_asset_references", "ALTER TABLE native_chat_asset_references ENABLE ROW LEVEL SECURITY", "ALTER TABLE native_chat_asset_references FORCE ROW LEVEL SECURITY", "CREATE POLICY native_chat_asset_references_owner ON native_chat_asset_references"),
+    ):
         add(f"""
             DO $native_chat_rls$
             BEGIN
               IF to_regclass('{table}') IS NULL THEN RETURN; END IF;
-              EXECUTE 'ALTER TABLE {table} ENABLE ROW LEVEL SECURITY';
-              EXECUTE 'ALTER TABLE {table} FORCE ROW LEVEL SECURITY';
+              EXECUTE '{enable_sql}';
+              EXECUTE '{force_sql}';
               EXECUTE 'DROP POLICY IF EXISTS {table}_owner ON {table}';
               EXECUTE $policy$
-                CREATE POLICY {table}_owner ON {table}
+                {policy_sql}
                 USING (client_id = current_setting('app.current_user_id', true))
                 WITH CHECK (client_id = current_setting('app.current_user_id', true))
               $policy$;

@@ -219,6 +219,19 @@ jobs:
           pip install mypy
           mypy --follow-imports=silent --ignore-missing-imports "${CHANGED_PY[@]}"
 
+      - name: Enforce tenant isolation ratchets
+        if: needs.changes.outputs.backend_changed == 'true'
+        env:
+          PYTHONPATH: .
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+          TEST_MODE: "true"
+          DISABLE_HEAVY_STARTUP: "1"
+        run: |
+          pytest -q --disable-warnings -p pytest_asyncio.plugin \
+            tldw_Server_API/tests/CI/test_rls_coverage_ratchet.py \
+            tldw_Server_API/tests/lint/test_route_auth_ratchet.py \
+            tldw_Server_API/tests/lint/test_scope_predicate_ratchet.py
+
       - name: Backend unit smoke
         if: needs.changes.outputs.backend_changed == 'true'
         env:

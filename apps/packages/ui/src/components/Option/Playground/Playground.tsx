@@ -1764,6 +1764,7 @@ const PlaygroundContent = () => {
   ]);
 
   const initializePlayground = React.useCallback(async () => {
+    if (historySelection.canAutomaticallyLoad?.() === false) return;
     let handoff;
     let handoffInHash = false;
     let storedHistoryReference;

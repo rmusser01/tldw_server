@@ -1,5 +1,12 @@
 # Post-publication Qodo follow-up
 
+**Complete:** PR2978 merged into dev at `2922bd50322149598ef74f7f5b2e8f1dbcda5dc4` on
+2026-09-22T03:27:38Z after explicit requester approval and a PR-specific
+human-summary waiver. Final head passed 53 checks; 28 intentionally skipped;
+none failed, pending or canceled. All 32 inventoried review threads are resolved.
+The merged tree exactly matches approved head b9f15b489c0104e67dddddc727f83460d868444d.
+Earlier pending checkpoints below are historical. Published releases are unchanged.
+
 Tracking: TASK-13263.3. Scope: four PR2974 findings, six PR2972 findings found
 in the final publication review inventory, and thirteen findings on follow-up
 PR2978 plus nine final sync PR2971 comments. PR2972's six comments were posted at
@@ -31,7 +38,7 @@ TypeScript, scoped lint and Bandit against baseline.
 limits and inline Qodo replies linked to the fix or evidence. Publication and
 follow-up merge are separate from preparing these changes.
 **Tests:** Combined impacted tests, clean diff, unchanged published source record.
-**Status:** In Progress
+**Status:** Complete
 
 ## Verification checkpoint
 

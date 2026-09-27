@@ -425,7 +425,8 @@ export function useHistorySelection(
         }
         return installed
       } catch (error) {
-        if (operation.epoch !== epoch.current) return false
+        if (operation.epoch !== epoch.current ||
+          (owner.kind === "native" && !owner.validate_lease())) return false
         publish({
           ...live.current,
           status:
@@ -644,6 +645,12 @@ export function useHistorySelection(
     },
     [invalidate, publish]
   )
+  const canAutomaticallyLoad = useCallback(() => {
+    const current = live.current
+    return current.owner?.kind !== "native" || (
+      current.error !== "request_config_scope_changed" && current.owner.validate_lease()
+    )
+  }, [])
   const loadConversation = useCallback(
     async (
       target: {
@@ -652,10 +659,13 @@ export function useHistorySelection(
         temporary?: boolean
         scope?: import("@/types/chat-scope").ChatScope
         bindUnbound?: boolean
+        isCurrent?: () => boolean
       },
       reference?: HistorySelectionReference | null,
       onLoaded?: (receipt: HistoryLoadReceipt) => void
     ) => {
+      const isCurrent = () => target.isCurrent?.() !== false
+      if (!isCurrent()) return false
       let openedReceipt: HistoryLoadReceipt | undefined
       let openedEpoch: number | undefined
       const opened = (receipt: HistoryLoadReceipt) => {
@@ -665,6 +675,7 @@ export function useHistorySelection(
       const completed = (result: boolean) => {
         if (
           result &&
+          isCurrent() &&
           openedReceipt &&
           openedEpoch === epoch.current &&
           live.current.owner === openedReceipt.owner &&
@@ -692,13 +703,13 @@ export function useHistorySelection(
         const details = target.historyId
           ? await new PageAssistDatabase().getHistoryInfo(target.historyId)
           : null
-        if (operation.epoch !== epoch.current) return false
+        if (operation.epoch !== epoch.current || !isCurrent()) return false
         const chatId = target.serverChatId || details?.server_chat_id
         if (!chatId) {
           const { getLocalHistoryOwner } =
             await import("@/db/dexie/history-selection")
           const owner = await getLocalHistoryOwner(target.historyId!)
-          if (operation.epoch !== epoch.current) return false
+          if (operation.epoch !== epoch.current || !isCurrent()) return false
           return completed(await open(owner, reference, opened))
         }
         if (
@@ -711,13 +722,13 @@ export function useHistorySelection(
           resolveServicePromptScope,
           subscribeToServicePromptConfigChanges
         } = await import("@/services/service-prompts")
-        if (operation.epoch !== epoch.current) return false
+        if (operation.epoch !== epoch.current || !isCurrent()) return false
         let valid = true
         let capturedOwner: HistoryOwnerV1 | null = null
         const unsubscribe = subscribeToServicePromptConfigChanges(() => {
           valid = false
           if (
-            operation.epoch !== epoch.current &&
+            (operation.epoch !== epoch.current || !isCurrent()) &&
             live.current.owner !== capturedOwner
           )
             return
@@ -738,10 +749,10 @@ export function useHistorySelection(
         const requestScope = await resolveServicePromptScope({
           signal: operation.signal
         })
-        if (!valid || operation.epoch !== epoch.current) return false
+        if (!valid || operation.epoch !== epoch.current || !isCurrent()) return false
         const { serverChatMirrorOwnerKey, linkServerChatMirror } =
           await import("@/db/dexie/server-chat-mirror")
-        if (!valid || operation.epoch !== epoch.current) return false
+        if (!valid || operation.epoch !== epoch.current || !isCurrent()) return false
         const mirrorKey = serverChatMirrorOwnerKey({ requestScope })
         if (
           details?.server_scope_key &&
@@ -754,7 +765,7 @@ export function useHistorySelection(
           conversation_id: String(chatId),
           request_scope: requestScope,
           scope: target.scope,
-          validate_lease: () => valid
+          validate_lease: () => valid && isCurrent()
         }
         capturedOwner = owner
         const result = await open(owner, reference, opened)
@@ -762,6 +773,7 @@ export function useHistorySelection(
         if (
           target.bindUnbound &&
           result &&
+          isCurrent() &&
           live.current.capture &&
           details &&
           valid
@@ -777,7 +789,7 @@ export function useHistorySelection(
               signal: request.current?.signal
             })
           } catch (error) {
-            if (bindingEpoch !== epoch.current) return false
+            if (bindingEpoch !== epoch.current || !isCurrent()) return false
             publish({
               ...live.current,
               status: "error",
@@ -788,7 +800,7 @@ export function useHistorySelection(
         }
         return completed(result)
       } catch (error) {
-        if (operation.epoch !== epoch.current) return false
+        if (operation.epoch !== epoch.current || !isCurrent()) return false
         return open({ kind: "unavailable", code: errorCode(error) })
       }
     },
@@ -1176,6 +1188,7 @@ export function useHistorySelection(
     reset,
     fence,
     beginLoad: invalidate,
+    canAutomaticallyLoad,
     getSignal: () => request.current?.signal,
     getCurrent: () => live.current
   }
