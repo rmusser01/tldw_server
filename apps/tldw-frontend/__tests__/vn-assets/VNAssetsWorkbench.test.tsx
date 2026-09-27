@@ -338,10 +338,10 @@ describe('VNAssetsWorkbench', () => {
     expect(mocks.startVNAssetGeneration).not.toHaveBeenCalled();
   });
 
-  it('verifies a legacy single-user principal without requiring a persisted profile row', async () => {
+  it.each([404, 410])('verifies a legacy single-user principal after profile HTTP %s', async (status) => {
     existingFailedPack();
     mocks.profile.mockImplementation(async (path) => {
-      if (path === '/users/me/profile') throw Object.assign(new Error('User not found'), { status: 404 });
+      if (path === '/users/me/profile') throw Object.assign(new Error('User not found'), { status });
       if (path === '/auth/me') return { id: 1, is_active: true };
       throw new Error('Unexpected identity endpoint');
     });
@@ -351,6 +351,20 @@ describe('VNAssetsWorkbench', () => {
     await user.click(screen.getByRole('button', { name: 'Start generation' }));
     await waitFor(() => expect(screen.getByLabelText('Generation status')).toHaveTextContent('queued'));
     expect(mocks.profile.mock.calls.map(([path]) => path)).toEqual(['/users/me/profile', '/auth/me', '/users/me/profile', '/auth/me']);
+  });
+
+  it.each([401, 403, 429, 500])('does not bypass a profile HTTP %s failure through the legacy identity endpoint', async (status) => {
+    existingFailedPack();
+    mocks.profile.mockImplementation(async (path) => {
+      if (path === '/users/me/profile') throw Object.assign(new Error('Identity verification failed'), { status });
+      if (path === '/auth/me') return { id: 1, is_active: true };
+      throw new Error('Unexpected identity endpoint');
+    });
+    await act(async () => { render(<VNAssetsWorkbench />); });
+    expect(screen.getByText('Identity verification failed')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start generation' })).toBeDisabled();
+    expect(mocks.profile.mock.calls.map(([path]) => path)).toEqual(['/users/me/profile']);
+    expect(mocks.startVNAssetGeneration).not.toHaveBeenCalled();
   });
 
   it.each([403, 409, 500])('handles an HTTP %s response without losing an ambiguous operation', async (status) => {

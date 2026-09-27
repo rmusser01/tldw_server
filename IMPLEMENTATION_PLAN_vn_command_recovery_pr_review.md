@@ -54,6 +54,18 @@ Malformed data stays intact until warned explicit discard; a missing key remains
 valid. All 101 VN/frontend fetch-client tests pass (13.11s), typecheck, scoped
 ESLint and diff checks pass. Complete new-head hosted review remains required.
 
+Qodo's complete deep review of 5953de6951 reported zero bugs and the shared-auth
+architecture finding in discussion 4116389900. The hook's profile-first policy is
+moved into shared `services/tldw/verified-principal.ts`, using the existing caller
+transport. No cached identity, new auth state, or change to `getCurrentUser()` is
+introduced. Seven identity behavior checks passed before extraction; all 116
+VN/frontend fetch-client/shared-auth checks pass after extraction (9.38s), as do
+typecheck and scoped lint. The shared-file lint command required the installed
+ESLint 9.39.2 binary with the existing frontend config and UI working directory;
+the cached bunx 10.11.0/config-base setup failures are not source findings.
+Bandit on unchanged Python VN baseline remains clear and does not scan TypeScript.
+Complete exact-new-head hosted review and all required gates remain prerequisites.
+
 ## Stage 3: Gated Merge
 
 **Goal**: Merge normally only after current-head review and live dev gates pass.
@@ -65,7 +77,7 @@ this completed plan removed. Preserve checkout and chat; stop own follow-up.
 **Tests**: Live GitHub rules/checks, merge API verification and tracked diff check.
 **Status**: In Progress
 
-Exact 804c0745c0 E2E failed before tests in unchanged AuthNZ bootstrap. Isolated
+Exact 804c0745c0 and 5953de6951 E2E failed before tests in unchanged AuthNZ bootstrap. Isolated
 30.19.0/30.20.0 SQLGlot comparison reproduces rejection of identical canonical SQL
 because standalone AUTOINCREMENT rendering changed. A separate backend-fix
 decision is pending; shared environments and dependency policy are unchanged.

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiClient, getApiBaseUrl } from '@web/lib/api';
 import { AUTH_CREDENTIALS_CHANGED_EVENT } from '@web/lib/auth-events';
+import { fetchCurrentPrincipal } from '@/services/tldw/verified-principal';
 import {
   clearVNCommands, createVNCommandScope, readVNCommands, sameVNCommandScope,
   VNRecoveryStorageError, writeVNCommands,
@@ -8,19 +9,6 @@ import {
 } from '@web/lib/vnGenerationRecovery';
 
 type Capture = { scope: VNCommandScope; epoch: number };
-type Principal = { id?: number; is_active?: boolean };
-
-async function verifyPrincipal(): Promise<Principal | undefined> {
-  try {
-    const profile = await apiClient.get<{ user?: Principal }>('/users/me/profile');
-    return profile.user;
-  } catch (error) {
-    const status = error && typeof error === 'object' ? (error as { status?: number }).status : undefined;
-    // Existing single-user deployments may have a verified principal but no profile row.
-    if (status !== 404 && status !== 410) throw error;
-    return apiClient.get<Principal>('/auth/me');
-  }
-}
 
 export function useVNGenerationRecovery(onBoundary: (resetAccount: boolean) => void) {
   const [commands, setCommands] = useState<VNPendingCommand[]>([]);
@@ -52,7 +40,7 @@ export function useVNGenerationRecovery(onBoundary: (resetAccount: boolean) => v
     let revision = epoch.current;
     const server = getApiBaseUrl();
     try {
-      const principal = await verifyPrincipal();
+      const principal = await fetchCurrentPrincipal(apiClient.get);
       if (!mounted.current || revision !== epoch.current || server !== getApiBaseUrl()) return null;
       if (!principal?.is_active) throw new Error('Current server and account could not be verified.');
       const next = createVNCommandScope(server, principal.id);
