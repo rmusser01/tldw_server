@@ -8,9 +8,9 @@ merge. Preserve the human-written Change summary verbatim and unrelated work.
 
 **Goal**: Rebase the owned PR branch onto latest dev without changing prior patches.
 **Success Criteria**: Clean tracked checkout and matching remote ownership before
-rebase; conflict-free rebase and all five patches unchanged in range-diff; explicit
+rebase; conflict-free rebase and all prior patches unchanged in range-diff; explicit
 expected-head lease on publication. Exclude local preview link and archive13379.
-**Tests**: Range-diff, unrelated base-file equality, 97 VN/fetch-client tests,
+**Tests**: Range-diff, unrelated base-file equality, 116 VN/fetch/shared-auth tests,
 frontend typecheck, scoped lint, diff checks; unchanged VN Python Bandit baseline.
 **Status**: Complete
 
@@ -19,6 +19,20 @@ Published 581979a4a87543aedd73ac0f11667c2dc253e73b onto dev
 5de2ed11671f593968a86aef24d3be0422488f75. All five prior patches unchanged;
 97 tests, typecheck, scoped lint and diff checks pass. Bandit baseline has zero
 findings/errors; it does not scan touched TypeScript.
+
+Dev advanced to `a3d52f30b0d21b8528d426d16e06c4a013414807` through the
+independently merged AuthNZ compatibility fix in PR #3030. The latest authorized
+rebase from clean owned `98be158e87903b27afa4a98c2552bc08729e176d` is conflict-free;
+all ten prior patches are unchanged in range-diff. Fresh 116 VN/fetch/shared-auth
+tests pass (8.79s), frontend typecheck and scoped lint pass. The read-only AuthNZ
+guard suite passed 123 tests (375.07s, exit 0) using isolated SQLGlot 30.20.0, including
+the actual startup DDL and fail-closed controls. Slow session cleanup was sampled
+in Python garbage collection, not a network wait. The process exited normally
+before a bounded stop attempt reached it; no process was terminated. Direct
+startup-DDL acceptance and off-id AUTOINCREMENT rejection checks also exited 0.
+The unchanged VN Python Bandit
+baseline has zero findings/errors over 9064 lines and does not scan TypeScript.
+Publication uses an explicit lease on the full original owned head.
 
 ## Stage 2: Current-Head Review
 
@@ -66,6 +80,11 @@ the cached bunx 10.11.0/config-base setup failures are not source findings.
 Bandit on unchanged Python VN baseline remains clear and does not scan TypeScript.
 Complete exact-new-head hosted review and all required gates remain prerequisites.
 
+CodeRabbit discussion 4116478050 flagged the final summary's outdated 97-test
+checkpoint. Official Backlog mutation updates it to the latest 116 passing tests
+and makes new rebased-head reviews explicitly pending. Historical test/review
+evidence is retained, including Qodo's completed 98be158e87 reassessment.
+
 ## Stage 3: Gated Merge
 
 **Goal**: Merge normally only after current-head review and live dev gates pass.
@@ -77,8 +96,11 @@ this completed plan removed. Preserve checkout and chat; stop own follow-up.
 **Tests**: Live GitHub rules/checks, merge API verification and tracked diff check.
 **Status**: In Progress
 
-Exact 804c0745c0 and 5953de6951 E2E failed before tests in unchanged AuthNZ bootstrap. Isolated
+Exact 804c0745c0, 5953de6951 and 98be158e87 E2E failed before tests in unchanged
+AuthNZ bootstrap. Isolated
 30.19.0/30.20.0 SQLGlot comparison reproduces rejection of identical canonical SQL
-because standalone AUTOINCREMENT rendering changed. A separate backend-fix
-decision is pending; shared environments and dependency policy are unchanged.
+because standalone AUTOINCREMENT rendering changed. PR #3030 independently
+integrated the backend fix into dev with all its required gates passed. The
+frontend PR is rebased onto that external integration; no separate-fix decision
+is still needed. Shared environments and dependency policy are unchanged.
 No merge attempted; all live current-head gates remain prerequisites.
