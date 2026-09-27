@@ -1,11 +1,11 @@
 ---
-id: TASK-13387
+id: TASK-13389
 title: >-
   Temporary mode cannot open saved server chats: restore read access per the H1
   ruling
 status: To Do
 assignee: []
-created_date: '2026-09-27 18:41'
+created_date: '2026-09-27 21:18'
 labels:
   - bug
   - chat
