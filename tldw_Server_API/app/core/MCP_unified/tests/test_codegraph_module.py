@@ -214,8 +214,10 @@ async def test_codegraph_index_and_files_roundtrip(tmp_path: Path) -> None:
     # in the language registry, but TypeScript's is `not typescript_missing` -- so without
     # tree_sitter_typescript installed, ui.ts is filtered out of foundation_candidates and
     # this failed with `assert 1 == 2` rather than skipping. An unrunnable environment
-    # must skip; only a real regression should fail. See TASK-13358.
-    _require_typescript_parsers()
+    # must skip; only a real regression should fail. See TASK-13358. Only the .ts parser
+    # gates this: the indexer registers TypeScript on load_parser("typescript") alone.
+    if not load_parser("typescript").available:
+        pytest.skip("tree-sitter-typescript parser is not available")
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir()
     (workspace_root / "app.py").write_text("x = 1\n", encoding="utf-8")

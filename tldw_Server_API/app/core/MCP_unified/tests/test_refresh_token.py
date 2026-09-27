@@ -8,6 +8,8 @@ from tldw_Server_API.app.api.v1.endpoints.mcp_unified_endpoint import (
 )
 from tldw_Server_API.app.core.MCP_unified.auth.jwt_manager import get_jwt_manager
 
+pytestmark = pytest.mark.unit
+
 # The demo-auth surface this endpoint sits behind requires a secret of at least 16 chars.
 _DEMO_SECRET = "demo-auth-secret-for-tests"
 
