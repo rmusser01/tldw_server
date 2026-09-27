@@ -1,5 +1,54 @@
 # PR 3016 VN Durability Review Implementation Plan
 
+## Current Review Wave: Task 35
+
+**Base head:** 40e5eef3d4485991e27a4258c74088c177313767.
+**Tracking:** TASK-13369. **Live dev:** f5fa1f3a41855aa02871d8b76d0ec0cebbaf9e07.
+Fullrequest5851345253 completed review5328286054 at00:44:35Z/terminal5851366320
+at00:44:39Z exacthead; busy5851346394 removed/fresh404. New4113556132/4113556135,
+71reviews57threads2unresolved38comments/allpages exhausted. AC5reopenedAC6pending.
+
+### Stage 1: Verify Cancellation Failure Race
+**Goal:** Sensitive real-thread rollback/closure RED with requested cancellation.
+**Success Criteria:** Cancellation wins after the failing operation drains; without
+cancellation, the native failure remains visible. Repeated cancellation remains safe.
+**Tests:** New focused module with actual file-backed thread-owned transitions.
+**Status:** Complete
+
+### Stage 2: Minimal Boundary And Formatting Correction
+**Goal:** Wait for completion without prematurely surfacing the worker failure,
+consume its result/exception, then give observed cancellation precedence.
+**Success Criteria:** No leaked worker/handle/exception warning, all existing memory/
+caller-transaction/fence semantics unchanged. Blank line only in nested worker def.
+**Tests:** Focused GREEN plus existing failure and successful cancellation controls;
+AST, scoped Bandit before/final, docs/tier/types and native/preview Ruff qualified.
+**Status:** Complete
+
+### Stage 3: Independent Review And Integration
+**Goal:** Freeze exact evidence, fresh independent scoped review and normal commit.
+**Success Criteria:** Tested individual replies/resolutions; one full new-head review,
+allseven required CI contexts/current strict base/human gate before normal merge.
+**Tests:** Narrow matching-byte final checks and applicable normal hooks; no broadrepeat.
+**Status:** In Progress
+
+Task35 implementation COMPLETELOCAL/frozen26 actualcheck0; Kierkegaard independent
+SPEC/QUALITY/final changed-contract PASS/no actionable findings/CLOSED; own10hashes
+verified. Main final3pass0failerrorsskips4warnings5.17s/XML3time3.926, separate
+overlapping verification; six-file applicable hooks Passed/no-file Skipped,
+existing deprecated-stage warnings retained. RED2wrong-errorfail1nativecontrol0errorsskips4warnings
+5.50s/XML3time4.330. InitialGREEN5setuperrors4warnings1.99s/XML5errors5time0.880
+mistyped basetemp, NOTGREEN/no source adjustment; correctedapprovedroot5pass
+4warnings7.29s/XML5time6.221. One completion-observation task drains before
+cancellation precedence/result retrieval; all other repository AST unchanged,
+entireworker AST same. Bandit0/errors[]onlyB101excluded; nativeBLE001 baseline,
+explicitpreview E306 RED1/GREENempty only. No commitpushrepliesmerge yet.
+
+Ruling: controller owns this coupled critical-path boundary fix; fresh independent
+review follows frozen inputs. Tasks1-34 closed/frozen, not redispatched. Installed
+Ruff0.15.10 native selection E306 has no effect without preview; the claimed enabled
+Ruff failure is not reproduced. Requested blank line is harmless style-only; explicit
+preview may provide a separate style probe, never a native-CI configuration claim.
+
 ## Current Review Wave: Tasks 31 To 34
 
 **Base head:** 2e4d51ab77986e208c907011458975b1798ffb44.

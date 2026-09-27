@@ -456,6 +456,7 @@ class VNAssetGenerationWorker:
             )
         if outcome["outcome_status"] == "completed":
             return _generated_variant_result(item, batch_id=batch_id)
+
         def reconcile() -> dict[str, Any]:
             """Finish synchronous reconciliation/fences using only thread-owned handles."""
             reconciled = item

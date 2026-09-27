@@ -2293,7 +2293,8 @@ class VNAssetPacksRepository:
         The callback must materialize its result and finish all cursor/transaction
         work before returning. Only dict/None crosses the boundary. Close only the
         fresh thread's repository handle, including after an exception. Cancellation
-        waits for commit/rollback/close before propagating. Private-memory databases
+        waits for commit/rollback/close and wins over a concurrent operation error.
+        Without cancellation native operation errors propagate. Private-memory databases
         and active caller transactions retain the owner-thread fallback; schema
         setup stays caller-owned. This is not universally asynchronous DB access.
         """
@@ -2310,16 +2311,18 @@ class VNAssetPacksRepository:
 
         with ThreadPoolExecutor(max_workers=1, thread_name_prefix="vn-replay") as executor:
             pending = asyncio.get_running_loop().run_in_executor(executor, copy_context().run, run_owned)
+            completion = asyncio.create_task(asyncio.wait({pending}))
             cancellation: asyncio.CancelledError | None = None
-            while not pending.done():
+            while not completion.done():
                 try:
-                    await asyncio.shield(pending)
+                    await asyncio.shield(completion)
                 except asyncio.CancelledError as exc:
                     cancellation = exc
-            result = pending.result()
             if cancellation is not None:
+                if not pending.cancelled():
+                    pending.exception()
                 raise cancellation
-            return result
+            return pending.result()
 
     def claim_variant(
         self,
