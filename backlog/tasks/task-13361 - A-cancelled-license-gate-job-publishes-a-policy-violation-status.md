@@ -4,7 +4,7 @@ title: A cancelled license-gate job publishes a policy-violation status
 status: In Progress
 assignee: []
 created_date: '2026-09-23 17:13'
-updated_date: '2026-09-27 17:32'
+updated_date: '2026-09-27 19:02'
 labels:
   - ci
   - security
@@ -60,7 +60,7 @@ status.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [x] #1 A cancelled license-gate job leaves the trusted-policy status pending, not failure
+- [ ] #1 A cancelled license-gate job leaves the trusted-policy status pending, not failure
 - [x] #2 A genuine policy violation still publishes failure
 - [x] #3 A crashed evaluation step still publishes failure
 - [ ] #4 Verified by cancelling a run deliberately and observing the resulting commit status
@@ -109,6 +109,8 @@ PR #2996 (10-minute timeout, cancelled in checkout), and on PR #3000 both the li
 load in TASK-13359 this will keep recurring.
 
 Fixed on chore/close-fixed-review-tasks (#3029): the publish step is if: "!cancelled()". A cancelled run leaves the pending status from the job's first step, which stays fail-closed. A policy violation or a crashed evaluate step is a failure, not a cancellation, so it still publishes failure (ACs 2 and 3). Pinned in test_frontend_license_gate_workflow.py. AC #4 (cancel a live run and observe the status) can only be done after merge, so the task stays In Progress until then.
+
+CORRECTION 2026-09-27: the !cancelled() fix from #3029 does NOT work, and AC #1 was checked wrongly. Verified live on PR #3031: run 36342617339 was cancelled during Checkout after the pending status posted, and the publisher still ran and posted failure. Run 36342606942, cancelled by this workflow's own cancel-in-progress, did the same. The cancelled step left cancelled() false for the following steps. Replaced on fix/license-gate-publish-on-verdict: the publisher is now gated on always() && steps.evaluate.outcome in {success, failure}, so it publishes only when a verdict exists. always() is needed so a genuine violation (evaluate failed) is not skipped by the implicit success(). A checkout failure now also leaves pending, which stays fail-closed. AC #1 and AC #4 are to be re-verified live after merge.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
