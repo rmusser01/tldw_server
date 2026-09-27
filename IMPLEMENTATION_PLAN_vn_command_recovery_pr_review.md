@@ -14,6 +14,26 @@ expected-head lease on publication. Exclude local preview link and archive13379.
 frontend typecheck, scoped lint, diff checks; unchanged VN Python Bandit baseline.
 **Status**: Complete
 
+Dev advanced to `df1fcc7a52306f400b843c8b0ea0bc90d0396056` through independently
+merged Persona PR #2817. Its 95-file integration includes shared UI, ChaChaNotes
+SQLite V73/PostgreSQL V77 migrations, Persona schemas and fingerprint, published
+VN documentation and existing CI entries. Clean tracked local and owned remote
+`f5e96c0fb10c90aca68a74d59971a621eab2e376` were verified before the conflict-free
+rebase. The final completed-rebase range-diff preserves all 21 prior patches
+unchanged. Fresh 211 VN/fetch/shared-auth tests pass (47.83s, one worker),
+typecheck, both scoped lint commands, compilation and diff checks pass. All 393 VN
+backend tests pass against the inherited DB migrations (393.68s, 13 warnings,
+normal exit 0), using the main environment and CI-aligned temporary overlay with
+an approved temporary DB root. No test skips, timeouts or environments changed.
+Unchanged VN Python Bandit has zero findings/errors over 9064 lines; it does not
+scan TypeScript. Backend, workflows, inherited Persona UI, published docs,
+OpenAPI fingerprint, unrelated tasks and shared TldwAuth match the new base.
+Publication must protect the full original owned f5e96c0f remote head with an
+explicit lease. Complete Qodo and CodeRabbit reviews of that prior head found no
+actionable issues; they do not qualify this new base/head. The additional evidence
+commit changes only TASK-13385 and this review plan. Fresh complete reviews
+and all live dev gates remain pending, and Stage 2/3 remain In Progress.
+
 Dev advanced again to `19215eb89ba658b13babe28fc2185d6821a0c462` through
 PR #3031, changing only two unrelated Backlog records. Clean tracked checkout
 and owned remote `97302526fb54b2c3b7a8006ddfb5b4dca6604054` were verified before
