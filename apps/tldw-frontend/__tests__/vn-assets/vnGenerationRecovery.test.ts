@@ -46,6 +46,22 @@ describe('VN generation recovery journal', () => {
     expect(readVNCommands(scope)).toEqual([]);
   });
 
+  it.each([
+    { ...scope, server: 'http://[' },
+    { ...scope, server: 'not-a-url' },
+    { ...scope, principal: 'x' },
+    { ...scope, server: `${scope.server}/` },
+    { ...scope, server: 'https://VN.example/api/v1' },
+    { ...scope, server: `${scope.server}?token=secret` },
+    { ...scope, principal: '01' },
+    { ...scope, principal: '1.0' },
+  ])('retains an invalid or noncanonical saved scope behind warned discard: %j', (savedScope) => {
+    const raw = JSON.stringify({ version: 1, scope: savedScope, commands: [command] });
+    sessionStorage.setItem(key, raw);
+    expect(() => readVNCommands(scope)).toThrow(/could not be read/);
+    expect(sessionStorage.getItem(key)).toBe(raw);
+  });
+
   it('surfaces quota, read and cleanup failures', () => {
     const prototype = Object.getPrototypeOf(window.sessionStorage);
     const spy = vi.spyOn(prototype, 'setItem').mockImplementation(() => { throw new Error('quota'); });
@@ -63,5 +79,12 @@ describe('VN generation recovery journal', () => {
       expect(() => createVNCommandScope(server, 1)).toThrow();
     }
     expect(() => createVNCommandScope(scope.server, 'cached-user')).toThrow();
+  });
+
+  it('writes a canonical scope that remains readable after repeated trailing slashes', () => {
+    const normalized = createVNCommandScope(`${scope.server}///`, 1);
+    expect(normalized).toEqual(scope);
+    writeVNCommands(normalized, [command]);
+    expect(readVNCommands(normalized)).toEqual([command]);
   });
 });

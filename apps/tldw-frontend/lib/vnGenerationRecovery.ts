@@ -28,7 +28,7 @@ export function createVNCommandScope(server: string, principal: unknown): VNComm
   const url = new URL(server, window.location.origin);
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash ||
       !isId(principal)) throw new Error('Current server and account could not be verified.');
-  return { server: `${url.origin}${url.pathname.replace(/\/$/, '')}`, principal: String(principal) };
+  return { server: `${url.origin}${url.pathname.replace(/\/+$/, '')}`, principal: String(principal) };
 }
 
 export function sameVNCommandScope(left: VNCommandScope | null, right: VNCommandScope): boolean {
@@ -57,7 +57,16 @@ export function readVNCommands(scope: VNCommandScope): VNPendingCommand[] {
         new Set(value.commands.map((command) => command.packId)).size !== value.commands.length) {
       throw new VNRecoveryStorageError(true);
     }
-    if (!sameVNCommandScope(value.scope as unknown as VNCommandScope, scope)) {
+    let savedScope: VNCommandScope;
+    try {
+      savedScope = createVNCommandScope(value.scope.server, Number(value.scope.principal));
+    } catch {
+      throw new VNRecoveryStorageError(true);
+    }
+    if (value.scope.server !== savedScope.server || value.scope.principal !== savedScope.principal) {
+      throw new VNRecoveryStorageError(true);
+    }
+    if (!sameVNCommandScope(savedScope, scope)) {
       window.sessionStorage.removeItem(VN_COMMAND_STORAGE_KEY);
       return [];
     }

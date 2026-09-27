@@ -449,6 +449,38 @@ describe('VNAssetsWorkbench', () => {
     expect(mocks.startVNAssetGeneration).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { server: 'http://[', principal: '1' },
+    { server: 'not-a-url', principal: '1' },
+    { server: 'http://localhost:8000/api/v1', principal: 'x' },
+    { server: 'http://localhost:8000/api/v1/', principal: '1' },
+    { server: 'http://LOCALHOST:8000/api/v1', principal: '1' },
+    { server: 'http://localhost:8000/api/v1?token=secret', principal: '1' },
+    { server: 'http://localhost:8000/api/v1', principal: '01' },
+    { server: 'http://localhost:8000/api/v1', principal: '1.0' },
+  ])('locks a corrupt saved scope until explicit warned discard: %j', async (scope) => {
+    existingFailedPack();
+    const key = 'tldw:vn-generation:pending:v1';
+    const raw = JSON.stringify({ version: 1, scope, commands: [
+      { packId: 7, request: { idempotency_key: 'vn-generation-saved-key' } },
+    ] });
+    sessionStorage.setItem(key, raw);
+    const user = userEvent.setup();
+    await act(async () => { render(<VNAssetsWorkbench />); });
+    expect(screen.getByRole('button', { name: 'Start generation' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Retry sprite_neutral' })).not.toBeInTheDocument();
+    expect(screen.getByText(/Saved generation requests could not be read/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Discard unreadable requests' })).toBeDisabled();
+    expect(sessionStorage.getItem(key)).toBe(raw);
+    await user.click(screen.getByRole('checkbox', { name: /I checked server status/ }));
+    await user.click(screen.getByRole('button', { name: 'Discard unreadable requests' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
+    expect(sessionStorage.getItem(key)).toBeNull();
+    expect(mocks.startVNAssetGeneration).not.toHaveBeenCalled();
+    expect(mocks.retryVNAssetSlot).not.toHaveBeenCalled();
+    expect(mocks.cancelVNAssetGeneration).not.toHaveBeenCalled();
+  });
+
   it('keeps warned discard available after storage refuses to remove unreadable requests', async () => {
     existingFailedPack();
     sessionStorage.setItem('tldw:vn-generation:pending:v1', '{');

@@ -153,6 +153,27 @@ commands pass. Fresh unchanged VN Python Bandit has zero findings/errors over
 finished at 19:39:54 UTC with exact-head reviewed coverage and no actionable
 comments; that prior-head assessment does not qualify this follow-up.
 
+Qodo's complete 428cddc review identified corrupt saved scope strings being
+mistaken for another authority (4116725510). Eight storage and eight rendered
+workbench cases failed before the fix (16 failed, 3 controls passed): the journal
+was removed and Start became enabled. Stored scope now uses the existing scope
+validator and must equal its canonical form before authority comparison. Invalid
+or noncanonical records remain byte-identical behind warned explicit discard;
+the three genuine authority-mismatch controls still pass.
+
+Initial green runs exposed a new test expectation error: unreadable recovery
+prevents detail loading, so Retry is absent rather than disabled. Corrected that
+assertion after reassessment; those fixture failures are not bug evidence.
+A separate canonical-write regression then failed for repeated trailing slashes.
+Normalizing all trailing slashes, consistent with shared networking, makes scope
+creation stable so the new reader accepts newly written scopes. Final full
+verification passes all 162 VN/fetch/shared-auth tests (50.93s, one worker),
+typecheck and both scoped lint commands. Fresh unchanged VN Python Bandit has
+zero findings/errors over 9064 lines, not a TypeScript scan. Existing Node/Next
+advisories and shared environments are unchanged. CodeRabbit's complete 428cddc
+full review finished at 20:03:45 UTC with exact-head reviewed coverage and no
+actionable defect; it does not qualify this new scoped follow-up.
+
 ## Stage 3: Gated Merge
 
 **Goal**: Merge normally only after current-head review and live dev gates pass.
