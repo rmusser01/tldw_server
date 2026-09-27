@@ -1026,6 +1026,8 @@ class VNAssetPackService:
                 slot_id: bool(
                     (source := source_batches[batch_id])
                     and int(source["pack_id"]) == int(row["pack_id"])
+                    and source["status"] == "failed"
+                    and int(source["requested_by_user_id"]) == self.owner_user_id
                     and source["recipe_json"] is not None
                 )
                 for slot_id, batch_id in failed_slot_batch_ids.items()

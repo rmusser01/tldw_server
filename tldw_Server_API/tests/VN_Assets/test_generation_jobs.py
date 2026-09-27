@@ -795,6 +795,71 @@ def test_generation_status_reports_recipe_availability_for_each_failed_slot_sour
     assert status.failed_slot_recipe_available[slot_id] is False
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancelled", [False, True])
+async def test_generation_status_matches_retry_eligibility_after_final_failure(
+    service: VNAssetPackService,
+    pack_with_slots: SimpleNamespace,
+    fake_jobs: FakeJobs,
+    cancelled: bool,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    class FinalFailureAdapter(FakeImageAdapter):
+        def generate(self, request: Any) -> ImageGenResult:
+            if cancelled:
+                service.cancel_generation(pack_with_slots.id)
+            raise RuntimeError("final variant failure")
+
+    slot_id = pack_with_slots.slots[0].id
+    started = service.start_generation(
+        pack_with_slots.id, VNAssetGenerationRequest(slot_ids=[slot_id]),
+    )
+    parent = fake_jobs.created[-1]
+    worker = VNAssetGenerationWorker(
+        repo=service.repo, jobs_manager=fake_jobs,
+        image_registry=FakeImageRegistry(FinalFailureAdapter()), backend_gate=FakeGenerationGate(),
+    )
+    worker.handle_enqueue_batch(parent["payload"])
+    child = fake_jobs.created[-1]
+
+    with pytest.raises(RuntimeError, match="final variant failure"):
+        await worker.handle_generate_variant(child["payload"])
+
+    status = service.get_generation_status(pack_with_slots.id)
+    assert status.status == ("cancelled" if cancelled else "failed")
+    assert status.failed_slot_batch_ids[slot_id] == started.batch_id
+    assert status.failed_slot_recipe_available[slot_id] is (not cancelled)
+    if cancelled:
+        with pytest.raises(ValueError, match="vn_asset_retry_source_unavailable"):
+            service.retry_slot(pack_with_slots.id, slot_id)
+    else:
+        retry = service.retry_slot(pack_with_slots.id, slot_id)
+        assert retry.source_batch_id == started.batch_id
+
+
+def test_generation_status_rejects_non_owner_failure_source(
+    service: VNAssetPackService,
+    pack_with_slots: SimpleNamespace,
+) -> None:
+    slot_id = pack_with_slots.slots[0].id
+    started = service.start_generation(
+        pack_with_slots.id, VNAssetGenerationRequest(slot_ids=[slot_id]),
+    )
+    recipe = json.loads(service.repo.get_batch(started.batch_id)["recipe_json"])
+    source = service.repo.create_batch(
+        pack_id=pack_with_slots.id, requested_by_user_id=2, status="queued",
+        recipe=recipe, options={"slot_ids": [slot_id]},
+    )
+    service.repo.record_batch_variant_failure(source["id"], slot_id=slot_id, error="foreign source")
+
+    status = service.get_generation_status(pack_with_slots.id)
+    assert status.failed_slot_batch_ids[slot_id] == source["id"]
+    assert status.failed_slot_recipe_available[slot_id] is False
+    with pytest.raises(ValueError, match="vn_asset_retry_source_unavailable"):
+        service.retry_slot(pack_with_slots.id, slot_id)
+
+
 def test_retry_without_source_uses_latest_failed_batch_for_that_slot(
     service: VNAssetPackService,
     pack_with_slots: SimpleNamespace,
@@ -1936,7 +2001,9 @@ def test_zero_work_fanout_completes_and_allows_later_lazy_depth(
     parent = fake_jobs.created[-1]
     batch_id = parent["payload"]["batch_id"]
     if legacy_recipe:
-        service.repo.update_batch(batch_id, {"recipe_json": None})
+        with service.repo.db.transaction() as conn:
+            conn.execute("UPDATE vn_asset_batches SET recipe_json = NULL WHERE id = ?", (batch_id,))
+        assert service.repo.get_batch(batch_id)["recipe_json"] is None
     worker = VNAssetGenerationWorker(
         repo=service.repo, jobs_manager=fake_jobs, image_registry=FakeImageRegistry(FakeImageAdapter()),
     )
