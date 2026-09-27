@@ -17,7 +17,7 @@
 **Status**: Complete
 
 ## Stage 4: Final verification
-**Goal**: Recheck local and remote gates, update TASK-13358, and merge only when review and CI permit.
+**Goal**: Recheck local and remote gates, update TASK-13378, and merge only when review and CI permit.
 **Success Criteria**: No unresolved actionable review finding, green relevant checks, clean branch, and PR policy satisfied.
 **Tests**: VN backend suite, frontend VN tests and typecheck, OpenAPI drift, Ruff, Bandit, and PR checks.
 **Status**: In Progress
@@ -77,5 +77,12 @@
 - Confirmed a clean owned worktree and remote head `674d13d1458554e07e74b80ea615d74705c1cac1` before rebasing onto dev `f94375c26e457be1f7752f20c9f11102f2503e42`. The base advance contains unrelated MCP filesystem/test helpers and task records; no VN runtime ownership overlap was found.
 - Rebase completed without conflicts. `git range-diff` confirms all ten prior PR patches unchanged.
 - Fresh verification: all 344 VN backend tests passed (304.95s) using the CI-aligned temporary overlay; 37 frontend VN tests, frontend typecheck, compilation, OpenAPI drift, scoped Ruff with documented BLE001/UP035 exclusions, and diff checks passed. Bandit returned zero findings/errors. The temporary shared-UI dependency link was removed.
-- The new base introduces an unrelated MCP task also using TASK-13358. Both task files are preserved unchanged. Backlog's CLI has no supported renumber command; requester approval was requested for manually renumbering only the VN record and its references. Do not write to the ambiguous task ID or merge until tracking ownership is resolved.
+- The new base introduced an unrelated MCP task also using TASK-13358. Both task files were preserved unchanged while requester approval was requested for a scoped manual renumber because Backlog's CLI has no supported renumber command. The approved resolution is recorded below.
 - Prior-head Qodo and CodeRabbit reviews were clear, but the rebased head requires fresh review and all current dev gates. Publish only with an explicit lease protecting the verified owned remote head. Stage 4 remains In Progress.
+
+### Approved Tracking Collision Resolution (2026-09-27 UTC)
+
+- The requester explicitly approved manually renumbering only the VN task and its references. Checked task filenames across all 151 registered worktrees, including active, draft, archived, and completed records; the highest existing ID was TASK-13377. Renumbered the VN record to the unused TASK-13378 and updated its current spec, plan, and PR references.
+- Preserve the task's complete history, including earlier IDs TASK-13356 and TASK-13358. The unrelated MCP TASK-13358, its parent TASK-13291, and their references remain unchanged. Subsequent task updates use the official Backlog workflow again.
+- This tracking-only change does not alter runtime code, tests, dependencies, or generated schemas. The fresh 344 backend tests, 37 frontend tests, typecheck, OpenAPI, Ruff, compilation, and Bandit verification from this same dev base remain applicable. Verify task lookup, task-ID uniqueness, preserved task history, unchanged MCP records, and diff checks before publishing.
+- Current-head reviews and every required dev gate remain mandatory. TASK-13378 and Stage 4 stay In Progress until the normal merge is verified.
