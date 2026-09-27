@@ -1,208 +1,433 @@
 import React from "react"
+import { Tooltip } from "antd"
+import { Plus, RefreshCw, Upload } from "lucide-react"
 
 import {
   cloneChatMacro,
   getChatMacroSettings,
   listChatMacros,
   setChatMacroEnabled,
-  updateChatMacroSettings,
-  validateChatMacro,
+  type ChatMacroSettings,
   type ChatMacroSummary
 } from "@/services/chat-macros"
+import {
+  ChatMacroEditor,
+  type ChatMacroEditorImportSource
+} from "./ChatMacroEditor"
+import { readMacroImport } from "./chat-macro-editor-utils"
+import { OutputProfileEditor } from "./OutputProfileEditor"
 
-const stringifySettings = (settings: Record<string, unknown>): string =>
-  JSON.stringify(settings, null, 2)
+type ActiveTab = "macros" | "profiles"
+type Selection = { kind: "macro"; name: string } | { kind: "new" } | null
 
 const responseError = (status: number, error?: string): string =>
   error || `Request failed (${status})`
 
+const headerButtonClassName =
+  "inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-sm font-medium text-text transition-colors hover:bg-surface2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50"
+
+const iconButtonClassName =
+  "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-surface text-text transition-colors hover:bg-surface2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50"
+
+const tabClassName = (active: boolean): string =>
+  [
+    "inline-flex h-9 items-center border-b-2 px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
+    active
+      ? "border-primary text-primary"
+      : "border-transparent text-text-muted hover:border-border hover:text-text"
+  ].join(" ")
+
+const selectionKey = (macro: ChatMacroSummary): string => `${macro.source}:${macro.name}`
+
+const catalogValidation = (macro: ChatMacroSummary): {
+  label: "Valid" | "Invalid" | "Unknown"
+  className: string
+} => {
+  if (macro.validation_status === "valid") {
+    return { label: "Valid", className: "text-success" }
+  }
+  if (macro.validation_status === "invalid") {
+    return { label: "Invalid", className: "text-danger" }
+  }
+  return { label: "Unknown", className: "text-text-muted" }
+}
+
 export const ChatMacrosSettings = () => {
+  const [activeTab, setActiveTab] = React.useState<ActiveTab>("macros")
   const [macros, setMacros] = React.useState<ChatMacroSummary[]>([])
-  const [loading, setLoading] = React.useState(true)
+  const [catalogLoading, setCatalogLoading] = React.useState(true)
+  const [catalogError, setCatalogError] = React.useState<string | null>(null)
+  const [settings, setSettings] = React.useState<ChatMacroSettings | null>(null)
+  const [settingsLoading, setSettingsLoading] = React.useState(true)
+  const [settingsError, setSettingsError] = React.useState<string | null>(null)
+  const [selection, setSelection] = React.useState<Selection>(null)
   const [busyMacro, setBusyMacro] = React.useState<string | null>(null)
-  const [error, setError] = React.useState<string | null>(null)
+  const [cloneSource, setCloneSource] = React.useState<ChatMacroSummary | null>(null)
   const [cloneName, setCloneName] = React.useState("")
-  const [settingsText, setSettingsText] = React.useState("{}")
-  const [settingsLoaded, setSettingsLoaded] = React.useState(false)
-  const [settingsLoadError, setSettingsLoadError] = React.useState<string | null>(null)
-  const [settingsMessage, setSettingsMessage] = React.useState<string | null>(null)
-  const [validateRaw, setValidateRaw] = React.useState("")
-  const [validationMessage, setValidationMessage] = React.useState<string | null>(null)
+  const [cloneError, setCloneError] = React.useState<string | null>(null)
+  const [cloneBusy, setCloneBusy] = React.useState(false)
+  const [importSource, setImportSource] = React.useState<ChatMacroEditorImportSource | null>(null)
+  const [importError, setImportError] = React.useState<string | null>(null)
+  const importInputRef = React.useRef<HTMLInputElement>(null)
+  const importRequestRef = React.useRef(0)
+  const mountedRef = React.useRef(false)
+  const catalogRequestRef = React.useRef(0)
+  const settingsRequestRef = React.useRef(0)
+  const selectionGeneration = React.useRef(0)
 
-  const loadData = React.useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    setSettingsLoaded(false)
-    setSettingsLoadError(null)
-    const [macroResponse, settingsResponse] = await Promise.all([
-      listChatMacros(),
-      getChatMacroSettings()
-    ])
+  const refreshCatalog = React.useCallback(async (preferredName?: string) => {
+    if (!mountedRef.current) return
+    const generation = selectionGeneration.current
+    const request = ++catalogRequestRef.current
+    setCatalogLoading(true)
+    setCatalogError(null)
 
-    if (!macroResponse.ok || !macroResponse.data) {
-      setError(responseError(macroResponse.status, macroResponse.error))
-    } else {
-      setMacros(macroResponse.data.macros)
+    try {
+      const response = await listChatMacros()
+      if (!mountedRef.current || request !== catalogRequestRef.current) return
+
+      if (!response.ok || !response.data) {
+        setCatalogError(responseError(response.status, response.error))
+        return
+      }
+
+      const nextMacros = response.data.macros
+      setMacros(nextMacros)
+      setSelection((current) => {
+        if (generation === selectionGeneration.current && preferredName && nextMacros.some((macro) => macro.name === preferredName)) {
+          return { kind: "macro", name: preferredName }
+        }
+        if (current?.kind === "new") return current
+        if (current?.kind === "macro" && nextMacros.some((macro) => macro.name === current.name)) {
+          return current
+        }
+        return nextMacros[0] ? { kind: "macro", name: nextMacros[0].name } : { kind: "new" }
+      })
+    } catch (error) {
+      if (mountedRef.current && request === catalogRequestRef.current) {
+        setCatalogError(error instanceof Error ? error.message : "Unable to load macro catalog.")
+      }
+    } finally {
+      if (mountedRef.current && request === catalogRequestRef.current) {
+        setCatalogLoading(false)
+      }
     }
+  }, [])
 
-    if (settingsResponse.ok && settingsResponse.data) {
-      setSettingsText(stringifySettings(settingsResponse.data.settings))
-      setSettingsLoaded(true)
-    } else {
-      setSettingsLoadError(responseError(settingsResponse.status, settingsResponse.error))
+  const refreshSettings = React.useCallback(async () => {
+    const request = ++settingsRequestRef.current
+    setSettingsLoading(true)
+    setSettingsError(null)
+
+    try {
+      const response = await getChatMacroSettings()
+      if (!mountedRef.current || request !== settingsRequestRef.current) return
+
+      if (!response.ok || !response.data?.settings) {
+        setSettingsError(responseError(response.status, response.error))
+        return
+      }
+
+      setSettings(response.data.settings)
+    } catch (error) {
+      if (mountedRef.current && request === settingsRequestRef.current) {
+        setSettingsError(error instanceof Error ? error.message : "Unable to load macro settings.")
+      }
+    } finally {
+      if (mountedRef.current && request === settingsRequestRef.current) {
+        setSettingsLoading(false)
+      }
     }
-    setLoading(false)
   }, [])
 
   React.useEffect(() => {
-    let cancelled = false
+    mountedRef.current = true
+    void refreshCatalog()
+    void refreshSettings()
 
-    const run = async () => {
-      setLoading(true)
-      setError(null)
-      setSettingsLoaded(false)
-      setSettingsLoadError(null)
-      const [macroResponse, settingsResponse] = await Promise.all([
-        listChatMacros(),
-        getChatMacroSettings()
-      ])
-      if (cancelled) return
-
-      if (!macroResponse.ok || !macroResponse.data) {
-        setError(responseError(macroResponse.status, macroResponse.error))
-      } else {
-        setMacros(macroResponse.data.macros)
-      }
-
-      if (settingsResponse.ok && settingsResponse.data) {
-        setSettingsText(stringifySettings(settingsResponse.data.settings))
-        setSettingsLoaded(true)
-      } else {
-        setSettingsLoadError(responseError(settingsResponse.status, settingsResponse.error))
-      }
-      setLoading(false)
-    }
-
-    void run()
     return () => {
-      cancelled = true
+      mountedRef.current = false
+      catalogRequestRef.current += 1
+      settingsRequestRef.current += 1
     }
+  }, [refreshCatalog, refreshSettings])
+
+  const selectedMacro = selection?.kind === "macro"
+    ? macros.find((macro) => macro.name === selection.name) || null
+    : null
+  const outputProfileNames = settings
+    ? Object.keys(settings.output_profiles)
+    : ["default"]
+
+  const selectMacro = React.useCallback((macro: ChatMacroSummary) => {
+    selectionGeneration.current += 1
+    setCloneSource(null)
+    setCloneName("")
+    setCloneError(null)
+    setSelection({ kind: "macro", name: macro.name })
   }, [])
 
-  const toggleMacro = React.useCallback(
-    async (macro: ChatMacroSummary) => {
-      setBusyMacro(macro.name)
-      setError(null)
-      const response = await setChatMacroEnabled(macro.name, !macro.enabled)
-      setBusyMacro(null)
-      if (!response.ok) {
-        setError(responseError(response.status, response.error))
-        return
-      }
-      void loadData()
-    },
-    [loadData]
-  )
+  const openNewMacro = React.useCallback(() => {
+    selectionGeneration.current += 1
+    setCloneSource(null)
+    setCloneName("")
+    setCloneError(null)
+    setImportError(null)
+    setSelection({ kind: "new" })
+  }, [])
 
-  const cloneWrapup = React.useCallback(
-    async (macro: ChatMacroSummary) => {
-      const trimmed = cloneName.trim()
-      if (!trimmed) return
+  const importMacro = React.useCallback(() => {
+    setImportError(null)
+    importInputRef.current?.click()
+  }, [])
 
-      setBusyMacro(macro.name)
-      setError(null)
-      const response = await cloneChatMacro(macro.name, {
-        name: trimmed,
-        command: trimmed
-      })
-      setBusyMacro(null)
-      if (!response.ok) {
-        setError(responseError(response.status, response.error))
-        return
-      }
-      setCloneName("")
-      void loadData()
-    },
-    [cloneName, loadData]
-  )
+  const handleImportFile = React.useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ""
+    if (!file) return
 
-  const saveSettings = React.useCallback(async () => {
-    if (!settingsLoaded) return
-    setSettingsMessage(null)
-    setError(null)
-    let parsed: Record<string, unknown>
+    const generation = ++selectionGeneration.current
     try {
-      const loaded = JSON.parse(settingsText)
-      if (!loaded || typeof loaded !== "object" || Array.isArray(loaded)) {
-        throw new Error("Macro settings JSON must be an object")
+      const raw = await readMacroImport(file)
+      if (!mountedRef.current || generation !== selectionGeneration.current) return
+      openNewMacro()
+      setImportSource({ requestId: ++importRequestRef.current, raw })
+    } catch (error) {
+      if (mountedRef.current && generation === selectionGeneration.current) {
+        setImportError(error instanceof Error ? error.message : "Unable to import macro YAML.")
       }
-      parsed = loaded as Record<string, unknown>
-    } catch (err) {
-      setSettingsMessage(err instanceof Error ? err.message : "Invalid settings JSON")
+    }
+  }, [openNewMacro])
+
+  const toggleMacro = React.useCallback(async (macro: ChatMacroSummary) => {
+    setBusyMacro(macro.name)
+    setCatalogError(null)
+
+    try {
+      const response = await setChatMacroEnabled(macro.name, !macro.enabled)
+      if (!mountedRef.current) return
+      if (!response.ok) {
+        setCatalogError(responseError(response.status, response.error))
+        return
+      }
+      await refreshCatalog()
+    } catch (error) {
+      if (mountedRef.current) {
+        setCatalogError(error instanceof Error ? error.message : "Unable to update macro state.")
+      }
+    } finally {
+      if (mountedRef.current) setBusyMacro(null)
+    }
+  }, [refreshCatalog])
+
+  const requestClone = React.useCallback((macro: ChatMacroSummary) => {
+    setCloneSource(macro)
+    setCloneName("")
+    setCloneError(null)
+  }, [])
+
+  const cloneMacro = React.useCallback(async () => {
+    if (!cloneSource) return
+    const name = cloneName.trim()
+    if (!name) {
+      setCloneError("Clone macro name is required.")
       return
     }
 
-    const response = await updateChatMacroSettings(parsed)
-    if (!response.ok) {
-      setSettingsMessage(responseError(response.status, response.error))
-      return
+    setCloneBusy(true)
+    setCloneError(null)
+    const generation = selectionGeneration.current
+    try {
+      const response = await cloneChatMacro(cloneSource.name, { name, command: name })
+      if (!mountedRef.current) return
+      if (generation !== selectionGeneration.current) {
+        if (response.ok) await refreshCatalog()
+        return
+      }
+      if (!response.ok) {
+        setCloneError(responseError(response.status, response.error))
+        return
+      }
+      setCloneSource(null)
+      setCloneName("")
+      await refreshCatalog(name)
+    } catch (error) {
+      if (mountedRef.current && generation === selectionGeneration.current) {
+        setCloneError(error instanceof Error ? error.message : "Unable to clone macro.")
+      }
+    } finally {
+      if (mountedRef.current) setCloneBusy(false)
     }
-    setSettingsMessage("Macro settings saved")
-  }, [settingsLoaded, settingsText])
+  }, [cloneName, cloneSource, refreshCatalog])
 
-  const validateRawMacro = React.useCallback(async () => {
-    setValidationMessage(null)
-    const response = await validateChatMacro(validateRaw)
-    if (!response.ok || !response.data) {
-      setValidationMessage(responseError(response.status, response.error))
+  // Mutation callbacks belong to the selection that rendered the editor.
+  const editorGeneration = selectionGeneration.current
+  const handleSaved = React.useCallback((name: string) => {
+    if (!mountedRef.current) return
+    if (editorGeneration !== selectionGeneration.current) {
+      void refreshCatalog()
       return
     }
-    if (response.data.valid) {
-      setValidationMessage("Macro YAML is valid")
-      return
-    }
-    setValidationMessage(response.data.error || "Macro YAML is invalid")
-  }, [validateRaw])
+    selectionGeneration.current += 1
+    setCloneSource(null)
+    setCloneName("")
+    setSelection({ kind: "macro", name })
+    void refreshCatalog(name)
+  }, [editorGeneration, refreshCatalog])
 
-  const firstMacro = macros[0] ?? null
+  const handleDeleted = React.useCallback(() => {
+    if (!mountedRef.current) return
+    if (editorGeneration !== selectionGeneration.current) {
+      void refreshCatalog()
+      return
+    }
+    selectionGeneration.current += 1
+    setCloneSource(null)
+    setCloneName("")
+    setSelection(null)
+    void refreshCatalog()
+  }, [editorGeneration, refreshCatalog])
+
+  const handleCatalogChanged = React.useCallback(() => {
+    void refreshCatalog()
+  }, [refreshCatalog])
+
+  const handleSettingsSaved = React.useCallback((nextSettings: ChatMacroSettings) => {
+    if (mountedRef.current) setSettings(nextSettings)
+  }, [])
+
+  const handleImportConsumed = React.useCallback((requestId: number) => {
+    setImportSource((current) => current?.requestId === requestId ? null : current)
+  }, [])
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-4 text-text">
-      <header>
-        <h1 className="text-xl font-semibold">Chat macros</h1>
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 px-4 py-4 text-text">
+      <header className="flex flex-col gap-3 border-b border-border pb-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="text-xl font-semibold">Chat macros</h1>
+          <p className="mt-1 max-w-3xl text-sm text-text-muted">
+            Author reusable chat workflows and shape how their results are returned.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2" data-testid="chat-macro-header-actions">
+          <input
+            ref={importInputRef}
+            type="file"
+            className="sr-only"
+            accept=".yaml,.yml,text/yaml,text/plain"
+            aria-label="Import macro YAML file"
+            onChange={(event) => void handleImportFile(event)}
+          />
+          <button type="button" className={headerButtonClassName} onClick={openNewMacro}>
+            <Plus aria-hidden="true" size={16} />
+            New macro
+          </button>
+          <button
+            type="button"
+            aria-label="Import macro"
+            className={headerButtonClassName}
+            onClick={importMacro}
+          >
+            <Upload aria-hidden="true" size={16} />
+            Import
+          </button>
+          <Tooltip title="Refresh macros">
+            <button
+              type="button"
+              aria-label="Refresh macros"
+              className={iconButtonClassName}
+              onClick={() => {
+                void refreshCatalog()
+                void refreshSettings()
+              }}
+            >
+              <RefreshCw aria-hidden="true" size={16} />
+            </button>
+          </Tooltip>
+        </div>
       </header>
 
-      {error ? (
-        <p className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm font-medium text-danger" role="alert">
-          {error}
-        </p>
-      ) : null}
+      {importError ? <p className="text-sm font-medium text-danger" role="alert">{importError}</p> : null}
 
-      <section className="space-y-3">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-sm font-semibold">Macros</h2>
-          {loading ? <span className="text-xs text-text-muted">Loading</span> : null}
-        </div>
+      <div className="flex border-b border-border" role="tablist" aria-label="Chat macro settings views">
+        <button
+          id="chat-macros-tab"
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "macros"}
+          aria-controls="chat-macros-panel"
+          className={tabClassName(activeTab === "macros")}
+          onClick={() => setActiveTab("macros")}
+        >
+          Macros
+        </button>
+        <button
+          id="chat-macro-profiles-tab"
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "profiles"}
+          aria-controls="chat-macro-profiles-panel"
+          className={tabClassName(activeTab === "profiles")}
+          onClick={() => setActiveTab("profiles")}
+        >
+          Output profiles
+        </button>
+      </div>
 
-        <div className="overflow-hidden rounded-md border border-border">
-          <table className="w-full border-collapse text-sm">
-            <thead className="bg-surface2 text-left text-xs uppercase text-text-muted">
-              <tr>
-                <th className="px-3 py-2 font-medium">Command</th>
-                <th className="px-3 py-2 font-medium">Source</th>
-                <th className="px-3 py-2 font-medium">Description</th>
-                <th className="px-3 py-2 text-right font-medium">Enabled</th>
-              </tr>
-            </thead>
-            <tbody>
-              {macros.map((macro) => (
-                <tr key={`${macro.source}:${macro.name}`} className="border-t border-border">
-                  <td className="px-3 py-2 font-medium">/{macro.command}</td>
-                  <td className="px-3 py-2 text-text-muted">{macro.source}</td>
-                  <td className="px-3 py-2 text-text-muted">
-                    {macro.description || "No description"}
-                  </td>
-                  <td className="px-3 py-2 text-right">
+      <div
+        id="chat-macros-panel"
+        role="tabpanel"
+        aria-labelledby="chat-macros-tab"
+        hidden={activeTab !== "macros"}
+      >
+        <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(220px,300px)_minmax(0,1fr)]">
+          <aside className="min-w-0 border-b border-border pb-4 xl:border-b-0 xl:border-r xl:pb-0 xl:pr-4" aria-label="Macro catalog">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <h2 className="text-sm font-semibold">Macros</h2>
+              {catalogLoading ? <span className="text-xs text-text-muted">Loading macros</span> : null}
+            </div>
+
+            {catalogError ? (
+              <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-danger/40 bg-danger/10 px-3 py-2" role="alert">
+                <span className="min-w-0 flex-1 text-sm font-medium text-danger">{catalogError}</span>
+                <button
+                  type="button"
+                  className="text-sm font-medium text-danger underline decoration-danger/50 underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                  onClick={() => void refreshCatalog()}
+                >
+                  Retry macro list
+                </button>
+              </div>
+            ) : null}
+
+            <div className="divide-y divide-border border-y border-border">
+              {macros.map((macro) => {
+                const selected = selectedMacro?.name === macro.name
+                const validation = catalogValidation(macro)
+                return (
+                  <div
+                    key={selectionKey(macro)}
+                    className={[
+                      "grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-2 px-2 py-2",
+                      selected ? "bg-surface2/70" : "bg-transparent"
+                    ].join(" ")}
+                  >
+                    <button
+                      type="button"
+                      aria-label={`Select /${macro.command}`}
+                      aria-pressed={selected}
+                      className="min-w-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                      onClick={() => selectMacro(macro)}
+                    >
+                      <span className="block truncate text-sm font-medium text-text">/{macro.command}</span>
+                      <span className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-xs text-text-muted">
+                        <span>{macro.source}</span>
+                        <span>{macro.enabled ? "Enabled" : "Disabled"}</span>
+                        <span className={validation.className} title={macro.validation_error || undefined}>
+                          {validation.label}
+                        </span>
+                      </span>
+                    </button>
                     <button
                       type="button"
                       role="switch"
@@ -211,10 +436,8 @@ export const ChatMacrosSettings = () => {
                       disabled={busyMacro === macro.name}
                       onClick={() => void toggleMacro(macro)}
                       className={[
-                        "inline-flex h-6 w-11 items-center rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50",
-                        macro.enabled
-                          ? "border-primary bg-primary"
-                          : "border-border bg-surface"
+                        "mt-1 inline-flex h-6 w-11 items-center rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50",
+                        macro.enabled ? "border-primary bg-primary" : "border-border bg-surface"
                       ].join(" ")}
                     >
                       <span
@@ -224,94 +447,84 @@ export const ChatMacrosSettings = () => {
                         ].join(" ")}
                       />
                     </button>
-                  </td>
-                </tr>
-              ))}
-              {!loading && macros.length === 0 ? (
-                <tr>
-                  <td className="px-3 py-3 text-sm text-text-muted" colSpan={4}>
-                    No macros found.
-                  </td>
-                </tr>
+                  </div>
+                )
+              })}
+              {!catalogLoading && macros.length === 0 ? (
+                <p className="px-2 py-3 text-sm text-text-muted">No macros found.</p>
               ) : null}
-            </tbody>
-          </table>
-        </div>
-      </section>
+            </div>
+          </aside>
 
-      <section className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-md border border-border bg-surface px-3 py-3">
-          <h2 className="text-sm font-semibold">Clone a macro</h2>
-          <label className="mt-3 block text-sm font-medium" htmlFor="chat-macro-clone-name">
-            Clone macro name
-          </label>
-          <input
-            id="chat-macro-clone-name"
-            className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-focus"
-            value={cloneName}
-            onChange={(event) => setCloneName(event.target.value)}
-          />
-          <button
-            type="button"
-            className="mt-3 inline-flex min-h-[36px] items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-primaryStrong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={!firstMacro || !cloneName.trim()}
-            onClick={() => firstMacro && void cloneWrapup(firstMacro)}
-          >
-            Clone /{firstMacro?.command || "macro"}
-          </button>
-        </div>
+          <div className="min-w-0">
+            {cloneSource ? (
+              <section className="mb-4 border-y border-border py-3" aria-labelledby="chat-macro-clone-title">
+                <h2 id="chat-macro-clone-title" className="mb-3 text-sm font-semibold text-text">
+                  Clone /{cloneSource.command}
+                </h2>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                  <label className="min-w-0 flex-1 text-sm font-medium text-text" htmlFor="chat-macro-clone-name">
+                    Clone macro name
+                    <input
+                      id="chat-macro-clone-name"
+                      className="mt-1 h-9 w-full rounded-md border border-border bg-surface px-2.5 text-sm text-text outline-none focus:border-primary focus:ring-2 focus:ring-focus disabled:cursor-not-allowed disabled:opacity-60"
+                      value={cloneName}
+                      disabled={cloneBusy}
+                      onChange={(event) => {
+                        setCloneName(event.target.value)
+                        setCloneError(null)
+                      }}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="inline-flex h-9 items-center justify-center rounded-md bg-primary px-3 text-sm font-medium text-white transition-colors hover:bg-primaryStrong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={cloneBusy || !cloneName.trim()}
+                    onClick={() => void cloneMacro()}
+                  >
+                    {cloneBusy ? "Cloning" : `Clone /${cloneSource.command}`}
+                  </button>
+                </div>
+                {cloneError ? <p className="mt-2 text-sm font-medium text-danger" role="alert">{cloneError}</p> : null}
+              </section>
+            ) : null}
 
-        <div className="rounded-md border border-border bg-surface px-3 py-3">
-          <h2 className="text-sm font-semibold">Validate YAML</h2>
-          <label className="mt-3 block text-sm font-medium" htmlFor="chat-macro-validate-yaml">
-            Validate macro YAML
-          </label>
-          <textarea
-            id="chat-macro-validate-yaml"
-            className="mt-1 min-h-[118px] w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-sm outline-none focus:border-primary focus:ring-2 focus:ring-focus"
-            value={validateRaw}
-            onChange={(event) => setValidateRaw(event.target.value)}
-          />
-          <button
-            type="button"
-            className="mt-3 inline-flex min-h-[36px] items-center rounded-md border border-border px-4 py-2 text-sm font-medium text-text transition-colors hover:bg-surface2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-            onClick={() => void validateRawMacro()}
-          >
-            Validate macro
-          </button>
-          {validationMessage ? (
-            <p className="mt-2 text-sm text-text-muted">{validationMessage}</p>
+            <ChatMacroEditor
+              selected={selectedMacro}
+              outputProfileNames={outputProfileNames}
+              onSaved={handleSaved}
+              onDeleted={handleDeleted}
+              onCatalogChanged={handleCatalogChanged}
+              onCloneRequested={requestClone}
+              onImportConsumed={handleImportConsumed}
+              importSource={importSource}
+            />
+          </div>
+        </div>
+      </div>
+
+      <section
+        id="chat-macro-profiles-panel"
+        role="tabpanel"
+        aria-labelledby="chat-macro-profiles-tab"
+        hidden={activeTab !== "profiles"}
+      >
+          {settingsLoading ? <p className="text-sm text-text-muted">Loading output profiles</p> : null}
+          {!settingsLoading && settingsError ? (
+            <div className="flex flex-wrap items-center gap-3 rounded-md border border-danger/40 bg-danger/10 px-3 py-2" role="alert">
+              <span className="min-w-0 flex-1 text-sm font-medium text-danger">{settingsError}</span>
+              <button
+                type="button"
+                className="text-sm font-medium text-danger underline decoration-danger/50 underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                onClick={() => void refreshSettings()}
+              >
+                Retry settings
+              </button>
+            </div>
           ) : null}
-        </div>
-      </section>
-
-      <section className="rounded-md border border-border bg-surface px-3 py-3">
-        <h2 className="text-sm font-semibold">Output profiles</h2>
-        <label className="mt-3 block text-sm font-medium" htmlFor="chat-macro-settings-json">
-          Macro settings JSON
-        </label>
-        <textarea
-          id="chat-macro-settings-json"
-          className="mt-1 min-h-[180px] w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-sm outline-none focus:border-primary focus:ring-2 focus:ring-focus"
-          value={settingsText}
-          onChange={(event) => setSettingsText(event.target.value)}
-        />
-        <button
-          type="button"
-          className="mt-3 inline-flex min-h-[36px] items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-primaryStrong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={loading || !settingsLoaded}
-          onClick={() => void saveSettings()}
-        >
-          Save macro settings
-        </button>
-        {settingsMessage ? (
-          <p className="mt-2 text-sm text-text-muted">{settingsMessage}</p>
-        ) : null}
-        {settingsLoadError ? (
-          <p className="mt-2 text-sm font-medium text-danger" role="alert">
-            {settingsLoadError}
-          </p>
-        ) : null}
+          {settings ? (
+            <OutputProfileEditor settings={settings} onSaved={handleSettingsSaved} />
+          ) : null}
       </section>
     </div>
   )
