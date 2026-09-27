@@ -4,7 +4,7 @@ title: A cancelled license-gate job publishes a policy-violation status
 status: In Progress
 assignee: []
 created_date: '2026-09-23 17:13'
-updated_date: '2026-09-27 19:38'
+updated_date: '2026-09-27 19:44'
 labels:
   - ci
   - security
@@ -113,6 +113,8 @@ Fixed on chore/close-fixed-review-tasks (#3029): the publish step is if: "!cance
 CORRECTION 2026-09-27: the !cancelled() fix from #3029 does NOT work, and AC #1 was checked wrongly. Verified live on PR #3031: run 36342617339 was cancelled during Checkout after the pending status posted, and the publisher still ran and posted failure. Run 36342606942, cancelled by this workflow's own cancel-in-progress, did the same. The cancelled step left cancelled() false for the following steps. Replaced on fix/license-gate-publish-on-verdict: the publisher is now gated on always() && steps.evaluate.outcome in {success, failure}, so it publishes only when a verdict exists. always() is needed so a genuine violation (evaluate failed) is not skipped by the implicit success(). A checkout failure now also leaves pending, which stays fail-closed. AC #1 and AC #4 are to be re-verified live after merge.
 
 Follow-up from Qodo on #3032, declined there with reasons: a run superseded by cancel-in-progress but cancelled only after evaluate completes can still publish its verdict over the newer run's status. Pre-existing (always() had it too) and low impact, since superseding runs evaluate the same head SHA under a base-qualified context. A real guard means a latest-run check inside the hash-pinned publish body, which is a deliberate trusted-gate change for its own PR.
+
+CORRECTION 2 (2026-09-27): both live tests above were invalid. pull_request_target runs the workflow file from the DEFAULT branch (main), not the PR base (dev). A runner debug log of rerun 36345134991 attempt 2 shows the Publish step evaluated plain always(), which is main's version. So neither #3029 (!cancelled()) nor #3032 (verdict-gated condition) has run, and the earlier claim that cancelled() stayed false after a cancelled step is unproven: the runs never evaluated it. #3032's condition stays as the fix. It also covers a cancel before evaluation, whatever cancelled() does. It takes effect only when dev is released to main. AC #1 and AC #4 must be verified live after that release. The same applies to any change to a pull_request_target workflow: it is inert until it reaches main.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
