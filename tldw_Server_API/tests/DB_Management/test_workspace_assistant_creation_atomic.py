@@ -11,9 +11,14 @@ import pytest
 from fastapi import HTTPException
 
 from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import ChatSessionCreate
+from tldw_Server_API.app.api.v1.schemas.workspace_schemas import (
+    WorkspaceAssistantDefaultDegradedReason,
+    WorkspaceEffectiveAssistantDefault,
+)
 from tldw_Server_API.app.core import feature_flags
 from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import create_character_conversation
 from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup, decode_assistant_startup
+from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError
 from tldw_Server_API.app.core.Workspaces import assistant_defaults
 from tldw_Server_API.tests.DB_Management.test_conversation_assistant_startup import (
@@ -72,6 +77,207 @@ def test_helper_replaces_preflight_identity_and_title(creation_db: CharactersRAG
     assert decode_assistant_startup(row["assistant_startup_json"]).model_dump() == {
         "schema_version": 1, "source": "workspace_default", "workspace_id": "ws", "workspace_version": 2,
     }
+
+
+@pytest.mark.parametrize("request_fields, clear_default, expected_identity, expected_title, expected_origin", [
+    pytest.param({}, False, ("persona", "persona-a", None, "read_only"), "First Chat (stamp)",
+                 ("workspace_default", "ws", 2), id="inherited"),
+    pytest.param({"title": "Chosen title"}, False, ("persona", "persona-a", None, "read_only"), "Chosen title",
+                 ("workspace_default", "ws", 2), id="explicit-title"),
+    pytest.param({"title": None}, False, ("persona", "persona-a", None, "read_only"), "First Chat (stamp)",
+                 ("workspace_default", "ws", 2), id="null-title"),
+    pytest.param({"title": ""}, False, ("persona", "persona-a", None, "read_only"), "First Chat (stamp)",
+                 ("workspace_default", "ws", 2), id="empty-title"),
+    pytest.param({"assistant_kind": None}, False, (None, None, None, None), "Chat (stamp)",
+                 ("explicit_none", None, None), id="explicit-none"),
+    pytest.param({"assistant_kind": "persona", "assistant_id": "persona-b", "persona_memory_mode": "read_write"},
+                 False, ("persona", "persona-b", None, "read_write"), "Second Chat (stamp)",
+                 ("explicit", None, None), id="explicit-persona"),
+    pytest.param({}, True, (None, None, None, None), "Chat (stamp)",
+                 ("system_fallback", "ws", 3), id="cleared-default"),
+])
+def test_resolved_insertion_preserves_identity_title_and_origin(
+    creation_db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch,
+    request_fields: dict[str, Any], clear_default: bool,
+    expected_identity: tuple[Any, ...], expected_title: str, expected_origin: tuple[Any, ...],
+) -> None:
+    """Insert the selected result once without resolving again or opening a transaction."""
+    insert = getattr(assistant_defaults, "insert_resolved_workspace_conversation", None)
+    assert callable(insert), "Missing shared resolved-conversation insertion helper"
+    if clear_default:
+        creation_db.update_workspace("ws", {"assistant_defaults_json": None}, 2)
+    request = ChatSessionCreate(scope_type="workspace", workspace_id="ws", **request_fields)
+    payload = {
+        "id": "resolved", "root_id": "resolved", "client_id": "user-1",
+        "scope_type": "workspace", "workspace_id": "ws", "title": "Stale preflight title",
+        "assistant_kind": "persona", "assistant_id": "persona-b", "character_id": None,
+        "persona_memory_mode": "read_write", "topic_label": "Keep metadata",
+    }
+    original_payload = dict(payload)
+
+    def unexpected(*args: Any, **kwargs: Any) -> Any:
+        """Selection and transaction ownership must stay with the caller."""
+        raise AssertionError("Insertion must not resolve or open a transaction")
+
+    with creation_db.transaction() as conn:
+        resolved = assistant_defaults.resolve_workspace_assistant_startup(
+            creation_db, user_id="user-1", request=request, conn=conn,
+        )
+        with monkeypatch.context() as patch:
+            patch.setattr(assistant_defaults, "resolve_workspace_assistant_startup", unexpected)
+            patch.setattr(creation_db, "transaction", unexpected)
+            cid = insert(
+                creation_db, resolved=resolved, conversation_data=payload, title_timestamp="stamp", conn=conn,
+            )
+    row = creation_db.get_conversation_by_id(cid)
+    assert cid == "resolved"
+    assert tuple(row[field] for field in (
+        "assistant_kind", "assistant_id", "character_id", "persona_memory_mode",
+    )) == expected_identity
+    assert row["title"] == expected_title
+    origin = decode_assistant_startup(row["assistant_startup_json"])
+    assert (origin.source, origin.workspace_id, origin.workspace_version) == expected_origin
+    assert (row["scope_type"], row["workspace_id"], row["root_id"], row["topic_label"]) == (
+        "workspace", "ws", "resolved", "Keep metadata",
+    )
+    assert payload == original_payload
+
+
+def test_resolved_insertion_obeys_caller_rollback(
+    creation_db: CharactersRAGDB, db_factory: Callable[[], CharactersRAGDB],
+) -> None:
+    """The helper cannot commit identity or provenance ahead of its caller."""
+    insert = getattr(assistant_defaults, "insert_resolved_workspace_conversation", None)
+    assert callable(insert), "Missing shared resolved-conversation insertion helper"
+    observer = db_factory()
+    with pytest.raises(RuntimeError, match="rollback caller unit"):
+        with creation_db.transaction() as conn:
+            resolved = assistant_defaults.resolve_workspace_assistant_startup(
+                creation_db, user_id="user-1",
+                request=ChatSessionCreate(scope_type="workspace", workspace_id="ws"), conn=conn,
+            )
+            cid = insert(
+                creation_db, resolved=resolved,
+                conversation_data={
+                    "id": "rolled-back", "root_id": "rolled-back", "client_id": "user-1",
+                    "scope_type": "workspace", "workspace_id": "ws",
+                }, title_timestamp="stamp", conn=conn,
+            )
+            assert creation_db.get_conversation_by_id(cid)["assistant_id"] == "persona-a"
+            raise RuntimeError("rollback caller unit")
+    assert observer.get_conversation_by_id("rolled-back", include_deleted=True) is None
+
+
+def test_legacy_creation_resolves_once_and_delegates_insertion(
+    creation_db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The guarded wrapper shares insertion without a second default selection."""
+    insert = getattr(assistant_defaults, "insert_resolved_workspace_conversation", None)
+    assert callable(insert), "Missing shared resolved-conversation insertion helper"
+    resolve = assistant_defaults.resolve_workspace_assistant_startup
+    selections: list[assistant_defaults.ResolvedConversationAssistant] = []
+    inserted: list[assistant_defaults.ResolvedConversationAssistant] = []
+
+    def resolve_once(*args: Any, **kwargs: Any) -> assistant_defaults.ResolvedConversationAssistant:
+        """Keep real locking selection, tracking the result handed to insertion."""
+        resolved = resolve(*args, **kwargs)
+        selections.append(resolved)
+        return resolved
+
+    def insert_once(*args: Any, **kwargs: Any) -> str:
+        """Keep the actual insertion on the wrapper's supplied connection."""
+        inserted.append(kwargs["resolved"])
+        return insert(*args, **kwargs)
+
+    monkeypatch.setattr(assistant_defaults, "resolve_workspace_assistant_startup", resolve_once)
+    monkeypatch.setattr(assistant_defaults, "insert_resolved_workspace_conversation", insert_once)
+    cid = _create(creation_db)
+    assert len(selections) == len(inserted) == 1
+    assert inserted[0] is selections[0]
+    assert creation_db.get_conversation_by_id(cid)["title"] == "First Chat (stamp)"
+
+
+@pytest.mark.parametrize("reason, expected_status", [
+    ("persona_deleted", 409), ("persona_unavailable", 409), ("persona_feature_disabled", 503),
+    ("permission_denied", 409), ("invalid_default", 409), ("unsupported_assistant_kind", 409),
+])
+def test_unavailable_default_exposes_typed_reason_with_legacy_http_contract(
+    creation_db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch,
+    reason: WorkspaceAssistantDefaultDegradedReason, expected_status: int,
+) -> None:
+    """Only unavailable defaults expose a bounded reason, preserving legacy wire behavior."""
+    if reason == "persona_deleted":
+        creation_db.soft_delete_persona_profile(persona_id="persona-a", user_id="user-1", expected_version=1)
+    elif reason == "persona_unavailable":
+        _mutate(creation_db, "deactivate")
+    elif reason == "persona_feature_disabled":
+        monkeypatch.setattr(feature_flags, "is_persona_enabled", lambda: False)
+    elif reason == "permission_denied":
+        creation_db.update_workspace("ws", {"assistant_defaults_json": {
+            "assistant_kind": "persona", "assistant_id": "inaccessible-persona", "persona_memory_mode": "read_only",
+        }}, 2)
+    elif reason == "invalid_default":
+        creation_db.update_workspace("ws", {"assistant_defaults_json": {
+            "assistant_kind": "persona", "assistant_id": "",
+        }}, 2)
+    else:
+        # Stored defaults currently admit only Persona; this future-kind branch
+        # is unreachable through schema-safe storage, but its bounded result is valid.
+        monkeypatch.setattr(
+            assistant_defaults, "resolve_effective_workspace_assistant_default",
+            lambda *args, **kwargs: WorkspaceEffectiveAssistantDefault(
+                status="unavailable", source="workspace", degraded_reason="unsupported_assistant_kind",
+            ),
+        )
+    with pytest.raises(HTTPException) as error:
+        _create(creation_db)
+    assert type(error.value) is getattr(assistant_defaults, "WorkspaceDefaultUnavailable", None)
+    assert error.value.reason == reason
+    assert error.value.status_code == expected_status
+    assert error.value.detail == "Workspace default Persona is unavailable; choose an assistant explicitly"
+    assert creation_db.get_conversation_by_id("created", include_deleted=True) is None
+
+
+@pytest.mark.parametrize("explicit_persona", [False, True], ids=["missing-workspace", "missing-explicit-persona"])
+def test_missing_selection_target_is_not_typed_default_unavailability(
+    creation_db: CharactersRAGDB, explicit_persona: bool,
+) -> None:
+    """Workspace and explicit Persona misses retain their original 404 types/details."""
+    request = ChatSessionCreate(
+        scope_type="workspace", workspace_id="ws" if explicit_persona else "missing-workspace",
+        **({"assistant_kind": "persona", "assistant_id": "missing-persona"} if explicit_persona else {}),
+    )
+    with pytest.raises(HTTPException) as error:
+        with creation_db.transaction() as conn:
+            assistant_defaults.resolve_workspace_assistant_startup(
+                creation_db, user_id="user-1", request=request, conn=conn,
+            )
+    assert type(error.value) is HTTPException
+    assert (error.value.status_code, error.value.detail) == (
+        404, "Persona not found" if explicit_persona else "Workspace not found",
+    )
+
+
+@pytest.mark.parametrize("getter", ["get_workspace", "get_persona_profile"])
+@pytest.mark.parametrize("failure_kind", ["http", "storage"])
+def test_selection_errors_are_not_relabeled_as_default_unavailability(
+    creation_db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch, getter: str, failure_kind: str,
+) -> None:
+    """Unexpected HTTP/storage failures propagate unchanged, never becoming fallback/default errors."""
+    failure = HTTPException(status_code=502, detail="upstream failure") if failure_kind == "http" else (
+        DatabaseError("injected storage failure")
+    )
+
+    def fail(*args: Any, **kwargs: Any) -> Any:
+        """Inject only the failed read; the real transaction still owns rollback."""
+        raise failure
+
+    with monkeypatch.context() as patch:
+        patch.setattr(creation_db, getter, fail)
+        with pytest.raises(type(failure)) as error:
+            _create(creation_db)
+    assert error.value is failure
+    assert creation_db.get_conversation_by_id("created", include_deleted=True) is None
 
 
 @pytest.mark.parametrize("overrides", [
