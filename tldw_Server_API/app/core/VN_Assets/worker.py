@@ -245,29 +245,38 @@ class VNAssetGenerationWorker:
             if recipe is None:
                 raise VNAssetGenerationError("vn_asset_recipe_not_found", batch_id=batch_id, slot_id=slot_id)
             attempt_token = uuid.uuid4().hex
-            claimed_item = self.repo.claim_variant(
-                batch_id=batch_id, slot_id=slot_id, variant_index=variant_index,
-                lease_id=lease_id, attempt_token=attempt_token,
-                allow_takeover=job is not None,
-                expected_claim_token=outcome.get("claim_token") if outcome else None,
-                validate_authority=(lambda: self._require_current_job_lease(job, user_id=user_id)) if job else None,
-                item_fields={
-                    "pack_id": pack_id,
-                    "generation_job_id": _job_id(job),
-                    "source_prompt_snapshot": {
-                        key: recipe[key] for key in (
-                            "prompt", "negative_prompt", "token_estimates",
-                            "omitted_source_counts", "warnings",
-                        )
+            try:
+                claimed_item = await self.repo.run_worker_replay_operation(partial(
+                    self.repo.claim_variant,
+                    batch_id=batch_id, slot_id=slot_id, variant_index=variant_index,
+                    lease_id=lease_id, attempt_token=attempt_token,
+                    allow_takeover=job is not None,
+                    expected_claim_token=outcome.get("claim_token") if outcome else None,
+                    validate_authority=(lambda: self._require_current_job_lease(job, user_id=user_id)) if job else None,
+                    item_fields={
+                        "pack_id": pack_id,
+                        "generation_job_id": _job_id(job),
+                        "source_prompt_snapshot": {
+                            key: recipe[key] for key in (
+                                "prompt", "negative_prompt", "token_estimates",
+                                "omitted_source_counts", "warnings",
+                            )
+                        },
+                        "source_context_snapshot": {
+                            "pack_id": pack_id, "slot_id": slot_id,
+                            "batch_id": batch_id, "variant_index": variant_index,
+                            "slot_key": recipe["slot_key"],
+                            "primary_character_id": recipe["primary_character_id"],
+                        },
                     },
-                    "source_context_snapshot": {
-                        "pack_id": pack_id, "slot_id": slot_id,
-                        "batch_id": batch_id, "variant_index": variant_index,
-                        "slot_key": recipe["slot_key"],
-                        "primary_character_id": recipe["primary_character_id"],
-                    },
-                },
-            )
+                ))
+            except asyncio.CancelledError:
+                if job is None:
+                    self.repo.release_variant_claim(
+                        batch_id=batch_id, slot_id=slot_id, variant_index=variant_index,
+                        attempt_token=attempt_token,
+                    )
+                raise
 
         reconciling = outcome is not None and outcome.get("item_id") is not None
         legacy_inline = recipe_version == 0 and job is None
@@ -1147,6 +1156,25 @@ class VNAssetGenerationWorker:
         job: Mapping[str, Any] | None = None,
         user_id: int | None = None,
     ) -> None:
+        """Record failure through the version-specific persistence boundary.
+
+        Args:
+            batch_id: Batch whose persisted recipe version selects the transition.
+            slot_id: Slot to reconcile for V1 or mark failed for legacy generation.
+            variant_index: Exact V1 recipe variant; unused by the legacy transition.
+            error: Safe persisted failure description.
+            attempt_token: Current V1 claim fence, forwarded to failure admission.
+            job: Optional Jobs delivery whose current lease must authorize V1 writes.
+            user_id: Delivery owner required when job supplies that authority callback.
+
+        Returns:
+            None: Missing batches do nothing. V1 uses fenced variant failure admission;
+            legacy generation updates slot status/error and batch status/failed count.
+
+        Raises:
+            VNAssetGenerationError: Jobs authority validation rejects a V1 transition.
+            Exception: Native database or authority callback failures propagate.
+        """
         batch = self.repo.get_batch(batch_id)
         if batch is None:
             return

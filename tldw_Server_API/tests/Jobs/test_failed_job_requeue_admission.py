@@ -105,6 +105,50 @@ def test_explicit_retry_and_queued_replay_preserve_identity(jobs: JobManager) ->
     assert snapshot(jobs, job) == ("queued", 1, 1)
 
 
+def test_explicit_retry_clears_failed_attempt_progress(jobs: JobManager) -> None:
+    """Re-admission clears old progress, while replay retains new attempt progress."""
+    job = jobs.create_job(
+        domain="vn_assets", queue="default", job_type="vn_asset_enqueue_batch", owner_user_id="42",
+        payload={"pack_id": 1, "batch_id": 7, "user_id": 42}, idempotency_key="progress-parent", max_retries=0,
+    )
+    acquired = jobs.acquire_next_job(
+        domain="vn_assets", queue="default", worker_id="progress-worker", lease_seconds=60, owner_user_id="42",
+    )
+    assert acquired is not None and acquired["id"] == job["id"]
+    assert jobs.update_job_progress(
+        job["id"], progress_percent=87.5, progress_message="Previous attempt partial fanout",
+    )
+    assert jobs.fail_job(
+        job["id"], error="partial fanout", retryable=True, backoff_seconds=0,
+        worker_id=acquired["worker_id"], lease_id=acquired["lease_id"],
+    )
+    failed = jobs.get_job(job["id"], owner_user_id="42")
+    assert failed is not None
+    assert (failed["status"], failed["progress_percent"], failed["progress_message"]) == (
+        "failed", 87.5, "Previous attempt partial fanout",
+    )
+
+    admitted = retry(jobs, failed)
+    assert (admitted["status"], admitted["progress_percent"], admitted["progress_message"]) == (
+        "queued", None, None,
+    )
+    persisted = jobs.get_job(job["id"], owner_user_id="42")
+    assert persisted is not None
+    assert (persisted["progress_percent"], persisted["progress_message"]) == (None, None)
+
+    next_attempt = jobs.acquire_next_job(
+        domain="vn_assets", queue="default", worker_id="next-worker", lease_seconds=60, owner_user_id="42",
+    )
+    assert next_attempt is not None and next_attempt["id"] == job["id"]
+    assert jobs.update_job_progress(
+        job["id"], progress_percent=12.5, progress_message="New attempt fanout",
+    )
+    replay = retry(jobs, failed)
+    assert (replay["status"], replay["progress_percent"], replay["progress_message"]) == (
+        "processing", 12.5, "New attempt fanout",
+    )
+
+
 @pytest.mark.parametrize("field,value", [
     ("owner_user_id", "43"), ("owner_user_id", ""), ("expected_uuid", "wrong"),
     ("domain", "other"), ("queue", "generation"), ("job_type", "wrong"),

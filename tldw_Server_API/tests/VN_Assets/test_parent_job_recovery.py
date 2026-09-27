@@ -344,6 +344,166 @@ def test_full_fanout_without_any_parent_stays_pending(case: RecoveryCase) -> Non
     assert case.jobs.list_jobs(domain="vn_assets") == jobs
 
 
+def terminal_full_fanout_parent(case: RecoveryCase, status: str) -> dict[str, Any]:
+    """Finish real parent fanout and its lease, retaining an approved history row."""
+    slot_id = int(case.service.repo.list_batch_recipes(case.batch_id)[0]["slot_id"])
+    case.service.repo.create_item(
+        pack_id=case.pack_id, slot_id=slot_id, review_status="approved", preferred=True,
+        source="uploaded", source_prompt_snapshot={"prompt": "historical approval"},
+    )
+    created = create_enqueue_batch_job(case.jobs, pack_id=case.pack_id, batch_id=case.batch_id, user_id=42)
+    parent = case.jobs.get_job(created["id"], owner_user_id="42")
+    assert parent is not None
+    VNAssetGenerationWorker(repo=case.service.repo, jobs_manager=case.jobs).handle_enqueue_batch(parent["payload"])
+    batch = case.service.repo.get_batch(case.batch_id)
+    assert batch is not None
+    assert batch["enqueued_count"] == batch["planned_count"] == 2
+    children = case.jobs.list_jobs(
+        domain="vn_assets", queue="generation", job_type="vn_asset_generate_variant", owner_user_id="42",
+    )
+    assert len(children) == 2
+    assert case.child_id in {child["id"] for child in children}
+    acquired = case.jobs.acquire_next_job(
+        domain="vn_assets", queue="default", job_type="vn_asset_enqueue_batch",
+        owner_user_id="42", worker_id="archive-contract-parent", lease_seconds=60,
+    )
+    assert acquired is not None and acquired["id"] == parent["id"]
+    if status == "completed":
+        assert case.jobs.complete_job(parent["id"], worker_id=acquired["worker_id"], lease_id=acquired["lease_id"])
+    else:
+        assert status == "failed"
+        assert case.jobs.fail_job(
+            parent["id"], error="response interrupted after fanout", retryable=False,
+            worker_id=acquired["worker_id"], lease_id=acquired["lease_id"],
+        )
+    terminal = case.jobs.get_job(parent["id"], owner_user_id="42")
+    assert terminal is not None and terminal["status"] == status
+    return terminal
+
+
+@pytest.mark.parametrize("saved_parent", ["unsaved", "linked"])
+@pytest.mark.parametrize("status", ["completed", "failed"])
+def test_archive_only_full_fanout_parent_keeps_public_receipt_pending(
+    case: RecoveryCase, monkeypatch: pytest.MonkeyPatch, saved_parent: str, status: str,
+) -> None:
+    """Native archived parents are evidence, not active authority, even after complete fanout."""
+    parent = terminal_full_fanout_parent(case, status)
+    saved_id = None if saved_parent == "unsaved" else str(parent["id"])
+    case.service.repo.update_batch(case.batch_id, {"job_batch_id": saved_id})
+    monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", "1")
+    monkeypatch.setenv("JOBS_ARCHIVE_COMPRESS", "0")
+    assert case.jobs.prune_jobs(
+        statuses=[status], older_than_days=0, domain="vn_assets", queue="default",
+        job_type="vn_asset_enqueue_batch",
+    ) == 1
+    scope = {
+        "idempotency_key": f"vn_assets:user:42:pack:{case.pack_id}:batch:{case.batch_id}:enqueue",
+        "domain": "vn_assets", "queue": "default", "job_type": "vn_asset_enqueue_batch", "owner_user_id": "42",
+    }
+    native_lookup = case.jobs.get_job_or_archived_by_idempotency_key
+    native_get_job = case.jobs.get_job
+    archived = native_lookup(**scope)
+    assert archived is not None and archived["archived"] is True
+    assert (archived["id"], archived["uuid"], archived["status"], archived["payload"]) == (
+        parent["id"], parent["uuid"], status, {"pack_id": case.pack_id, "batch_id": case.batch_id, "user_id": 42},
+    )
+    assert all(archived[field] == value for field, value in scope.items())
+    assert native_get_job(parent["id"], owner_user_id="42") is None
+    batch_before = case.service.repo.get_batch(case.batch_id)
+    recipes_before = case.service.repo.list_batch_recipes(case.batch_id)
+    items_before = case.service.repo.list_items(case.pack_id)
+    slots_before = case.service.repo.list_slots(case.pack_id)
+    receipt_before = case.record()
+    jobs_before = case.jobs.list_jobs(domain="vn_assets", owner_user_id="42")
+    assert receipt_before["status"] == "in_progress"
+    assert receipt_before["response_json"] == "{}"
+    assert len(items_before) == 1 and items_before[0]["review_status"] == "approved"
+    assert items_before[0]["preferred"]
+    assert len(jobs_before) == 2
+    scoped_reads: list[dict[str, str]] = []
+    active_reads: list[tuple[int, str | None, dict[str, Any] | None]] = []
+
+    def observe_scoped_lookup(
+        *, idempotency_key: str, domain: str, queue: str, job_type: str, owner_user_id: str,
+    ) -> dict[str, Any] | None:
+        """Observe public recovery using the actual scoped archive-capable read."""
+        request = {
+            "idempotency_key": idempotency_key, "domain": domain, "queue": queue,
+            "job_type": job_type, "owner_user_id": owner_user_id,
+        }
+        scoped_reads.append(request)
+        result = native_lookup(**request)
+        assert result == archived
+        return result
+
+    def observe_active_lookup(job_id: int, *, owner_user_id: str | None = None) -> dict[str, Any] | None:
+        """Keep native active authority checks observable, without substituting a row."""
+        result = native_get_job(job_id, owner_user_id=owner_user_id)
+        active_reads.append((job_id, owner_user_id, result))
+        return result
+
+    def no_queue_mutation(*args: Any, **kwargs: Any) -> None:
+        """Complete fanout cannot create or retry a parent to replace missing authority."""
+        pytest.fail("archive-only full fanout attempted Jobs creation or retry admission")
+
+    monkeypatch.setattr(case.jobs, "get_job_or_archived_by_idempotency_key", observe_scoped_lookup)
+    monkeypatch.setattr(case.jobs, "get_job", observe_active_lookup)
+    monkeypatch.setattr(case.jobs, "create_job", no_queue_mutation)
+    monkeypatch.setattr(case.jobs, "retry_failed_job_admission", no_queue_mutation)
+    for _replay in range(2):
+        with pytest.raises(VNAssetGenerationError, match="^idempotency_key_in_progress$") as error:
+            case.replay()
+        assert error.value.retryable is True
+        assert case.record() == receipt_before
+        assert case.service.repo.get_batch(case.batch_id) == batch_before
+        assert case.service.repo.list_batch_recipes(case.batch_id) == recipes_before
+        assert case.service.repo.list_items(case.pack_id) == items_before
+        assert case.service.repo.list_slots(case.pack_id) == slots_before
+        assert case.jobs.list_jobs(domain="vn_assets", owner_user_id="42") == jobs_before
+        assert native_lookup(**scope) == archived
+    assert scoped_reads and all(request == scope for request in scoped_reads)
+    assert active_reads and all(read == (parent["id"], "42", None) for read in active_reads)
+
+
+def test_active_full_fanout_parent_completes_public_receipt_without_queue_mutation(
+    case: RecoveryCase, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A native active completed parent still recovers an unsaved ID without altering history."""
+    parent = terminal_full_fanout_parent(case, "completed")
+    assert case.service.repo.get_batch(case.batch_id)["job_batch_id"] is None
+    batch_before = case.service.repo.get_batch(case.batch_id)
+    recipes_before = case.service.repo.list_batch_recipes(case.batch_id)
+    items_before = case.service.repo.list_items(case.pack_id)
+    slots_before = case.service.repo.list_slots(case.pack_id)
+    jobs_before = case.jobs.list_jobs(domain="vn_assets", owner_user_id="42")
+
+    def no_queue_mutation(*args: Any, **kwargs: Any) -> None:
+        """An authoritative active parent needs neither creation nor retry after full fanout."""
+        pytest.fail("active full fanout attempted Jobs creation or retry admission")
+
+    monkeypatch.setattr(case.jobs, "create_job", no_queue_mutation)
+    monkeypatch.setattr(case.jobs, "retry_failed_job_admission", no_queue_mutation)
+    recovered = case.replay()
+    assert recovered["batch_id"] == case.batch_id
+    assert recovered["job_batch_id"] == str(parent["id"])
+    assert recovered["enqueue_error"] is None
+    completed_receipt = case.record()
+    assert completed_receipt["status"] == "completed"
+    assert case.replay() == recovered
+    assert case.record() == completed_receipt
+    batch_after = case.service.repo.get_batch(case.batch_id)
+    assert batch_after is not None
+    assert {field: value for field, value in batch_after.items() if field != "updated_at"} == {
+        **{field: value for field, value in batch_before.items() if field != "updated_at"},
+        "job_batch_id": str(parent["id"]), "enqueue_error": None,
+    }
+    assert case.service.repo.list_batch_recipes(case.batch_id) == recipes_before
+    assert case.service.repo.list_items(case.pack_id) == items_before
+    assert case.service.repo.list_slots(case.pack_id) == slots_before
+    assert case.jobs.list_jobs(domain="vn_assets", owner_user_id="42") == jobs_before
+    assert case.jobs.get_job(parent["id"], owner_user_id="42") == parent
+
+
 def test_admin_cancelled_parent_is_not_resumed(case: RecoveryCase) -> None:
     """An explicit client retry cannot override deliberate admin cancellation."""
     parent = create_enqueue_batch_job(case.jobs, pack_id=case.pack_id, batch_id=case.batch_id, user_id=42)

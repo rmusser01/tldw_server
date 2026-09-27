@@ -1,5 +1,107 @@
 # PR 3016 VN Durability Review Implementation Plan
 
+## Current Review Wave: Tasks 37-39
+
+Full exact34de108 request5851647535 completed formal5328428101/terminal5851679010
+at2026-09-27T01:38Z; busy5851648753 fresh404. Four new threads4113690642/644/647/651,
+76reviews62threads4unresolved42comments/all outer/nested pages exhausted.
+Tracking TASK-13369; AC5 reopened, AC6 pending. Tasks1-36 remain frozen/CLOSED.
+
+### Stage 1: Verify And Bound New Findings
+**Goal:** Preserve the approved active-Jobs authority contract, repair only verified
+claim scheduling and retry-progress defects, and document the failure helper.
+**Success Criteria:** Archive-only parents remain pending without queue mutation;
+no new archival recovery or universally async DB guarantee.
+**Tests:** Native archive contract controls; sensitive claim responsiveness and
+owned resource/cancellation controls; real SQLite/shared PostgreSQL progress RED.
+**Status:** Complete
+
+### Stage 2: Minimal Corrections
+**Goal:** Task37 awaits the existing complete thread-owned repository boundary for
+claiming; retain all admission inputs, fences and fallback semantics. Add immediate
+failure-helper documentation. Task38 clears progress fields only in both explicit
+retry updates. Task39 tests/reasons about archive rejection, with no production edit.
+**Success Criteria:** No raw SQL outside DB management, Jobs manager/config/fixtures
+unchanged, approved outcomes/counters unchanged; one tier/docs/types for new tests.
+**Tests:** Bounded RED/GREEN, AST/byte preservation, scoped Bandit baseline/static checks.
+**Status:** Complete
+
+### Stage 3: Independent Review And Normal Integration
+**Goal:** Fresh independent SPEC/QUALITY/final changed-contract review, normal scoped
+hooks/commit/push, individual evidence replies and one full new-head Qodo request.
+**Success Criteria:** Exact-head review, all seven real required CI passes, safe
+strict current dev and human summary gates before normal merge. No body PATCH
+approval bypass, tracking-only push, cleanup or repeated broad suites.
+**Tests:** Frozen matching evidence, focused final controls and official live gates.
+**Status:** In Progress
+
+Task37 independent T37-R1 inline cancellation cleanup gap accepted and corrected:
+new claim await cancellation now invokes the existing token-guarded release only
+for job=None, preserving hidden identity and Jobs takeover claims. Actual RED2
+persisted inline fence failures; first GREEN5pass2storage-double API failures NOT
+green; corrected final7pass6warnings10.09s/XML9.076, overlapping/notsummed.
+Original22/firstreviewISSUES preserved, oldliveworker/test superseded; newR1
+frozen19checked0. Task38 Godel CLOSED/frozen37, actualSQLite/sharedPG RED2/GREEN6
+8warnings39.52s/XML39.493; exactbaseline testB608/no new finding, notblanketclean.
+Task39 Volta CLOSED/frozen72, nativearchive5NEWcharacterizations pass6warnings
+7.20s/XML6.244/noRED/no production archive change. Audit-tool failures retained
+and qualified. Pascal fresh SPEC/QUALITY/final changed-contract review ACTIVE.
+Combined runtime SPEC/interaction review PASS; quality held for T37-R1-Q1.
+Import-only correction verified with identical executable AST/import bindings;
+final3pass4deselect6warnings5.60s/XML4.479 overlaps earlier cases, not summed.
+Actual Ruff only unchanged BLE001; old frozen R1 BLE001+I001 report claim explicitly
+corrected in new task-37-quality-correction.md, history intact. Combined Bandit
+one exact baseline testB608/errors[]/onlyB101excluded/notclean. Initial new manifest
+self-reference failure qualified and retained; corrected17entries verified0.
+Pascal scoped final SPEC/QUALITY/changed-contract PASS/no actionable findings,
+CLOSED; new final reviewer4 hashes verified after completed freeze. Audits only,
+no reviewer fresh tests/scanners/base review. Original ISSUES artifacts preserved.
+Controller early missing finalmanifest read exit2 gets no verification credit.
+Applicable explicit8filehooks passed; no-file yaml/toml/wizardRuff/black skipped
+not passes, existing deprecated-stage warnings retained. Source bytes unchanged.
+All main test sessions CLOSED; no broad repeats/oldtaskredispatch/hooks/commit/
+push/replies/merge yet. Actual devf943 advanced; AC5/6pending/bodyapproval not bypassed.
+
+Preflight: Task37 repository/worker/new test and Task38 retry helper/existing retry
+test are disjoint. Task39 only parent recovery tests and new evidence. Shared tracking
+records remain controller-owned. Task37 async helper consumes only plain materialized
+results and uses existing owned-thread cancellation draining. Task38 retains exact
+queue admission/accounting. Task39 does not alter authority or finish an archive receipt.
+Integration preflight: actual protected dev advanced to
+f94375c26e457be1f7752f20c9f11102f2503e42 through MCP PR2997; nine paths have zero
+exact path overlap with58 owned paths including the new claim test. GraphQL base
+lagged f5. Fetch-only completed; inherited automatic packing/gc notices preserved,
+no manual cleanup. Normal scoped commit, new backup and preservation-checked rebase
+will follow independent approval. Existing Backlog records remain preserved, no
+unrelated task renumbering. Human summary unchanged; body approval still pending.
+
+Ruling: Preserve active-row authority for archive-only recovery, as required by the
+approved spec/user. Directly trusting archive rows would add an unapproved recovery
+guarantee; if that scope later changes, it requires a separate design decision.
+
+## Current External Integration Checkpoint
+
+Normal three-file Task36 commit/FFpush/GitHub head34de10820d1d4afffc074365e3f018136efd6849,
+actual protected devf5fa1f3a41855aa02871d8b76d0ec0cebbaf9e07 unchanged/no rebase.
+Tasks1-36 LOCAL COMPLETE/frozen/independently approved; all needed agents/tests/
+hooks/commit/push sessions CLOSED. Applicable three-file hooks Passed/no-file
+Skipped/notpasses/deprecatedstagewarnings retained. Normal commit no hook output,
+no commit-stage execution claim/no bypass; inherited packing/gc notices retained.
+Frozen16/reviewer4+qualified old25/9/Main8 entries actual62checked0 aftercommit.
+Reply4113678151 exactbodyverified/threadPRRT_kwDOL1aGf86mWPKF resolved; fresh
+75reviews58threads0unresolved42comments/all outer+nested pages exhausted.
+ONE full exactheadrequest5851647535 at01:32:32Z PENDING/busy5851648753 at01:32:44Z.
+Pushsummary5836873877 edited01:31:11Z0bugs0rules43historicalomissions/exact34footer
+is NOT full completion. All prior full reviews historical; no duplicate request.
+Exacthead actual54checks33queued21completed(1cancelled1neutral19skipped), no
+actionable failure/allsevenrequiredABSENT/statusCodeRabbitsuccess55011390465only,
+description reviewskipped/not requiredpass. AC5checkedAC6pending/OPENBLOCKED/
+mergedAtnull/no mergeattempt. Only owned task/plan notes dirty/no tracking-only push.
+Both backups/both alreadyapplied retained stashes/main/evidence preserved.
+PR Verification remains stale00:43 manual update; rejected guarded PATCH made no
+mutation, no bypass/retry. User async approval requested, no answer yet. Fresh
+live human summary verified VERBATIM; preserve all other sections/current footer.
+
 ## Current Review Wave: Task 36
 
 **Base head:** 6a3136d993125df7f9fdefe90304437832f7c6c3.
