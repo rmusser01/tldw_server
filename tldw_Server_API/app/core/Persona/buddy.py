@@ -85,8 +85,11 @@ def derive_persona_buddy_core(profile: dict[str, Any]) -> dict[str, Any]:
 def normalize_persona_buddy_overlay_preferences(
     overlay_preferences: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
-    """Preserve overlay preferences while validating the ambient mode contract."""
+    """Normalize visual overrides while preserving and validating ambient preferences."""
     normalized = dict(overlay_preferences or {})
+    for key in ("accessory_id", "eye_style"):
+        if normalized.get(key) is not None:
+            normalized[key] = str(normalized[key])
     ambient_mode = normalized.get("ambient_mode")
     if ambient_mode is not None and ambient_mode not in {"off", "expressive", "roaming"}:
         raise PersonaBuddyValidationError("ambient_mode must be off, expressive, or roaming")
