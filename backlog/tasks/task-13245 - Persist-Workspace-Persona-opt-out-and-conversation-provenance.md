@@ -4,7 +4,7 @@ title: Persist Workspace Persona opt-out and conversation provenance
 status: In Progress
 assignee: []
 created_date: '2026-09-13 18:15'
-updated_date: '2026-09-14 00:09'
+updated_date: '2026-09-27 10:43'
 labels:
   - persona
   - workspaces
@@ -42,6 +42,8 @@ Stage 2 prompt/memory baseline: 13 passed, 9 failed with HTTP 503 missing_provid
 Design prerequisite TASK-13245.1 completed and published as draft PR #2958 (stacked on #2957). Independent review findings resolved at contract level. Parent remains In Progress: all runtime acceptance criteria are unchecked; requester approval is needed before slice 2A implementation.
 
 Requester-requested second design review completed in TASK-13245.1/PR #2958. Verified/amended silent strict-selector downgrade on older servers (dedicated route), mixed-version cached-writer hazard (offline migration), lifecycle activation ordering, and unbounded permanent receipts (finite owner-scoped budget including tombstones). Independent re-review found no remaining material contract issues. Runtime untouched; revised contract and implementation verification gates still apply.
+
+2026-09-27 delivery update: prerequisite resolver/choice and local startup-provenance stack merged normally into dev through PR #2963 at 10:40:42Z, merge commit 056d9adbb3f50243183ba8c6a3e9b367a21f1799 (head e5064376a67997901c2c33ddfe9e83b233c97bdf). TASK-13245.5 Done. All 70 exact-head hosted checks passed; requester-owned human summary and fresh review gates satisfied without admin bypass. Final integration 1095 passed/four known Bash>=4 skips/zero failures, including 734 Persona/Sync cases on official isolated SQLite/live-PostgreSQL fixtures; production Bandit clean across 14 files. Opt-out/provenance migrations are SQLite v69/v70 and PostgreSQL v73/v74. Canonical parity plan records merged 2A/local-2B delivery and exact evidence. Parent remains In Progress and its broad acceptance criteria remain unchecked: Stage 2C dedicated strict startup/versioned receipt/idempotency/send-time admission and Stage 2D broader validation are not implemented or certified by this merge. Tool-profile, provisioning/backfill and Research Workspace surface adoption remain separate open work; do not claim overall parity. Overarching issue #2950 remains open. Shared dirty checkout and other agents containers unchanged; heartbeat stopped.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
