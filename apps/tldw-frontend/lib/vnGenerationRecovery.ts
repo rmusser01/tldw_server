@@ -47,7 +47,7 @@ function validCommand(value: unknown): value is VNPendingCommand {
 export function readVNCommands(scope: VNCommandScope): VNPendingCommand[] {
   try {
     const raw = window.sessionStorage.getItem(VN_COMMAND_STORAGE_KEY);
-    if (!raw) return [];
+    if (raw === null) return [];
     if (raw.length > 32768) throw new VNRecoveryStorageError(true);
     const value: unknown = JSON.parse(raw);
     if (!object(value) || !onlyKeys(value, ['version', 'scope', 'commands']) || value.version !== 1 ||

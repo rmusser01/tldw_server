@@ -4,7 +4,7 @@ title: Recover pending VN generation commands after reload
 status: In Progress
 assignee: []
 created_date: 2026-09-27 15:25
-updated_date: 2026-09-27 17:57
+updated_date: 2026-09-27 18:04
 labels:
 - vn-assets
 - frontend
@@ -64,6 +64,10 @@ CodeRabbit complete exact804c full review finished2026-09-27 17:46:08 with three
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Scoped CodeRabbit fixes verified: the real workbench storage-removal-denial regression failed before the hook change because the warned confirmation checkbox disappeared (1 failed, 37 skipped, 1.60s). The minimal discard catch now preserves unreadable=true after reporting the storage error. With storage denied, the original journal and generation lock remain, confirmation resets and the warned discard path stays visible; after storage restoration, a fresh explicit confirmation/discard succeeds without generation or cancellation. All 98 VN/frontend real fetch-client tests passed (8.97s), typecheck passed, scoped ESLint zero warnings, diff checks passed. Bandit unchanged VN Python baseline has zero findings/errors over 6764 LOC; it does not scan TypeScript. Removed only retired implementation-plan documentation reference through official Backlog mutation; preserved historical notes and corrected own review-plan heading spacing. No backend, workflow, dependency or unrelated task changes. Current dev35d and owned remote804c unchanged before publication; exact-new-head hosted reviews and all live gates remain required. SQLGlot compatibility blocker/requester separate-fix decision remains pending; no merge or deterministic-failure rerun attempted.
+
+Fresh Qodo reassessment of70953 issuecomment5858353005 identified a concrete silent-discard path: readVNCommands uses a falsy check, so an existing empty-string journal is treated as absence and may unlock generation. Verify malformed empty storage with storage and rendered workbench regressions before restricting absence to getItem null. This is within the approved fail-closed frontend contract; no backend scope change. Previously fixed CodeRabbit threads remain resolved and acknowledged; current70953 full CodeRabbit review still pending.
+
+Addressed Qodo issuecomment5858353005: only getItem null denotes absent journal; an existing empty string now reaches JSON validation and is unreadable rather than silently unlocking generation. Real storage regression failed because readVNCommands did not throw; rendered workbench regression failed because Start generation was enabled (2 failed,10 passed,42 skipped,2.15s). Initial UI findByText wait timed out, so it was replaced by awaited render and direct disabled-state assertion; the timeout is not claimed as bug proof. Existing malformed cases and explicit warned discard remain intact; missing-key positive control passes. Final101VN/frontend real fetch-client tests passed13.11s, typecheck/scopedESLint0warnings/diffcheck passed. Shared environments/dependency policy, backend, base workflows, unrelated MCP/tasks untouched. Current dev35d and remote70953 unchanged before next normal publication. All four threads on70953 resolved; new-head full reviews/CI required, separate SQLGlot compatibility decision still pending. No merge attempted.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

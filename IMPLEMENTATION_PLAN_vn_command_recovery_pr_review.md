@@ -45,6 +45,15 @@ heading spacing is corrected here. All 98 VN/frontend fetch-client tests pass
 findings/errors (not a TypeScript scan). Any changed head still requires complete
 reassessment; no backend scope expansion is authorized.
 
+Qodo reassessment of 70953ae10c (issuecomment-5858353005) identified an empty-string
+journal being mistaken for absence. Storage and rendered workbench regressions
+failed before the one-line null-only absence check: storage did not throw and
+Start was enabled (2 failed, 10 passed, 2.15s). The initial UI wait timed out;
+the corrected direct disabled-state assertion supplies genuine regression proof.
+Malformed data stays intact until warned explicit discard; a missing key remains
+valid. All 101 VN/frontend fetch-client tests pass (13.11s), typecheck, scoped
+ESLint and diff checks pass. Complete new-head hosted review remains required.
+
 ## Stage 3: Gated Merge
 
 **Goal**: Merge normally only after current-head review and live dev gates pass.

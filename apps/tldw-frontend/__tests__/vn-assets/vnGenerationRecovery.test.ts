@@ -27,6 +27,7 @@ describe('VN generation recovery journal', () => {
   });
 
   it.each([
+    '',
     '{',
     JSON.stringify({ version: 2, scope, commands: [command] }),
     JSON.stringify({ version: 1, scope, commands: [{ ...command, packId: 0 }] }),
@@ -38,6 +39,11 @@ describe('VN generation recovery journal', () => {
     sessionStorage.setItem(key, raw);
     expect(() => readVNCommands(scope)).toThrow(/could not be read/);
     expect(sessionStorage.getItem(key)).toBe(raw);
+  });
+
+  it('permits generation when the journal key is absent', () => {
+    expect(sessionStorage.getItem(key)).toBeNull();
+    expect(readVNCommands(scope)).toEqual([]);
   });
 
   it('surfaces quota, read and cleanup failures', () => {

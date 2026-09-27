@@ -283,14 +283,15 @@ describe('VNAssetsWorkbench', () => {
     await waitFor(() => expect(screen.getByLabelText('Generation status')).toHaveTextContent('queued'));
   });
 
-  it('guards unreadable recovery until explicit warned discard', async () => {
+  it.each(['{', ''])('guards unreadable recovery until explicit warned discard: %j', async (raw) => {
     existingFailedPack();
-    sessionStorage.setItem('tldw:vn-generation:pending:v1', '{');
+    sessionStorage.setItem('tldw:vn-generation:pending:v1', raw);
     const user = userEvent.setup();
-    render(<VNAssetsWorkbench />);
-    await screen.findByText(/Saved generation requests could not be read/);
+    await act(async () => { render(<VNAssetsWorkbench />); });
     expect(screen.getByRole('button', { name: 'Start generation' })).toBeDisabled();
+    expect(screen.getByText(/Saved generation requests could not be read/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Discard unreadable requests' })).toBeDisabled();
+    expect(sessionStorage.getItem('tldw:vn-generation:pending:v1')).toBe(raw);
     await user.click(screen.getByRole('checkbox', { name: /I checked server status/ }));
     await user.click(screen.getByRole('button', { name: 'Discard unreadable requests' }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
