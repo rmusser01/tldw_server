@@ -23,6 +23,7 @@ EXPECTED_STATUS_CONTEXTS = {
     "dev": "frontend-license-policy/trusted/dev",
 }
 CLASSIFIER = "Helper_Scripts/ci/check_frontend_license_gate.py"
+PUBLISH_CONDITION = "always() && (steps.evaluate.outcome == 'success' || steps.evaluate.outcome == 'failure')"
 EXPECTED_STEP_IDENTITIES = (
     ("Mark trusted policy pending", None, None),
     ("Checkout trusted policy", None, CHECKOUT_ACTION),
@@ -71,7 +72,7 @@ def assert_exact_step_structure(steps: list[dict[str, Any]]) -> None:
         {"name", "if", "shell", "env", "run"},
     ]
     assert [step.get("shell") for step in steps] == ["bash", None, "bash", "bash"]
-    assert steps[3]["if"] == "always()"
+    assert steps[3]["if"] == PUBLISH_CONDITION
     assert steps[3]["env"] == {"VERDICT": "${{ steps.evaluate.outputs.verdict }}"}
 
 
@@ -326,12 +327,34 @@ def test_evaluator_contract_rejects_common_validation_after_owner_branch() -> No
         assert_common_validations_precede_owner(mutated)
 
 
+def test_a_cancelled_run_leaves_the_pending_status_in_place() -> None:
+    """A run that never produced a verdict must not publish one (TASK-13361).
+
+    Gating on `!cancelled()` did not work, which was verified live on 2026-09-27. A run
+    cancelled during checkout, whether by hand or by this workflow's own
+    cancel-in-progress, still ran the publisher and posted failure: the cancelled step
+    left `cancelled()` false for the steps after it. So the publisher is gated on what
+    actually happened. It runs only when the evaluate step reached a verdict (success or
+    failure). A cancel before or during evaluation leaves it skipped or cancelled, and
+    the pending status from the first step stays. That is still fail-closed, because
+    pending never satisfies the required check.
+
+    `always()` is required, not decoration. Without a status function GitHub prefixes an
+    implicit `success() &&`, which would skip the publisher after a genuine policy
+    violation (evaluate failed) and never post the failure.
+    """
+    steps = load_yaml(WORKFLOW_PATH)["jobs"][JOB_ID]["steps"]
+    publisher = next(step for step in steps if step.get("name") == "Publish trusted policy result")
+
+    assert publisher["if"] == PUBLISH_CONDITION
+    assert "always()" in publisher["if"]
+
+
 def test_workflow_publishes_success_only_for_an_explicit_success_verdict() -> None:
     steps = load_yaml(WORKFLOW_PATH)["jobs"][JOB_ID]["steps"]
     publisher = next(step for step in steps if step.get("name") == "Publish trusted policy result")
     script = publisher["run"]
 
-    assert publisher["if"] == "always()"
     assert publisher["env"] == {"VERDICT": "${{ steps.evaluate.outputs.verdict }}"}
     assert "state=failure" in script
     assert script.count("state=success") == 1

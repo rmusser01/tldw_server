@@ -103,7 +103,7 @@ jobs:
           verdict=success
 
       - name: Publish trusted policy result
-        if: always()
+        if: always() && (steps.evaluate.outcome == 'success' || steps.evaluate.outcome == 'failure')
         shell: bash
         env:
           VERDICT: ${{ steps.evaluate.outputs.verdict }}

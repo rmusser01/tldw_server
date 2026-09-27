@@ -17,6 +17,22 @@ and this project adheres to Some kind of Versioning
 ### Removed
 
 
+## [0.1.45] - 2026-09-27
+
+> Patch release. Rolls up the dev changes merged after 0.1.44 (#3029, #3030, #3032).
+> See the [change inventory](Docs/Development/releases/0.1.45-change-inventory.md) and
+> [release plan](Docs/superpowers/plans/2026-09-27-release-0.1.45-plan.md). The protected
+> frontend source is unchanged since 0.1.44.
+
+### Fixed
+
+- **Trusted license gate no longer posts a false policy failure for runs that never produced a verdict.** A run cancelled before or during evaluation, by hand or by the workflow's own cancel-in-progress when a newer run starts, posted `failure` on `frontend-license-policy/trusted/*` and blocked the PR. The publisher now runs only when evaluation reached a verdict, so those runs leave `pending`, which is still fail-closed. The gate runs on `pull_request_target`, which executes the default branch's workflow file, so this release is what puts the fix into effect (#3029, #3032; TASK-13361).
+- **SQLite users bootstrap under sqlglot 30.20.0.** This is dev's equivalent of the fix 0.1.44 shipped, reconciled on merge to keep 0.1.44's backend-scoped check. The canonical SQLite users DDL is now one module constant shared by startup and its tests, and a positive test pins it (#3030).
+
+### Changed
+
+- Backlog ledger: six core-review tasks closed after verification against the code, and TASK-13386 filed (#3029).
+
 ## [0.1.44] - 2026-09-27
 
 > Draft release candidate. Includes all 272 commits and 37 merged PRs

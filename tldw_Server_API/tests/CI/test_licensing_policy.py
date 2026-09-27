@@ -48,6 +48,11 @@ PROTECTED_PACKAGES = [
             "2026-09-27-release-0.1.44-plan.md",
             "task-13264 - Prepare-0.1.44-release-with-all-changes-since-v0.1.43-and-land-prior-closure-records.md",
         ),
+        (
+            "0.1.45",
+            "2026-09-27-release-0.1.45-plan.md",
+            "task-13388 - Prepare-the-0.1.45-release-with-the-dev-changes-since-0.1.44.md",
+        ),
     ],
 )
 def test_release_candidate_authorities_agree_on_protected_source(version: str, plan: str, task: str) -> None:

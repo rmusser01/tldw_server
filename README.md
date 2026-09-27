@@ -114,10 +114,10 @@ Optional add-ons (apply AFTER your base profile is healthy):
 ## Current Status
 
 Current release line:
-- `0.1.44` Beta status. Expect rough edges and please report issues.
+- `0.1.45` Beta status. Expect rough edges and please report issues.
 - Primary client surfaces are the Next.js WebUI, Admin UI, and browser extension.
 - Package metadata is prepared under the canonical PyPI name `tldw-server`; use a repository checkout until publishing is complete.
-- The `dev` branch remains the home for ongoing work beyond `0.1.44`.
+- The `dev` branch remains the home for ongoing work beyond `0.1.45`.
 - This draft candidate includes all changes since `v0.1.43` through frozen PR #3002. See [CHANGELOG.md](CHANGELOG.md) for the PR rollup and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for the published release entry point.
 
 <details>
@@ -194,7 +194,7 @@ Still active on `dev`:
 
 License-first CI follow-ups are merged and included in the 0.1.44 candidate.
 
-Currently landing on `dev` (post-`0.1.44` branch work):
+Currently landing on `dev` (post-`0.1.45` branch work):
 - Follow the backlog for separately tracked UAT, native-fork recovery/synchronization and certification work.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full running history and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for published release notes.
