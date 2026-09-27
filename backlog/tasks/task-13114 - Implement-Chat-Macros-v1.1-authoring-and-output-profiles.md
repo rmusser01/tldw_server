@@ -4,7 +4,7 @@ title: Implement Chat Macros v1.1 authoring and output profiles
 status: In Progress
 assignee: []
 created_date: '2026-08-24 04:15'
-updated_date: '2026-09-27 06:16'
+updated_date: '2026-09-27 07:01'
 labels:
   - chat-macros
   - frontend
@@ -87,6 +87,8 @@ Fingerprint correction verification: regenerated OpenAPI JSON+TypeScript using C
 2026-09-27 02:30 UTC: rebased cleanly onto dev f94375c26e (PR2997 MCP filesystem/test-tooling fixes). All28 prior commits patch-equivalent by range-diff; frontend and Chat Macros files unchanged. Fresh CI-matched OpenAPI contract and full PR whitespace checks pass. No new Qodo findings or comments. Publish with exact lease against0b045e71f7; required CI remains pending. No new application changes or additional security scan scope from this rebase.
 
 2026-09-27 06:15 UTC: rebased cleanly onto dev d5c46570e0 (PR3004 frontend license audit shallow-clone fix). All29 prior commits patch-equivalent by range-diff; apps, backend, and Helper_Scripts trees unchanged. Fresh CI-matched OpenAPI contract and full PR whitespace checks pass. No new Qodo feedback. Prior head had no failures and one remaining in-progress check but was BEHIND. Publish with exact lease against b011f74829; fresh required CI remains the merge gate. No application changes or additional Bandit scope.
+
+2026-09-27 07:00 UTC: rebased cleanly onto dev a6e51f60d5 (PR3007 canonical MCP package license and boundary-test correction). All30 prior PR commits patch-equivalent by range-diff; frontend and Chat Macros unchanged. Fresh CI-matched OpenAPI contract and full PR whitespace checks pass. No new Qodo feedback. Previous head had no CI failures but was BEHIND. Publish with exact lease against7870dde81b; fresh required CI remains pending. No new authored application code or additional Bandit scope.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
