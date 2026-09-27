@@ -41,7 +41,7 @@ def test_upgrade_reopen_preserves_chat_and_installs_native_storage(
     for _ in range(2):
         upgraded = CharactersRAGDB(**kwargs)
         assert upgraded.execute_query("SELECT content FROM messages WHERE id = ?", (mid,)).fetchone()["content"] == "keep this turn"
-        expected_version = 76 if backend_name == "postgres" else 72
+        expected_version = 77 if backend_name == "postgres" else 73
         assert upgraded.execute_query(
             "SELECT version FROM db_schema_version WHERE schema_name = ?", (CharactersRAGDB._SCHEMA_NAME,)
         ).fetchone()["version"] == expected_version
@@ -216,7 +216,7 @@ def test_colliding_native_lineage_preserves_receipts_or_rolls_back(
                     )) == ("native-fork-v1", "native_fork_v1", "operation", '{"preserved":true}')
                     assert child["assistant_startup_json"] is None
                     assert upgraded.execute_query("SELECT version FROM db_schema_version").fetchone()["version"] == (
-                        76 if backend_name == "postgres" else 72
+                        77 if backend_name == "postgres" else 73
                     )
                 finally:
                     upgraded.close_connection()

@@ -18,8 +18,8 @@ vi.mock("react-i18next", () => ({
 }))
 
 vi.mock("@/components/Common/PersonaBuddy/SpriteFrameRenderer", () => ({
-  SpriteFrameRenderer: ({ state }: { state: string }) => (
-    <div data-testid="sprite-frame-renderer">Sprite preview: {state}</div>
+  SpriteFrameRenderer: ({ requestedState }: { requestedState: string }) => (
+    <div data-testid="sprite-frame-renderer">Sprite preview: {requestedState}</div>
   )
 }))
 
@@ -58,9 +58,22 @@ const manifest: PersonaVisualManifest = {
 
 const asset: PersonaVisualAsset = {
   id: "idle-frame",
+  pack_id: "pack-1",
+  persona_id: "persona-1",
   asset_role: "frame",
+  storage_key: "persona-1/pack-1/idle-frame",
   url: "https://example.test/idle.png",
-  mime_type: "image/png"
+  original_filename: "idle.png",
+  mime_type: "image/png",
+  byte_size: 1,
+  checksum_sha256: "0".repeat(64),
+  width: null,
+  height: null,
+  duration_ms: null,
+  provenance: "uploaded",
+  created_at: "2026-08-23T00:00:00Z",
+  last_modified: "2026-08-23T00:00:00Z",
+  version: 1
 }
 
 const preview = (
