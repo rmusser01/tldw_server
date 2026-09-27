@@ -478,3 +478,28 @@ Tracked changes are Markdown/task records only, so Bandit has no applicable
 production Python scope. The bounded diagnostic is complete; root-cause repair,
 native arm64, full workflow on the latest source and broader release gates
 remain open. Existing CI jobs were neither retried nor cancelled.
+
+## Approved Docker browser-download correction
+
+The requester approved the prepared Docker-only proposal. TASK-13376.12 scopes
+`PUPPETEER_SKIP_DOWNLOAD=true` to the shared dependency install RUN. Bun 1.3.2,
+the frozen lockfile, other lifecycle scripts, local developer installs, runtime
+configuration and Playwright qualification remain unchanged.
+
+A command-behavior regression executes the actual RUN with an inert Bun
+fixture and checks the child flag plus ordinary frozen-install arguments. It
+failed before the fix as expected, then all 58 focused Docker hardening,
+same-origin and managed-config checks passed. The existing source-string install
+assertion was replaced by this behavior check. Independent review identified
+Windows test portability; shell discovery, LF fixture bytes, Windows drive-path
+conversion and a bounded subprocess corrected it. The revised 58 checks passed
+and the reviewer found no remaining actionable issues. Native Windows execution
+is not verified by the macOS test run. Scoped Black checks and Bandit passed;
+test-only subprocess annotations explain the reviewed inert fixture boundary.
+Four existing fixture warnings are retained in the private test logs.
+
+The prior `3ef013bd94` native run has since completed: amd64 and Windows helper
+syntax succeeded, arm64 ended cancelled and the combined-platform gate skipped.
+This task did not cancel or retry it. Fresh actual production-build and signed
+candidate qualification are next on the committed correction; no successful
+build, repaired internal Puppeteer wait or release gate is claimed yet.

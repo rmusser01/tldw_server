@@ -12,7 +12,8 @@ COPY apps/extension/scripts/wxt-prepare.mjs /app/apps/extension/scripts/wxt-prep
 COPY apps/packages/voice-assistant-sdk/package.json /app/apps/packages/voice-assistant-sdk/package.json
 COPY apps/tldw-frontend /app/apps/tldw-frontend
 COPY apps/packages/ui /app/apps/packages/ui
-RUN bun install --frozen-lockfile --cwd /app/apps
+# The production WebUI does not use the CDP developer tool browser.
+RUN PUPPETEER_SKIP_DOWNLOAD=true bun install --frozen-lockfile --cwd /app/apps
 
 FROM dependencies AS quickstart-builder
 ARG NEXT_PUBLIC_API_URL=

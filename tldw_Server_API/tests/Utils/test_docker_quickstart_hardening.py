@@ -1,4 +1,7 @@
+import os
 import re
+import shutil
+import subprocess  # nosec B404: execute only the reviewed RUN with an inert test fixture.
 from pathlib import Path
 
 import pytest
@@ -252,9 +255,32 @@ def test_webui_dockerfile_copies_only_required_workspace_sources():
         "pkg.workspaces=" not in text,
         "Expected Dockerfile.webui not to rewrite the workspace manifest because that invalidates the frozen lockfile",
     )
+
+
+def test_webui_dependency_install_skips_only_unused_browser_downloads(tmp_path: Path) -> None:
+    """The install child must skip browsers without disabling lifecycle scripts."""
+    dependencies = _stage_block(_read_text("Dockerfiles/Dockerfile.webui"), "dependencies", "oven/bun:1.3.2-debian")
+    commands = [line[4:] for line in dependencies.splitlines() if line.startswith("RUN ")]
+    _require(len(commands) == 1, "Expected one dependency install command")
+    bun = tmp_path / "bun"
+    bun.write_bytes(b'#!/bin/sh\nprintf "%s\\n" "${PUPPETEER_SKIP_DOWNLOAD-}" "$@"\n')
+    bun.chmod(0o700)
+    shell = shutil.which("sh") or shutil.which("bash")
+    _require(shell is not None, "A POSIX shell is required to test the Docker install command")
+    fixture_path = tmp_path.as_posix()
+    if os.name == "nt":
+        fixture_path = f"/{fixture_path[0].lower()}{fixture_path[2:]}"
+    result = subprocess.run(  # nosec B603: checked-in Docker RUN with an inert Bun fixture.
+        [shell, "-c", 'PATH="$TLDW_BUN_FIXTURE" ' + commands[0]],
+        env=dict(os.environ, TLDW_BUN_FIXTURE=fixture_path, PUPPETEER_SKIP_DOWNLOAD="false"),
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
     _require(
-        "RUN bun install --frozen-lockfile --cwd /app/apps" in dependencies,
-        "Expected Dockerfile.webui to install with the committed Bun lockfile",
+        result.stdout.splitlines() == ["true", "install", "--frozen-lockfile", "--cwd", "/app/apps"],
+        "Expected browser downloads disabled only for the ordinary frozen install child",
     )
 
 
