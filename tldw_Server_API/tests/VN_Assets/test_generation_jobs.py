@@ -1827,6 +1827,74 @@ def test_approved_background_item_enqueues_lazy_depth_generation(
     assert f'"slot_ids": [{depth.id}]' in batch["options_json"]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("variant_fails", [False, True])
+@pytest.mark.parametrize("full_enqueue_rejected", [False, True])
+async def test_zero_variant_full_batch_preserves_active_lazy_depth_outcome(
+    service: VNAssetPackService,
+    character_id: int,
+    fake_jobs: FakeJobs,
+    variant_fails: bool,
+    full_enqueue_rejected: bool,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    class DepthImageAdapter(FakeImageAdapter):
+        def generate(self, request: Any) -> ImageGenResult:
+            if variant_fails:
+                raise RuntimeError("depth generation failed")
+            return super().generate(request)
+
+    pack = service.create_pack(VNAssetPackCreate(title="Active depth", primary_character_id=character_id))
+    background = service.create_slot(
+        pack.id, VNAssetSlotCreate(asset_type="background", slot_key="background.interior", variant_count=1),
+    )
+    depth = service.create_slot(
+        pack.id, VNAssetSlotCreate(
+            asset_type="depth_companion", slot_key="depth.interior", variant_count=0,
+            required_for_runtime=False, depends_on_slot_id=background.id,
+        ),
+    )
+    item = service.repo.create_item(pack_id=pack.id, slot_id=background.id, review_status="draft")
+    service.review_item_for_pack(
+        pack.id, int(item["id"]), VNAssetReviewRequest(review_status="approved", preferred=True),
+    )
+    parent = fake_jobs.created[-1]
+    lazy_batch_id = parent["payload"]["batch_id"]
+    worker = VNAssetGenerationWorker(
+        repo=service.repo, jobs_manager=fake_jobs,
+        image_registry=FakeImageRegistry(DepthImageAdapter()), backend_gate=FakeGenerationGate(),
+        save_vn_asset_image=RecordingVNSaver(),
+    )
+    worker.handle_enqueue_batch(parent["payload"])
+    child = fake_jobs.created[-1]
+    service.repo.mark_slot_generation_started(depth.id, lazy_batch_id)
+    assert service.get_readiness(pack.id).status == "generating"
+
+    if full_enqueue_rejected:
+        with pytest.raises(ValueError, match="queued job quota exceeded"):
+            service.start_generation(pack.id, jobs_manager=RejectingJobs())
+    else:
+        service.start_generation(pack.id)
+    full_batch = service.repo.list_batches(pack.id)[0]
+    full_recipe = json.loads(full_batch["recipe_json"])
+    assert next(slot for slot in full_recipe["slots"] if slot["slot_id"] == depth.id)["variant_count"] == 0
+
+    if variant_fails:
+        with pytest.raises(RuntimeError, match="depth generation failed"):
+            await worker.handle_generate_variant(child["payload"])
+    else:
+        await worker.handle_generate_variant(child["payload"])
+
+    stored_depth = service.repo.get_slot(depth.id)
+    assert stored_depth["status"] == ("failed" if variant_fails else "reviewing")
+    assert service.get_readiness(pack.id).status != "generating"
+    assert stored_depth["latest_generation_batch_id"] == lazy_batch_id
+    assert stored_depth["last_failed_batch_id"] == (lazy_batch_id if variant_fails else None)
+    assert stored_depth["last_error"] == ("depth generation failed" if variant_fails else None)
+    assert service.repo.get_slot(background.id)["latest_generation_batch_id"] == full_batch["id"]
+
+
 def test_lazy_depth_generation_does_not_duplicate_active_depth_batch(
     service: VNAssetPackService,
     character_id: int,

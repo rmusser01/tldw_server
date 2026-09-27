@@ -123,6 +123,10 @@ work. Query the owner-scoped batch group across both queues in one snapshot,
 including a persisted parent whose enqueue response was lost. Once there is no
 active source work, a genuine enqueue rejection remains retryable.
 
+Accepting a queued batch claims slot outcome ownership only for recorded slots
+with planned variants. Zero-variant lazy-depth entries remain in the recipe,
+but cannot replace an active depth batch's ownership or suppress its outcome.
+
 ## Verification
 
 Backend tests edit pack, slot, character, and world-book data after acceptance

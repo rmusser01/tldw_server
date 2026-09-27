@@ -1786,6 +1786,7 @@ class VNAssetPacksRepository:
                     (
                         (batch_id, int(slot["slot_id"]), pack_id)
                         for slot in recipe.get("slots", [])
+                        if int(slot["variant_count"]) > 0
                     ),
                 )
         batch = self.get_batch(batch_id)
