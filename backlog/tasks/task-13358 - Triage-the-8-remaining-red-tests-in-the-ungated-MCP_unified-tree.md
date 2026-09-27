@@ -1,9 +1,10 @@
 ---
 id: TASK-13358
 title: Triage the 8 remaining red tests in the ungated MCP_unified tree
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-23 15:04'
+updated_date: '2026-09-27 15:07'
 labels:
   - testing
   - mcp
@@ -40,6 +41,12 @@ Sequence: settle the flashcards isolation one first (security), then the two `ga
 - [ ] #3 The flashcards cross-workspace isolation property is actually verified, not merely no longer erroring
 - [ ] #4 The tree reaches zero failures so TASK-13291 can gate it
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+All 8 were stale tests, none a product defect. Fixed in PR #3025: 277 passed, 5 skipped across the 8 files on latest dev.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
