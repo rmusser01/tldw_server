@@ -109,7 +109,7 @@ function normalizeApiErrorBody(errorBody: ApiErrorResponse, statusCode: number, 
       };
     }
     const rejection = statusCode === 409 && vnGenerationRequest
-      ? asVNGenerationRejectionCode(errorBody.detail.error_code) : undefined;
+      ? asVNGenerationRejectionCode(errorBody.detail.code) : undefined;
     if (rejection) return { detail: VN_GENERATION_REJECTION_MESSAGES[rejection], errorCode: rejection };
   }
   // Untyped 5xx bodies are not a public contract and may contain raw upstream
