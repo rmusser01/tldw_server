@@ -115,7 +115,7 @@ VERIFICATION
   test_audio_router_import_survives_broken_streaming_module, fails identically on clean dev
   with `AttributeError: '_IncludedRouter' object has no attribute 'path'` and is an artefact of
   this venv running FastAPI 0.141.1 against a pyproject pin of >=0.136.3,<0.137.0 -- see
-  TASK-13364. Unrelated to resampling.
+  TASK-13382. Unrelated to resampling.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

@@ -1,5 +1,5 @@
 ---
-id: TASK-13364
+id: TASK-13382
 title: >-
   Local venv runs FastAPI outside the declared pin, so route-introspection tests
   diverge from CI
