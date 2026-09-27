@@ -584,8 +584,6 @@ def test_profile_anchor_ddl_requires_one_shot_capability(statement: str) -> None
         )
 
 
-
-
 def test_the_sqlite_users_bootstrap_is_canonical() -> None:
     """The exact DDL Users_DB runs on SQLite must pass the guard.
 
@@ -607,6 +605,8 @@ def test_the_sqlite_users_bootstrap_rejects_autoincrement_off_the_id_column() ->
     )
     assert moved != _SQLITE_USERS_BOOTSTRAP
     assert not _is_canonical_users_bootstrap_sql(moved, backend="sqlite")
+
+
 @pytest.fixture
 def canonical_sqlite_users_bootstrap() -> str:
     return _SQLITE_USERS_BOOTSTRAP
