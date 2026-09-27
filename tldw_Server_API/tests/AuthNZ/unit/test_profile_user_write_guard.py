@@ -22,6 +22,11 @@ from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
     _revoke_profile_user_sql,
 )
 
+# The exact statement Users_DB runs at startup, not a copy that could drift from it.
+from tldw_Server_API.app.core.DB_Management.Users_DB import (
+    _SQLITE_USERS_BOOTSTRAP_SQL as _SQLITE_USERS_BOOTSTRAP,
+)
+
 pytestmark = pytest.mark.unit
 
 
@@ -577,6 +582,31 @@ def test_profile_anchor_ddl_requires_one_shot_capability(statement: str) -> None
             connection_identity=connection,
             operation="execute",
         )
+
+
+
+
+def test_the_sqlite_users_bootstrap_is_canonical() -> None:
+    """The exact DDL Users_DB runs on SQLite must pass the guard.
+
+    Only the PostgreSQL bootstrap had a positive test. sqlglot 30.20.0 stopped rendering a
+    standalone AutoIncrementColumnConstraint (it now emits AUTOINCREMENT only with its
+    INTEGER PRIMARY KEY context), so the guard compared '' to 'AUTOINCREMENT', rejected the
+    canonical table, and every SQLite AuthNZ startup failed with "Failed to create users
+    table". Nothing failed here, because nothing here asserted the SQLite shape.
+    """
+    assert _is_canonical_users_bootstrap_sql(_SQLITE_USERS_BOOTSTRAP, backend="sqlite")
+
+
+def test_the_sqlite_users_bootstrap_rejects_autoincrement_off_the_id_column() -> None:
+    """Control: accepting AUTOINCREMENT by type must not accept it on any column."""
+    moved = _SQLITE_USERS_BOOTSTRAP.replace(
+        "failed_login_attempts INTEGER NOT NULL DEFAULT 0",
+        "failed_login_attempts INTEGER NOT NULL DEFAULT 0 AUTOINCREMENT",
+        1,
+    )
+    assert moved != _SQLITE_USERS_BOOTSTRAP
+    assert not _is_canonical_users_bootstrap_sql(moved, backend="sqlite")
 
 
 def test_users_bootstrap_requires_exact_one_shot_capability() -> None:
