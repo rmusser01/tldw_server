@@ -219,7 +219,8 @@ def test_frontend_required_uses_isolated_vitest_shards() -> None:
     unit_job = jobs["frontend-unit-tests"]
     steps = unit_job["steps"]
 
-    assert unit_job["needs"] == ["changes", "admission"]
+    # License-first: every gated job also waits on the license audit (await_license).
+    assert unit_job["needs"] == ["changes", "admission", "await_license"]
     assert unit_job["timeout-minutes"] == 60
     assert unit_job["strategy"] == {
         "fail-fast": False,
@@ -303,7 +304,7 @@ def test_frontend_required_uses_isolated_vitest_shards() -> None:
     } == {"^28.1.0"}
 
     final_job = jobs["frontend-required"]
-    assert final_job["needs"] == ["changes", "admission", "frontend-unit-tests"]
+    assert final_job["needs"] == ["changes", "admission", "frontend-unit-tests", "await_license"]
     assert final_job["timeout-minutes"] == 120
     final_steps = final_job["steps"]
     assert not any(step.get("name") == "Run frontend unit tests" for step in final_steps)
@@ -724,7 +725,7 @@ def test_full_suite_summaries_follow_backend_path_filter() -> None:
 
     for summary_job, shard_job in summary_to_shards.items():
         job = workflow["jobs"][summary_job]
-        assert job["needs"] == [shard_job, "changes", "admission"]
+        assert job["needs"] == [shard_job, "changes", "admission", "await_license"]
         assert job["if"] == expected_if
 
 
