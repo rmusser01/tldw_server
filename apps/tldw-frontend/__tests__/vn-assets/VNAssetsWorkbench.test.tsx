@@ -179,6 +179,104 @@ describe('VNAssetsWorkbench', () => {
     expect(sessionStorage.length).toBe(0);
   });
 
+  it.each(['success', 'error'])('reports an invalid server setting when an in-flight request returns %s', async (outcome) => {
+    existingFailedPack();
+    let resolve!: (value: unknown) => void;
+    let reject!: (error: Error) => void;
+    mocks.startVNAssetGeneration.mockImplementationOnce(() => new Promise((accept, fail) => {
+      resolve = accept;
+      reject = fail;
+    }));
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Start generation' }));
+    await waitFor(() => expect(mocks.startVNAssetGeneration).toHaveBeenCalledTimes(1));
+    const saved = sessionStorage.getItem('tldw:vn-generation:pending:v1');
+    const request = mocks.startVNAssetGeneration.mock.calls[0][1];
+    mocks.apiBaseUrl.mockReturnValue('ftp://invalid-server.example/api/v1');
+    await act(async () => {
+      if (outcome === 'success') resolve({ status: 'queued', batch_id: 41 });
+      else reject(new Error('Response lost'));
+    });
+    expect(screen.getByText('Current server and account could not be verified.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start generation' })).toBeDisabled();
+    expect(screen.getByLabelText('Generation status')).not.toHaveTextContent('queued');
+    expect(sessionStorage.getItem('tldw:vn-generation:pending:v1')).toBe(saved);
+    mocks.apiBaseUrl.mockReturnValue('http://localhost:8000/api/v1');
+    await user.click(screen.getByRole('button', { name: 'Retry recovery check' }));
+    await user.click(await screen.findByRole('button', { name: 'Recover pending request' }));
+    await waitFor(() => expect(mocks.startVNAssetGeneration.mock.calls[1]).toEqual([7, request]));
+    await waitFor(() => expect(sessionStorage.length).toBe(0));
+  });
+
+  it.each(['start', 'retry'])('retains a new %s command after an unclassified HTTP 400 admission failure', async (kind) => {
+    existingFailedPack();
+    const send = kind === 'start' ? mocks.startVNAssetGeneration : mocks.retryVNAssetSlot;
+    send.mockRejectedValueOnce(Object.assign(new Error('Job admission failed'), { status: 400 }));
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    const button = await screen.findByRole('button', { name: kind === 'start' ? 'Start generation' : 'Retry sprite_neutral' });
+    await waitFor(() => expect(button).toBeEnabled());
+    await user.click(button);
+    await screen.findByText('Job admission failed');
+    expect(sessionStorage.length).toBe(1);
+    expect(screen.getByRole('button', { name: 'Start generation' })).toBeDisabled();
+    const original = send.mock.calls[0];
+    await user.click(screen.getByRole('button', { name: 'Recover pending request' }));
+    await waitFor(() => expect(send.mock.calls[1]).toEqual(original));
+    await waitFor(() => expect(sessionStorage.length).toBe(0));
+  });
+
+  it('does not report an invalid server setting from an already stale account response', async () => {
+    existingFailedPack();
+    let response!: (value: unknown) => void;
+    mocks.startVNAssetGeneration.mockImplementationOnce(() => new Promise((resolve) => { response = resolve; }));
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Start generation' }));
+    await waitFor(() => expect(mocks.startVNAssetGeneration).toHaveBeenCalledTimes(1));
+    mocks.profile.mockResolvedValue({ user: { id: 2, is_active: true } });
+    act(() => window.dispatchEvent(new CustomEvent('tldw:auth-principal-changed', { detail: { kind: 'switch' } })));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
+    mocks.apiBaseUrl.mockReturnValue('ftp://invalid-server.example/api/v1');
+    await act(async () => response({ status: 'queued', batch_id: 41 }));
+    expect(screen.queryByText('Current server and account could not be verified.')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Generation status')).not.toHaveTextContent('queued');
+    expect(mocks.startVNAssetGeneration).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['start', 'retry'].flatMap((kind) => [400, 403, 404, 409, 422].map((status) => ({ kind, status }))))(
+    'retains an ambiguous $kind request when replay returns HTTP $status', async ({ kind, status }) => {
+      existingFailedPack();
+      const send = kind === 'start' ? mocks.startVNAssetGeneration : mocks.retryVNAssetSlot;
+      const message = status === 403 ? 'CSRF validation failed. Refresh the page and try again.' : 'Replay could not be admitted';
+      send.mockRejectedValueOnce(new Error('Original response lost'))
+        .mockRejectedValueOnce(Object.assign(new Error(message), {
+          name: 'ApiError', status, detail: message,
+          ...(status === 409 ? { errorCode: 'vn_asset_retry_source_unavailable' } : {}),
+        }));
+      const user = userEvent.setup();
+      render(<VNAssetsWorkbench />);
+      const button = await screen.findByRole('button', { name: kind === 'start' ? 'Start generation' : 'Retry sprite_neutral' });
+      await waitFor(() => expect(button).toBeEnabled());
+      await user.click(button);
+      await screen.findByText('Original response lost');
+      const original = send.mock.calls[0];
+      const saved = sessionStorage.getItem('tldw:vn-generation:pending:v1');
+      await user.click(screen.getByRole('button', { name: 'Recover pending request' }));
+      await screen.findByText(message);
+      expect(sessionStorage.getItem('tldw:vn-generation:pending:v1')).toBe(saved);
+      expect(send.mock.calls[1]).toEqual(original);
+      expect(screen.getByRole('button', { name: 'Start generation' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Retry sprite_neutral' })).toBeDisabled();
+      await user.click(screen.getByRole('button', { name: 'Recover pending request' }));
+      await waitFor(() => expect(send.mock.calls[2]).toEqual(original));
+      await waitFor(() => expect(sessionStorage.length).toBe(0));
+    },
+  );
+
   it('keeps a newer account command locked when an old profile check completes', async () => {
     existingFailedPack();
     const user = userEvent.setup();

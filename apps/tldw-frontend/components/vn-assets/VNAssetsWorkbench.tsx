@@ -350,7 +350,7 @@ export default function VNAssetsWorkbench() {
       }
     } catch (startError) {
       if (!recovery.isCurrent(capture)) return;
-      if (isVNGenerationRejected(startError)) recovery.forget(capture, command);
+      if (!recover && isVNGenerationRejected(startError)) recovery.forget(capture, command);
       if (selectedPackIdRef.current === packId) {
         setError(startError instanceof Error ? startError.message : 'Generation could not be started. Retry to check the same request.');
       }

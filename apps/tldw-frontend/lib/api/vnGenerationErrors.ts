@@ -19,6 +19,6 @@ export function asVNGenerationRejectionCode(value: unknown): VNGenerationRejecti
 export function isVNGenerationRejected(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
   const { status, errorCode } = error as { status?: number; errorCode?: string };
-  return (status !== undefined && [400, 403, 404, 422].includes(status)) ||
+  return (status !== undefined && [403, 404, 422].includes(status)) ||
     (status === 409 && asVNGenerationRejectionCode(errorCode) !== undefined);
 }

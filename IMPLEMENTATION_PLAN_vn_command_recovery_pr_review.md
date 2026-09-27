@@ -10,7 +10,7 @@ merge. Preserve the human-written Change summary verbatim and unrelated work.
 **Success Criteria**: Clean tracked checkout and matching remote ownership before
 rebase; conflict-free rebase and all prior patches unchanged in range-diff; explicit
 expected-head lease on publication. Exclude local preview link and archive13379.
-**Tests**: Range-diff, unrelated base-file equality, 128 VN/fetch/shared-auth tests,
+**Tests**: Range-diff, unrelated base-file equality, VN/fetch/shared-auth tests,
 frontend typecheck, scoped lint, diff checks; unchanged VN Python Bandit baseline.
 **Status**: Complete
 
@@ -107,6 +107,23 @@ reconciliation outside this frontend slice. Valid ambiguous commands remain
 locked with their original key; warned discard is only offered for unreadable
 storage. This is not an exactly-once or definitive server-outcome guarantee.
 Complete review and CI on the newly published base/head remain required.
+
+The complete 97b7 reviews identified three additional scoped findings:
+Qodo 4116594441 (invalid current server setting hidden by `isCurrent`), Qodo
+4116594446 (replay CSRF rejection erases an earlier ambiguous command), and
+CodeRabbit 4116602159 (generic HTTP 400 may follow batch creation).
+Fourteen rendered regressions failed before the fixes (5.39s): two lacked a
+validation warning and twelve lost their saved command. Current scope-validation
+failure now reports a safe error and blocks generation without applying the
+response or removing the journal. Stale authority guards run before validation.
+Generic 400 no longer establishes initial rejection; all failed replays retain
+the original request because they cannot prove its earlier outcome. No new
+backend codes or admission behavior are introduced. Initial known 409 rejection
+cleanup remains supported. Focused scope/fencing checks pass (5), admission and
+known-rejection checks pass (4), and replay/rejection checks pass (15). The first
+full run passed 142 tests (41.42s); with the stale-invalid-server control, final
+verification passed all 143 tests (29.53s). Both scoped lint commands and
+typecheck pass, and unchanged VN Python Bandit has zero findings/errors.
 
 ## Stage 3: Gated Merge
 

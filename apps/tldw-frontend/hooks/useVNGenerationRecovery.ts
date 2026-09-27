@@ -30,11 +30,16 @@ export function useVNGenerationRecovery(onBoundary: (resetAccount: boolean) => v
   }, []);
 
   const isCurrent = useCallback((capture: Capture) => {
+    if (!mounted.current || epoch.current !== capture.epoch || !sameVNCommandScope(scope.current, capture.scope)) return false;
     try {
-      return mounted.current && epoch.current === capture.epoch && sameVNCommandScope(scope.current, capture.scope) &&
-        createVNCommandScope(getApiBaseUrl(), Number(capture.scope.principal)).server === capture.scope.server;
-    } catch { return false; }
-  }, []);
+      return createVNCommandScope(getApiBaseUrl(), Number(capture.scope.principal)).server === capture.scope.server;
+    } catch {
+      scope.current = null;
+      setReady(false);
+      report(new Error('Current server and account could not be verified.'));
+      return false;
+    }
+  }, [report]);
 
   const verify = useCallback(async (reloadDetails = false): Promise<Capture | null> => {
     let revision = epoch.current;
