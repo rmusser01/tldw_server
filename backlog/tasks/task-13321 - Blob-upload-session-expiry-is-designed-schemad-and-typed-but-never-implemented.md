@@ -6,7 +6,6 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-09-22 04:55'
-updated_date: '2026-09-27 17:24'
 labels:
   - bug
   - sync
@@ -50,12 +49,6 @@ Found by the comprehensive core-module review; the absent writer, dead state and
 - [ ] #6 The notes.py upload flow returns the upload_id and compensates on failure so cancel is reachable
 - [ ] #7 Design doc and ADR per CLAUDE.md, since this adds a lifecycle transition
 <!-- AC:END -->
-
-## Implementation Notes
-
-<!-- SECTION:NOTES:BEGIN -->
-Partly done in #3006 (merged): expires_at stamped on create (SYNC_V2_BLOB_UPLOAD_SESSION_TTL_SECONDS, default 86400); quota queries exclude expired sessions; chunk upload and completion refuse expired sessions. See ADR-048. Still open: (1) no sweep deletes staged chunk files of expired sessions from disk; (2) the notes.py upload flow has no compensating cancel and returns no upload_id.
-<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

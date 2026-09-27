@@ -6,7 +6,7 @@ title: >-
 status: Done
 assignee: []
 created_date: '2026-09-22 04:51'
-updated_date: '2026-09-27 17:24'
+updated_date: '2026-09-27 17:32'
 labels:
   - bug
   - sync
@@ -54,7 +54,19 @@ Found by the comprehensive core-module review (Sync reviewer, reproduced end-to-
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Verified on dev 2026-09-27: blocker check in _scan_pull_page (Sync/v2/service.py) plus test_legacy_pull_does_not_advance_past_unresolved_conflict (#2982). The shared-helper criterion was declined with a reason.
+Fixed on branch ci/review-followup-visibility.
+
+Reproduced first: test_legacy_pull_does_not_advance_past_unresolved_conflict in tldw_Server_API/tests/Sync/test_sync_v2_service.py, mirroring the versioned test named in the description. Failed with assert [] == ['later-v1'] against unfixed code.
+
+The fix is in _scan_pull_page, not at the call site. First attempt bounded the caller's watermark by the blocker cursor (the shape AC #2 describes) and broke test_conflict_resolution_rebases_later_dependency_and_paginates_without_queued_history: pinning the cursor while has_more stayed True is a livelock, a client polls forever without progressing. That pre-existing test is a no-progress guard and it is correct; dev only satisfied it by losing the data.
+
+The scan now ends at the blocker instead of filtering around it, matching how _scan_pull_page_versioned breaks out of its merge loop. raw no longer contains withheld envelopes, so both the watermark (max of raw) and has_more (len(raw) > page_limit) follow from the filtered list with no caller change -- AC #3 falls out of the same edit. 16 lines in app code.
+
+AC #2 not taken literally: the two paths were not merged into a shared helper. The versioned scan additionally carries restore_barrier and per-stream watermarks, so a common helper would have to take both, and the structural parity that actually matters -- neither scan emits envelopes at or past the blocker -- is now present in both. Extracting the helper is a refactor with its own blast radius, not part of a data-loss fix.
+
+Verification: tldw_Server_API/tests/Sync/test_sync_v2_service.py 166 passed (was 165 + the new test), including test_versioned_pull_does_not_advance_past_unresolved_conflict (AC #4) and the pagination-progress guard. ruff clean.
+
+Closed 2026-09-27, re-verified on dev. AC #2 stays unchecked on purpose: declined for the reason recorded above, not left undone.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
