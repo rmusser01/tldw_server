@@ -79,6 +79,39 @@ _USERS_DB_NONCRITICAL_EXCEPTIONS = (
     sqlite3.Error,
 )
 
+# The canonical SQLite users DDL. Module-level so the write-guard tests assert the exact
+# statement startup runs, not a copy that can drift from it.
+_SQLITE_USERS_BOOTSTRAP_SQL = """
+                            CREATE TABLE IF NOT EXISTS main.users (
+                                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                uuid TEXT UNIQUE NOT NULL DEFAULT (lower(hex(randomblob(16)))),
+                                username TEXT UNIQUE NOT NULL,
+                                email TEXT UNIQUE NOT NULL,
+                                password_hash TEXT NOT NULL,
+                                metadata TEXT,
+                                is_active INTEGER NOT NULL DEFAULT 1,
+                                is_superuser INTEGER NOT NULL DEFAULT 0,
+                                role TEXT NOT NULL DEFAULT 'user',
+                                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                last_login TIMESTAMP,
+                                email_verified INTEGER NOT NULL DEFAULT 0,
+                                is_verified INTEGER NOT NULL DEFAULT 0,
+                                two_factor_enabled INTEGER NOT NULL DEFAULT 0,
+                                failed_login_attempts INTEGER NOT NULL DEFAULT 0,
+                                locked_until TIMESTAMP,
+                                storage_quota_mb INTEGER NOT NULL DEFAULT 5120,
+                                storage_used_mb INTEGER NOT NULL DEFAULT 0,
+                                email_verified_at TIMESTAMP,
+                                two_factor_secret TEXT,
+                                totp_secret TEXT,
+                                backup_codes TEXT,
+                                created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                                password_changed_at TIMESTAMP,
+                                profile_version TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%f000Z', 'now'))
+                            )
+                        """
+
 #######################################################################################################################
 #
 # Exceptions
@@ -262,36 +295,7 @@ class UsersDB:
 
                     else:
                         # SQLite
-                        await _execute_profile_users_bootstrap(conn, """
-                            CREATE TABLE IF NOT EXISTS main.users (
-                                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                                uuid TEXT UNIQUE NOT NULL DEFAULT (lower(hex(randomblob(16)))),
-                                username TEXT UNIQUE NOT NULL,
-                                email TEXT UNIQUE NOT NULL,
-                                password_hash TEXT NOT NULL,
-                                metadata TEXT,
-                                is_active INTEGER NOT NULL DEFAULT 1,
-                                is_superuser INTEGER NOT NULL DEFAULT 0,
-                                role TEXT NOT NULL DEFAULT 'user',
-                                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                                last_login TIMESTAMP,
-                                email_verified INTEGER NOT NULL DEFAULT 0,
-                                is_verified INTEGER NOT NULL DEFAULT 0,
-                                two_factor_enabled INTEGER NOT NULL DEFAULT 0,
-                                failed_login_attempts INTEGER NOT NULL DEFAULT 0,
-                                locked_until TIMESTAMP,
-                                storage_quota_mb INTEGER NOT NULL DEFAULT 5120,
-                                storage_used_mb INTEGER NOT NULL DEFAULT 0,
-                                email_verified_at TIMESTAMP,
-                                two_factor_secret TEXT,
-                                totp_secret TEXT,
-                                backup_codes TEXT,
-                                created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
-                                password_changed_at TIMESTAMP,
-                                profile_version TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%f000Z', 'now'))
-                            )
-                        """, backend="sqlite")
+                        await _execute_profile_users_bootstrap(conn, _SQLITE_USERS_BOOTSTRAP_SQL, backend="sqlite")
 
                         # Create indexes
                         await conn.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)")

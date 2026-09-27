@@ -22,6 +22,11 @@ from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
     _revoke_profile_user_sql,
 )
 
+# The exact statement Users_DB runs at startup, not a copy that could drift from it.
+from tldw_Server_API.app.core.DB_Management.Users_DB import (
+    _SQLITE_USERS_BOOTSTRAP_SQL as _SQLITE_USERS_BOOTSTRAP,
+)
+
 pytestmark = pytest.mark.unit
 
 
@@ -579,36 +584,6 @@ def test_profile_anchor_ddl_requires_one_shot_capability(statement: str) -> None
         )
 
 
-_SQLITE_USERS_BOOTSTRAP = """
-    CREATE TABLE IF NOT EXISTS main.users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        uuid TEXT UNIQUE NOT NULL DEFAULT (lower(hex(randomblob(16)))),
-        username TEXT UNIQUE NOT NULL,
-        email TEXT UNIQUE NOT NULL,
-        password_hash TEXT NOT NULL,
-        metadata TEXT,
-        is_active INTEGER NOT NULL DEFAULT 1,
-        is_superuser INTEGER NOT NULL DEFAULT 0,
-        role TEXT NOT NULL DEFAULT 'user',
-        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        last_login TIMESTAMP,
-        email_verified INTEGER NOT NULL DEFAULT 0,
-        is_verified INTEGER NOT NULL DEFAULT 0,
-        two_factor_enabled INTEGER NOT NULL DEFAULT 0,
-        failed_login_attempts INTEGER NOT NULL DEFAULT 0,
-        locked_until TIMESTAMP,
-        storage_quota_mb INTEGER NOT NULL DEFAULT 5120,
-        storage_used_mb INTEGER NOT NULL DEFAULT 0,
-        email_verified_at TIMESTAMP,
-        two_factor_secret TEXT,
-        totp_secret TEXT,
-        backup_codes TEXT,
-        created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
-        password_changed_at TIMESTAMP,
-        profile_version TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%f000Z', 'now'))
-    )
-"""
 
 
 def test_the_sqlite_users_bootstrap_is_canonical() -> None:
