@@ -1,10 +1,10 @@
 ---
 id: TASK-13361
 title: A cancelled license-gate job publishes a policy-violation status
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-23 17:13'
-updated_date: '2026-09-23 17:15'
+updated_date: '2026-09-27 17:24'
 labels:
   - ci
   - security
@@ -69,44 +69,7 @@ status.
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-BETTER PRIMARY FIX FOUND -- remove the cause, not just the mislabelling.
-
-The audit job checks out at fetch-depth: 0 (:45), a FULL-history clone. Measured locally:
-834 MB of history across 17,899 commits. The job's timeout is 5 minutes (:19), and the
-failing run took 5m03s, dying inside actions/checkout. So the clone alone does not reliably
-fit the budget under contention.
-
-And the job does not use that history in either path:
-
-- Owner-authored PRs (PR_AUTHOR == REPOSITORY_OWNER, :65-71): the evaluate step runs
-  check_frontend_license_gate.py with --null </dev/null and exits success immediately. It
-  touches no git object at all.
-- Other PRs (:73-76): it does its OWN fetches, explicitly shallow --
-  `git fetch --no-tags --depth=1` for the base ref and for refs/pull/N/head -- then diffs
-  the two fetched SHAs. It deliberately does not rely on the checkout's history.
-
-Nothing else in the job reads history: 'Mark trusted policy pending' and 'Publish trusted
-policy result' are both gh api calls. The checkout is needed only for the working tree, to
-have Helper_Scripts/ci/check_frontend_license_gate.py on disk.
-
-So `fetch-depth: 1` is sufficient and provably behaviour-preserving, and it removes the
-timeout exposure rather than softening how the timeout is reported. `git diff A B` still
-works after the two --depth=1 fetches, since both commits' trees are present.
-
-Every PR currently in flight is owner-authored, so all of them take the path that reads no
-history while still paying for the full clone.
-
-RECOMMENDED, in order:
-1. `fetch-depth: 0` -> `1` on the audit checkout (:45). Removes the cause.
-2. `if: always()` -> `if: ${{ !cancelled() }}` on the publish step (:99). Stops a
-   cancellation from being reported as a policy violation, for whatever still cancels.
-
-(1) is the one that matters; (2) is defence in depth. Both are one-line changes.
-
-THIRD OCCURRENCE of this cancellation pattern today, so it is not a one-off: pre-commit on
-PR #2996 (10-minute timeout, cancelled in checkout), and on PR #3000 both the license audit
-(5-minute) and pre-commit. All three died inside actions/checkout. Under the duplicate-run
-load in TASK-13359 this will keep recurring.
+Cause fixed by fetch-depth: 1 (#3004). Mislabel fixed here: the publish step is now if: "!cancelled()", so a cancelled run leaves the pending status instead of posting failure. Stays fail-closed: pending never satisfies the required check. Pinned in test_frontend_license_gate_workflow.py.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

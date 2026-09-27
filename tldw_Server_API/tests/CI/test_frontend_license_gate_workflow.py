@@ -71,7 +71,7 @@ def assert_exact_step_structure(steps: list[dict[str, Any]]) -> None:
         {"name", "if", "shell", "env", "run"},
     ]
     assert [step.get("shell") for step in steps] == ["bash", None, "bash", "bash"]
-    assert steps[3]["if"] == "always()"
+    assert steps[3]["if"] == "!cancelled()"
     assert steps[3]["env"] == {"VERDICT": "${{ steps.evaluate.outputs.verdict }}"}
 
 
@@ -331,7 +331,10 @@ def test_workflow_publishes_success_only_for_an_explicit_success_verdict() -> No
     publisher = next(step for step in steps if step.get("name") == "Publish trusted policy result")
     script = publisher["run"]
 
-    assert publisher["if"] == "always()"
+    assert publisher["if"] == "!cancelled()", (
+        "a cancelled run must leave the pending status in place, not publish a policy "
+        "failure for a commit whose policy was never evaluated (TASK-13361)"
+    )
     assert publisher["env"] == {"VERDICT": "${{ steps.evaluate.outputs.verdict }}"}
     assert "state=failure" in script
     assert script.count("state=success") == 1
