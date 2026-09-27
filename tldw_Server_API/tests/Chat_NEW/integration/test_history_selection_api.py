@@ -3,15 +3,24 @@ import pytest
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.core.Chat.history_selection import resolve_history_selection
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
 @pytest.fixture
 def history_api(credentialed_test_client, populated_chacha_db, auth_headers):
-    client, db = credentialed_test_client, populated_chacha_db
+    client = credentialed_test_client
+    # Preserve fixture writer attribution while supplying the authenticated owner
+    # through the same trusted construction boundary as the real dependency.
+    db = CharactersRAGDB(
+        db_path=populated_chacha_db.db_path_str,
+        client_id=populated_chacha_db.client_id,
+        owner_user_id="1",
+    )
     client.app.dependency_overrides[get_chacha_db_for_user] = lambda: db
     cid = db.add_conversation({"character_id": None, "title": "H1 API", "client_id": "1"})
     yield client, db, cid, auth_headers
     client.app.dependency_overrides.pop(get_chacha_db_for_user, None)
+    db.close_connection()
 
 
 def capture(client, cid, headers, **overrides):
