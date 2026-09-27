@@ -44,6 +44,9 @@ server work nor proves it was rejected. No expiry silently loses ambiguous keys.
 Scope excludes backend/Jobs changes, exactly-once output commits, model-byte drift,
 live GPU qualification and cross-tab coordination. Browser session storage can be
 copied when a tab is duplicated; existing server idempotency remains authoritative.
+Preserving the original command is not a duplicate-free execution guarantee if
+the server releases an admitted idempotency claim before recording its response.
+Server-side post-admission reconciliation remains outside this frontend slice.
 
 Verification: real storage validation tests; workbench remount/lost-response tests;
 changed-source replay, principal/server isolation and stale callback tests; storage

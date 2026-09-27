@@ -146,7 +146,8 @@ export default function VNAssetsWorkbench() {
         setGeneration(nextGeneration);
         setReadiness(nextReadiness.value);
         setLoadedPackId(pack.id);
-        setError((previous) => previous === 'Could not refresh generation progress. Refresh to try again.' ? null : previous);
+        setError((previous) => previous === 'Could not refresh generation progress. Refresh to try again.' ||
+          previous === 'Could not load generation status. Refresh to try again.' ? null : previous);
       } catch (loadError) {
         if (isCurrent()) throw loadError;
       }
@@ -191,12 +192,15 @@ export default function VNAssetsWorkbench() {
   }, [accountRevision]);
 
   useEffect(() => {
+    setError(null);
+  }, [selectedPack?.id, accountRevision]);
+
+  useEffect(() => {
     setLoadedPackId(null);
     setGeneration(null);
     setSlots([]);
     setItems([]);
     setReadiness(null);
-    setError(null);
     const revision = ++refreshRevision.current;
     if (!selectedPack || !recovery.ready) {
       return;

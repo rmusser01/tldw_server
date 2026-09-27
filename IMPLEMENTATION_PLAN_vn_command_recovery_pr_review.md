@@ -251,6 +251,31 @@ Backend, workflows, unrelated tasks and shared auth-service files match dev
 and exact-head CI remain pending. The a642bfa CodeRabbit request was rate-limited;
 no duplicate request or paid billing was enabled.
 
+CodeRabbit completed the exact c806b624 full review at 21:17:39 UTC (trigger
+5859845466); the sticky records that head as reviewed and raises one minor
+command-error lifecycle issue (4116974418). Eight rendered Start/Retry cases
+failed before the fix: focus/pageshow erased both ambiguous and known rejection
+messages (8 failed, 5 controls passed, 3.57s test time). Error clearing now follows
+selected pack/account context, not background verification revisions. Successful
+detail reads still clear their own internal read errors, while command errors
+remain visible. All 13 focused cases pass (4.24s test time), including pack/account
+boundary clearing and recovered detail-error controls; original request replay
+and acknowledgement cleanup remain intact. The first full suite passed 211 tests
+(42.70s). A new test-call line break caused an ESLint style error, corrected without
+changing behavior; final post-format qualification passes all 211 tests (51.63s,
+one worker), typecheck and both scoped lint commands. Fresh unchanged VN Python
+Bandit has zero findings/errors over 9064 lines, not a TypeScript scan.
+
+The architecture note concerns existing service-exception claim release after
+admission, not new backend code. Read-only inspection confirms service errors
+release claims while response recording is outside that try/catch. The design
+now explicitly distinguishes original-key preservation from duplicate-free
+server execution if an admitted claim is released. Server reconciliation remains
+outside this frontend slice; no backend/Jobs or unrelated issue changes are made.
+Qodo's requested c806 reassessment completed at 21:09:42 UTC with no active
+findings. Neither prior review qualifies the new scoped follow-up; complete
+changed-head reviews and all live CI gates remain pending.
+
 ## Stage 3: Gated Merge
 
 **Goal**: Merge normally only after current-head review and live dev gates pass.
