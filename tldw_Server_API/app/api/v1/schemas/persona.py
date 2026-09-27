@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
+from pydantic import BaseModel, Field, StrictInt, ValidationInfo, field_validator, model_validator
 
 from tldw_Server_API.app.core.Persona.visual_renderer_capabilities import (
     PersonaVisualRendererSetupStatus,
@@ -33,6 +33,7 @@ PersonaSetupStatus = Literal["not_started", "in_progress", "completed"]
 PersonaSetupStep = Literal["archetype", "persona", "voice", "commands", "safety", "test"]
 PersonaSetupTestType = Literal["dry_run", "live_session"]
 PersonaVisualPackStatus = Literal["draft", "review", "active", "archived", "failed"]
+PersonaAmbientMode = Literal["off", "expressive", "roaming"]
 PersonaVisualRendererType = Literal["sprite_frames", "sprite_sheet", "static_image", "live2d"]
 PersonaVisualAssetRole = Literal["frame", "still_pose", "sprite_sheet", "preview", "generated_candidate"]
 PersonaVisualStarterComplexityTier = Literal["basic", "intermediate", "intricate"]
@@ -45,6 +46,7 @@ PersonaVisualStarterRecipeItems = Annotated[
     Field(min_length=1, max_length=12),
 ]
 PersonaVisualPortabilityOperation = Literal["export", "import_preview", "import_commit"]
+PersonaStrictVersion = Annotated[StrictInt, Field(ge=1)]
 PersonaSetupEventType = Literal[
     "setup_started",
     "step_viewed",
@@ -90,6 +92,55 @@ def _normalize_persona_visual_library_tags(value: list[str]) -> list[str]:
 class PersonaVisualPackCreate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     manifest: dict[str, Any] = Field(default_factory=dict)
+    companion_behavior: dict[str, Any] | None = None
+
+
+class PersonaBuddyPreferencesUpdate(BaseModel):
+    ambient_mode: PersonaAmbientMode
+    expected_version: PersonaStrictVersion | None = None
+
+
+class PersonaBuddyPreferencesOverrideUpdate(BaseModel):
+    ambient_mode: PersonaAmbientMode | None
+    expected_version: PersonaStrictVersion
+
+
+class PersonaBuddyPreferencesResponse(BaseModel):
+    ambient_mode: PersonaAmbientMode
+    version: int | None
+    stored: bool
+
+
+class PersonaBuddyPreferencesOverrideResponse(BaseModel):
+    ambient_mode: PersonaAmbientMode | None
+    version: int
+    stored: bool
+
+
+class PersonaVisualPackReviewRequest(BaseModel):
+    expected_version: PersonaStrictVersion
+
+
+class PersonaVisualPackForkRequest(BaseModel):
+    manifest: dict[str, Any] = Field(default_factory=dict)
+    companion_behavior: dict[str, Any] | None = None
+    expected_version: PersonaStrictVersion
+
+
+class PersonaVisualPackActivateRequest(BaseModel):
+    expected_version: PersonaStrictVersion
+    reviewed_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class PersonaVisualPackReviewResponse(BaseModel):
+    id: str
+    pack_id: str
+    user_id: str
+    reviewer_user_id: str
+    fingerprint: str
+    pack_version: int
+    reviewed_at: str
+    created_at: str
 
 
 class PersonaVisualPackDuplicateRequest(BaseModel):
@@ -222,7 +273,8 @@ class PersonaVisualLibraryUseRequest(BaseModel):
 
 class PersonaVisualManifestUpdate(BaseModel):
     manifest: dict[str, Any] = Field(default_factory=dict)
-    expected_version: int | None = Field(default=None, ge=1)
+    companion_behavior: dict[str, Any] | None = None
+    expected_version: PersonaStrictVersion
 
 
 class PersonaVisualRendererCapabilityResponse(BaseModel):
@@ -285,6 +337,8 @@ class PersonaVisualPackResponse(BaseModel):
     status: PersonaVisualPackStatus
     manifest_version: int = 1
     manifest: dict[str, Any] = Field(default_factory=dict)
+    companion_behavior: dict[str, Any] | None = None
+    review: PersonaVisualPackReviewResponse | None = None
     parent_pack_id: str | None = None
     revision_number: int = 1
     provenance: str = "uploaded"

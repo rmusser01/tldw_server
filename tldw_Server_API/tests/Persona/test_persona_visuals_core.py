@@ -1,18 +1,19 @@
 import pytest
 
+from tldw_Server_API.app.core.Persona import visuals as visuals_module
 from tldw_Server_API.app.core.Persona.visual_renderer_capabilities import (
     PersonaVisualRendererCapability,
     get_persona_visual_renderer_capability,
     list_persona_visual_renderer_capabilities,
 )
-from tldw_Server_API.app.core.Persona import visuals as visuals_module
 from tldw_Server_API.app.core.Persona.visuals import (
     MAX_FRAMES_PER_ANIMATION,
-    PersonaVisualManifestError,
     REQUIRED_VISUAL_STATES,
+    VISUAL_STATE_IDS,
+    PersonaVisualManifestError,
+    validate_sprite_static_coverage,
     validate_visual_manifest,
 )
-
 
 pytestmark = pytest.mark.unit
 
@@ -37,6 +38,85 @@ def _activatable_manifest() -> dict:
         },
         "fallbacks": {"tool_running": ["thinking", "idle"]},
     }
+
+
+def _all_state_static_manifest(asset_id: str = "asset-still") -> dict:
+    return {
+        "manifest_version": 1,
+        "renderer_type": "sprite_frames",
+        "states": {
+            state: {"animation_id": "still"}
+            for state in VISUAL_STATE_IDS
+        },
+        "animations": {
+            "still": {
+                "frames": [{"asset_id": asset_id}],
+                "preview_frame": 0,
+            }
+        },
+    }
+
+
+def test_static_coverage_accepts_one_frame_png_for_all_nine_states() -> None:
+    result = validate_sprite_static_coverage(
+        _all_state_static_manifest(),
+        [{"id": "asset-still", "detected_mime_type": "image/png", "decoded_frame_count": 1}],
+    )
+
+    assert result.is_valid is True
+    assert result.errors == ()
+
+
+@pytest.mark.parametrize(
+    ("detected_mime_type", "decoded_frame_count"),
+    [("image/gif", 1), ("image/gif", 2), ("image/webp", 2), ("image/png", 2)],
+)
+def test_static_coverage_rejects_non_png_or_animated_bytes(
+    detected_mime_type: str,
+    decoded_frame_count: int,
+) -> None:
+    result = validate_sprite_static_coverage(
+        _all_state_static_manifest(),
+        [
+            {
+                "id": "asset-still",
+                "mime_type": "image/png",
+                "detected_mime_type": detected_mime_type,
+                "decoded_frame_count": decoded_frame_count,
+            }
+        ],
+    )
+
+    assert result.is_valid is False
+    assert {error["code"] for error in result.errors} == {"static_asset_invalid"}
+
+
+def test_static_coverage_uses_preview_frame_then_preview_asset_then_first_frame() -> None:
+    manifest = _all_state_static_manifest("first")
+    manifest["animations"]["still"] = {
+        "frames": [{"asset_id": "first"}, {"asset_id": "preferred"}],
+        "preview_frame": 1,
+        "preview_asset_id": "first",
+    }
+    assets = [
+        {"id": "first", "detected_mime_type": "image/gif", "decoded_frame_count": 2},
+        {"id": "preferred", "detected_mime_type": "image/png", "decoded_frame_count": 1},
+    ]
+
+    assert validate_sprite_static_coverage(manifest, assets).is_valid is True
+
+
+def test_static_coverage_requires_all_nine_builtin_states_to_resolve() -> None:
+    manifest = _all_state_static_manifest()
+    manifest["states"].pop("offline")
+
+    result = validate_sprite_static_coverage(
+        manifest,
+        [{"id": "asset-still", "detected_mime_type": "image/png", "decoded_frame_count": 1}],
+    )
+
+    assert result.is_valid is False
+    assert result.errors == ({"code": "static_state_unresolved", "state": "offline"},)
 
 
 def test_renderer_capability_registry_exposes_v2_metadata_without_enabling_live2d() -> None:
